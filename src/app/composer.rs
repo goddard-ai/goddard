@@ -3111,24 +3111,52 @@ impl Waku {
         cx.notify();
     }
 
+    /// A click on a lane atom's chip: a pasted block opens its text in the
+    /// right panel — the lane has no floating editor, so the panel is its
+    /// only view — and other atoms keep their double-click activation.
+    pub(super) fn click_side_chat_atom(
+        &mut self,
+        session_id: Uuid,
+        marker: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let paste = self
+            .side_chat_composers
+            .get(&session_id)
+            .and_then(|chat| chat.atoms.iter().find(|atom| atom.marker == marker))
+            .and_then(|atom| match &atom.kind {
+                ComposerAtomKind::PastedText(text) => Some((atom.revision, text.clone())),
+                ComposerAtomKind::SessionRef { .. } | ComposerAtomKind::Ref(_) => None,
+            });
+        if let Some((revision, text)) = paste {
+            self.open_pasted_atom_text(revision, text, cx);
+        }
+    }
+
     /// Double-click on a lane atom: a session reference opens its task; a
-    /// folded paste has no lane editor, so the caret placement stands.
+    /// folded paste opens its right-panel view, the lane's only affordance.
     pub(super) fn activate_side_chat_atom(
         &mut self,
         session_id: Uuid,
         marker: usize,
         cx: &mut Context<Self>,
     ) {
-        let kind = self
+        let atom = self
             .side_chat_composers
             .get(&session_id)
             .and_then(|chat| chat.atoms.iter().find(|atom| atom.marker == marker))
-            .map(|atom| atom.kind.clone());
-        if let Some(ComposerAtomKind::SessionRef {
-            session_id: target, ..
-        }) = kind
-        {
-            self.select_session(target, cx);
+            .map(|atom| (atom.revision, atom.kind.clone()));
+        match atom {
+            Some((
+                _,
+                ComposerAtomKind::SessionRef {
+                    session_id: target, ..
+                },
+            )) => self.select_session(target, cx),
+            Some((revision, ComposerAtomKind::PastedText(text))) => {
+                self.open_pasted_atom_text(revision, text, cx)
+            }
+            Some((_, ComposerAtomKind::Ref(_))) | None => {}
         }
         cx.notify();
     }
@@ -3448,21 +3476,33 @@ impl Waku {
     }
 
     /// A click on an atom's painted label — the field reports the marker's
-    /// byte offset. A paste atom opens its floating editor; a session atom
-    /// keeps double-click as its activation, so the caret placement the
-    /// field already did is the whole answer.
+    /// byte offset. A paste atom opens its text in the right panel, like the
+    /// `.txt` chip; a session atom keeps double-click as its activation, so
+    /// the caret placement the field already did is the whole answer.
     pub(super) fn click_inline_atom(&mut self, marker: usize, cx: &mut Context<Self>) {
-        let is_paste = self.composer_inline_atoms.iter().any(|atom| {
-            atom.marker == marker && matches!(atom.kind, ComposerAtomKind::PastedText(_))
-        });
-        if is_paste {
-            self.open_pasted_atom_editor(marker, cx);
+        // An open editor commits its edit to its own atom first — the same
+        // contract opening a second editor used to keep, and a commit can
+        // bump this atom's revision, so the text lookup follows it.
+        self.commit_pasted_text_editor(cx);
+        let paste = self
+            .composer_inline_atoms
+            .iter()
+            .find(|atom| {
+                atom.marker == marker && matches!(atom.kind, ComposerAtomKind::PastedText(_))
+            })
+            .and_then(|atom| match &atom.kind {
+                ComposerAtomKind::PastedText(text) => Some((atom.revision, text.clone())),
+                ComposerAtomKind::SessionRef { .. } | ComposerAtomKind::Ref(_) => None,
+            });
+        if let Some((revision, text)) = paste {
+            self.open_pasted_atom_text(revision, text, cx);
         }
     }
 
     /// A double-click on an atom's painted label — the field reports the
-    /// marker's byte offset. A pasted block opens its editor, same as a
-    /// single click; a session atom opens its session.
+    /// marker's byte offset. A pasted block opens its floating editor, so
+    /// double-click is the edit gesture behind single-click's view; a
+    /// session atom opens its session.
     pub(super) fn activate_inline_atom(&mut self, marker: usize, cx: &mut Context<Self>) {
         let kind = self
             .composer_inline_atoms
@@ -4985,7 +5025,8 @@ impl Waku {
 
     /// A paste too large to stay inline, stored as a durable `.txt` blob: the
     /// same compact "Pasted text" chip a collapsed block gets, with the
-    /// paste's leading characters on hover and the reveal menu behind it.
+    /// paste's leading characters on hover, a click that opens the full text
+    /// in the right panel, and the reveal menu behind it.
     fn render_pasted_text_attachment_chip(
         &self,
         index: usize,
@@ -5000,6 +5041,8 @@ impl Waku {
             .filter(|preview| !preview.is_empty())
             .map(|preview| SharedString::from(preview.clone()));
         let key_menu = menu.clone();
+        let click_attachment = attachment.clone();
+        let key_attachment = attachment.clone();
         let chip = div()
             .id(SharedString::from(format!("composer-attachment-{index}")))
             .h(px(24.0))
@@ -5014,6 +5057,7 @@ impl Waku {
             .gap(px(10.0))
             .track_focus(menu.trigger_focus_handle())
             .tab_index(0)
+            .cursor_pointer()
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .when_some(preview, |element, preview| {
                 element.tooltip(pasted_text_tooltip(preview))
@@ -5074,6 +5118,10 @@ impl Waku {
                         }
                     })),
             )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_pasted_text_attachment(&click_attachment, cx);
+                cx.stop_propagation();
+            }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
                 if matches!(key, "backspace" | "delete") {
@@ -5082,6 +5130,9 @@ impl Waku {
                         this.schedule_composer_draft_save(cx);
                         cx.notify();
                     }
+                    cx.stop_propagation();
+                } else if matches!(key, "enter" | "space") {
+                    this.open_pasted_text_attachment(&key_attachment, cx);
                     cx.stop_propagation();
                 } else if key == "f10" && event.keystroke.modifiers.shift {
                     key_menu.open_context_menu(window, cx);

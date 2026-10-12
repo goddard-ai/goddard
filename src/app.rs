@@ -906,6 +906,44 @@ enum RightPanelSurface {
     },
     /// The employee roster and goal status for the owning Boss chat.
     Goals,
+    /// A pasted block opened from a composer's "Pasted text" chip — the
+    /// paste's text read-only in a tab. `key` names the paste so a second
+    /// click reactivates rather than duplicating; the strip's
+    /// `pasted_texts` holds the content.
+    PastedText { key: PastedTextKey },
+}
+
+/// A pasted-text tab's identity — the atom revision an inline paste opened
+/// with (a new one each edit), or the stored `.txt` path a too-large paste
+/// reads on mount.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum PastedTextKey {
+    Atom(Uuid),
+    Blob(PathBuf),
+}
+
+/// One pasted-text tab: a read-only field holding the paste, created on the
+/// tab's first render like the file editors — `text` seeds it for an atom
+/// snapshot, `source` instead marks a stored `.txt` whose read fills it.
+/// `requested` re-arms when a panel swap stranded the read mid-flight, and
+/// `error` replaces the body when the read fails.
+struct PastedTextTab {
+    state: Option<Entity<TextInput>>,
+    text: Option<String>,
+    source: Option<PastedTextBlob>,
+    requested: bool,
+    error: Option<String>,
+    scroll: ScrollHandle,
+    scrollbar: Rc<ScrollbarState>,
+}
+
+/// What a blob-backed pasted-text tab reads once: the stored `.txt`'s
+/// materialized path on the daemon host plus its durable reference — the
+/// same pair the transcript's expand-on-click read resolves.
+#[derive(Clone, Debug)]
+struct PastedTextBlob {
+    path: PathBuf,
+    reference: Option<String>,
 }
 
 /// A planning session's fetched plan document. `revision` is the Boss
@@ -1443,6 +1481,9 @@ struct RightPanelSessionState {
     file_tree_visible: bool,
     file_editors: HashMap<String, RightPanelFileEditor>,
     ref_editors: HashMap<String, RightPanelRefEditor>,
+    /// Content behind the strip's `PastedText` surfaces, keyed the same —
+    /// it parks with the strip so a swapped-out tab keeps its text.
+    pasted_texts: HashMap<PastedTextKey, PastedTextTab>,
     /// The directory this state's file surfaces and editors are rooted at —
     /// the session's workspace, or the terminal cwd the detached context was
     /// last resolved to. `None` means the files slice is still empty.
@@ -1501,6 +1542,7 @@ impl RightPanelSessionState {
             file_tree_visible: true,
             file_editors: HashMap::new(),
             ref_editors: HashMap::new(),
+            pasted_texts: HashMap::new(),
             files_root: None,
             diff_source: ReviewDiffSource::default(),
             diff_commit: None,
@@ -2022,7 +2064,10 @@ fn persisted_panel_surface(surface: &RightPanelSurface) -> Option<PersistedRight
         | RightPanelSurface::BackgroundWork { .. }
         // A planning session's strip rebuilds its plan tab on restore —
         // persisting it would only resurrect it for a renamed document.
-        | RightPanelSurface::Plan { .. } => None,
+        | RightPanelSurface::Plan { .. }
+        // A pasted-text tab is a view over composer state that the draft
+        // already owns — persisting it would copy the paste into the store.
+        | RightPanelSurface::PastedText { .. } => None,
     }
 }
 
@@ -3550,6 +3595,9 @@ pub struct Waku {
     /// between a flag change and the sync that follows.
     right_panel_live_owner: RightPanelOwner,
     right_panel_surfaces: Vec<RightPanelSurface>,
+    /// Content behind the live strip's `PastedText` surfaces — atom
+    /// snapshots and blob reads, parked with the strip on an owner swap.
+    right_panel_pasted_texts: HashMap<PastedTextKey, PastedTextTab>,
     right_panel_active_surface: Option<usize>,
     /// Per side-chat session: the transcript's virtualized rows, its row-kind
     /// cache, and its composer. Keyed by the side chat's own session id;
@@ -7554,6 +7602,7 @@ impl Waku {
                 right_panel_states: HashMap::new(),
                 right_panel_live_owner: RightPanelOwner::Bare,
                 right_panel_surfaces: Vec::new(),
+                right_panel_pasted_texts: HashMap::new(),
                 side_chat_views: HashMap::new(),
                 side_chat_composers: HashMap::new(),
                 right_panel_pending_side_chat_focus: None,

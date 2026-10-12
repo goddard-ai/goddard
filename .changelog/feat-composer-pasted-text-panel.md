@@ -1,0 +1,1 @@
+- Click a "Pasted text" chip in the composer — a collapsed paste atom or a stored `.txt` attachment — to read the full paste in a new right-panel tab; hovering the `.txt` chip previews its leading characters, and double-clicking a paste atom opens its editor.

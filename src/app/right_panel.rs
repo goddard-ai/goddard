@@ -1252,6 +1252,7 @@ impl RightPanelSurface {
             Self::SideChat(_) => "side_chat",
             Self::Plan { .. } => "plan",
             Self::Goals => "goals",
+            Self::PastedText { .. } => "pasted_text",
         }
     }
 
@@ -1283,6 +1284,7 @@ impl RightPanelSurface {
                 plan_file.rsplit('/').next().unwrap_or(plan_file).to_owned()
             }
             Self::Goals => tr!("right_panel.goals"),
+            Self::PastedText { .. } => tr!("composer.pasted_block"),
         }
     }
 
@@ -1299,6 +1301,7 @@ impl RightPanelSurface {
             Self::SideChat(_) => "icons/chat.svg",
             Self::Plan { plan_file, .. } => file_icon_for_path(plan_file),
             Self::Goals => "icons/target.svg",
+            Self::PastedText { .. } => "icons/file.svg",
         }
     }
 }
@@ -1362,6 +1365,7 @@ fn managed_panel_surface(surface: &RightPanelSurface) -> bool {
             | RightPanelSurface::FileAtRef { .. }
             | RightPanelSurface::SideChat(_)
             | RightPanelSurface::Plan { .. }
+            | RightPanelSurface::PastedText { .. }
     )
 }
 
@@ -1392,7 +1396,8 @@ pub(super) fn reusable_surface_index(
         | RightPanelSurface::File(_)
         | RightPanelSurface::FileAtRef { .. }
         | RightPanelSurface::PullRequest { .. }
-        | RightPanelSurface::Plan { .. } => {
+        | RightPanelSurface::Plan { .. }
+        | RightPanelSurface::PastedText { .. } => {
             surfaces.iter().position(|surface| surface == requested)
         }
     }
@@ -3600,6 +3605,53 @@ mod tests {
     }
 
     #[test]
+    fn pasted_text_tab_reuses_only_its_own_paste() {
+        let atom = Uuid::new_v4();
+        let surfaces = vec![
+            RightPanelSurface::PastedText {
+                key: PastedTextKey::Atom(atom),
+            },
+            RightPanelSurface::PastedText {
+                key: PastedTextKey::Blob("/tmp/paste.txt".into()),
+            },
+        ];
+
+        assert_eq!(
+            reusable_surface_index(
+                &surfaces,
+                &RightPanelSurface::PastedText {
+                    key: PastedTextKey::Atom(atom),
+                },
+            ),
+            Some(0)
+        );
+        // An edit bumps the atom's revision — the reopened paste reads as a
+        // different tab, not a reuse of the snapshot.
+        assert_eq!(
+            reusable_surface_index(
+                &surfaces,
+                &RightPanelSurface::PastedText {
+                    key: PastedTextKey::Atom(Uuid::new_v4()),
+                },
+            ),
+            None
+        );
+        assert_eq!(
+            reusable_surface_index(
+                &surfaces,
+                &RightPanelSurface::PastedText {
+                    key: PastedTextKey::Blob("/tmp/paste.txt".into()),
+                },
+            ),
+            Some(1)
+        );
+
+        let pasted = &surfaces[0];
+        assert_eq!(right_panel_tab_label(pasted, None), "Pasted text");
+        assert_eq!(right_panel_tab_icon(pasted, None), "icons/file.svg");
+    }
+
+    #[test]
     fn right_panel_state_isolated_by_session() {
         let session_with_terminal = Uuid::new_v4();
         let other_session = Uuid::new_v4();
@@ -5063,6 +5115,11 @@ impl Waku {
         for editor in self.right_panel_ref_editors.values_mut() {
             editor.requested = false;
         }
+        // A pasted-text blob read dropped by the swap re-arms the same way —
+        // its surface's lazy ensure asks again on the next render.
+        for tab in self.right_panel_pasted_texts.values_mut() {
+            tab.requested = false;
+        }
         // The find bar pointed into the editors that were just swapped out;
         // its match list means nothing here, and restored editors may carry
         // washes stored mid-search. A pending finder focus handoff names one
@@ -5240,6 +5297,7 @@ impl Waku {
             file_tree_visible: self.right_panel_file_tree_visible,
             file_editors,
             ref_editors: HashMap::new(),
+            pasted_texts: std::mem::take(&mut self.right_panel_pasted_texts),
             files_root: self.right_panel_files_root.take(),
             diff_source: self.right_panel_diff_source,
             diff_commit: self.right_panel_diff_commit.take(),
@@ -5285,6 +5343,7 @@ impl Waku {
         self.right_panel_file_tree_visible = state.file_tree_visible;
         self.right_panel_file_editors = state.file_editors;
         self.right_panel_ref_editors = state.ref_editors;
+        self.right_panel_pasted_texts = state.pasted_texts;
         self.right_panel_files_root = state.files_root;
         self.right_panel_diff_generation = self.right_panel_diff_generation.wrapping_add(1);
         self.right_panel_diff_selection.clear();
@@ -5766,6 +5825,9 @@ impl Waku {
         if let Some(browser_id) = self.right_panel_surfaces[index].browser_id() {
             self.right_panel_browsers.remove(&browser_id);
         }
+        if let RightPanelSurface::PastedText { key } = &self.right_panel_surfaces[index] {
+            self.right_panel_pasted_texts.remove(key);
+        }
         if let RightPanelSurface::GitHub(project_id) = self.right_panel_surfaces[index]
             && let Some(browser) = self.github_browsers.get_mut(&project_id)
         {
@@ -6056,6 +6118,9 @@ impl Waku {
                 .render_plan_preview(session_id, &plan_file, window, cx)
                 .into_any_element(),
             Some(RightPanelSurface::Goals) => self.render_boss_goals_panel(cx).into_any_element(),
+            Some(RightPanelSurface::PastedText { key }) => self
+                .render_pasted_text_panel(&key, window, cx)
+                .into_any_element(),
             Some(RightPanelSurface::Browser(browser_id)) => {
                 let browser = self.ensure_right_panel_browser(browser_id, window, cx);
                 if self
@@ -6166,10 +6231,12 @@ impl Waku {
                         cx.notify();
                     }
                 }
+                ComposerEvent::InlineAtomClicked(marker) => {
+                    this.click_side_chat_atom(session_id, *marker, cx);
+                }
                 ComposerEvent::InlineAtomActivated(marker) => {
                     this.activate_side_chat_atom(session_id, *marker, cx);
                 }
-                _ => {}
             },
         )
         .detach();
@@ -9043,6 +9110,252 @@ impl Waku {
             .ok();
         })
         .detach();
+    }
+
+    /// A collapsed paste atom's chip opens its text in the right panel —
+    /// the atom's revision keys the tab, so a click on the same chip
+    /// reactivates rather than duplicating it, and the text rides the open
+    /// as a snapshot.
+    pub(super) fn open_pasted_atom_text(
+        &mut self,
+        revision: Uuid,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_pasted_text_tab(PastedTextKey::Atom(revision), Some(text), None, cx);
+    }
+
+    /// The `.txt` attachment chip's paste opens the same way; its text is a
+    /// stored blob the tab reads on first render — `render` may not touch
+    /// the daemon — through the path and durable reference pair the
+    /// transcript's expand-on-click read resolves.
+    pub(super) fn open_pasted_text_attachment(
+        &mut self,
+        attachment: &ComposerAttachment,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_pasted_text_tab(
+            PastedTextKey::Blob(attachment.path.clone()),
+            None,
+            Some(PastedTextBlob {
+                path: attachment.path.clone(),
+                reference: attachment.blob_reference.clone(),
+            }),
+            cx,
+        );
+    }
+
+    fn open_pasted_text_tab(
+        &mut self,
+        key: PastedTextKey,
+        text: Option<String>,
+        source: Option<PastedTextBlob>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.right_panel_pasted_texts.contains_key(&key) {
+            self.right_panel_pasted_texts.insert(
+                key.clone(),
+                PastedTextTab {
+                    state: None,
+                    text,
+                    source,
+                    requested: false,
+                    error: None,
+                    scroll: ScrollHandle::new(),
+                    scrollbar: ScrollbarState::new(),
+                },
+            );
+        }
+        self.open_right_panel_surface(RightPanelSurface::PastedText { key }, cx);
+    }
+
+    /// The pasted-text tab's field, created on first render — the file
+    /// editors' shape: a read-only field the atom's snapshot fills directly,
+    /// or that a blob read lands in a frame or two later.
+    fn ensure_pasted_text_field(
+        &mut self,
+        key: &PastedTextKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<TextInput>> {
+        let tab = self.right_panel_pasted_texts.get_mut(key)?;
+        if tab.state.is_none() {
+            let state = cx.new(|cx| {
+                TextInput::new(window, cx)
+                    .multi_line()
+                    .read_only(true)
+                    .accessibility_label(tr!("a11y.pasted_text"))
+            });
+            if let Some(text) = tab.text.take() {
+                state.update(cx, |input, cx| input.set_content(text, cx));
+            }
+            tab.state = Some(state);
+        }
+        tab.state.clone()
+    }
+
+    /// A blob-backed tab's one read, issued lazily from render like the file
+    /// surfaces' reads: `source` still set means the text has not landed.
+    /// `requested` keeps a second frame from re-issuing; a swap that
+    /// stranded the read clears it for the next ask.
+    fn ensure_pasted_text_read(&mut self, key: &PastedTextKey, cx: &mut Context<Self>) {
+        let Some(source) = self
+            .right_panel_pasted_texts
+            .get(key)
+            .filter(|tab| !tab.requested && tab.error.is_none())
+            .and_then(|tab| tab.source.clone())
+        else {
+            return;
+        };
+        let Some(daemon) = self.daemon_for_path(&source.path) else {
+            if let Some(tab) = self.right_panel_pasted_texts.get_mut(key) {
+                tab.error = Some("Pasted text is unavailable from this host.".to_owned());
+                cx.notify();
+            }
+            return;
+        };
+        let Some(tab) = self.right_panel_pasted_texts.get_mut(key) else {
+            return;
+        };
+        tab.requested = true;
+        let input = tab.state.clone();
+        let key = key.clone();
+        cx.spawn(async move |waku, cx| {
+            let content = cx
+                .background_executor()
+                .spawn(async move {
+                    let reference = source.reference?;
+                    let bytes = waku_client::persistence::read_remote_reference(
+                        &reference,
+                        Some(&source.path),
+                        &daemon,
+                    )?;
+                    Some(String::from_utf8_lossy(&bytes).into_owned())
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                let Some(tab) = waku.right_panel_pasted_texts.get_mut(&key) else {
+                    return;
+                };
+                match content {
+                    Some(text) => {
+                        tab.source = None;
+                        if let Some(input) = input {
+                            input.update(cx, |input, cx| input.set_content(text, cx));
+                        } else {
+                            tab.text = Some(text);
+                        }
+                    }
+                    None => {
+                        tab.error = Some("Could not load pasted text.".to_owned());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The pasted-text surface: the ref editor's shape — a labeled bar over
+    /// a read-only field on a scroll handle — around whatever the tab
+    /// holds: the paste's text, a loading note, or the read's failure.
+    fn render_pasted_text_panel(
+        &mut self,
+        key: &PastedTextKey,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        let Some(field) = self.ensure_pasted_text_field(key, window, cx) else {
+            return self.render_right_panel_empty_message(
+                tr!("composer.pasted_block"),
+                "Pasted text is unavailable.".to_owned(),
+                cx,
+            );
+        };
+        // Cheap every frame — the read self-guards once started.
+        self.ensure_pasted_text_read(key, cx);
+        let Some((loading, error, scroll, scrollbar)) =
+            self.right_panel_pasted_texts.get(key).map(|tab| {
+                (
+                    tab.source.is_some(),
+                    tab.error.clone(),
+                    tab.scroll.clone(),
+                    tab.scrollbar.clone(),
+                )
+            })
+        else {
+            return self.render_right_panel_empty_message(
+                tr!("composer.pasted_block"),
+                "Pasted text is unavailable.".to_owned(),
+                cx,
+            );
+        };
+        if let Some(error) = error {
+            return self.render_right_panel_empty_message(tr!("composer.pasted_block"), error, cx);
+        }
+        let key = SharedString::from(format!("{key:?}"));
+        let text_size = self.state.code_font_size;
+        let line_height = (text_size * 1.5).round();
+
+        let body = if loading {
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(sp(13.0))
+                .text_color(theme.text_tertiary)
+                .child(tr!("boss.loading"))
+                .into_any_element()
+        } else {
+            div()
+                .id(SharedString::from(format!("pasted-text-editor-{key}")))
+                .size_full()
+                .overflow_y_scroll()
+                .track_scroll(&scroll)
+                .child(div().w_full().px(px(16.0)).py(px(6.0)).child(field))
+                .into_any_element()
+        };
+        div()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .h(px(42.0))
+                    .flex_none()
+                    .px(px(16.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .border_b(hairline())
+                    .border_color(theme.separator)
+                    .child(file_icon("icons/file.svg", 13.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("composer.pasted_block")),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .bg(theme.surface)
+                    .font_family(crate::fonts::current(cx).code)
+                    .text_size(px(text_size))
+                    .line_height(px(line_height))
+                    .child(body)
+                    .child(scrollbar::vertical(&scroll, &scrollbar)),
+            )
     }
 
     fn ensure_right_panel_file_editor(
