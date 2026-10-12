@@ -132,13 +132,14 @@ fn plan_acceptance_dispatch_and_projection_failures_preserve_work() {
 
 #[test]
 fn plan_acceptance_size_boundary_and_exact_reread_after_compaction() {
-    // Include the old cutoff, both reported plan sizes, and the full approval
+    // Include the old cutoff, all three reported plan sizes, and the full approval
     // capture boundary. Content outside the qualified range still blocks.
     for (bytes, supported) in [
         (32 * 1024, true),
         (32 * 1024 + 1, true),
         (33_290, true),
         (40_009, true),
+        (43_843, true),
         (COMPLETE_INPUT_BYTES, true),
         (COMPLETE_INPUT_BYTES + 1, false),
     ] {
