@@ -4117,6 +4117,7 @@ impl Waku {
                 state.identity.name.clone(),
                 subtitle,
                 None,
+                None,
                 false,
                 &theme,
                 None,
@@ -4253,6 +4254,19 @@ impl Waku {
         // Option trades the job title for the employee's model and effort,
         // the same reveal a task row's detail line performs.
         let alt_held = self.sidebar_alt_held;
+        let revealed_project = alt_held
+            .then(|| {
+                session
+                    .and_then(|session| {
+                        self.state
+                            .projects
+                            .iter()
+                            .find(|project| project.id == session.project_id)
+                            .filter(|project| !project.is_projectless())
+                            .map(|project| project.display_name())
+                    })
+            })
+            .flatten();
         let (detail, detail_provider) = if alt_held {
             self.boss_ui.queued_model_targets.get(&id).map_or_else(
                 || {
@@ -4324,6 +4338,7 @@ impl Waku {
             .child(boss_sidebar_label(
                 identity.name.clone(),
                 detail.unwrap_or_default(),
+                revealed_project,
                 if alt_held {
                     None
                 } else {
@@ -4410,6 +4425,7 @@ impl Waku {
             .child(boss_sidebar_label(
                 planning.idea.clone(),
                 planning.label.render(),
+                None,
                 Some("icons/compass.svg"),
                 true,
                 &theme,
@@ -9919,6 +9935,7 @@ fn boss_queue_detail(
 fn boss_sidebar_label(
     name: String,
     job_title: String,
+    revealed_project: Option<String>,
     job_icon: Option<&'static str>,
     show_job_icon: bool,
     theme: &Theme,
@@ -9931,11 +9948,32 @@ fn boss_sidebar_label(
         .flex_col()
         .child(
             div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
                 .text_size(sp(14.0))
                 .line_height(sp(17.0))
-                .text_color(theme.text)
-                .truncate()
-                .child(name),
+                .child(
+                    div()
+                        .when(revealed_project.is_some(), |name| name.flex_none())
+                        .when(revealed_project.is_none(), |name| {
+                            name.min_w_0().flex_1().truncate()
+                        })
+                        .text_color(theme.text)
+                        .child(name),
+                )
+                .when_some(revealed_project, |line, project| {
+                    line.child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(sp(12.0))
+                            .line_height(sp(15.0))
+                            .text_color(theme.text_tertiary)
+                            .child(project),
+                    )
+                }),
         )
         .child(
             div()
