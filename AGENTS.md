@@ -70,6 +70,8 @@ Read the doc before working in its area:
   employee-owned submit, rebase, verification, and failure handling
 - [.agents/docs/jev.md](.agents/docs/jev.md) — the eval model's plumbing,
   call sites, thresholds, and the spend-gating rules
+- [.agents/docs/stable-runtime.md](.agents/docs/stable-runtime.md) — the
+  stage-1 stable provider host: contract, seam, harness, and semantics
 
 ## Documentation audiences
 

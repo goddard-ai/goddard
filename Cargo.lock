@@ -11689,6 +11689,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "waku-runtime"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "serde",
+ "serde_json",
+ "subtle",
+ "thiserror 2.0.19",
+ "uuid",
+]
+
+[[package]]
 name = "waku-server"
 version = "0.1.0"
 dependencies = [
