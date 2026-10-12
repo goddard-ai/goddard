@@ -1243,6 +1243,10 @@ impl Waku {
                 _ => true,
             })
             .collect();
+        if !self.state.sidebar_errands_initialized {
+            self.sidebar_collapsed_groups.insert(SidebarGroup::Errands);
+            self.state.sidebar_errands_initialized = true;
+        }
         self.briefed_messages = self.state.briefed_messages.iter().copied().collect();
         let terminal_records = self
             .state

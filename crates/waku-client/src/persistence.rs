@@ -564,6 +564,7 @@ fn default_sidebar_collapsed_groups() -> Vec<PersistedSidebarGroup> {
     vec![
         PersistedSidebarGroup::Terminals,
         PersistedSidebarGroup::Dormant,
+        PersistedSidebarGroup::Errands,
     ]
 }
 
@@ -1083,6 +1084,7 @@ pub enum PersistedSidebarGroup {
     Pinned,
     Terminals,
     Dormant,
+    Errands,
     Planning,
     Date(usize),
     Project(Uuid),
@@ -1862,6 +1864,9 @@ struct AppState {
     /// everything", which must not fall back to the launch defaults.
     #[serde(default = "default_sidebar_collapsed_groups")]
     sidebar_collapsed_groups: Vec<PersistedSidebarGroup>,
+    #[serde(default)]
+    /// Seed the new Errands fold once without refolding an explicitly expanded group.
+    sidebar_errands_initialized: bool,
     /// Expired employees the user archived out of the sidebar listing.
     /// The dismissal is sidebar-only — the daemon roster still carries the
     /// record, so the brain page's employee history keeps listing them.
@@ -2338,6 +2343,8 @@ pub struct PersistedState {
     /// everything", which must not fall back to the launch defaults.
     #[serde(default = "default_sidebar_collapsed_groups")]
     pub sidebar_collapsed_groups: Vec<PersistedSidebarGroup>,
+    #[serde(default)]
+    pub sidebar_errands_initialized: bool,
     /// Expired employees the user archived out of the sidebar listing —
     /// see the AppState twin. The brain page's roster is unaffected.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
@@ -2747,6 +2754,7 @@ impl PersistedState {
             sidebar_project_ordering: SidebarProjectOrdering::Recent,
             sidebar_project_order: Vec::new(),
             sidebar_collapsed_groups: default_sidebar_collapsed_groups(),
+            sidebar_errands_initialized: true,
             sidebar_archived_employees: BTreeSet::new(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             boss_deliverable_width: DEFAULT_RIGHT_PANEL_WIDTH,
@@ -3259,6 +3267,7 @@ impl PersistedState {
             sidebar_project_ordering: self.sidebar_project_ordering,
             sidebar_project_order: self.sidebar_project_order.clone(),
             sidebar_collapsed_groups: self.sidebar_collapsed_groups.clone(),
+            sidebar_errands_initialized: true,
             sidebar_archived_employees: self.sidebar_archived_employees.clone(),
             right_panel_width: self.right_panel_width,
             boss_deliverable_width: self.boss_deliverable_width,
@@ -3438,6 +3447,15 @@ impl PersistedState {
         self.sidebar_project_ordering = app_state.sidebar_project_ordering;
         self.sidebar_project_order = app_state.sidebar_project_order;
         self.sidebar_collapsed_groups = app_state.sidebar_collapsed_groups;
+        if !app_state.sidebar_errands_initialized
+            && !self
+                .sidebar_collapsed_groups
+                .contains(&PersistedSidebarGroup::Errands)
+        {
+            self.sidebar_collapsed_groups
+                .push(PersistedSidebarGroup::Errands);
+        }
+        self.sidebar_errands_initialized = true;
         self.sidebar_archived_employees = app_state.sidebar_archived_employees;
         self.right_panel_width = app_state.right_panel_width;
         self.boss_deliverable_width = app_state.boss_deliverable_width;
@@ -5743,6 +5761,25 @@ mod tests {
             restored.sidebar_archived_employees,
             state.sidebar_archived_employees
         );
+    }
+
+    #[test]
+    fn errands_default_collapsed_migrates_once_and_preserves_expansion() {
+        let legacy: AppState =
+            serde_json::from_str(r#"{"app_state_version":1,"sidebar_collapsed_groups":[]}"#)
+                .unwrap();
+        let mut state = PersistedState::empty();
+        state.apply_app_state(legacy);
+        assert_eq!(
+            state.sidebar_collapsed_groups,
+            vec![PersistedSidebarGroup::Errands]
+        );
+        state.sidebar_collapsed_groups.clear();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(
+            serde_json::from_value(serde_json::to_value(state.app_state()).unwrap()).unwrap(),
+        );
+        assert!(restored.sidebar_collapsed_groups.is_empty());
     }
 
     #[test]

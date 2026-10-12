@@ -1,0 +1,1 @@
+- Employees summoned by planning sessions and employees that do not finish a task or chain now appear beneath a collapsed Errands sidebar header, with counts and unread attention; expand it to browse their work.

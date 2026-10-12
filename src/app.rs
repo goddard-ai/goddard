@@ -7509,6 +7509,7 @@ impl Waku {
                 sidebar_collapsed_groups: HashSet::from([
                     SidebarGroup::Terminals,
                     SidebarGroup::Dormant,
+                    SidebarGroup::Errands,
                 ]),
                 terminals_group_held_open: false,
                 focused_project: None,
