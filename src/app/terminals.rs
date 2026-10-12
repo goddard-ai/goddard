@@ -213,11 +213,61 @@ impl Waku {
         terminal_id: Uuid,
         cx: &App,
     ) -> AnyElement {
-        let cwd = self
+        // The header's folder chip names the directory, never its absolute
+        // path: a repository anchor when one is known, the leaf otherwise.
+        let label = self
             .terminal_cwd(terminal_id, cx)
-            .map(|cwd| settings::abbreviate_home_path(&cwd, self.home_directory.as_deref()))
+            .map(|cwd| {
+                self.repo_location_label(&cwd, SIDEBAR_TERMINAL_DETAIL_MAX_CHARS)
+                    .or_else(|| {
+                        cwd.file_name()
+                            .and_then(|name| name.to_str())
+                            .map(|name| name.to_owned())
+                    })
+                    .unwrap_or_else(|| {
+                        settings::abbreviate_home_path(
+                            &cwd,
+                            self.home_directory.as_deref(),
+                        )
+                    })
+            })
             .unwrap_or_default();
-        self.render_terminal_location(terminal_id, "icons/folder.svg", cwd, cx)
+        self.render_terminal_location(terminal_id, "icons/folder.svg", label, cx)
+    }
+
+    /// The sidebar row's repo-anchored location label — the project's
+    /// display name or the repository's directory name at the root,
+    /// `name/sub/dir` deeper in. `None` when the cwd sits outside every
+    /// known repository (or the scan has not reported it yet).
+    fn repo_location_label(&self, cwd: &Path, max_chars: usize) -> Option<String> {
+        let root = self
+            .sidebar_terminal_repo_roots
+            .borrow()
+            .get(cwd)
+            .cloned()
+            .flatten()?;
+        let project = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| cwd.starts_with(&project.path))
+            .max_by_key(|project| project.path.components().count());
+        let name = project.map(Project::display_name).unwrap_or_else(|| {
+            root.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_owned()
+        });
+        let relative_root = project.map_or(root.as_path(), |project| project.path.as_path());
+        let label = cwd
+            .strip_prefix(relative_root)
+            .ok()
+            .filter(|rel| !rel.as_os_str().is_empty())
+            .map(|rel| format!("{name}/{}", rel.display()))
+            .unwrap_or(name);
+        // The repo name anchors the label — the folded middle comes from
+        // the working directory's ancestors.
+        Some(truncate_path_ancestors(&label, max_chars, true))
     }
 
     #[track_caller]
@@ -2183,43 +2233,11 @@ impl Waku {
         // "waku" at the root, "waku/src/app" deeper in. Outside any
         // repository the shell's name stands in under a shell glyph
         // rather than a folder, with the cwd trailing it.
-        let repo = cwd.as_deref().and_then(|cwd| {
-            self.sidebar_terminal_repo_roots
-                .borrow()
-                .get(cwd)
-                .cloned()
-                .flatten()
-                .map(|root| (cwd, root))
-        });
-        let (detail_icon, detail) = match repo {
-            Some((cwd, root)) => {
-                let project = self
-                    .state
-                    .projects
-                    .iter()
-                    .filter(|project| cwd.starts_with(&project.path))
-                    .max_by_key(|project| project.path.components().count());
-                let name = project.map(Project::display_name).unwrap_or_else(|| {
-                    root.file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or_default()
-                        .to_owned()
-                });
-                let relative_root =
-                    project.map_or(root.as_path(), |project| project.path.as_path());
-                let label = cwd
-                    .strip_prefix(relative_root)
-                    .ok()
-                    .filter(|rel| !rel.as_os_str().is_empty())
-                    .map(|rel| format!("{name}/{}", rel.display()))
-                    .unwrap_or(name);
-                // The repo name anchors the label — the folded middle
-                // comes from the working directory's ancestors.
-                (
-                    "icons/folder.svg",
-                    truncate_path_ancestors(&label, SIDEBAR_TERMINAL_DETAIL_MAX_CHARS, true),
-                )
-            }
+        let repo_label = cwd
+            .as_deref()
+            .and_then(|cwd| self.repo_location_label(cwd, SIDEBAR_TERMINAL_DETAIL_MAX_CHARS));
+        let (detail_icon, detail) = match repo_label {
+            Some(label) => ("icons/folder.svg", label),
             None => (
                 "icons/terminal-square.svg",
                 cwd.as_deref()
