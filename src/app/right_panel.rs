@@ -5850,6 +5850,12 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A deliverable preview is a page over the Boss chat, so ⌘W returns
+        // to that chat instead of closing the window or a right-panel tab.
+        if self.live_deliverable_page().is_some() {
+            self.navigate_back_action(&NavigateBack, window, cx);
+            return;
+        }
         // The Git panel has no tabs; ⌘W on it just gives the slot back.
         if self.git_panel_visible {
             self.set_git_panel_visible(false, window, cx);
