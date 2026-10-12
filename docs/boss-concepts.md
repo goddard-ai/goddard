@@ -57,6 +57,12 @@ Outcome membership and completion behavior are captured when the assignment
 starts. Resuming keeps those settings. Changing that contract requires stopping
 and reassigning the work; editing a title or plan link does not change it.
 
+A summon can also grant the employee Boss-level operation authority, so it can
+run Boss-authorized operations itself — useful for a deputy that coordinates
+other employees. That grant is fixed when the employee is summoned: it cannot
+be edited, inherited from a persona, or passed on to another employee, and the
+next assignment on a resumed employee starts without it.
+
 ## Approval and completion are separate
 
 **Employee completion** means the employee's attempt has settled. Check the

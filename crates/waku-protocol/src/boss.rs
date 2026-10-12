@@ -1303,6 +1303,12 @@ pub struct BossEmployee {
     pub icon: Option<crate::custom_commands::CustomCommandIcon>,
     /// The grants assigned when this employee was summoned.
     pub permissions: PersonaPermissions,
+    /// Boss-level operation authority granted at summon — never inherited
+    /// from the persona, never editable through `setPermissions`, and
+    /// cleared when the record re-enters admission. Expiry suspends it;
+    /// a resume starts the next assignment without it.
+    #[serde(default)]
+    pub boss_authority: bool,
     /// The persona's memory pins at summon time — paths relative to
     /// `memory/` in the Boss files root.
     #[serde(default, alias = "knowledgeFiles")]
@@ -2858,6 +2864,14 @@ pub enum BossOperation {
         /// `None` inherits the persona's permissions unchanged.
         #[serde(default)]
         permissions: Option<PermissionOverrides>,
+        /// Grant this employee Boss-level operation authority for the
+        /// life of this admission — Boss-authorized operations accept its
+        /// credential while human-only actions still refuse it. Only the
+        /// boss or a human may set it: it is fixed at summon, cannot be
+        /// added through `setPermissions` or inherited from a persona,
+        /// and does not survive re-admission.
+        #[serde(default)]
+        boss_authority: bool,
         /// The work kind fixed at summon — `errand` (the default) reports
         /// its finish to the supervisor; `goal` expires silently and lists
         /// on the client's Goals page.
@@ -3753,16 +3767,18 @@ mod tests {
             "prompt": "Check the build",
             "project": "/project",
             "reasoningEffort": "high",
-            "permissions": {"bucketIds": ["work"], "computerUse": true}
+            "permissions": {"bucketIds": ["work"], "computerUse": true},
+            "bossAuthority": true
         }))
         .unwrap();
         assert!(matches!(
             summon,
-            super::BossOperation::Summon { permissions: Some(overrides), reasoning_effort, work_goal, .. }
+            super::BossOperation::Summon { permissions: Some(overrides), reasoning_effort, work_goal, boss_authority, .. }
                 if overrides.bucket_ids.as_deref() == Some(&["work".to_string()][..])
                     && overrides.computer_use == Some(true)
                     && overrides.integration_ids.is_none()
                     && reasoning_effort.as_deref() == Some("high")
+                    && boss_authority
                     // An omitted kind is an assignment: its finish reports.
                     && work_goal == super::EmployeeGoal::Errand
         ));
@@ -3793,6 +3809,24 @@ mod tests {
                 if permissions.integration_ids == Some(Vec::new())
                     && permissions.summon_employees.is_none()
         ));
+        // Boss authority is summon-only — the per-field grant override
+        // surface rejects it outright rather than ignoring it.
+        assert!(
+            serde_json::from_value::<super::PermissionOverrides>(serde_json::json!({
+                "bossAuthority": true
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<super::BossOperation>(serde_json::json!({
+                "type": "summon",
+                "jobTitle": "T",
+                "prompt": "P",
+                "project": "/project",
+                "bossAuthority": "yes"
+            }))
+            .is_err()
+        );
     }
 
     #[test]

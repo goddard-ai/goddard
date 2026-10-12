@@ -920,6 +920,22 @@ impl BossService {
         self.is_boss(session) || self.is_planning(session)
     }
 
+    /// Whether `session` carries Boss-level operation authority: the boss
+    /// chat, its planning sessions, or a live employee whose summon
+    /// explicitly granted it. The grant ends with the admission — expiry
+    /// suspends it and re-admission clears it — so it never outlives the
+    /// assignment it was summoned with. Human-only gates still require a
+    /// callerless (client) call, and identity surfaces — workspaces,
+    /// telemetry, prompt composition — keep `is_boss_principal`.
+    pub fn has_boss_authority(&self, session: Uuid) -> bool {
+        if self.is_boss_principal(session) {
+            return true;
+        }
+        self.state.lock().employees.iter().any(|employee| {
+            employee.session_id == session && employee.boss_authority && !employee.expired
+        })
+    }
+
     pub fn is_employee(&self, session: Uuid) -> bool {
         self.state
             .lock()
@@ -2064,7 +2080,7 @@ impl BossService {
             })
             .ok_or_else(|| anyhow!("not a Boss employee"))?;
         if caller.is_some_and(|caller| {
-            !self.is_boss_principal(caller) && employee.supervisor_id != caller
+            !self.has_boss_authority(caller) && employee.supervisor_id != caller
         }) {
             bail!("only the boss or this employee's supervisor can control it");
         }
@@ -2078,7 +2094,7 @@ impl BossService {
         let Some(caller) = caller else {
             return Ok(());
         };
-        if caller == target || self.is_boss_principal(caller) {
+        if caller == target || self.has_boss_authority(caller) {
             return Ok(());
         }
         let state = self.document();
@@ -2186,12 +2202,14 @@ impl BossService {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare_employee(
         &self,
         caller: Uuid,
         persona_id: Option<Uuid>,
         job_title: String,
         overrides: Option<PermissionOverrides>,
+        boss_authority: bool,
         work_goal: EmployeeGoal,
         icon: Option<waku_protocol::custom_commands::CustomCommandIcon>,
     ) -> anyhow::Result<BossEmployee> {
@@ -2204,6 +2222,12 @@ impl BossService {
             .find(|persona| persona.id == persona_id)
             .ok_or_else(|| anyhow!("unknown persona"))?;
         self.validate_bucket_ids(&persona.permissions.bucket_ids)?;
+        // Boss authority is a summon-time grant issued by the boss or a
+        // human alone — an employee caller, even one holding the grant
+        // itself, cannot mint it for a new employee.
+        if boss_authority && !self.is_boss_principal(caller) {
+            bail!("only the boss or a human can grant an employee Boss authority");
+        }
         // Summon overrides the persona default; either explicit choice is
         // copied onto the record — a snapshot the client renders directly,
         // untouched by later persona edits. `None` leaves the title
@@ -2230,7 +2254,7 @@ impl BossService {
             // managed task and cannot summon any more.
             bail!("this planning session is archived");
         }
-        if !self.is_boss_principal(caller) {
+        if !self.has_boss_authority(caller) {
             let parent = state
                 .employees
                 .iter()
@@ -2278,6 +2302,7 @@ impl BossService {
             created_at: Some(waku_protocol::model::unix_time()),
             icon,
             permissions,
+            boss_authority,
             pinned_files,
             expired: false,
             workspace_transition: false,
@@ -2333,7 +2358,7 @@ impl BossService {
     ) -> anyhow::Result<()> {
         self.validate_bucket_ids(overrides.bucket_ids.as_deref().unwrap_or(&[]))?;
         let ceiling = match caller {
-            Some(caller) if !self.is_boss_principal(caller) => Some(
+            Some(caller) if !self.has_boss_authority(caller) => Some(
                 self.employee(caller)
                     .ok_or_else(|| anyhow!("this task is not a Boss employee"))?
                     .permissions,
@@ -2682,8 +2707,13 @@ impl BossService {
                     "Finishing is silent — your outcome lands on the human's Goals page without prompting anyone, so do not expect a reply."
                 }
             };
+            let boss_authority = if employee.boss_authority {
+                " Your summon also granted Boss authority for this assignment: Boss-authorized operations accept your credential — summoning, employee control, transcripts, files, personas, memory buckets, chains, and project settings — while human-only actions still refuse it. You cannot pass the grant to another employee, and it ends when this assignment does."
+            } else {
+                ""
+            };
             format!(
-                "You are employee {}, whose job title is {}. Your supervisor is task {}. Your persona instructions above are the canonical Employee base — plus your assigned role when one follows — and they stay authoritative every turn; the daemon re-injects them when they change. Use named memory buckets explicitly through `goddard-agent memory`; omit the bucket to use your assigned project bucket. You can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss file read PATH` to read pinned documents and `goddard-agent boss transcript EMPLOYEE_ID` to retrieve employee transcripts. Native subagents are not Boss employees: delegate only with `goddard-agent boss summon`, and only when permitted. Your grants are {}. Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} Do not prompt or steer the Boss or your supervisor during a turn. Your only channels to them are report-blocker for actionable blockers and your normal turn-end/final report for results. Only when you cannot proceed without supervisor or human action — permission denials, missing external state, destructive ambiguity, or genuine product-intent questions after checking repository conventions — report a blocker with `goddard-agent boss report-blocker --text 'what needs attention'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Fix recoverable check failures yourself, including wrong flags, missing dependencies, and flaky retries. Put substantial reports and text artifacts in your transcript, with a concise self-contained final summary pointing to the relevant turn; the supervisor can retrieve the full transcript after expiry with `goddard-agent boss transcript EMPLOYEE_ID --turn N`. Do not rely on workspace-only file paths after cleanup. Publish a requested user-facing artifact from your workspace with `goddard-agent boss deliverable publish ABSOLUTE_PATH --name 'Descriptive title'` — the daemon stores a copy that survives workspace cleanup; write requested Markdown documents in plain language with a descriptive title, purpose, context, useful headings, and recommendations.",
+                "You are employee {}, whose job title is {}. Your supervisor is task {}. Your persona instructions above are the canonical Employee base — plus your assigned role when one follows — and they stay authoritative every turn; the daemon re-injects them when they change. Use named memory buckets explicitly through `goddard-agent memory`; omit the bucket to use your assigned project bucket. You can read and record only in buckets granted to you and your assigned project bucket. Bucket access does not preload its contents. Use `goddard-agent boss file read PATH` to read pinned documents and `goddard-agent boss transcript EMPLOYEE_ID` to retrieve employee transcripts. Native subagents are not Boss employees: delegate only with `goddard-agent boss summon`, and only when permitted. Your grants are {}.{boss_authority} Pinned documents: {}. Finish this bounded job, return your results, and expire. {finish} Do not prompt or steer the Boss or your supervisor during a turn. Your only channels to them are report-blocker for actionable blockers and your normal turn-end/final report for results. Only when you cannot proceed without supervisor or human action — permission denials, missing external state, destructive ambiguity, or genuine product-intent questions after checking repository conventions — report a blocker with `goddard-agent boss report-blocker --text 'what needs attention'`: the report interrupts your supervisor's running work when it can and makes your finish deliver a full report instead of expiring silently. Fix recoverable check failures yourself, including wrong flags, missing dependencies, and flaky retries. Put substantial reports and text artifacts in your transcript, with a concise self-contained final summary pointing to the relevant turn; the supervisor can retrieve the full transcript after expiry with `goddard-agent boss transcript EMPLOYEE_ID --turn N`. Do not rely on workspace-only file paths after cleanup. Publish a requested user-facing artifact from your workspace with `goddard-agent boss deliverable publish ABSOLUTE_PATH --name 'Descriptive title'` — the daemon stores a copy that survives workspace cleanup; write requested Markdown documents in plain language with a descriptive title, purpose, context, useful headings, and recommendations.",
                 employee.identity.name,
                 employee.job_title,
                 employee.supervisor_id,
@@ -2694,7 +2724,7 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Your persona instructions above are the canonical Boss default; they stay authoritative every turn and the daemon re-injects them when they change. When you need to discover capabilities or correct usage, call `goddard-agent boss --help` first. It gives the complete Boss guide and relevant companion operations in one call. Use a command's `--schema` only when you need its precise machine contract, or `goddard-agent boss --schema` for the complete contract. Invoke operations using command paths, positionals, and flags; do not pass a whole-operation JSON payload. JSON is for documented structured inputs and outputs. Follow the actual installed CLI syntax; capability documentation does not override role limits, human authorization, or workflow policy. This is demand-driven, not a mandatory call every turn: use already-known correct commands immediately and dispatch employees promptly without mandatory browsing or research. Your dedicated tools use runnable paths such as `goddard-agent boss context`, `goddard-agent boss roster`, `goddard-agent boss summon --title 'Research task' --icon search --text 'Research only; report findings.'`, and `goddard-agent boss file read plans/design.md`. Advanced scripting uses `goddard-agent boss script --file script.rhai` or `--text 'RHAI_SOURCE'`; `help()` inside a script lists bindings. Scripting function names below are not CLI leaf commands; generic operations use `op(#{{type: OPERATION, ...}})` inside that script.\n\nSummon interface: `goddard-agent boss summon` uses `--persona`, `--title`, `--icon`, `--workspace`, `--base-branch`, `--adopt-worktree`, `--effort`, `--work-goal`, `--plan`, `--item`, `--request-id`, and `--needs-attention` with `--text` or `--file` for the assignment. Advanced fields without CLI flags use the Rhai binding `summon(#{{jobTitle: TITLE, prompt: PROMPT, project: PROJECT, ...}})` through `boss script`; the following camelCase names describe that scripting map, not CLI flags. Summon fields: `personaId` selects an employee role layered on the shared Employee base — a shipped specialist (Researcher, Feature Developer, Bug Investigator, Verifier) or a custom persona — omit it for the base alone, and the Boss persona cannot be an employee role; `jobTitle` names the job — choose a purpose-specific title since Goddard assigns the human name and titles feed the fallback classifier; `icon` picks the employee icon that fits the actual work; `workspace: \"worktree\"` + `baseBranch` runs the employee in a daemon-managed Git worktree, `\"adopt\"` + `adoptWorktree` hands it a finished employee's worktree; `reasoningEffort` pins an effort the resolved model supports or the summon fails; `workGoal` fixes how its finish lands — `errand` (default) reports to you, `goal` expires silently on the human's Goals page, and a finish still reaches you on a blocker report, `alwaysReport`, or a session failure; `resources` reserves host capacity (`{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>` plus `resident_devices`, `desktop_input` for shared input) — the employee's `resource run` calls borrow subsets of the granted set and a contested set queues the ticket rather than erroring; `allowBurst` spends burst slots above `liveLimit` but never past `hardCap`; `groupId` joins a wave whose single report lands when every member finishes; `priority` is stored but the FIFO scheduler does not reorder on it; `requestId` is an idempotency key; `needsAttention` flags the employee for the human's attention — its sidebar entry stays unread once finished and is never swept by roster retirement, so use it for completions the user must not miss rather than routine work. Outcome tagging: `outcomeId` or `newOutcome` attaches the assignment to an outcome, `afterSuccess` records your follow-up intent, `finishesOutcome` designates the assignment the outcome's finisher — it requires explicit success criteria and a single live finisher — and `prerequisites` lists sibling assignment session ids that must finish before it dispatches; `plan`/`item` tag the assignment to a plan work item. A summon that returns without error succeeded — a `queued` state waits for capacity, never an error — and the dispatch notice or next context snapshot carries the employee's name, so do not call `view` just to confirm.\n\nControl and lifecycle: use `goddard-agent boss prompt EMPLOYEE_ID --delivery steer --text 'Correction'` for a live correction, `--delivery queue` for later work, `goddard-agent boss stop EMPLOYEE_ID`, and `goddard-agent boss resume EMPLOYEE_ID`. Employee configuration uses `goddard-agent boss employee model`, `permissions`, `workspace`, `resources`, and `plan` with their documented inputs. Advanced control uses Rhai `control(EMPLOYEE_ID, #{{type: ACTION, ...}})` through `boss script`; its actions are `prompt`, `steer` (mid-flight correction; a redirecting steer may carry `jobTitle` to relabel the job), `stop`, `setModel` (one atomic reconfigure — an open turn is interrupted intentionally, never marked failed, and the assignment resumes on the new selection), `setPermissions` (per-field grant overrides; an employee summoner stays clamped to its own grants), `setPersona` (replace an employee's custom role or pass `null` for the base alone — the deliberate fix when an assigned role is unavailable), `setWorkspace` (one atomic move between the primary checkout and a fresh worktree; a failure leaves the employee running in its old workspace), `setResources` (a queued ticket re-enters admission on the new set, a running employee swaps once capacity frees), and `setPlan` (re-tag the plan/item links). A prompt or steer to a finished employee re-enters admission with the same transcript; `resume` revives an interrupted one in place. Queued prompts can be lost as an employee finishes — summon a fresh employee for new follow-up work rather than stacking onto one about to expire.\n\nFor daemon-managed worktrees, require each assigned employee to commit its unit and run `goddard-agent merge submit` itself; do not summon a separate Worktree Integrator, and never create Git worktrees yourself — summon `--workspace worktree --base-branch BRANCH` and `goddard-agent boss employee workspace` cover employee worktree needs. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. Require employee-reported completion evidence before reporting a task done: changed paths or delivered artifacts, checks performed and their results, unverified conditions, remaining blockers, and commit and submission evidence when applicable. Delegate repository-state and commit verification to employees; a summary without supporting evidence does not establish completion. Distinguish implemented, committed, submitted, landed, and behavior verified; a commit is not proof of landing, and compilation is not proof of behavior. Never claim behavior verified without reported checks that establish it.\n\nMemory: `goddard-agent boss memory` subcommands reach every named bucket — a project's name resolves to its shared bucket — through `buckets`, `overview`, `scan`, `zoom`, `record`, and `summary`; contents are never loaded automatically. Buckets are append-only: corrections are new notes and a repeated retry key never duplicates one. Project-assigned employees have automatic read and insert access to that project's shared bucket; grant additional buckets deliberately through persona `bucketIds` or per-employee permission overrides, and pinned files are documents only — they do not grant memory access. Personal buckets remain private unless you grant them deliberately.\n\nPersonas and files: `goddard-agent boss persona upsert` creates or edits a custom role — the Employee base composes automatically beneath it, so role text carries only specialist methods and limits; `goddard-agent boss persona defaults` inspects the shipped default instructions — the Boss and Employee base roles plus the shipped specialist roles — it returns full shipped text, revision labels, and saved-versus-shipped diffs; `goddard-agent boss persona reset` and `goddard-agent boss persona undo` replace or restore a default's instructions on a clear human request; `goddard-agent boss persona propose` drafts an update for the human's review (`goddard-agent boss persona keep` and `goddard-agent boss persona adopt` are human-only). Your persona is {}. Your persistent files root is {} — plan documents live under `plans/` and every employee can read them.\n\nSurfaces: `goddard-agent boss terminal --title TITLE --cwd DIRECTORY` (optionally `--file STARTUP_SCRIPT`) creates a pinned standalone terminal — choose an existing directory and use it only for yourself or a planning session, never an employee. `goddard-agent boss automation` subcommands manage user automations; employees cannot use it. `goddard-agent boss script` runs Rhai inside the daemon with operations bound as functions — batch related operations into one call; variables exist only within that invocation. Scripting-only outcome operations (`createOutcome`, `setOutcomeState`, `setOutcomeWaiting`, `attachPlan`, `resolveHandoff`) use `op(#{{type: OPERATION, ...}})`; these are not standalone function bindings or CLI leaves. The same route exposes `setProjectSubmissions` and `setProjectQaBranch`. Use the installed help/schema for their precise contracts; scripting preserves each operation's authorization. `goddard-agent boss context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `goddard-agent search` scans every project's task transcripts — `project:` narrows to one — and `goddard-agent read` opens any task it surfaces. `goddard-agent boss browse URL` (optionally `--title TITLE`) opens an http(s) page in the boss chat's right panel for the user. `goddard-agent boss speak --text TEXT` voices an utterance through connected clients when voice is on — split it into reusable fragments so generated clips are reused and later utterances stay instant. `goddard-agent boss plan create` opens a design session that drafts a product design for the human's approval — it launches on codex/gpt-6.1-sol at medium effort unless you pass provider/model/reasoningEffort overrides — and a finalized planning session answers questions about its design but does not implement.\n\nBoss must not conduct codebase research directly: delegate all source discovery, code search, source or diff inspection, caller and dependency analysis, repository-history investigation, and technical verification to employees. This boundary applies before dispatch, during planning, when answering code questions, and when checking completion; neither a quick lookup nor unavailable employee capacity is an exception. You may identify the relevant project, read planning documents, review employee reports and supplied evidence, and ask employees to resolve gaps; project identification must not become codebase exploration. If no employee can perform the research, report the limitation and its consequence rather than doing it yourself. Broader filesystem editing and internet access outside codebase research are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, summon an employee to watch and report, then return to the human. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. There are no managers.",
+                "You are {}, the boss for this daemon. Your persona instructions above are the canonical Boss default; they stay authoritative every turn and the daemon re-injects them when they change. When you need to discover capabilities or correct usage, call `goddard-agent boss --help` first. It gives the complete Boss guide and relevant companion operations in one call. Use a command's `--schema` only when you need its precise machine contract, or `goddard-agent boss --schema` for the complete contract. Invoke operations using command paths, positionals, and flags; do not pass a whole-operation JSON payload. JSON is for documented structured inputs and outputs. Follow the actual installed CLI syntax; capability documentation does not override role limits, human authorization, or workflow policy. This is demand-driven, not a mandatory call every turn: use already-known correct commands immediately and dispatch employees promptly without mandatory browsing or research. Your dedicated tools use runnable paths such as `goddard-agent boss context`, `goddard-agent boss roster`, `goddard-agent boss summon --title 'Research task' --icon search --text 'Research only; report findings.'`, and `goddard-agent boss file read plans/design.md`. Advanced scripting uses `goddard-agent boss script --file script.rhai` or `--text 'RHAI_SOURCE'`; `help()` inside a script lists bindings. Scripting function names below are not CLI leaf commands; generic operations use `op(#{{type: OPERATION, ...}})` inside that script.\n\nSummon interface: `goddard-agent boss summon` uses `--persona`, `--title`, `--icon`, `--workspace`, `--base-branch`, `--adopt-worktree`, `--effort`, `--work-goal`, `--plan`, `--item`, `--request-id`, `--needs-attention`, and `--boss-authority` with `--text` or `--file` for the assignment. Advanced fields without CLI flags use the Rhai binding `summon(#{{jobTitle: TITLE, prompt: PROMPT, project: PROJECT, ...}})` through `boss script`; the following camelCase names describe that scripting map, not CLI flags. Summon fields: `personaId` selects an employee role layered on the shared Employee base — a shipped specialist (Researcher, Feature Developer, Bug Investigator, Verifier) or a custom persona — omit it for the base alone, and the Boss persona cannot be an employee role; `jobTitle` names the job — choose a purpose-specific title since Goddard assigns the human name and titles feed the fallback classifier; `icon` picks the employee icon that fits the actual work; `workspace: \"worktree\"` + `baseBranch` runs the employee in a daemon-managed Git worktree, `\"adopt\"` + `adoptWorktree` hands it a finished employee's worktree; `reasoningEffort` pins an effort the resolved model supports or the summon fails; `workGoal` fixes how its finish lands — `errand` (default) reports to you, `goal` expires silently on the human's Goals page, and a finish still reaches you on a blocker report, `alwaysReport`, or a session failure; `resources` reserves host capacity (`{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>` plus `resident_devices`, `desktop_input` for shared input) — the employee's `resource run` calls borrow subsets of the granted set and a contested set queues the ticket rather than erroring; `allowBurst` spends burst slots above `liveLimit` but never past `hardCap`; `groupId` joins a wave whose single report lands when every member finishes; `priority` is stored but the FIFO scheduler does not reorder on it; `requestId` is an idempotency key; `needsAttention` flags the employee for the human's attention — its sidebar entry stays unread once finished and is never swept by roster retirement, so use it for completions the user must not miss rather than routine work; `bossAuthority` grants the employee Boss-level operation authority for its admission only — use it sparingly for a deputy that must run Boss-authorized operations itself, since the grant cannot be narrowed, revoked early, or passed on. Outcome tagging: `outcomeId` or `newOutcome` attaches the assignment to an outcome, `afterSuccess` records your follow-up intent, `finishesOutcome` designates the assignment the outcome's finisher — it requires explicit success criteria and a single live finisher — and `prerequisites` lists sibling assignment session ids that must finish before it dispatches; `plan`/`item` tag the assignment to a plan work item. A summon that returns without error succeeded — a `queued` state waits for capacity, never an error — and the dispatch notice or next context snapshot carries the employee's name, so do not call `view` just to confirm.\n\nControl and lifecycle: use `goddard-agent boss prompt EMPLOYEE_ID --delivery steer --text 'Correction'` for a live correction, `--delivery queue` for later work, `goddard-agent boss stop EMPLOYEE_ID`, and `goddard-agent boss resume EMPLOYEE_ID`. Employee configuration uses `goddard-agent boss employee model`, `permissions`, `workspace`, `resources`, and `plan` with their documented inputs. Advanced control uses Rhai `control(EMPLOYEE_ID, #{{type: ACTION, ...}})` through `boss script`; its actions are `prompt`, `steer` (mid-flight correction; a redirecting steer may carry `jobTitle` to relabel the job), `stop`, `setModel` (one atomic reconfigure — an open turn is interrupted intentionally, never marked failed, and the assignment resumes on the new selection), `setPermissions` (per-field grant overrides; an employee summoner stays clamped to its own grants), `setPersona` (replace an employee's custom role or pass `null` for the base alone — the deliberate fix when an assigned role is unavailable), `setWorkspace` (one atomic move between the primary checkout and a fresh worktree; a failure leaves the employee running in its old workspace), `setResources` (a queued ticket re-enters admission on the new set, a running employee swaps once capacity frees), and `setPlan` (re-tag the plan/item links). A prompt or steer to a finished employee re-enters admission with the same transcript; `resume` revives an interrupted one in place. Queued prompts can be lost as an employee finishes — summon a fresh employee for new follow-up work rather than stacking onto one about to expire.\n\nFor daemon-managed worktrees, require each assigned employee to commit its unit and run `goddard-agent merge submit` itself; do not summon a separate Worktree Integrator, and never create Git worktrees yourself — summon `--workspace worktree --base-branch BRANCH` and `goddard-agent boss employee workspace` cover employee worktree needs. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. Require employee-reported completion evidence before reporting a task done: changed paths or delivered artifacts, checks performed and their results, unverified conditions, remaining blockers, and commit and submission evidence when applicable. Delegate repository-state and commit verification to employees; a summary without supporting evidence does not establish completion. Distinguish implemented, committed, submitted, landed, and behavior verified; a commit is not proof of landing, and compilation is not proof of behavior. Never claim behavior verified without reported checks that establish it.\n\nMemory: `goddard-agent boss memory` subcommands reach every named bucket — a project's name resolves to its shared bucket — through `buckets`, `overview`, `scan`, `zoom`, `record`, and `summary`; contents are never loaded automatically. Buckets are append-only: corrections are new notes and a repeated retry key never duplicates one. Project-assigned employees have automatic read and insert access to that project's shared bucket; grant additional buckets deliberately through persona `bucketIds` or per-employee permission overrides, and pinned files are documents only — they do not grant memory access. Personal buckets remain private unless you grant them deliberately.\n\nPersonas and files: `goddard-agent boss persona upsert` creates or edits a custom role — the Employee base composes automatically beneath it, so role text carries only specialist methods and limits; `goddard-agent boss persona defaults` inspects the shipped default instructions — the Boss and Employee base roles plus the shipped specialist roles — it returns full shipped text, revision labels, and saved-versus-shipped diffs; `goddard-agent boss persona reset` and `goddard-agent boss persona undo` replace or restore a default's instructions on a clear human request; `goddard-agent boss persona propose` drafts an update for the human's review (`goddard-agent boss persona keep` and `goddard-agent boss persona adopt` are human-only). Your persona is {}. Your persistent files root is {} — plan documents live under `plans/` and every employee can read them.\n\nSurfaces: `goddard-agent boss terminal --title TITLE --cwd DIRECTORY` (optionally `--file STARTUP_SCRIPT`) creates a pinned standalone terminal — choose an existing directory and use it only for yourself or a planning session, never an employee. `goddard-agent boss automation` subcommands manage user automations; employees cannot use it. `goddard-agent boss script` runs Rhai inside the daemon with operations bound as functions — batch related operations into one call; variables exist only within that invocation. Scripting-only outcome operations (`createOutcome`, `setOutcomeState`, `setOutcomeWaiting`, `attachPlan`, `resolveHandoff`) use `op(#{{type: OPERATION, ...}})`; these are not standalone function bindings or CLI leaves. The same route exposes `setProjectSubmissions` and `setProjectQaBranch`. Use the installed help/schema for their precise contracts; scripting preserves each operation's authorization. `goddard-agent boss context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `goddard-agent search` scans every project's task transcripts — `project:` narrows to one — and `goddard-agent read` opens any task it surfaces. `goddard-agent boss browse URL` (optionally `--title TITLE`) opens an http(s) page in the boss chat's right panel for the user. `goddard-agent boss speak --text TEXT` voices an utterance through connected clients when voice is on — split it into reusable fragments so generated clips are reused and later utterances stay instant. `goddard-agent boss plan create` opens a design session that drafts a product design for the human's approval — it launches on codex/gpt-6.1-sol at medium effort unless you pass provider/model/reasoningEffort overrides — and a finalized planning session answers questions about its design but does not implement.\n\nBoss must not conduct codebase research directly: delegate all source discovery, code search, source or diff inspection, caller and dependency analysis, repository-history investigation, and technical verification to employees. This boundary applies before dispatch, during planning, when answering code questions, and when checking completion; neither a quick lookup nor unavailable employee capacity is an exception. You may identify the relevant project, read planning documents, review employee reports and supplied evidence, and ask employees to resolve gaps; project identification must not become codebase exploration. If no employee can perform the research, report the limitation and its consequence rather than doing it yourself. Broader filesystem editing and internet access outside codebase research are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, summon an employee to watch and report, then return to the human. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
@@ -3654,6 +3684,9 @@ impl BossService {
             employee.plan_readiness = None;
             employee.cancelled = false;
             employee.expiry = None;
+            // Boss authority belongs to the summon that granted it — a
+            // re-admission starts the next assignment without it.
+            employee.boss_authority = false;
             employee.queued_at = Some(now);
             employee.ticket = Some(ticket);
             let snapshot = employee.clone();
@@ -3682,7 +3715,7 @@ impl BossService {
         model_limits: Vec<ModelLimit>,
         host: Option<waku_protocol::resources::ResourcePolicy>,
     ) -> anyhow::Result<BossResourcePolicy> {
-        if caller.is_some_and(|id| !self.is_boss_principal(id)) {
+        if caller.is_some_and(|id| !self.has_boss_authority(id)) {
             bail!("only the boss or a human can set the resource policy");
         }
         for rule in &model_limits {
@@ -4072,7 +4105,7 @@ impl BossService {
     }
 
     fn require_owner(&self, caller: Option<Uuid>) -> anyhow::Result<()> {
-        if caller.is_some_and(|id| !self.is_boss_principal(id)) {
+        if caller.is_some_and(|id| !self.has_boss_authority(id)) {
             bail!("only the boss or a human can change personas and Boss files");
         }
         Ok(())
@@ -4098,7 +4131,7 @@ impl BossService {
         caller: Option<Uuid>,
         target: &Path,
     ) -> anyhow::Result<()> {
-        let Some(caller) = caller.filter(|id| !self.is_boss_principal(*id)) else {
+        let Some(caller) = caller.filter(|id| !self.has_boss_authority(*id)) else {
             return Ok(());
         };
         let workspace = self.projects.lock().get(&caller).cloned();
@@ -4123,7 +4156,7 @@ impl BossService {
         caller: Option<Uuid>,
         parts: Vec<String>,
     ) -> anyhow::Result<Vec<String>> {
-        if caller.is_some_and(|caller| !self.is_boss_principal(caller)) {
+        if caller.is_some_and(|caller| !self.has_boss_authority(caller)) {
             bail!("only the boss or a human can speak");
         }
         if parts.is_empty() || parts.len() > MAX_SPEECH_PARTS {
@@ -4266,7 +4299,7 @@ impl BossService {
             }
             BossOperation::View => {
                 let mut state = self.document();
-                if let Some(caller) = caller.filter(|id| !self.is_boss_principal(*id)) {
+                if let Some(caller) = caller.filter(|id| !self.has_boss_authority(*id)) {
                     let employee = state
                         .employees
                         .iter()
@@ -4823,7 +4856,7 @@ impl BossService {
         use waku_protocol::boss::MemoryOperation;
 
         let state = self.document();
-        let boss_principal = caller.is_none_or(|id| self.is_boss_principal(id));
+        let boss_principal = caller.is_none_or(|id| self.has_boss_authority(id));
         let principal = if boss_principal {
             "boss".to_owned()
         } else {
@@ -5318,7 +5351,7 @@ impl BossService {
         directory: bool,
     ) -> anyhow::Result<()> {
         validate_relative(path, directory)?;
-        if caller.is_none() || caller.is_some_and(|id| self.is_boss_principal(id)) {
+        if caller.is_none() || caller.is_some_and(|id| self.has_boss_authority(id)) {
             return Ok(());
         }
         let state = self.state.lock();
@@ -7530,6 +7563,7 @@ mod tests {
                 Some(persona),
                 "One".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -7544,6 +7578,7 @@ mod tests {
                 Some(persona),
                 "Two".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -7558,6 +7593,7 @@ mod tests {
                     Some(persona),
                     format!("Job {index}"),
                     None,
+                    false,
                     EmployeeGoal::Errand,
                     None,
                 )
@@ -7596,6 +7632,7 @@ mod tests {
                 Some(state.personas[0].id),
                 "Review".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -7660,6 +7697,7 @@ mod tests {
                 Some(service.document().personas[0].id),
                 "Review".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -7686,6 +7724,7 @@ mod tests {
                 Some(service.document().personas[0].id),
                 "New job".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -7725,6 +7764,7 @@ mod tests {
                 Some(state.personas[0].id),
                 "Watch".into(),
                 None,
+                false,
                 EmployeeGoal::Goal,
                 None,
             )
@@ -7785,6 +7825,7 @@ mod tests {
                 Some(service.document().personas[0].id),
                 "Audit".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -7928,6 +7969,7 @@ mod tests {
                 Some(service.document().personas[0].id),
                 "Review".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -7975,6 +8017,7 @@ mod tests {
                     created_at: None,
                     icon: None,
                     permissions: PersonaPermissions::default(),
+                    boss_authority: false,
                     pinned_files: Vec::new(),
                     expired: false,
                     workspace_transition: false,
@@ -8054,6 +8097,7 @@ mod tests {
                     created_at: None,
                     icon: None,
                     permissions: PersonaPermissions::default(),
+                    boss_authority: false,
                     pinned_files: Vec::new(),
                     expired: false,
                     workspace_transition: false,
@@ -8273,6 +8317,7 @@ mod tests {
                 Some(persona),
                 "Research".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -8286,6 +8331,7 @@ mod tests {
                 Some(persona),
                 "Research".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 Some(CustomCommandIcon::FolderSearch),
             )
@@ -8303,6 +8349,7 @@ mod tests {
                 Some(persona),
                 "Research".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -8323,6 +8370,7 @@ mod tests {
                     Some(persona),
                     "Research".into(),
                     None,
+                    false,
                     EmployeeGoal::Errand,
                     Some(CustomCommandIcon::Bot),
                 )
@@ -8383,6 +8431,7 @@ mod tests {
                 Some(persona),
                 "Investigator".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -8439,6 +8488,7 @@ mod tests {
                     permissions: PersonaPermissions {
                         ..Default::default()
                     },
+                    boss_authority: false,
                     pinned_files: vec!["docs/release.md".into(), "memory/work/old.md".into()],
                     expired: false,
                     workspace_transition: false,
@@ -8586,6 +8636,7 @@ mod tests {
                         created_at: None,
                         icon: None,
                         permissions: PersonaPermissions::default(),
+                        boss_authority: false,
                         pinned_files: Vec::new(),
                         expired: false,
                         workspace_transition: false,
@@ -8738,6 +8789,7 @@ mod tests {
                 Some(persona),
                 "Release".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -8767,6 +8819,7 @@ mod tests {
                 Some(persona),
                 "Child".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -8806,6 +8859,7 @@ mod tests {
                     Some(persona),
                     "Again".into(),
                     None,
+                    false,
                     EmployeeGoal::Errand,
                     None
                 )
@@ -8843,6 +8897,7 @@ mod tests {
                     computer_use: Some(true),
                     ..Default::default()
                 }),
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -8868,6 +8923,7 @@ mod tests {
                     summon_employees: Some(false),
                     ..Default::default()
                 }),
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -8912,6 +8968,208 @@ mod tests {
         assert!(!child.permissions.computer_use);
         fs::remove_dir_all(root).unwrap();
     }
+
+    /// The summon-time Boss grant: only the boss or a human issues it, it
+    /// unlocks owner-level surfaces for the live admission, and it dies
+    /// with that admission — expiry suspends it and re-admission clears it.
+    #[test]
+    fn boss_authority_is_summon_scoped_unclamped_and_nonpersistent() {
+        let root = std::env::temp_dir().join(format!("boss-auth-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        let persona = service.document().personas[0].id;
+        let researcher = service.document().specialist_persona_ids
+            [&PersonaDefaultRole::Researcher];
+        service
+            .update(|state| {
+                state.session_id = Some(boss);
+                let persona = state
+                    .personas
+                    .iter_mut()
+                    .find(|entry| entry.id == persona)
+                    .unwrap();
+                persona.permissions.summon_employees = true;
+                persona.permissions.integration_ids = vec!["linear".into()];
+                Ok(())
+            })
+            .unwrap();
+        // A plain summon leaves the record ungranted and the employee
+        // confined to its supervisor's reach.
+        let plain = service
+            .prepare_employee(
+                boss,
+                Some(persona),
+                "Plain".into(),
+                None,
+                false,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        assert!(!plain.boss_authority);
+        let plain_id = plain.session_id;
+        service
+            .update(|state| {
+                state.employees.push(plain);
+                Ok(())
+            })
+            .unwrap();
+        assert!(!service.has_boss_authority(plain_id));
+        assert!(service.authorize_transcript(Some(plain_id), boss).is_err());
+        assert!(
+            service
+                .set_resource_policy(Some(plain_id), 0, Vec::new(), None)
+                .is_err()
+        );
+        // An employee caller — even one that may summon — cannot mint it.
+        assert!(
+            service
+                .prepare_employee(
+                    plain_id,
+                    Some(persona),
+                    "Claim".into(),
+                    None,
+                    true,
+                    EmployeeGoal::Errand,
+                    None,
+                )
+                .is_err()
+        );
+        // The boss's summon carries it onto the record; deliberately deny
+        // the deputy the delegate grant so its reach is authority alone.
+        let deputy = service
+            .prepare_employee(
+                boss,
+                Some(persona),
+                "Deputy".into(),
+                Some(PermissionOverrides {
+                    summon_employees: Some(false),
+                    ..Default::default()
+                }),
+                true,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        assert!(deputy.boss_authority);
+        assert!(!deputy.permissions.summon_employees);
+        let deputy_id = deputy.session_id;
+        service
+            .update(|state| {
+                state.employees.push(deputy);
+                Ok(())
+            })
+            .unwrap();
+        assert!(service.has_boss_authority(deputy_id));
+        assert!(service.authorize_transcript(Some(deputy_id), plain_id).is_ok());
+        assert!(
+            service
+                .set_resource_policy(Some(deputy_id), 0, Vec::new(), None)
+                .is_ok()
+        );
+        // A deputy summons like the boss — any persona, unclamped grants —
+        // but cannot mint the grant for a new employee.
+        let child = service
+            .prepare_employee(
+                deputy_id,
+                Some(researcher),
+                "Child".into(),
+                Some(PermissionOverrides {
+                    integration_ids: Some(vec!["github".into()]),
+                    ..Default::default()
+                }),
+                false,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        assert_eq!(child.persona_id, researcher);
+        assert_eq!(child.permissions.integration_ids, vec!["github"]);
+        assert!(!child.boss_authority);
+        assert!(
+            service
+                .prepare_employee(
+                    deputy_id,
+                    Some(persona),
+                    "Heir".into(),
+                    None,
+                    true,
+                    EmployeeGoal::Errand,
+                    None,
+                )
+                .is_err()
+        );
+        // Grant editing cannot touch the flag — the override surface has
+        // no field for it, and an edit leaves the summon-fixed value.
+        service
+            .set_employee_permissions(
+                Some(boss),
+                deputy_id,
+                PermissionOverrides {
+                    computer_use: Some(true),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(service.employee(deputy_id).unwrap().boss_authority);
+        assert!(service.employee(deputy_id).unwrap().permissions.computer_use);
+        // Expiry suspends the grant in place; re-admission clears it, so
+        // the revived employee runs its next assignment without it.
+        service.expire(deputy_id).unwrap();
+        assert!(!service.has_boss_authority(deputy_id));
+        service
+            .requeue_employee(deputy_id, memory_op_tests::test_ticket(None), |_| {})
+            .unwrap();
+        let revived = service.employee(deputy_id).unwrap();
+        assert!(!revived.boss_authority);
+        assert!(!service.has_boss_authority(deputy_id));
+        assert!(service.authorize_transcript(Some(deputy_id), plain_id).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A granted employee hears its authority in its composed prompt.
+    #[test]
+    fn boss_authority_summon_reaches_the_employee_prompt() {
+        let root = std::env::temp_dir().join(format!("boss-auth-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service.set_session_id(boss).unwrap();
+        let deputy = service
+            .prepare_employee(
+                boss,
+                None,
+                "Deputy".into(),
+                None,
+                true,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        let plain = service
+            .prepare_employee(
+                boss,
+                None,
+                "Plain".into(),
+                None,
+                false,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        let plain_id = plain.session_id;
+        let deputy_id = deputy.session_id;
+        service
+            .update(|state| {
+                state.employees.extend([plain, deputy]);
+                Ok(())
+            })
+            .unwrap();
+        let granted = service.prompt_with_context(deputy_id, "start".into());
+        assert!(granted.contains("also granted Boss authority"));
+        let ungranted = service.prompt_with_context(plain_id, "start".into());
+        assert!(!ungranted.contains("Boss authority"));
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn employee_job_titles_and_human_names_survive_legacy_migration() {
         let root = std::env::temp_dir().join(format!("boss-names-{}", Uuid::new_v4()));
@@ -8930,6 +9188,7 @@ mod tests {
                 Some(persona),
                 "Release engineer".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -9080,6 +9339,7 @@ mod tests {
                     created_at: None,
                     icon: None,
                     permissions: PersonaPermissions::default(),
+                    boss_authority: false,
                     pinned_files: Vec::new(),
                     expired: false,
                     workspace_transition: false,
@@ -9801,6 +10061,7 @@ mod tests {
                     created_at: None,
                     icon: None,
                     permissions: PersonaPermissions::default(),
+                    boss_authority: false,
                     pinned_files: Vec::new(),
                     expired: false,
                     workspace_transition: false,
@@ -9987,6 +10248,7 @@ mod memory_op_tests {
                 Some(persona),
                 "Review".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -10120,6 +10382,7 @@ mod memory_op_tests {
                 Some(persona),
                 "Review".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -10981,6 +11244,7 @@ mod memory_op_tests {
                 Some(service.document().personas[0].id),
                 "Job".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -11043,6 +11307,7 @@ mod memory_op_tests {
                     Some(persona),
                     title.into(),
                     None,
+                    false,
                     EmployeeGoal::Errand,
                     None,
                 )
@@ -11158,6 +11423,7 @@ mod memory_op_tests {
                 Some(persona),
                 "Job".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -11258,6 +11524,7 @@ mod memory_op_tests {
                 Some(persona),
                 "Job".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -11317,6 +11584,7 @@ mod memory_op_tests {
                     Some(persona),
                     title.into(),
                     None,
+                    false,
                     EmployeeGoal::Errand,
                     None,
                 )
@@ -11416,6 +11684,7 @@ mod memory_op_tests {
                     Some(persona),
                     title.into(),
                     None,
+                    false,
                     EmployeeGoal::Errand,
                     None,
                 )
@@ -11545,6 +11814,7 @@ mod memory_op_tests {
                 Some(service.document().personas[0].id),
                 "Build".into(),
                 None,
+                false,
                 EmployeeGoal::Goal,
                 None,
             )
@@ -11914,6 +12184,7 @@ mod memory_op_tests {
                 Some(service.document().personas[0].id),
                 "Job".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -12018,6 +12289,7 @@ mod memory_op_tests {
                     Some(service.document().personas[0].id),
                     "Job".into(),
                     None,
+                    false,
                     EmployeeGoal::Errand,
                     None,
                 )
@@ -12046,6 +12318,7 @@ mod memory_op_tests {
                     Some(service.document().personas[0].id),
                     "Other".into(),
                     None,
+                    false,
                     EmployeeGoal::Errand,
                     None,
                 )
@@ -12095,6 +12368,7 @@ mod memory_op_tests {
                 Some(service.document().personas[0].id),
                 title.into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -12772,7 +13046,7 @@ mod memory_op_tests {
 
     /// A ticket stamped for the summon path — outcome linkage rides the
     /// ticket like the daemon's dispatch does.
-    fn test_ticket(outcome_id: Option<Uuid>) -> SummonTicket {
+    pub(crate) fn test_ticket(outcome_id: Option<Uuid>) -> SummonTicket {
         SummonTicket {
             sequence: 0,
             generation: 1,
@@ -12820,6 +13094,7 @@ mod memory_op_tests {
                 Some(service.document().personas[0].id),
                 title.into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -12992,6 +13267,7 @@ mod memory_op_tests {
                 Some(service.document().personas[0].id),
                 "Ledger audit".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -13027,6 +13303,7 @@ mod memory_op_tests {
                 Some(service.document().personas[0].id),
                 "Reconcile the books".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -13281,6 +13558,7 @@ mod memory_op_tests {
                 Some(persona_id),
                 "Use role".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -13426,6 +13704,7 @@ mod memory_op_tests {
                 Some(referenced),
                 "Research".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -13680,6 +13959,7 @@ mod memory_op_tests {
                 Some(researcher_id),
                 "Researcher".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -13747,6 +14027,7 @@ mod memory_op_tests {
                 None,
                 "Worker".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -13757,6 +14038,7 @@ mod memory_op_tests {
                 Some(base_id),
                 "Worker".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -13767,6 +14049,7 @@ mod memory_op_tests {
                 Some(custom),
                 "Reviewer".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -13868,6 +14151,7 @@ mod memory_op_tests {
                         rejected,
                         "Worker".into(),
                         None,
+                        false,
                         EmployeeGoal::Errand,
                         None,
                     )
@@ -14116,6 +14400,7 @@ mod memory_op_tests {
                 None,
                 "Worker".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )
@@ -14157,6 +14442,7 @@ mod memory_op_tests {
                 None,
                 "Worker".into(),
                 None,
+                false,
                 EmployeeGoal::Errand,
                 None,
             )

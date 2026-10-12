@@ -28,7 +28,7 @@ pub(super) fn availability(path: &str) -> Value {
             json!({"roles":["boss","planning","human","employee"],"conditions":["Boss experiment enabled","Employees may only record their bound attempt result; response is Saved","Controls and inspection require Boss or human authority","Accepted steps admit and hand off automatically; exceptions pause the chain"]})
         }
         "boss summon" => {
-            json!({"roles":["boss","planning","human","employee"],"conditions":["Boss experiment enabled","Employee requires summonEmployees grant and active supervisor","Employee permissions are clamped to its grants"]})
+            json!({"roles":["boss","planning","human","employee"],"conditions":["Boss experiment enabled","Employee requires summonEmployees grant and active supervisor","Employee permissions are clamped to its grants","--boss-authority grants Boss-level operation authority for the admission — boss or human callers only, fixed at summon, ends with the assignment"]})
         }
         "boss prompt" | "boss stop" | "boss resume" => {
             json!({"roles":["boss","planning","human","employee-supervisor"],"conditions":["Target is an owned employee; scoped caller is active","resume requires an expired record"]})
@@ -105,6 +105,7 @@ pub(super) fn enrich_leaf(path: &str, mut leaf: Value) -> Value {
             json!({"type":"UUID","optional":true,"conflictsWith":"--new-outcome-json[-file]"}),
         );
         object.insert("--after-success".into(), json!({"type":"string","optional":true,"default":waku_protocol::boss::DEFAULT_AFTER_SUCCESS}));
+        object.insert("--boss-authority".into(), json!({"type":"boolean flag","default":false,"notes":"Boss or human callers only; Boss-authorized operations accept the employee's credential for this admission. Ends at expiry, cleared by re-admission, cannot be passed to a new summon or added through permissions editing"}));
         leaf["constraints"] = json!([
             "--item requires --plan; plan and item must be open",
             "--outcome-id and --new-outcome-json[-file] are mutually exclusive",
@@ -112,6 +113,7 @@ pub(super) fn enrich_leaf(path: &str, mut leaf: Value) -> Value {
             "--finishes-outcome requires outcome success criteria, a single live finisher, and no --after-success",
             "--request-id retries return the original employee; different input with the same key fails",
             "worktree requires --base-branch; adopt requires --adopt-worktree owned by a finished employee",
+            "--boss-authority is rejected for employee callers, including employees already holding it",
             "Resources must fit total host capacity; contention queues",
             "Effort must be supported by the resolved provider/model"
         ]);

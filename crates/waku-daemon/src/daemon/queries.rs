@@ -120,7 +120,7 @@ impl WakuBackend {
         // Resolve the boss's `project:` filters up front so a misspelling
         // errors like the scoped branch instead of silently scanning
         // nothing.
-        let project_scope = if self.boss.is_boss_principal(caller) {
+        let project_scope = if self.boss.has_boss_authority(caller) {
             let parsed = parse_session_message_search(query);
             let state = self.task_state.lock();
             for value in &parsed.projects {
@@ -262,7 +262,7 @@ impl WakuBackend {
             .collect();
         let boss_session_id = document.session_id;
         // `None` — the human's own client — searches with the boss's reach.
-        let is_boss = caller.is_none_or(|caller| self.boss.is_boss_principal(caller));
+        let is_boss = caller.is_none_or(|caller| self.boss.has_boss_authority(caller));
         let is_employee = !is_boss && caller.is_some_and(|caller| self.boss.is_employee(caller));
 
         // One classifier for the corpus scan and the result projection:

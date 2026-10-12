@@ -2992,6 +2992,7 @@ boss.pinned_files: "固定的记忆文件（每行一个 memory/ 下的路径）
 boss.permissions_hint: "权限在召唤员工时生效。常规任务的文件系统权限仍然适用。"
 boss.delegate: "允许召唤员工"
 boss.computer: "计算机操作"
+boss.authority: "Boss 权限"
 boss.select_document: "选择要查看和编辑的文件或角色设定。"
 boss.save: "保存"
 boss.discard: "放弃更改"

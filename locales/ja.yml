@@ -3040,6 +3040,7 @@ boss.pinned_files: "ピン留めメモリファイル（memory/ 以下のパス�
 boss.permissions_hint: "権限は従業員を呼び出す際に適用されます。通常のタスクのファイルシステム権限も適用されます。"
 boss.delegate: "従業員の呼び出しを許可"
 boss.computer: "コンピューター操作"
+boss.authority: "Boss 権限"
 boss.select_document: "表示・編集するファイルまたはペルソナを選択してください。"
 boss.save: "保存"
 boss.discard: "変更を破棄"

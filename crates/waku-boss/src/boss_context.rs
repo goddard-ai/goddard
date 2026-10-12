@@ -713,6 +713,7 @@ mod tests {
             created_at: None,
             icon: None,
             permissions: PersonaPermissions::default(),
+            boss_authority: false,
             pinned_files: Vec::new(),
             expired,
             workspace_transition: false,

@@ -353,6 +353,7 @@ impl WakuBackend {
                 definition.persona_id,
                 definition.title.clone(),
                 None,
+                false,
                 waku_protocol::boss::EmployeeGoal::Errand,
                 None,
             )?;

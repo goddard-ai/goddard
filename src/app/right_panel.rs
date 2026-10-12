@@ -3769,6 +3769,7 @@ mod tests {
             created_at: Some(100),
             icon: None,
             permissions: Default::default(),
+            boss_authority: false,
             pinned_files: Vec::new(),
             expired: lifecycle == waku_protocol::boss::EmployeeLifecycle::Expired,
             workspace_transition: false,

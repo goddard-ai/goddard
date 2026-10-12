@@ -592,6 +592,7 @@ mod tests {
                     None,
                     "Contract fixture".into(),
                     None,
+                    false,
                     EmployeeGoal::Errand,
                     None,
                 )

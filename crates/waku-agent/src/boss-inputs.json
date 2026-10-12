@@ -351,6 +351,10 @@
                 }
               ]
             },
+            "bossAuthority": {
+              "type": "boolean",
+              "default": false
+            },
             "workGoal": {
               "$ref": "#/definitions/EmployeeGoal",
               "default": "errand"
@@ -406,6 +410,10 @@
             "requestId": {
               "type": "string",
               "format": "uuid"
+            },
+            "needsAttention": {
+              "type": "boolean",
+              "default": false
             }
           },
           "required": [
@@ -1270,6 +1278,44 @@
           },
           "required": [
             "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "markEmployeeViewed"
+            },
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setEmployeeAttention"
+            },
+            "sessionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "needsAttention": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "sessionId",
+            "needsAttention"
           ],
           "additionalProperties": false
         }

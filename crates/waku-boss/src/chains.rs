@@ -322,7 +322,7 @@ impl BossService {
         caller: Option<Uuid>,
         action: ChainOperation,
     ) -> Result<EmployeeChain> {
-        let owner = caller.is_none_or(|caller| self.is_boss_principal(caller));
+        let owner = caller.is_none_or(|caller| self.has_boss_authority(caller));
         if !owner {
             ensure!(
                 matches!(action, ChainOperation::RecordResult { .. }),
@@ -2093,7 +2093,7 @@ mod tests {
         fixture.service.set_session_id(boss).unwrap();
         let employee = fixture
             .service
-            .prepare_employee(boss, None, "job".into(), None, EmployeeGoal::Errand, None)
+            .prepare_employee(boss, None, "job".into(), None, false, EmployeeGoal::Errand, None)
             .unwrap();
         let employee_id = employee.session_id;
         fixture.service.add_employee(employee).unwrap();

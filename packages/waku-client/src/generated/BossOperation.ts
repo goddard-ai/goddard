@@ -67,6 +67,15 @@ adoptWorktree?: string,
  */
 permissions: PermissionOverrides | null,
 /**
+ * Grant this employee Boss-level operation authority for the
+ * life of this admission — Boss-authorized operations accept its
+ * credential while human-only actions still refuse it. Only the
+ * boss or a human may set it: it is fixed at summon, cannot be
+ * added through `setPermissions` or inherited from a persona,
+ * and does not survive re-admission.
+ */
+bossAuthority: boolean,
+/**
  * The work kind fixed at summon — `errand` (the default) reports
  * its finish to the supervisor; `goal` expires silently and lists
  * on the client's Goals page.

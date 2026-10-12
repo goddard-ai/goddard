@@ -7412,6 +7412,9 @@ impl Waku {
         if permissions.computer_use {
             access.push(tr!("boss.computer"));
         }
+        if employee.boss_authority {
+            access.push(tr!("boss.authority"));
+        }
         let resources = employee.ticket.as_ref().map(|ticket| {
             let resources = &ticket.resources;
             if resources.is_empty() {
@@ -10917,6 +10920,7 @@ mod tests {
             created_at,
             icon: None,
             permissions: PersonaPermissions::default(),
+            boss_authority: false,
             pinned_files: Vec::new(),
             expired: false,
             workspace_transition: false,
@@ -11273,6 +11277,7 @@ mod tests {
             created_at: None,
             icon: None,
             permissions: PersonaPermissions::default(),
+            boss_authority: false,
             pinned_files: Vec::new(),
             expired: lifecycle == waku_protocol::boss::EmployeeLifecycle::Expired,
             workspace_transition: false,

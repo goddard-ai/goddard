@@ -231,7 +231,7 @@ impl WakuBackend {
                 let result = self.boss.with_operation_lock(|| {
                     anyhow::ensure!(
                         matches!(action, ChainOperation::RecordResult { .. })
-                            || caller.is_none_or(|id| self.boss.is_boss_principal(id)),
+                            || caller.is_none_or(|id| self.boss.has_boss_authority(id)),
                         "only the boss or a human can inspect or control chains"
                     );
                     let existing_request = match &action {
@@ -375,7 +375,7 @@ impl WakuBackend {
                 }
             }
             BossOperation::Automation { action } => {
-                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can manage automations");
                 }
                 use waku_protocol::automations::AutomationInput;
@@ -570,7 +570,7 @@ impl WakuBackend {
                 events,
             ),
             BossOperation::Browse { url, title } => {
-                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can open browser tabs for the user");
                 }
                 crate::boss::validate_browse_url(&url)?;
@@ -594,7 +594,7 @@ impl WakuBackend {
                 cwd,
                 command,
             } => {
-                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
                     bail!("only the boss can create a user terminal");
                 }
                 let title = title.trim().to_owned();
@@ -657,6 +657,7 @@ impl WakuBackend {
                 base_branch,
                 adopt_worktree,
                 permissions,
+                boss_authority,
                 work_goal,
                 icon,
                 resources,
@@ -688,6 +689,7 @@ impl WakuBackend {
                         base_branch,
                         adopt_worktree,
                         permissions,
+                        boss_authority,
                         work_goal,
                         icon,
                         resources,
@@ -1055,7 +1057,7 @@ impl WakuBackend {
                 limit,
                 offset,
             } => {
-                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can search history");
                 }
                 // `None` scopes to the boss's reach — every retained record,
@@ -1079,7 +1081,7 @@ impl WakuBackend {
                 Ok(BossResult::Speak { delivered })
             }
             BossOperation::Context => {
-                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can read the work digest");
                 }
                 Ok(BossResult::Context {
@@ -1100,7 +1102,7 @@ impl WakuBackend {
                 })
             }
             BossOperation::Roster => {
-                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can read the employee roster");
                 }
                 let boss = self.boss.document();
@@ -1183,7 +1185,7 @@ impl WakuBackend {
                 Ok(result)
             }
             BossOperation::SetProjectSubmissions { project, enabled } => {
-                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can configure project submissions");
                 }
                 let mut state = self.task_state.lock();
@@ -1194,7 +1196,7 @@ impl WakuBackend {
                 Ok(BossResult::Saved)
             }
             BossOperation::SetProjectQaBranch { project, branch } => {
-                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can configure a project's QA branch");
                 }
                 let branch = match branch {
@@ -1211,7 +1213,7 @@ impl WakuBackend {
                 Ok(BossResult::Saved)
             }
             BossOperation::Eval { script } => {
-                if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can eval boss scripts");
                 }
                 // The scope keys on the boss session, so a human client and

@@ -367,7 +367,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent read TASK_ID --turn 3".to_owned(),
         ),
         "boss summon" => (
-            json!({"--persona":{"type":"exact visible persona name or UUID — an employee role layered on the canonical Employee base (a shipped specialist or custom persona); omit for the base alone","optional":true},"--title":{"required":true,"type":"job title"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--icon":{"enum":employee_icons,"optional":true},"--workspace":{"enum":["local","worktree","adopt"],"default":"local"},"--base-branch":{"requiredWhen":"workspace=worktree"},"--adopt-worktree":{"requiredWhen":"workspace=adopt; worktree address"},"--work-goal":{"enum":["errand","goal"],"default":"errand"},"--assignment-kind":{"enum":["implementation","research"],"default":"implementation","notes":"Research is read-only; draft tags never authorize implementation"},"--plan":{"type":"plan id, planning-session id, or plans/<file>.md; otherwise inherit the outcome attached plan","optional":true},"--item":{"type":"work item UUID inside the explicit or outcome attached plan","optional":true},"--project":{"type":"absolute path","default":"current project; required if none is assigned"},"--provider":{"enum":providers,"optional":"inherits current provider"},"--model":"optional; inherits current model","--effort":"optional; inherits current reasoning effort","--request-id":"optional UUID idempotency key","--needs-attention":{"type":"boolean flag","notes":"flag the employee for user attention: its sidebar entry stays unread once finished and is never swept by roster retirement"}}),
+            json!({"--persona":{"type":"exact visible persona name or UUID — an employee role layered on the canonical Employee base (a shipped specialist or custom persona); omit for the base alone","optional":true},"--title":{"required":true,"type":"job title"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--icon":{"enum":employee_icons,"optional":true},"--workspace":{"enum":["local","worktree","adopt"],"default":"local"},"--base-branch":{"requiredWhen":"workspace=worktree"},"--adopt-worktree":{"requiredWhen":"workspace=adopt; worktree address"},"--work-goal":{"enum":["errand","goal"],"default":"errand"},"--assignment-kind":{"enum":["implementation","research"],"default":"implementation","notes":"Research is read-only; draft tags never authorize implementation"},"--plan":{"type":"plan id, planning-session id, or plans/<file>.md; otherwise inherit the outcome attached plan","optional":true},"--item":{"type":"work item UUID inside the explicit or outcome attached plan","optional":true},"--project":{"type":"absolute path","default":"current project; required if none is assigned"},"--provider":{"enum":providers,"optional":"inherits current provider"},"--model":"optional; inherits current model","--effort":"optional; inherits current reasoning effort","--request-id":"optional UUID idempotency key","--needs-attention":{"type":"boolean flag","notes":"flag the employee for user attention: its sidebar entry stays unread once finished and is never swept by roster retirement"},"--boss-authority":{"type":"boolean flag","notes":"grant Boss-level operation authority for this admission — boss or human callers only; fixed at summon, ends with the assignment, cannot be passed on"}}),
             json!({"json":{"type":"summoned","sessionId":"employee UUID","state":"queued|dispatching|working","admission":{"provider":"resolved provider","model":"resolved model","reasoningEffort":"resolved effort or null","queuePosition":"optional queue position","blockedBy":"admission blockers"}}}),
             "goddard-agent boss summon --persona Researcher --title 'Review diff' --file brief.md"
                 .to_owned(),
@@ -1397,7 +1397,7 @@ fn flags(
         if let Some(key) = arg.strip_prefix("--") {
             if matches!(
                 key,
-                "all" | "new" | "clear" | "reference" | "allow-burst" | "finishes-outcome" | "needs-attention"
+                "all" | "new" | "clear" | "reference" | "allow-burst" | "finishes-outcome" | "needs-attention" | "boss-authority"
             ) && value_flags.contains(&key)
             {
                 if values.insert(key.to_owned(), String::new()).is_some() {
@@ -2323,6 +2323,7 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
             "outcome-id",
             "after-success",
             "needs-attention",
+            "boss-authority",
             "file",
             "text",
         ],
@@ -2435,7 +2436,8 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
         "allowBurst":opts.contains_key("allow-burst"), "groupId":opts.get("group-id"), "priority":priority,
         "outcomeId":opts.get("outcome-id"), "newOutcome":structured("new-outcome")?,
         "afterSuccess":opts.get("after-success"), "finishesOutcome":opts.contains_key("finishes-outcome"),
-        "prerequisites":prerequisites, "needsAttention":opts.contains_key("needs-attention")
+        "prerequisites":prerequisites, "needsAttention":opts.contains_key("needs-attention"),
+        "bossAuthority":opts.contains_key("boss-authority")
 
     }))?;
     match boss_request(operation)? {
@@ -3589,6 +3591,14 @@ mod tests {
         )
         .unwrap();
         assert!(attention.contains_key("needs-attention"));
+        let (_, authority) = flags(
+            vec!["--boss-authority".into()],
+            &["boss-authority"],
+            false,
+        )
+        .unwrap();
+        assert!(authority.contains_key("boss-authority"));
+        assert!(flags(vec!["--boss-authority".into()], &["text"], false).is_err());
 
         let (_, options) = flags(
             vec!["--text".into(), "line one\n$literal `tick`\n".into()],
@@ -3635,6 +3645,8 @@ mod tests {
         let summon_syntax = summon_help["cards"][0]["syntax"].as_str().unwrap();
         assert!(summon_syntax.contains("--needs-attention"));
         assert!(!summon_syntax.contains("--needs-attention VALUE"));
+        assert!(summon_syntax.contains("--boss-authority"));
+        assert!(!summon_syntax.contains("--boss-authority VALUE"));
         assert!(exported["commands"]["map"]["inputs"]["--anchors"].is_object());
         assert!(
             exported.get("boss").is_none(),

@@ -6308,6 +6308,8 @@ boss.delegate:
   en: May summon employees
 boss.computer:
   en: Computer use
+boss.authority:
+  en: Boss authority
 boss.goals_in_progress:
   en: In progress
 boss.goals_completed:

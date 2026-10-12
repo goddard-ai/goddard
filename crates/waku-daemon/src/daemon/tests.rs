@@ -4952,6 +4952,7 @@ fn employee_search_stays_inside_its_assigned_project() {
             Some(persona),
             "Search audit".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Goal,
             None,
         )
@@ -5311,6 +5312,7 @@ fn a_clean_employee_finish_retires_runtime_revokes_token_and_stays_silent() {
             Some(persona),
             "Release checks".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Goal,
             None,
         )
@@ -5403,6 +5405,7 @@ fn employee_finish_fixture(
             Some(persona),
             "Release checks".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Goal,
             None,
         )
@@ -5488,6 +5491,7 @@ fn detach_boss_session(backend: &WakuBackend, supervisor: Uuid) -> Uuid {
             Some(persona),
             "Supervisor".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Goal,
             None,
         )
@@ -6975,6 +6979,7 @@ fn an_expiring_employee_notifies_attached_clients() {
             Some(persona),
             "Release checks".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Goal,
             None,
         )
@@ -7080,6 +7085,7 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
             Some(persona),
             "Release checks".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -7228,6 +7234,7 @@ fn a_settle_expiry_drains_past_an_open_turn() {
             Some(persona),
             "Release checks".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -7322,6 +7329,7 @@ fn a_retired_employees_task_stays_boss_managed() {
             Some(persona),
             "Release checks".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -7439,6 +7447,7 @@ fn boss_summon_runs_the_employee_in_a_managed_worktree() {
             base_branch: Some("main".into()),
             adopt_worktree: None,
             permissions: None,
+            boss_authority: false,
             work_goal: waku_protocol::boss::EmployeeGoal::Errand,
             icon: None,
             resources: None,
@@ -7526,6 +7535,7 @@ fn boss_summon_marker_freezes_the_card_identity() {
             base_branch: None,
             adopt_worktree: None,
             permissions: None,
+            boss_authority: false,
             work_goal: waku_protocol::boss::EmployeeGoal::Errand,
             icon: Some(waku_protocol::custom_commands::CustomCommandIcon::Beaker),
             resources: None,
@@ -7764,6 +7774,7 @@ impl AdoptFixture {
                 base_branch: Some("main".into()),
                 adopt_worktree,
                 permissions: None,
+                boss_authority: false,
                 work_goal: waku_protocol::boss::EmployeeGoal::Errand,
                 icon: None,
                 resources: None,
@@ -7967,6 +7978,7 @@ fn boss_summon_rejects_unadoptable_worktrees() {
             Some(fixture.backend.boss.document().personas[0].id),
             "Live job".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -8121,6 +8133,7 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
                 base_branch: None,
                 adopt_worktree: None,
                 permissions: None,
+                boss_authority: false,
                 work_goal: waku_protocol::boss::EmployeeGoal::Errand,
                 icon: None,
                 resources: None,
@@ -8284,6 +8297,7 @@ fn summon_op(
         base_branch: None,
         adopt_worktree: None,
         permissions: None,
+        boss_authority: false,
         work_goal: waku_protocol::boss::EmployeeGoal::Errand,
         icon: None,
         resources: None,
@@ -8337,6 +8351,64 @@ fn summon_attention_flag_is_persisted_on_employee() {
     assert!(employee.needs_attention);
     assert_eq!(employee.attention_viewed_at, None);
     assert!(employee.expired, "the deliberately missing provider failed launch");
+}
+
+/// The summon-time Boss grant crosses the daemon boundary only for the
+/// boss or a human: the wire field lands on the record, while an
+/// employee caller's identical request is refused before admission.
+#[test]
+fn summon_boss_authority_is_a_boss_only_grant() {
+    use waku_protocol::boss::BossOperation;
+
+    let root = std::env::temp_dir().join(format!("summon-authority-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    let mut operation = summon_op(
+        &backend,
+        &root,
+        "deputy",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon { boss_authority, .. } = &mut operation {
+        *boss_authority = true;
+    }
+    // The deliberately missing provider fails the launch, but the grant
+    // is already on the durable record — a restart keeps it visible.
+    let _ = backend.handle_boss_operation(Some(boss), operation, &EventSink::detached());
+    let document = backend.boss.document();
+    let deputy = document
+        .employees
+        .iter()
+        .find(|employee| employee.job_title == "deputy")
+        .expect("the summon persists an employee record before launch");
+    assert!(deputy.boss_authority);
+    let deputy_id = deputy.session_id;
+    drop(document);
+
+    // An employee's own summon cannot mint the grant — not even the
+    // granted employee for a child. Admission rejects before a record.
+    for (caller, title) in [(deputy_id, "heir"), (Uuid::new_v4(), "imposter")] {
+        let mut claim = summon_op(&backend, &root, title, ProviderKind::Codex, Some("gpt-5.5"));
+        if let BossOperation::Summon { boss_authority, .. } = &mut claim {
+            *boss_authority = true;
+        }
+        let result = backend
+            .handle_boss_operation(Some(caller), claim, &EventSink::detached());
+        let error = result.expect_err("the grant request must be refused");
+        assert!(
+            error.to_string().contains("only the boss or a human"),
+            "unexpected rejection: {error:#}"
+        );
+        assert!(
+            !backend
+                .boss
+                .document()
+                .employees
+                .iter()
+                .any(|employee| employee.job_title == title),
+            "a refused summon left an employee record"
+        );
+    }
 }
 
 /// Exercise the asynchronous scheduler used in production, including dispatch
@@ -12595,6 +12667,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
             Some(persona),
             "Move job".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -13678,6 +13751,7 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
             Some(persona),
             "Follow-up".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -13751,6 +13825,7 @@ fn finalize_plan_freezes_the_document_then_the_grace_sweep_archives() {
                 Some(persona),
                 "Follow-up".into(),
                 None,
+                false,
                 waku_protocol::boss::EmployeeGoal::Errand,
                 None
             )
@@ -14244,6 +14319,7 @@ fn summon_with_tag(
         base_branch: None,
         adopt_worktree: None,
         permissions: None,
+        boss_authority: false,
         work_goal: waku_protocol::boss::EmployeeGoal::Errand,
         icon: None,
         resources: None,
@@ -15042,6 +15118,7 @@ fn employee_tool_outputs_survive_48_hours_after_expiry_and_retirement() {
             Some(persona),
             "Evidence".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -15198,6 +15275,7 @@ fn outcome_employee_fixture(
             Some(persona),
             "Repair transfers".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -15345,6 +15423,7 @@ fn a_finishing_conflict_reports_and_leaves_the_outcome_open() {
             Some(persona),
             "Verify and land".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -15600,6 +15679,7 @@ fn boss_history_search_surfaces_paraphrased_archived_and_retired_sources() {
             Some(persona),
             "Editor sync".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -15616,6 +15696,7 @@ fn boss_history_search_surfaces_paraphrased_archived_and_retired_sources() {
             Some(persona),
             "Upgrade notes".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -15937,6 +16018,7 @@ fn task_history_search_stays_in_scope_and_discloses_exclusions() {
             Some(persona),
             "Editor sync".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -16096,6 +16178,7 @@ fn employee_history_search_reaches_itself_and_supervised_only() {
             Some(persona),
             "Lead".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -16110,6 +16193,7 @@ fn employee_history_search_reaches_itself_and_supervised_only() {
             Some(persona),
             "Assistant".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -16123,6 +16207,7 @@ fn employee_history_search_reaches_itself_and_supervised_only() {
             Some(persona),
             "Other team".into(),
             None,
+            false,
             waku_protocol::boss::EmployeeGoal::Errand,
             None,
         )
@@ -16229,6 +16314,7 @@ fn boss_operation_history_search_uses_boss_reach_for_the_human_only() {
             Some(persona),
             "Sync notes".into(),
             None,
+            false,
             EmployeeGoal::Errand,
             None,
         )

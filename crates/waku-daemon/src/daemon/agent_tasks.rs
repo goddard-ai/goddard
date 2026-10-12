@@ -185,7 +185,7 @@ impl WakuBackend {
         // placeholder holding only its session, so its proposals reach a
         // task in any project the daemon knows. Every other caller stays
         // confined to the project its own session belongs to.
-        let boss_principal = self.boss.is_boss_principal(caller);
+        let boss_principal = self.boss.has_boss_authority(caller);
         let (target_ids, titles, projects) = {
             let state = self.task_state.lock();
             let project_id = state
@@ -332,7 +332,7 @@ impl WakuBackend {
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         use waku_protocol::boss::BossResult;
-        if caller.is_some_and(|id| !self.boss.is_boss_principal(id)) {
+        if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
             bail!("only the boss can start a planning session");
         }
         self.boss.with_operation_lock(|| {

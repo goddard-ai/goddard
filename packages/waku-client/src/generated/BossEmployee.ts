@@ -32,6 +32,13 @@ icon?: CustomCommandIcon | null,
  */
 permissions: PersonaPermissions,
 /**
+ * Boss-level operation authority granted at summon — never inherited
+ * from the persona, never editable through `setPermissions`, and
+ * cleared when the record re-enters admission. Expiry suspends it;
+ * a resume starts the next assignment without it.
+ */
+bossAuthority: boolean,
+/**
  * The persona's memory pins at summon time — paths relative to
  * `memory/` in the Boss files root.
  */
