@@ -25,6 +25,7 @@
 
 mod agent;
 mod avvvatars;
+pub(super) mod mascots;
 
 use serde::Deserialize;
 use std::cmp::Ordering;
@@ -126,7 +127,7 @@ fn dicebear_style(style: AvatarStyle) -> &'static Style {
         AvatarStyle::DiceBear => (&MOODS, MOODS_JSON),
         AvatarStyle::Gaze => (&GAZE, GAZE_JSON),
         AvatarStyle::LineFace => (&LINE_FACE, LINE_FACE_JSON),
-        AvatarStyle::AgentAvatars | AvatarStyle::Avvvatars => {
+        AvatarStyle::AgentAvatars | AvatarStyle::Avvvatars | AvatarStyle::Mascots => {
             unreachable!("{style:?} is not a schema-driven DiceBear style")
         }
     };
@@ -656,6 +657,9 @@ pub(super) fn avatar_svg_for_style(seed: &str, style: AvatarStyle, bucket: u32) 
         }
         AvatarStyle::AgentAvatars => agent::avatar_svg(seed),
         AvatarStyle::Avvvatars => avvvatars::avatar_svg(seed, bucket),
+        // Mascots render through `mascots::avatar_image` — the avatar queue
+        // never reaches this arm, which only keeps the dispatch total.
+        AvatarStyle::Mascots => agent::avatar_svg(seed),
     }
 }
 
@@ -1044,6 +1048,7 @@ mod tests {
                 AvatarStyle::LineFace,
                 AvatarStyle::AgentAvatars,
                 AvatarStyle::Avvvatars,
+                AvatarStyle::Mascots,
             ] {
                 for bucket in [16, 24, 56] {
                     let svg = avatar_svg_for_style(seed, style, bucket);

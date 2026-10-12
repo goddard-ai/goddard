@@ -3714,6 +3714,9 @@ impl Waku {
         avatar_style: AvatarStyle,
         cx: &mut Context<Self>,
     ) {
+        if avatar_style == AvatarStyle::Mascots {
+            boss_moods::mascots::prefetch();
+        }
         self.boss_request(
             key,
             global_avatar_style_operation(avatar_style),
@@ -4098,6 +4101,11 @@ impl Waku {
         if let Some(image) = self.boss_avatar_cached(identity, size) {
             return Some(image);
         }
+        // Warm the pack while the queued render job waits on it — Once +
+        // thread spawn only, no I/O on this path.
+        if identity.avatar_style == AvatarStyle::Mascots {
+            boss_moods::mascots::prefetch();
+        }
         let bucket = avatar_bucket(size);
         if self.boss_ui.avatar_requested.borrow_mut().insert((
             (identity.avatar_seed.clone(), identity.avatar_style),
@@ -4206,6 +4214,16 @@ impl Waku {
             cx.spawn(async move |this, cx| {
                 let image = cx.background_executor().spawn(async move {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        // Mascots are raster files from the cloned pack, not
+                        // generated SVG — decode straight to a RenderImage.
+                        if style == AvatarStyle::Mascots {
+                            let still =
+                                boss_moods::mascots::avatar_image(&avatar_seed, bucket)?;
+                            return Ok::<_, anyhow::Error>(AvatarFaces {
+                                still,
+                                gaze: None,
+                            });
+                        }
                         let scale = avatar_scale(bucket);
                         let svg = boss_moods::avatar_svg_for_style(&avatar_seed, style, bucket);
                         let still = renderer
@@ -11284,6 +11302,7 @@ mod tests {
             AvatarStyle::LineFace,
             AvatarStyle::AgentAvatars,
             AvatarStyle::Avvvatars,
+            AvatarStyle::Mascots,
         ] {
             assert!(!gaze_animates(style, false), "{style:?} keeps its static raster");
         }

@@ -6608,6 +6608,8 @@ boss.avatar_style_agent:
   en: "Avatar style: Agent Avatars"
 boss.avatar_style_avvvatars:
   en: "Avatar style: Avvvatars"
+boss.avatar_style_mascots:
+  en: "Avatar style: Mascots"
 boss.planning_label:
   en: Planning
 boss.plan_seed_opener:

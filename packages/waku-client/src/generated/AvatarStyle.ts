@@ -4,4 +4,4 @@
  * Human-selected avatar generator. Removed avatar styles deserialize as
  * Gaze to preserve compatibility with stored Boss identities.
  */
-export type AvatarStyle = "diceBear" | "gaze" | "lineFace" | "agentAvatars" | "avvvatars";
+export type AvatarStyle = "diceBear" | "gaze" | "lineFace" | "agentAvatars" | "avvvatars" | "mascots";

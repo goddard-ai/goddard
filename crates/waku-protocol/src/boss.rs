@@ -25,6 +25,10 @@ pub enum AvatarStyle {
     LineFace,
     AgentAvatars,
     Avvvatars,
+    /// Raster mascot logos shallow-cloned on demand from the repo's
+    /// `icons/ipaslogo` branch — the only style drawn from files rather
+    /// than generated locally.
+    Mascots,
 }
 
 /// `#[serde(default)]` for stored `avatarStyle` fields: records written

@@ -2383,6 +2383,9 @@
         },
         {
           "const": "avvvatars"
+        },
+        {
+          "const": "mascots"
         }
       ]
     },

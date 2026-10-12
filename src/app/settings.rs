@@ -11157,6 +11157,7 @@ impl Waku {
                             (AvatarStyle::LineFace, tr!("boss.avatar_style_line_face")),
                             (AvatarStyle::AgentAvatars, tr!("boss.avatar_style_agent")),
                             (AvatarStyle::Avvvatars, tr!("boss.avatar_style_avvvatars")),
+                            (AvatarStyle::Mascots, tr!("boss.avatar_style_mascots")),
                         ],
                         selected_style,
                         160.0,
