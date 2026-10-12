@@ -606,14 +606,20 @@ impl Waku {
         // notification clicks; opening one is intent to bring it back. An
         // employee's task is a boss record, not the user's own — a visit
         // from history or search is inspection, so its flag stays put and
-        // the top bar marks the session Archived.
+        // the top bar marks the session Archived. A retired boss chat is
+        // the same kind of record: its archive is the rotation's history,
+        // and the landing retargets to the live chat in
+        // `finish_session_activation` rather than resurrecting it.
         let visit_restores = !matches!(transition, SessionActivationTransition::Inspect)
             && self
                 .state
                 .sessions
                 .iter()
                 .find(|session| session.id == session_id && session.archived_at.is_some())
-                .is_some_and(|session| !self.session_is_employee(session));
+                .is_some_and(|session| {
+                    !self.session_is_employee(session)
+                        && !self.session_is_retired_boss_chat(session)
+                });
         if visit_restores {
             self.unarchive_session(session_id, false, cx);
         }
@@ -654,10 +660,16 @@ impl Waku {
         transition: SessionActivationTransition,
         cx: &mut Context<Self>,
     ) {
+        // A Boss rotation's session swap is not a navigation boundary: a
+        // landing aimed at the retired chat — a sidebar click, a pending
+        // activation completing, a Back target — lands on its live
+        // replacement instead of stranding the view on the archived
+        // session. Back and Forward still match the id the stack recorded.
+        let target = self.live_boss_chat_target(session_id).unwrap_or(session_id);
         match transition {
             SessionActivationTransition::Visit | SessionActivationTransition::Inspect => self
                 .session_navigation
-                .visit(self.navigation_location(), NavigationLocation::Task(session_id)),
+                .visit(self.navigation_location(), NavigationLocation::Task(target)),
             SessionActivationTransition::Silent => {}
             SessionActivationTransition::Back { from } => {
                 if self.navigation_location() != Some(from)
@@ -678,8 +690,8 @@ impl Waku {
                 let _ = self.session_navigation.go_forward(from);
             }
         }
-        self.activate_session(session_id, cx);
-        self.mark_employee_viewed_for_session(session_id, cx);
+        self.activate_session(target, cx);
+        self.mark_employee_viewed_for_session(target, cx);
         // A deep link's prompt rides the activation so it also lands on a
         // draft whose projectless workspace was still provisioning.
         self.apply_deep_link_prompt(cx);

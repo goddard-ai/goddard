@@ -78,7 +78,12 @@ fn rotated_draft_key(
     is_incognito: impl Fn(Uuid) -> bool,
 ) -> crate::persistence::ComposerDraftKey {
     let mut resolved = key;
-    while let crate::persistence::ComposerDraftKey::Session(session_id) = resolved {
+    // Bounded like `live_boss_chat_session`'s walk: swaps chain, so a
+    // corrupt map must not loop the read.
+    for _ in 0..8 {
+        let crate::persistence::ComposerDraftKey::Session(session_id) = resolved else {
+            break;
+        };
         let Some(next) = rotated.get(&session_id) else {
             break;
         };

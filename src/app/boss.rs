@@ -1440,6 +1440,25 @@ fn live_boss_chat_session(
     }
 }
 
+/// The session an activation or selection should land on: a retired Boss
+/// chat's id resolves to its live replacement when the catalog already
+/// carries it — the rotation's session swap is not a navigation boundary.
+/// Anything else — a live chat, an unrelated session, a replacement the
+/// push has not delivered yet — answers the requested id.
+fn boss_chat_activation_target(
+    sessions: &[AgentSession],
+    identities: &HashSet<Uuid>,
+    rotated: &HashMap<Uuid, Uuid>,
+    requested: Uuid,
+) -> Uuid {
+    let resolved = live_boss_chat_session(sessions, identities, rotated, requested);
+    if resolved != requested && sessions.iter().any(|session| session.id == resolved) {
+        resolved
+    } else {
+        requested
+    }
+}
+
 fn viewed_plan_just_finalized(
     previous: Option<&BossState>,
     current: &BossState,
@@ -1486,17 +1505,6 @@ impl Waku {
                 .is_some_and(|id| self.boss_ui.plan_finalizing.contains(&id))
             {
                 finalized_plan_host = Some(key);
-            }
-            if self.boss_ui.page.is_none()
-                && self.boss_ui.states.get(&key).is_some_and(|previous| {
-                    previous.identity.id == state.identity.id
-                        && previous.session_id.is_some()
-                        && previous.session_id == self.state.selected_session
-                        && state.session_id.is_some()
-                        && previous.session_id != state.session_id
-                })
-            {
-                rotated_chat_host = Some(key);
             }
             // Rotation re-keys the boss's chat whether or not the swap
             // redirects this client — a voice pad parked on the retired
@@ -1688,6 +1696,61 @@ impl Waku {
             // A boss chat opening or an employee expiring can arm or
             // disarm the composer's command target.
             self.sync_composer_placeholder(cx);
+            // The selection sitting on a retired Boss chat strands the user
+            // on an archived session — the swap already happened elsewhere
+            // and a one-shot redirect condition cannot reach every ordering:
+            // a Boss page or preview covered the chat when the document
+            // landed, an activation was in flight, or the pointer trailed
+            // the catalog. Every applied state re-checks instead, on two
+            // signals: a replacement the catalog already carries, or the
+            // document's pointer naming a different chat for the boss whose
+            // workspace owns the selected session. A covered surface
+            // repoints underneath it; the bare chat redirects through the
+            // Open round trip.
+            if let Some(selected) = self.state.selected_session {
+                let resolved = self.live_boss_chat_target(selected);
+                let retired_key = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| {
+                        session.id == selected && session.boss_managed && session.planning.is_none()
+                    })
+                    .and_then(|entry| {
+                        self.boss_ui.states.iter().find_map(|(key, state)| {
+                            (state.identity.id == entry.project_id
+                                && state.session_id.is_some_and(|id| id != selected))
+                            .then_some(*key)
+                        })
+                    });
+                if resolved.is_some() || retired_key.is_some() {
+                    if !self.session_surface_active()
+                        || self.big_picture.is_open()
+                        || self.boss_ui.deliverable_page.is_some()
+                    {
+                        if let Some(resolved) = resolved {
+                            self.state.selected_session = Some(resolved);
+                            self.sync_composer_placeholder(cx);
+                        }
+                    } else if let Some(key) = retired_key
+                        .or_else(|| {
+                            self.boss_ui.states.iter().find_map(|(key, state)| {
+                                (state.session_id == resolved || state.session_id == Some(selected))
+                                    .then_some(*key)
+                            })
+                        })
+                        .or_else(|| {
+                            self.state
+                                .sessions
+                                .iter()
+                                .find(|session| session.id == selected)
+                                .and_then(|entry| self.boss_key_for_project(entry.project_id))
+                        })
+                    {
+                        rotated_chat_host = Some(key);
+                    }
+                }
+            }
             if let Some(key) = self.boss_chat_key() {
                 if self
                     .boss_ui
@@ -2340,7 +2403,14 @@ impl Waku {
                             {
                                 this.daemons.claim_project(project.id, key);
                                 this.boss_ui.projects.insert(project.id, *project);
-                                let rotated_from = if session.planning.is_none() {
+                                // An Open answered before the pointer commit
+                                // can carry the retired chat itself — only a
+                                // live session is a swap destination, so the
+                                // reply never regresses the pointer or records
+                                // a backwards new→old swap.
+                                let rotated_from = if session.planning.is_none()
+                                    && session.archived_at.is_none()
+                                {
                                     this.boss_ui
                                         .states
                                         .get_mut(&key)
@@ -2912,6 +2982,26 @@ impl Waku {
         )
     }
 
+    /// `resolve_boss_chat_session` narrowed to destinations the catalog can
+    /// land on — the live replacement's id when a retired chat's successor
+    /// is already present, `None` for a live chat, an unrelated session, or
+    /// a replacement whose row has not been pushed yet.
+    pub(super) fn live_boss_chat_target(&self, session_id: Uuid) -> Option<Uuid> {
+        let identities: HashSet<Uuid> = self
+            .boss_ui
+            .states
+            .values()
+            .map(|state| state.identity.id)
+            .collect();
+        let resolved = boss_chat_activation_target(
+            &self.state.sessions,
+            &identities,
+            &self.boss_ui.rotated_chat_drafts,
+            session_id,
+        );
+        (resolved != session_id).then_some(resolved)
+    }
+
     /// The boss chat a main-composer submission answers to while armed —
     /// a live employee's task is on screen or a sidebar deliverable was
     /// clicked — plus the context it attaches. `None` leaves the
@@ -3455,6 +3545,22 @@ impl Waku {
                 .any(|state| state.session_id == Some(session.id)),
             self.state.boss_experiment_enabled,
         )
+    }
+
+    /// Whether the session is a Boss chat a rotation retired — an archived
+    /// boss-managed session in a boss's own workspace, whatever the
+    /// document's pointer still says. Distinct from an archived employee:
+    /// the predecessor is history inside the live chat, never a surface to
+    /// restore.
+    pub(super) fn session_is_retired_boss_chat(&self, session: &AgentSession) -> bool {
+        session.archived_at.is_some()
+            && session.boss_managed
+            && session.planning.is_none()
+            && self
+                .boss_ui
+                .states
+                .values()
+                .any(|state| state.identity.id == session.project_id)
     }
 
     /// Whether the session is an archived employee task — the read the
@@ -11860,6 +11966,48 @@ mod tests {
         assert_eq!(
             live_boss_chat_session(&chained, &identities, &rotated, old),
             newer
+        );
+    }
+
+    #[test]
+    fn rotation_activation_lands_on_the_live_chat_not_the_archive() {
+        // A visit, a Back hop, or a pending activation aimed at the retired
+        // chat lands on its successor — the session swap is not a
+        // navigation boundary.
+        let project = Uuid::new_v4();
+        let old = Uuid::new_v4();
+        let next = Uuid::new_v4();
+        let sessions = vec![
+            boss_chat_session(project, old, true),
+            boss_chat_session(project, next, false),
+        ];
+        let identities = HashSet::from([project]);
+        assert_eq!(
+            boss_chat_activation_target(&sessions, &identities, &HashMap::new(), old),
+            next
+        );
+        // A recorded swap alone cannot redirect — the successor's row must
+        // be in the catalog before a landing may aim at it.
+        let retired_only = vec![boss_chat_session(project, old, true)];
+        assert_eq!(
+            boss_chat_activation_target(
+                &retired_only,
+                &identities,
+                &HashMap::from([(old, next)]),
+                old
+            ),
+            old
+        );
+        // The live chat, unrelated sessions, and non-chat boss surfaces
+        // keep their own target.
+        assert_eq!(
+            boss_chat_activation_target(&sessions, &identities, &HashMap::new(), next),
+            next
+        );
+        let unrelated = Uuid::new_v4();
+        assert_eq!(
+            boss_chat_activation_target(&sessions, &identities, &HashMap::new(), unrelated),
+            unrelated
         );
     }
 
