@@ -1,0 +1,1 @@
+- Hide next-step suggestions while a reply is running; Save draft and preemptive suggestions that still make sense during the reply remain available.

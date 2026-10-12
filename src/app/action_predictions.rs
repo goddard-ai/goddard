@@ -1490,7 +1490,14 @@ impl Waku {
         let Some(session) = self.composer_session() else {
             return false;
         };
-        if self.has_preemptive_suggestion(session.id) {
+        let preemptive = self.has_preemptive_suggestion(session.id);
+        // A next-step prediction belongs to the turn that just finished.
+        // Keep only preemptive suggestions that can still be acted on while
+        // this turn is open; Save draft has its own composer row.
+        if session.active_turn_id().is_some() && !preemptive {
+            return false;
+        }
+        if preemptive {
             return self
                 .action_suggestion
                 .as_ref()
@@ -1527,7 +1534,13 @@ impl Waku {
             return None;
         }
         let session = self.composer_session()?;
-        if !self.has_preemptive_suggestion(session.id)
+        let preemptive = self.has_preemptive_suggestion(session.id);
+        // Don't carry a prediction from a completed turn into a new running
+        // turn. Inbox and deterministic preemptive actions remain available.
+        if session.active_turn_id().is_some() && !preemptive {
+            return None;
+        }
+        if !preemptive
             && session
                 .turns
                 .last()
@@ -1746,10 +1759,18 @@ impl Waku {
         let has_follow_up = self
             .composer_session()
             .is_some_and(|session| self.has_preemptive_suggestion(session.id));
+        let active_turn = self
+            .composer_session()
+            .is_some_and(|session| session.active_turn_id().is_some());
         let displayed = if let Some(session_id) = approval_session {
             Some(Displayed::PlanApproval(session_id))
         } else if has_follow_up {
             Some(Displayed::Action)
+        } else if active_turn {
+            // The regular next-step chip is hidden while a turn runs, so its
+            // shortcut must propagate as well. Preemptive actions and plan
+            // approval are handled above.
+            None
         } else {
             let displayed = self
                 .composer_session()
