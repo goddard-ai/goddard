@@ -1,0 +1,1 @@
+- The Boss Employees tab and expanded outcome rows no longer show model and reasoning details or a Resume button, employee chat headers no longer show Resume, and outcome employee rows no longer repeat each employee's job title.

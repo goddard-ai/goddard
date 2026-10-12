@@ -1025,8 +1025,8 @@ pub(super) struct BossEmployeeRow {
     pub key: DaemonKey,
     pub avatar: BossEmployeeAvatar,
     pub name: String,
-    /// The job line — the title plus the context suffixes a nested row
-    /// carries (attempt number, finisher).
+    /// Employee rows keep the job title here; outcome rows use this for
+    /// attempt and finisher context without repeating the job title.
     pub detail: String,
     pub job_icon: &'static str,
     pub project: Option<String>,
@@ -1037,10 +1037,7 @@ pub(super) struct BossEmployeeRow {
     /// each so the full text reads instead of truncating inline.
     pub reasons: Vec<BossEmployeeReason>,
     pub readiness: Option<String>,
-    pub model_detail: Option<String>,
     pub status: Option<(String, Hsla)>,
-    /// The Resume chip's resolved availability — Hidden renders nothing.
-    pub resume: EmployeeResume,
     /// The bound plan's recovery chips — `None` for unbound employees.
     pub plan_recovery: Option<BossEmployeePlanRecovery>,
     /// Virtualized rows keep a persistent focus handle so a remount
@@ -3586,20 +3583,10 @@ impl Waku {
                     .child(SharedString::from(job_title.to_owned())),
             )
             .children(self.employee_assignment_popover(session_id, &theme, cx))
-            .children(self.boss_employee_record(session_id).and_then(|(key, employee)| {
-                self.employee_plan_recovery_controls(key, employee, "header", &theme, cx)
-            }))
             .children(
                 self.boss_employee_record(session_id)
                     .and_then(|(key, employee)| {
-                        self.employee_resume_button(
-                            key,
-                            session_id,
-                            employee_resume_action(employee),
-                            "header",
-                            &theme,
-                            cx,
-                        )
+                        self.employee_plan_recovery_controls(key, employee, "header", &theme, cx)
                     }),
             )
             .into_any_element()
@@ -6582,8 +6569,8 @@ impl Waku {
     }
 
     /// A full-width Employees row — the shared employee card painted from
-    /// `boss_employee_row_data`; avatar and name over the job line, with
-    /// model · effort, a readable status, and the summon or finish age on
+    /// `boss_employee_row_data`; avatar and name over the employee detail, with
+    /// a readable status and the summon or finish age on
     /// the right. Blocked and queued reasons get their own line.
     fn render_boss_employee_page_row(
         &self,
@@ -6597,8 +6584,8 @@ impl Waku {
     }
 
     /// The Employees-tab row's prepared paint data — roster record joined
-    /// with the cached session, identity, job, queue, and model lookups,
-    /// plus the Resume/plan chips' resolved state.
+    /// with the cached session, identity, job, and queue lookups, plus
+    /// the plan chip's resolved state.
     fn boss_employee_row_data(
         &self,
         id: Uuid,
@@ -6652,20 +6639,6 @@ impl Waku {
             }
         }
         let readiness = employee.and_then(boss_plan_readiness_label);
-        let model_detail = if let Some((model_key, provider, model, effort)) =
-            self.boss_ui.queued_model_targets.get(&id)
-        {
-            let name = self.model_display_name_on(*model_key, *provider, Some(model));
-            Some(match effort.as_deref() {
-                Some(effort) => format!(
-                    "{name} · {}",
-                    self.reasoning_effort_label_on(*model_key, *provider, Some(model), effort)
-                ),
-                None => name,
-            })
-        } else {
-            session.map(|session| self.session_sidebar_model_detail(session))
-        };
         let status =
             employee.map(|employee| self.boss_employee_status_label(employee, session, &theme));
         let stamp = employee.and_then(|employee| {
@@ -6698,11 +6671,7 @@ impl Waku {
             now: unix_time(),
             reasons,
             readiness,
-            model_detail,
             status,
-            resume: employee
-                .map(employee_resume_action)
-                .unwrap_or(EmployeeResume::Hidden),
             plan_recovery: employee.and_then(|employee| self.employee_plan_recovery(key, employee)),
             focus: None,
             navigable: true,
@@ -6775,9 +6744,9 @@ impl Waku {
         }
     }
 
-    /// The roster record a Resume targets — live-roster employees and
-    /// the retired entries their transcripts still resolve to, paired
-    /// with the daemon that owns the record.
+    /// The roster record used by the employee header's plan controls —
+    /// live-roster employees and retired entries their transcripts still
+    /// resolve to, paired with the daemon that owns the record.
     fn boss_employee_record(
         &self,
         session_id: Uuid,
@@ -6790,47 +6759,6 @@ impl Waku {
                 .find(|employee| employee.session_id == session_id)
                 .map(|employee| (*key, employee))
         })
-    }
-
-    /// The Resume control's dispatch — the same `resume` operation the
-    /// boss issues, fired by the human directly. While another boss
-    /// request holds the pipe `boss_request` drops non-Open operations,
-    /// so the click reports the wait instead of going silent.
-    fn resume_boss_employee(&mut self, key: DaemonKey, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.boss_ui.pending {
-            self.show_toast(tr!("boss.loading"));
-            cx.notify();
-            return;
-        }
-        self.boss_request(
-            key,
-            BossOperation::Resume { session_id },
-            BossReply::Resume,
-            cx,
-        );
-    }
-
-    /// The Resume chip an expired employee's surfaces carry — its chat
-    /// page's header and its Employees-list row. `slot` disambiguates
-    /// the element id when both render at once. A disabled control stays
-    /// in the tab order so the reason is still reachable.
-    fn employee_resume_button(
-        &self,
-        key: DaemonKey,
-        session_id: Uuid,
-        action: EmployeeResume,
-        slot: &str,
-        theme: &Theme,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        boss_employee_resume_chip(
-            &cx.entity().downgrade(),
-            key,
-            session_id,
-            action,
-            slot,
-            theme,
-        )
     }
 
     /// The required plan's chip state for an employee — `None` when the
@@ -9661,68 +9589,6 @@ fn boss_employee_avatar_element(avatar: &BossEmployeeAvatar, theme: &Theme) -> A
     }
 }
 
-/// The Resume chip's markup — the weak handle drives its dispatch so a
-/// virtualized list's row builder reaches it without a `Context<Waku>`.
-#[track_caller]
-fn boss_employee_resume_chip(
-    waku: &WeakEntity<Waku>,
-    key: DaemonKey,
-    session_id: Uuid,
-    action: EmployeeResume,
-    slot: &str,
-    theme: &Theme,
-) -> Option<AnyElement> {
-    if action == EmployeeResume::Hidden {
-        return None;
-    }
-    let enabled = action == EmployeeResume::Enabled;
-    let label = tr!("boss.resume_employee");
-    let button = div()
-        .id(SharedString::from(format!(
-            "employee-resume-{slot}-{session_id}"
-        )))
-        .tab_index(0)
-        .h(px(22.0))
-        .px(px(7.0))
-        .rounded(px(8.0))
-        .flex_none()
-        .flex()
-        .items_center()
-        .gap(px(4.0))
-        .bg(theme.overlay)
-        .text_size(sp(12.5))
-        .aria_label(label.clone())
-        .tooltip(Tooltip::text(if enabled {
-            tr!("boss.resume_employee_hint")
-        } else {
-            tr!("boss.resume_unavailable")
-        }))
-        .focus_visible(|style| style.bg(theme.focus_highlight()))
-        // The header's drag region and the list row's activation both
-        // answer the same press without this guard.
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(icon("icons/play.svg", 11.0, theme.text_tertiary))
-        .child(label);
-    let button = if enabled {
-        let waku = waku.clone();
-        button
-            .cursor_pointer()
-            .text_color(theme.text_secondary)
-            .hover(|style| style.bg(theme.overlay_strong))
-            .on_activation_app(move |_, cx| {
-                let _ = waku.update(cx, |this, cx| {
-                    this.resume_boss_employee(key, session_id, cx)
-                });
-            })
-    } else {
-        button
-            .cursor_default()
-            .text_color(theme.text_tertiary)
-            .opacity(0.55)
-    };
-    Some(button.into_any_element())
-}
-
 /// The bound plan's chips — Open the plan's session while it resolves,
 /// and Retry while its review is blocked.
 #[track_caller]
@@ -9805,8 +9671,8 @@ fn boss_employee_plan_chips(
 
 /// The employee card the Employees tab and an expanded outcome's member
 /// list share — avatar, name over the job line with its project and
-/// stamp, each blocked/queued reason on its own line, and the status,
-/// model, and action chips the caller resolved. `waku` backs activation
+/// stamp, each blocked/queued reason on its own line, the status, and the
+/// action chips the caller resolved. `waku` backs activation
 /// and chip dispatch; callers holding `Context<Waku>` hand over
 /// `&cx.entity().downgrade()`.
 #[track_caller]
@@ -9946,15 +9812,6 @@ pub(super) fn boss_employee_row_element(
             }),
             |element, chips| element.child(chips),
         )
-        .when_some(row.model_detail.clone(), |element, model| {
-            element.child(
-                div()
-                    .flex_none()
-                    .text_size(sp(12.0))
-                    .text_color(theme.text_tertiary)
-                    .child(model),
-            )
-        })
         .when_some(row.status.clone(), |element, (label, color)| {
             element.child(
                 div()
@@ -9966,40 +9823,7 @@ pub(super) fn boss_employee_row_element(
                     .child(label),
             )
         })
-        .when_some(
-            boss_employee_resume_chip(waku, key, session_id, row.resume, &row.slot, &theme),
-            |element, chip| element.child(chip),
-        )
         .into_any_element()
-}
-
-/// Whether an employee record offers the manual Resume action: the
-/// daemon's `resume` op re-admits an expired record in place with its
-/// transcript, workspace, and provider cursor intact. A live record
-/// takes a prompt instead, so the action stays hidden until expiry; an
-/// expiry flagged unresumable renders disabled rather than absent.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum EmployeeResume {
-    Hidden,
-    Enabled,
-    Disabled,
-}
-
-pub(super) fn employee_resume_action(
-    employee: &waku_protocol::boss::BossEmployee,
-) -> EmployeeResume {
-    if !employee.expired {
-        return EmployeeResume::Hidden;
-    }
-    if employee
-        .expiry
-        .as_ref()
-        .is_some_and(|expiry| !expiry.resumable)
-    {
-        EmployeeResume::Disabled
-    } else {
-        EmployeeResume::Enabled
-    }
 }
 
 /// Keep required-plan progression separate from admission and never reuse a
@@ -10669,34 +10493,6 @@ mod tests {
             item_id: None,
             assignment: None,
         }
-    }
-
-    #[test]
-    fn resume_action_keys_off_expiry_and_the_wire_resumable_flag() {
-        use waku_protocol::boss::{EmployeeExpiry, EmployeeLifecycle, ExpiryCause};
-        // A live record takes a prompt, not a revive — no control at all.
-        let mut employee = boss_employee(Some(100));
-        assert_eq!(employee_resume_action(&employee), EmployeeResume::Hidden);
-
-        // A supervisor stop expires the record; every cause offers the
-        // action, stopped included.
-        employee.set_lifecycle(EmployeeLifecycle::Expired, 200);
-        employee.expiry = Some(EmployeeExpiry {
-            cause: ExpiryCause::Stopped,
-            resumable: true,
-            parked_prompts: 0,
-            pending_question: None,
-        });
-        assert_eq!(employee_resume_action(&employee), EmployeeResume::Enabled);
-
-        // An expiry flagged unresumable keeps the control visible but
-        // disabled rather than silently absent.
-        employee.expiry.as_mut().unwrap().resumable = false;
-        assert_eq!(employee_resume_action(&employee), EmployeeResume::Disabled);
-
-        // A record too old to carry an expiry still offers the action.
-        employee.expiry = None;
-        assert_eq!(employee_resume_action(&employee), EmployeeResume::Enabled);
     }
 
     #[test]

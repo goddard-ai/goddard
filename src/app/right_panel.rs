@@ -4153,7 +4153,8 @@ mod tests {
         );
         assert_eq!(waiting_entry.status, BossGoalStatus::Queued);
         assert_eq!(waiting_entry.name, "Nina");
-        assert_eq!(waiting_entry.detail, "Reviewer");
+        assert!(waiting_entry.detail.is_empty());
+        assert!(!waiting_entry.aria.contains("Reviewer"));
         // The wait and the failed prerequisite each get their own line.
         assert!(
             waiting_entry
@@ -11732,8 +11733,7 @@ impl Waku {
 
     /// An expanded outcome's employee rows — `boss_outcome_employee_fields`
     /// supplies the derivable parts; this adds what only the view knows:
-    /// the face, project, model detail, Resume/plan chips, and the status
-    /// slot's color.
+    /// the face, project, plan chips, and the status slot's color.
     fn prepare_boss_outcome_employees(
         &self,
         row: &boss::BossOutcomeRow,
@@ -11777,25 +11777,6 @@ impl Waku {
                             .map(|ticket| ticket.project.trim().to_owned())
                             .filter(|project| !project.is_empty())
                     });
-                let model_detail = if let Some((model_key, provider, model, effort)) =
-                    self.boss_ui.queued_model_targets.get(&fields.session_id)
-                {
-                    let name = self.model_display_name_on(*model_key, *provider, Some(model));
-                    Some(match effort.as_deref() {
-                        Some(effort) => format!(
-                            "{name} · {}",
-                            self.reasoning_effort_label_on(
-                                *model_key,
-                                *provider,
-                                Some(model),
-                                effort
-                            )
-                        ),
-                        None => name,
-                    })
-                } else {
-                    session.map(|session| self.session_sidebar_model_detail(session))
-                };
                 let (_, tone, _) = fields.status.marker();
                 boss::BossEmployeeRow {
                     slot: fields.key,
@@ -11819,11 +11800,7 @@ impl Waku {
                     now,
                     reasons: fields.reasons,
                     readiness: fields.readiness,
-                    model_detail,
                     status: Some((fields.status.label(), tone.color(&theme))),
-                    resume: employee
-                        .map(boss::employee_resume_action)
-                        .unwrap_or(boss::EmployeeResume::Hidden),
                     plan_recovery: employee
                         .and_then(|employee| self.employee_plan_recovery(key, employee)),
                     focus: None,
@@ -11838,8 +11815,8 @@ impl Waku {
 
 /// One expanded-outcome employee row's derivable fields — everything the
 /// shared card paints that does not need the live view. `Waku`'s
-/// `prepare_boss_outcome_employees` adds the avatar, project, model, and
-/// chip data only the view can resolve.
+/// `prepare_boss_outcome_employees` adds the avatar, project, and chip
+/// data only the view can resolve.
 struct BossOutcomeEmployeeFields {
     /// The entry's stable key — `{outcome}:{session}:{generation}` — the
     /// row's element-id slot and focus-handle key.
@@ -11849,11 +11826,11 @@ struct BossOutcomeEmployeeFields {
     /// identity is the fallback.
     identity: Option<waku_client::boss::BossIdentity>,
     name: String,
-    /// The bare job title — the detail line's first segment and the job
-    /// icon's lookup text.
+    /// The employee job title, retained for the row's icon lookup but
+    /// omitted from the outcome row's visible detail.
     job: String,
-    /// The job line with its context suffixes — attempt number,
-    /// finisher — joined with " · ".
+    /// Outcome-specific context such as attempt number or finisher,
+    /// joined with " · "; employee job titles stay out of this row.
     detail: String,
     status: BossGoalStatus,
     /// Blocked/queued/cause text — each on the card's own line.
@@ -11923,8 +11900,9 @@ fn boss_outcome_employee_fields(
             if assignment.finishes_outcome == Some(true) {
                 suffixes.push(tr!("boss.goals_entry_finisher"));
             }
-            let detail = std::iter::once(job.as_str())
-                .chain(suffixes.iter().map(String::as_str))
+            let detail = suffixes
+                .iter()
+                .map(String::as_str)
                 .filter(|part| !part.is_empty())
                 .collect::<Vec<_>>()
                 .join(" · ");
