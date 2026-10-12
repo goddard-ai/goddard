@@ -242,7 +242,22 @@ impl Backend for WakuBackend {
                     && session.planning.is_none()
             })
         };
-        let _boss_chat_guard = boss_chat_command.then(|| self.boss.operation_guard());
+        // A Boss rotation or summon can hold the operation lock while it
+        // waits on other session state; the chat must fail fast rather than
+        // park behind it until the client's request timeout fires.
+        let _boss_chat_guard = if boss_chat_command {
+            Some(
+                self.boss
+                    .try_operation_guard(std::time::Duration::from_secs(30))
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "the Boss is busy applying a background operation; retry shortly"
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
         if boss_chat_command {
             anyhow::ensure!(
                 self.task_state

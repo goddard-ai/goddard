@@ -1,5 +1,44 @@
 use super::*;
 
+/// Remove a session's runtime entry under its ownership gate — the shared
+/// body of `WakuBackend::remove_runtime`, also driven from detached
+/// teardown threads that have no backend handle.
+pub(super) fn remove_runtime_entry(
+    lifecycles: &RuntimeLifecycles,
+    sessions: &Mutex<HashMap<Uuid, RuntimeEntry>>,
+    agent: &crate::agent::AgentState,
+    repo_maps: &Arc<(Mutex<RepoMaps>, Condvar)>,
+    session_id: Uuid,
+    expected: Option<Uuid>,
+    clear: bool,
+) -> Option<RuntimeEntry> {
+    let lifecycle = lifecycles.session(session_id);
+    let owner = lifecycle.lock();
+    let mut sessions = sessions.lock();
+    let current = sessions
+        .get(&session_id)
+        .map(|entry| entry.runtime_id)
+        .or(owner.get());
+    if expected.is_some_and(|id| current != Some(id)) {
+        return None;
+    }
+    owner.set(None);
+    let removed = sessions.remove(&session_id);
+    drop(sessions);
+    if clear {
+        agent.clear_session(session_id);
+    } else {
+        agent.revoke_session(session_id);
+        agent.note_driver_event(session_id, &DriverEvent::ProcessExited);
+        agent.take_daemon_interrupt(session_id);
+    }
+    repo_maps.0.lock().sessions.remove(&session_id);
+    if let Some(entry) = &removed {
+        entry.driver.begin_shutdown();
+    }
+    removed
+}
+
 impl WakuBackend {
     /// Start a provider runtime for `session_id` and forward its events into
     /// `events`, which must already target the new `runtime_id`.
@@ -421,32 +460,15 @@ impl WakuBackend {
         expected: Option<Uuid>,
         clear: bool,
     ) -> Option<RuntimeEntry> {
-        let lifecycle = self.runtime_lifecycles.session(session_id);
-        let owner = lifecycle.lock();
-        let mut sessions = self.sessions.lock();
-        let current = sessions
-            .get(&session_id)
-            .map(|entry| entry.runtime_id)
-            .or(owner.get());
-        if expected.is_some_and(|id| current != Some(id)) {
-            return None;
-        }
-        owner.set(None);
-        let removed = sessions.remove(&session_id);
-        drop(sessions);
-        if clear {
-            self.agent.clear_session(session_id);
-        } else {
-            self.agent.revoke_session(session_id);
-            self.agent
-                .note_driver_event(session_id, &DriverEvent::ProcessExited);
-            self.agent.take_daemon_interrupt(session_id);
-        }
-        self.repo_maps.0.lock().sessions.remove(&session_id);
-        if let Some(entry) = &removed {
-            entry.driver.begin_shutdown();
-        }
-        removed
+        remove_runtime_entry(
+            &self.runtime_lifecycles,
+            &self.sessions,
+            &self.agent,
+            &self.repo_maps,
+            session_id,
+            expected,
+            clear,
+        )
     }
 
     /// Publish the runtime before any buffered driver event can be consumed.

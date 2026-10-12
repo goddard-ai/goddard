@@ -903,6 +903,16 @@ impl BossService {
         self.operation_lock.lock()
     }
 
+    /// Bounded `operation_guard` for request paths that must fail fast
+    /// instead of parking behind a wedged Boss operation until the
+    /// client-side request timeout fires.
+    pub fn try_operation_guard(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Option<parking_lot::MutexGuard<'_, ()>> {
+        self.operation_lock.try_lock_for(timeout)
+    }
+
     /// Serialize a host-side operation with Boss mutations.
     pub fn with_operation_lock<R>(&self, operation: impl FnOnce() -> R) -> R {
         let _guard = self.operation_lock.lock();

@@ -199,14 +199,46 @@ impl WakuBackend {
         if !settings.boss_experiment_enabled || !self.boss.is_active() {
             return Ok(());
         }
+        let mut retired = Vec::new();
         self.boss.with_operation_lock(|| {
-            let result = self.rotate_boss_chat(&settings, now);
+            let result = self.rotate_boss_chat(&settings, now, &mut retired);
             if let Err(error) = &result {
                 self.note_rotation_failure(now, error);
             }
             self.publish_rotation_status(now);
             result
-        })
+        })?;
+        // Runtime teardown parks on the retired session's event-pump gate,
+        // which a stalled pump can hold indefinitely — never inside the
+        // Boss operation lock (Boss chat commands serialize behind it) or on
+        // this scheduler thread (employee dispatch queues behind it).
+        if !retired.is_empty() {
+            let lifecycles = self.runtime_lifecycles.clone();
+            let sessions = self.sessions.clone();
+            let agent = self.agent.clone();
+            let repo_maps = self.repo_maps.clone();
+            let retire = move || {
+                for id in retired {
+                    drop_detached(super::runtime::remove_runtime_entry(
+                        &lifecycles,
+                        &sessions,
+                        &agent,
+                        &repo_maps,
+                        id,
+                        None,
+                        false,
+                    ));
+                }
+            };
+            if let Err(error) = std::thread::Builder::new()
+                .name("boss-rotation-retire".into())
+                .spawn(retire.clone())
+            {
+                eprintln!("could not spawn Boss rotation teardown: {error}");
+                retire();
+            }
+        }
+        Ok(())
     }
 
     /// Record a failed reconcile pass against the pending intent — the
@@ -421,7 +453,15 @@ impl WakuBackend {
         }))
     }
 
-    fn rotate_boss_chat(&self, settings: &crate::DaemonSettings, now: u64) -> anyhow::Result<()> {
+    /// `retired` collects sessions whose runtimes must be torn down after
+    /// the caller drops the Boss operation lock — teardown waits on the
+    /// session's event-pump gate, which must never park the lock.
+    fn rotate_boss_chat(
+        &self,
+        settings: &crate::DaemonSettings,
+        now: u64,
+        retired: &mut Vec<Uuid>,
+    ) -> anyhow::Result<()> {
         let (identity, active) = self.boss.identity_and_session();
         let Some(active) = active else {
             return Ok(());
@@ -771,9 +811,10 @@ impl WakuBackend {
         }
         self.task_store.save(&mut state)?;
         drop(state);
-        // Same runtime/credential retirement as ordinary archival. The
-        // transcript stays in the task store under its old session id.
-        self.retire_archived_runtimes(&[intent.old_session_id]);
+        // Same runtime/credential retirement as ordinary archival, run by
+        // the caller once the Boss operation lock is dropped. The transcript
+        // stays in the task store under its old session id.
+        retired.push(intent.old_session_id);
         journal.record_stage(RotationLifecycleStage::PredecessorFenced, now);
         #[cfg(test)]
         {

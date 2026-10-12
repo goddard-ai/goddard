@@ -14979,6 +14979,13 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
     backend.reconcile_boss_rotation(refreshed).unwrap();
     let next = backend.boss.identity_and_session().1.unwrap();
     assert_ne!(old, next);
+    // Runtime teardown is detached so a stalled event pump cannot park the
+    // Boss operation lock — poll for it rather than assuming it landed
+    // before the reconcile returned.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while *capture.shutdowns.lock() == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert_eq!(*capture.shutdowns.lock(), 1);
     assert!(!backend.sessions.lock().contains_key(&old));
     assert!(
@@ -15127,6 +15134,117 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
         1,
         "new chat does not inherit context pressure"
     );
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Regression: the retired session's event pump holds its lifecycle gate
+/// across every delivered event, so retirement parks on it. The rotation's
+/// commit and the Boss operation lock must not wait behind that gate —
+/// while a stalled pump held it, every Boss chat prompt and boss command
+/// ran out the client request timeout.
+#[test]
+fn boss_rotation_commits_while_predecessor_teardown_waits_on_its_event_pump() {
+    use crate::boss_rotation::RotationJournal;
+    let root = std::env::temp_dir().join(format!("boss-rotation-offlock-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let old = rotation_boss(&backend);
+    let capture = Arc::new(CaptureDriver::default());
+    let driver = DriverHandle::from_control(capture.clone());
+    let old_runtime = Uuid::new_v4();
+    backend.sessions.lock().insert(
+        old,
+        RuntimeEntry {
+            plan_gate: None,
+            runtime_id: old_runtime,
+            driver: driver.clone(),
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.clone(),
+        },
+    );
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(old).unwrap();
+        session.begin_turn("Keep supervising the release");
+        session.push_message(
+            MessageRole::Assistant,
+            "The release work is still in flight",
+        );
+        backend.task_store.save(&mut state).unwrap();
+    }
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        &DriverEvent::UsageUpdated {
+            context_tokens: Some(81),
+            context_window: None,
+        },
+    )
+    .unwrap();
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        &DriverEvent::UsageUpdated {
+            context_tokens: None,
+            context_window: Some(100),
+        },
+    )
+    .unwrap();
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        &DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    )
+    .unwrap();
+    let refreshed = backend
+        .task_state
+        .lock()
+        .session_mut(old)
+        .unwrap()
+        .last_reply_at
+        .unwrap();
+    // The event pump applies each event under the session's lifecycle gate;
+    // hold it the way a stalled pump would.
+    let lifecycle = backend.runtime_lifecycles.session(old);
+    let gate = lifecycle.lock();
+    backend.reconcile_boss_rotation(refreshed).unwrap();
+    let next = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(old, next);
+    let journal = RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
+    assert!(journal.intent.is_none());
+    assert!(
+        journal
+            .rotations
+            .last()
+            .is_some_and(|rotation| rotation.committed_at.is_some()),
+        "rotation commits while predecessor teardown is still waiting"
+    );
+    // Boss chat commands must not inherit the pump's stall.
+    assert!(
+        backend
+            .boss
+            .try_operation_guard(std::time::Duration::from_secs(1))
+            .is_some()
+    );
+    assert_eq!(*capture.shutdowns.lock(), 0);
+    assert!(backend.sessions.lock().contains_key(&old));
+    drop(gate);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while *capture.shutdowns.lock() == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(*capture.shutdowns.lock(), 1);
+    assert!(!backend.sessions.lock().contains_key(&old));
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }

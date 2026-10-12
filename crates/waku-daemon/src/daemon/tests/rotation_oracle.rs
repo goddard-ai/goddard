@@ -354,7 +354,14 @@ fn retired_boss_generation_is_fenced_at_the_driver_boundary() {
     // the pointer moved — must not reach the provider.
     let stale_runtime = Uuid::new_v4();
     let stale_capture = boss_runtime(&backend, old, stale_runtime);
-    let stale_driver = backend.sessions.lock().get(&old).unwrap().driver.clone();
+    // Rotation teardown is detached and may already have reaped the
+    // inserted entry — the fence lives in the driver boundary, not in the
+    // runtime registry.
+    let stale_driver = backend.boss_driver_boundary(
+        old,
+        stale_runtime,
+        DriverHandle::from_control(stale_capture.clone()),
+    );
     stale_driver.prompt("stale generation still tries to coordinate".into());
     stale_driver.steer("steer is denied too".into());
     assert!(stale_capture.prompts.lock().is_empty());
