@@ -1187,7 +1187,7 @@ impl Waku {
                 }
             }))
             .child(crate::ui::icon(
-                "icons/eye-off.svg",
+                "icons/ghost.svg",
                 14.0,
                 theme.text_secondary,
             ))

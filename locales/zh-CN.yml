@@ -149,9 +149,9 @@ command_palette.manage_friends: 管理好友
 command_palette.share_friend_placeholder: 选择好友…
 command_palette.share_project_placeholder: 选择要分享的项目…
 command_palette.new_task_in_same_worktree: 在同一工作树中新建任务
-command_palette.new_incognito_task: 新建无痕任务
-command_palette.new_incognito_task_in: 在指定目录中新建无痕任务…
-command_palette.new_incognito_task_in_same_worktree: 在同一工作树中新建无痕任务
+command_palette.new_incognito_task: 新建临时聊天
+command_palette.new_incognito_task_in: 在指定目录中新建临时聊天…
+command_palette.new_incognito_task_in_same_worktree: 在同一工作树中新建临时聊天
 command_palette.resume: 恢复…
 command_palette.change_provider: 更改服务商
 command_palette.current_provider: 当前服务商
@@ -643,13 +643,13 @@ common.unarchive: 取消归档
 common.undo: 撤销
 common.rename: 重命名
 session.new_task: 新任务
-session.new_incognito_task: 新建无痕任务
-session.incognito: 无痕
-session.incognito_hint: 这是一次性聊天；无痕模式不会提升安全性或隐私保护。如果你启用了项目记忆（仍处于实验阶段），此聊天不会读取或更新它。
-session.incognito_disclosure_title: 开始无痕聊天？
-session.incognito_disclosure_description: 无痕模式不会提升安全性或隐私保护。它只用于开始一次性聊天。
+session.new_incognito_task: 新建临时聊天
+session.incognito: 临时
+session.incognito_hint: 这是一次临时聊天；它不会提升安全性或隐私保护。如果你启用了项目记忆（仍处于实验阶段），此聊天不会读取或更新它。
+session.incognito_disclosure_title: 开始临时聊天？
+session.incognito_disclosure_description: 临时聊天不会提升安全性或隐私保护；对话内容仅保留在内存中。
 session.incognito_disclosure_memory: 如果你启用了项目记忆（仍处于实验阶段），此聊天不会读取或更新它。
-session.incognito_disclosure_continue: 继续使用无痕模式
+session.incognito_disclosure_continue: 继续使用临时聊天
 session.copy_working_directory: 复制工作目录
 session.move_to_worktree: 移动到工作树
 session.archive: 归档
@@ -1227,9 +1227,9 @@ session.agent_rename_request_from: 智能体想要将此任务从“{current}”
 session.agent_rename_once: 重命名
 session.agent_rename_always: 始终允许
 commands.compact_description: 压缩会话上下文
-commands.incognito_description: 开始无痕任务 — 仅存在于内存中，不读写项目记忆
-commands.incognito_no_draft: 无痕模式适用于新任务 — 未选择草稿
-commands.incognito_too_late: 无痕模式需在任务创建时设置 — 此任务已开始
+commands.incognito_description: 开始临时聊天 — 仅存在于内存中，不读写项目记忆
+commands.incognito_no_draft: 临时聊天适用于新任务 — 未选择草稿
+commands.incognito_too_late: 临时聊天需在任务创建时设置 — 此任务已开始
 commands.compact_context: 压缩上下文
 commands.compact_turn_running: 请等待当前轮次结束后再压缩
 commands.compact_nothing_to_compact: 还没有可压缩的内容 — 请先发送一条消息
