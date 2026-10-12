@@ -10,7 +10,9 @@ use waku_protocol::boss::{
     PlanReadinessPhase as Phase,
 };
 
-const INLINE_BYTES: usize = 32 * 1024;
+// Match the existing 256 KiB Boss approval capture limit. Supported adapters
+// stream the complete execution input; this is not a process argument bound.
+const COMPLETE_INPUT_BYTES: usize = 256 * 1024;
 const SECTION_BYTES: usize = 8 * 1024;
 
 fn digest(bytes: &[u8]) -> String {
@@ -112,7 +114,9 @@ pub(super) fn classify_plan_failure(error: &anyhow::Error) -> PlanContractError 
             "Implementation blocked: the exact approved artifact is missing. Restore the approved copy or explicitly correct the binding, then retry.",
         )
     } else if text.contains("unsupported") {
-        if text.contains("exceeds the qualified inline delivery bound") {
+        if text.contains("exceeds the qualified complete-input delivery bound")
+            || text.contains("exceeds the qualified inline delivery bound")
+        {
             (
                 PlanFailureKind::DeliveryUnsupported,
                 "Implementation blocked: the complete approved plan exceeds the qualified delivery bound. Reduce the approved content or split the assignment, then retry.",
@@ -243,12 +247,12 @@ impl Review {
     }
 
     fn check_artifact(&self) -> anyhow::Result<()> {
-        // The qualified inline delivery mode carries the complete approved
-        // bundle; larger bundles block predictably — no summary, truncation
-        // or omitted-section fallback exists.
+        // Deliver every capturable approved revision in full. Keep a bounded
+        // artifact read and reject oversized/corrupt persisted revisions; no
+        // summary, truncation or omitted-section fallback exists.
         anyhow::ensure!(
-            self.receipt.revision.content.len() <= INLINE_BYTES,
-            "plan delivery unsupported: the complete approved plan exceeds the qualified inline delivery bound"
+            self.receipt.revision.content.len() <= COMPLETE_INPUT_BYTES,
+            "plan delivery unsupported: the complete approved plan exceeds the qualified complete-input delivery bound"
         );
         for ancestor in self.receipt.artifact.ancestors() {
             anyhow::ensure!(
@@ -273,7 +277,7 @@ impl Review {
         let mut bytes = Vec::new();
         options
             .open(&self.receipt.artifact)?
-            .take(256 * 1024 + 1)
+            .take((COMPLETE_INPUT_BYTES + 1) as u64)
             .read_to_end(&mut bytes)?;
         anyhow::ensure!(
             bytes == self.receipt.revision.content.as_bytes(),
@@ -897,11 +901,11 @@ impl WakuBackend {
         let mut permissions = fs::metadata(&artifact)?.permissions();
         permissions.set_readonly(true);
         fs::set_permissions(&artifact, permissions)?;
-        // The complete bundle must fit the qualified inline delivery mode;
-        // oversized plans block here rather than falling back to a locator.
+        // The complete input supports the entire approval capture range.
+        // Reject anything beyond it rather than substituting a locator.
         anyhow::ensure!(
-            revision.content.len() <= INLINE_BYTES,
-            "plan delivery unsupported: the complete approved plan exceeds the qualified inline delivery bound"
+            revision.content.len() <= COMPLETE_INPUT_BYTES,
+            "plan delivery unsupported: the complete approved plan exceeds the qualified complete-input delivery bound"
         );
         let delivery_mode = "complete-input-inline".to_owned();
         let mut section_digests: Vec<String> = revision
@@ -1306,14 +1310,15 @@ mod tests {
             "generation",
             "auth",
             "tamper",
+            "missing",
             "persistence",
             "transport",
             "dispatch",
             "turn-failure",
         ] {
-            let fixture = Fixture::new(&"section text\n".repeat(2000));
+            let fixture = Fixture::new(&"section text\n".repeat(4000));
             match fault {
-                "generation" | "auth" | "tamper" => {}
+                "generation" | "auth" | "tamper" | "missing" => {}
                 _ => fixture.gate.submit("IMPLEMENT_SENTINEL".into(), Vec::new()),
             }
             match fault {
@@ -1326,6 +1331,9 @@ mod tests {
                         "lookalike mutable content",
                     )
                     .unwrap();
+                }
+                "missing" => {
+                    fs::remove_file(fixture.root.join("approved-plan.md")).unwrap();
                 }
                 "persistence" => {
                     fs::remove_file(fixture.root.join("delivery.json")).unwrap();
@@ -1351,13 +1359,13 @@ mod tests {
                 }
                 _ => unreachable!(),
             }
-            if matches!(fault, "generation" | "auth" | "tamper") {
+            if matches!(fault, "generation" | "auth" | "tamper" | "missing") {
                 fixture.gate.submit("IMPLEMENT_SENTINEL".into(), Vec::new());
             }
             assert!(!fixture.gate.delivered(), "{fault}");
             match fault {
                 // Authority/integrity faults block before any submission.
-                "generation" | "auth" | "tamper" => {
+                "generation" | "auth" | "tamper" | "missing" => {
                     assert_eq!(fixture.capture.0.lock().len(), 0, "{fault}");
                 }
                 _ => {

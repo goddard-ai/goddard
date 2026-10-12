@@ -40,12 +40,25 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
                 "auth-after-launch",
                 "provider-switch",
                 "workspace-switch",
+                "revision-switch",
             ] {
                 let root = std::env::temp_dir().join(format!("plan-acceptance-{}", Uuid::new_v4()));
                 let (mut backend, session) = runtime_generation_launch_fixture(&root, true);
                 runtime_generation_configure_launch(&mut backend, &root);
                 let plan = boss_plan("plans/acceptance.md", &[]);
                 backend.boss.add_plan(plan.clone()).unwrap();
+                // Both reported failing sizes plus the complete approval range
+                // cross the real launch preflight for each supported adapter.
+                let bytes = match workspace {
+                    "direct" => 33_290,
+                    "worktree" => 40_009,
+                    _ => 256 * 1024,
+                };
+                let header = "# Reviewed fixture\n";
+                let approved_text = format!("{header}{}", "x".repeat(bytes - header.len()));
+                let file = backend.boss.plan_document_path(&plan.plan_file).unwrap();
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, &approved_text).unwrap();
                 let reviewed = review_plan_fixture(&backend, &plan.plan_file);
                 backend
                     .boss
@@ -159,6 +172,26 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
                             state.mark_session_dirty(session);
                             backend.task_store.save(&mut state).unwrap();
                         }
+                        "revision-switch" => {
+                            let replacement = boss_plan("plans/replacement.md", &[]);
+                            backend.boss.add_plan(replacement.clone()).unwrap();
+                            let reviewed = review_plan_fixture(&backend, &replacement.plan_file);
+                            backend
+                                .boss
+                                .finalize_plan(&replacement.plan_file, None, 2, &reviewed)
+                                .unwrap();
+                            let accepted = backend.boss.employee(session).unwrap().plan_binding;
+                            assert!(
+                                backend
+                                    .boss
+                                    .set_employee_plan(session, Some(Some(replacement.plan_file)), None)
+                                    .is_err()
+                            );
+                            assert_eq!(
+                                backend.boss.employee(session).unwrap().plan_binding,
+                                accepted
+                            );
+                        }
                         _ => {}
                     }
                     driver.prompt(MUTATE.into());
@@ -167,19 +200,19 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
                         .clone()
                         .unwrap();
                     match fault {
-                        "none" | "unconfirmed" => {
+                        "none" | "unconfirmed" | "revision-switch" => {
                             // The complete input carries exact approved bytes
                             // and the brief together — no review turn, no
                             // ack line, no lookalike content.
                             let prompts = script.prompts.lock();
                             assert_eq!(prompts.len(), 1);
-                            assert!(prompts[0].contains("# Reviewed fixture\n"));
+                            assert!(prompts[0].contains(&approved_text));
                             assert!(prompts[0].contains(MUTATE));
                             assert!(!prompts[0].contains("PLAN-ACK "));
                             assert!(!prompts[0].contains("PROJECT_LOOKALIKE_SENTINEL"));
                             drop(prompts);
                             assert!(!gate.delivered());
-                            if fault == "none" {
+                            if fault != "unconfirmed" {
                                 gate.observe(&DriverEvent::TurnStarted);
                                 assert!(gate.delivered());
                                 // Delivered follow-ups revalidate but resend
@@ -216,7 +249,7 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
                 // Physical mutation evidence is separate from authorization:
                 // only submissions the adapter actually received can mutate.
                 let expected = match fault {
-                    "none" => 2,
+                    "none" | "revision-switch" => 2,
                     "unconfirmed" => 1,
                     _ => 0,
                 };
@@ -232,9 +265,9 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
             }
         }
     }
-    assert_eq!(cases, 36);
+    assert_eq!(cases, 42);
     eprintln!(
-        "plan acceptance runtime matrix: {cases} passed; Codex/Devin x direct/worktree/cross-project x success/unconfirmed delivery/launch failure/auth revoked/provider switch/workspace switch"
+        "plan acceptance runtime matrix: {cases} passed; Codex/Devin x direct/worktree/cross-project x success/unconfirmed delivery/launch failure/auth revoked/provider switch/workspace switch/revision switch rejected"
     );
 }
 

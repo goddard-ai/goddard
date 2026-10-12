@@ -132,9 +132,16 @@ fn plan_acceptance_dispatch_and_projection_failures_preserve_work() {
 
 #[test]
 fn plan_acceptance_size_boundary_and_exact_reread_after_compaction() {
-    // The qualified inline mode delivers the complete bundle; over the bound
-    // blocks predictably as unsupported — never truncated or summarized.
-    for (bytes, supported) in [(INLINE_BYTES, true), (INLINE_BYTES + 1, false)] {
+    // Include the old cutoff, both reported plan sizes, and the full approval
+    // capture boundary. Content outside the qualified range still blocks.
+    for (bytes, supported) in [
+        (32 * 1024, true),
+        (32 * 1024 + 1, true),
+        (33_290, true),
+        (40_009, true),
+        (COMPLETE_INPUT_BYTES, true),
+        (COMPLETE_INPUT_BYTES + 1, false),
+    ] {
         let text = "x".repeat(bytes);
         let fixture = Fixture::new(&text);
         fixture.gate.submit(BRIEF.into(), Vec::new());
@@ -169,6 +176,22 @@ fn plan_acceptance_size_boundary_and_exact_reread_after_compaction() {
                 .content_digest
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn plan_acceptance_oversized_artifact_read_denial_withholds_execution() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new(&"approved section\n".repeat(4000));
+    let artifact = fixture.gate.review.lock().receipt.artifact.clone();
+    fs::set_permissions(&artifact, fs::Permissions::from_mode(0)).unwrap();
+    fixture.gate.submit(BRIEF.into(), Vec::new());
+    assert!(fixture.capture.0.lock().is_empty());
+    assert!(!fixture.gate.delivered());
+    let stored = fixture.stored();
+    assert_eq!(stored.receipt.phase, Phase::Blocked);
+    assert!(stored.receipt.failure.unwrap().contains("Permission denied"));
+    assert_eq!(stored.withheld[0].0, BRIEF);
 }
 
 #[cfg(unix)]
