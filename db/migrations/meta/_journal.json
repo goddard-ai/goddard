@@ -204,6 +204,13 @@
       "when": 1791777261088,
       "tag": "0028_good_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1791838764529,
+      "tag": "0029_black_deathbird",
+      "breakpoints": true
     }
   ]
 }

@@ -147,6 +147,13 @@ struct PendingRequest {
     consumed: bool,
 }
 
+/// A minted ingress grant as the host knows it — the presented token is
+/// compared against this in constant time; expiry is immutable.
+struct IssuedGrant {
+    token: String,
+    expires_at_ms: u64,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TurnState {
     Open,
@@ -171,6 +178,12 @@ struct Generation {
     held: VecDeque<Uuid>,
     pending: HashMap<String, PendingRequest>,
     turns: BTreeMap<Uuid, TurnState>,
+    /// Ingress grants minted for this generation, by grant id.
+    grants: HashMap<Uuid, IssuedGrant>,
+    /// Agent requests accepted at scoped ingress, by request id.
+    ingress: BTreeMap<Uuid, IngressRecord>,
+    /// Live durable resource claims bound to this generation's work.
+    claims: BTreeMap<Uuid, ResourceClaim>,
     /// The generation's last word was observed; nothing may follow it.
     ended: bool,
 }
@@ -190,6 +203,9 @@ impl Generation {
             held: VecDeque::new(),
             pending: HashMap::new(),
             turns: BTreeMap::new(),
+            grants: HashMap::new(),
+            ingress: BTreeMap::new(),
+            claims: BTreeMap::new(),
             ended: false,
         }
     }
@@ -257,6 +273,13 @@ impl Session {
             held_commands: g.held.len(),
             fence: g.fence,
             effective: self.effective.clone(),
+            pending_ingress: g
+                .ingress
+                .values()
+                .filter(|r| !r.disposition.is_terminal())
+                .map(|r| r.request_id)
+                .collect(),
+            claims: g.claims.values().cloned().collect(),
             adapter_alive: self.adapter.as_ref().is_some_and(|a| a.alive()),
         }
     }
@@ -317,6 +340,13 @@ impl RuntimeHost {
         clock: Box<dyn Clock>,
     ) -> Result<Self, HostError> {
         fs::create_dir_all(root).map_err(io_err)?;
+        // The namespace root holds credentials, the journal, and the IPC
+        // endpoint — owner-only, like the identity file inside it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(root, fs::Permissions::from_mode(0o700));
+        }
         let lock_path = root.join("runtime.lock");
         let lock_file = OpenOptions::new()
             .read(true)
@@ -409,6 +439,11 @@ impl RuntimeHost {
 
     pub fn recovery(&self) -> RecoveryState {
         self.recovery
+    }
+
+    /// The live control epoch, or 0 while no controller holds the lease.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     /// The persisted clock floor: `now` can never observe a time before
@@ -645,7 +680,7 @@ impl RuntimeHost {
         if self.journal.bytes() + self.budgets.control_reserve_bytes
             >= self.budgets.aggregate_journal_bytes
         {
-            return Err(HostError::Capacity("journal budget exhausted"));
+            return Err(HostError::Capacity("journal budget exhausted".into()));
         }
 
         self.journal_record(JournalRecord::Command {
@@ -877,6 +912,337 @@ impl RuntimeHost {
         Ok(DrainReport::Drained { sessions: count })
     }
 
+    /// Mint a session-scoped ingress grant. The grant is durable before it
+    /// exists — a grant the journal never saw must verify as nothing.
+    pub fn issue_grant(
+        &mut self,
+        credential: &str,
+        epoch: u64,
+        session: SessionRef,
+        ttl_ms: u64,
+    ) -> Result<SessionGrant, HostError> {
+        self.check_controller(credential)?;
+        self.check_epoch(epoch)?;
+        self.pump();
+        let target = self
+            .sessions
+            .get(&session.session_id)
+            .ok_or(HostError::UnknownSession(session.session_id))?;
+        if target.generation() != session.generation {
+            return Err(HostError::GenerationMismatch {
+                presented: session.generation,
+                current: target.generation(),
+            });
+        }
+        let g = target.current();
+        if g.fence.is_some() || g.ended {
+            return Err(HostError::Malformed(
+                "cannot grant ingress to a fenced generation".into(),
+            ));
+        }
+        let grant = SessionGrant {
+            grant_id: Uuid::new_v4(),
+            session_id: session.session_id,
+            generation: session.generation,
+            token: mint_credential(),
+            expires_at_ms: self.now().saturating_add(ttl_ms),
+        };
+        self.journal_record(JournalRecord::GrantIssued {
+            session_id: grant.session_id,
+            generation: grant.generation,
+            grant_id: grant.grant_id,
+            token: grant.token.clone(),
+            expires_at_ms: grant.expires_at_ms,
+        })
+        .map_err(|_| HostError::PersistenceUnavailable)?;
+        self.sessions
+            .get_mut(&session.session_id)
+            .and_then(|s| s.generation_at_mut(session.generation))
+            .unwrap()
+            .grants
+            .insert(
+                grant.grant_id,
+                IssuedGrant {
+                    token: grant.token.clone(),
+                    expires_at_ms: grant.expires_at_ms,
+                },
+            );
+        Ok(grant)
+    }
+
+    /// Verify a presented grant: constant-time token comparison, session
+    /// and generation scope, immutable expiry. Every failure is the same
+    /// `Unauthorized` — a wrong token, a foreign session, a dead
+    /// generation, and an expired window are indistinguishable to callers,
+    /// and authority is never renewed.
+    pub fn check_grant(&self, grant: &SessionGrant) -> Result<SessionRef, HostError> {
+        let target = SessionRef {
+            session_id: grant.session_id,
+            generation: grant.generation,
+        };
+        let ok = self
+            .sessions
+            .get(&grant.session_id)
+            .and_then(|s| s.generation_at(grant.generation))
+            .and_then(|g| g.grants.get(&grant.grant_id))
+            .is_some_and(|issued| {
+                self.now() <= issued.expires_at_ms
+                    && bool::from(grant.token.as_bytes().ct_eq(issued.token.as_bytes()))
+            });
+        if ok { Ok(target) } else { Err(HostError::Unauthorized) }
+    }
+
+    /// Accept one agent request under its session grant. Identity dedup is
+    /// the same rule commands follow: the same request id with the same
+    /// canonical payload returns the recorded truth; a different payload
+    /// under a recorded id is refused. Recording is durable before any
+    /// forwarding.
+    pub fn ingress_submit(
+        &mut self,
+        grant: &SessionGrant,
+        request: IngressRequest,
+    ) -> Result<IngressRecord, HostError> {
+        let target = self.check_grant(grant)?;
+        self.pump();
+        if !self.persistence_ok {
+            return Err(HostError::PersistenceUnavailable);
+        }
+        let now = self.now();
+        {
+            let session = self.sessions.get(&target.session_id).unwrap();
+            let g = session.generation_at(target.generation).unwrap();
+            if let Some(existing) = g.ingress.get(&request.request_id) {
+                if existing.class == request.class && existing.subject == request.subject {
+                    return Ok(existing.clone());
+                }
+                return Err(HostError::PayloadMismatch);
+            }
+        }
+        // A request landing on a fenced or ended generation is evidence,
+        // not execution — recorded as refused. One already past its
+        // deadline is expired on arrival.
+        let disposition = {
+            let session = self.sessions.get(&target.session_id).unwrap();
+            let g = session.generation_at(target.generation).unwrap();
+            if g.fence.is_some() || g.ended || session.status != SessionStatus::Live {
+                IngressDisposition::Refused {
+                    detail: "session generation is fenced".into(),
+                }
+            } else if request.deadline_ms <= now {
+                IngressDisposition::Expired
+            } else {
+                IngressDisposition::Pending
+            }
+        };
+        let record = IngressRecord {
+            request_id: request.request_id,
+            session: target,
+            grant_id: grant.grant_id,
+            class: request.class,
+            subject: request.subject,
+            deadline_ms: request.deadline_ms,
+            forwarded: false,
+            disposition,
+        };
+        self.journal_record(JournalRecord::IngressOpened {
+            record: Box::new(record.clone()),
+        })
+        .map_err(|_| HostError::PersistenceUnavailable)?;
+        self.sessions
+            .get_mut(&target.session_id)
+            .and_then(|s| s.generation_at_mut(target.generation))
+            .unwrap()
+            .ingress
+            .insert(record.request_id, record.clone());
+        Ok(record)
+    }
+
+    /// Read one ingress record under the grant that opened it. A caller
+    /// sees only its own session's requests — anything else is
+    /// indistinguishable from a bad grant.
+    pub fn ingress_query(
+        &mut self,
+        grant: &SessionGrant,
+        request_id: Uuid,
+    ) -> Result<IngressRecord, HostError> {
+        let target = self.check_grant(grant)?;
+        self.pump();
+        let session = self.sessions.get(&target.session_id).unwrap();
+        let g = session.generation_at(target.generation).unwrap();
+        match g.ingress.get(&request_id) {
+            Some(record) if record.grant_id == grant.grant_id => Ok(record.clone()),
+            _ => Err(HostError::Unauthorized),
+        }
+    }
+
+    /// Everything the current controller's service must answer. Pending
+    /// records mark forwarded in the same step — the dispatch marker that
+    /// decides between `Expired` and `Uncertain` later. Forwarded but
+    /// unresolved records are returned again: a new epoch's service still
+    /// owes them, and the daemon dedups by request identity.
+    pub fn ingress_drain(
+        &mut self,
+        credential: &str,
+        epoch: u64,
+    ) -> Result<Vec<ForwardedRequest>, HostError> {
+        self.check_controller(credential)?;
+        self.check_epoch(epoch)?;
+        self.pump();
+        let now = self.now();
+        let mut mark = Vec::new();
+        let mut out = Vec::new();
+        for session in self.sessions.values() {
+            for g in &session.gens {
+                for record in g.ingress.values() {
+                    if record.disposition.is_terminal()
+                        || matches!(record.disposition, IngressDisposition::Uncertain { .. })
+                        || record.deadline_ms <= now
+                    {
+                        continue;
+                    }
+                    out.push(ForwardedRequest {
+                        request_id: record.request_id,
+                        session: record.session,
+                        grant_id: record.grant_id,
+                        class: record.class,
+                        subject: record.subject.clone(),
+                        deadline_ms: record.deadline_ms,
+                    });
+                    if !record.forwarded {
+                        mark.push((session.id, g.number, record.request_id));
+                    }
+                }
+            }
+        }
+        for (session_id, generation, request_id) in mark {
+            self.journal_best_effort(JournalRecord::IngressForwarded { request_id });
+            if let Some(s) = self.sessions.get_mut(&session_id)
+                && let Some(g) = s.generation_at_mut(generation)
+                && let Some(r) = g.ingress.get_mut(&request_id)
+            {
+                r.forwarded = true;
+                r.disposition = IngressDisposition::Forwarded;
+            }
+        }
+        Ok(out)
+    }
+
+    /// Record the service's outcome for one forwarded request. Outcomes
+    /// write once: a later answer cannot rewrite a terminal truth, while
+    /// `Uncertain` remains reconcilable by qualified evidence.
+    pub fn ingress_resolve(
+        &mut self,
+        credential: &str,
+        epoch: u64,
+        request_id: Uuid,
+        outcome: ForwardedOutcome,
+    ) -> Result<IngressRecord, HostError> {
+        self.check_controller(credential)?;
+        self.check_epoch(epoch)?;
+        self.pump();
+        let (session_id, generation) = self
+            .sessions
+            .iter()
+            .find_map(|(sid, s)| {
+                s.gens
+                    .iter()
+                    .find_map(|g| g.ingress.contains_key(&request_id).then_some((*sid, g.number)))
+            })
+            .ok_or(HostError::Malformed("unknown ingress request".into()))?;
+        {
+            let s = self.sessions.get(&session_id).unwrap();
+            let existing = &s.generation_at(generation).unwrap().ingress[&request_id];
+            if existing.disposition.is_terminal() {
+                return Ok(existing.clone());
+            }
+        }
+        let disposition = match outcome {
+            ForwardedOutcome::Completed { result } => IngressDisposition::Completed { result },
+            ForwardedOutcome::Failed { detail } => IngressDisposition::Failed { detail },
+            ForwardedOutcome::Uncertain { detail } => IngressDisposition::Uncertain { detail },
+        };
+        self.journal_best_effort(JournalRecord::IngressOutcome {
+            request_id,
+            disposition: disposition.clone(),
+        });
+        let s = self.sessions.get_mut(&session_id).unwrap();
+        let g = s.generation_at_mut(generation).unwrap();
+        let record = g.ingress.get_mut(&request_id).unwrap();
+        record.disposition = disposition;
+        Ok(record.clone())
+    }
+
+    /// Register a durable resource claim against runtime-owned work.
+    /// Claims survive controller replacement; release is always an
+    /// explicit decision after the owning work is reconciled or
+    /// terminated, never a side effect of detachment.
+    pub fn register_claim(
+        &mut self,
+        credential: &str,
+        epoch: u64,
+        claim: ResourceClaim,
+    ) -> Result<(), HostError> {
+        self.check_controller(credential)?;
+        self.check_epoch(epoch)?;
+        self.pump();
+        let session = self
+            .sessions
+            .get(&claim.session.session_id)
+            .ok_or(HostError::UnknownSession(claim.session.session_id))?;
+        if session.generation() != claim.session.generation {
+            return Err(HostError::GenerationMismatch {
+                presented: claim.session.generation,
+                current: session.generation(),
+            });
+        }
+        let g = session.current();
+        if g.fence.is_some() || g.ended {
+            return Err(HostError::Malformed(
+                "cannot claim resources on a fenced generation".into(),
+            ));
+        }
+        self.journal_record(JournalRecord::ClaimRegistered {
+            claim: claim.clone(),
+        })
+        .map_err(|_| HostError::PersistenceUnavailable)?;
+        self.sessions
+            .get_mut(&claim.session.session_id)
+            .unwrap()
+            .current_mut()
+            .claims
+            .insert(claim.claim_id, claim);
+        Ok(())
+    }
+
+    /// Release a claim by identity. Only the current controller releases;
+    /// the claim's absence afterwards is a journaled fact, not a lapse.
+    pub fn release_claim(&mut self, credential: &str, epoch: u64, claim_id: Uuid) -> Result<(), HostError> {
+        self.check_controller(credential)?;
+        self.check_epoch(epoch)?;
+        self.pump();
+        let found = self
+            .sessions
+            .iter()
+            .find_map(|(sid, s)| {
+                s.gens
+                    .iter()
+                    .find_map(|g| g.claims.contains_key(&claim_id).then_some((*sid, g.number)))
+            })
+            .ok_or(HostError::Malformed("unknown claim".into()))?;
+        self.journal_record(JournalRecord::ClaimReleased {
+            claim_id,
+            session_id: found.0,
+            generation: found.1,
+        })
+        .map_err(|_| HostError::PersistenceUnavailable)?;
+        if let Some(s) = self.sessions.get_mut(&found.0)
+            && let Some(g) = s.generation_at_mut(found.1)
+        {
+            g.claims.remove(&claim_id);
+        }
+        Ok(())
+    }
+
     /// Drain adapter intake channels into the journal. This is the
     /// deterministic barrier: provider events become durable, ordered, and
     /// replayable exactly when the host drains them — including while no
@@ -887,6 +1253,7 @@ impl RuntimeHost {
         for id in ids {
             drained += self.pump_session(id);
         }
+        self.sweep_ingress();
         drained
     }
 
@@ -1948,6 +2315,39 @@ impl RuntimeHost {
                         consumed: pending.consumed,
                     });
                 }
+                for (grant_id, issued) in &g.grants {
+                    push(JournalRecord::GrantIssued {
+                        session_id: session.id,
+                        generation: g.number,
+                        grant_id: *grant_id,
+                        token: issued.token.clone(),
+                        expires_at_ms: issued.expires_at_ms,
+                    });
+                }
+                for record in g.ingress.values() {
+                    push(JournalRecord::IngressOpened {
+                        record: Box::new(record.clone()),
+                    });
+                    if record.forwarded {
+                        push(JournalRecord::IngressForwarded {
+                            request_id: record.request_id,
+                        });
+                    }
+                    if !matches!(
+                        record.disposition,
+                        IngressDisposition::Pending | IngressDisposition::Forwarded
+                    ) {
+                        push(JournalRecord::IngressOutcome {
+                            request_id: record.request_id,
+                            disposition: record.disposition.clone(),
+                        });
+                    }
+                }
+                for claim in g.claims.values() {
+                    push(JournalRecord::ClaimRegistered {
+                        claim: claim.clone(),
+                    });
+                }
             }
         }
         for (id, cmd) in &self.commands {
@@ -1970,6 +2370,49 @@ impl RuntimeHost {
             push(JournalRecord::Reconciled { epoch: self.epoch });
         }
         frames
+    }
+
+    /// Sweep ingress deadlines. `Pending` past its deadline expires — it
+    /// provably never dispatched. `Forwarded` becomes uncertain: the
+    /// daemon may already have observed or completed the work, and the
+    /// deadline's passing cannot prove otherwise.
+    fn sweep_ingress(&mut self) {
+        let now = self.now();
+        let mut stale = Vec::new();
+        for session in self.sessions.values() {
+            for g in &session.gens {
+                for record in g.ingress.values() {
+                    if record.deadline_ms > now {
+                        continue;
+                    }
+                    match record.disposition {
+                        IngressDisposition::Pending => {
+                            stale.push((record.request_id, IngressDisposition::Expired))
+                        }
+                        IngressDisposition::Forwarded => stale.push((
+                            record.request_id,
+                            IngressDisposition::Uncertain {
+                                detail: "deadline passed while awaiting the service".into(),
+                            },
+                        )),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        for (request_id, disposition) in stale {
+            self.journal_best_effort(JournalRecord::IngressOutcome {
+                request_id,
+                disposition: disposition.clone(),
+            });
+            for session in self.sessions.values_mut() {
+                for g in &mut session.gens {
+                    if let Some(r) = g.ingress.get_mut(&request_id) {
+                        r.disposition = disposition.clone();
+                    }
+                }
+            }
+        }
     }
 
     /// Tombstone commands whose retry window elapsed. Expired identities
@@ -2193,6 +2636,70 @@ impl RuntimeHost {
                         g.acknowledged = g.acknowledged.max(*applied);
                     }
                 }
+                JournalRecord::GrantIssued {
+                    session_id,
+                    generation,
+                    grant_id,
+                    token,
+                    expires_at_ms,
+                } => {
+                    if let Some(s) = self.sessions.get_mut(session_id)
+                        && let Some(g) = s.generation_at_mut(*generation)
+                    {
+                        g.grants.insert(
+                            *grant_id,
+                            IssuedGrant {
+                                token: token.clone(),
+                                expires_at_ms: *expires_at_ms,
+                            },
+                        );
+                    }
+                }
+                JournalRecord::IngressOpened { record } => {
+                    if let Some(s) = self.sessions.get_mut(&record.session.session_id)
+                        && let Some(g) = s.generation_at_mut(record.session.generation)
+                    {
+                        g.ingress.insert(record.request_id, (**record).clone());
+                    }
+                }
+                JournalRecord::IngressForwarded { request_id } => {
+                    for s in self.sessions.values_mut() {
+                        for g in &mut s.gens {
+                            if let Some(r) = g.ingress.get_mut(request_id) {
+                                r.forwarded = true;
+                                if r.disposition == IngressDisposition::Pending {
+                                    r.disposition = IngressDisposition::Forwarded;
+                                }
+                            }
+                        }
+                    }
+                }
+                JournalRecord::IngressOutcome {
+                    request_id,
+                    disposition,
+                } => {
+                    for s in self.sessions.values_mut() {
+                        for g in &mut s.gens {
+                            if let Some(r) = g.ingress.get_mut(request_id) {
+                                r.disposition = disposition.clone();
+                            }
+                        }
+                    }
+                }
+                JournalRecord::ClaimRegistered { claim } => {
+                    if let Some(s) = self.sessions.get_mut(&claim.session.session_id)
+                        && let Some(g) = s.generation_at_mut(claim.session.generation)
+                    {
+                        g.claims.insert(claim.claim_id, claim.clone());
+                    }
+                }
+                JournalRecord::ClaimReleased { claim_id, .. } => {
+                    for s in self.sessions.values_mut() {
+                        for g in &mut s.gens {
+                            g.claims.remove(claim_id);
+                        }
+                    }
+                }
                 JournalRecord::Reconciled { .. } => {
                     self.reconciled = true;
                 }
@@ -2258,6 +2765,32 @@ impl RuntimeHost {
                 });
             }
         }
+        // Forwarded-but-unresolved agent requests cannot prove their
+        // outcome across an owner loss — uncertain, never replayed.
+        // Unforwarded ones stay pending: a new service still owes them.
+        let mut uncertain = Vec::new();
+        for session in self.sessions.values_mut() {
+            for g in &mut session.gens {
+                for record in g.ingress.values_mut() {
+                    if record.disposition == IngressDisposition::Forwarded {
+                        record.disposition = IngressDisposition::Uncertain {
+                            detail:
+                                "runtime restarted while the request was with the service"
+                                    .into(),
+                        };
+                        uncertain.push(record.request_id);
+                    }
+                }
+            }
+        }
+        for request_id in uncertain {
+            self.journal_best_effort(JournalRecord::IngressOutcome {
+                request_id,
+                disposition: IngressDisposition::Uncertain {
+                    detail: "runtime restarted while the request was with the service".into(),
+                },
+            });
+        }
         // Commands whose evidence chain broke with the instance.
         let open: Vec<Uuid> = self
             .commands
@@ -2302,6 +2835,21 @@ fn attribution(event: &ProviderEvent) -> (Option<Uuid>, Option<Uuid>, Option<Str
         ProviderEvent::ConfigActivated { revision, .. } => (None, None, None, Some(*revision)),
         _ => (None, None, None, None),
     }
+}
+
+/// Read the namespace's stored credentials. This is how the daemon's
+/// controller and the emergency route obtain authority: same-user file
+/// access is the credential distribution, and `identity.json` is
+/// owner-only beside the journal.
+pub fn load_credentials(root: &Path) -> Result<Credentials, HostError> {
+    let path = root.join("identity.json");
+    let raw = fs::read(&path).map_err(io_err)?;
+    let id: IdentityFile =
+        serde_json::from_slice(&raw).map_err(|e| HostError::Malformed(e.to_string()))?;
+    Ok(Credentials {
+        controller: id.controller,
+        emergency: id.emergency,
+    })
 }
 
 fn load_or_mint_identity(root: &Path, namespace: &str) -> Result<Credentials, HostError> {

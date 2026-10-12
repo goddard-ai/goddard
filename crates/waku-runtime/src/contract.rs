@@ -98,7 +98,7 @@ pub struct RequestedConfig {
 /// One requested action as presented to the host. `command_id` plus the
 /// canonical action is the durable identity; the epoch and retry window
 /// authorize this attempt.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionEnvelope {
     pub namespace: String,
@@ -511,6 +511,12 @@ pub struct SessionInventory {
     pub fence: Option<FenceKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective: Option<EffectiveConfig>,
+    /// Agent ingress requests still awaiting an outcome.
+    #[serde(default)]
+    pub pending_ingress: Vec<Uuid>,
+    /// Live durable resource claims reconciliators must account for.
+    #[serde(default)]
+    pub claims: Vec<ResourceClaim>,
     pub adapter_alive: bool,
 }
 
@@ -603,21 +609,161 @@ pub enum DrainReport {
 }
 
 /// Session-scoped authority minted at admission for agent ingress. The
-/// host checks scope and expiry on every request and never renews them;
-/// routing ingress to the daemon arrives with reconciliation (stage 2C).
+/// host checks scope and expiry on every request and never renews them.
+/// The token is the grant's proof: it rides no logs and is compared in
+/// constant time, and it binds the caller to exactly one session
+/// generation — it can never acquire controller authority or another
+/// session's traffic.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionGrant {
     pub grant_id: Uuid,
     pub session_id: Uuid,
     pub generation: u64,
+    /// The bearer proof, minted at issue. Presented verbatim on connect.
+    pub token: String,
     pub expires_at_ms: u64,
+}
+
+/// Agent-originated traffic class. CLI, MCP, and provider-callback
+/// requests all ride the same scoped, deduplicated ingress; the runtime
+/// records identity and forwards to the current daemon — it never
+/// authorizes a new grant or executes product tools itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum IngressKind {
+    Cli,
+    Mcp,
+    Callback,
+}
+
+/// One agent request into the runtime. `request_id` is the caller-chosen
+/// deduplication identity: a retry queries the recorded truth rather than
+/// starting another operation, and the deadline is the caller's original
+/// bound — retries and attachment changes never extend it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IngressRequest {
+    pub request_id: Uuid,
+    pub class: IngressKind,
+    /// Opaque request payload the current daemon interprets.
+    pub subject: Value,
+    /// Original deadline in epoch milliseconds.
+    pub deadline_ms: u64,
+}
+
+/// Recorded truth for one ingress request. The distinction between
+/// `Expired` and `Uncertain` is whether the request provably never reached
+/// a daemon — a forwarded request past its deadline may have executed and
+/// is held for reconciliation, never resent automatically.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum IngressDisposition {
+    /// Recorded; not yet handed to a daemon service.
+    Pending,
+    /// Handed to a controller's service; outcome unconfirmed.
+    Forwarded,
+    /// The daemon returned a result.
+    Completed { result: Value },
+    /// The daemon executed and reported failure.
+    Failed { detail: String },
+    /// Refused before dispatch — fenced generation, dead session, or a
+    /// class the service declined.
+    Refused { detail: String },
+    /// The deadline elapsed while the request had never been dispatched.
+    Expired,
+    /// The daemon may have observed or completed the request; the proof
+    /// is missing. Reconciliation may resolve it; nothing is resent.
+    Uncertain { detail: String },
+}
+
+impl IngressDisposition {
+    /// Whether this disposition can still change. `Forwarded` and
+    /// `Pending` are live; `Uncertain` stays reconcilable like command
+    /// uncertainty.
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            IngressDisposition::Completed { .. }
+                | IngressDisposition::Failed { .. }
+                | IngressDisposition::Refused { .. }
+                | IngressDisposition::Expired
+        )
+    }
+}
+
+/// The host's durable record for one ingress request.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IngressRecord {
+    pub request_id: Uuid,
+    pub session: SessionRef,
+    pub grant_id: Uuid,
+    pub class: IngressKind,
+    pub subject: Value,
+    pub deadline_ms: u64,
+    /// Whether the request was ever handed to a daemon service — the
+    /// dispatch marker that separates `Expired` from `Uncertain`.
+    pub forwarded: bool,
+    pub disposition: IngressDisposition,
+}
+
+/// A request the current daemon service must answer, with its original
+/// identity and deadline preserved.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForwardedRequest {
+    pub request_id: Uuid,
+    pub session: SessionRef,
+    pub grant_id: Uuid,
+    pub class: IngressKind,
+    pub subject: Value,
+    pub deadline_ms: u64,
+}
+
+/// The daemon's reported outcome for one forwarded request.
+/// `Uncertain` means the daemon itself cannot prove whether the work
+/// already ran — the host records that honestly rather than resending.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "outcome",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ForwardedOutcome {
+    Completed { result: Value },
+    Failed { detail: String },
+    Uncertain { detail: String },
+}
+
+/// A durable resource reservation bound to runtime-owned work — a broker
+/// lane, a credential lease, a surviving daemon-tool worker. Claims are
+/// journaled, survive controller replacement, and release only through an
+/// explicit controller decision after reconciliation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceClaim {
+    pub claim_id: Uuid,
+    pub session: SessionRef,
+    /// Opaque claim descriptors the controller understands — broker lanes,
+    /// credential leases, descendant-process claims.
+    pub resources: Vec<String>,
+    pub detail: Value,
 }
 
 /// Every failure a caller can observe. Rejected commands are dispositions
 /// inside receipts; these are authorization and precondition failures that
 /// never reach the journal.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "error",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum HostError {
     #[error("credential or namespace rejected")]
     Unauthorized,
@@ -638,7 +784,7 @@ pub enum HostError {
     #[error("cursor {cursor} precedes the retained floor {floor}")]
     CursorExpired { cursor: u64, floor: u64 },
     #[error("capacity exhausted: {0}")]
-    Capacity(&'static str),
+    Capacity(String),
     #[error("durable persistence is unavailable")]
     PersistenceUnavailable,
     #[error("incompatible protocol: {0}")]

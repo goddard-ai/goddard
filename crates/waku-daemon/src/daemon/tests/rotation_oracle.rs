@@ -29,6 +29,7 @@ fn boss_runtime(backend: &WakuBackend, session_id: Uuid, runtime_id: Uuid) -> Ar
                 runtime_id,
                 DriverHandle::from_control(capture.clone()),
             ),
+            stable: None,
             last_active: std::time::Instant::now(),
             resumable: true,
             computer_use_available: false,

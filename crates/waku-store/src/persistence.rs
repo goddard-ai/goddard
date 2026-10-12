@@ -3404,6 +3404,202 @@ fn normalize_computer_app_grants(grants: &mut Vec<ComputerAppGrant>) {
     });
 }
 
+/// The daemon's durable attachment to a stable-runtime host session: which
+/// runtime session and generation the task rides, and the host sequence the
+/// daemon has durably applied. The runtime's cursor acknowledgement must
+/// never advance past this row's `applied_seq`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StableLinkRow {
+    /// The daemon task id this link belongs to.
+    pub session_id: Uuid,
+    /// The runtime namespace the owning host serves.
+    pub namespace: String,
+    /// The host-side provider session id (the daemon's runtime attempt id).
+    pub runtime_session_id: Uuid,
+    /// The host instance that admitted the session — a replacement is a new
+    /// instance, so a mismatch means the link describes a dead generation.
+    pub runtime_instance: Uuid,
+    /// The host generation inside that session.
+    pub generation: u64,
+    /// Last host event sequence durably applied to daemon state.
+    pub applied_seq: u64,
+    /// `live` | `interrupted` | `ended` — what the host last reported.
+    pub status: String,
+    pub updated_at: u64,
+}
+
+impl StableLinkRow {
+    /// A fresh link for a session the daemon is about to admit.
+    pub fn admit(namespace: &str, session_id: Uuid, runtime_session_id: Uuid, runtime_instance: Uuid) -> Self {
+        Self {
+            session_id,
+            namespace: namespace.to_string(),
+            runtime_session_id,
+            runtime_instance,
+            generation: 1,
+            applied_seq: 0,
+            status: "live".into(),
+            updated_at: 0,
+        }
+    }
+}
+
+/// A recorded outcome for one forwarded stable-runtime agent request. The
+/// request identity is the dedup key: the daemon answers a replayed request
+/// from the receipt and never executes the effect twice.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StableReceipt {
+    pub request_id: Uuid,
+    pub session_id: Uuid,
+    pub generation: u64,
+    /// `cli` | `mcp` | `callback` — the agent surface that forwarded it.
+    pub class: String,
+    /// The serialized outcome returned to the runtime.
+    pub outcome: serde_json::Value,
+    pub recorded_at: u64,
+}
+
+impl StateStore {
+    /// Load a task's stable-runtime link row, if it ever had one.
+    pub fn stable_link(&self, session_id: Uuid) -> io::Result<Option<StableLinkRow>> {
+        let connection = self.open()?;
+        connection
+            .query_row(
+                "SELECT namespace, runtime_session_id, runtime_instance, generation, applied_seq, status, updated_at
+                 FROM stable_runtime_links WHERE session_id = ?1",
+                params![session_id.to_string()],
+                |row| {
+                    let namespace: String = row.get(0)?;
+                    let runtime_session_id: String = row.get(1)?;
+                    let runtime_instance: String = row.get(2)?;
+                    let generation: i64 = row.get(3)?;
+                    let applied_seq: i64 = row.get(4)?;
+                    let status: String = row.get(5)?;
+                    let updated_at: i64 = row.get(6)?;
+                    Ok((namespace, runtime_session_id, runtime_instance, generation, applied_seq, status, updated_at))
+                },
+            )
+            .optional()
+            .map_err(to_io_error)?
+            .map(|(namespace, rsid, rinst, generation, applied_seq, status, updated_at)| {
+                Ok(StableLinkRow {
+                    session_id,
+                    namespace,
+                    runtime_session_id: Uuid::parse_str(&rsid)
+                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+                    runtime_instance: Uuid::parse_str(&rinst)
+                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+                    generation: generation as u64,
+                    applied_seq: applied_seq as u64,
+                    status,
+                    updated_at: updated_at as u64,
+                })
+            })
+            .transpose()
+    }
+
+    /// Upsert a link row — written when the admission lands and every time
+    /// the durable apply cursor or reported status moves.
+    pub fn stable_link_save(&self, row: &StableLinkRow) -> io::Result<()> {
+        let connection = self.open()?;
+        connection
+            .execute(
+                "INSERT INTO stable_runtime_links
+                 (session_id, namespace, runtime_session_id, runtime_instance, generation, applied_seq, status, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(session_id) DO UPDATE SET
+                   namespace = excluded.namespace,
+                   runtime_session_id = excluded.runtime_session_id,
+                   runtime_instance = excluded.runtime_instance,
+                   generation = excluded.generation,
+                   applied_seq = excluded.applied_seq,
+                   status = excluded.status,
+                   updated_at = excluded.updated_at",
+                params![
+                    row.session_id.to_string(),
+                    row.namespace,
+                    row.runtime_session_id.to_string(),
+                    row.runtime_instance.to_string(),
+                    row.generation as i64,
+                    row.applied_seq as i64,
+                    row.status,
+                    row.updated_at as i64,
+                ],
+            )
+            .map_err(to_io_error)?;
+        Ok(())
+    }
+
+    /// Forget a link — the task's runtime attachment is over for good.
+    pub fn stable_link_clear(&self, session_id: Uuid) -> io::Result<()> {
+        let connection = self.open()?;
+        connection
+            .execute(
+                "DELETE FROM stable_runtime_links WHERE session_id = ?1",
+                params![session_id.to_string()],
+            )
+            .map_err(to_io_error)?;
+        Ok(())
+    }
+
+    /// The recorded outcome for a forwarded request, by identity.
+    pub fn stable_receipt(&self, request_id: Uuid) -> io::Result<Option<StableReceipt>> {
+        let connection = self.open()?;
+        connection
+            .query_row(
+                "SELECT session_id, generation, class, outcome, recorded_at
+                 FROM stable_runtime_receipts WHERE request_id = ?1",
+                params![request_id.to_string()],
+                |row| {
+                    let session_id: String = row.get(0)?;
+                    let generation: i64 = row.get(1)?;
+                    let class: String = row.get(2)?;
+                    let outcome: String = row.get(3)?;
+                    let recorded_at: i64 = row.get(4)?;
+                    Ok((session_id, generation, class, outcome, recorded_at))
+                },
+            )
+            .optional()
+            .map_err(to_io_error)?
+            .map(|(sid, generation, class, outcome, recorded_at)| {
+                Ok(StableReceipt {
+                    request_id,
+                    session_id: Uuid::parse_str(&sid)
+                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+                    generation: generation as u64,
+                    class,
+                    outcome: serde_json::from_str(&outcome)
+                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?,
+                    recorded_at: recorded_at as u64,
+                })
+            })
+            .transpose()
+    }
+
+    /// Record an outcome before delivery is confirmed — a replayed request
+    /// reads the receipt rather than executing again.
+    pub fn stable_receipt_record(&self, receipt: &StableReceipt) -> io::Result<()> {
+        let connection = self.open()?;
+        let outcome = serde_json::to_string(&receipt.outcome).map_err(io::Error::other)?;
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO stable_runtime_receipts
+                 (request_id, session_id, generation, class, outcome, recorded_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    receipt.request_id.to_string(),
+                    receipt.session_id.to_string(),
+                    receipt.generation as i64,
+                    receipt.class,
+                    outcome,
+                    receipt.recorded_at as i64,
+                ],
+            )
+            .map_err(to_io_error)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

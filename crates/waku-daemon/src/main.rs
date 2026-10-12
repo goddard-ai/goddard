@@ -85,6 +85,7 @@ fn main() -> anyhow::Result<()> {
     // bound socket, not the `--bind` request.
     backend.set_daemon_address(address.to_string());
     let backend = Arc::new(backend);
+    backend.install_weak_self();
     // Scheduled automations tick whether or not a client ever connects;
     // starting here is what makes them daemon-owned.
     backend.start_automations();

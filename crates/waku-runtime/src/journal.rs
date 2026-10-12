@@ -129,6 +129,42 @@ pub enum JournalRecord {
         generation: u64,
         applied: u64,
     },
+    /// A session-scoped grant minted for agent ingress. The token is the
+    /// grant's proof — journaled under the same file permissions as the
+    /// namespace identity, checked on every request, never renewed.
+    GrantIssued {
+        session_id: Uuid,
+        generation: u64,
+        grant_id: Uuid,
+        token: String,
+        expires_at_ms: u64,
+    },
+    /// An agent request accepted at scoped ingress, durable before any
+    /// forwarding — a crash reconciles the record, it is never lost.
+    IngressOpened {
+        record: Box<IngressRecord>,
+    },
+    /// The request was handed to a controller's service — the dispatch
+    /// marker separating `Expired` from `Uncertain` after a failure.
+    IngressForwarded {
+        request_id: Uuid,
+    },
+    /// The request's recorded outcome — a separate fact from forwarding.
+    IngressOutcome {
+        request_id: Uuid,
+        disposition: IngressDisposition,
+    },
+    /// A durable resource claim bound to runtime-owned work.
+    ClaimRegistered {
+        claim: ResourceClaim,
+    },
+    /// A controller released a claim after reconciling or terminating its
+    /// work. Claims never release silently on controller detachment.
+    ClaimReleased {
+        claim_id: Uuid,
+        session_id: Uuid,
+        generation: u64,
+    },
     /// A crash-recovered namespace completed inventory reconciliation.
     Reconciled {
         epoch: u64,

@@ -375,7 +375,14 @@ impl WakuBackend {
         }
         // A launch that never came up keeps no credential.
         let sandboxed_launch = options.sandbox.is_some();
-        let handle = self.start_runtime_driver(provider, options, event_sender, cloud_launch)?;
+        let (handle, stable) = self.start_runtime_driver(
+            session_id,
+            runtime_id,
+            provider,
+            options,
+            event_sender,
+            cloud_launch,
+        )?;
         if prepared_plan.is_some()
             && handle.agent_surface_delivery() == driver::AgentSurfaceDelivery::Absent
         {
@@ -422,6 +429,7 @@ impl WakuBackend {
                 plan_gate,
                 runtime_id,
                 driver: handle.clone(),
+                stable,
                 last_active: std::time::Instant::now(),
                 resumable,
                 computer_use_available,
@@ -436,20 +444,40 @@ impl WakuBackend {
 
     fn start_runtime_driver(
         &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
         provider: ProviderKind,
         options: DriverStartOptions,
         sender: driver::DriverEventSender,
         cloud: bool,
-    ) -> anyhow::Result<DriverHandle> {
+    ) -> anyhow::Result<(DriverHandle, Option<crate::stable_runtime::StableLink>)> {
         #[cfg(test)]
         if let Some(start) = &self.runtime_test_start {
-            return start(provider, options, sender);
+            return start(provider, options, sender).map(|handle| (handle, None));
         }
-        if cloud {
-            driver::start_cloud(provider, options, sender)
+        if let Some(root) = self.stable_runtime_root(provider) {
+            // The opt-in seam: this launch attaches through the surviving
+            // runtime host. Every other provider keeps the legacy
+            // in-process driver until Stage 4.
+            let (handle, stable) = crate::stable_runtime::start_link(
+                self,
+                &self.task_store,
+                session_id,
+                runtime_id,
+                provider,
+                &options,
+                sender,
+                &root,
+                None,
+            )?;
+            return Ok((handle, Some(stable)));
+        }
+        let handle = if cloud {
+            driver::start_cloud(provider, options, sender)?
         } else {
-            driver::start_local(provider, options, sender)
-        }
+            driver::start_local(provider, options, sender)?
+        };
+        Ok((handle, None))
     }
 
     /// Revoke only the owner being removed. A launch attempt can own credentials
@@ -606,7 +634,7 @@ impl WakuBackend {
     /// Return the live driver for `session_id`, cold-starting it from the
     /// stored task's provider cursor and saved options when no runtime is
     /// running.
-    pub(super) fn ensure_agent_runtime(
+    pub(crate) fn ensure_agent_runtime(
         &self,
         session_id: Uuid,
         events: &EventSink,

@@ -68,6 +68,7 @@ pub mod routing;
 pub use waku_exec::sandbox;
 pub mod share;
 pub use waku_vcs::shell_command;
+pub(crate) mod stable_runtime;
 pub use waku_workspace::skills;
 pub mod stats;
 pub use waku_exec::terminal;

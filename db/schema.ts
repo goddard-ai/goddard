@@ -168,3 +168,47 @@ export const sessionDetails = sqliteTable("session_details", {
   sessionId: text("session_id").primaryKey(),
   data: text("data").notNull(),
 });
+
+/**
+ * The daemon's durable attachment to a stable-runtime host session. One row
+ * per task that ever ran through the surviving provider host: it records the
+ * runtime session/generation the task is attached to and the host sequence
+ * the daemon has durably applied — the cursor the runtime must never see
+ * replayed or lost.
+ */
+export const stableRuntimeLinks = sqliteTable("stable_runtime_links", {
+  /** The daemon task id this link belongs to. */
+  sessionId: text("session_id").primaryKey(),
+  /** The runtime namespace the owning host serves. */
+  namespace: text("namespace").notNull(),
+  /** The host-side provider session id (the daemon's runtime attempt id). */
+  runtimeSessionId: text("runtime_session_id").notNull(),
+  /** The host instance that admitted the session — a replacement is a new instance. */
+  runtimeInstance: text("runtime_instance").notNull(),
+  /** The host generation inside that session. */
+  generation: integer("generation").notNull(),
+  /** Last host event sequence durably applied to daemon state. */
+  appliedSeq: integer("applied_seq").notNull().default(0),
+  /** live | interrupted | ended — mirrors what the host last reported. */
+  status: text("status").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+/**
+ * Effect receipts for stable-runtime agent ingress. The request identity is
+ * the durable key: a forwarded request whose answer the daemon already
+ * recorded is answered from the receipt, never executed twice — and an
+ * outcome that could not be confirmed stays `uncertain`, never resent.
+ */
+export const stableRuntimeReceipts = sqliteTable("stable_runtime_receipts", {
+  /** The runtime's request identity — also the dedup key for effects. */
+  requestId: text("request_id").primaryKey(),
+  /** The daemon task the request's grant was scoped to. */
+  sessionId: text("session_id").notNull(),
+  generation: integer("generation").notNull(),
+  /** cli | mcp | callback — which agent surface forwarded it. */
+  class: text("class").notNull(),
+  /** JSON outcome recorded for the request before delivery was confirmed. */
+  outcome: text("outcome").notNull(),
+  recordedAt: integer("recorded_at").notNull(),
+});

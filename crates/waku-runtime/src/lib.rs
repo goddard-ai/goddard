@@ -21,6 +21,15 @@ pub mod contract;
 pub mod fake;
 pub mod host;
 pub mod journal;
+pub mod registry;
+pub mod wire;
+
+#[cfg(unix)]
+pub mod client;
+#[cfg(unix)]
+pub mod ipc;
+#[cfg(unix)]
+pub mod server;
 
 pub use adapter::{
     AdapterFactory, AdapterHandle, CancelOutcome, CancellationLimit, DeadlineBound,
@@ -30,6 +39,14 @@ pub use contract::*;
 pub use fake::{FakeAdapter, FakeFactory, ManualClock};
 pub use host::{Budgets, Clock, Credentials, HostOptions, RuntimeHost, SystemClock};
 pub use journal::{JournalError, JournalFault};
+pub use registry::AdapterRegistry;
 
+#[cfg(unix)]
+pub use client::{ClientError, RuntimeClient};
+#[cfg(unix)]
+pub use server::RuntimeServer;
+
+#[cfg(test)]
+mod stage2c_tests;
 #[cfg(test)]
 mod tests;

@@ -114,6 +114,9 @@ impl WakuBackend {
             summon_wake: Arc::new((Mutex::new(false), Condvar::new())),
             summon_scheduler_started: std::sync::atomic::AtomicBool::new(false),
             broker_root: Mutex::new(None),
+            weak_self: Mutex::new(Weak::new()),
+            #[cfg(test)]
+            stable_test_root: None,
         };
         // Sessions summoned before `boss_managed` existed carry no stamp;
         // the roster still names them, so mark them now — once an employee

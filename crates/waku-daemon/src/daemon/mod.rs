@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 
 use crate::{
     AgentPromptDelivery, AgentWorkspace, Backend, Command, EventSink, Request, ResponsePayload,
@@ -341,7 +341,7 @@ fn resident_bytes(session: &AgentSession) -> u64 {
 /// driver emits while it unwinds stay scoped to the removed runtime id,
 /// which the hub has already retired. A spawn failure falls back to the
 /// inline drop.
-fn drop_detached<T: Send + 'static>(value: T) {
+pub(crate) fn drop_detached<T: Send + 'static>(value: T) {
     let _ = std::thread::Builder::new()
         .name("waku-detached-teardown".into())
         .spawn(move || drop(value));
@@ -383,6 +383,9 @@ struct RuntimeEntry {
     plan_gate: Option<Arc<plan_delivery::PlanGate>>,
     runtime_id: Uuid,
     driver: DriverHandle,
+    /// Present when this runtime rides the surviving provider host — the
+    /// forwarder's applied-marker routing acks the host through it.
+    stable: Option<crate::stable_runtime::StableLink>,
     last_active: std::time::Instant,
     resumable: bool,
     computer_use_available: bool,
@@ -641,6 +644,57 @@ pub struct WakuBackend {
     summon_scheduler_started: std::sync::atomic::AtomicBool,
     /// Tests root their own broker ledger rather than the host's.
     broker_root: Mutex<Option<PathBuf>>,
+    /// Set once the backend is inside its `Arc` — the stable-runtime
+    /// ingress service upgrades it for scoped command dispatch.
+    weak_self: Mutex<Weak<WakuBackend>>,
+    /// Test seam: routes provider launches through an in-test runtime host
+    /// rooted here instead of the legacy in-process drivers.
+    #[cfg(test)]
+    pub(crate) stable_test_root: Option<PathBuf>,
+}
+
+impl WakuBackend {
+    /// Install the backend's own weak reference — called once the `Arc`
+    /// exists — so the stable-runtime ingress service can upgrade it for
+    /// scoped command dispatch without creating a cycle.
+    pub fn install_weak_self(self: &Arc<Self>) {
+        *self.weak_self.lock() = Arc::downgrade(self);
+    }
+
+    pub(crate) fn weak_self(&self) -> Weak<WakuBackend> {
+        self.weak_self.lock().clone()
+    }
+
+    /// The hub's event source, for the stable-runtime ingress service's
+    /// scoped `handle` calls.
+    pub(crate) fn event_source(&self) -> EventSink {
+        self.event_source.lock().clone()
+    }
+
+    /// The durable state store — the stable-runtime link records its
+    /// session attachment and effect receipts here.
+    #[cfg(test)]
+    pub(crate) fn task_store(&self) -> &Arc<StateStore> {
+        &self.task_store
+    }
+
+    /// Where a provider launch should ride the surviving runtime host —
+    /// `Some(root)` opts this provider in, `None` keeps the legacy
+    /// in-process driver path.
+    fn stable_runtime_root(&self, provider: ProviderKind) -> Option<PathBuf> {
+        #[cfg(test)]
+        {
+            return crate::stable_runtime::enabled(
+                provider,
+                &self.data_dir,
+                self.stable_test_root.as_ref(),
+            );
+        }
+        #[cfg(not(test))]
+        {
+            crate::stable_runtime::enabled(provider, &self.data_dir, None)
+        }
+    }
 }
 
 /// How often the summon scheduler re-scans while tickets wait — the
@@ -711,4 +765,4 @@ use response::*;
 use transfer::*;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

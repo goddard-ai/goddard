@@ -11556,6 +11556,7 @@ dependencies = [
  "waku-localization",
  "waku-protocol",
  "waku-repo-map",
+ "waku-runtime",
  "waku-server",
  "waku-sessions",
  "waku-share",
@@ -11694,6 +11695,7 @@ name = "waku-runtime"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
+ "libc",
  "serde",
  "serde_json",
  "subtle",
