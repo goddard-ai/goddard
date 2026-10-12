@@ -2401,6 +2401,19 @@ impl TerminalView {
         }
     }
 
+    /// ⌘C reaches the view as an action, not a keystroke: the workspace
+    /// binds it to `CopySelection` and the Edit menu sends `Copy`. The
+    /// grid's own selection answers both before the workspace's
+    /// transcript fallback — which a stale selection would otherwise win
+    /// while the terminal still held one.
+    fn copy_selection_or_propagate(&mut self, cx: &mut Context<Self>) {
+        if self.selected_text().is_some() {
+            self.copy_selection(cx);
+        } else {
+            cx.propagate();
+        }
+    }
+
     fn paste(&mut self, text: String, cx: &mut Context<Self>) {
         self.pause_cursor_blink(cx);
         let Some(session) = &self.session else {
@@ -3191,6 +3204,25 @@ impl Render for TerminalView {
             .bg(theme.terminal)
             .children(toolbar)
             .child(grid)
+            .on_action(cx.listener(|this, _: &crate::CopySelection, _, cx| {
+                this.copy_selection_or_propagate(cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::input::Copy, _, cx| {
+                this.copy_selection_or_propagate(cx)
+            }))
+            .on_action(cx.listener(|this, _: &crate::input::Paste, _, cx| {
+                match cx.read_from_clipboard().and_then(|item| item.text()) {
+                    Some(text) => this.paste(text, cx),
+                    None => cx.propagate(),
+                }
+            }))
+            .on_action(cx.listener(|this, _: &crate::input::SelectAll, _, cx| {
+                if this.session.is_some() {
+                    this.select_all(cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
             .on_key_down(cx.listener(Self::on_key_down))
             .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
     }

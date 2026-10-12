@@ -1,0 +1,1 @@
+- Copy and paste now work reliably in a full-page terminal: ⌘C copies the grid's selection even while a chat transcript still holds one, and the Edit menu's Copy, Paste, and Select All reach a focused terminal.
