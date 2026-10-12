@@ -6534,8 +6534,16 @@ boss.command_placeholder_memory:
   en: Ask the boss to correct this memory...
 boss.command_placeholder_memory_feedback:
   en: Send memory feedback to the boss...
+boss.command_placeholder_direct:
+  en: Message %{name} directly…
 boss.command_hint:
   en: Messages go to %{name}
+boss.command_send_to:
+  en: Send to
+boss.command_no_employees:
+  en: No employees yet
+boss.command_target_gone:
+  en: "%{name} is no longer available — the message was not sent"
 boss.save_first:
   en: Save or discard your changes before selecting another document.
 boss.history_loading:

@@ -655,6 +655,12 @@ pub(super) struct BossUi {
     /// Cleared by a send or any landing that is not re-arming it — the
     /// `pending_deliverable` half carries it across its own navigation.
     pub command_deliverable: Option<(DaemonKey, Uuid)>,
+    /// Per-daemon destination picks off the composer's target chip: the
+    /// employee session id sends land on directly, keyed by the boss that
+    /// owns the employee so a pick under one boss never reroutes
+    /// another's. Absent means the armed command's default — the boss
+    /// chat. Session ids keep a pick stable across roster reorders.
+    pub(super) composer_targets: HashMap<DaemonKey, Uuid>,
     /// The deliverable whose row click is still navigating to its task page —
     /// the boss chat. Session activation clears `command_deliverable` as stale
     /// context, so the click parks its deliverable here and the finish reapplies
@@ -815,6 +821,7 @@ impl Default for BossUi {
             sidebar_idle_visible: HashMap::new(),
             sidebar_errand_idle_visible: HashMap::new(),
             command_deliverable: None,
+            composer_targets: HashMap::new(),
             pending_deliverable: None,
             deliverable_page: None,
             deliverable_page_scroll: HashMap::new(),
@@ -1212,6 +1219,44 @@ pub(super) enum BossCommandContext {
         name: String,
         directory: bool,
     },
+}
+
+/// Where the main composer lands a submission while a boss command is
+/// armed: the boss chat by default, or the employee the destination chip
+/// picked. A `Stale` pick names an employee that left its boss's roster —
+/// sends on it refuse rather than silently rerouting to the boss the
+/// draft was not written for.
+pub(super) enum ComposerTarget {
+    Boss,
+    Employee(Uuid),
+    Stale { employee: Uuid, name: String },
+}
+
+/// What a stored composer-target pick resolves to against the roster it
+/// was picked from: `Unpicked` keeps the boss chat as the destination,
+/// `Live` routes the send to the employee, `Stale` marks a pick whose
+/// employee left the roster so callers refuse rather than reroute
+/// silently.
+pub(super) enum ComposerTargetPick {
+    Unpicked,
+    Live(Uuid),
+    Stale(Uuid),
+}
+
+impl BossUi {
+    /// Resolve the daemon's stored chip pick against its current roster.
+    /// A session id keeps a pick stable across reorders; membership in the
+    /// roster (expired employees stay listed) keeps it live, anything
+    /// else — retired, unrostered, no roster received yet — reads stale.
+    fn composer_target_pick(&self, key: DaemonKey) -> ComposerTargetPick {
+        let Some(employee) = self.composer_targets.get(&key).copied() else {
+            return ComposerTargetPick::Unpicked;
+        };
+        match self.recent.get(&key) {
+            Some(roster) if roster.contains(&employee) => ComposerTargetPick::Live(employee),
+            _ => ComposerTargetPick::Stale(employee),
+        }
+    }
 }
 
 /// Keep the accepted draft and its armed context together while asking the
@@ -3295,6 +3340,73 @@ impl Waku {
         })
     }
 
+    /// The daemon whose boss owns an armed command — the chat submissions
+    /// land on and the roster the target chip lists.
+    pub(super) fn composer_command_daemon(&self, command: &BossCommand) -> Option<DaemonKey> {
+        self.boss_ui
+            .states
+            .iter()
+            .find_map(|(key, state)| (state.identity.id == command.identity.id).then_some(*key))
+    }
+
+    /// The chip pick for an armed command's daemon: `Boss` until the user
+    /// picks an employee off the menu. A pick names a session id, not a
+    /// row, so roster reorders cannot retarget it; one whose employee
+    /// left the roster comes back `Stale` so sends refuse closed instead
+    /// of landing on the boss chat.
+    pub(super) fn composer_target(&self, command: &BossCommand) -> ComposerTarget {
+        let Some(key) = self.composer_command_daemon(command) else {
+            return ComposerTarget::Boss;
+        };
+        match self.boss_ui.composer_target_pick(key) {
+            ComposerTargetPick::Unpicked => ComposerTarget::Boss,
+            ComposerTargetPick::Live(employee) => ComposerTarget::Employee(employee),
+            ComposerTargetPick::Stale(employee) => ComposerTarget::Stale {
+                employee,
+                name: self.employee_target_name(employee),
+            },
+        }
+    }
+
+    /// The label a picked employee wears on the chip and in refusal
+    /// toasts — its persona name, falling back to the session title and
+    /// then a bare "Employee" once even the roster record is gone.
+    fn employee_target_name(&self, employee: Uuid) -> String {
+        self.boss_ui
+            .identities
+            .get(&employee)
+            .map(|identity| identity.name.clone())
+            .or_else(|| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == employee)
+                    .map(|session| session.title.clone())
+            })
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| tr!("boss.trigger_employee"))
+    }
+
+    /// Record the destination chip's pick for one boss daemon — `None`
+    /// restores the boss chat as the landing.
+    fn set_composer_target(
+        &mut self,
+        key: DaemonKey,
+        target: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) {
+        match target {
+            Some(employee) => {
+                self.boss_ui.composer_targets.insert(key, employee);
+            }
+            None => {
+                self.boss_ui.composer_targets.remove(&key);
+            }
+        }
+        self.sync_composer_placeholder(cx);
+        cx.notify();
+    }
+
     /// The attachment a boss-command submission carries: a session
     /// reference for the viewed employee, the published file itself for
     /// an armed deliverable. Its mention token splices into the provider-
@@ -3357,11 +3469,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let restore_session = self.state.selected_session.unwrap_or(command.session_id);
-        let Some(key) =
-            self.boss_ui.states.iter().find_map(|(key, state)| {
-                (state.identity.id == command.identity.id).then_some(*key)
-            })
-        else {
+        let Some(key) = self.composer_command_daemon(&command) else {
             self.restore_composer_submission(restore_session, submission, cx);
             return;
         };
@@ -3563,23 +3671,41 @@ impl Waku {
         if self.big_picture.is_open() {
             return;
         }
-        let placeholder = match self.composer_boss_command().map(|command| command.context) {
-            Some(BossCommandContext::Employee(..)) => tr!("boss.command_placeholder_employee"),
-            Some(BossCommandContext::Deliverable { .. }) => {
-                tr!("boss.command_placeholder_deliverable")
-            }
-            Some(BossCommandContext::MemoryFeedback(_)) => {
-                tr!("boss.command_placeholder_memory_feedback")
-            }
+        let placeholder = match self.composer_boss_command() {
+            Some(command) => match self.composer_target(&command) {
+                ComposerTarget::Employee(employee) => tr!(
+                    "boss.command_placeholder_direct",
+                    name = self.employee_target_name(employee)
+                ),
+                // The chip keeps naming the picked employee — the send
+                // itself refuses, so the hint stays honest about intent.
+                ComposerTarget::Stale { name, .. } => {
+                    tr!("boss.command_placeholder_direct", name = name)
+                }
+                ComposerTarget::Boss => match command.context {
+                    BossCommandContext::Employee(..) => {
+                        tr!("boss.command_placeholder_employee")
+                    }
+                    BossCommandContext::Deliverable { .. } => {
+                        tr!("boss.command_placeholder_deliverable")
+                    }
+                    BossCommandContext::MemoryFeedback(_) => {
+                        tr!("boss.command_placeholder_memory_feedback")
+                    }
+                },
+            },
             None => tr!("input.do_anything"),
         };
         self.composer
             .update(cx, |composer, cx| composer.set_placeholder(placeholder, cx));
     }
 
-    /// The chip an armed main composer draws before the model picker: the
-    /// boss the submission goes to, named so the destination is visible
-    /// while the pickers still describe the viewed session.
+    /// The composer's destination chip while a boss command is armed: the
+    /// face and name Enter's draft lands on — the boss by default, or the
+    /// employee picked off this menu, which sends over the roster's
+    /// control channel instead of commanding the boss. A stale pick keeps
+    /// its employee's name so the chip never claims a destination a send
+    /// would silently miss.
     pub(super) fn render_boss_command_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let command = self.composer_boss_command()?;
         // The workspace footer already names the boss when the command's
@@ -3587,22 +3713,180 @@ impl Waku {
         if self.workspace_subject().0 == Some(command.session_id) {
             return None;
         }
-        Some(
-            div()
-                .id("boss-command-chip")
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .pr(px(4.0))
-                .tooltip(Tooltip::text(tr!(
-                    "boss.command_hint",
-                    name = command.identity.name.clone()
-                )))
-                .child(self.boss_avatar(&command.identity, 16.0, cx))
-                .child(SharedString::from(command.identity.name))
-                .into_any_element(),
-        )
+        let theme = Theme::current(cx);
+        let key = self.composer_command_daemon(&command)?;
+        let target = self.composer_target(&command);
+        let (chip_name, chip_identity) = match &target {
+            ComposerTarget::Boss => (
+                command.identity.name.clone(),
+                Some(command.identity.clone()),
+            ),
+            ComposerTarget::Employee(employee) | ComposerTarget::Stale { employee, .. } => {
+                let name = self.employee_target_name(*employee);
+                let identity = self.boss_ui.identities.get(employee).cloned().or_else(|| {
+                    Some(BossIdentity {
+                        id: *employee,
+                        name: name.clone(),
+                        avatar_seed: name.clone(),
+                        avatar_style: AvatarStyle::default(),
+                    })
+                });
+                (name, identity)
+            }
+        };
+        // Menu rows are a prebuilt snapshot: the items closure and its row
+        // renders run inside the card's own paint, where the entity is
+        // already borrowed, so faces come from the avatar cache only.
+        let picked = self.boss_ui.composer_targets.get(&key).copied();
+        let boss_face = self.boss_avatar_cached(&command.identity, 18.0);
+        let boss_identity = command.identity.clone();
+        let employees: Vec<(Uuid, BossIdentity, String, bool)> = self
+            .boss_ui
+            .recent
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .filter_map(|employee| {
+                let identity = self.boss_ui.identities.get(employee)?.clone();
+                let job_title = self
+                    .boss_ui
+                    .job_titles
+                    .get(employee)
+                    .cloned()
+                    .unwrap_or_default();
+                Some((
+                    *employee,
+                    identity,
+                    job_title,
+                    self.boss_ui.expired.contains(employee),
+                ))
+            })
+            .collect();
+        let employee_faces: Vec<Option<Arc<gpui::RenderImage>>> = employees
+            .iter()
+            .map(|(_, identity, _, _)| self.boss_avatar_cached(identity, 18.0))
+            .collect();
+        let weak = cx.entity().downgrade();
+        let handle = self.menu_handle("boss-composer-target", cx);
+        let trigger = div()
+            .id("boss-command-chip")
+            .flex_none()
+            .h(px(26.0))
+            .pl(px(5.0))
+            .pr(px(7.0))
+            .rounded(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .text_size(sp(13.0))
+            .line_height(sp(16.0))
+            .cursor_default()
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .when(handle.is_open(), |element| element.bg(theme.overlay))
+            .hover(|element| element.bg(theme.overlay))
+            .tooltip(Tooltip::text(tr!(
+                "boss.command_hint",
+                name = chip_name.clone()
+            )))
+            .when_some(chip_identity, |element, identity| {
+                element.child(self.boss_avatar(&identity, 16.0, cx))
+            })
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(chip_name)),
+            )
+            .child(icon(
+                "icons/chevron-down.svg",
+                10.5,
+                theme.affordance_icon(),
+            ));
+        Some(dropdown_menu(
+            trigger,
+            "boss-composer-target-menu",
+            &handle,
+            MenuAlign::AboveLeft,
+            move |cx| {
+                let mut items = Vec::new();
+                items.push(MenuItem::Header(tr!("boss.command_send_to").into()));
+                {
+                    let weak = weak.clone();
+                    items.push(
+                        MenuItem::custom({
+                            let theme = Theme::current(cx);
+                            let boss_face = boss_face.clone();
+                            let identity = boss_identity.clone();
+                            let name = boss_identity.name.clone();
+                            move |_, _| {
+                                target_row(
+                                    boss_face.clone(),
+                                    &identity,
+                                    &name,
+                                    None,
+                                    picked.is_none(),
+                                    &theme,
+                                )
+                            }
+                        })
+                        .on_click(move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_composer_target(key, None, cx);
+                            });
+                        }),
+                    );
+                }
+                if employees.is_empty() {
+                    items.push(
+                        MenuItem::new(tr!("boss.command_no_employees"), move |_, _| {})
+                            .disabled(true),
+                    );
+                } else {
+                    items.push(MenuItem::Separator);
+                    for (index, (employee, identity, job_title, expired)) in
+                        employees.iter().enumerate()
+                    {
+                        let weak = weak.clone();
+                        let employee = *employee;
+                        items.push(
+                            MenuItem::custom({
+                                let theme = Theme::current(cx);
+                                let face = employee_faces[index].clone();
+                                let identity = identity.clone();
+                                let name = identity.name.clone();
+                                let detail = match (job_title.is_empty(), *expired) {
+                                    (false, true) => format!(
+                                        "{} · {}",
+                                        job_title,
+                                        tr!("boss.employee_finished")
+                                    ),
+                                    (true, true) => tr!("boss.employee_finished"),
+                                    _ => job_title.clone(),
+                                };
+                                let selected = picked == Some(employee);
+                                move |_, _| {
+                                    target_row(
+                                        face.clone(),
+                                        &identity,
+                                        &name,
+                                        (!detail.is_empty()).then(|| detail.clone()),
+                                        selected,
+                                        &theme,
+                                    )
+                                }
+                            })
+                            .on_click(move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_composer_target(key, Some(employee), cx);
+                                });
+                            }),
+                        );
+                    }
+                }
+                items
+            },
+        ))
     }
 
     /// The boss-side identity of a managed session: an employee's persona
@@ -10993,6 +11277,87 @@ mod loading_indicator_tests {
     }
 }
 
+/// One row of the composer's target menu: the cached face or lettered
+/// placeholder, the recipient's name over an optional detail line (job
+/// title, "Finished"), and a trailing check on the live pick. Drawn from
+/// captured state — menu rows render inside the card's own paint, where
+/// the entity is already borrowed.
+fn target_row(
+    face: Option<Arc<gpui::RenderImage>>,
+    identity: &BossIdentity,
+    name: &str,
+    detail: Option<String>,
+    selected: bool,
+    theme: &Theme,
+) -> AnyElement {
+    let circular = boss_moods::circular_frame(identity.avatar_style);
+    let avatar: AnyElement = if let Some(image) = face {
+        let image = gpui::img(image).size(px(18.0));
+        if circular {
+            image.rounded_full().into_any_element()
+        } else {
+            image.rounded(px(6.0)).into_any_element()
+        }
+    } else {
+        let placeholder = div().size(px(18.0));
+        let placeholder = if circular {
+            placeholder.rounded_full()
+        } else {
+            placeholder.rounded(px(6.0))
+        };
+        placeholder
+            .bg(theme.overlay)
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(sp(10.0))
+            .text_color(theme.text_tertiary)
+            .child(name.chars().next().unwrap_or('B').to_string())
+            .into_any_element()
+    };
+    div()
+        .w(px(260.0))
+        .py(px(4.0))
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .child(avatar)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .w_full()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .font_weight(if selected {
+                            FontWeight::SEMIBOLD
+                        } else {
+                            FontWeight::MEDIUM
+                        })
+                        .text_color(theme.text)
+                        .child(name.to_owned()),
+                )
+                .when_some(detail, |element, detail| {
+                    element.child(
+                        div()
+                            .w_full()
+                            .mt(px(2.0))
+                            .truncate()
+                            .text_size(sp(11.5))
+                            .line_height(sp(13.0))
+                            .text_color(theme.text_tertiary)
+                            .child(detail),
+                    )
+                }),
+        )
+        .when(selected, |element| {
+            element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
+        })
+        .into_any_element()
+}
+
 #[track_caller]
 pub(super) fn boss_button(
     id: impl Into<SharedString>,
@@ -12654,5 +13019,53 @@ mod tests {
         // was selected since.
         assert!(boss_open_reply_navigates(None, None));
         assert!(!boss_open_reply_navigates(None, Some(project_draft)));
+    }
+
+    /// The chip pick binds a session id, not a roster slot: reorders keep
+    /// the same employee, an employee leaving the roster (retired, or one
+    /// whose boss never sent one) reads stale so a send refuses closed
+    /// rather than landing on the boss chat the draft was not written for,
+    /// and a pick under one daemon never resolves under another.
+    #[test]
+    fn composer_target_pick_tracks_the_roster_by_session_id() {
+        let key = DaemonKey::Local;
+        let other_key = DaemonKey::Remote(Uuid::new_v4());
+        let employee = Uuid::new_v4();
+        let coworker = Uuid::new_v4();
+        let mut ui = BossUi::default();
+        // Nothing picked: the boss chat stays the destination.
+        assert!(matches!(
+            ui.composer_target_pick(key),
+            ComposerTargetPick::Unpicked
+        ));
+        ui.composer_targets.insert(key, employee);
+        // A missing roster cannot confirm the pick — stale, never live.
+        assert!(matches!(
+            ui.composer_target_pick(key),
+            ComposerTargetPick::Stale(id) if id == employee
+        ));
+        ui.recent.insert(key, vec![employee, coworker]);
+        assert!(matches!(
+            ui.composer_target_pick(key),
+            ComposerTargetPick::Live(id) if id == employee
+        ));
+        // Reordering the roster does not retarget the pick.
+        ui.recent.insert(key, vec![coworker, employee]);
+        assert!(matches!(
+            ui.composer_target_pick(key),
+            ComposerTargetPick::Live(id) if id == employee
+        ));
+        // Retirement drops the employee from the roster — the pick stays
+        // armed against the session id but reads stale.
+        ui.recent.insert(key, vec![coworker]);
+        assert!(matches!(
+            ui.composer_target_pick(key),
+            ComposerTargetPick::Stale(id) if id == employee
+        ));
+        // The same session id picked under another daemon is inert here.
+        assert!(matches!(
+            ui.composer_target_pick(other_key),
+            ComposerTargetPick::Unpicked
+        ));
     }
 }

@@ -6196,10 +6196,13 @@ impl Waku {
         // the boss chat and planning sessions' own cards, plus the main
         // card while an armed boss command reroutes its submission to the
         // boss chat — a viewed employee or an armed deliverable riding
-        // along as context. Every other send keeps the plain filled disc
-        // and tinted arrow.
+        // along as context. A chip-picked employee leaves the boss path
+        // entirely, so its send keeps the plain filled disc too.
         let boss_send = session.is_some_and(|session| self.session_is_boss_owned(session))
-            || (interactive && self.composer_boss_command().is_some());
+            || (interactive
+                && self.composer_boss_command().is_some_and(|command| {
+                    matches!(self.composer_target(&command), boss::ComposerTarget::Boss)
+                }));
         let send_route = surface.clone();
         let queue_route = surface.clone();
         let continue_route = surface.clone();

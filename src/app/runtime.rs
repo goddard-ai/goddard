@@ -6591,14 +6591,29 @@ impl Waku {
         // An armed boss command answers to the boss chat, not the
         // selected task — the employee on screen or a clicked deliverable
         // rides along as the submission's context attachment. Hidden
-        // nudges (continue, goal reminders) stay on their own session.
+        // nudges (continue, goal reminders) stay on their own session,
+        // and a chip-picked employee takes its draft over the roster's
+        // control channel instead.
         if !submission.hidden
             && let Some(command) = self.composer_boss_command()
         {
             if let Some(owner) = self.composer_voice_pad_owner() {
                 self.retire_press_to_talk_bubble(owner, cx);
             }
-            self.submit_boss_composer_command(command, submission, false, cx);
+            match self.composer_target(&command) {
+                boss::ComposerTarget::Boss => {
+                    self.submit_boss_composer_command(command, submission, false, cx);
+                }
+                target => {
+                    self.submit_composer_employee_send(
+                        command,
+                        target,
+                        submission,
+                        waku_client::AgentPromptDelivery::Queue,
+                        cx,
+                    );
+                }
+            }
             return;
         }
         let Some(session) = self.selected_session() else {
@@ -6764,10 +6779,28 @@ impl Waku {
         }
         // The armed boss command's steer lands in the boss's live turn —
         // or queues behind it — the same retargeting a plain send takes.
+        // A chip-picked employee gets it as an interrupt instead: steered
+        // into an open turn, parked behind one when there is none.
         if !submission.hidden
             && let Some(command) = self.composer_boss_command()
         {
-            self.submit_boss_composer_command(command, submission, true, cx);
+            match self.composer_target(&command) {
+                boss::ComposerTarget::Boss => {
+                    self.submit_boss_composer_command(command, submission, true, cx);
+                }
+                target => {
+                    if let Some(owner) = self.composer_voice_pad_owner() {
+                        self.retire_press_to_talk_bubble(owner, cx);
+                    }
+                    self.submit_composer_employee_send(
+                        command,
+                        target,
+                        submission,
+                        waku_client::AgentPromptDelivery::Interrupt,
+                        cx,
+                    );
+                }
+            }
             return;
         }
         let Some(session_id) = self.state.selected_session else {
@@ -6845,6 +6878,111 @@ impl Waku {
                 .runtimes
                 .get(&session.id)
                 .is_some_and(|runtime| runtime.driver.supports_steer())
+    }
+
+    /// A composer send whose target chip names an employee rides the
+    /// roster's control channel rather than the session launch path — the
+    /// daemon folds it into a queued or dispatching launch envelope, parks
+    /// it behind a live turn, steers it into one for the steer shortcut,
+    /// and re-enters admission for an expired record. A stale pick — an
+    /// employee that left the roster after being chosen — refuses closed
+    /// instead of rerouting the draft to the boss chat it was not written
+    /// for. On refusal the draft returns to the composer untouched.
+    fn submit_composer_employee_send(
+        &mut self,
+        command: boss::BossCommand,
+        target: boss::ComposerTarget,
+        submission: ComposerSubmission,
+        delivery: waku_client::AgentPromptDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        let restore_session = self.state.selected_session.unwrap_or(command.session_id);
+        let session_id = match target {
+            boss::ComposerTarget::Employee(session_id) => session_id,
+            boss::ComposerTarget::Stale { name, .. } => {
+                self.restore_composer_submission(restore_session, submission, cx);
+                self.show_toast(tr!("boss.command_target_gone", name = name));
+                cx.notify();
+                return;
+            }
+            // Both callers only hand employee-targeted sends here.
+            boss::ComposerTarget::Boss => return,
+        };
+        let prompt = submission.prompt.trim().to_owned();
+        if prompt.is_empty() {
+            // The daemon refuses an empty employee prompt — so does the
+            // composer, quietly, keeping whatever else the draft staged.
+            self.restore_composer_submission(restore_session, submission, cx);
+            cx.notify();
+            return;
+        }
+        let Some(client) = self
+            .daemon_for_session(session_id)
+            .map(|daemon| daemon.client())
+        else {
+            self.restore_composer_submission(restore_session, submission, cx);
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            cx.notify();
+            return;
+        };
+        if !submission.hidden {
+            self.record_action(
+                Some(session_id),
+                action_predictions::JournalAction::PromptSend {
+                    canned: action_predictions::canned_prompt_id(
+                        &submission.prompt,
+                        &self.state.suggested_prompts,
+                    ),
+                },
+            );
+        }
+        // A resumed employee's row reopens ahead of the dispatch — the
+        // same early unarchive the expired-send path does.
+        self.unarchive_session(session_id, false, cx);
+        let was_expired = self.boss_ui.expired.contains(&session_id);
+        let operation = waku_client::boss::BossOperation::Control {
+            session_id,
+            action: waku_client::boss::EmployeeControl::Prompt {
+                prompt,
+                delivery: Some(delivery),
+            },
+        };
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::Boss { operation },
+                    )
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                match result {
+                    Ok(_) => {
+                        if was_expired {
+                            let name = waku
+                                .boss_ui
+                                .identities
+                                .get(&session_id)
+                                .map(|identity| identity.name.clone())
+                                .unwrap_or_else(|| tr!("boss.trigger_employee"));
+                            waku.show_success_toast(tr!(
+                                "boss.employee_resume_queued",
+                                name = name
+                            ));
+                        }
+                    }
+                    Err(error) => {
+                        waku.restore_composer_submission(restore_session, submission, cx);
+                        waku.show_toast(format!("{error:#}"));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// A prompt, steer, or nudge aimed at an expired employee takes the
