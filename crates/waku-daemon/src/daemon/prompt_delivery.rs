@@ -314,7 +314,10 @@ pub(super) fn deliver_agent_prompt(
         .unwrap_or(entry.prompt);
     let carried_handoff = handoff.is_some();
     let prompt = handoff.map_or(prompt.clone(), |context| {
-        format!("{context}\n\nNext assignment: {prompt}")
+        format!(
+            "{}\n\nNext assignment: {prompt}",
+            provider_context_block(&context)
+        )
     });
     driver.prompt(wrap_boss_outbound_prompt(
         task_state,
@@ -327,6 +330,12 @@ pub(super) fn deliver_agent_prompt(
         mark_boss_delivery_submitted(boss, session_id);
     }
     Ok(())
+}
+
+/// Mark daemon-owned context so submitted-prompt mirrors can keep it out of
+/// the human transcript while sending the complete text to the provider.
+pub(super) fn provider_context_block(context: &str) -> String {
+    format!("<goddard-provider-context>\n{context}\n</goddard-provider-context>")
 }
 
 /// The bound package just went out over provider transport. Submission is

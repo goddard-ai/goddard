@@ -1,0 +1,1 @@
+- **Boss chat:** Provider switch handoff instructions stay hidden from the transcript while the provider still receives them.

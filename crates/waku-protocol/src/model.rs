@@ -2908,6 +2908,7 @@ impl AgentSession {
                 trigger.boundary = ReportTriggerBoundary::Steer;
                 let mut prompt = Message::new_for_turn(MessageRole::User, message, active);
                 prompt.id = message_id;
+                prompt.display_content = provider_prompt_display_content(message);
                 prompt.sent_by_task = sent_by_task;
                 prompt.hidden = hidden;
                 prompt.report_trigger = Some(trigger);
@@ -2917,6 +2918,7 @@ impl AgentSession {
             }
             let mut prompt = Message::new_for_turn(MessageRole::User, message, active);
             prompt.id = message_id;
+            prompt.display_content = provider_prompt_display_content(message);
             prompt.sent_by_task = sent_by_task;
             prompt.hidden = hidden;
             prompt.report_trigger = report_trigger.map(|mut trigger| {
@@ -2945,6 +2947,7 @@ impl AgentSession {
         });
         let mut prompt = Message::new_for_turn(MessageRole::User, message, turn_id);
         prompt.id = message_id;
+        prompt.display_content = provider_prompt_display_content(message);
         prompt.sent_by_task = sent_by_task;
         prompt.hidden = hidden;
         prompt.report_trigger = report_trigger;
@@ -3953,6 +3956,16 @@ pub struct Message {
     pub reference_context: Option<ReferenceContext>,
     pub created_at: u64,
     pub streaming: bool,
+}
+
+/// Return the human-authored tail of a provider prompt carrying a Goddard
+/// context prefix. The full prompt remains in `Message::content` for history.
+fn provider_prompt_display_content(content: &str) -> Option<String> {
+    const OPEN: &str = "<goddard-provider-context>\n";
+    const CLOSE: &str = "\n</goddard-provider-context>\n\n";
+    let prefixed = content.strip_prefix(OPEN)?;
+    let (_, prompt) = prefixed.split_once(CLOSE)?;
+    Some(prompt.to_owned())
 }
 
 impl Message {
@@ -8248,6 +8261,43 @@ mod tests {
         let prompt = session.messages.last().unwrap();
         assert_eq!(prompt.id, queued_id);
         assert_eq!(prompt.content, "parked prompt");
+    }
+
+    #[test]
+    fn submitted_provider_context_stays_in_history_but_not_the_transcript() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let prompt = "<goddard-provider-context>\nContinue from Claude.\n</goddard-provider-context>\n\nPlease continue.";
+        let message_id = Uuid::new_v4();
+        assert!(session.adopt_submitted_prompt(
+            prompt,
+            Uuid::new_v4(),
+            message_id,
+            None,
+            false,
+            None,
+        ));
+
+        let submitted = session.messages.last().unwrap();
+        assert_eq!(submitted.content, prompt);
+        assert_eq!(submitted.visible_content(), "Please continue.");
+        let restored: Message =
+            serde_json::from_value(serde_json::to_value(submitted).unwrap()).unwrap();
+        assert_eq!(restored.visible_content(), "Please continue.");
+    }
+
+    #[test]
+    fn ordinary_provider_switch_text_is_not_hidden() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let prompt = "Please explain how a provider switch works.";
+        assert!(session.adopt_submitted_prompt(
+            prompt,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            None,
+            false,
+            None,
+        ));
+        assert_eq!(session.messages.last().unwrap().visible_content(), prompt);
     }
 
     #[test]

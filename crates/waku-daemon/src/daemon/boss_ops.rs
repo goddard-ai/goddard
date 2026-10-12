@@ -55,7 +55,10 @@ impl WakuBackend {
             mark_boss_delivery_submitted(&self.boss, session_id);
         }
         let prompt = match handoff {
-            Some(context) if !prompt.contains(&context) => format!("{context}\n\n{prompt}"),
+            Some(context) if !prompt.contains(&context) => format!(
+                "{}\n\n{prompt}",
+                super::prompt_delivery::provider_context_block(&context)
+            ),
             _ => prompt,
         };
         wrap_boss_outbound_prompt(
