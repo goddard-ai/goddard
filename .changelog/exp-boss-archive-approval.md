@@ -1,0 +1,1 @@
+- **Boss:** Approving an archive request now reports by name any task that could not be archived — for example one already archived or removed while the card waited — instead of silently skipping it, and a repeated answer to a settled request is safely ignored.

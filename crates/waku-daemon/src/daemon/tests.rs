@@ -2586,6 +2586,183 @@ fn an_approved_archive_proposal_archives_tasks_and_side_chats() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A repeated answer for a settled request is a duplicate delivery: the
+/// provider never minted the id, so the daemon consumes it rather than
+/// forwarding it to a driver that has nothing parked under it. The second
+/// approval settles harmlessly and archives nothing twice.
+#[test]
+fn a_duplicate_archive_answer_is_consumed() {
+    let root = std::env::temp_dir().join(format!("waku-agent-archive-dup-{}", Uuid::new_v4()));
+    let (backend, session_id, _side_id) = read_scope_test_backend(&root);
+    let (target_id, _target_side_id, _foreign_id, _archived_id) =
+        archive_proposal_targets(&backend, &root);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            plan_gate: None,
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.join("repo"),
+        },
+    );
+    let events = EventSink::detached();
+    std::thread::scope(|scope| {
+        let proposal = scope.spawn(|| {
+            backend.agent_propose_archive(Some(session_id), vec![target_id], None, &events)
+        });
+        let request_id = loop {
+            if let Some(request_id) = backend.agent.parked_permission_request(session_id) {
+                break request_id;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        let respond = || Command::Respond {
+            request_id: request_id.clone(),
+            option_id: "archive".into(),
+        };
+        // The first answer resolves the parked request and archives.
+        assert_eq!(
+            backend.agent.resolve_permission(session_id, &respond()),
+            Some(request_id.clone())
+        );
+        assert!(matches!(proposal.join().unwrap(), Ok(ResponsePayload::Ack)));
+        // A second delivery of the same answer is consumed — settled,
+        // never forwarded — and no archive runs again.
+        assert_eq!(
+            backend.agent.resolve_permission(session_id, &respond()),
+            Some(request_id)
+        );
+        assert!(
+            backend
+                .agent
+                .parked_permission_request(session_id)
+                .is_none()
+        );
+    });
+    let state = backend.task_state.lock();
+    assert!(
+        state
+            .sessions
+            .iter()
+            .find(|session| session.id == target_id)
+            .unwrap()
+            .archived_at
+            .is_some()
+    );
+    drop(state);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A target the user archived or removed while its card waited cannot take
+/// the approval — the proposal fails naming it rather than reporting a
+/// silent skip — while every still-archivable target archives.
+#[test]
+fn an_approved_archive_proposal_reports_stale_targets() {
+    let root = std::env::temp_dir().join(format!("waku-agent-archive-stale-{}", Uuid::new_v4()));
+    let (backend, session_id, _side_id) = read_scope_test_backend(&root);
+    let (stale_id, _target_side_id, _foreign_id, _archived_id) =
+        archive_proposal_targets(&backend, &root);
+    let (gone_id, live_id) = {
+        let mut state = backend.task_state.lock();
+        let project_id = state
+            .sessions
+            .iter()
+            .find(|session| session.id == stale_id)
+            .unwrap()
+            .project_id;
+        let started = |title: &str| {
+            let mut session = AgentSession::new(project_id, ProviderKind::Codex);
+            session.title = title.to_owned();
+            session.begin_turn("seed");
+            session.finish_active_turn(crate::model::TurnStatus::Completed);
+            session
+        };
+        let gone = started("Gone");
+        let live = started("Live");
+        let ids = (gone.id, live.id);
+        state.push_session(gone);
+        state.push_session(live);
+        drop(state);
+        ids
+    };
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            plan_gate: None,
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.join("repo"),
+        },
+    );
+    let events = EventSink::detached();
+    std::thread::scope(|scope| {
+        let proposal = scope.spawn(|| {
+            backend.agent_propose_archive(
+                Some(session_id),
+                vec![stale_id, gone_id, live_id],
+                None,
+                &events,
+            )
+        });
+        let request_id = loop {
+            if let Some(request_id) = backend.agent.parked_permission_request(session_id) {
+                break request_id;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        // One target archives and one disappears while the card waits —
+        // both go stale before the approval lands.
+        backend.archive_sessions(&[stale_id]).unwrap();
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .retain(|session| session.id != gone_id);
+        backend.agent.resolve_permission(
+            session_id,
+            &Command::Respond {
+                request_id,
+                option_id: "archive".into(),
+            },
+        );
+        let error = proposal.join().unwrap().unwrap_err();
+        let text = format!("{error:#}");
+        assert!(text.contains("was already archived"), "error: {text}");
+        assert!(text.contains("no longer exists"), "error: {text}");
+    });
+    // The live target still archived — the failure names what missed,
+    // it does not roll back what took.
+    let state = backend.task_state.lock();
+    for id in [stale_id, live_id] {
+        assert!(
+            state
+                .sessions
+                .iter()
+                .find(|session| session.id == id)
+                .unwrap()
+                .archived_at
+                .is_some()
+        );
+    }
+    assert!(state.sessions.iter().all(|session| session.id != gone_id));
+    drop(state);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A declined proposal fails the call and leaves every task untouched.
 #[test]
 fn a_declined_archive_proposal_archives_nothing() {

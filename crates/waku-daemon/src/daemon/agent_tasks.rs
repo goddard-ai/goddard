@@ -303,9 +303,54 @@ impl WakuBackend {
         let _ = events.send(event_to_wire(DriverEvent::RequestSettled { request_id })?);
         match option.as_deref() {
             Some("archive") => {
-                // Revalidate under the lock inside `archive_sessions`: a task
-                // the user archived while this card waited simply skips.
+                // Approval is the action — it archives exactly the tasks the
+                // card named. Targets the user archived while the card
+                // waited revalidate as skips inside `archive_sessions`;
+                // snapshot them first so this approval can tell its own
+                // work from a target that was already gone.
+                let pre_archived: std::collections::HashSet<Uuid> = {
+                    let state = self.task_state.lock();
+                    target_ids
+                        .iter()
+                        .filter(|id| {
+                            state
+                                .sessions
+                                .iter()
+                                .any(|session| session.id == **id && session.archived_at.is_some())
+                        })
+                        .copied()
+                        .collect()
+                };
                 self.archive_sessions(&target_ids)?;
+                // A target that did not take reads as success to the caller
+                // unless the approval says so — name it with its reason.
+                let mut missed = Vec::new();
+                {
+                    let state = self.task_state.lock();
+                    for (id, title) in target_ids.iter().zip(&titles) {
+                        let Some(session) = state.sessions.iter().find(|session| session.id == *id)
+                        else {
+                            missed.push(format!("“{title}” no longer exists"));
+                            continue;
+                        };
+                        if pre_archived.contains(id) {
+                            missed.push(format!("“{title}” was already archived"));
+                        } else if session.archived_at.is_none() {
+                            let reason = Self::employee_archive_blocker(session)?
+                                .map(|(path, reason)| {
+                                    format!("still holds {reason} in {}", path.display())
+                                })
+                                .unwrap_or_else(|| "could not be archived".to_owned());
+                            missed.push(format!("“{title}” {reason}"));
+                        }
+                    }
+                }
+                if !missed.is_empty() {
+                    bail!(
+                        "the approved archive could not archive {}",
+                        missed.join(", ")
+                    );
+                }
                 Ok(ResponsePayload::Ack)
             }
             Some(_) => bail!("the archive proposal was declined"),

@@ -74,6 +74,17 @@ pub const AGENT_ARCHIVE_REQUEST_PREFIX: &str = "agent-archive-";
 /// Clients must never treat it as a provider permission eligible for auto-review.
 pub const PLAN_FINALIZE_REQUEST_PREFIX: &str = "plan-finalize-";
 
+/// Whether the request id names a daemon-owned request — one of the parked
+/// asks or permission requests the daemon mints itself. These ids never
+/// reach a provider driver, so an answer for one after the daemon already
+/// settled it is a duplicate delivery the daemon consumes itself.
+pub fn is_daemon_request(request_id: &str) -> bool {
+    request_id.starts_with(AGENT_ASK_REQUEST_PREFIX)
+        || request_id.starts_with(AGENT_RENAME_REQUEST_PREFIX)
+        || request_id.starts_with(AGENT_ARCHIVE_REQUEST_PREFIX)
+        || request_id.starts_with(PLAN_FINALIZE_REQUEST_PREFIX)
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonReady {

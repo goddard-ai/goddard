@@ -840,7 +840,10 @@ impl AgentState {
             .get_mut(&session_id)
             .and_then(|permissions| permissions.remove(request_id));
         let Some(sender) = sender else {
-            return None;
+            // Same duplicate-delivery contract as `resolve_user_input`: a
+            // daemon-owned id that is not parked was already settled, and
+            // the provider has nothing waiting under it.
+            return waku_protocol::is_daemon_request(request_id).then(|| request_id.clone());
         };
         let _ = sender.send(Some(option_id.clone()));
         Some(request_id.clone())

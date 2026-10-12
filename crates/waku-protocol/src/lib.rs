@@ -81,7 +81,7 @@ pub use protocol::{
     PROTOCOL_VERSION, ReplayCursor, Request, RequestCommandSample, RequestPoolSample,
     ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage, SessionDetailTail,
     SubprocessLabelSample, TASK_LINK_PREFIX, WhistleWord, WireComputerToolRequest, WireDriverEvent,
-    WireDriverStartOptions, WireSessionOptions,
+    WireDriverStartOptions, WireSessionOptions, is_daemon_request,
 };
 pub use protocol::{KeyedError, WireTranslation};
 pub use settings::DaemonSettings;
