@@ -6725,7 +6725,7 @@ impl Waku {
                                             .justify_center()
                                             .tooltip(Tooltip::text(tr!("session.incognito")))
                                             .child(icon(
-                                                "icons/hat-glasses.svg",
+                                                "icons/ghost.svg",
                                                 12.0,
                                                 theme.text_tertiary,
                                             )),
@@ -7230,7 +7230,7 @@ impl Waku {
                                         .justify_center()
                                         .bg(theme.overlay)
                                         .child(icon(
-                                            "icons/hat-glasses.svg",
+                                            "icons/ghost.svg",
                                             11.0,
                                             theme.text_secondary,
                                         ))

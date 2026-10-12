@@ -1,0 +1,1 @@
+- Temporary chats now show the ghost icon everywhere — the Temporary chip under the composer, the sidebar and header badges, and the command palette — and the chip matches the access mode selector instead of reading as a filled pill.

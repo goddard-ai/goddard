@@ -2566,7 +2566,7 @@ impl Waku {
             CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.new_incognito_task"),
-                "icons/hat-glasses.svg",
+                "icons/ghost.svg",
                 None,
                 PaletteAction::NewIncognitoTask,
                 "new incognito task session chat private ephemeral off the record no memory",
@@ -2575,7 +2575,7 @@ impl Waku {
             CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.new_incognito_task_in"),
-                "icons/hat-glasses.svg",
+                "icons/ghost.svg",
                 None,
                 PaletteAction::NewIncognitoTaskIn,
                 "new incognito task in directory folder private ephemeral",
@@ -2821,7 +2821,7 @@ impl Waku {
             let mut incognito_item = CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.new_incognito_task_in_same_worktree"),
-                "icons/hat-glasses.svg",
+                "icons/ghost.svg",
                 None,
                 PaletteAction::NewIncognitoTaskInSameWorktree,
                 "new incognito task worktree same current shared checkout private ephemeral",
