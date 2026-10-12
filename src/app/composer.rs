@@ -6041,18 +6041,22 @@ impl Waku {
                                     element.bg(theme.raised.blend(theme.overlay_strong))
                                 })
                                 .child(icon("icons/compose.svg", 11.0, theme.text_secondary))
-                                .child(tr!("drafts.save_action"))
-                                .when_some(shortcut, |chip, label| {
-                                    chip.child(
-                                        div()
-                                            .flex_none()
-                                            .relative()
-                                            .top(px(2.0))
-                                            .text_size(sp(11.0))
-                                            .text_color(theme.text_tertiary)
-                                            .child(label),
-                                    )
-                                })
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_baseline()
+                                        .gap(px(5.0))
+                                        .child(tr!("drafts.save_action"))
+                                        .when_some(shortcut, |row, label| {
+                                            row.child(
+                                                div()
+                                                    .flex_none()
+                                                    .text_size(sp(11.0))
+                                                    .text_color(theme.text_tertiary)
+                                                    .child(label),
+                                            )
+                                        }),
+                                )
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.create_saved_draft(window, cx);
                                 }))

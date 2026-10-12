@@ -196,18 +196,22 @@ impl Waku {
                 // through.
                 .hover(|element| element.bg(theme.raised.blend(theme.overlay_strong)))
                 .child(icon(icon_path, 11.0, theme.text_secondary))
-                .child(label)
-                .when_some(shortcut_label, |chip, label| {
-                    chip.child(
-                        div()
-                            .flex_none()
-                            .relative()
-                            .top(px(2.0))
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_tertiary)
-                            .child(label),
-                    )
-                })
+                .child(
+                    div()
+                        .flex()
+                        .items_baseline()
+                        .gap(px(5.0))
+                        .child(label)
+                        .when_some(shortcut_label, |row, label| {
+                            row.child(
+                                div()
+                                    .flex_none()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(label),
+                            )
+                        }),
+                )
                 .tooltip(Tooltip::text(tr_cow!("boss.plan_approve_hint")))
                 .on_activation(cx, move |this, _, cx| {
                     this.request_plan_finalization(session_id, cx);
