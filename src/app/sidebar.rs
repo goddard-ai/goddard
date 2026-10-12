@@ -291,7 +291,9 @@ fn append_sidebar_employee_group(
             });
         }
     }
-    rows.push(SidebarRow::GroupSpacer);
+    if !collapsed || group != SidebarGroup::Outcomes {
+        rows.push(SidebarRow::GroupSpacer);
+    }
 }
 
 /// How many finished employees an expanded group lists before its fold row:
