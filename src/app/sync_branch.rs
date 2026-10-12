@@ -424,10 +424,9 @@ impl Waku {
         }
     }
 
-    /// Sync the highlighted row (`None`, the keyboard path) or a clicked one:
-    /// `pull --rebase` in the branch's checkout — `git merge` when the
-    /// setting says so. The picker closes once the pull starts and its
-    /// progress toast settles when the operation lands.
+    /// Sync the highlighted row (`None`, the keyboard path) or a clicked one.
+    /// The picker closes once the pull starts and its progress toast settles
+    /// when the operation lands.
     fn execute_sync_branch(&mut self, index: Option<usize>, cx: &mut Context<Self>) {
         if self.git_panel_operation.is_some() {
             self.show_toast(tr!("sync_branch.busy"));
@@ -445,6 +444,26 @@ impl Waku {
         let target = &self.sync_branch.targets[target_index];
         let workspace = target.cwd.clone();
         let branch = target.branch.clone();
+        self.start_sync_branch_pull(workspace, branch, cx);
+        self.close_sync_branch(cx);
+    }
+
+    /// The pull half of a "Sync branch…" run against `workspace`'s checkout:
+    /// `pull --rebase` — `git merge` when the setting says so — through the
+    /// shared panel-operation slot with its progress toast. The caller
+    /// keeps or closes whichever surface raised it; `finish_git_panel_op`
+    /// chains the push when the pull lands.
+    pub(super) fn start_sync_branch_pull(
+        &mut self,
+        workspace: PathBuf,
+        branch: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_panel_operation.is_some() {
+            self.show_toast(tr!("sync_branch.busy"));
+            cx.notify();
+            return;
+        }
         let strategy = if self.state.sync_with_merge {
             PullStrategy::Merge
         } else {
@@ -464,7 +483,6 @@ impl Waku {
             operation.sync_branch_name = Some(branch);
             operation.toast_id = Some(toast_id);
         }
-        self.close_sync_branch(cx);
         let Some(client) = self.workspace_client_for_path(&workspace) else {
             self.finish_git_panel_op(
                 op_id,

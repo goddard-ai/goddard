@@ -487,6 +487,8 @@ command_palette.hint_navigate:
   en: navigate
 command_palette.hint_select:
   en: select
+command_palette.hint_sync:
+  en: sync
 command_palette.hint_close:
   en: close
 

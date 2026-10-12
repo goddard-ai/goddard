@@ -1,0 +1,1 @@
+- **Sync branch:** The project picker shows ahead and behind counts, lists projects with outgoing commits first and incoming commits second, and keeps recent order inside each group. Press Shift+Enter to sync a project's current branch and keep the picker open; Enter opens its branch picker.

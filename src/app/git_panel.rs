@@ -2247,6 +2247,11 @@ impl Waku {
                 cx.notify();
             }
         }
+        // A landed operation may have moved the counts the "Sync branch…"
+        // project step is showing — re-probe while its list is up.
+        if self.sync_branch_projects_open() {
+            self.fetch_sync_branch_project_divergence(cx);
+        }
     }
 
     /// Record `base` as the base branch of every session rooted at

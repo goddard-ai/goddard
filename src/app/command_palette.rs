@@ -12,6 +12,7 @@ use nucleo_matcher::{Matcher, Utf32Str};
 use waku_protocol::workspace::{GitHubAvailability, GitHubRepoRef, RepoWorktree};
 
 use super::*;
+use crate::git_branch::BranchSnapshot;
 use crate::ui::shortcut::ShortcutHint;
 
 actions!(
@@ -24,6 +25,7 @@ actions!(
         SelectPageDown,
         SelectPageUp,
         Confirm,
+        ConfirmKeepOpen,
         Dismiss
     ]
 );
@@ -75,6 +77,10 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("pagedown", SelectPageDown, Some(SEARCH_CONTEXT)),
         KeyBinding::new("pageup", SelectPageUp, Some(SEARCH_CONTEXT)),
         KeyBinding::new("enter", Confirm, Some(SEARCH_CONTEXT)),
+        // The "Sync branch…" project step alone acts on it — everywhere else
+        // the chord is a no-op. This context outranks the input's own
+        // shift-enter newline binding.
+        KeyBinding::new("shift-enter", ConfirmKeepOpen, Some(SEARCH_CONTEXT)),
         // Bound at the palette, not the field: the query field's own
         // clear-on-escape outranks this (deeper context) while it has text,
         // and an empty field propagates the keystroke down to it.
@@ -421,6 +427,31 @@ struct ScoredPaletteItem {
     item: CommandPaletteItem,
 }
 
+/// Sync priority over the "Sync branch…" project step's MRU sequence:
+/// checkouts ahead of their upstream lead — there is work waiting to
+/// publish — then checkouts behind, then everything else (untracked,
+/// repo-less, or still probing). Each band keeps the order it came in
+/// with, so recency still ranks within a band. `counts` holds `(ahead,
+/// behind)` per project, probed snapshots only.
+fn sync_branch_project_order(
+    ordered: Vec<Uuid>,
+    counts: &HashMap<Uuid, (u64, u64)>,
+) -> Vec<Uuid> {
+    let mut ahead = Vec::new();
+    let mut behind = Vec::new();
+    let mut rest = Vec::new();
+    for project_id in ordered {
+        match counts.get(&project_id).copied() {
+            Some((ahead_count, _)) if ahead_count > 0 => ahead.push(project_id),
+            Some((_, behind_count)) if behind_count > 0 => behind.push(project_id),
+            _ => rest.push(project_id),
+        }
+    }
+    ahead.extend(behind);
+    ahead.extend(rest);
+    ahead
+}
+
 /// Groups results by section, ordering the sections by each one's best score
 /// so a strong match lifts its section above weak matches elsewhere — a
 /// keyword-stuffed command must not outrank a literal custom-command hit just
@@ -759,6 +790,13 @@ pub(super) struct CommandPaletteUi {
     /// daemon's branch scan behind the picker.
     rebase_base: Option<RebaseBasePicker>,
     rebase_generation: u64,
+    /// The "Sync branch…" project step's per-project checkout probes, keyed
+    /// by project — the `InspectBranches` snapshot behind each row's
+    /// ahead/behind counts and the picker's sync-priority order. Projects
+    /// whose probe is in flight or found no repository have no entry, and
+    /// `sync_branch_generation` drops a probe superseded by a newer scan.
+    sync_branch_divergence: HashMap<Uuid, BranchSnapshot>,
+    sync_branch_generation: u64,
     /// The transcript code-block run parked behind its project picker, and
     /// the candidates the block's inference already surfaced — the picker's
     /// rows lead with them.
@@ -825,6 +863,8 @@ impl CommandPaletteUi {
             issue_generation: 0,
             rebase_base: None,
             rebase_generation: 0,
+            sync_branch_divergence: HashMap::new(),
+            sync_branch_generation: 0,
             code_block_run: None,
             code_block_candidates: Vec::new(),
             save_prompt_body: None,
@@ -2087,7 +2127,9 @@ impl Waku {
 
     /// "Sync branch…" found no repository in context: the palette offers a
     /// project to run it in — a pick re-enters the branch picker rooted at
-    /// that project, Esc lands back on the regular palette.
+    /// that project, Esc lands back on the regular palette. Each project's
+    /// upstream counts probe in behind the rows; the list re-sorts into
+    /// ahead / behind / neither bands as they land.
     fn open_command_palette_sync_branch_projects_view(&mut self, cx: &mut Context<Self>) {
         self.command_palette.view = CommandPaletteView::SyncBranchProjects;
         self.command_palette.search.update(cx, |input, cx| {
@@ -2095,7 +2137,75 @@ impl Waku {
             input.clear(cx);
         });
         self.refresh_command_palette_results("", false, cx);
+        self.fetch_sync_branch_project_divergence(cx);
         cx.notify();
+    }
+
+    /// Whether the palette is sitting on the "Sync branch…" project step —
+    /// the gate a landed Git operation checks before re-probing its counts.
+    pub(super) fn sync_branch_projects_open(&self) -> bool {
+        self.command_palette.open
+            && self.command_palette.view == CommandPaletteView::SyncBranchProjects
+    }
+
+    /// Probe every listed project's checkout for the upstream counts the
+    /// "Sync branch…" project step rows and bands are built from — one
+    /// `InspectBranches` per project on its own daemon, each answer landing
+    /// in `sync_branch_divergence` and rebuilding the picker while it is
+    /// still up. A landed Git operation re-runs this so a keep-open sync's
+    /// post-sync counts replace the stale ones.
+    pub(super) fn fetch_sync_branch_project_divergence(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.sync_branch_generation =
+            self.command_palette.sync_branch_generation.wrapping_add(1);
+        let generation = self.command_palette.sync_branch_generation;
+        let probes = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless())
+            .filter_map(|project| {
+                self.workspace_client_for_path(&project.path)
+                    .map(|client| (project.id, project.path.clone(), client))
+            })
+            .collect::<Vec<_>>();
+        for (project_id, path, client) in probes {
+            cx.spawn(async move |waku, cx| {
+                let result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        client.request(waku_client::WorkspaceOperation::InspectBranches {
+                            cwd: path,
+                        })
+                    })
+                    .await;
+                let _ = waku.update(cx, |waku, cx| {
+                    if waku.command_palette.sync_branch_generation != generation {
+                        return;
+                    }
+                    match result {
+                        Ok(waku_client::WorkspaceResult::Branches {
+                            snapshot: Some(snapshot),
+                        }) => {
+                            waku.command_palette
+                                .sync_branch_divergence
+                                .insert(project_id, snapshot);
+                        }
+                        Ok(waku_client::WorkspaceResult::Branches { snapshot: None }) => {
+                            waku.command_palette
+                                .sync_branch_divergence
+                                .remove(&project_id);
+                        }
+                        _ => {}
+                    }
+                    if waku.sync_branch_projects_open() {
+                        let query = waku.command_palette.search.read(cx).content().to_owned();
+                        waku.refresh_command_palette_results(&query, true, cx);
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
     }
 
     /// The branch picker's entry to that fallback, reached from ⌘S or the
@@ -4360,7 +4470,19 @@ impl Waku {
             .map(|session| session.project_id)
             .filter(|id| projects.iter().any(|project| project.id == *id));
         let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
-        run_script::run_script_project_order(current, &recent, &projects)
+        let counts = self
+            .command_palette
+            .sync_branch_divergence
+            .iter()
+            .filter_map(|(id, snapshot)| {
+                snapshot
+                    .upstream
+                    .as_ref()
+                    .map(|upstream| (*id, (upstream.ahead, upstream.behind)))
+            })
+            .collect::<HashMap<Uuid, (u64, u64)>>();
+        let ordered = run_script::run_script_project_order(current, &recent, &projects);
+        sync_branch_project_order(ordered, &counts)
             .into_iter()
             .enumerate()
             .filter_map(|(order, project_id)| {
@@ -4416,6 +4538,46 @@ impl Waku {
             selected_action.flatten(),
             Some(PaletteAction::ChooseSyncBranchProject),
         );
+    }
+
+    /// Shift+Enter on the "Sync branch…" project step: sync the highlighted
+    /// project's checkout right there — pull, then the chained push — while
+    /// the menu stays open so several projects can sync in a row. Enter
+    /// still swaps to the branch picker for the picked project. The op's
+    /// completion re-probes, so the rows' counts and bands reflect the
+    /// post-sync state once it lands.
+    fn confirm_sync_branch_project(&mut self, cx: &mut Context<Self>) {
+        if self.command_palette.view != CommandPaletteView::SyncBranchProjects {
+            return;
+        }
+        let index = self
+            .command_palette
+            .selected
+            .min(self.command_palette.results.len().saturating_sub(1));
+        let Some(item) = self.command_palette.results.get(index) else {
+            return;
+        };
+        let PaletteAction::ChooseSyncBranchProject(project_id) = item.action else {
+            return;
+        };
+        let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+        else {
+            return;
+        };
+        let workspace = project.path.clone();
+        // The toast names the synced branch — the probe's answer when it
+        // has landed, the project name while it is still out.
+        let branch = self
+            .command_palette
+            .sync_branch_divergence
+            .get(&project_id)
+            .and_then(|snapshot| snapshot.display_branch().map(str::to_owned))
+            .unwrap_or_else(|| project.display_name());
+        self.start_sync_branch_pull(workspace, branch, cx);
     }
 
     /// The code-block picker's projects — every local-daemon project a
@@ -6167,6 +6329,17 @@ impl Waku {
                     .shortcut
                     .as_ref()
                     .and_then(|hint| hint.resolve(window, cx));
+                // The "Sync branch…" project step's rows badge the checkout's
+                // upstream counts, drawn like the Git panel's branch row.
+                let divergence = match &item.action {
+                    PaletteAction::ChooseSyncBranchProject(project_id) => self
+                        .command_palette
+                        .sync_branch_divergence
+                        .get(project_id)
+                        .and_then(|snapshot| snapshot.upstream.as_ref())
+                        .map(|upstream| (upstream.ahead, upstream.behind)),
+                    _ => None,
+                };
                 results = results.child(
                     div()
                         .id(SharedString::from(format!("command-palette-row-{index}")))
@@ -6320,6 +6493,39 @@ impl Waku {
                                     )
                                 }),
                         )
+                        .when_some(divergence, |row, (ahead, behind)| {
+                            row.child(
+                                div()
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .children(
+                                        [
+                                            (behind, "icons/arrow-down.svg"),
+                                            (ahead, "icons/arrow-up.svg"),
+                                        ]
+                                        .into_iter()
+                                        .filter(|(count, _)| *count > 0)
+                                        .map(|(count, icon_path)| {
+                                            div()
+                                                .flex_none()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(2.0))
+                                                .text_size(sp(12.0))
+                                                .text_color(theme.text_tertiary)
+                                                .child(icon(
+                                                    icon_path,
+                                                    10.0,
+                                                    theme.text_tertiary,
+                                                ))
+                                                .child(count.to_string())
+                                                .into_any_element()
+                                        }),
+                                    ),
+                            )
+                        })
                         .when_some(shortcut, |row, shortcut| {
                             row.child(
                                 div()
@@ -6370,6 +6576,9 @@ impl Waku {
                     }
                     this.execute_command_palette_selection(None, window, cx)
                 }))
+                .on_action(cx.listener(|this, _: &ConfirmKeepOpen, _, cx| {
+                    this.confirm_sync_branch_project(cx)
+                }))
                 .on_action(cx.listener(|this, _: &Dismiss, window, cx| {
                     this.dismiss_command_palette(window, cx)
                 }))
@@ -6414,11 +6623,20 @@ impl Waku {
                         .items_center()
                         .gap(px(14.0))
                         .children(
-                            [
-                                ("↑↓", tr!("command_palette.hint_navigate")),
-                                ("↵", tr!("command_palette.hint_select")),
-                                ("esc", tr!("command_palette.hint_close")),
-                            ]
+                            {
+                                let mut hints = vec![
+                                    ("↑↓", tr!("command_palette.hint_navigate")),
+                                    ("↵", tr!("command_palette.hint_select")),
+                                ];
+                                if self.command_palette.view
+                                    == CommandPaletteView::SyncBranchProjects
+                                {
+                                    hints.push(("⇧↵", tr!("command_palette.hint_sync")));
+                                }
+                                hints.push(("esc", tr!("command_palette.hint_close")));
+                                hints
+                            }
+                            .into_iter()
                             .map(|(keys, label)| {
                                 div()
                                     .flex()
@@ -6616,6 +6834,45 @@ mod tests {
                 PaletteSection::Commands,
                 PaletteSection::Commands,
             ]
+        );
+    }
+
+    /// The sync picker's bands: checkouts ahead of their upstream lead,
+    /// behind follow, the rest last — and each band keeps the MRU order the
+    /// sequence came in with rather than re-ranking by count size.
+    #[test]
+    fn sync_branch_project_order_bands_by_divergence() {
+        let id = |n: u128| Uuid::from_u128(n);
+        let ordered = vec![id(0), id(1), id(2), id(3), id(4)];
+        let counts = HashMap::from([
+            (id(1), (0_u64, 2_u64)),   // behind only
+            (id(3), (5_u64, 1_u64)),   // ahead and behind — ahead wins the band
+            (id(4), (1_u64, 0_u64)),   // ahead only
+        ]);
+        assert_eq!(
+            sync_branch_project_order(ordered, &counts),
+            [id(3), id(4), id(1), id(0), id(2)]
+        );
+    }
+
+    /// Recency ranks inside a band — the MRU sequence's order is preserved,
+    /// so a less-recent ahead checkout still trails a more-recent one, and
+    /// unprobed or untracked projects keep their MRU slots at the tail.
+    #[test]
+    fn sync_branch_project_order_keeps_mru_within_bands() {
+        let id = |n: u128| Uuid::from_u128(n);
+        let ordered = vec![id(0), id(1), id(2), id(3)];
+        let counts = HashMap::from([(id(0), (1_u64, 0_u64)), (id(2), (7_u64, 0_u64))]);
+        assert_eq!(
+            sync_branch_project_order(ordered, &counts),
+            [id(0), id(2), id(1), id(3)]
+        );
+        // A zero-count entry orders like a missing one — synced and
+        // never-probed projects share the tail band.
+        let counts = HashMap::from([(id(1), (0_u64, 0_u64))]);
+        assert_eq!(
+            sync_branch_project_order(vec![id(0), id(1), id(2)], &counts),
+            [id(0), id(1), id(2)]
         );
     }
 
