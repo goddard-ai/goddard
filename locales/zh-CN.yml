@@ -2787,6 +2787,7 @@ shortcuts.kill_line_forward: 删除到段尾
 shortcuts.line_end: 移到行尾
 shortcuts.line_start: 移到行首
 shortcuts.mark_unread: 将当前任务标记为未读
+shortcuts.toggle_employee_attention: 切换所选员工的关注标记
 shortcuts.mark_unread_next: 搁置任务并前往下一个重要任务
 shortcuts.menu_next_tab: 下一个标签页
 shortcuts.menu_previous_tab: 上一个标签页
@@ -2996,6 +2997,7 @@ boss.discard: "放弃更改"
 boss.saved: "已保存"
 boss.loading: "加载中…"
 boss.employee_finished: "已完成"
+boss.employee_needs_attention: "这位员工需要关注"
 boss.finished_now: "%{name} 刚刚完成"
 boss.finished_ago: "%{name} 于%{ago}完成"
 boss.expired_hint: "这位员工已完成工作。请将下一项请求发送给老板。"

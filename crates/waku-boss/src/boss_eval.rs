@@ -202,6 +202,8 @@ pub fn run(
                             | BossOperation::ArchiveDeliverable { .. }
                             | BossOperation::MarkDeliverableViewed { .. }
                             | BossOperation::MarkGoalsViewed
+                            | BossOperation::MarkEmployeeViewed { .. }
+                            | BossOperation::SetEmployeeAttention { .. }
                         ) {
                             bail!("sidebar presentation state is client-owned and unavailable to scripts");
                         }

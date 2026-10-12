@@ -672,6 +672,7 @@ impl WakuBackend {
                 item,
                 assignment_kind,
                 request_id,
+                needs_attention,
             } => {
                 let (session_id, newly_admitted) = self.boss.with_operation_lock(|| {
                     self.summon_employee(
@@ -702,6 +703,7 @@ impl WakuBackend {
                         item,
                         assignment_kind.unwrap_or_default(),
                         request_id,
+                        needs_attention,
                         events,
                     )
                 })?;

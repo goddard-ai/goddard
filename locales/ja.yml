@@ -2835,6 +2835,7 @@ shortcuts.kill_line_forward: 段落の末尾まで削除
 shortcuts.line_end: 行末へ移動
 shortcuts.line_start: 行頭へ移動
 shortcuts.mark_unread: 現在のタスクを未読にする
+shortcuts.toggle_employee_attention: 選択中の従業員の要確認状態を切り替える
 shortcuts.mark_unread_next: タスクを保留にして次の重要なタスクへ移動
 shortcuts.menu_next_tab: 次のタブ
 shortcuts.menu_previous_tab: 前のタブ
@@ -3044,6 +3045,7 @@ boss.discard: "変更を破棄"
 boss.saved: "保存しました"
 boss.loading: "読み込み中…"
 boss.employee_finished: "完了"
+boss.employee_needs_attention: "この従業員は確認が必要です"
 boss.finished_now: "%{name} がたった今完了"
 boss.finished_ago: "%{name} が%{ago}に完了"
 boss.expired_hint: "この従業員の仕事は完了しました。次の依頼はボスに送ってください。"

@@ -1317,6 +1317,22 @@ pub struct BossEmployee {
     /// unless the boss assigns the employee another prompt first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expired_at: Option<u64>,
+    /// The summoner flagged this employee for the user's attention — a
+    /// backstop for work that must not complete unnoticed. A flagged
+    /// record wears the sidebar's unread marker once expired, stays out
+    /// of the retirement sweep until unflagged, and is unaffected by
+    /// whether the job produced a deliverable. The user can also set the
+    /// flag manually on a finished employee.
+    #[serde(default)]
+    pub needs_attention: bool,
+    /// The client's view stamp on the attention marker, in the
+    /// `BossDeliverable::viewed_at` convention: the unread dot holds
+    /// while it is missing or older than `expired_at`, and a re-expiry
+    /// under a fresh timestamp re-arms it. Clearing `needs_attention`
+    /// is the only way the marker leaves for good.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub attention_viewed_at: Option<u64>,
     /// The attention item the employee raised through `reportBlocker`, or
     /// one the daemon recorded on its behalf (a restart interrupted the
     /// job). Its presence turns a finish back into a delivered report;
@@ -2935,6 +2951,13 @@ pub enum BossOperation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         request_id: Option<Uuid>,
+        /// Flag the employee for the user's attention at completion —
+        /// its sidebar entry wears the unread marker once expired and is
+        /// exempt from the roster-retirement sweep until unflagged. The
+        /// flag is a summon property, not a deliverable check: it applies
+        /// whether or not the job published anything.
+        #[serde(default)]
+        needs_attention: bool,
     },
     /// Replace the boss-set admission policy atomically. `expectedRevision`
     /// must match the current `resource_policy.revision`. Boss/human only —
@@ -3238,6 +3261,20 @@ pub enum BossOperation {
     /// Stamp the Goals page viewed at the daemon's clock — goal finishes
     /// older than the stamp stop counting toward the sidebar's unread dot.
     MarkGoalsViewed,
+    /// Stamp a flagged employee viewed at the daemon's clock — opening its
+    /// session retires the sidebar's unread dot while `needs_attention`
+    /// stays set, so a later re-expiry re-arms the marker.
+    MarkEmployeeViewed {
+        session_id: Uuid,
+    },
+    /// Set or clear an employee's user-attention flag directly — the
+    /// sidebar's manual mark-unread path for a finished employee whose
+    /// summon did not flag it. Setting the flag re-arms the unread
+    /// marker; clearing it releases the retirement exemption.
+    SetEmployeeAttention {
+        session_id: Uuid,
+        needs_attention: bool,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]

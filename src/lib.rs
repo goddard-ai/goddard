@@ -98,6 +98,7 @@ actions!(
         DismissInbox,
         DismissDraftsLayer,
         ToggleAutomationsPage,
+        ToggleEmployeeAttention,
         ToggleBigPicture,
         OpenResumePicker,
         ToggleFpsCounter,
@@ -676,9 +677,14 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // ⌘⇧I opens the notification inbox — the same page contract the
         // Projects page has.
         KeyBinding::new("secondary-shift-i", ToggleInboxPage, None),
-        // ⌘⇧U opens the Automations page — scheduling's letter in the
-        // page-toggle family.
-        KeyBinding::new("secondary-shift-u", ToggleAutomationsPage, None),
+        // ⌘⇧U toggles attention on the selected finished Boss employee.
+        KeyBinding::new(
+            "secondary-shift-u",
+            ToggleEmployeeAttention,
+            Some("Workspace"),
+        ),
+        // Keep Automations available without sharing the employee-attention chord.
+        KeyBinding::new("secondary-alt-shift-u", ToggleAutomationsPage, None),
         // ⌘⌥1–3 switch the page's tabs while it is open. The chords used
         // to deep-link to a tab from anywhere; the model picker's
         // ⌘⌥1–⌘⌥9 favorite jump owns the workspace scope now.

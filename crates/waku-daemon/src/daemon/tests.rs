@@ -7453,6 +7453,7 @@ fn boss_summon_runs_the_employee_in_a_managed_worktree() {
             plan: None,
             item: None,
             request_id: None,
+            needs_attention: false,
         },
         &EventSink::detached(),
     );
@@ -7539,6 +7540,7 @@ fn boss_summon_marker_freezes_the_card_identity() {
             plan: None,
             item: None,
             request_id: None,
+            needs_attention: false,
         },
         &EventSink::detached(),
     );
@@ -7776,6 +7778,7 @@ impl AdoptFixture {
                 plan: None,
                 item: None,
                 request_id: None,
+                needs_attention: false,
             },
             &EventSink::detached(),
         )
@@ -8132,6 +8135,7 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
                 plan: None,
                 item: None,
                 request_id: None,
+                needs_attention: false,
             },
             &EventSink::detached(),
         )
@@ -8294,7 +8298,45 @@ fn summon_op(
         plan: None,
         item: None,
         request_id: None,
+        needs_attention: false,
     }
+}
+
+#[test]
+fn summon_attention_flag_is_persisted_on_employee() {
+    use waku_protocol::boss::BossOperation;
+
+    let root = std::env::temp_dir().join(format!("summon-attention-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    let mut operation = summon_op(
+        &backend,
+        &root,
+        "attention",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon {
+        needs_attention, ..
+    } = &mut operation
+    {
+        *needs_attention = true;
+    }
+
+    let result = backend
+        .handle_boss_operation(Some(boss), operation, &EventSink::detached());
+    assert!(
+        result.is_err(),
+        "the test backend deliberately has no Codex executable"
+    );
+    let document = backend.boss.document();
+    let employee = document
+        .employees
+        .iter()
+        .find(|employee| employee.supervisor_id == boss && employee.job_title == "attention")
+        .expect("the summon persists an employee record before launch");
+    assert!(employee.needs_attention);
+    assert_eq!(employee.attention_viewed_at, None);
+    assert!(employee.expired, "the deliberately missing provider failed launch");
 }
 
 /// Exercise the asynchronous scheduler used in production, including dispatch
@@ -13887,6 +13929,7 @@ fn summon_with_tag(
         prerequisites: Vec::new(),
         after_success: None,
         finishes_outcome: false,
+        needs_attention: false,
         plan,
         item,
         request_id,

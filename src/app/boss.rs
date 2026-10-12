@@ -7,8 +7,9 @@ use super::*;
 use crate::ui::ActivationExt;
 use waku_client::DaemonKey;
 use waku_client::boss::{
-    BossFile, BossIdentity, BossOperation, BossPersona, BossPersonaUpsert, BossResult, BossState,
-    MemoryOperation, PersonaDefaultAction, PersonaDefaultRole, PersonaPermissions,
+    BossEmployee, BossFile, BossIdentity, BossOperation, BossPersona, BossPersonaUpsert,
+    BossResult, BossState, MemoryOperation, PersonaDefaultAction, PersonaDefaultRole,
+    PersonaPermissions,
     instruction_diff, shipped_persona_default, shipped_persona_prefix, shipped_persona_revision,
 };
 use waku_protocol::boss::AvatarStyle;
@@ -19,6 +20,16 @@ fn global_avatar_style_operation(avatar_style: AvatarStyle) -> BossOperation {
         session_id: None,
         avatar_style,
     }
+}
+
+fn employee_attention_is_unread(employee: &BossEmployee) -> bool {
+    employee.needs_attention
+        && employee.expired
+        && employee.attention_viewed_at.is_none_or(|viewed_at| {
+            employee
+                .expired_at
+                .is_some_and(|expired_at| viewed_at < expired_at)
+        })
 }
 
 fn sidebar_deliverable_action_slot(group_name: SharedString) -> Div {
@@ -608,6 +619,11 @@ pub(super) struct BossUi {
     pub active: HashMap<DaemonKey, Vec<Uuid>>,
     pub working: HashSet<Uuid>,
     pub expired: HashSet<Uuid>,
+    /// Employees wearing the user-attention unread marker right now:
+    /// flagged at summon or by hand, expired, and not viewed since that
+    /// expiry. Rebuilt with every Boss snapshot; the row reads membership
+    /// here instead of rescanning employee records while rendering.
+    pub attention: HashSet<Uuid>,
     workspace_transitions: HashSet<Uuid>,
     /// Queued employees' wait reason, keyed by session id — the sidebar row
     /// and summon card read membership here to wear a pending state instead
@@ -768,6 +784,7 @@ impl Default for BossUi {
             active: HashMap::new(),
             working: HashSet::new(),
             expired: HashSet::new(),
+            attention: HashSet::new(),
             workspace_transitions: HashSet::new(),
             queued: HashMap::new(),
             dispatching: HashSet::new(),
@@ -1526,6 +1543,7 @@ impl Waku {
             self.boss_ui.employee_icons.clear();
             self.boss_ui.working.clear();
             self.boss_ui.expired.clear();
+            self.boss_ui.attention.clear();
             self.boss_ui.workspace_transitions.clear();
             self.boss_ui.queued.clear();
             self.boss_ui.dispatching.clear();
@@ -1572,6 +1590,9 @@ impl Waku {
                         self.boss_ui.expired.insert(employee.session_id);
                     } else {
                         self.boss_ui.working.insert(employee.session_id);
+                    }
+                    if employee_attention_is_unread(employee) {
+                        self.boss_ui.attention.insert(employee.session_id);
                     }
                     if let Some(detail) =
                         boss_queue_detail(employee, queue_rank.get(&employee.session_id).copied())
@@ -4234,6 +4255,7 @@ impl Waku {
         };
         let theme = Theme::current(cx);
         let session = self.state.sessions.iter().find(|session| session.id == id);
+        let attention_unread = self.boss_ui.attention.contains(&id);
         // A queued employee wins over the session indicator — a requeued
         // employee's shell can still carry its last turn's verdict marker,
         // which would read as finished over the pending state.
@@ -4387,6 +4409,24 @@ impl Waku {
                 &theme,
                 detail_provider,
             ))
+            .when(attention_unread, |row| {
+                row.child(
+                    div()
+                        .id(format!("boss-employee-attention-{id}"))
+                        .flex_none()
+                        .size(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(8.0))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(theme.text)
+                        .tooltip(Tooltip::text(tr!("boss.employee_needs_attention")))
+                        .bg(theme.info)
+                        .rounded_full()
+                        .child("!"),
+                )
+            })
             .when_some(status_indicator, |row, indicator| {
                 // On an expired row the status yields its slot to the
                 // hover-revealed archive control — it collapses out of the
@@ -5224,6 +5264,88 @@ impl Waku {
                     Uuid::nil(),
                     waku_client::Command::Boss {
                         operation: BossOperation::MarkDeliverableViewed { id },
+                    },
+                );
+            })
+            .detach();
+    }
+
+    pub(super) fn mark_employee_viewed_for_session(
+        &self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let key = self.boss_ui.states.iter().find_map(|(key, state)| {
+            state
+                .employees
+                .iter()
+                .chain(state.retired_employees.iter())
+                .find(|employee| {
+                    employee.session_id == session_id && employee_attention_is_unread(employee)
+                })
+                .map(|_| *key)
+        });
+        let Some(key) = key else {
+            return;
+        };
+        let Some(client) = self
+            .daemons
+            .supervisor(key)
+            .map(|supervisor| supervisor.client())
+        else {
+            return;
+        };
+        cx.background_executor()
+            .spawn(async move {
+                let _ = client.request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    waku_client::Command::Boss {
+                        operation: BossOperation::MarkEmployeeViewed { session_id },
+                    },
+                );
+            })
+            .detach();
+    }
+
+    pub(super) fn toggle_employee_attention_action(
+        &mut self,
+        _: &ToggleEmployeeAttention,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        // Only active roster entries can be toggled here. Manually archived
+        // employees stay archived; the shortcut is for an idle sidebar row.
+        let target = self.boss_ui.states.iter().find_map(|(key, state)| {
+            state
+                .employees
+                .iter()
+                .find(|employee| employee.session_id == session_id && employee.expired)
+                .map(|employee| (*key, !employee.needs_attention))
+        });
+        let Some((key, needs_attention)) = target else {
+            return;
+        };
+        let Some(client) = self
+            .daemons
+            .supervisor(key)
+            .map(|supervisor| supervisor.client())
+        else {
+            return;
+        };
+        cx.background_executor()
+            .spawn(async move {
+                let _ = client.request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    waku_client::Command::Boss {
+                        operation: BossOperation::SetEmployeeAttention {
+                            session_id,
+                            needs_attention,
+                        },
                     },
                 );
             })
@@ -10759,6 +10881,8 @@ mod tests {
             expired: false,
             workspace_transition: false,
             expired_at: None,
+            needs_attention: false,
+            attention_viewed_at: None,
             blocker: None,
             cancelled: false,
             expiry: None,
@@ -10771,6 +10895,31 @@ mod tests {
             item_id: None,
             assignment: None,
         }
+    }
+
+    #[test]
+    fn employee_attention_unread_rearms_on_expiry_and_view_stamp() {
+        let mut employee = boss_employee(None);
+        employee.needs_attention = true;
+        assert!(!employee_attention_is_unread(&employee));
+
+        employee.expired = true;
+        employee.expired_at = Some(100);
+        assert!(employee_attention_is_unread(&employee));
+        employee.attention_viewed_at = Some(99);
+        assert!(employee_attention_is_unread(&employee));
+        employee.attention_viewed_at = Some(100);
+        assert!(!employee_attention_is_unread(&employee));
+
+        // A fresh manual flag clears its prior view stamp, even when the
+        // employee's old expiry has not changed.
+        employee.attention_viewed_at = None;
+        assert!(employee_attention_is_unread(&employee));
+        employee.expired = false;
+        assert!(!employee_attention_is_unread(&employee));
+        employee.expired = true;
+        employee.needs_attention = false;
+        assert!(!employee_attention_is_unread(&employee));
     }
 
     #[test]
@@ -11051,6 +11200,8 @@ mod tests {
             expired: lifecycle == waku_protocol::boss::EmployeeLifecycle::Expired,
             workspace_transition: false,
             expired_at: None,
+            needs_attention: false,
+            attention_viewed_at: None,
             blocker: None,
             cancelled: false,
             expiry: None,

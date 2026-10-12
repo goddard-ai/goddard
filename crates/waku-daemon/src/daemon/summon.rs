@@ -1310,6 +1310,7 @@ impl WakuBackend {
         item: Option<Uuid>,
         assignment_kind: waku_protocol::boss::PlanAssignmentKind,
         request_id: Option<Uuid>,
+        needs_attention: bool,
         events: &EventSink,
     ) -> anyhow::Result<(Uuid, bool)> {
         let supervisor = caller
@@ -1341,6 +1342,7 @@ impl WakuBackend {
             "afterSuccess": after_success, "finishesOutcome": finishes_outcome,
             "prerequisites": prerequisites,
             "plan": plan, "item": item, "assignmentKind": assignment_kind,
+            "needsAttention": needs_attention,
         }))?;
         if let Some(request_id) = request_id
             && let Some(existing) = self
@@ -1443,6 +1445,7 @@ impl WakuBackend {
         };
         employee.request_id = request_id;
         employee.request_fingerprint = request_id.map(|_| fingerprint);
+        employee.needs_attention = needs_attention;
         employee.assignment_kind = assignment_kind;
         employee.plan_id = plan_binding.as_ref().map(|binding| binding.plan_id);
         employee.item_id = item;

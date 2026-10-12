@@ -96,6 +96,7 @@ use crate::{
     SelectFavoriteModel, SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask,
     SelectProjectsTab, SelectSidebarSession, StepModelPickerBackward, SwitchProjectBackward,
     SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward, SyncBranch, ToggleAutomationsPage,
+    ToggleEmployeeAttention,
     ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleEnvironment,
     ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
     ToggleFpsCounter, ToggleFullScreen, ToggleGitPanel, ToggleInboxPage, ToggleModelPicker,

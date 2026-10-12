@@ -217,6 +217,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     Some("Workspace"),
                 ),
                 bound(
+                    tr!("shortcuts.toggle_employee_attention"),
+                    ToggleEmployeeAttention,
+                    Some("Workspace"),
+                ),
+                bound(
                     tr!("shortcuts.mark_unread_next"),
                     MarkUnreadAndGoToNextIdle,
                     Some("Workspace"),

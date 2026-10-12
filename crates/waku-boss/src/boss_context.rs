@@ -717,6 +717,8 @@ mod tests {
             expired,
             workspace_transition: false,
             expired_at: expired.then(unix_time),
+            needs_attention: false,
+            attention_viewed_at: None,
             blocker: None,
             cancelled: false,
             expiry: None,

@@ -5324,6 +5324,8 @@ shortcuts.next_unread_completion:
   en: Go to Next Unread Completion
 shortcuts.mark_unread:
   en: Mark Current Task Unread
+shortcuts.toggle_employee_attention:
+  en: Toggle Attention for Selected Employee
 shortcuts.mark_unread_next:
   en: Park Task & Go to Next Important Task
 shortcuts.task_switcher:
@@ -6452,6 +6454,8 @@ boss.loading:
   en: Loading…
 boss.employee_finished:
   en: Finished
+boss.employee_needs_attention:
+  en: This employee needs attention
 boss.employee_resume_queued:
   en: "%{name} is queued to resume — the message delivers when it starts"
 boss.finished_now:

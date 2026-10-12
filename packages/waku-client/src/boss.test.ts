@@ -116,6 +116,7 @@ function employee(overrides: Partial<BossEmployee> = {}): BossEmployee {
     pinnedFiles: [],
     expired: false,
     workspaceTransition: false,
+    needsAttention: false,
     cancelled: false,
     state: "working",
     ...overrides,

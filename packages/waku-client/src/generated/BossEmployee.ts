@@ -48,6 +48,23 @@ workspaceTransition: boolean,
  */
 expiredAt?: number | null,
 /**
+ * The summoner flagged this employee for the user's attention — a
+ * backstop for work that must not complete unnoticed. A flagged
+ * record wears the sidebar's unread marker once expired, stays out
+ * of the retirement sweep until unflagged, and is unaffected by
+ * whether the job produced a deliverable. The user can also set the
+ * flag manually on a finished employee.
+ */
+needsAttention: boolean,
+/**
+ * The client's view stamp on the attention marker, in the
+ * `BossDeliverable::viewed_at` convention: the unread dot holds
+ * while it is missing or older than `expired_at`, and a re-expiry
+ * under a fresh timestamp re-arms it. Clearing `needs_attention`
+ * is the only way the marker leaves for good.
+ */
+attentionViewedAt?: number,
+/**
  * The attention item the employee raised through `reportBlocker`, or
  * one the daemon recorded on its behalf (a restart interrupted the
  * job). Its presence turns a finish back into a delivered report;

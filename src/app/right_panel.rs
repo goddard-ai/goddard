@@ -3762,6 +3762,8 @@ mod tests {
             expired: lifecycle == waku_protocol::boss::EmployeeLifecycle::Expired,
             workspace_transition: false,
             expired_at: None,
+            needs_attention: false,
+            attention_viewed_at: None,
             blocker: blocker.map(str::to_owned),
             cancelled: false,
             expiry: None,
