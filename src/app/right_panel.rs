@@ -2057,7 +2057,6 @@ struct BossOutcomePanelRow {
     detail: Option<String>,
     /// A blocked or queued member's reason, rendered on its own third line.
     reason: Option<String>,
-    worktree: bool,
     updated_label: Option<String>,
     attention: bool,
     expanded: bool,
@@ -2260,9 +2259,9 @@ fn boss_goal_section_header(
 }
 
 /// The compact two-line outcome row: status icon and outcome title with
-/// a disclosure chevron, then an indented detail line — project folder
-/// and name, a "·" separator, the current member's avatar and name, and
-/// the worktree fork hugging the trailing relative update time. A row
+/// a disclosure chevron, then an indented identity line — project folder
+/// and employee avatar and name at the left, with the relative update time
+/// at the far right. A row
 /// with no members shows its recorded wait or follow-up detail instead.
 /// Activation toggles the assignment detail; the expanded entries carry
 /// the conversation navigation.
@@ -2331,6 +2330,7 @@ fn boss_goal_panel_row_element(
         .child(
             div()
                 .flex()
+                .min_w_0()
                 .items_center()
                 .gap(px(6.0))
                 .child(
@@ -2366,6 +2366,7 @@ fn boss_goal_panel_row_element(
         .child(
             div()
                 .flex()
+                .min_w_0()
                 .items_center()
                 .gap(px(5.0))
                 // Indent past the status icon and its gap so the detail line
@@ -2435,34 +2436,20 @@ fn boss_goal_panel_row_element(
                             )
                     },
                 )
-                .when(row.queued_extra > 0, |element| {
-                    element.child(
-                        div()
-                            .flex_none()
-                            .text_size(sp(11.0))
-                            .line_height(sp(15.0))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!(
-                                "boss.goals_more_queued",
-                                count = row.queued_extra
-                            )),
-                    )
+                .when(row.member_name.is_none(), |element| {
+                    element.when_some(row.detail.clone(), |element, detail| {
+                        element.child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(sp(11.0))
+                                .line_height(sp(15.0))
+                                .text_color(theme.text_tertiary)
+                                .child(detail),
+                        )
+                    })
                 })
-                .when_some(row.detail.clone(), |element, detail| {
-                    element.child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(sp(11.0))
-                            .line_height(sp(15.0))
-                            .text_color(theme.text_tertiary)
-                            .child(detail),
-                    )
-                })
-                .child(div().flex_1())
-                .when(row.worktree, |element| {
-                    element.child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
-                })
+                .child(div().flex_1().min_w_0())
                 .when_some(row.updated_label.clone(), |element, label| {
                     element.child(
                         div()
@@ -2474,18 +2461,56 @@ fn boss_goal_panel_row_element(
                     )
                 }),
         )
-        .when_some(row.reason.clone(), |element, reason| {
-            element.child(
-                div()
-                    .min_w_0()
-                    .pl(px(18.0))
-                    .truncate()
-                    .text_size(sp(11.0))
-                    .line_height(sp(15.0))
-                    .text_color(theme.text_secondary)
-                    .child(reason),
-            )
-        })
+        .when(
+            row.reason.is_some()
+                || (row.member_name.is_some() && (row.detail.is_some() || row.queued_extra > 0)),
+            |element| {
+                element.child(
+                    div()
+                        .flex()
+                        .min_w_0()
+                        .pl(px(18.0))
+                        .items_center()
+                        .gap(px(5.0))
+                        .line_height(sp(15.0))
+                        .text_color(theme.text_secondary)
+                        .when(row.queued_extra > 0, |element| {
+                            element.child(
+                                div()
+                                    .flex_none()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(tr!("boss.goals_more_queued", count = row.queued_extra)),
+                            )
+                        })
+                        .when_some(
+                            row.member_name.as_ref().and(row.detail.clone()),
+                            |element, detail| {
+                                element.child(
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .truncate()
+                                        .text_size(sp(11.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(detail),
+                                )
+                            },
+                        )
+                        .when_some(row.reason.clone(), |element, reason| {
+                            element.child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .truncate()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(reason),
+                            )
+                        }),
+                )
+            },
+        )
 }
 
 /// One line inside an expanded outcome — an indented status marker, the
@@ -2644,7 +2669,6 @@ mod tests {
                                     project_label: Some("Goddard".into()),
                                     detail: None,
                                     reason: None,
-                                    worktree: true,
                                     updated_label: Some("23h".into()),
                                     attention: true,
                                     expanded: false,
@@ -2802,7 +2826,6 @@ mod tests {
                             project_label: None,
                             detail: None,
                             reason: None,
-                            worktree: false,
                             updated_label: None,
                             attention: false,
                             expanded: false,
@@ -12013,9 +12036,6 @@ impl Waku {
                     .map(str::to_owned)
             })
         });
-        let worktree = speaker_session_ref.is_some_and(|session| {
-            matches!(session.workspace, SessionWorkspace::Worktree { .. })
-        });
         // Last-updated: the outcome's own activity stamp, lifted by a
         // newer member session stamp when the snapshot leads it.
         let updated_at = [
@@ -12082,7 +12102,14 @@ impl Waku {
             focus,
             height: {
                 let height = boss_goal_row_height(self.state.ui_font_size);
-                height + if reason.is_some() { (height * 0.3).ceil() } else { 0.0 }
+                let has_status_detail = reason.is_some()
+                    || (speaker_member.is_some() && (detail.is_some() || queued_extra > 0));
+                height
+                    + if has_status_detail {
+                        (height * 0.3).ceil()
+                    } else {
+                        0.0
+                    }
             },
             bucket,
             status,
@@ -12092,7 +12119,6 @@ impl Waku {
             project_label,
             detail,
             reason,
-            worktree,
             updated_label,
             attention: row.attention || status.attention(),
             expanded,

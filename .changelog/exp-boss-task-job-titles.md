@@ -1,1 +1,1 @@
-- Boss employee tasks in the Tasks tab now show the employee's job title. When no job title is set, the existing task title fallback remains in effect.
+- Boss employee rows in the Tasks tab show the employee's job title when available. Outcome rows identify the employee by project and name, with the update time at the far right.
