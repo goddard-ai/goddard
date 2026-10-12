@@ -3848,6 +3848,8 @@ terminal.kill:
   en: Kill Terminal
 terminal.moved_to_group:
   en: The task's workspace changed — its terminal moved to the Terminals group.
+terminal.expand:
+  en: Expand to full screen
 
 project.add_project:
   en: Add project

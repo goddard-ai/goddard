@@ -3973,7 +3973,8 @@ impl Waku {
                     .is_some_and(|record| {
                         record.pinned
                             || (record.session.is_none()
-                                && self.selected_terminal == Some(terminal_id))
+                                && (self.selected_terminal == Some(terminal_id)
+                                    || self.docked_terminal == Some(terminal_id)))
                     })
             {
                 rows.push(SidebarRow::Terminal(terminal_id));

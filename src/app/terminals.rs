@@ -46,6 +46,16 @@ pub(super) fn nearest_repo_root(directory: &Path) -> Option<PathBuf> {
 /// component's middle.
 const SIDEBAR_TERMINAL_DETAIL_MAX_CHARS: usize = 32;
 
+/// The docked card's frame: its slot margin, the header strip's height,
+/// the inset mat around the view that keeps its square corners off the
+/// card's rounded edge, and the band the card height clamps to as the
+/// window grows and shrinks.
+const DOCKED_TERMINAL_MARGIN: f32 = 8.0;
+const DOCKED_TERMINAL_HEADER_HEIGHT: f32 = 34.0;
+const DOCKED_TERMINAL_INSET: f32 = 6.0;
+const DOCKED_TERMINAL_MIN_HEIGHT: f32 = 220.0;
+const DOCKED_TERMINAL_MAX_HEIGHT: f32 = 340.0;
+
 /// Shorten a slash-separated label by popping whole ancestors, never
 /// cutting through a component: `~/a/b/c` becomes `…/b/c`, then `…/c`.
 /// With `keep_first`, the leading component — a repository name — stays
@@ -328,6 +338,9 @@ impl Waku {
             .is_some_and(|dialog| dialog.terminal_id == terminal_id)
         {
             self.terminal_close_dialog = None;
+        }
+        if self.docked_terminal == Some(terminal_id) {
+            self.docked_terminal = None;
         }
         if self.selected_terminal == Some(terminal_id) {
             self.selected_terminal = None;
@@ -1138,6 +1151,7 @@ impl Waku {
     /// stored strip still points at it.
     pub(super) fn terminal_is_active_surface(&self, terminal_id: Uuid) -> bool {
         self.selected_terminal == Some(terminal_id)
+            || self.docked_terminal == Some(terminal_id)
             || (self.right_panel_visible
                 && self
                     .active_right_panel_surface()
@@ -1276,6 +1290,11 @@ impl Waku {
         self.automations_detail = None;
         self.notifications.open = false;
         self.selected_terminal = Some(terminal_id);
+        if self.docked_terminal == Some(terminal_id) {
+            // The standalone page and the card are two homes for one
+            // view — taking the main area releases the dock.
+            self.docked_terminal = None;
+        }
         self.last_visible_terminal = Some(terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);
         // Whatever owned the strip — a session, a page, or another
@@ -1339,6 +1358,99 @@ impl Waku {
         {
             self.sidebar_rows_fingerprint.set(None);
         }
+    }
+
+    /// Open a sidebar terminal as the card docked at the top of the main
+    /// column — the selected surface stays put underneath; the card is a
+    /// layer over it, not a page. The row of the terminal already filling
+    /// the main area just re-focuses its standalone view.
+    pub(super) fn open_docked_terminal(
+        &mut self,
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_terminal == Some(terminal_id) {
+            self.select_terminal(terminal_id, window, cx);
+            return;
+        }
+        let Some(record) = self.terminal_records.get(&terminal_id) else {
+            return;
+        };
+        if !self.right_panel_terminals.contains_key(&terminal_id) {
+            // Remote directories spawn through their host's daemon; a
+            // disconnected host surfaces as the view's spawn error.
+            let Some(working_directory) = self.terminal_spawn_directory(record) else {
+                return;
+            };
+            self.spawn_terminal_entity(terminal_id, working_directory, cx);
+        }
+        // One view, one mount: while the terminal is the right panel's
+        // active tab — docked or maximized — the strip hands its slot to
+        // a neighbor so the card can take the view. A maximized strip
+        // would hide the card under its layer, so it restores first.
+        if self
+            .fullscreen_surface
+            .as_ref()
+            .and_then(|(surface, _)| surface.terminal_id())
+            == Some(terminal_id)
+        {
+            self.toggle_panel_fullscreen(cx);
+        }
+        if self.terminal_mounts_in_right_panel(terminal_id) {
+            self.right_panel_active_surface = (0..self.right_panel_surfaces.len())
+                .find(|index| Some(*index) != self.right_panel_active_surface);
+            if let Some(index) = self.right_panel_active_surface {
+                self.reveal_right_panel_tab(index);
+            }
+        }
+        self.docked_terminal = Some(terminal_id);
+        self.unseen_terminal_completions.remove(&terminal_id);
+        let focus = self
+            .right_panel_terminals
+            .get(&terminal_id)
+            .map(|terminal| terminal.read(cx).focus_handle(cx));
+        if let Some(focus) = focus {
+            window.focus(&focus, cx);
+        }
+        cx.notify();
+    }
+
+    /// Whether the right panel — docked or maximized — currently mounts
+    /// the terminal's view. Only the active tab's view is painted, so a
+    /// parked or background strip holding the same tab is no conflict.
+    fn terminal_mounts_in_right_panel(&self, terminal_id: Uuid) -> bool {
+        (self.panel_fullscreen_active()
+            || (self.right_panel_visible && !self.git_panel_visible))
+            && self
+                .active_right_panel_surface()
+                .and_then(RightPanelSurface::terminal_id)
+                == Some(terminal_id)
+    }
+
+    /// Whether the docked card can paint — set, and no other surface
+    /// holds the view's mount this frame. A strip tab or the standalone
+    /// page that claimed it suppresses the card until it lets go; the
+    /// dock itself stays.
+    pub(super) fn docked_terminal_visible(&self, terminal_id: Uuid) -> bool {
+        self.right_panel_terminals.contains_key(&terminal_id)
+            && self.selected_terminal != Some(terminal_id)
+            && !self.terminal_mounts_in_right_panel(terminal_id)
+    }
+
+    /// Close the card without killing the terminal — the shell keeps
+    /// running under its sidebar row, and focus returns to the composer.
+    pub(super) fn dismiss_docked_terminal(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.docked_terminal.take().is_none() {
+            return;
+        }
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+        cx.notify();
     }
 
     /// `secondary-t` — always a fresh terminal, rooted where the user is.
@@ -1667,6 +1779,170 @@ impl Waku {
             .into_any_element()
     }
 
+    /// The docked terminal card pinned to the top of the main column —
+    /// in flow, so the surface underneath shifts down rather than being
+    /// covered. The header carries the title and directory, the expand
+    /// affordance that promotes the card to the standalone page, and the
+    /// close that only dismisses the card — the shell keeps running.
+    pub(super) fn render_docked_terminal_card(
+        &self,
+        terminal_id: Uuid,
+        width: f32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(terminal) = self.right_panel_terminals.get(&terminal_id).cloned() else {
+            return div().into_any_element();
+        };
+        // The view's column math needs its painted width — the card's
+        // margin, border, and inset mat shave the column's.
+        let inner_width =
+            (width - DOCKED_TERMINAL_MARGIN * 2.0 - 2.0 - DOCKED_TERMINAL_INSET * 2.0).max(0.0);
+        if (terminal.read(cx).panel_width() - inner_width).abs() > 0.5 {
+            terminal.update(cx, |terminal, _| terminal.set_panel_width(inner_width));
+        }
+        let card_height = (f32::from(window.viewport_size().height) * 0.4)
+            .clamp(DOCKED_TERMINAL_MIN_HEIGHT, DOCKED_TERMINAL_MAX_HEIGHT);
+        let record = self.terminal_records.get(&terminal_id);
+        let title = record
+            .and_then(|record| record.custom_title.clone())
+            .or_else(|| Some(single_line_label(terminal.read(cx).title())))
+            .filter(|title| !title.is_empty())
+            .unwrap_or_else(|| tr!("right_panel.terminal"));
+        let cwd = self.terminal_cwd(terminal_id, cx).map(|cwd| {
+            settings::abbreviate_home_path(&cwd, self.home_directory.as_deref())
+        });
+        let expand_focus =
+            self.transcript_control_focus(format!("docked-terminal-expand-{terminal_id}"), cx);
+        let close_focus =
+            self.transcript_control_focus(format!("docked-terminal-close-{terminal_id}"), cx);
+        let expand_button = div()
+            .id(SharedString::from(format!(
+                "docked-terminal-expand-{terminal_id}"
+            )))
+            .track_focus(&expand_focus)
+            .tab_index(0)
+            .size(px(26.0))
+            .rounded(px(8.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .child(icon("icons/maximize.svg", 13.0, theme.text_tertiary))
+            .tooltip(|window, cx| Tooltip::new(tr!("terminal.expand")).build(window, cx))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.select_terminal(terminal_id, window, cx);
+            }))
+            .on_key_down(cx.listener(
+                move |this, event: &KeyDownEvent, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.select_terminal(terminal_id, window, cx);
+                        cx.stop_propagation();
+                    }
+                },
+            ));
+        let close_button = div()
+            .id(SharedString::from(format!(
+                "docked-terminal-close-{terminal_id}"
+            )))
+            .track_focus(&close_focus)
+            .tab_index(0)
+            .size(px(26.0))
+            .rounded(px(8.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .child(icon("icons/x.svg", 13.0, theme.text_tertiary))
+            .tooltip(|window, cx| Tooltip::new(tr!("common.close")).build(window, cx))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.dismiss_docked_terminal(window, cx);
+            }))
+            .on_key_down(cx.listener(
+                move |this, event: &KeyDownEvent, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.dismiss_docked_terminal(window, cx);
+                        cx.stop_propagation();
+                    }
+                },
+            ));
+        div()
+            .flex_none()
+            .w_full()
+            .px(px(DOCKED_TERMINAL_MARGIN))
+            .pt(px(DOCKED_TERMINAL_MARGIN))
+            .pb(px(DOCKED_TERMINAL_MARGIN / 2.0))
+            .child(
+                div()
+                    .id(SharedString::from(format!("docked-terminal-{terminal_id}")))
+                    .w_full()
+                    .h(px(card_height))
+                    .flex()
+                    .flex_col()
+                    .rounded(px(12.0))
+                    .border(hairline())
+                    .border_color(theme.border_subtle)
+                    .bg(theme.raised)
+                    .shadow_md()
+                    .child(
+                        div()
+                            .h(px(DOCKED_TERMINAL_HEADER_HEIGHT))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .pl(px(10.0))
+                            .pr(px(4.0))
+                            .border_b(hairline())
+                            .border_color(theme.border_subtle)
+                            .child(icon("icons/terminal-square.svg", 13.0, theme.text_tertiary))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(sp(12.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(SharedString::from(title)),
+                            )
+                            .when_some(cwd, |element, cwd| {
+                                element.child(
+                                    div()
+                                        .flex_none()
+                                        .max_w(px(240.0))
+                                        .truncate()
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(SharedString::from(cwd)),
+                                )
+                            })
+                            .child(div().flex_1())
+                            .child(expand_button)
+                            .child(close_button),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .px(px(DOCKED_TERMINAL_INSET))
+                            .pb(px(DOCKED_TERMINAL_INSET))
+                            .child(terminal),
+                    ),
+            )
+            .into_any_element()
+    }
+
     /// One terminal row in the Terminals group — also what a pinned
     /// terminal contributes to the collapsed group.
     pub(super) fn render_sidebar_terminal_item(
@@ -1796,7 +2072,8 @@ impl Waku {
             .and_then(|terminal| terminal.read(cx).last_command_started_at())
             .unwrap_or(record.opened_at);
         let time_label = format_time_ago(unix_time().saturating_sub(started_at));
-        let selected = self.selected_terminal == Some(terminal_id);
+        let selected = self.selected_terminal == Some(terminal_id)
+            || self.docked_terminal_visible(terminal_id);
         let renaming = self.terminal_rename == Some(terminal_id);
         let menu = self.menu_handle(format!("terminal-{terminal_id}"), cx);
         let row_focus = menu.trigger_focus_handle().clone();
@@ -2018,7 +2295,7 @@ impl Waku {
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         let key = event.keystroke.key.as_str();
                         if matches!(key, "enter" | "space") {
-                            this.select_terminal(terminal_id, window, cx);
+                            this.open_docked_terminal(terminal_id, window, cx);
                             cx.stop_propagation();
                         } else if key == "f10" && event.keystroke.modifiers.shift {
                             keyboard_menu.open_context_menu(window, cx);
@@ -2026,7 +2303,7 @@ impl Waku {
                         }
                     }))
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select_terminal(terminal_id, window, cx);
+                        this.open_docked_terminal(terminal_id, window, cx);
                     }))
             });
 

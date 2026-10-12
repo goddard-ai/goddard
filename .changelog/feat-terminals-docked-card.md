@@ -1,0 +1,1 @@
+- Opening a terminal from the sidebar no longer switches away from the current task — it docks as a card at the top of the screen with a button to expand it to full screen, and ⌘W or the close button dismisses the card while the shell keeps running.

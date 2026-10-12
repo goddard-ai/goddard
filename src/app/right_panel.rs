@@ -5912,6 +5912,15 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The docked terminal card is the lightest layer over the column:
+        // ⌘W dismisses just the card — the shell keeps running under its
+        // sidebar row.
+        if let Some(terminal_id) = self.docked_terminal
+            && self.docked_terminal_visible(terminal_id)
+        {
+            self.dismiss_docked_terminal(window, cx);
+            return;
+        }
         // A deliverable preview is a page over the Boss chat, so ⌘W returns
         // to that chat instead of closing the window or a right-panel tab.
         if self.live_deliverable_page().is_some() {
@@ -10276,7 +10285,7 @@ impl Waku {
     /// The flag parks with the owner's strip on a swap, and every other way
     /// the surface goes away (tab close, surface switch, panel hide) is
     /// reconciled per frame in `settle_panel_slides`.
-    fn toggle_panel_fullscreen(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn toggle_panel_fullscreen(&mut self, cx: &mut Context<Self>) {
         let entering = self.fullscreen_surface.is_none();
         self.fullscreen_surface = if entering {
             self.active_right_panel_surface()

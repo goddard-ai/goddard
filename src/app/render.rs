@@ -955,6 +955,21 @@ impl Render for Waku {
                     )
                     .children(self.friend_watch_banner(cx))
                     .children(self.daemon_degraded_banner(cx))
+                    // The docked terminal card sits in flow at the top of
+                    // the column — whatever surface is active below it
+                    // shifts down to make room.
+                    .children(
+                        self.docked_terminal
+                            .filter(|id| self.docked_terminal_visible(*id))
+                            .map(|terminal_id| {
+                                self.render_docked_terminal_card(
+                                    terminal_id,
+                                    self.chat_viewport_width(window),
+                                    window,
+                                    cx,
+                                )
+                            }),
+                    )
                     // A selected terminal takes the column in place of the
                     // transcript, the Projects page, or the new-task prompt.
                     .child(

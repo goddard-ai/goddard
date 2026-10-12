@@ -3726,6 +3726,11 @@ pub struct Waku {
     /// The terminal filling the main area. Set only while no session is
     /// selected; activating a chat clears it and folds the group.
     selected_terminal: Option<Uuid>,
+    /// The terminal docked as a card at the top of the main column —
+    /// sidebar opens land here instead of taking the main area. The card
+    /// is a layer, not a page: the selected chat stays underneath, and
+    /// the dock is never persisted or recorded in navigation history.
+    docked_terminal: Option<Uuid>,
     /// The terminal last shown in the main area. Survives the group's
     /// collapse so re-expanding lands on it again.
     last_visible_terminal: Option<Uuid>,
@@ -7667,6 +7672,7 @@ impl Waku {
                 terminal_restore_directories: HashMap::new(),
                 unseen_terminal_completions: HashSet::new(),
                 selected_terminal: None,
+                docked_terminal: None,
                 last_visible_terminal: None,
                 right_panel_terminal_commands: HashMap::new(),
                 right_panel_terminal_programs: HashMap::new(),
