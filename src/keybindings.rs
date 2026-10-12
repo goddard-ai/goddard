@@ -458,6 +458,44 @@ mod tests {
         }
     }
 
+    #[gpui::test]
+    fn boss_chat_j_resolves_to_new_terminal_and_keeps_workspace_focus_terminal(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(|cx| crate::bind_keys(cx));
+
+        for (context, expected) in [
+            (
+                "Workspace BossChat TextInput",
+                &crate::NewTerminal as &dyn gpui::Action,
+            ),
+            (
+                "Workspace TextInput",
+                &crate::FocusTerminal as &dyn gpui::Action,
+            ),
+        ] {
+            let stack = context
+                .split_whitespace()
+                .map(|part| gpui::KeyContext::parse(part).unwrap())
+                .collect::<Vec<_>>();
+            let (bindings, _) = cx.update(|cx| {
+                cx.key_bindings()
+                    .borrow()
+                    .bindings_for_input(&[gpui::Keystroke::parse("secondary-j").unwrap()], &stack)
+            });
+            assert_eq!(
+                bindings.len(),
+                1,
+                "⌘J must resolve exactly once in {context}"
+            );
+            assert!(
+                bindings[0].action().partial_eq(expected),
+                "⌘J under {context} should resolve to {}",
+                expected.name()
+            );
+        }
+    }
+
     /// Parity gate: the generated keymap must be identical — action,
     /// sequence, platform, predicate, and precedence order — to the
     /// hand-written registrations it replaces. This must pass on every

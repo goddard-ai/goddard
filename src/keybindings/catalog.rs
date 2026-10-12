@@ -2920,7 +2920,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "secondary-l",
         TranscriptOrEditor,
     ),
-    e("workspace.focus_terminal", All, "secondary-j", ""),
+    e("workspace.focus_terminal", All, "secondary-j", NotBossChat),
+    e("terminal.new", All, "secondary-j", BossChat),
     e("app.run_script", All, "secondary-r", ""),
     e("terminal.new", All, "secondary-t", ""),
     e("workspace.toggle_model_picker", All, "secondary-/", ""),
@@ -3079,6 +3080,8 @@ mod ctx {
     /// Picture from eating the chords; !Terminal and !Menu spare their input.
     pub const SweepScope: &str = "BigPictureEnabled && !Terminal && !Menu";
     pub const Workspace: &str = "Workspace";
+    pub const BossChat: &str = "BossChat";
+    pub const NotBossChat: &str = "!BossChat";
     pub const ProjectsPage: &str = "ProjectsPage";
     pub const AutomationsPage: &str = "AutomationsPage";
     pub const GitSettingsPage: &str = "GitSettingsPage";

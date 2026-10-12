@@ -712,15 +712,24 @@ impl Render for Waku {
         let sync_branch_modal = self.render_sync_branch(window, cx);
         let git_panel_overlays = self.render_git_panel_overlays(window, cx);
         let toast = self.render_active_toast(window, cx);
+        let workspace_context = match (
+            composer_mounted,
+            self.state.big_picture_enabled,
+            self.boss_chat_key().is_some(),
+        ) {
+            (true, true, true) => "Workspace ComposerExists BigPictureEnabled BossChat",
+            (true, true, false) => "Workspace ComposerExists BigPictureEnabled",
+            (true, false, true) => "Workspace ComposerExists BossChat",
+            (true, false, false) => "Workspace ComposerExists",
+            (false, true, true) => "Workspace BigPictureEnabled BossChat",
+            (false, true, false) => "Workspace BigPictureEnabled",
+            (false, false, true) => "Workspace BossChat",
+            (false, false, false) => "Workspace",
+        };
         let content = div()
             // BigPictureEnabled arms the ⌘⌥←/⌘⌥→ sweep's context — with the
             // experiment off the bindings match nothing.
-            .key_context(match (composer_mounted, self.state.big_picture_enabled) {
-                (true, true) => "Workspace ComposerExists BigPictureEnabled",
-                (true, false) => "Workspace ComposerExists",
-                (false, true) => "Workspace BigPictureEnabled",
-                (false, false) => "Workspace",
-            })
+            .key_context(workspace_context)
             .on_action(cx.listener(Self::quit_action))
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
             .on_action(|_: &Minimize, window, _| window.minimize_window())

@@ -924,7 +924,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
             AddToChat,
             Some("Transcript || FileEditorPane"),
         ),
-        KeyBinding::new("secondary-j", FocusTerminal, None),
+        KeyBinding::new("secondary-j", FocusTerminal, Some("!BossChat")),
+        // Boss chat has no terminal panel to focus; there ⌘J is the same
+        // project-aware terminal action as ⌘T. The deeper context keeps the
+        // ordinary workspace and text-input behavior unchanged.
+        KeyBinding::new("secondary-j", NewTerminal, Some("BossChat")),
         // ⌘R opens the run-a-script picker everywhere except the
         // browser surface, whose deeper context keeps it as reload.
         KeyBinding::new("secondary-r", RunProjectScript, None),
