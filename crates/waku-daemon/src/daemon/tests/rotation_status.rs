@@ -361,6 +361,104 @@ fn incident_refresh_carries_parked_work_and_closes_orphaned_turns() {
 }
 
 #[test]
+fn incident_refresh_delivers_carried_work_once_the_swap_commits() {
+    let root = std::env::temp_dir().join(format!("boss-incident-deliver-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let old = rotation_boss(&backend);
+    busy_boss_chat(&backend, old, Uuid::new_v4());
+    let now = crate::model::unix_time();
+    let fenced_at = now - 10;
+    let continuity_path = backend.boss_continuity_path();
+    let mut ledger = waku_boss::rotation_continuity::ContinuityLedger::load(&continuity_path)
+        .expect("continuity ledger");
+    ledger.record_compaction_incident(old, fenced_at, "compaction activity observed");
+    ledger.persist(&continuity_path).unwrap();
+    // Parked work the fence holds, plus a user stop — both are
+    // session-keyed holds that must ride the swap to the successor.
+    let queued_id = Uuid::new_v4();
+    backend.agent.enqueue(
+        old,
+        crate::agent::AgentPrompt {
+            prompt: "parked report".into(),
+            transport: None,
+            sender: None,
+            queued_id: Some(queued_id),
+            context: None,
+            hidden: false,
+            report_trigger: None,
+        },
+    );
+    mirror_agent_queued_prompt(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        queued_id,
+        "parked report",
+        None,
+        false,
+        None,
+    )
+    .unwrap();
+    backend.agent.note_user_stop(old);
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        &DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    )
+    .unwrap();
+    backend.reconcile_boss_rotation(now + 1).unwrap();
+    let next = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(old, next);
+    // The stop hold followed the chat, not the retiring id — the carried
+    // report stays parked until the user's next prompt releases it.
+    assert!(backend.agent.user_stopped(next));
+    assert!(!backend.agent.user_stopped(old));
+    let capture = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        next,
+        RuntimeEntry {
+            plan_gate: None,
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(capture.clone()),
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: backend.default_cwd.clone(),
+        },
+    );
+    backend.deliver_pending_agent_prompts();
+    assert!(capture.prompts.lock().is_empty());
+    assert!(backend.agent.has_queued(next));
+    // The user's resume releases the hold; the scheduler's delivery pass
+    // then drains the carried report through the successor's runtime.
+    backend.agent.clear_user_stop(next);
+    backend.deliver_pending_agent_prompts();
+    {
+        let prompts = capture.prompts.lock();
+        assert_eq!(prompts.len(), 1);
+        assert!(prompts[0].contains("parked report"));
+        assert!(prompts[0].contains("boss-session-rotation"));
+    }
+    assert!(!backend.agent.has_queued(next));
+    let state = backend.task_state.lock();
+    let successor = state
+        .sessions
+        .iter()
+        .find(|session| session.id == next)
+        .unwrap();
+    assert!(successor.queued_messages.is_empty());
+    drop(state);
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn manual_compact_attempt_is_journal_telemetry_and_retry_is_human_only() {
     let root = std::env::temp_dir().join(format!("boss-compact-telemetry-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);

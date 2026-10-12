@@ -833,9 +833,14 @@ impl WakuBackend {
             eprintln!("Boss session rotation: composer draft carry failed: {error}");
         }
         // The in-memory queue follows the same re-key the document took —
-        // the successor's drain delivers what the incident fence held.
+        // the successor's drain delivers what the incident fence held. A
+        // user stop held on the retired id is the same kind of session-keyed
+        // state: the halt still applies to the chat that replaced it.
         self.agent
             .migrate_queue(intent.old_session_id, intent.new_session_id);
+        self.agent
+            .migrate_user_stop(intent.old_session_id, intent.new_session_id);
+        self.wake_summon_queue();
         self.boss.router_defer_context(intent.new_session_id);
         if let Some(notifier) = self.task_notifier.lock().clone() {
             notifier();

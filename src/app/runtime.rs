@@ -4905,10 +4905,25 @@ impl Waku {
         self.pending_checkpoint_turn(session_id)
     }
 
-    fn defer_queue_drain(&mut self, session_id: Uuid) {
+    pub(super) fn defer_queue_drain(&mut self, session_id: Uuid) {
         if !self.pending_queue_drains.contains(&session_id) {
             self.pending_queue_drains.push(session_id);
         }
+    }
+
+    /// A Boss rotation re-keyed the chat's session id: its parked follow-ups
+    /// carried to the successor, but the swap emits no settle of its own —
+    /// nothing would ever arm the drain a `TurnFinished` fires. Re-key the
+    /// armed drain (and drop the retired chat's stale cancel drain) and arm
+    /// the successor's so carried follow-ups dequeue on the now-idle chat
+    /// instead of parking forever. The drain itself re-checks the session's
+    /// own gates — busy, checkpoint pending, cancel settling — before
+    /// anything sends, and daemon-owned chips stay for the daemon's drain.
+    pub(super) fn migrate_boss_queue_drain(&mut self, from: Uuid, to: Uuid) {
+        self.pending_queue_drains.retain(|pending| *pending != from);
+        self.cancel_drains.remove(&from);
+        self.defer_queue_drain(to);
+        signal_event_pump(&self.event_wake_tx);
     }
 
     /// Queues the newest finished turn's checkpoint for capture.

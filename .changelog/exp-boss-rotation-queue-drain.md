@@ -1,0 +1,1 @@
+- **Boss session refresh:** Fixed queued follow-ups parked on a Boss chat staying queued forever after the chat refreshed to a new session. They now send automatically once the replacement chat is idle, and a Boss stopped before the refresh stays stopped.

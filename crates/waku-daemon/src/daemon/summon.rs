@@ -104,7 +104,7 @@ impl WakuBackend {
             .collect()
     }
 
-    fn deliver_pending_agent_prompts(&self) {
+    pub(super) fn deliver_pending_agent_prompts(&self) {
         let events = self.event_source.lock().clone();
         for target in self.agent_queue_targets() {
             if self.session_quarantined(target) {

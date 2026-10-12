@@ -1546,6 +1546,7 @@ impl Waku {
             if let Some((from, to)) = rotated_session {
                 self.migrate_voice_scratchpad(from, to);
                 self.migrate_boss_composer_draft(from, to, cx);
+                self.migrate_boss_queue_drain(from, to);
             }
             for plan in planning {
                 self.ensure_plan_doc(key, plan.session_id, &plan.plan_file, true, cx);
@@ -2356,6 +2357,7 @@ impl Waku {
                                     // strands them.
                                     this.migrate_voice_scratchpad(from, id);
                                     this.migrate_boss_composer_draft(from, id, cx);
+                                    this.migrate_boss_queue_drain(from, id);
                                 }
                                 this.daemons.claim_session(id, key);
                                 if let Some(existing) =
@@ -3107,6 +3109,7 @@ impl Waku {
                 if old != id {
                     this.migrate_voice_scratchpad(old, id);
                     this.migrate_boss_composer_draft(old, id, cx);
+                    this.migrate_boss_queue_drain(old, id);
                 }
                 if let Some(state) = this.boss_ui.states.get_mut(&key)
                     && state.session_id == Some(old)

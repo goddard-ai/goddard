@@ -571,6 +571,21 @@ impl AgentState {
         queues.insert(to, carried);
     }
 
+    /// Re-home a user-stop hold the same way [`Self::migrate_queue`] re-homes
+    /// parked prompts — the halt the user ordered applies to the chat the
+    /// pointer names, not the retiring session id. Without the carry a
+    /// rotation would release the hold and drain parked deliveries into a
+    /// resume the user never asked for.
+    pub fn migrate_user_stop(&self, from: Uuid, to: Uuid) {
+        if from == to {
+            return;
+        }
+        let mut stops = self.user_stops.lock();
+        if stops.remove(&from) {
+            stops.insert(to);
+        }
+    }
+
     /// Rebuild the in-memory queue from prompts the session document still
     /// mirrors as parked — a restart dropped the memory copy but not the
     /// persisted chips. The document lists parked prompts in submission
@@ -1720,5 +1735,24 @@ mod tests {
         assert_eq!(state.resolve(&token), None);
         assert!(state.pop_queued(session).is_none());
         assert!(!state.has_open_turn(session));
+    }
+
+    #[test]
+    fn rotation_carry_rehomes_queue_and_user_stop_onto_the_successor() {
+        let state = AgentState::default();
+        let old = Uuid::new_v4();
+        let next = Uuid::new_v4();
+        state.enqueue(old, prompt("held", None));
+        state.note_user_stop(old);
+
+        state.migrate_queue(old, next);
+        state.migrate_user_stop(old, next);
+
+        assert!(state.has_queued(next));
+        assert!(!state.has_queued(old));
+        assert!(state.user_stopped(next));
+        assert!(!state.user_stopped(old));
+        state.clear_user_stop(next);
+        assert_eq!(state.pop_queued(next).map(|entry| entry.prompt).as_deref(), Some("held"));
     }
 }
