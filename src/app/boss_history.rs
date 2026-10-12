@@ -132,6 +132,24 @@ impl BossHistorySession {
     }
 }
 
+/// The page a scroll to the transcript's top should fetch: the boundary has
+/// to be the first row with the scroll anchor parked inside it. A
+/// tail-following list reports row `count` rather than a real position, so
+/// `is_scrolled` keeps resting at the tail from qualifying.
+fn top_history_boundary(
+    kinds: &[TranscriptRowKind],
+    is_scrolled: bool,
+    scroll_top: ListOffset,
+) -> Option<Uuid> {
+    if !is_scrolled || scroll_top.item_ix != 0 {
+        return None;
+    }
+    match kinds.first() {
+        Some(&TranscriptRowKind::BossHistoryBoundary(id)) => Some(id),
+        _ => None,
+    }
+}
+
 /// The daemon writes this marker into both sessions. Only the destination's
 /// marker is a predecessor link; the source's outgoing marker must be ignored.
 fn boss_chat_predecessor(session: &AgentSession) -> Option<Uuid> {
@@ -320,6 +338,33 @@ impl Waku {
         if let Some(id) = predecessor {
             self.load_boss_history(key, id, cx);
         }
+    }
+
+    /// Fetch the pending page when the reader's scroll reaches the boundary
+    /// row. Called from `render_transcript`, so it has to stay cheap on every
+    /// other frame and fire once per arrival: a finished load moves the scroll
+    /// anchor below the boundary's replacement, an in-flight or failed load
+    /// leaves the row's loading/retry state to its own control, and a missing
+    /// supervisor skips the request rather than re-arming its toast every
+    /// frame.
+    pub(super) fn load_boss_history_at_top(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = top_history_boundary(
+            &self.transcript_row_kinds.borrow(),
+            self.transcript_is_scrolled.get(),
+            self.active_transcript_rows().logical_scroll_top(),
+        ) else {
+            return;
+        };
+        let Some(key) = self.boss_chat_key() else {
+            return;
+        };
+        let loadable = self.boss_ui.chat_history.get(&key).is_none_or(|history| {
+            !history.loading.contains(&id) && !history.errors.contains_key(&id)
+        });
+        if !loadable || self.daemons.supervisor(key).is_none() {
+            return;
+        }
+        self.load_boss_history(key, id, cx);
     }
 
     pub(super) fn load_boss_history(&mut self, key: DaemonKey, id: Uuid, cx: &mut Context<Self>) {
@@ -541,6 +586,57 @@ mod tests {
         );
         assert_eq!(history.chain(&live), (vec![recent.id, oldest.id], None));
         assert_eq!(history.sessions.len(), 2);
+    }
+
+    #[test]
+    fn scrolling_to_the_boundary_targets_its_page_once() {
+        let project = Uuid::new_v4();
+        let mut older = chat(project, "Older");
+        let mut recent = chat(project, "Recent");
+        let mut live = chat(project, "Live");
+        rotate(&mut older, &mut recent);
+        rotate(&mut recent, &mut live);
+        let mut history = BossChatHistory::default();
+        history
+            .sessions
+            .insert(recent.id, BossHistorySession::new(recent));
+        let rows = history.transcript_rows(&live, &HashSet::new(), None);
+        assert_eq!(rows[0], TranscriptRowKind::BossHistoryBoundary(older.id));
+        let top = ListOffset {
+            item_ix: 0,
+            offset_in_item: px(4.0),
+        };
+        // The tail-follow position is not a real scroll into the boundary.
+        assert_eq!(
+            top_history_boundary(
+                &rows,
+                false,
+                ListOffset {
+                    item_ix: 0,
+                    offset_in_item: Pixels::ZERO
+                }
+            ),
+            None
+        );
+        // Parking just below the boundary leaves it alone too.
+        assert_eq!(
+            top_history_boundary(
+                &rows,
+                true,
+                ListOffset {
+                    item_ix: 1,
+                    offset_in_item: Pixels::ZERO
+                }
+            ),
+            None
+        );
+        assert_eq!(top_history_boundary(&rows, true, top), Some(older.id));
+        // In-flight and failed loads hold their state on the row instead of
+        // re-issuing the request every frame.
+        assert!(history.begin_load(older.id));
+        history.finish_load(older.id, Some(project), Err(anyhow::anyhow!("offline")));
+        assert!(history.errors.contains_key(&older.id));
+        assert!(!history.loading.contains(&older.id));
     }
 
     #[test]
