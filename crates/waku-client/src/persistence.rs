@@ -1803,10 +1803,14 @@ struct AppState {
     /// Auto selected instead of inheriting the routed provider/model.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     last_auto_route: bool,
+    /// Fallback for projects without a saved access mode.
     #[serde(default)]
     last_runtime_mode: RuntimeMode,
+    /// Last selected access mode for each project.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    project_runtime_modes: HashMap<Uuid, RuntimeMode>,
     /// Whether the user has confirmed the one-time Full access warning. Gates
-    /// the modal, not the mode — the mode itself is `last_runtime_mode`.
+    /// the modal, not the mode — see `last_runtime_mode` and `project_runtime_modes`.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     full_access_acknowledged: bool,
     /// Whether the user has confirmed that Incognito is a throwaway chat,
@@ -1972,10 +1976,14 @@ pub struct PersistedState {
     /// Auto selected instead of inheriting the routed provider/model.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub last_auto_route: bool,
+    /// Fallback for projects without a saved access mode.
     #[serde(default)]
     pub last_runtime_mode: RuntimeMode,
+    /// Last selected access mode for each project.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub project_runtime_modes: HashMap<Uuid, RuntimeMode>,
     /// Whether the user has confirmed the one-time Full access warning. Gates
-    /// the modal, not the mode — the mode itself is `last_runtime_mode`.
+    /// the modal, not the mode — see `last_runtime_mode` and `project_runtime_modes`.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub full_access_acknowledged: bool,
     /// Whether the user has confirmed that Incognito is a throwaway chat,
@@ -2639,6 +2647,7 @@ impl PersistedState {
             last_provider: ProviderKind::Codex,
             last_auto_route: false,
             last_runtime_mode: RuntimeMode::default(),
+            project_runtime_modes: HashMap::new(),
             full_access_acknowledged: false,
             incognito_disclosure_acknowledged: false,
             last_environment: SessionEnvironment::Local,
@@ -2844,7 +2853,7 @@ impl PersistedState {
 
     pub fn new_session(&self, project_id: Uuid, provider: ProviderKind) -> AgentSession {
         let mut session = AgentSession::new(project_id, provider);
-        session.runtime_mode = self.last_runtime_mode;
+        session.runtime_mode = self.runtime_mode_for_project(project_id);
         session.environment = if !self.sandbox_experiment_enabled {
             SessionEnvironment::Local
         } else if self.sandbox_default_enabled {
@@ -2877,6 +2886,21 @@ impl PersistedState {
         }
         session.workspace = self.workspace_for_new_session(project_id);
         session
+    }
+
+    pub fn runtime_mode_for_project(&self, project_id: Uuid) -> RuntimeMode {
+        self.project_runtime_modes
+            .get(&project_id)
+            .copied()
+            .unwrap_or(self.last_runtime_mode)
+    }
+
+    pub fn remember_project_runtime_mode(&mut self, project_id: Uuid, mode: RuntimeMode) -> bool {
+        if self.project_runtime_modes.get(&project_id) == Some(&mode) {
+            return false;
+        }
+        self.project_runtime_modes.insert(project_id, mode);
+        true
     }
 
     /// Records the workspace mode chosen for a draft in `project_id`; the
@@ -3247,6 +3271,7 @@ impl PersistedState {
             last_provider: self.last_provider,
             last_auto_route: self.last_auto_route,
             last_runtime_mode: self.last_runtime_mode,
+            project_runtime_modes: self.project_runtime_modes.clone(),
             full_access_acknowledged: self.full_access_acknowledged,
             incognito_disclosure_acknowledged: self.incognito_disclosure_acknowledged,
             last_environment: self.last_environment(),
@@ -3427,6 +3452,7 @@ impl PersistedState {
         self.last_provider = app_state.last_provider;
         self.last_auto_route = app_state.last_auto_route;
         self.last_runtime_mode = app_state.last_runtime_mode;
+        self.project_runtime_modes = app_state.project_runtime_modes;
         self.full_access_acknowledged = app_state.full_access_acknowledged;
         self.incognito_disclosure_acknowledged = app_state.incognito_disclosure_acknowledged;
         self.last_environment =

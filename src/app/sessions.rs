@@ -13,8 +13,13 @@ fn retain_runtime_after_cancel(provider: ProviderKind) -> bool {
 /// prompt must not hold the queue forever.
 pub(crate) const CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(15);
 
-fn new_task_runtime_mode(current: Option<&AgentSession>, remembered: RuntimeMode) -> RuntimeMode {
+fn new_task_runtime_mode(
+    current: Option<&AgentSession>,
+    project_id: Uuid,
+    remembered: RuntimeMode,
+) -> RuntimeMode {
     current
+        .filter(|session| session.project_id == project_id)
         .map(|session| session.runtime_mode)
         .unwrap_or(remembered)
 }
@@ -946,6 +951,8 @@ impl Waku {
             self.state.last_provider = provider;
             self.state.last_auto_route = auto_route;
             self.state.last_runtime_mode = runtime_mode;
+            self.state
+                .remember_project_runtime_mode(project_id, runtime_mode);
             self.state.last_environment = environment;
             self.state.last_model = model;
             self.state.last_reasoning_effort = reasoning_effort;
@@ -1572,11 +1579,14 @@ impl Waku {
             self.select_session(draft_id, cx);
             return draft_id;
         }
-        // A task opened from the current task carries its working access mode.
-        // `last_runtime_mode` covers launch and the few creation paths without
-        // a selected source task.
-        let runtime_mode =
-            new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
+        // A task opened from another task in this project carries its working
+        // mode; otherwise the project's saved choice or the global fallback
+        // seeds it.
+        let runtime_mode = new_task_runtime_mode(
+            self.selected_session(),
+            project_id,
+            self.state.runtime_mode_for_project(project_id),
+        );
         let environment = new_task_environment(
             self.selected_session(),
             self.state.last_environment(),
@@ -1619,8 +1629,11 @@ impl Waku {
         {
             self.use_remote_host(host, cx);
         }
-        let runtime_mode =
-            new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
+        let runtime_mode = new_task_runtime_mode(
+            self.selected_session(),
+            project_id,
+            self.state.runtime_mode_for_project(project_id),
+        );
         let environment = new_task_environment(
             self.selected_session(),
             self.state.last_environment(),
@@ -1809,8 +1822,11 @@ impl Waku {
         {
             self.use_remote_host(host, cx);
         }
-        let runtime_mode =
-            new_task_runtime_mode(self.selected_session(), self.state.last_runtime_mode);
+        let runtime_mode = new_task_runtime_mode(
+            self.selected_session(),
+            project_id,
+            self.state.runtime_mode_for_project(project_id),
+        );
         let mut session = self.state.new_session(project_id, self.state.last_provider);
         session.runtime_mode = runtime_mode;
         if self.project_workspace_confirmed_non_git(project_id) {
@@ -6220,10 +6236,10 @@ impl Waku {
         // A mode change restarts the driver — providers refuse to retune a
         // running session's permission posture — so while a turn is live the
         // pick waits for it to settle rather than cancelling it.
-        let Some((session_id, session_changed)) = self
+        let Some((session_id, project_id, session_changed)) = self
             .composer_session()
             .filter(|session| !session.is_busy())
-            .map(|session| (session.id, session.runtime_mode != mode))
+            .map(|session| (session.id, session.project_id, session.runtime_mode != mode))
         else {
             return;
         };
@@ -6245,7 +6261,8 @@ impl Waku {
                 .runtime_mode = mode;
             self.apply_session_options(session_id, cx);
         }
-        if session_changed || remembered_changed {
+        let project_mode_changed = self.state.remember_project_runtime_mode(project_id, mode);
+        if session_changed || remembered_changed || project_mode_changed {
             self.state.last_runtime_mode = mode;
             self.save();
             cx.notify();
@@ -7332,11 +7349,11 @@ mod tests {
         current.runtime_mode = RuntimeMode::Ask;
 
         assert_eq!(
-            new_task_runtime_mode(Some(&current), RuntimeMode::FullAccess),
+            new_task_runtime_mode(Some(&current), current.project_id, RuntimeMode::FullAccess),
             RuntimeMode::Ask
         );
         assert_eq!(
-            new_task_runtime_mode(None, RuntimeMode::AutoAcceptEdits),
+            new_task_runtime_mode(None, Uuid::new_v4(), RuntimeMode::AutoAcceptEdits),
             RuntimeMode::AutoAcceptEdits
         );
     }

@@ -1,0 +1,1 @@
+- Remember the last access mode separately for each project, and restore it after restarting Goddard or when starting another task in that project.

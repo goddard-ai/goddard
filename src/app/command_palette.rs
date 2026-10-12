@@ -5286,8 +5286,9 @@ impl Waku {
         let provider = summary.provider();
         let runtime_mode = self
             .selected_session()
+            .filter(|session| session.project_id == project_id)
             .map(|session| session.runtime_mode)
-            .unwrap_or(self.state.last_runtime_mode);
+            .unwrap_or_else(|| self.state.runtime_mode_for_project(project_id));
         let now = unix_time();
         let created_at = if summary.created_at == 0 {
             now
