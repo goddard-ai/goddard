@@ -3426,6 +3426,9 @@ pub struct Waku {
     /// Stable keyboard focus for each session row's hover-revealed pin
     /// control.
     sidebar_session_pin_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
+    /// Stable keyboard focus for an expired employee row's hover-revealed
+    /// archive control.
+    sidebar_employee_archive_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
     /// Stable keyboard focus for each deliverable row's hover-revealed Finder
     /// control.
     sidebar_deliverable_finder_focuses:
@@ -7521,6 +7524,7 @@ impl Waku {
                 sidebar_group_open_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_archive_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_pin_focuses: RefCell::new(HashMap::new()),
+                sidebar_employee_archive_focuses: RefCell::new(HashMap::new()),
                 sidebar_deliverable_finder_focuses: RefCell::new(HashMap::new()),
                 sidebar_deliverable_pin_focuses: RefCell::new(HashMap::new()),
                 sidebar_deliverable_archive_focuses: RefCell::new(HashMap::new()),

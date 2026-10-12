@@ -4304,8 +4304,42 @@ impl Waku {
                 None,
             )
         };
+        // An expired row's archive control borrows the status slot the way
+        // a task row's does — zero-width until the row is hovered or the
+        // button takes keyboard focus. Archiving drops only the sidebar
+        // listing; the brain page's employee history keeps the record.
+        let expired = self.boss_ui.expired.contains(&id);
+        let group_name = SharedString::from(format!("boss-employee-row-{id}"));
+        let archive_button = expired.then(|| {
+            let focus = self
+                .sidebar_employee_archive_focuses
+                .borrow_mut()
+                .entry(id)
+                .or_insert_with(|| cx.focus_handle())
+                .clone();
+            self.sidebar_deliverable_button(
+                &group_name,
+                format!("boss-employee-archive-{id}"),
+                &focus,
+                "icons/archive.svg",
+                tr!("session.archive"),
+                cx,
+            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.archive_sidebar_employee(id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.archive_sidebar_employee(id, cx);
+                    cx.stop_propagation();
+                }
+            }))
+        });
         div()
             .id(format!("boss-employee-{id}"))
+            .when(expired, |row| row.group(group_name.clone()))
             .tab_index(0)
             .h(px(42.0))
             .w_full()
@@ -4353,8 +4387,39 @@ impl Waku {
                 &theme,
                 detail_provider,
             ))
-            .when_some(status_indicator, |row, indicator| row.child(indicator))
+            .when_some(status_indicator, |row, indicator| {
+                // On an expired row the status yields its slot to the
+                // hover-revealed archive control — it collapses out of the
+                // flow rather than just hiding so the button lands where
+                // the indicator stood.
+                if expired {
+                    row.child(
+                        div()
+                            .flex_none()
+                            .overflow_hidden()
+                            .group_hover(group_name.clone(), |style| style.w_0().opacity(0.0))
+                            .child(indicator),
+                    )
+                } else {
+                    row.child(indicator)
+                }
+            })
+            .when_some(archive_button, |row, button| row.child(button))
             .into_any_element()
+    }
+
+    /// An expired employee row's archive control: drops the row from the
+    /// sidebar listing. The dismissal is sidebar-only and app-persisted —
+    /// the daemon's roster is untouched, so the brain page's employee
+    /// history still lists the record and reviving the employee resurfaces
+    /// the row.
+    pub(super) fn archive_sidebar_employee(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if !self.state.sidebar_archived_employees.insert(session_id) {
+            return;
+        }
+        self.sidebar_rows_fingerprint.set(None);
+        self.save();
+        cx.notify();
     }
 
     /// A planning session's sidebar row — the boss section's session row

@@ -3855,6 +3855,11 @@ impl Waku {
             mix(fingerprint, self.sidebar_collapsed_groups.len() as u64),
             collapsed,
         );
+        // Archived-sidebar employees leave the idle roster — the set is a
+        // BTreeSet, so iteration is already order-stable.
+        for id in &self.state.sidebar_archived_employees {
+            fingerprint = mix_uuid(fingerprint, *id);
+        }
         // The Terminals group reads its ids in list order plus each row's
         // pin state — pinned rows survive the fold, so both feed the rows.
         // The selected standalone terminal survives the fold too, so while
@@ -3996,6 +4001,10 @@ impl Waku {
                 if let Some(active) = self.boss_ui.active.get(key) {
                     rows.extend(active.iter().copied().map(SidebarRow::Employee));
                 }
+                // Rows the user archived off the sidebar stay on the boss's
+                // roster — they still list on the brain page's employee
+                // history — so the filter lives at the listing, not the
+                // roster.
                 let idle = self
                     .boss_ui
                     .recent
@@ -4003,6 +4012,7 @@ impl Waku {
                     .into_iter()
                     .flatten()
                     .filter(|id| !self.boss_ui.working.contains(id))
+                    .filter(|id| !self.state.sidebar_archived_employees.contains(id))
                     .copied()
                     .collect::<Vec<_>>();
                 let visible = self
@@ -4406,6 +4416,7 @@ impl Waku {
                         .into_iter()
                         .flatten()
                         .filter(|id| !self.boss_ui.working.contains(id))
+                        .filter(|id| !self.state.sidebar_archived_employees.contains(id))
                         .nth(visible);
                     next.and_then(|id| {
                         let name = self.boss_ui.identities.get(&id)?.name.clone();

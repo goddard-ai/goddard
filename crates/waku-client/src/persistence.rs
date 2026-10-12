@@ -1862,6 +1862,11 @@ struct AppState {
     /// everything", which must not fall back to the launch defaults.
     #[serde(default = "default_sidebar_collapsed_groups")]
     sidebar_collapsed_groups: Vec<PersistedSidebarGroup>,
+    /// Expired employees the user archived out of the sidebar listing.
+    /// The dismissal is sidebar-only — the daemon roster still carries the
+    /// record, so the brain page's employee history keeps listing them.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    sidebar_archived_employees: BTreeSet<Uuid>,
     #[serde(default = "default_right_panel_width")]
     right_panel_width: f32,
     #[serde(default = "default_right_panel_width")]
@@ -2333,6 +2338,10 @@ pub struct PersistedState {
     /// everything", which must not fall back to the launch defaults.
     #[serde(default = "default_sidebar_collapsed_groups")]
     pub sidebar_collapsed_groups: Vec<PersistedSidebarGroup>,
+    /// Expired employees the user archived out of the sidebar listing —
+    /// see the AppState twin. The brain page's roster is unaffected.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub sidebar_archived_employees: BTreeSet<Uuid>,
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f32,
     #[serde(default = "default_right_panel_width")]
@@ -2738,6 +2747,7 @@ impl PersistedState {
             sidebar_project_ordering: SidebarProjectOrdering::Recent,
             sidebar_project_order: Vec::new(),
             sidebar_collapsed_groups: default_sidebar_collapsed_groups(),
+            sidebar_archived_employees: BTreeSet::new(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             boss_deliverable_width: DEFAULT_RIGHT_PANEL_WIDTH,
             git_panel_width: DEFAULT_GIT_PANEL_WIDTH,
@@ -3249,6 +3259,7 @@ impl PersistedState {
             sidebar_project_ordering: self.sidebar_project_ordering,
             sidebar_project_order: self.sidebar_project_order.clone(),
             sidebar_collapsed_groups: self.sidebar_collapsed_groups.clone(),
+            sidebar_archived_employees: self.sidebar_archived_employees.clone(),
             right_panel_width: self.right_panel_width,
             boss_deliverable_width: self.boss_deliverable_width,
             git_panel_width: Some(self.git_panel_width),
@@ -3427,6 +3438,7 @@ impl PersistedState {
         self.sidebar_project_ordering = app_state.sidebar_project_ordering;
         self.sidebar_project_order = app_state.sidebar_project_order;
         self.sidebar_collapsed_groups = app_state.sidebar_collapsed_groups;
+        self.sidebar_archived_employees = app_state.sidebar_archived_employees;
         self.right_panel_width = app_state.right_panel_width;
         self.boss_deliverable_width = app_state.boss_deliverable_width;
         // Pre-split state files have no Git panel width of their own; the
@@ -5707,6 +5719,9 @@ mod tests {
             PersistedSidebarGroup::Date(2),
             PersistedSidebarGroup::Pinned,
         ];
+        state
+            .sidebar_archived_employees
+            .extend([Uuid::new_v4(), Uuid::new_v4()]);
 
         let app_state = serde_json::to_value(state.app_state()).unwrap();
         let mut restored = PersistedState::empty();
@@ -5723,6 +5738,10 @@ mod tests {
                 PersistedSidebarGroup::Date(2),
                 PersistedSidebarGroup::Pinned,
             ]
+        );
+        assert_eq!(
+            restored.sidebar_archived_employees,
+            state.sidebar_archived_employees
         );
     }
 
