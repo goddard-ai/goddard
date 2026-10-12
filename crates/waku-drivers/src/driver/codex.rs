@@ -2606,8 +2606,62 @@ fn handle_codex_message(
             }
         }
         "error" => {
+            // Stream failures nest under `error` with `willRetry` marking a
+            // reconnect attempt versus a terminal failure; older app-servers
+            // used a flat `message`. A retry sequence is one incident —
+            // upsert a single row rather than stacking an error per attempt,
+            // and only a final failure becomes an error event.
+            let message = params
+                .pointer("/error/message")
+                .or_else(|| params.get("message"))
+                .or_else(|| params.get("error").filter(|error| error.is_string()))
+                .and_then(Value::as_str);
+            if let Some(message) = message {
+                if params.get("willRetry").and_then(Value::as_bool) == Some(true) {
+                    let detail = params
+                        .pointer("/error/additionalDetails")
+                        .and_then(Value::as_str)
+                        .filter(|details| !details.is_empty() && *details != message)
+                        .map_or_else(|| message.to_owned(), |details| {
+                            format!("{message}: {details}")
+                        });
+                    let scope = params
+                        .get("turnId")
+                        .or_else(|| params.get("threadId"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("session");
+                    let (title, title_i18n) = localized!("activity.provider_retrying");
+                    let mut activity = ActivityItem::new(
+                        Some(format!("codex-retry:{scope}")),
+                        ActivityKind::Tool,
+                        title,
+                        Some(detail),
+                        false,
+                    );
+                    activity.title_i18n = Some(title_i18n);
+                    let _ = events.send(DriverEvent::RichActivity(activity));
+                } else {
+                    let _ = events.send(codex_error_event(message.to_owned()));
+                }
+            }
+        }
+        "warning" => {
+            // Transport notices ("Falling back from WebSockets to HTTPS")
+            // explain an otherwise silent stall. One row per thread keeps a
+            // superseded warning from stacking.
             if let Some(message) = params.get("message").and_then(Value::as_str) {
-                let _ = events.send(codex_error_event(message.to_owned()));
+                let scope = params
+                    .get("threadId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("session");
+                let activity = ActivityItem::new(
+                    Some(format!("codex-warning:{scope}")),
+                    ActivityKind::Tool,
+                    message.to_owned(),
+                    None,
+                    true,
+                );
+                let _ = events.send(DriverEvent::RichActivity(activity));
             }
         }
         "mcpServer/startupStatus/updated"
@@ -4901,5 +4955,95 @@ mod tests {
 
         assert!(codex_plan_usage(Some(&json!({"planType": "plus"}))).is_none());
         assert!(codex_plan_usage(None).is_none());
+    }
+
+    #[test]
+    fn retrying_stream_errors_upsert_one_activity_row() {
+        let harness = GoalHarness::new();
+        *harness.turn_id.lock() = Some("turn-1".to_owned());
+        let notification = |attempt: u64| {
+            json!({
+                "method": "error",
+                "params": {
+                    "error": {
+                        "message": format!("Reconnecting... {attempt}/5"),
+                        "additionalDetails": "stream disconnected before completion"
+                    },
+                    "willRetry": true,
+                    "threadId": "thread-1",
+                    "turnId": "turn-1"
+                }
+            })
+        };
+
+        harness.handle(notification(2));
+        let DriverEvent::RichActivity(item) = harness.received.try_recv().unwrap() else {
+            panic!("a retrying stream error must surface as an activity row");
+        };
+        assert_eq!(
+            item.source_id.as_deref(),
+            Some("codex-retry:turn-1"),
+            "retries for one turn share a source id so the row upserts"
+        );
+        assert!(!item.complete);
+        assert_eq!(
+            item.detail.as_deref(),
+            Some("Reconnecting... 2/5: stream disconnected before completion")
+        );
+
+        harness.handle(notification(3));
+        let DriverEvent::RichActivity(item) = harness.received.try_recv().unwrap() else {
+            panic!("each retry updates the same row");
+        };
+        assert_eq!(item.source_id.as_deref(), Some("codex-retry:turn-1"));
+        assert!(harness.received.try_recv().is_err());
+    }
+
+    #[test]
+    fn terminal_and_legacy_stream_errors_stay_error_events() {
+        let harness = GoalHarness::new();
+        harness.handle(json!({
+            "method": "error",
+            "params": {
+                "error": {"message": "stream closed"},
+                "willRetry": false,
+                "threadId": "thread-1"
+            }
+        }));
+        let DriverEvent::Error(message) = harness.received.try_recv().unwrap() else {
+            panic!("a terminal stream error must surface as an error event");
+        };
+        assert_eq!(message, "stream closed");
+
+        harness.handle(json!({
+            "method": "error",
+            "params": {"message": "legacy flat message"}
+        }));
+        let DriverEvent::Error(message) = harness.received.try_recv().unwrap() else {
+            panic!("the legacy flat message shape must still surface");
+        };
+        assert_eq!(message, "legacy flat message");
+    }
+
+    #[test]
+    fn warnings_become_completed_activity_rows() {
+        let harness = GoalHarness::new();
+        harness.handle(json!({
+            "method": "warning",
+            "params": {
+                "threadId": "thread-1",
+                "message": "Falling back from WebSockets to HTTPS transport"
+            }
+        }));
+
+        let DriverEvent::RichActivity(item) = harness.received.try_recv().unwrap() else {
+            panic!("a warning must surface as an activity row");
+        };
+        assert_eq!(item.source_id.as_deref(), Some("codex-warning:thread-1"));
+        assert!(item.complete);
+        assert_eq!(
+            item.title,
+            "Falling back from WebSockets to HTTPS transport"
+        );
     }
 }

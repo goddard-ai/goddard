@@ -1,0 +1,1 @@
+- Fixed Codex tasks appearing to stall with no output when the provider's connection drops — the transcript now shows a single "Retrying the request" row that updates with the reconnect reason instead of silently spinning.
