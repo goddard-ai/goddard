@@ -1082,17 +1082,23 @@ impl Waku {
                 .spawn(async move {
                     client
                         .request(WorkspaceOperation::FileDiff {
-                            cwd: workspace,
+                            cwd: workspace.clone(),
                             path,
                             staged,
                         })
                         .map(|result| match result {
                             WorkspaceResult::ReviewDiff { data } => {
+                                let attrs = crate::gitattributes::load_for_paths(
+                                    &client,
+                                    &workspace,
+                                    crate::gitattributes::numstat_paths(&data.numstat),
+                                );
                                 crate::review_diff::parse_collected(
                                     ReviewDiffSource::Unstaged,
                                     &data.numstat,
                                     &data.patch,
                                     data.complete_context,
+                                    attrs.as_ref(),
                                 )
                             }
                             _ => crate::review_diff::parse_collected(
@@ -1100,6 +1106,7 @@ impl Waku {
                                 "",
                                 "",
                                 true,
+                                None,
                             ),
                         })
                 })
@@ -2735,16 +2742,22 @@ impl Waku {
                 .spawn(async move {
                     client
                         .request(WorkspaceOperation::CommitDiff {
-                            cwd: workspace,
+                            cwd: workspace.clone(),
                             sha,
                         })
                         .map(|result| match result {
                             WorkspaceResult::ReviewDiff { data } => {
+                                let attrs = crate::gitattributes::load_for_paths(
+                                    &client,
+                                    &workspace,
+                                    crate::gitattributes::numstat_paths(&data.numstat),
+                                );
                                 crate::review_diff::parse_collected(
                                     ReviewDiffSource::Commit,
                                     &data.numstat,
                                     &data.patch,
                                     data.complete_context,
+                                    attrs.as_ref(),
                                 )
                             }
                             _ => crate::review_diff::parse_collected(
@@ -2752,6 +2765,7 @@ impl Waku {
                                 "",
                                 "",
                                 true,
+                                None,
                             ),
                         })
                 })

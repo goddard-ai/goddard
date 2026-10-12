@@ -1201,6 +1201,19 @@ impl TextInput {
         self
     }
 
+    /// Switch the syntax language after construction — a file's
+    /// `.gitattributes` declaration can land after its editor exists.
+    /// Re-tokenizes only when the language actually moved.
+    pub fn set_syntax(&mut self, language: Option<&str>, cx: &mut Context<Self>) {
+        let language = language.and_then(highlight::lang_for_tag);
+        if self.language == language {
+            return;
+        }
+        self.language = language;
+        self.refresh_highlight();
+        cx.notify();
+    }
+
     /// Paint the content as one bullet per character — for password and
     /// token fields. Editing, selection, and copy all work as usual; only
     /// the glyphs differ.
@@ -1443,10 +1456,10 @@ impl TextInput {
     /// Re-tokenize after a content change. Cheap for a composer (no language),
     /// one linear pass for a code editor.
     fn refresh_highlight(&mut self) {
+        self.highlight.clear();
         let Some(language) = self.language else {
             return;
         };
-        self.highlight.clear();
         let mut line_start = 0;
         for (line, tokens) in self
             .content

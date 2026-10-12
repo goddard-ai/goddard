@@ -277,14 +277,17 @@ fn push_remaining_gap(replacement: &mut Vec<Line>, file_index: usize, mut gap: G
 
 /// Turn daemon-captured Git output into render-ready rows. Parsing and syntax
 /// tokenization remain client-side presentation work; no path is resolved and
-/// no subprocess is started here.
+/// no subprocess is started here. `attrs` carries the repo's parsed
+/// `.gitattributes` layers, fetched by the caller beside the diff itself, so
+/// a `linguist-language` declaration can steer each file's highlighting.
 pub fn parse_collected(
     source: Source,
     numstat: &str,
     patch: &str,
     complete_context: bool,
+    attrs: Option<&crate::gitattributes::Layers>,
 ) -> Snapshot {
-    let mut snapshot = parse(source, numstat, patch, complete_context);
+    let mut snapshot = parse(source, numstat, patch, complete_context, attrs);
     if !complete_context {
         snapshot.truncated = true;
     }
@@ -329,7 +332,7 @@ pub fn from_file_changes(changes: &[crate::model::ActivityFileChange]) -> Snapsh
             patch.push('\n');
         }
     }
-    parse(Source::default(), &numstat, &patch, false)
+    parse(Source::default(), &numstat, &patch, false, None)
 }
 
 pub fn wire_source(source: Source) -> waku_client::workspace::ReviewDiffSource {
@@ -352,7 +355,13 @@ pub fn wire_source(source: Source) -> waku_client::workspace::ReviewDiffSource {
     }
 }
 
-fn parse(source: Source, numstat: &str, patch: &str, complete_context: bool) -> Snapshot {
+fn parse(
+    source: Source,
+    numstat: &str,
+    patch: &str,
+    complete_context: bool,
+    attrs: Option<&crate::gitattributes::Layers>,
+) -> Snapshot {
     let mut files = parse_numstat(numstat);
     let mut path_indexes = files
         .iter()
@@ -505,7 +514,7 @@ fn parse(source: Source, numstat: &str, patch: &str, complete_context: bool) -> 
             continue;
         };
         let content = raw.get(1..).unwrap_or_default().to_owned();
-        let language = language_for_path(&files[file_index].path);
+        let language = language_for_file(&files[file_index].path, attrs);
         let (kind, shown_old, shown_new, tokens) = match marker {
             b' ' => {
                 let (tokens, next_new_carry) = tokenize(language, &content, new_carry);
@@ -790,6 +799,17 @@ fn parse_range_start(range: &str) -> Option<u32> {
     range.split(',').next()?.parse().ok()
 }
 
+/// A file's lexer for its diff lines: a `linguist-language` declaration
+/// from `.gitattributes` wins outright — including its "we don't know this
+/// language" answer, which stays plain rather than guessing from the
+/// suffix — and everything else falls to the name/extension table.
+fn language_for_file(path: &str, attrs: Option<&crate::gitattributes::Layers>) -> Option<Lang> {
+    match attrs.and_then(|attrs| attrs.declared_language(path)) {
+        Some(name) => lang_for_tag(&crate::gitattributes::tag_for_linguist(name)),
+        None => language_for_path(path),
+    }
+}
+
 pub fn language_for_path(path: &str) -> Option<Lang> {
     let path = Path::new(path);
     let name = path.file_name()?.to_str()?;
@@ -828,7 +848,7 @@ index 1111111..2222222 100644
 +return fresh;
  context();
 "#;
-        let snapshot = parse(Source::Uncommitted, numstat, patch, false);
+        let snapshot = parse(Source::Uncommitted, numstat, patch, false, None);
         assert_eq!(snapshot.files.len(), 1);
         assert_eq!(snapshot.files[0].diff_line, Some(0));
         assert!(matches!(
@@ -868,7 +888,7 @@ index 1111111..2222222 100644
     #[test]
     fn full_context_collapses_around_changes_and_label_expands_everything() {
         let patch = full_patch(30, &[8, 17]);
-        let mut snapshot = parse(Source::Uncommitted, "2\t2\tsrc/lib.rs\n", &patch, true);
+        let mut snapshot = parse(Source::Uncommitted, "2\t2\tsrc/lib.rs\n", &patch, true, None);
         let gaps = snapshot
             .lines
             .iter()
@@ -906,7 +926,7 @@ index 1111111..2222222 100644
     #[test]
     fn directional_expansion_reveals_one_hundred_lines_from_the_gap_edge() {
         let patch = full_patch(230, &[221]);
-        let mut snapshot = parse(Source::Uncommitted, "1\t1\tsrc/lib.rs\n", &patch, true);
+        let mut snapshot = parse(Source::Uncommitted, "1\t1\tsrc/lib.rs\n", &patch, true, None);
         let gap_index = snapshot
             .lines
             .iter()
@@ -943,7 +963,7 @@ index 1111111..2222222 100644
     #[test]
     fn count_expansion_reveals_one_hundred_lines_from_both_edges() {
         let patch = full_patch(230, &[221]);
-        let mut snapshot = parse(Source::Uncommitted, "1\t1\tsrc/lib.rs\n", &patch, true);
+        let mut snapshot = parse(Source::Uncommitted, "1\t1\tsrc/lib.rs\n", &patch, true, None);
         let gap_index = snapshot
             .lines
             .iter()
@@ -979,6 +999,7 @@ index 1111111..2222222 100644
             "1\t1\tsrc/lib.rs\n1\t1\tsrc/other.rs\n",
             &patch,
             true,
+            None,
         );
         let second_header = snapshot.files[1].diff_line.unwrap();
         assert_eq!(

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -1060,6 +1061,172 @@ pub(super) fn file_highlighter_language(relative_path: &str) -> &'static str {
         Some("diff" | "patch") => "diff",
         Some("md" | "markdown" | "mdx") => "markdown",
         _ => "text",
+    }
+}
+
+impl Waku {
+    /// The `.gitattributes`-declared language for `relative_path` under
+    /// `root`, or the extension-table name when nothing is declared. `None`
+    /// while any `.gitattributes` in the path's ancestor chain is still
+    /// loading — the landing fetch re-resolves through
+    /// [`Self::reapply_file_languages`].
+    fn peek_file_language(&self, root: &Path, relative_path: &str) -> Option<Cow<'static, str>> {
+        let mut declared = None;
+        for dir in crate::gitattributes::governing_dirs(std::iter::once(relative_path)) {
+            let layer = self
+                .file_language_attrs
+                .peek(&(root.to_path_buf(), dir.clone()))?;
+            let Some(file) = layer.as_ref() else {
+                continue;
+            };
+            let Ok(rest) = Path::new(relative_path).strip_prefix(&dir) else {
+                continue;
+            };
+            match file.language_state(rest) {
+                Some(crate::gitattributes::LanguageAttr::Named(name)) => {
+                    declared = Some(name.clone());
+                }
+                Some(crate::gitattributes::LanguageAttr::Erased) => declared = None,
+                None => {}
+            }
+        }
+        Some(match declared {
+            Some(name) => crate::gitattributes::tag_for_linguist(&name),
+            None => Cow::Borrowed(file_highlighter_language(relative_path)),
+        })
+    }
+
+    /// The language the file surface shows `relative_path` as right now —
+    /// `.gitattributes` once its layers are loaded, the extension table in
+    /// the meantime. Render-only callers use this; editor creation resolves
+    /// through [`Self::resolved_file_language`], which also claims the
+    /// fetches so the answer can only miss a declaration that is already on
+    /// its way in.
+    pub(super) fn display_file_language(&self, relative_path: &str) -> Cow<'static, str> {
+        self.right_panel_files_root
+            .as_deref()
+            .and_then(|root| self.peek_file_language(root, relative_path))
+            .unwrap_or_else(|| Cow::Borrowed(file_highlighter_language(relative_path)))
+    }
+
+    /// The language `relative_path`'s editor should show, honouring the
+    /// files root's `.gitattributes` before the extension table.
+    fn resolved_file_language(
+        &mut self,
+        relative_path: &str,
+        cx: &mut Context<Self>,
+    ) -> Cow<'static, str> {
+        let Some(root) = self.right_panel_files_root.clone() else {
+            return Cow::Borrowed(file_highlighter_language(relative_path));
+        };
+        self.resolved_language_under(&root, relative_path, cx)
+    }
+
+    /// [`Self::peek_file_language`]'s mutating half: claims a fetch for each
+    /// `.gitattributes` in `relative_path`'s ancestor chain that is not
+    /// loaded yet, then resolves with whatever is ready.
+    fn resolved_language_under(
+        &mut self,
+        root: &Path,
+        relative_path: &str,
+        cx: &mut Context<Self>,
+    ) -> Cow<'static, str> {
+        self.ensure_language_attr_dirs(root, relative_path, cx);
+        self.peek_file_language(root, relative_path)
+            .unwrap_or_else(|| Cow::Borrowed(file_highlighter_language(relative_path)))
+    }
+
+    fn ensure_language_attr_dirs(
+        &mut self,
+        root: &Path,
+        relative_path: &str,
+        cx: &mut Context<Self>,
+    ) {
+        for dir in crate::gitattributes::governing_dirs(std::iter::once(relative_path)) {
+            self.ensure_language_attr_layer(root, &dir, cx);
+        }
+    }
+
+    /// Fetch `dir`'s `.gitattributes` under `root` once — the first asker
+    /// owns the request, everyone after reads `Pending` until it lands.
+    fn ensure_language_attr_layer(&mut self, root: &Path, dir: &Path, cx: &mut Context<Self>) {
+        let key = (root.to_path_buf(), dir.to_path_buf());
+        let Query::Missing(token) = self.file_language_attrs.read(&key) else {
+            return;
+        };
+        let Some(workspace) = self.workspace_client_for_path(root) else {
+            // A remote owner that is offline gets no fetch — abandon so the
+            // next asker retries rather than waiting on nothing.
+            self.file_language_attrs.abandon(token);
+            return;
+        };
+        let dir = dir.to_path_buf();
+        let root = root.to_path_buf();
+        cx.spawn(async move |waku, cx| {
+            let file = cx
+                .background_executor()
+                .spawn({
+                    let root = root.clone();
+                    let dir = dir.clone();
+                    async move { crate::gitattributes::read_layer(&workspace, &root, &dir) }
+                })
+                .await;
+            waku.update(cx, |waku, cx| {
+                if waku.file_language_attrs.fulfill(token, file) {
+                    waku.reapply_file_languages(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// `.gitattributes` layers landed or were invalidated — re-resolve every
+    /// open editor's syntax. [`TextInput::set_syntax`] re-tokenizes only
+    /// where the language moved, and an editor whose ancestor chain is still
+    /// fetching keeps its interim language until the rest lands.
+    fn reapply_file_languages(&mut self, cx: &mut Context<Self>) {
+        if let Some(root) = self.right_panel_files_root.clone() {
+            for path in self
+                .right_panel_file_editors
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+            {
+                self.ensure_language_attr_dirs(&root, &path, cx);
+                let Some(language) = self.peek_file_language(&root, &path) else {
+                    continue;
+                };
+                let Some(editor) = self.right_panel_file_editors.get(&path) else {
+                    continue;
+                };
+                editor
+                    .state
+                    .update(cx, |state, cx| state.set_syntax(Some(language.as_ref()), cx));
+            }
+        }
+        if let Some(root) = self.selected_workspace_path().map(Path::to_path_buf) {
+            for key in self
+                .right_panel_ref_editors
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+            {
+                let Some((_, path)) = key.split_once(':') else {
+                    continue;
+                };
+                self.ensure_language_attr_dirs(&root, path, cx);
+                let Some(language) = self.peek_file_language(&root, path) else {
+                    continue;
+                };
+                let Some(editor) = self.right_panel_ref_editors.get(&key) else {
+                    continue;
+                };
+                editor
+                    .state
+                    .update(cx, |state, cx| state.set_syntax(Some(language.as_ref()), cx));
+            }
+        }
     }
 }
 
@@ -5559,7 +5726,7 @@ impl Waku {
             })
         });
         markdown_preview_mode(
-            file_highlighter_language(relative_path) == "markdown",
+            self.display_file_language(relative_path) == "markdown",
             deliverable_page,
             self.right_panel_file_editors
                 .get(relative_path)
@@ -8647,7 +8814,7 @@ impl Waku {
     /// previews as themed elements behind the wireframes experiment; with the
     /// flag off, or flipped to source, it is just a JSON file in the editor.
     fn file_viewer_modes(&self, relative_path: &str, deliverable_page: bool) -> FileViewerModes {
-        let is_markdown = file_highlighter_language(relative_path) == "markdown";
+        let is_markdown = self.display_file_language(relative_path) == "markdown";
         let is_svg =
             image_preview::image_format_for_name(relative_path) == Some(gpui::ImageFormat::Svg);
         let is_wireframe =
@@ -9101,11 +9268,15 @@ impl Waku {
                 editor.scrollbar.clone(),
             );
         }
-        let language = file_highlighter_language(path);
+        let language = self
+            .selected_workspace_path()
+            .map(Path::to_path_buf)
+            .map(|root| self.resolved_language_under(&root, path, cx))
+            .unwrap_or_else(|| Cow::Borrowed(file_highlighter_language(path)));
         let state = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
-                .syntax(Some(language))
+                .syntax(Some(language.as_ref()))
                 .read_only(true)
                 .accessibility_label(format!("{path} ({git_ref})"))
         });
@@ -9488,11 +9659,11 @@ impl Waku {
         // Reached from `render`, so the file cannot be read here. The editor
         // starts empty and locked, and `read_right_panel_file_into_editor`
         // fills it in from the background executor a frame or two later.
-        let language = file_highlighter_language(relative_path);
+        let language = self.resolved_file_language(relative_path, cx);
         let state = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
-                .syntax(Some(language))
+                .syntax(Some(language.as_ref()))
                 .read_only(true)
                 .accessibility_label(relative_path.to_owned())
         });
@@ -11324,6 +11495,15 @@ impl Waku {
                                     content.clone().into_bytes(),
                                 ))));
                             }
+                        }
+                        // A saved `.gitattributes` may rewrite every
+                        // sibling's language, not just its own.
+                        if Path::new(&relative_path).file_name()
+                            == Some(std::ffi::OsStr::new(".gitattributes"))
+                        {
+                            waku.file_language_attrs
+                                .invalidate_where(|(root, _)| *root == project_path);
+                            waku.reapply_file_languages(cx);
                         }
                     }
                     Err(error) => waku.show_toast(tr!(
@@ -13363,6 +13543,9 @@ impl Waku {
             });
         self.restore_right_panel_files_slice(slice);
         self.right_panel_files_root = resolved;
+        // The restored editors were colored under whatever `.gitattributes`
+        // this root had when they parked; re-resolve them against the cache.
+        self.reapply_file_languages(cx);
         // Search and jump state pointed into editors that just swapped out.
         self.reset_file_search_for_session(cx);
         self.reset_go_to_line_for_session(cx);
@@ -13459,6 +13642,11 @@ impl Waku {
         // The tree on disk moves under us, and the expanded set may just have
         // changed, so a cached listing is only good until something asks again.
         self.working_trees.invalidate(&project_path);
+        // `.gitattributes` files can move with the tree; the refetches land
+        // on open editors through `reapply_file_languages`.
+        self.file_language_attrs
+            .invalidate_where(|(root, _)| *root == project_path);
+        self.reapply_file_languages(cx);
         match self.working_trees.read(&project_path) {
             Query::Ready(entries) => {
                 self.right_panel_working_tree = (*entries).clone();
@@ -13655,24 +13843,30 @@ impl Waku {
                         let result = match &commit {
                             Some(commit) => workspace.request(
                                 waku_client::WorkspaceOperation::CommitDiff {
-                                    cwd: project_path,
+                                    cwd: project_path.clone(),
                                     sha: commit.sha.clone(),
                                 },
                             )?,
                             None => workspace.request(
                                 waku_client::WorkspaceOperation::CollectReviewDiff {
-                                    cwd: project_path,
+                                    cwd: project_path.clone(),
                                     source: crate::review_diff::wire_source(source),
                                 },
                             )?,
                         };
                         match result {
                             waku_client::WorkspaceResult::ReviewDiff { data } => {
+                                let attrs = crate::gitattributes::load_for_paths(
+                                    &workspace,
+                                    &project_path,
+                                    crate::gitattributes::numstat_paths(&data.numstat),
+                                );
                                 Ok(crate::review_diff::parse_collected(
                                     source,
                                     &data.numstat,
                                     &data.patch,
                                     data.complete_context,
+                                    attrs.as_ref(),
                                 ))
                             }
                             _ => anyhow::bail!("the daemon returned an invalid diff response"),

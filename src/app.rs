@@ -3728,6 +3728,11 @@ pub struct Waku {
     /// Working tree per project path. Walking it is filesystem I/O and must
     /// never happen in a frame.
     working_trees: QueryCache<PathBuf, Vec<right_panel::WorkingTreeEntry>>,
+    /// Parsed `.gitattributes` per `(files root, directory)` — the
+    /// `linguist-language` rules each file's language resolution consults.
+    /// Fetched through the workspace channel off the UI thread like the file
+    /// reads it feeds; `None` caches a directory that has no such file.
+    file_language_attrs: QueryCache<(PathBuf, PathBuf), Option<crate::gitattributes::AttributeFile>>,
     /// Set when a turn finishes; the drain loop drops the workspace queries,
     /// since the event handler has no `Context` to refresh them itself.
     workspace_queries_stale: bool,
@@ -7691,6 +7696,7 @@ impl Waku {
                 right_panel_diff_tree_cursor: None,
                 right_panel_working_tree: Vec::new(),
                 working_trees: QueryCache::new(MAX_CACHED_WORKSPACES),
+                file_language_attrs: QueryCache::new(8 * MAX_CACHED_WORKSPACES),
                 workspace_queries_stale: false,
                 right_panel_terminals: HashMap::new(),
                 terminal_records: HashMap::new(),

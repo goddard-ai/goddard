@@ -2999,15 +2999,21 @@ impl Waku {
                 .background_executor()
                 .spawn(async move {
                     match workspace.request(waku_client::WorkspaceOperation::CollectReviewDiff {
-                        cwd: project_path,
+                        cwd: project_path.clone(),
                         source: crate::review_diff::wire_source(source),
                     })? {
                         waku_client::WorkspaceResult::ReviewDiff { data } => {
+                            let attrs = crate::gitattributes::load_for_paths(
+                                &workspace,
+                                &project_path,
+                                crate::gitattributes::numstat_paths(&data.numstat),
+                            );
                             let snapshot = crate::review_diff::parse_collected(
                                 source,
                                 &data.numstat,
                                 &data.patch,
                                 data.complete_context,
+                                attrs.as_ref(),
                             );
                             let file_lines = changed_files_diff_file_lines(&snapshot);
                             Ok((snapshot, file_lines))

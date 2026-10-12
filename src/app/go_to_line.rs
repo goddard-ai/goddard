@@ -122,8 +122,7 @@ impl Waku {
         // preview mode renders a different scroll surface with no line
         // structure to aim at, so the key falls through there too.
         let preview_active = self.visible_right_panel_file_path().is_some_and(|path| {
-            right_panel::file_highlighter_language(&path) == "markdown"
-                && self.state.markdown_preview
+            self.display_file_language(&path) == "markdown" && self.state.markdown_preview
         });
         if !self.right_panel_visible || preview_active {
             cx.propagate();

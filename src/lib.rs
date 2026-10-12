@@ -39,6 +39,7 @@ mod custom_commands;
 pub mod daemon;
 mod diagnostics;
 mod driver;
+mod gitattributes;
 mod keybindings;
 mod platform;
 mod query;
