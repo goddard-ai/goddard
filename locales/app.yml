@@ -425,6 +425,8 @@ drafts.no_composer:
   en: No composer to save a draft from
 drafts.nothing_to_save:
   en: The composer is empty — nothing to save
+drafts.save_action:
+  en: Save draft
 drafts.saved_toast:
   en: Saved to drafts
 drafts.attachments:

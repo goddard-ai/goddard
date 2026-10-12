@@ -5970,18 +5970,103 @@ impl Waku {
     }
 
     fn render_composer_field(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let save_draft_chip = self.render_save_draft_chip(window, cx);
         // A sealed planning session no longer takes prompts — a muted card
         // in the composer's slot carries the state instead.
-        if let Some(session) = self
+        let field = if let Some(session) = self
             .composer_session()
             .filter(|session| self.plan_execution_locked(session))
         {
-            return self.render_plan_sealed_card(session, cx);
-        }
+            self.render_plan_sealed_card(session, cx)
+        } else {
+            div()
+                .flex_none()
+                .px(px(20.0 - COMPOSER_OVERHANG))
+                .child(self.render_composer_card(&ComposerCard::Main, window, cx))
+        };
+        let Some(save_draft_chip) = save_draft_chip else {
+            return field;
+        };
         div()
+            .w_full()
             .flex_none()
-            .px(px(20.0 - COMPOSER_OVERHANG))
-            .child(self.render_composer_card(&ComposerCard::Main, window, cx))
+            .flex()
+            .flex_col()
+            .child(save_draft_chip)
+            .child(field)
+    }
+
+    fn render_save_draft_chip(&self, window: &Window, cx: &mut Context<Self>) -> Option<Div> {
+        if self.composer_is_empty(cx) {
+            return None;
+        }
+        let theme = Theme::current(cx);
+        let focus = self.transcript_control_focus("composer-save-draft", cx);
+        let shortcut = crate::ui::shortcut::ShortcutHint::action_in(
+            &crate::SaveFile,
+            &self.composer_focus(cx),
+        )
+        .resolve(window, cx);
+        Some(
+            div()
+                .flex_none()
+                .px(px(20.0 - COMPOSER_OVERHANG))
+                .pb(px(6.0))
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
+                        .mx_auto()
+                        .pl(px(COMPOSER_CHIP_INSET))
+                        .flex()
+                        .child(
+                            div()
+                                .id("composer-save-draft-suggestion")
+                                .track_focus(&focus)
+                                .tab_index(0)
+                                .h(px(24.0))
+                                .px(px(9.0))
+                                .rounded(px(8.0))
+                                .border(hairline())
+                                .border_color(theme.border_subtle)
+                                .bg(theme.raised)
+                                .flex()
+                                .items_center()
+                                .gap(px(5.0))
+                                .cursor_default()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text)
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                .hover(|element| {
+                                    element.bg(theme.raised.blend(theme.overlay_strong))
+                                })
+                                .child(icon("icons/compose.svg", 11.0, theme.text_secondary))
+                                .child(tr!("drafts.save_action"))
+                                .when_some(shortcut, |chip, label| {
+                                    chip.child(
+                                        div()
+                                            .flex_none()
+                                            .relative()
+                                            .top(px(2.0))
+                                            .text_size(sp(11.0))
+                                            .text_color(theme.text_tertiary)
+                                            .child(label),
+                                    )
+                                })
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.create_saved_draft(window, cx);
+                                }))
+                                .on_key_down(cx.listener(
+                                    |this, event: &KeyDownEvent, window, cx| {
+                                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                            this.create_saved_draft(window, cx);
+                                            cx.stop_propagation();
+                                        }
+                                    },
+                                )),
+                        ),
+                ),
+        )
     }
 
     /// The composer card — rounded field, chip row, send/stop button —
@@ -8610,12 +8695,6 @@ impl Waku {
                             .when_some(managed, |row, chip| row.child(chip))
                             .when(!hide_workspace_selector, |row| row.child(worktree_selector))
                             .children(branch_selector)
-                            .child(
-                                div()
-                                    .text_size(sp(11.5))
-                                    .text_color(theme.text_tertiary)
-                                    .child("⌘S to save draft."),
-                            )
                             .child(div().flex_1())
                             .children(briefing_controls)
                             .children(usage_meter),

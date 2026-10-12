@@ -2273,6 +2273,7 @@ drafts.no_composer: 下書きを保存できる入力欄がありません
 drafts.no_match: 一致する下書きはありません
 drafts.no_match_hint: 別の検索語を試してください
 drafts.nothing_to_save: 入力欄が空です — 保存するものがありません
+drafts.save_action: 下書きを保存
 drafts.saved_toast: 下書きに保存しました
 drafts.search: 下書きを検索
 drafts.title: 下書き
