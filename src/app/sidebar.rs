@@ -301,6 +301,24 @@ fn sidebar_employee_idle_shown(idle_visible: usize, no_active: bool) -> usize {
     idle_visible.max(usize::from(no_active))
 }
 
+/// Whether a rostered employee lists on the sidebar. Rows the user archived
+/// off the sidebar stay on the boss's roster — they still list on the brain
+/// page's employee history — so the dismissal filter lives at the listing,
+/// and a session-archived employee hides the same way: the roster owns the
+/// record, and a resume unarchives the session before re-admission reopens
+/// the row.
+fn sidebar_employee_shown(
+    id: &Uuid,
+    sessions: &[AgentSession],
+    dismissed: &std::collections::BTreeSet<Uuid>,
+) -> bool {
+    !dismissed.contains(id)
+        && sessions
+            .iter()
+            .find(|session| session.id == *id)
+            .is_none_or(|session| session.archived_at.is_none())
+}
+
 fn append_sidebar_group_rows(
     rows: &mut Vec<SidebarRow>,
     group: SidebarGroup,
@@ -3947,6 +3965,25 @@ impl Waku {
         for id in &self.state.sidebar_archived_employees {
             fingerprint = mix_uuid(fingerprint, *id);
         }
+        // An employee's session archive flag lives off the roster, so the
+        // boss-state revision cannot see it flip; the session loop above
+        // skips boss-managed sessions outright. Mix each rostered id's flag
+        // order-independently like the collapsed-set fold.
+        let archived_employees = self
+            .boss_ui
+            .recent
+            .values()
+            .flatten()
+            .fold(0u64, |combined, id| {
+                let archived = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == *id)
+                    .is_some_and(|session| session.archived_at.is_some());
+                combined.wrapping_add(mix_uuid(u64::from(archived), *id))
+            });
+        fingerprint = mix(fingerprint, archived_employees);
         // The Terminals group reads its ids in list order plus each row's
         // pin state — pinned rows survive the fold, so both feed the rows.
         // The selected standalone terminal survives the fold too, so while
@@ -4096,6 +4133,13 @@ impl Waku {
                 let mut active_errands = Vec::new();
                 if let Some(active) = self.boss_ui.active.get(key) {
                     for id in active {
+                        if !sidebar_employee_shown(
+                            id,
+                            &self.state.sessions,
+                            &self.state.sidebar_archived_employees,
+                        ) {
+                            continue;
+                        }
                         if self.boss_ui.errands.contains(id) {
                             active_errands.push(*id);
                         } else {
@@ -4106,7 +4150,8 @@ impl Waku {
                 // Rows the user archived off the sidebar stay on the boss's
                 // roster — they still list on the brain page's employee
                 // history — so the filter lives at the listing, not the
-                // roster.
+                // roster. A session-archived employee hides the same way;
+                // resuming it unarchives the session, which reopens the row.
                 let (idle_errands, idle_outcomes): (Vec<_>, Vec<_>) = self
                     .boss_ui
                     .recent
@@ -4114,7 +4159,13 @@ impl Waku {
                     .into_iter()
                     .flatten()
                     .filter(|id| !self.boss_ui.working.contains(id))
-                    .filter(|id| !self.state.sidebar_archived_employees.contains(id))
+                    .filter(|id| {
+                        sidebar_employee_shown(
+                            id,
+                            &self.state.sessions,
+                            &self.state.sidebar_archived_employees,
+                        )
+                    })
                     .copied()
                     .partition(|id| self.boss_ui.errands.contains(id));
                 // Folded headers aggregate their hidden members' attention
@@ -5315,7 +5366,14 @@ impl Waku {
                 .get(&key)
                 .into_iter()
                 .flatten()
-                .all(|id| self.boss_ui.errands.contains(id) != errands);
+                .all(|id| {
+                    self.boss_ui.errands.contains(id) != errands
+                        || !sidebar_employee_shown(
+                            id,
+                            &self.state.sessions,
+                            &self.state.sidebar_archived_employees,
+                        )
+                });
             let shown = sidebar_employee_idle_shown(visible, no_active);
             let next = self
                 .boss_ui
@@ -5325,7 +5383,13 @@ impl Waku {
                 .flatten()
                 .filter(|id| !self.boss_ui.working.contains(id))
                 .filter(|id| self.boss_ui.errands.contains(*id) == errands)
-                .filter(|id| !self.state.sidebar_archived_employees.contains(id))
+                .filter(|id| {
+                    sidebar_employee_shown(
+                        id,
+                        &self.state.sessions,
+                        &self.state.sidebar_archived_employees,
+                    )
+                })
                 .nth(shown);
             next.and_then(|id| {
                 let name = self.boss_ui.identities.get(&id)?.name.clone();
@@ -8332,6 +8396,31 @@ mod tests {
             SidebarGroup::from_persisted(SidebarGroup::Outcomes.persisted()),
             Some(SidebarGroup::Outcomes)
         );
+    }
+
+    /// The listing gate every employee group applies: a dismissed or
+    /// session-archived roster member stays off the sidebar while a live
+    /// or catalog-missing one still lists.
+    #[test]
+    fn archived_employees_leave_the_sidebar_listing() {
+        let listed = Uuid::from_u128(1);
+        let archived = Uuid::from_u128(2);
+        let dismissed = Uuid::from_u128(3);
+        let missing = Uuid::from_u128(4);
+        let mut listed_session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        listed_session.id = listed;
+        listed_session.begin_turn("work");
+        let mut archived_session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        archived_session.id = archived;
+        archived_session.begin_turn("work");
+        archived_session.archived_at = Some(1);
+        let sessions = [listed_session, archived_session];
+        let dismissed_set = std::collections::BTreeSet::from([dismissed]);
+
+        assert!(sidebar_employee_shown(&listed, &sessions, &dismissed_set));
+        assert!(!sidebar_employee_shown(&archived, &sessions, &dismissed_set));
+        assert!(!sidebar_employee_shown(&dismissed, &sessions, &dismissed_set));
+        assert!(sidebar_employee_shown(&missing, &sessions, &dismissed_set));
     }
 
     #[test]

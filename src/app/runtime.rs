@@ -6805,6 +6805,10 @@ impl Waku {
             cx.notify();
             return;
         };
+        // A resumed employee's row reopens: its archive flag clears ahead
+        // of the dispatch so the sidebar lists it again once the roster
+        // re-admits it, not a catalog round-trip later.
+        self.unarchive_session(session_id, false, cx);
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()

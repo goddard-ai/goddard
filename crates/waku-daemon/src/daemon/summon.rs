@@ -2046,6 +2046,11 @@ impl WakuBackend {
                 .find(|session| session.id == session_id)
             {
                 self.task_store.hydrate(session)?;
+                // A requeue revives the employee, so its archive flag
+                // clears ahead of admission — clients relist the sidebar
+                // row on the next task-state push instead of leaving live
+                // work filed under the archive.
+                let mut dirty = session.archived_at.take().is_some();
                 if session
                     .queued_messages
                     .iter()
@@ -2060,6 +2065,9 @@ impl WakuBackend {
                     session
                         .queued_messages
                         .retain(|queued| !queued.is_agent_owned());
+                    dirty = true;
+                }
+                if dirty {
                     session.updated_at = crate::model::unix_time();
                     state.mark_session_dirty(session_id);
                     self.task_store.save(&mut state)?;

@@ -11704,6 +11704,69 @@ fn a_resume_requeues_the_expired_employee_with_its_cause() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A session-archived employee stays off clients' sidebars, so the resume
+/// clears the flag ahead of re-admission — the row returns with the roster
+/// push rather than staying filed under the archive.
+#[test]
+fn a_resume_unarchives_the_employee_session_first() {
+    use waku_protocol::boss::BossOperation;
+    let root = std::env::temp_dir().join(format!("boss-resume-unarchive-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "revive",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap_err();
+    let session_id = backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .find(|session| session.id != boss)
+        .unwrap()
+        .id;
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        session.archived_at = Some(crate::model::unix_time());
+        backend.task_store.save(&mut state).unwrap();
+    }
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Resume { session_id },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap()
+            .archived_at
+            .is_none()
+    );
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A re-admitted employee's shell keeps its last admission's terminal
 /// status — a failed verdict would ride the sidebar row past resume until
 /// the next prompt lands, so dispatch marks the shell connecting while
