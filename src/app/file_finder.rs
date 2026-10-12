@@ -63,10 +63,11 @@ pub(super) struct FileFinderUi {
     open: bool,
     focus_generation: u64,
     previous_focus: Option<FocusHandle>,
-    /// The root `files` was listed from — the selected session's workspace,
-    /// or the selected terminal's cwd. A drift clears the projection; the
-    /// next refresh relists under the new root.
-    root: Option<PathBuf>,
+    /// The `mention_files` key `files` was listed from — the active files
+    /// root plus its listing, which for a planned new-worktree draft is the
+    /// base ref's tree rather than the checkout's. A drift clears the
+    /// projection; the next refresh relists under the new key.
+    root: Option<(PathBuf, waku_protocol::workspace::ProjectFilesListing)>,
     /// `Arc::as_ptr` identity of the index `files` was filtered out of, so the
     /// files-only projection is rebuilt once per index swap rather than per
     /// keystroke.
@@ -259,7 +260,16 @@ impl Waku {
         if !self.file_finder.open {
             return;
         }
-        let root = self.resolve_right_panel_files_root(cx);
+        let root = self.resolve_right_panel_files_root(cx).map(|path| {
+            let listing = match self.active_right_panel_owner() {
+                RightPanelOwner::Session(_) => self
+                    .selected_session()
+                    .map(|session| Self::workspace_files_listing(&session.workspace))
+                    .unwrap_or_default(),
+                _ => waku_protocol::workspace::ProjectFilesListing::WorkingTree,
+            };
+            (path, listing)
+        });
         if root != self.file_finder.root {
             self.file_finder.root = root;
             self.file_finder.index = 0;

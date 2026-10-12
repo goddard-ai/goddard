@@ -1,0 +1,1 @@
+- On the new task page, `@` file suggestions now list the files on the selected base branch when "New worktree" is the workspace, instead of the project checkout's files.

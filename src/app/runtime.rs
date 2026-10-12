@@ -4243,6 +4243,33 @@ impl Waku {
         self.workspace_path_for_session(session)
     }
 
+    /// Which file set `workspace`'s `@` index and file finder name. A
+    /// new-worktree draft has no files of its own yet, so its index reads
+    /// the committed tree at the base it will be created from — never the
+    /// ordinary checkout, which can sit on any branch.
+    pub(super) fn workspace_files_listing(
+        workspace: &SessionWorkspace,
+    ) -> waku_protocol::workspace::ProjectFilesListing {
+        match workspace {
+            SessionWorkspace::NewWorktree { base_branch } => {
+                waku_protocol::workspace::ProjectFilesListing::BaseRef {
+                    base_ref: base_branch.clone(),
+                }
+            }
+            _ => waku_protocol::workspace::ProjectFilesListing::WorkingTree,
+        }
+    }
+
+    /// The `mention_files` key for `session`: its workspace root plus the
+    /// listing that describes it.
+    pub(super) fn mention_files_key(
+        &self,
+        session: &AgentSession,
+    ) -> Option<(PathBuf, waku_protocol::workspace::ProjectFilesListing)> {
+        let path = self.workspace_path_for_session(session)?.to_path_buf();
+        Some((path, Self::workspace_files_listing(&session.workspace)))
+    }
+
     /// Marks the session for the next save; see `PersistedState::session_mut`.
     pub(super) fn selected_session_mut(&mut self) -> Option<&mut AgentSession> {
         let id = self.state.selected_session?;

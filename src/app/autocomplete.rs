@@ -416,18 +416,19 @@ impl Waku {
     /// background executor and re-runs this when it arrives. Nothing here may
     /// touch the filesystem directly.
     pub(super) fn refresh_composer_sources(&mut self, cx: &mut Context<Self>) {
-        let Some(project_path) = self
-            .selected_workspace_path()
-            .map(std::path::Path::to_path_buf)
+        let Some(files_key) = self
+            .selected_session()
+            .and_then(|session| self.mention_files_key(session))
         else {
             self.slash_command_index = Rc::new(Vec::new());
             self.slash_command_index_key = None;
             self.slash_command_index_loading = false;
             self.mention_file_index = Rc::new(Vec::new());
-            self.mention_file_index_path = None;
+            self.mention_file_index_key = None;
             self.mention_file_index_loading = false;
             return;
         };
+        let project_path = files_key.0.clone();
         let provider = self
             .selected_session()
             .map(|session| session.provider)
@@ -478,31 +479,31 @@ impl Waku {
             }
         }
 
-        match self.mention_files.read(&project_path) {
+        match self.mention_files.read(&files_key) {
             Query::Ready(files) => {
                 self.mention_file_index = files.as_ref().clone().into();
-                self.mention_file_index_path = Some(project_path);
+                self.mention_file_index_key = Some(files_key);
                 self.mention_file_index_loading = false;
             }
             Query::Pending => {
                 self.mention_file_index_loading = true;
-                if self.mention_file_index_path.as_ref() != Some(&project_path) {
+                if self.mention_file_index_key.as_ref() != Some(&files_key) {
                     self.mention_file_index = Rc::new(Vec::new());
-                    self.mention_file_index_path = None;
+                    self.mention_file_index_key = None;
                 }
             }
             Query::Missing(token) => {
                 self.mention_file_index_loading = true;
-                if self.mention_file_index_path.as_ref() != Some(&project_path) {
+                if self.mention_file_index_key.as_ref() != Some(&files_key) {
                     self.mention_file_index = Rc::new(Vec::new());
-                    self.mention_file_index_path = None;
+                    self.mention_file_index_key = None;
                 }
                 if self.workspace_client_for_path(&project_path).is_none() {
                     self.mention_file_index_loading = false;
                     self.mention_files.abandon(token);
                     return;
                 }
-                self.fetch_mention_files(token, project_path.clone(), cx);
+                self.fetch_mention_files(token, files_key, cx);
             }
         }
 
@@ -573,10 +574,7 @@ impl Waku {
         };
         let provider = session.provider;
         let reported = session.available_commands.clone();
-        let Some(project_path) = self
-            .workspace_path_for_session(session)
-            .map(std::path::Path::to_path_buf)
-        else {
+        let Some(files_key) = self.mention_files_key(session) else {
             if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
                 chat.commands = Rc::new(Vec::new());
                 chat.command_key = None;
@@ -587,6 +585,7 @@ impl Waku {
             }
             return;
         };
+        let project_path = files_key.0.clone();
         let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
         let command_key = (provider, project_path.clone(), binary_override.clone());
         match self.slash_commands.read(&command_key) {
@@ -636,18 +635,18 @@ impl Waku {
             }
         }
 
-        match self.mention_files.read(&project_path) {
+        match self.mention_files.read(&files_key) {
             Query::Ready(files) => {
                 if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
                     chat.files = files.as_ref().clone().into();
-                    chat.file_key = Some(project_path);
+                    chat.file_key = Some(files_key);
                     chat.files_loading = false;
                 }
             }
             Query::Pending => {
                 if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
                     chat.files_loading = true;
-                    if chat.file_key.as_ref() != Some(&project_path) {
+                    if chat.file_key.as_ref() != Some(&files_key) {
                         chat.files = Rc::new(Vec::new());
                         chat.file_key = None;
                     }
@@ -656,7 +655,7 @@ impl Waku {
             Query::Missing(token) => {
                 if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
                     chat.files_loading = true;
-                    if chat.file_key.as_ref() != Some(&project_path) {
+                    if chat.file_key.as_ref() != Some(&files_key) {
                         chat.files = Rc::new(Vec::new());
                         chat.file_key = None;
                     }
@@ -668,23 +667,26 @@ impl Waku {
                     self.mention_files.abandon(token);
                     return;
                 }
-                self.fetch_mention_files(token, project_path, cx);
+                self.fetch_mention_files(token, files_key, cx);
             }
         }
     }
 
-    /// Run the daemon's file listing for `root`, claiming `token`'s fetch.
-    /// The composer reads the workspace key; the `Cmd+P` finder reads
-    /// whatever files root it resolved — both land in the same cache. The
-    /// fulfill re-runs the composer mirror and an open finder's refresh so
-    /// either consumer picks up the arrival.
+    /// Run the daemon's file listing for `key`'s root and listing, claiming
+    /// `token`'s fetch. The composer reads the workspace key; the `Cmd+P`
+    /// finder reads whatever files root it resolved — both land in the same
+    /// cache. The fulfill re-runs the composer mirror and an open finder's
+    /// refresh so either consumer picks up the arrival.
     pub(super) fn fetch_mention_files(
         &mut self,
-        token: crate::query::FetchToken<PathBuf>,
-        root: PathBuf,
+        token: crate::query::FetchToken<(
+            PathBuf,
+            waku_protocol::workspace::ProjectFilesListing,
+        )>,
+        key: (PathBuf, waku_protocol::workspace::ProjectFilesListing),
         cx: &mut Context<Self>,
     ) {
-        let Some(workspace) = self.workspace_client_for_path(&root) else {
+        let Some(workspace) = self.workspace_client_for_path(&key.0) else {
             self.mention_files.abandon(token);
             return;
         };
@@ -693,8 +695,9 @@ impl Waku {
                 .background_executor()
                 .spawn(async move {
                     match workspace.request(waku_client::WorkspaceOperation::ListProjectFiles {
-                        root,
+                        root: key.0,
                         cap: FILE_INDEX_CAP,
+                        listing: key.1,
                     }) {
                         Ok(waku_client::WorkspaceResult::ProjectFiles { entries }) => entries,
                         Ok(_) | Err(_) => Vec::new(),
@@ -726,7 +729,8 @@ impl Waku {
             let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
             self.slash_commands
                 .invalidate(&(provider, path.clone(), binary_override));
-            self.mention_files.invalidate(&path);
+            self.mention_files
+                .invalidate_where(|key| key.0 == path);
         }
         self.refresh_composer_sources(cx);
     }

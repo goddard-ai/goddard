@@ -1462,7 +1462,8 @@ impl Waku {
         self.branch_snapshots.invalidate(&workspace_path);
         self.invalidate_workspace_remote_files(&workspace_path);
         self.invalidate_base_push_state(&workspace_path);
-        self.mention_files.invalidate(&workspace_path);
+        self.mention_files
+            .invalidate_where(|key| key.0 == workspace_path);
         self.invalidate_sidebar_git_scans();
         self.refresh_workspace_surfaces(cx);
         self.invalidate_composer_sources(cx);
@@ -1497,7 +1498,7 @@ impl Waku {
         self.branch_snapshots.invalidate(&path);
         self.invalidate_workspace_remote_files(&path);
         self.invalidate_base_push_state(&path);
-        self.mention_files.invalidate(&path);
+        self.mention_files.invalidate_where(|key| key.0 == path);
     }
 
     pub(super) fn create_session_for(
@@ -1881,6 +1882,9 @@ impl Waku {
             if self.state.selected_session == Some(session_id) {
                 self.ensure_right_panel_terminals(cx);
                 self.sync_git_panel_workspace(cx);
+                // The `@` index's file set moves with the workspace pick —
+                // a planned worktree lists its base ref's tree.
+                self.refresh_composer_sources(cx);
             }
             cx.notify();
         }

@@ -374,6 +374,9 @@ impl Waku {
                 self.save();
                 if self.state.selected_session == Some(session_id) {
                     self.sync_git_panel_workspace(cx);
+                    // The `@` index follows the base the draft will be cut
+                    // from.
+                    self.refresh_composer_sources(cx);
                 }
                 cx.notify();
             }

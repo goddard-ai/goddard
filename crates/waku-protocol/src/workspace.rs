@@ -593,6 +593,27 @@ pub struct ReclaimFailure {
     pub error: String,
 }
 
+/// Which file set `ListProjectFiles` enumerates.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ProjectFilesListing {
+    /// The checkout on disk — tracked files plus unignored untracked ones.
+    #[default]
+    WorkingTree,
+    /// The committed tree at `base_ref` — the file set a worktree created
+    /// from that base would hold. `None` resolves the repository's default
+    /// branch, the same base `CreateWorktree` picks.
+    BaseRef { base_ref: Option<String> },
+}
+
+impl ProjectFilesListing {
+    /// `serde(skip_serializing_if)` helper: an absent field means the same
+    /// thing to older peers.
+    pub fn is_working_tree(&self) -> bool {
+        matches!(self, Self::WorkingTree)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceOperation {
@@ -640,6 +661,10 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         root: PathBuf,
         cap: usize,
+        /// `WorkingTree` when absent, so peers from before the field existed
+        /// keep their checkout listing.
+        #[serde(default, skip_serializing_if = "ProjectFilesListing::is_working_tree")]
+        listing: ProjectFilesListing,
     },
     /// Depth-limited directory listing under each root, for pickers that
     /// choose a directory rather than a file. Returns `Directories`.

@@ -1018,7 +1018,7 @@ struct SideChatComposer {
     commands_loading: bool,
     /// The drawn `@` file index and the workspace it lists.
     files: Rc<Vec<FileEntry>>,
-    file_key: Option<PathBuf>,
+    file_key: Option<(PathBuf, waku_protocol::workspace::ProjectFilesListing)>,
     files_loading: bool,
 }
 
@@ -3048,10 +3048,13 @@ pub struct Waku {
     slash_command_index: Rc<Vec<SlashCommand>>,
     slash_command_index_key: Option<(ProviderKind, PathBuf, Option<String>)>,
     slash_command_index_loading: bool,
-    /// Workspace file index per project root, for `@` mentions.
-    mention_files: QueryCache<PathBuf, Vec<FileEntry>>,
+    /// Workspace file index per `(project root, listing)`, for `@` mentions.
+    /// A planned worktree's listing is its base ref's tree, not the
+    /// checkout's — the two name different file sets under the same root.
+    mention_files:
+        QueryCache<(PathBuf, waku_protocol::workspace::ProjectFilesListing), Vec<FileEntry>>,
     mention_file_index: Rc<Vec<FileEntry>>,
-    mention_file_index_path: Option<PathBuf>,
+    mention_file_index_key: Option<(PathBuf, waku_protocol::workspace::ProjectFilesListing)>,
     mention_file_index_loading: bool,
     /// `#` work-item mention state per workspace root: resolved repo, latest
     /// landed search, and the number→item map for expansion and chips.
@@ -7403,7 +7406,7 @@ impl Waku {
                 slash_command_index_loading: false,
                 mention_files: QueryCache::new(MAX_CACHED_WORKSPACES),
                 mention_file_index: Rc::new(Vec::new()),
-                mention_file_index_path: None,
+                mention_file_index_key: None,
                 mention_file_index_loading: false,
                 work_item_mentions: HashMap::new(),
                 composer_sources_stale: false,

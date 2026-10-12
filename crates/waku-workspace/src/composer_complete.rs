@@ -14,6 +14,7 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 pub use waku_protocol::composer::{CommandScope, FileEntry, SlashCommand};
 use waku_protocol::model::{ProviderKind, ReportedCommand};
+use waku_protocol::workspace::ProjectFilesListing;
 
 /// How many rows a filter pass returns. The popup shows a screenful and the
 /// keyboard walks the rest; past this the tail is noise, not choice.
@@ -787,10 +788,19 @@ pub fn resolved_skill_submission(
 /// Index the project's files for `@` mentions. Background executor only.
 ///
 /// `git ls-files` — tracked plus unignored untracked — is the authoritative
-/// listing for a repository and costs one subprocess for the whole tree. A
-/// plain directory gets a bounded walk instead.
-pub fn list_project_files(root: &Path, cap: usize) -> Vec<FileEntry> {
-    let files = git_listed_files(root, cap).unwrap_or_else(|| walked_files(root, cap));
+/// listing for a repository and costs one subprocess for the whole tree.
+/// `ProjectFilesListing::BaseRef` swaps it for `git ls-tree` at the ref a
+/// planned worktree starts from, since that worktree's files are the ref's
+/// committed ones. A plain directory gets a bounded walk instead.
+pub fn list_project_files(root: &Path, cap: usize, listing: &ProjectFilesListing) -> Vec<FileEntry> {
+    let files = match listing {
+        ProjectFilesListing::BaseRef { base_ref } => {
+            git_ref_listed_files(root, base_ref.as_deref(), cap)
+        }
+        ProjectFilesListing::WorkingTree => None,
+    }
+    .or_else(|| git_listed_files(root, cap))
+    .unwrap_or_else(|| walked_files(root, cap));
     let mut directories = BTreeSet::new();
     for file in &files {
         let mut path = file.as_str();
@@ -833,6 +843,40 @@ fn git_listed_files(root: &Path, cap: usize) -> Option<Vec<String>> {
             "--exclude-standard",
             "-z",
         ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let listing = String::from_utf8(output.stdout).ok()?;
+    Some(
+        listing
+            .split('\0')
+            .filter(|path| !path.is_empty())
+            .take(cap)
+            .map(str::to_owned)
+            .collect(),
+    )
+}
+
+/// The committed paths at `base_ref`, scoped to `root`'s prefix the way
+/// `ls-files` scopes its listing — run without `--full-tree` inside the
+/// project subdirectory, `ls-tree` both limits to and relativizes it.
+/// `None` or an empty ref resolves the repository's default branch,
+/// matching worktree creation. Untracked files never appear: a worktree
+/// based on a ref holds only what the ref commits.
+fn git_ref_listed_files(root: &Path, base_ref: Option<&str>, cap: usize) -> Option<Vec<String>> {
+    let base_ref = base_ref
+        .map(str::trim)
+        .filter(|reference| !reference.is_empty())
+        .map(str::to_owned)
+        .map(Ok)
+        .unwrap_or_else(|| waku_git::worktree::default_base_ref(root))
+        .ok()?;
+    let output = crate::command_env::search_path_command("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-tree", "-r", "--name-only", "-z", &base_ref])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -1723,7 +1767,7 @@ mod tests {
         std::fs::create_dir_all(root.join("src/deep")).unwrap();
         std::fs::write(root.join("src/deep/lib.rs"), "x").unwrap();
         std::fs::write(root.join("main.rs"), "x").unwrap();
-        let entries = list_project_files(&root, 100);
+        let entries = list_project_files(&root, 100, &ProjectFilesListing::WorkingTree);
         let paths = entries
             .iter()
             .map(|entry| entry.path.as_str())
@@ -1736,6 +1780,80 @@ mod tests {
             paths.iter().position(|p| *p == "main.rs").unwrap()
                 < paths.iter().position(|p| *p == "src/deep/lib.rs").unwrap()
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A planned worktree's `@` index names the base ref's committed files,
+    /// not the checkout's — even when the checkout sits on another branch or
+    /// carries untracked files the worktree will not have.
+    #[test]
+    fn base_ref_lists_the_refs_tree_not_the_checkouts() {
+        let root = std::env::temp_dir().join(format!("waku-files-ref-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let git = |args: &[&str]| {
+            let output = crate::command_env::search_path_command("git")
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{args:?}: {output:?}");
+        };
+        git(&["init", "-b", "main"]);
+        std::fs::write(root.join("main.rs"), "x").unwrap();
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=Goddard Tests",
+            "-c",
+            "user.email=waku@example.com",
+            "commit",
+            "-m",
+            "baseline",
+        ]);
+        git(&["checkout", "-b", "feature"]);
+        std::fs::write(root.join("feature.rs"), "x").unwrap();
+        git(&["add", "."]);
+        git(&[
+            "-c",
+            "user.name=Goddard Tests",
+            "-c",
+            "user.email=waku@example.com",
+            "commit",
+            "-m",
+            "feature",
+        ]);
+        git(&["checkout", "main"]);
+        // Untracked in the checkout, so a worktree based on `feature` would
+        // not have it either.
+        std::fs::write(root.join("scratch.txt"), "x").unwrap();
+
+        let paths = |listing: ProjectFilesListing| {
+            list_project_files(&root, 100, &listing)
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let working_tree = paths(ProjectFilesListing::WorkingTree);
+        assert!(working_tree.iter().any(|path| path == "main.rs"));
+        assert!(working_tree.iter().any(|path| path == "scratch.txt"));
+        assert!(!working_tree.iter().any(|path| path == "feature.rs"));
+
+        let feature = paths(ProjectFilesListing::BaseRef {
+            base_ref: Some("feature".to_owned()),
+        });
+        assert!(feature.iter().any(|path| path == "main.rs"));
+        assert!(feature.iter().any(|path| path == "feature.rs"));
+        assert!(!feature.iter().any(|path| path == "scratch.txt"));
+
+        // No explicit pick resolves the repository's default branch — this
+        // repository has no origin, so that is its current branch.
+        let default = paths(ProjectFilesListing::BaseRef { base_ref: None });
+        assert!(default.iter().any(|path| path == "main.rs"));
+        assert!(!default.iter().any(|path| path == "feature.rs"));
+        assert!(!default.iter().any(|path| path == "scratch.txt"));
+
         let _ = std::fs::remove_dir_all(&root);
     }
 }
