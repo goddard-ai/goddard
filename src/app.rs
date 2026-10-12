@@ -7059,6 +7059,7 @@ impl Waku {
                     let _ = waku.update(cx, |waku, cx| {
                         waku.run_markdown_code_block(
                             request.session,
+                            request.message,
                             request.language,
                             request.code,
                             window,

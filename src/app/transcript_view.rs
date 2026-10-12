@@ -1932,8 +1932,10 @@ impl Waku {
     /// scoped to the row, so a virtualized remount recreates the same keys and
     /// an in-progress selection survives scrolling. `session` is the task the
     /// row belongs to — a side chat's own id, not the selected parent's — so
-    /// the code-block run control lands in the right workspace. `selection`
-    /// is the surface's own registry — the transcript's, or a side chat's.
+    /// the code-block run control lands in the right workspace, and
+    /// `code_run_message` the row's message so a boss chat's run resolves
+    /// the project from the turn that produced it. `selection` is the
+    /// surface's own registry — the transcript's, or a side chat's.
     pub(super) fn markdown_ctx<'a>(
         &self,
         row: String,
@@ -1941,6 +1943,7 @@ impl Waku {
         metrics: MarkdownMetrics,
         animate_streaming: bool,
         session: Option<Uuid>,
+        code_run_message: Option<Uuid>,
         selection: &TranscriptSelection,
         cx: &App,
     ) -> MarkdownCtx<'a> {
@@ -1954,13 +1957,24 @@ impl Waku {
             .with_link_items(self.markdown_link_menu_items.clone())
             .with_streaming_animation(animate_streaming);
         // A desktop PTY only opens on a local workspace — a remote
-        // session's blocks keep the copy control alone.
+        // session's blocks keep the copy control alone. A boss chat
+        // archives into history sessions, which count here too.
         if session
-            .and_then(|id| self.state.sessions.iter().find(|session| session.id == id))
+            .and_then(|id| {
+                self.state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == id)
+                    .or_else(|| self.boss_history_session(id).map(|entry| &entry.session))
+            })
             .and_then(|session| self.workspace_path_for_session(session))
             .is_some_and(|workspace| !self.is_remote_path(workspace))
         {
-            ctx.with_code_run(session, self.markdown_code_run_handler.clone())
+            ctx.with_code_run(
+                session,
+                code_run_message,
+                self.markdown_code_run_handler.clone(),
+            )
         } else {
             ctx
         }
@@ -2252,6 +2266,7 @@ impl Waku {
                             metrics,
                             animate_streaming,
                             self.transcript_display_session().map(|session| session.id),
+                            Some(message.id),
                             &self.transcript_selection,
                             cx,
                         )
@@ -4486,6 +4501,7 @@ impl Waku {
                         self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
                         reasoning_live && !cx.reduce_motion(),
                         Some(session_id),
+                        None,
                         &self.transcript_selection,
                         cx,
                     )
@@ -4594,6 +4610,7 @@ impl Waku {
                     self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
                     false,
                     Some(session_id),
+                    None,
                     &self.transcript_selection,
                     cx,
                 );

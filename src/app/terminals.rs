@@ -906,11 +906,15 @@ impl Waku {
     /// Run a transcript code block in a terminal: the fence tag picks the
     /// interpreter, the block's own session roots it at its workspace — a
     /// side chat's strip is its parent's, the surface the user is looking
-    /// at. The run rides the custom-command launch, so the shell stays
-    /// open with the output when the script finishes.
+    /// at. A boss chat owns no project workspace, so its blocks resolve the
+    /// project from the message's turn instead — see
+    /// [`Self::code_run_working_directory`]. The run rides the
+    /// custom-command launch, so the shell stays open with the output when
+    /// the script finishes.
     pub(super) fn run_markdown_code_block(
         &mut self,
         session_id: Option<Uuid>,
+        message_id: Option<Uuid>,
         language: &str,
         code: &str,
         window: &mut Window,
@@ -919,30 +923,96 @@ impl Waku {
         let Some(run) = md::render::code_run_script(language, code) else {
             return;
         };
-        let session = session_id
-            .or(self.state.selected_session)
-            .and_then(|id| self.state.sessions.iter().find(|session| session.id == id));
+        let session = session_id.or(self.state.selected_session).and_then(|id| {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == id)
+                .or_else(|| self.boss_history_session(id).map(|entry| &entry.session))
+        });
         // The strip the tab joins: the session itself, or a side chat's
         // parent — a side-chat surface only renders inside it. Any other
         // attach point falls through to the full-width terminal.
         let attach = session.map(|session| session.side_chat_of.unwrap_or(session.id));
-        let working_directory = session
-            .and_then(|session| self.workspace_path_for_session(session))
-            .map(std::path::Path::to_path_buf);
+        let mut command = CustomCommand::new(run.script);
+        command.name = Some(language.to_owned());
+        command.icon = CustomCommandIcon::Terminal;
+        command.shell = run.shell.map(str::to_owned);
+        let working_directory = match session {
+            Some(session) if self.session_uses_boss_workspace(session) => {
+                match self.code_run_working_directory(session, message_id, code) {
+                    CodeRunDirectory::Resolved(directory) => Some(directory),
+                    CodeRunDirectory::Pick(candidates) => {
+                        self.prompt_code_block_project(
+                            PendingCodeBlockRun {
+                                command,
+                                attach,
+                                journal_session: session_id,
+                            },
+                            candidates,
+                            window,
+                            cx,
+                        );
+                        return;
+                    }
+                }
+            }
+            _ => session
+                .and_then(|session| self.workspace_path_for_session(session))
+                .map(std::path::Path::to_path_buf),
+        };
         let Some(working_directory) =
             working_directory.filter(|directory| !self.is_remote_path(directory))
         else {
             self.show_toast(tr!("code_block.no_local_workspace"));
             return;
         };
-        let mut command = CustomCommand::new(run.script);
-        command.name = Some(language.to_owned());
-        command.icon = CustomCommandIcon::Terminal;
-        command.shell = run.shell.map(str::to_owned);
         let Some(terminal_id) = self.create_terminal(working_directory, attach, Some(command), cx)
         else {
             return;
         };
+        self.finish_code_block_terminal(terminal_id, session_id, window, cx);
+    }
+
+    /// The run the code-block project picker parked, executed at the picked
+    /// project's root — same terminal treatment as an inferred run.
+    pub(super) fn run_code_block_in_project(
+        &mut self,
+        project_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(run) = self.command_palette.code_block_run.take() else {
+            return;
+        };
+        let Some(working_directory) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .filter(|project| !self.is_remote_project(project.id))
+            .map(|project| project.path.clone())
+        else {
+            return;
+        };
+        let Some(terminal_id) =
+            self.create_terminal(working_directory, run.attach, Some(run.command), cx)
+        else {
+            return;
+        };
+        self.finish_code_block_terminal(terminal_id, run.journal_session, window, cx);
+    }
+
+    /// The terminal a transcript code-block run spawned, landed: the tab
+    /// joins the live right-panel strip when it owns one, else the
+    /// full-width terminal, focused like ⌘T's fresh shell.
+    fn finish_code_block_terminal(
+        &mut self,
+        terminal_id: Uuid,
+        session_id: Option<Uuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.record_action(session_id, action_predictions::JournalAction::TerminalRun);
         if let Some(index) = self
             .right_panel_surfaces
@@ -960,6 +1030,106 @@ impl Waku {
             self.select_terminal(terminal_id, window, cx);
         }
         cx.notify();
+    }
+
+    /// Whether `session`'s project is a boss's own workspace — the boss
+    /// chat and its planning sessions. Their blocks need the message's
+    /// provenance to land in a real project; every other session already
+    /// names one.
+    fn session_uses_boss_workspace(&self, session: &AgentSession) -> bool {
+        self.boss_ui.projects.contains_key(&session.project_id)
+    }
+
+    /// Where a boss-surface code block belongs. The workspace of a task the
+    /// block's turn names — a report's employee, a task-sent prompt's
+    /// author — wins outright; next, the one project whose paths the
+    /// message references; last, the boss's own workspace. `Pick` carries
+    /// the candidates inference could not choose between — the palette
+    /// asks with them first.
+    fn code_run_working_directory(
+        &self,
+        session: &AgentSession,
+        message_id: Option<Uuid>,
+        code: &str,
+    ) -> CodeRunDirectory {
+        let message =
+            message_id.and_then(|id| session.messages.iter().find(|message| message.id == id));
+        let mut task_dir = None;
+        let mut task_projects = Vec::new();
+        for task_id in code_run_turn_tasks(session, message) {
+            let Some(task) = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == task_id)
+            else {
+                continue;
+            };
+            // An expired employee's recorded worktree may already be
+            // reclaimed — only a directory that exists can host the run.
+            let Some(dir) = self
+                .workspace_path_for_session(task)
+                .filter(|dir| dir.is_dir() && !self.is_remote_path(dir))
+            else {
+                continue;
+            };
+            if task_dir.is_none() {
+                task_dir = Some(dir.to_path_buf());
+            }
+            if !task_projects.contains(&task.project_id) {
+                task_projects.push(task.project_id);
+            }
+        }
+        match task_projects.len() {
+            1 => return CodeRunDirectory::Resolved(task_dir.expect("a project implies a dir")),
+            2.. => return CodeRunDirectory::Pick(task_projects),
+            _ => {}
+        }
+        let roots = self.code_run_project_roots();
+        let referenced = code_run_content_projects(
+            &roots,
+            message.map(Message::visible_content).unwrap_or(code),
+            code,
+            self.home_directory.as_deref(),
+        );
+        match referenced.as_slice() {
+            [project] => {
+                if let Some((_, root)) = roots.iter().find(|(id, _)| id == project) {
+                    return CodeRunDirectory::Resolved(root.to_path_buf());
+                }
+            }
+            [_, _, ..] => return CodeRunDirectory::Pick(referenced),
+            _ => {}
+        }
+        match self
+            .workspace_path_for_session(session)
+            .filter(|dir| !self.is_remote_path(dir))
+        {
+            Some(dir) => CodeRunDirectory::Resolved(dir.to_path_buf()),
+            // Nothing named a project — the picker offers every one it has.
+            None => CodeRunDirectory::Pick(Vec::new()),
+        }
+    }
+
+    /// The local projects a transcript code block can run in — the daemon's
+    /// real projects plus each boss's own workspace. Remote rows and the
+    /// projectless destination have no local directory a desktop PTY opens.
+    fn code_run_project_roots(&self) -> Vec<(Uuid, &Path)> {
+        let mut roots: Vec<(Uuid, &Path)> = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless() && !self.is_remote_project(project.id))
+            .map(|project| (project.id, project.path.as_path()))
+            .collect();
+        for project in self.boss_ui.projects.values() {
+            if !self.is_remote_project(project.id)
+                && roots.iter().all(|(id, _)| *id != project.id)
+            {
+                roots.push((project.id, project.path.as_path()));
+            }
+        }
+        roots
     }
 
     /// Whether the terminal is the surface on screen — the full-width
@@ -1931,9 +2101,316 @@ impl Waku {
     }
 }
 
+/// Where a boss-surface code block's run lands — `Resolved` carries the
+/// settled directory, `Pick` the project candidates inference could not
+/// choose between, ordered best-first for the palette's picker.
+enum CodeRunDirectory {
+    Resolved(PathBuf),
+    Pick(Vec<Uuid>),
+}
+
+/// A transcript code-block run parked on an ambiguous project: the
+/// block's prepared launch, the right-panel strip its terminal joins, and
+/// the session the action journal records against.
+pub(super) struct PendingCodeBlockRun {
+    pub command: CustomCommand,
+    pub attach: Option<Uuid>,
+    pub journal_session: Option<Uuid>,
+}
+
+/// The tasks a code block's turn names, deduped in transcript order: the
+/// block's own message's author first, then each prompt in the turn — a
+/// report's employee and a task-sent prompt's author.
+fn code_run_turn_tasks(session: &AgentSession, message: Option<&Message>) -> Vec<Uuid> {
+    let mut tasks = Vec::new();
+    let push = |tasks: &mut Vec<Uuid>, task: Option<Uuid>| {
+        if let Some(task) = task.filter(|task| !tasks.contains(task)) {
+            tasks.push(task);
+        }
+    };
+    let Some(message) = message else {
+        return tasks;
+    };
+    push(&mut tasks, message.sent_by_task);
+    let Some(turn) = message.turn_id else {
+        return tasks;
+    };
+    for prompt in session
+        .messages
+        .iter()
+        .filter(|candidate| candidate.turn_id == Some(turn))
+    {
+        push(
+            &mut tasks,
+            prompt.report_trigger.as_ref().map(|trigger| trigger.employee),
+        );
+        push(&mut tasks, prompt.sent_by_task);
+    }
+    tasks
+}
+
+/// Bounds the path-token scan — a wall of log text cannot multiply the
+/// relative-path probes' stat calls.
+const CODE_RUN_TOKEN_LIMIT: usize = 32;
+
+/// Path-shaped words `text` mentions, in order — whitespace-, quote-,
+/// and bracket-delimited tokens with prose punctuation and `:line`/`[:col]`
+/// suffixes stripped.
+fn code_run_path_tokens(text: &str) -> Vec<String> {
+    text.split(|c: char| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                '"' | '\'' | '`' | '(' | ')' | '<' | '>' | '[' | ']' | '{' | '}' | '|'
+            )
+    })
+    .filter_map(|token| {
+        let mut token = token.trim_matches(|c: char| matches!(c, ',' | ';'));
+        // A `path:line[:col]` reference names the file, not the position.
+        while let Some((head, tail)) = token.rsplit_once(':') {
+            if tail.is_empty() || !tail.chars().all(|c| c.is_ascii_digit()) {
+                break;
+            }
+            token = head;
+        }
+        (!token.is_empty()).then(|| token.to_owned())
+    })
+    .take(CODE_RUN_TOKEN_LIMIT)
+    .collect()
+}
+
+/// The projects a single path token names. An absolute or `~/` path picks
+/// the deepest root it sits under — a nested project beats its parent;
+/// a relative path picks every root it exists under, so `../`, flags,
+/// URLs, and words without a separator match nothing.
+fn code_run_token_projects(
+    roots: &[(Uuid, &Path)],
+    token: &str,
+    home: Option<&Path>,
+) -> Vec<Uuid> {
+    let expanded;
+    let path = if let Some(rest) = token.strip_prefix("~/") {
+        let Some(home) = home else {
+            return Vec::new();
+        };
+        expanded = home.join(rest);
+        expanded.as_path()
+    } else {
+        Path::new(token)
+    };
+    if path.is_absolute() {
+        let depth = roots
+            .iter()
+            .filter(|(_, root)| path.starts_with(root))
+            .map(|(_, root)| root.components().count())
+            .max();
+        return roots
+            .iter()
+            .filter(|(_, root)| {
+                Some(root.components().count()) == depth && path.starts_with(root)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+    }
+    let relative = token.strip_prefix("./").unwrap_or(token);
+    if relative.starts_with(['/', '.', '-', '~'])
+        || relative.contains("://")
+        || !relative.contains('/')
+    {
+        return Vec::new();
+    }
+    roots
+        .iter()
+        .filter(|(_, root)| root.join(relative).exists())
+        .map(|(id, _)| *id)
+        .collect()
+}
+
+/// The projects `message` and the block's own source reference, in
+/// first-mention order — absolute and `~` paths by prefix, relative paths
+/// by existence under a project root.
+fn code_run_content_projects(
+    roots: &[(Uuid, &Path)],
+    message: &str,
+    code: &str,
+    home: Option<&Path>,
+) -> Vec<Uuid> {
+    let mut projects: Vec<Uuid> = Vec::new();
+    for token in code_run_path_tokens(message)
+        .into_iter()
+        .chain(code_run_path_tokens(code))
+    {
+        for id in code_run_token_projects(roots, &token, home) {
+            if !projects.contains(&id) {
+                projects.push(id);
+            }
+        }
+    }
+    projects
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("goddard-code-run-{tag}-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn code_run_path_tokens_split_prose_and_strip_positions() {
+        let tokens = code_run_path_tokens(
+            "run `node scripts/db/feed.ts:42` then (bun ./tools/x.ts:7:3), see \"~/dev/app\"",
+        );
+        assert_eq!(
+            tokens,
+            [
+                "run",
+                "node",
+                "scripts/db/feed.ts",
+                "then",
+                "bun",
+                "./tools/x.ts",
+                "see",
+                "~/dev/app"
+            ]
+        );
+    }
+
+    #[test]
+    fn code_run_token_projects_match_absolute_home_and_relative_paths() {
+        let coral = temp_root("coral");
+        let other = temp_root("other");
+        let nested = coral.join("sub");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(coral.join("scripts/db")).unwrap();
+        std::fs::write(coral.join("scripts/db/feed.ts"), "").unwrap();
+        let coral_id = Uuid::from_u128(1);
+        let other_id = Uuid::from_u128(2);
+        let nested_id = Uuid::from_u128(3);
+        let roots: Vec<(Uuid, &Path)> = vec![
+            (coral_id, coral.as_path()),
+            (other_id, other.as_path()),
+            (nested_id, nested.as_path()),
+        ];
+
+        // An absolute path picks its project; a nested root wins.
+        assert_eq!(
+            code_run_token_projects(&roots, &other.join("src/main.rs").to_string_lossy(), None),
+            [other_id]
+        );
+        assert_eq!(
+            code_run_token_projects(&roots, &nested.join("a").to_string_lossy(), None),
+            [nested_id]
+        );
+        // `~` expands through the given home before the prefix match.
+        let home = temp_root("home");
+        let home_coral = home.join("coral");
+        std::fs::create_dir_all(&home_coral).unwrap();
+        let home_roots: Vec<(Uuid, &Path)> = vec![(coral_id, home_coral.as_path())];
+        assert_eq!(
+            code_run_token_projects(&home_roots, "~/coral/f.ts", Some(home.as_path())),
+            [coral_id]
+        );
+        assert!(
+            code_run_token_projects(&home_roots, "~/elsewhere/f.ts", Some(home.as_path())).is_empty()
+        );
+        // A relative path matches the root it exists under — and only that.
+        assert_eq!(
+            code_run_token_projects(&roots, "scripts/db/feed.ts", None),
+            [coral_id]
+        );
+        assert_eq!(
+            code_run_token_projects(&roots, "./scripts/db/feed.ts", None),
+            [coral_id]
+        );
+        // Flags, URLs, escapes, and slash-free words never name a project.
+        for token in ["../up/x", "--out/a", "https://a/b", "Makefile", ".env/x"] {
+            assert!(
+                code_run_token_projects(&roots, token, None).is_empty(),
+                "{token} matched"
+            );
+        }
+        std::fs::remove_dir_all(&coral).ok();
+        std::fs::remove_dir_all(&other).ok();
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn code_run_content_projects_leads_with_mentions_and_dedupes() {
+        let coral = temp_root("coral");
+        let other = temp_root("other");
+        let coral_id = Uuid::from_u128(1);
+        let other_id = Uuid::from_u128(2);
+        let roots: Vec<(Uuid, &Path)> = vec![
+            (coral_id, coral.as_path()),
+            (other_id, other.as_path()),
+        ];
+        let coral_file = format!("{}/scripts/feed.ts", coral.display());
+        let other_file = format!("{}/src/lib.rs", other.display());
+        let projects = code_run_content_projects(
+            &roots,
+            &format!("The answer mentions {other_file} and again {coral_file}."),
+            &format!("cat {coral_file}"),
+            None,
+        );
+        assert_eq!(projects, [other_id, coral_id]);
+        std::fs::remove_dir_all(&coral).ok();
+        std::fs::remove_dir_all(&other).ok();
+    }
+
+    #[test]
+    fn code_run_turn_tasks_lead_with_the_message_then_each_trigger() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let turn = Uuid::new_v4();
+        let employee_a = Uuid::new_v4();
+        let employee_b = Uuid::new_v4();
+        let mut report = Message::new_for_turn(MessageRole::User, "report", turn);
+        report.report_trigger = Some(crate::model::ReportTrigger {
+            event_id: Uuid::new_v4(),
+            employee: employee_a,
+            employee_name: "Faye".into(),
+            job_title: "Runnable scripts".into(),
+            kind: crate::model::ReportTriggerKind::Finished,
+            boundary: crate::model::ReportTriggerBoundary::Opening,
+            reference_context: None,
+        });
+        report.hidden = true;
+        session.messages.push(report);
+        let mut steer = Message::new_for_turn(MessageRole::User, "steer", turn);
+        steer.report_trigger = Some(crate::model::ReportTrigger {
+            event_id: Uuid::new_v4(),
+            employee: employee_b,
+            employee_name: "Ivo".into(),
+            job_title: "Steer".into(),
+            kind: crate::model::ReportTriggerKind::Finished,
+            boundary: crate::model::ReportTriggerBoundary::Steer,
+            reference_context: None,
+        });
+        steer.hidden = true;
+        session.messages.push(steer);
+        let answer = Message::new_for_turn(MessageRole::Assistant, "answer", turn);
+        let answer_id = answer.id;
+        session.messages.push(answer);
+
+        let message = session.messages.iter().find(|m| m.id == answer_id);
+        assert_eq!(
+            code_run_turn_tasks(&session, message),
+            [employee_a, employee_b]
+        );
+        // No message, no tasks — the boss project fallback decides.
+        assert!(code_run_turn_tasks(&session, None).is_empty());
+        // A task-sent prompt leads with its own author.
+        let sender = Uuid::new_v4();
+        let mut sent = Message::new_for_turn(MessageRole::User, "sent", Uuid::new_v4());
+        sent.sent_by_task = Some(sender);
+        let sent_id = sent.id;
+        session.messages.push(sent);
+        let message = session.messages.iter().find(|m| m.id == sent_id);
+        assert_eq!(code_run_turn_tasks(&session, message), [sender]);
+    }
 
     #[test]
     fn nearest_repo_root_handles_nested_repos_worktrees_and_non_repo_cwds() {

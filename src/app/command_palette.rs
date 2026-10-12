@@ -257,6 +257,7 @@ enum PaletteAction {
     /// The "Sync branch…" fallback picker's pick: open the branch picker
     /// rooted at this project's path.
     ChooseSyncBranchProject(Uuid),
+    ChooseCodeBlockProject(Uuid),
     CompactContext,
     GenerateVoiceBriefing,
     CancelVoiceBriefing,
@@ -340,6 +341,9 @@ enum CommandPaletteView {
     /// The "Sync branch…" fallback's project picker — shown when neither a
     /// session workspace nor a selected project supplied a repository.
     SyncBranchProjects,
+    /// The transcript code-block run's project picker — shown when the
+    /// block's own inference could not settle on a project.
+    CodeBlockProjects,
     IssueTemplates,
     /// The "Change base branch" branch picker.
     RebaseBase,
@@ -755,6 +759,11 @@ pub(super) struct CommandPaletteUi {
     /// daemon's branch scan behind the picker.
     rebase_base: Option<RebaseBasePicker>,
     rebase_generation: u64,
+    /// The transcript code-block run parked behind its project picker, and
+    /// the candidates the block's inference already surfaced — the picker's
+    /// rows lead with them.
+    pub(super) code_block_run: Option<terminals::PendingCodeBlockRun>,
+    code_block_candidates: Vec<Uuid>,
     /// The composer text the "Save as prompt template" step parks on entry —
     /// captured up front so a composer draft change mid-pick can't alter
     /// what lands in the file.
@@ -816,6 +825,8 @@ impl CommandPaletteUi {
             issue_generation: 0,
             rebase_base: None,
             rebase_generation: 0,
+            code_block_run: None,
+            code_block_candidates: Vec::new(),
             save_prompt_body: None,
             employee_search_query: None,
             employee_hits: Vec::new(),
@@ -1059,6 +1070,8 @@ impl Waku {
         self.command_palette.employee_search_pending = false;
         self.command_palette.employee_search_generation =
             self.command_palette.employee_search_generation.wrapping_add(1);
+        self.command_palette.code_block_run = None;
+        self.command_palette.code_block_candidates.clear();
         if let Some(previous_focus) = self.command_palette.previous_focus.take() {
             window.focus(&previous_focus, cx);
         }
@@ -1446,6 +1459,8 @@ impl Waku {
     /// matching the resume picker's drill-out.
     fn leave_command_palette_drill_in_view(&mut self, cx: &mut Context<Self>) {
         self.command_palette.view = CommandPaletteView::Commands;
+        self.command_palette.code_block_run = None;
+        self.command_palette.code_block_candidates.clear();
         self.command_palette.search.update(cx, |input, cx| {
             input.set_placeholder(tr!("command_palette.placeholder"), cx);
             input.clear(cx);
@@ -2097,6 +2112,41 @@ impl Waku {
         self.open_command_palette_sync_branch_projects_view(cx);
     }
 
+    /// A boss-surface code block's inference could not settle on a project —
+    /// the palette asks over the local projects, `candidates` first, and the
+    /// picked project's root runs the parked block. Every path a desktop
+    /// terminal could take being remote stops the flow with a toast instead.
+    pub(super) fn prompt_code_block_project(
+        &mut self,
+        run: terminals::PendingCodeBlockRun,
+        candidates: Vec<Uuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .state
+            .projects
+            .iter()
+            .all(|project| self.is_remote_project(project.id))
+        {
+            self.show_toast(tr!("code_block.no_local_workspace"));
+            cx.notify();
+            return;
+        }
+        self.command_palette.code_block_run = Some(run);
+        self.command_palette.code_block_candidates = candidates;
+        if !self.command_palette.open {
+            self.open_command_palette(window, cx);
+        }
+        self.command_palette.view = CommandPaletteView::CodeBlockProjects;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.code_block_project_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
     /// The picker picked — or skipped — a template; the dialog is a
     /// separate surface, so the palette hands it the resolved target and
     /// repo after closing.
@@ -2163,6 +2213,7 @@ impl Waku {
             CommandPaletteView::NewTaskIn => self.leave_command_palette_new_task_view(cx),
             CommandPaletteView::IssueProjects => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::SyncBranchProjects => self.leave_command_palette_drill_in_view(cx),
+            CommandPaletteView::CodeBlockProjects => self.leave_command_palette_drill_in_view(cx),
             // Esc on the templates step backs up to the project step —
             // also the way to override an inferred repository.
             CommandPaletteView::IssueTemplates => self.open_command_palette_issue_projects_view(cx),
@@ -2198,6 +2249,9 @@ impl Waku {
             }
             CommandPaletteView::SyncBranchProjects => {
                 tr!("command_palette.sync_branch_project_placeholder")
+            }
+            CommandPaletteView::CodeBlockProjects => {
+                tr!("command_palette.code_block_project_placeholder")
             }
             CommandPaletteView::IssueTemplates => {
                 tr!("command_palette.issue_template_placeholder")
@@ -2260,6 +2314,7 @@ impl Waku {
                 | CommandPaletteView::NewTaskIn
                 | CommandPaletteView::IssueProjects
                 | CommandPaletteView::SyncBranchProjects
+                | CommandPaletteView::CodeBlockProjects
                 | CommandPaletteView::IssueTemplates
                 | CommandPaletteView::RebaseBase
                 | CommandPaletteView::SavePrompt
@@ -4363,6 +4418,79 @@ impl Waku {
         );
     }
 
+    /// The code-block picker's projects — every local-daemon project a
+    /// desktop terminal could root at, the block's inferred candidates
+    /// first, then the usual recency order.
+    fn command_palette_code_block_project_candidates(&self) -> Vec<CommandPaletteItem> {
+        let projects = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !project.is_projectless() && !self.is_remote_project(project.id))
+            .collect::<Vec<_>>();
+        let current = self
+            .selected_session()
+            .map(|session| session.project_id)
+            .filter(|id| projects.iter().any(|project| project.id == *id));
+        let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
+        let mut order = self.command_palette.code_block_candidates.clone();
+        for id in run_script::run_script_project_order(current, &recent, &projects) {
+            if !order.contains(&id) {
+                order.push(id);
+            }
+        }
+        order
+            .into_iter()
+            .enumerate()
+            .filter_map(|(order, project_id)| {
+                let project = projects.iter().find(|project| project.id == project_id)?;
+                let mut detail =
+                    settings::abbreviate_home_path(&project.path, self.home_directory.as_deref());
+                if current == Some(project_id) {
+                    detail = format!("{detail} · {}", tr!("command_palette.current"));
+                }
+                let label = project.display_name();
+                Some(CommandPaletteItem {
+                    section: PaletteSection::Projects,
+                    search_text: format!(
+                        "{label} {} project run code block",
+                        project.path.to_string_lossy()
+                    ),
+                    label,
+                    detail: Some(detail),
+                    icon: PaletteIcon::Asset("icons/folder.svg"),
+                    shortcut: None,
+                    action: PaletteAction::ChooseCodeBlockProject(project_id),
+                    content_match: None,
+                    order,
+                    recency: 0,
+                })
+            })
+            .collect()
+    }
+
+    fn refresh_command_palette_code_block_project_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim();
+        let mut candidates = self.command_palette_code_block_project_candidates();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        self.command_palette.results = candidates;
+        // The inferred candidate row leads the list, so a bare Enter takes
+        // the likeliest project rather than the chat's own.
+        self.finish_drill_in_refresh(selected_action.flatten(), None);
+    }
+
     fn refresh_command_palette_issue_template_results(
         &mut self,
         query: &str,
@@ -4650,6 +4778,13 @@ impl Waku {
             }
             CommandPaletteView::SyncBranchProjects => {
                 self.refresh_command_palette_sync_branch_project_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::CodeBlockProjects => {
+                self.refresh_command_palette_code_block_project_results(
+                    query,
+                    preserve_selection,
+                );
                 return;
             }
             CommandPaletteView::IssueTemplates => {
@@ -5446,6 +5581,9 @@ impl Waku {
                     self.open_sync_branch_in(path, None, window, cx);
                 }
             }
+            PaletteAction::ChooseCodeBlockProject(project_id) => {
+                self.run_code_block_in_project(project_id, window, cx);
+            }
             PaletteAction::CompactContext => {
                 self.settings_page = None;
                 if let Some(session_id) = self.composer_session_id() {
@@ -5668,6 +5806,7 @@ impl Waku {
             | CommandPaletteView::ShareProjectFriends(_)
             | CommandPaletteView::IssueProjects
             | CommandPaletteView::SyncBranchProjects
+            | CommandPaletteView::CodeBlockProjects
             | CommandPaletteView::SavePrompt => false,
         };
         let show_empty_state = should_show_command_palette_empty_state(
@@ -5802,6 +5941,13 @@ impl Waku {
                     "icons/folder.svg",
                     tr!("command_palette.no_projects"),
                     Some(tr!("command_palette.no_sync_projects_hint")),
+                    false,
+                )
+            } else if view == CommandPaletteView::CodeBlockProjects {
+                (
+                    "icons/folder.svg",
+                    tr!("command_palette.no_projects"),
+                    Some(tr!("command_palette.no_code_block_projects_hint")),
                     false,
                 )
             } else if issue_templates_view {

@@ -118,10 +118,13 @@ pub type ContextMenuItems = Rc<dyn Fn(&mut gpui::App) -> Vec<MenuItem>>;
 
 /// A click on a runnable code block's run control. `session` is the task
 /// the block's row belongs to — a side chat's own id, not its parent's —
-/// `language` the fence tag, `code` the block's source. The renderer stays
-/// unaware of sessions and terminals; the host owns what "run" means.
+/// `message` the row's own message so the host can read its turn's
+/// provenance, `language` the fence tag, `code` the block's source. The
+/// renderer stays unaware of sessions and terminals; the host owns what
+/// "run" means.
 pub struct CodeRunRequest<'a> {
     pub session: Option<Uuid>,
+    pub message: Option<Uuid>,
     pub language: &'a str,
     pub code: &'a str,
 }
@@ -1689,6 +1692,9 @@ pub struct Ctx<'a> {
     /// `code_run` handler — the row's own task, which a side-chat view can
     /// differ from the selected one.
     code_run_session: Option<Uuid>,
+    /// The message the block's row belongs to — reported alongside
+    /// `code_run_session` so the host can read the turn's provenance.
+    code_run_message: Option<Uuid>,
     /// Host handler that makes fenced code blocks runnable — `None` keeps
     /// the run control hidden everywhere.
     code_run: Option<CodeRunHandler>,
@@ -1741,6 +1747,7 @@ impl<'a> Ctx<'a> {
             link_items: None,
             context_menu_items: None,
             code_run_session: None,
+            code_run_message: None,
             code_run: None,
             session_mentions: Rc::default(),
             mention_avatars: Rc::default(),
@@ -1876,9 +1883,16 @@ impl<'a> Ctx<'a> {
     /// Offer a run control on fenced code blocks whose language tag maps
     /// to an interpreter — `session` is reported back in the request so a
     /// side-chat row runs in its own workspace rather than the selected
-    /// task's.
-    pub fn with_code_run(mut self, session: Option<Uuid>, handler: CodeRunHandler) -> Self {
+    /// task's, and `message` names the row's message so a chat with no
+    /// workspace of its own can resolve the project from the turn.
+    pub fn with_code_run(
+        mut self,
+        session: Option<Uuid>,
+        message: Option<Uuid>,
+        handler: CodeRunHandler,
+    ) -> Self {
         self.code_run_session = session;
+        self.code_run_message = message;
         self.code_run = Some(handler);
         self
     }
@@ -1948,6 +1962,7 @@ impl<'a> Ctx<'a> {
             link_items: self.link_items.clone(),
             context_menu_items: self.context_menu_items.clone(),
             code_run_session: self.code_run_session,
+            code_run_message: self.code_run_message,
             code_run: self.code_run.clone(),
             session_mentions: self.session_mentions.clone(),
             mention_avatars: self.mention_avatars.clone(),
@@ -3797,6 +3812,7 @@ fn render_code_block_toned(
     });
     let run_button = run_button.map(|(language, handler)| {
         let session = ctx.code_run_session;
+        let message = ctx.code_run_message;
         let run_code = flat.text.clone();
         let keyboard_code = run_code.clone();
         let keyboard_language = language.clone();
@@ -3822,6 +3838,7 @@ fn render_code_block_toned(
                 handler(
                     CodeRunRequest {
                         session,
+                        message,
                         language: &language,
                         code: &run_code,
                     },
@@ -3834,6 +3851,7 @@ fn render_code_block_toned(
                     keyboard_handler(
                         CodeRunRequest {
                             session,
+                            message,
                             language: &keyboard_language,
                             code: &keyboard_code,
                         },

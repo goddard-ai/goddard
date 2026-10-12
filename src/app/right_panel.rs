@@ -6895,6 +6895,7 @@ impl Waku {
                             metrics,
                             animate_streaming,
                             Some(session.id),
+                            Some(message.id),
                             &selection,
                             cx,
                         )
