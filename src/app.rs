@@ -86,8 +86,9 @@ use crate::ui::{
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CheckForUpdates,
     CloseFind, CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection,
-    CopyWorkingDirectory, CycleFavoriteModel, CycleReasoningEffort, DismissDraftsLayer,
-    DismissInbox, DismissProjectsLayer, EffortCycleDirection, ExitPanelFullscreen, FindNext,
+    CopyWorkingDirectory, CycleFavoriteModel, CycleReasoningEffort, DismissDockedTerminal,
+    DismissDraftsLayer, DismissInbox, DismissProjectsLayer, EffortCycleDirection,
+    ExitPanelFullscreen, FindNext,
     FindPrevious, FocusComposer, FocusProjectsFilter, FocusTerminal, GoToNextTurn,
     GoToNextUnreadCompletion, GoToPreviousTurn, MarkSessionUnread, MarkUnreadAndGoToNextIdle,
     Minimize, NavigateBack, NavigateForward, NewProject, NewSession, NewTaskIn, NewTerminal,
@@ -4531,8 +4532,8 @@ pub use big_picture::{
 };
 pub use close_dialog::{ConfirmAppClose, DismissAppClose};
 pub use command_palette::{
-    Confirm, Dismiss, SelectFirst, SelectLast, SelectNext, SelectPageDown, SelectPageUp,
-    SelectPrevious,
+    Confirm, ConfirmKeepOpen, Dismiss, SelectFirst, SelectLast, SelectNext, SelectPageDown,
+    SelectPageUp, SelectPrevious,
 };
 pub use commit_dialog::{ConfirmCommitDialog, DismissCommitDialog, GenerateCommitDialog};
 pub use git_panel::{ConfirmGitPanelModal, DismissGitPanelModal, GitPanelPrimaryAction};

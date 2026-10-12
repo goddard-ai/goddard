@@ -217,6 +217,9 @@ impl PaletteIdentifier {
 enum PaletteAction {
     NewTask,
     NewTaskIn,
+    /// "New terminal in…" — the project picker; the pick floats a fresh
+    /// terminal rooted at the project.
+    NewTerminalIn,
     NewTaskInDirectory(PathBuf, bool),
     NewTaskProjectless(bool),
     NewTaskInSameWorktree,
@@ -2561,6 +2564,15 @@ impl Waku {
                 Some(ShortcutHint::action(&NewTaskIn)),
                 PaletteAction::NewTaskIn,
                 "new task in directory folder temporary project search",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.new_terminal_in"),
+                "icons/terminal-square.svg",
+                None,
+                PaletteAction::NewTerminalIn,
+                "new terminal in project directory shell console floating",
                 next(),
             ),
             CommandPaletteItem::command(
@@ -5534,6 +5546,14 @@ impl Waku {
         match action {
             PaletteAction::NewTask => self.new_session_action(&NewSession, window, cx),
             PaletteAction::NewIncognitoTask => self.new_incognito_session_action(window, cx),
+            PaletteAction::NewTerminalIn => {
+                // The same project pick ⌘T asks over the boss chat; with
+                // no registered projects the chord's own fallback guesses
+                // a directory and floats the terminal there.
+                if !self.open_terminal_project_switcher(window, cx) {
+                    self.new_terminal_action(&NewTerminal, window, cx);
+                }
+            }
             PaletteAction::NewTaskInDirectory(path, incognito) => {
                 self.create_task_in_directory(path, incognito, window, cx)
             }

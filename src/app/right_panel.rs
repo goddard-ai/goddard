@@ -5926,13 +5926,28 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // The docked terminal card is the lightest layer over the column:
-        // ⌘W dismisses just the card — the shell keeps running under its
-        // sidebar row.
+        // The floating terminal card is the lightest layer over the
+        // column. ⌘W with the card's terminal focused kills the shell —
+        // asking first while a command runs, like the standalone page;
+        // focused anywhere else it only dismisses the card and the shell
+        // keeps running under its sidebar row.
         if let Some(terminal_id) = self.docked_terminal
             && self.docked_terminal_visible(terminal_id)
         {
-            self.dismiss_docked_terminal(window, cx);
+            let terminal_focused = self
+                .right_panel_terminals
+                .get(&terminal_id)
+                .is_some_and(|terminal| {
+                    terminal
+                        .read(cx)
+                        .focus_handle(cx)
+                        .contains_focused(window, cx)
+                });
+            if terminal_focused {
+                self.close_main_terminal(terminal_id, window, cx);
+            } else {
+                self.dismiss_docked_terminal(window, cx);
+            }
             return;
         }
         // A deliverable preview is a page over the Boss chat, so ⌘W returns
@@ -6120,7 +6135,10 @@ impl Waku {
                         .get(&terminal_id)
                         .cloned()
                         .inspect(|terminal| {
-                            terminal.update(cx, |terminal, _| terminal.set_panel_width(width));
+                            terminal.update(cx, |terminal, _| {
+                                terminal.set_panel_width(width);
+                                terminal.set_fit_bounds(false);
+                            });
                         })
                         .map(IntoElement::into_any_element)
                         .unwrap_or_else(|| {

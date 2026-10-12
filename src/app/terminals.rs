@@ -1580,10 +1580,12 @@ impl Waku {
         }
     }
 
-    /// Open a sidebar terminal as the card docked at the top of the main
+    /// Mount a terminal as the card floating at the top of the main
     /// column — the selected surface stays put underneath; the card is a
-    /// layer over it, not a page. The row of the terminal already filling
-    /// the main area just re-focuses its standalone view.
+    /// layer over it, not a page. The card is how ⌘T, the "New terminal
+    /// in…" pick, and the standalone page's minimize open a terminal; the
+    /// row of the terminal already filling the main area just re-focuses
+    /// its standalone view.
     pub(super) fn open_docked_terminal(
         &mut self,
         terminal_id: Uuid,
@@ -1625,6 +1627,7 @@ impl Waku {
             }
         }
         self.docked_terminal = Some(terminal_id);
+        self.last_visible_terminal = Some(terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);
         let focus = self
             .right_panel_terminals
@@ -1673,13 +1676,62 @@ impl Waku {
         cx.notify();
     }
 
-    /// `secondary-t` — always a fresh terminal, rooted where the user is.
-    /// A focused right-panel terminal keeps the chord in the panel: the new
-    /// terminal joins its strip in the same directory. Over the boss chat
-    /// the chord first asks which project the terminal belongs to.
-    /// Everywhere else the terminal lands in the Terminals group — rooted
-    /// in the selected terminal's directory, the selected session's
-    /// workspace, or ~ when the main area shows neither.
+    /// The standalone page's minimize: the terminal drops to the floating
+    /// card and the main area returns to the page history came from — or,
+    /// with no back entry recorded, the empty state below the card. The
+    /// terminal keeps running; its standalone page lands on forward so the
+    /// hop back replays.
+    pub(super) fn minimize_terminal_to_card(
+        &mut self,
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_terminal != Some(terminal_id) {
+            return;
+        }
+        Self::prune_navigation_stack(
+            &self.state.projects,
+            self.state.projects_page_enabled,
+            self.state.automations_enabled,
+            self.state.github_enabled,
+            &mut self.session_navigation.back,
+        );
+        self.docked_terminal = Some(terminal_id);
+        self.last_visible_terminal = Some(terminal_id);
+        if self.session_navigation.back_target().is_some() {
+            // The terminal is still selected, so back resolves it as the
+            // current location and parks it on forward; the target's
+            // activation clears the standalone page underneath the card —
+            // deferred while a cold session hydrates, so the terminal
+            // stays full screen until its landing is ready.
+            self.navigate_back_action(&NavigateBack, window, cx);
+        } else {
+            // Nothing to navigate back to — the column falls to its
+            // empty state while the card floats over it.
+            self.selected_terminal = None;
+            self.sync_right_panel_owner(cx);
+        }
+        // The floating terminal opens focused — the same contract as ⌘T
+        // and the "New terminal in…" pick.
+        if let Some(focus) = self
+            .right_panel_terminals
+            .get(&terminal_id)
+            .map(|terminal| terminal.read(cx).focus_handle(cx))
+        {
+            window.focus(&focus, cx);
+        }
+        cx.notify();
+    }
+
+    /// `secondary-t` — always a fresh terminal, rooted where the user is,
+    /// opened focused in the floating card. A focused right-panel terminal
+    /// keeps the chord in the panel: the new terminal joins its strip in
+    /// the same directory. Over the boss chat the chord first asks which
+    /// project the terminal belongs to. Everywhere else the terminal
+    /// lands in the Terminals group — rooted in the selected terminal's
+    /// directory, the selected session's workspace, or ~ when the main
+    /// area shows neither — and floats over the current surface.
     pub(super) fn new_terminal_action(
         &mut self,
         _: &NewTerminal,
@@ -1749,7 +1801,7 @@ impl Waku {
         if let Some(working_directory) = working_directory
             && let Some(terminal_id) = self.create_terminal(working_directory, session, None, cx)
         {
-            self.select_terminal(terminal_id, window, cx);
+            self.open_docked_terminal(terminal_id, window, cx);
         }
         cx.notify();
     }
@@ -1986,12 +2038,51 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.ensure_sidebar_terminal_repo_roots(cx);
+        let theme = Theme::current(cx);
         let Some(terminal) = self.right_panel_terminals.get(&terminal_id).cloned() else {
             return div().into_any_element();
         };
-        if (terminal.read(cx).panel_width() - width).abs() > 0.5 {
-            terminal.update(cx, |terminal, _| terminal.set_panel_width(width));
+        let size_drifted = terminal.read_with(cx, |view, _| {
+            (view.panel_width() - width).abs() > 0.5 || view.fit_bounds()
+        });
+        if size_drifted {
+            terminal.update(cx, |terminal, _| {
+                terminal.set_panel_width(width);
+                terminal.set_fit_bounds(false);
+            });
         }
+        let minimize_focus =
+            self.transcript_control_focus(format!("terminal-minimize-{terminal_id}"), cx);
+        let minimize_button = div()
+            .id(SharedString::from(format!(
+                "terminal-minimize-{terminal_id}"
+            )))
+            .track_focus(&minimize_focus)
+            .tab_index(0)
+            .size(px(26.0))
+            .rounded(px(8.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .child(icon("icons/minimize.svg", 13.0, theme.text_tertiary))
+            .tooltip(|window, cx| Tooltip::new(tr!("terminal.minimize")).build(window, cx))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.minimize_terminal_to_card(terminal_id, window, cx);
+            }))
+            .on_key_down(cx.listener(
+                move |this, event: &KeyDownEvent, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.minimize_terminal_to_card(terminal_id, window, cx);
+                        cx.stop_propagation();
+                    }
+                },
+            ));
         div()
             .flex()
             .flex_col()
@@ -2000,9 +2091,14 @@ impl Waku {
             .w_full()
             .child(
                 div()
-                    .px(px(8.0))
+                    .pl(px(8.0))
+                    .pr(px(4.0))
                     .py(px(4.0))
-                    .child(self.render_terminal_location_for_id(terminal_id, cx)),
+                    .flex()
+                    .items_center()
+                    .child(self.render_terminal_location_for_id(terminal_id, cx))
+                    .child(div().flex_1())
+                    .child(minimize_button),
             )
             .child(terminal)
             .into_any_element()
@@ -2032,6 +2128,10 @@ impl Waku {
         if (terminal.read(cx).panel_width() - inner_width).abs() > 0.5 {
             terminal.update(cx, |terminal, _| terminal.set_panel_width(inner_width));
         }
+        // The card's fixed height bounds the view: the grid sizes to its
+        // painted rows so the shell's input line never clips under the
+        // card's bottom edge.
+        terminal.update(cx, |terminal, _| terminal.set_fit_bounds(true));
         let card_height = (f32::from(window.viewport_size().height) * 0.4)
             .clamp(DOCKED_TERMINAL_MIN_HEIGHT, DOCKED_TERMINAL_MAX_HEIGHT);
         let record = self.terminal_records.get(&terminal_id);
@@ -2114,6 +2214,12 @@ impl Waku {
             .child(
                 div()
                     .id(SharedString::from(format!("docked-terminal-{terminal_id}")))
+                    .key_context("DockedTerminal")
+                    .on_action(
+                        cx.listener(|this, _: &DismissDockedTerminal, window, cx| {
+                            this.dismiss_docked_terminal(window, cx);
+                        }),
+                    )
                     .w_full()
                     .h(px(card_height))
                     .flex()
@@ -2473,7 +2579,7 @@ impl Waku {
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         let key = event.keystroke.key.as_str();
                         if matches!(key, "enter" | "space") {
-                            this.open_docked_terminal(terminal_id, window, cx);
+                            this.select_terminal(terminal_id, window, cx);
                             cx.stop_propagation();
                         } else if key == "f10" && event.keystroke.modifiers.shift {
                             keyboard_menu.open_context_menu(window, cx);
@@ -2481,7 +2587,7 @@ impl Waku {
                         }
                     }))
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_docked_terminal(terminal_id, window, cx);
+                        this.select_terminal(terminal_id, window, cx);
                     }))
             });
 

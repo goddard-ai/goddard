@@ -557,7 +557,7 @@ impl Waku {
     }
 
     /// ⌘T over the boss chat: the switcher asks which project the new
-    /// standalone terminal belongs to — the pick opens the terminal at the
+    /// floating terminal belongs to — the pick opens the terminal at the
     /// project's root. With no registered projects the open fails and the
     /// chord keeps its usual directory guess.
     pub(super) fn open_terminal_project_switcher(
@@ -941,7 +941,7 @@ impl Waku {
             cx.notify();
             return;
         }
-        // A terminal commit spawns the standalone terminal at the picked
+        // A terminal commit spawns the floating terminal at the picked
         // project's root — no draft or page to retarget.
         if target == ProjectSwitcherTarget::Terminal {
             if let Some(project_id) = selected
@@ -953,8 +953,8 @@ impl Waku {
             {
                 let root = project.path.clone();
                 if let Some(terminal_id) = self.create_terminal(root, None, None, cx) {
-                    self.select_terminal(terminal_id, window, cx);
-                    // Activation owns focus now; restoring the switcher's
+                    self.open_docked_terminal(terminal_id, window, cx);
+                    // The card owns focus now; restoring the switcher's
                     // previous focus would send typing back to the composer.
                     return;
                 }

@@ -644,6 +644,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "palette.confirm_keep_open",
+        action: || Box::new(crate::app::ConfirmKeepOpen),
+        title_key: "shortcuts.confirm",
+        title_index: None,
+        category: C::CommandPalette,
+        editability: MODAL_NAV,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "settings.focus_next",
         action: || Box::new(crate::app::FocusNext),
         title_key: "shortcuts.next_field",
@@ -1073,6 +1082,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         title_index: None,
         category: C::Terminal,
         editability: TEXT_ENTRY,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "terminal.dismiss_docked",
+        action: || Box::new(crate::DismissDockedTerminal),
+        title_key: "shortcuts.dismiss",
+        title_index: None,
+        category: C::Terminal,
+        editability: MODAL_NAV,
         builtin_label: None,
     },
     CommandDescriptor {
@@ -2553,6 +2571,12 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("palette.select_page_down", All, "pagedown", PaletteSearch),
     e("palette.select_page_up", All, "pageup", PaletteSearch),
     e("palette.confirm", All, "enter", PaletteSearch),
+    e(
+        "palette.confirm_keep_open",
+        All,
+        "shift-enter",
+        PaletteSearch,
+    ),
     e("palette.dismiss", All, "escape", CommandPalette),
     // === app::init_file_finder ====================================================
     e("palette.select_next", All, "down", FinderSearch),
@@ -2835,6 +2859,12 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("projects.dismiss_layer", All, "escape", GitSettingsPage),
     e("inbox.dismiss", All, "escape", InboxPage),
     e(
+        "terminal.dismiss_docked",
+        All,
+        "escape",
+        DockedTerminalNotCommandBar,
+    ),
+    e(
         "workspace.previous_turn",
         All,
         "secondary-alt-up",
@@ -3075,6 +3105,10 @@ mod ctx {
     pub const ShortcutsDialog: &str = "ShortcutsDialog";
     pub const TerminalBarInput: &str = "TerminalCommandBar > TextInput";
     pub const TerminalCommandBar: &str = "TerminalCommandBar";
+    /// The floating terminal card — Escape hides it, but an open command
+    /// bar or context menu inside keeps its own dismiss first.
+    pub const DockedTerminalNotCommandBar: &str =
+        "DockedTerminal && !TerminalCommandBar && !Menu";
     pub const NotTerminal: &str = "!Terminal";
     /// The ⌘⌥←/⌘⌥→ session sweep — the experiment flag keeps a disabled Big
     /// Picture from eating the chords; !Terminal and !Menu spare their input.

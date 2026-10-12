@@ -138,6 +138,7 @@ actions!(
         ToggleSessionPin,
         ToggleTerminals,
         NewTerminal,
+        DismissDockedTerminal,
         RunProjectScript,
         CopySelection,
         CopyWorkingDirectory,
@@ -819,6 +820,14 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-f", FocusProjectsFilter, Some("GitSettingsPage")),
         KeyBinding::new("escape", DismissProjectsLayer, Some("GitSettingsPage")),
         KeyBinding::new("escape", DismissInbox, Some("InboxPage")),
+        // Escape hides the floating terminal card — the shell keeps
+        // running under its sidebar row. An open command bar or context
+        // menu inside the card keeps its own Escape.
+        KeyBinding::new(
+            "escape",
+            DismissDockedTerminal,
+            Some("DockedTerminal && !TerminalCommandBar && !Menu"),
+        ),
         // Step between turn prompts — the navigation rail's
         // landmarks. ⌘⌥ arrows are unclaimed by text fields, so the
         // pair works with the composer focused; in the terminal the

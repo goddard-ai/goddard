@@ -1482,6 +1482,11 @@ pub struct TerminalView {
     /// in Settings — size their grid to the painted bounds instead of the
     /// right panel's viewport math.
     embedded: bool,
+    /// Bounded hosts that are not embeds — the floating terminal card —
+    /// set this so the grid derives its rows from the painted bounds the
+    /// same way an embedded view does, keeping the prompt inside the
+    /// host's fixed height instead of sizing to the window.
+    fit_bounds: bool,
     /// Advance width of one grid cell, measured from the terminal font on
     /// first render so grid math matches what `StyledText` actually lays out.
     /// Keyed by family and size so a font change re-measures instead of
@@ -1582,6 +1587,7 @@ impl TerminalView {
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             embedded: false,
+            fit_bounds: false,
             measured_cell_width: None,
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
@@ -1672,6 +1678,7 @@ impl TerminalView {
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             embedded: false,
+            fit_bounds: false,
             measured_cell_width: None,
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
@@ -1857,6 +1864,18 @@ impl TerminalView {
 
     pub fn set_panel_width(&mut self, width: f32) {
         self.panel_width = width;
+    }
+
+    /// Whether the grid derives its rows and columns from the painted
+    /// bounds — the floating card's contract — or from the right panel's
+    /// viewport math. Every mount site sets it each frame so a view can
+    /// move between bounded and unbounded hosts.
+    pub fn fit_bounds(&self) -> bool {
+        self.fit_bounds
+    }
+
+    pub fn set_fit_bounds(&mut self, fit_bounds: bool) {
+        self.fit_bounds = fit_bounds;
     }
 
     pub fn refresh_localized_text(&mut self, cx: &mut Context<Self>) {
@@ -2858,7 +2877,7 @@ impl Render for TerminalView {
         // embedded math doesn't subtract it again. Before the first prepaint
         // an embedded terminal falls through to the panel defaults; the PTY
         // resize lands a frame later.
-        let embedded_bounds = if self.embedded {
+        let embedded_bounds = if self.embedded || self.fit_bounds {
             self.grid_bounds.get()
         } else {
             None

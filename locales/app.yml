@@ -165,6 +165,8 @@ command_palette.share_project_placeholder:
   en: Choose a project to share…
 command_palette.new_task_in:
   en: New task in…
+command_palette.new_terminal_in:
+  en: New terminal in…
 command_palette.new_task_in_placeholder:
   en: Search directories to create a new task in…
 command_palette.directories:
@@ -3858,6 +3860,8 @@ terminal.moved_to_group:
   en: The task's workspace changed — its terminal moved to the Terminals group.
 terminal.expand:
   en: Expand to full screen
+terminal.minimize:
+  en: Minimize to floating terminal
 
 project.add_project:
   en: Add project
