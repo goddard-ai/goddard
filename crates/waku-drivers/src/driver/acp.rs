@@ -542,6 +542,11 @@ struct PendingPrompts {
     /// Devin's `_cognition.ai/agent_stopped` cause, captured while requests
     /// are in flight — the harness's own verdict on why the run stopped.
     stop_cause: Option<String>,
+    /// Devin emits no `turn/started` of its own: the first provider-side
+    /// signal for the in-flight batch — a turn-scoped `session/update`, a
+    /// turn-bound permission request, or the `session/prompt` response —
+    /// is the adapter's acceptance evidence, reported once as `TurnStarted`.
+    turn_started: bool,
 }
 
 struct PendingPrompt {
@@ -562,6 +567,11 @@ struct PromptSettle {
 
 impl PendingPrompts {
     fn insert(&mut self, request_id: RequestId, extension_id: Option<String>, session_id: String) {
+        if self.requests.is_empty() {
+            // A new turn batch needs fresh provider-side evidence before its
+            // `TurnStarted` reports again.
+            self.turn_started = false;
+        }
         self.requests.push(PendingPrompt {
             request_id,
             extension_id,
@@ -612,11 +622,21 @@ impl PendingPrompts {
     }
 
     fn take_settle(&mut self) -> Option<PromptSettle> {
-        self.requests.is_empty().then(|| PromptSettle {
-            cancel_requested: std::mem::take(&mut self.cancel_requested),
-            saw_clean_settle: std::mem::take(&mut self.saw_clean_settle),
-            stop_cause: self.stop_cause.take(),
+        self.requests.is_empty().then(|| {
+            self.turn_started = false;
+            PromptSettle {
+                cancel_requested: std::mem::take(&mut self.cancel_requested),
+                saw_clean_settle: std::mem::take(&mut self.saw_clean_settle),
+                stop_cause: self.stop_cause.take(),
+            }
         })
+    }
+
+    /// Marks the batch's first provider-side evidence, returning true only on
+    /// the transition so `TurnStarted` reports once per turn. Evidence taken
+    /// with no request in flight is not acceptance of a submitted input.
+    fn mark_turn_started(&mut self) -> bool {
+        !self.requests.is_empty() && !std::mem::replace(&mut self.turn_started, true)
     }
 }
 
@@ -700,11 +720,13 @@ async fn run_sdk_connection(
                 let suppress_session_updates = suppress_session_updates.clone();
                 let stream_state = stream_state.clone();
                 let first_prompt = first_prompt.clone();
+                let prompt_requests = prompt_requests.clone();
                 async move |notification: SessionNotification, _connection| {
                     if !suppress_session_updates.load(Ordering::Acquire) {
                         handle_session_update(
                             provider,
                             notification,
+                            &prompt_requests,
                             &events,
                             &mut stream_state.lock(),
                             first_prompt.lock().as_deref(),
@@ -770,7 +792,11 @@ async fn run_sdk_connection(
             {
                 let events = events.clone();
                 let pending_permissions = pending_permissions.clone();
+                let prompt_requests = prompt_requests.clone();
                 async move |request: RequestPermissionRequest, responder, _connection| {
+                    // A turn-bound permission request is provider-side
+                    // evidence the submitted input was accepted and worked.
+                    note_devin_turn_accepted(provider, &prompt_requests, &events);
                     handle_permission_request(
                         request,
                         responder,
@@ -937,7 +963,13 @@ async fn run_sdk_connection(
                         } else {
                             None
                         };
-                        let _ = events.send(DriverEvent::TurnStarted);
+                        // Devin's `TurnStarted` is provider-side evidence —
+                        // the first turn-scoped update or the `session/prompt`
+                        // response — so command dequeue must not claim the
+                        // acceptance it cannot yet prove.
+                        if provider != ProviderKind::Devin {
+                            let _ = events.send(DriverEvent::TurnStarted);
+                        }
                         if let Err(error) = send_prompt(
                             &connection,
                             &session_id,
@@ -2169,6 +2201,12 @@ fn send_prompt(
             &result,
             Ok(response) if response.stop_reason != StopReason::Cancelled
         );
+        // The `session/prompt` response itself is provider-side acceptance
+        // evidence: an agent answering the request received the input, even
+        // when the turn it ran then failed. A rejected request is not.
+        if result.is_ok() {
+            note_devin_turn_accepted(provider, &callback_requests, &callback_events);
+        }
         if let Some(settle) = settle_prompt_request(&callback_requests, &callback_request_id, clean)
         {
             // Only an empty turn pays for this lookup, so a healthy turn never
@@ -2970,15 +3008,46 @@ fn handle_permission_request(
     Ok(())
 }
 
+/// Devin has no provider-emitted turn-start event: `TurnStarted` follows the
+/// first provider-side evidence for the in-flight batch — a turn-scoped
+/// `session/update`, a turn-bound permission request, or the `session/prompt`
+/// response — so the event remains real transport acceptance rather than
+/// local dequeue. Other providers keep their dequeue-time marker.
+fn note_devin_turn_accepted(
+    provider: ProviderKind,
+    prompt_requests: &Mutex<PendingPrompts>,
+    events: &impl DriverEventSink,
+) {
+    if provider == ProviderKind::Devin && prompt_requests.lock().mark_turn_started() {
+        let _ = events.send(DriverEvent::TurnStarted);
+    }
+}
+
 fn handle_session_update(
     provider: ProviderKind,
     notification: SessionNotification,
+    prompt_requests: &Mutex<PendingPrompts>,
     events: &impl DriverEventSink,
     state: &mut AcpStreamState,
     title_placeholder: Option<&str>,
 ) -> agent_client_protocol::Result<()> {
     let update = serde_json::to_value(notification.update)?;
     let kind = update.get("sessionUpdate").and_then(Value::as_str);
+    // Only turn-scoped updates are acceptance evidence: session-level records
+    // (titles, usage, command lists) can arrive unrelated to the submission.
+    if matches!(
+        kind,
+        Some(
+            "user_message_chunk"
+                | "agent_message_chunk"
+                | "agent_thought_chunk"
+                | "tool_call"
+                | "tool_call_update"
+                | "plan"
+        )
+    ) {
+        note_devin_turn_accepted(provider, prompt_requests, events);
+    }
     if provider == ProviderKind::Fx
         && !state.produced_content
         && kind == Some("agent_message_chunk")
@@ -4539,11 +4608,13 @@ mod tests {
             json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"OK"}}),
             json!({"sessionUpdate":"usage_update","used":9677,"size":500000}),
         ];
+        let prompt_requests = Mutex::new(PendingPrompts::default());
         for update in updates {
             let update = serde_json::from_value(update).unwrap();
             handle_session_update(
                 ProviderKind::Cursor,
                 SessionNotification::new("s", update),
+                &prompt_requests,
                 &events,
                 &mut state,
                 None,
@@ -4585,11 +4656,13 @@ mod tests {
             json!({"sessionUpdate":"tool_call_update","toolCallId":"agent1","status":"completed",
                    "_meta":{"cognition.ai/subagent_completed":{"agentId":"agent1","success":true,"summary":"ran echo"}}}),
         ];
+        let prompt_requests = Mutex::new(PendingPrompts::default());
         for update in updates {
             let update = serde_json::from_value(update).unwrap();
             handle_session_update(
                 ProviderKind::Devin,
                 SessionNotification::new("s", update),
+                &prompt_requests,
                 &events,
                 &mut state,
                 None,
@@ -4625,11 +4698,13 @@ mod tests {
             json!({"sessionUpdate":"tool_call","toolCallId":"read:0#late","title":"read","kind":"read",
                    "_meta":{"cognition.ai/subagent_context":{"parentAgentId":"agent1"}}}),
         ];
+        let prompt_requests = Mutex::new(PendingPrompts::default());
         for update in updates {
             let update = serde_json::from_value(update).unwrap();
             handle_session_update(
                 ProviderKind::Devin,
                 SessionNotification::new("s", update),
+                &prompt_requests,
                 &events,
                 &mut state,
                 None,
@@ -4649,10 +4724,148 @@ mod tests {
                     && item.failed));
     }
 
+    /// The plan gate keys verified delivery on the adapter's `TurnStarted`.
+    /// Devin's marker is provider-side evidence only: a submission without a
+    /// turn-scoped signal leaves it unemitted — the gate holds the withheld
+    /// brief — and session-level records are not acceptance. The first
+    /// turn-scoped update reports it exactly once.
+    #[test]
+    fn plan_acceptance_devin_turn_started_follows_provider_side_evidence() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let mut state = AcpStreamState::default();
+        let prompt_requests = Mutex::new(PendingPrompts::default());
+        prompt_requests.lock().insert(
+            RequestId::Str("prompt-1".into()),
+            None,
+            "devin-session".into(),
+        );
+
+        // Session-level records arrive unrelated to the submission — titles,
+        // usage and command lists cannot be acceptance evidence.
+        for update in [
+            json!({"sessionUpdate":"session_info_update","title":"renamed"}),
+            json!({"sessionUpdate":"usage_update","used":10,"size":100}),
+            json!({"sessionUpdate":"available_commands_update","availableCommands":[{"name":"x"}]}),
+        ] {
+            let update = serde_json::from_value(update).unwrap();
+            handle_session_update(
+                ProviderKind::Devin,
+                SessionNotification::new("s", update),
+                &prompt_requests,
+                &events,
+                &mut state,
+                None,
+            )
+            .unwrap();
+        }
+        assert!(!event_rx
+            .try_iter()
+            .any(|event| matches!(event, DriverEvent::TurnStarted)));
+
+        // The first turn-scoped update is provider-side acceptance — the
+        // provider's own echo of the submitted message counts. Further
+        // updates of the same turn do not repeat the marker.
+        for update in [
+            json!({"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"run it"}}),
+            json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"on it"}}),
+            json!({"sessionUpdate":"tool_call","toolCallId":"call-1","status":"pending","title":"read"}),
+        ] {
+            let update = serde_json::from_value(update).unwrap();
+            handle_session_update(
+                ProviderKind::Devin,
+                SessionNotification::new("s", update),
+                &prompt_requests,
+                &events,
+                &mut state,
+                None,
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            event_rx
+                .try_iter()
+                .filter(|event| matches!(event, DriverEvent::TurnStarted))
+                .count(),
+            1
+        );
+    }
+
+    /// `TurnStarted` re-arms per turn batch: a settle ends the epoch and the
+    /// next in-flight turn reports again. Evidence with nothing submitted is
+    /// not acceptance, and other providers keep their dequeue-time marker.
+    #[test]
+    fn plan_acceptance_devin_turn_started_re_arms_per_turn() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let prompt_requests = Mutex::new(PendingPrompts::default());
+
+        note_devin_turn_accepted(ProviderKind::Devin, &prompt_requests, &events);
+        assert!(event_rx.try_recv().is_err());
+
+        let request_id = RequestId::Str("prompt-1".into());
+        prompt_requests
+            .lock()
+            .insert(request_id.clone(), None, "devin-session".into());
+        note_devin_turn_accepted(ProviderKind::Devin, &prompt_requests, &events);
+        note_devin_turn_accepted(ProviderKind::Devin, &prompt_requests, &events);
+        note_devin_turn_accepted(ProviderKind::Cursor, &prompt_requests, &events);
+        assert_eq!(
+            event_rx
+                .try_iter()
+                .filter(|event| matches!(event, DriverEvent::TurnStarted))
+                .count(),
+            1
+        );
+
+        let _ = prompt_requests.lock().settle_request(&request_id, true);
+        prompt_requests.lock().insert(
+            RequestId::Str("prompt-2".into()),
+            None,
+            "devin-session".into(),
+        );
+        note_devin_turn_accepted(ProviderKind::Devin, &prompt_requests, &events);
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::TurnStarted
+        ));
+    }
+
+    /// The `session/prompt` response is itself acceptance evidence for a turn
+    /// that produced no visible updates: `TurnStarted` lands ahead of the
+    /// settle's outcome, and the turn's own failure flows on as an ordinary
+    /// `TurnFinished` the session can see.
+    #[test]
+    fn plan_acceptance_devin_prompt_response_is_acceptance_evidence() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let prompt_requests = Mutex::new(PendingPrompts::default());
+        let request_id = RequestId::Str("prompt-1".into());
+        prompt_requests
+            .lock()
+            .insert(request_id.clone(), None, "devin-session".into());
+
+        note_devin_turn_accepted(ProviderKind::Devin, &prompt_requests, &events);
+        let settle = settle_prompt_request(&prompt_requests, &request_id, true).unwrap();
+        assert!(!finish_prompt(
+            Ok(PromptResponse::new(StopReason::MaxTokens)),
+            None,
+            settle,
+            &events,
+        ));
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        assert!(matches!(seen[0], DriverEvent::TurnStarted));
+        assert!(matches!(
+            seen[1],
+            DriverEvent::TurnFinished {
+                success: false,
+                ..
+            }
+        ));
+    }
+
     #[test]
     fn fx_context_notices_do_not_become_assistant_text() {
         let (events, event_rx) = crossbeam_channel::unbounded();
         let mut state = AcpStreamState::default();
+        let prompt_requests = Mutex::new(PendingPrompts::default());
         for text in [
             "[context] skill catalog omitted 19 entries",
             "skill discovery warning: candidate was skipped",
@@ -4667,6 +4880,7 @@ mod tests {
             handle_session_update(
                 ProviderKind::Fx,
                 SessionNotification::new("s", update),
+                &prompt_requests,
                 &events,
                 &mut state,
                 None,
@@ -4685,6 +4899,7 @@ mod tests {
     fn session_info_update_forwards_a_generated_title() {
         let (events, event_rx) = crossbeam_channel::unbounded();
         let mut state = AcpStreamState::default();
+        let prompt_requests = Mutex::new(PendingPrompts::default());
         let update = serde_json::from_value(json!({
             "sessionUpdate": "session_info_update",
             "title": "  Polish the native agent interface  "
@@ -4693,6 +4908,7 @@ mod tests {
         handle_session_update(
             ProviderKind::Devin,
             SessionNotification::new("s", update),
+            &prompt_requests,
             &events,
             &mut state,
             Some("build a really polished local agent interface for rust"),
@@ -4709,6 +4925,7 @@ mod tests {
     fn session_info_update_skips_devins_first_prompt_placeholder() {
         let (events, event_rx) = crossbeam_channel::unbounded();
         let mut state = AcpStreamState::default();
+        let prompt_requests = Mutex::new(PendingPrompts::default());
         let update = serde_json::from_value(json!({
             "sessionUpdate": "session_info_update",
             "title": "hi"
@@ -4717,6 +4934,7 @@ mod tests {
         handle_session_update(
             ProviderKind::Devin,
             SessionNotification::new("s", update),
+            &prompt_requests,
             &events,
             &mut state,
             Some("hi"),

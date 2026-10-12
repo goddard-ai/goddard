@@ -2,6 +2,7 @@
 const suites: [string, string][] = [
   ['waku-boss', 'plan_contract::tests'],
   ['waku-daemon', 'plan_'],
+  ['waku-drivers', 'plan_acceptance_devin'],
   ['waku-boss', 'every_employee_reads_plans_regardless_of_persona'],
   ['waku-boss', 'employees_can_read_only_pinned_documents_and_cannot_mutate_personas'],
   ['waku-boss', 'symlinks_cannot_escape_the_files_root'],

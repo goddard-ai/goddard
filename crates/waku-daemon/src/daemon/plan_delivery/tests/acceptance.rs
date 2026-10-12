@@ -316,3 +316,21 @@ fn plan_acceptance_settled_input_turn_also_counts_as_acceptance() {
     assert_eq!(fixture.stored().receipt.phase, Phase::Blocked);
     assert_eq!(fixture.stored().withheld[0].0, BRIEF);
 }
+
+#[test]
+fn plan_acceptance_post_delivery_turn_failure_surfaces_without_reopening() {
+    // A failed settle after verified acceptance is the turn's outcome, not
+    // delivery evidence: the receipt stays delivered and the event flows to
+    // the session as ordinary turn evidence — nothing reopens or reblocks.
+    let fixture = Fixture::new("approved bytes");
+    fixture.gate.submit(BRIEF.into(), Vec::new());
+    fixture.accept();
+    assert!(fixture.gate.delivered());
+    assert!(!fixture.gate.observe(&DriverEvent::TurnFinished {
+        success: false,
+        summary: None,
+        summary_i18n: None,
+    }));
+    assert!(fixture.gate.delivered());
+    assert_eq!(fixture.stored().receipt.phase, Phase::Delivered);
+}
