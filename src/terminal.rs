@@ -3038,8 +3038,12 @@ impl Render for TerminalView {
         );
 
         let context_terminal = cx.entity();
+        // The wrapper must be a flex container or the screen's `flex_1`
+        // is inert: a block child collapses to its content height, which is
+        // what `grid_bounds` measures — under `fit_bounds` that feeds back
+        // into the row count and pins the grid wherever it started.
         let screen = context_menu(
-            div().size_full().child(screen),
+            div().size_full().flex().flex_col().child(screen),
             "terminal-context-menu",
             &self.context_menu,
             move |cx| {
@@ -4794,5 +4798,90 @@ mod tests {
                 );
             });
         }
+    }
+
+    /// A bounded host — the floating card — in miniature: a fixed-height
+    /// column with a header and an inset body holding the terminal view.
+    struct FloatingCardHost {
+        terminal: Entity<TerminalView>,
+    }
+
+    impl Render for FloatingCardHost {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            self.terminal
+                .update(cx, |terminal, _| terminal.set_fit_bounds(true));
+            div().size_full().flex().flex_col().child(
+                div()
+                    .h(px(340.0))
+                    .flex()
+                    .flex_col()
+                    .child(div().h(px(34.0)).flex_none())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .px(px(6.0))
+                            .pb(px(6.0))
+                            .child(self.terminal.clone()),
+                    ),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_bounded_host_sizes_the_grid_to_its_painted_height(cx: &mut gpui::TestAppContext) {
+        let (host, cx) = cx.add_window_view(|_window, cx| {
+            let terminal = cx.new(|cx| {
+                TerminalView::with_launch(std::env::temp_dir(), TerminalLaunch::Shell, cx)
+            });
+            FloatingCardHost { terminal }
+        });
+        cx.run_until_parked();
+
+        let session_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while host.read_with(cx, |host, cx| {
+            let view = host.terminal.read(cx);
+            view.session.is_none() && view.error.is_none()
+        }) {
+            assert!(
+                std::time::Instant::now() < session_deadline,
+                "terminal session did not start within five seconds"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+            cx.run_until_parked();
+        }
+        cx.run_until_parked();
+
+        // The painted grid area: card 340 - header 34 - body bottom inset 6
+        // - grid vertical padding 16.
+        let expected_height = 340.0 - 34.0 - 6.0 - TERMINAL_PADDING_Y * 2.0;
+        let (bounds, rows) = host.read_with(cx, |host, cx| {
+            let view = host.terminal.read(cx);
+            let rows = view
+                .session
+                .as_ref()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "terminal session failed to start: {}",
+                        view.error.as_deref().unwrap_or("unknown startup error")
+                    )
+                })
+                .grid_size
+                .1;
+            (view.grid_bounds.get(), rows)
+        });
+        let bounds = bounds.expect("grid bounds are recorded during prepaint");
+        // The grid's painted height is the row count's only input under
+        // `fit_bounds`; if the screen collapses to its content height, the
+        // two feed back into each other and the grid pins at the minimum.
+        assert!(
+            (f32::from(bounds.size.height) - expected_height).abs() < 1.0,
+            "painted grid height {:?} should fill the card body ({expected_height})",
+            bounds.size.height
+        );
+        let pitch = host.update_in(cx, |_, window, cx| {
+            f32::from(window.pixel_snap(px(terminal_cell_height(font_size(cx)))))
+        });
+        assert_eq!(rows, (expected_height / pitch).floor() as usize);
     }
 }
