@@ -2042,14 +2042,10 @@ impl Waku {
         let Some(terminal) = self.right_panel_terminals.get(&terminal_id).cloned() else {
             return div().into_any_element();
         };
-        let size_drifted = terminal.read_with(cx, |view, _| {
-            (view.panel_width() - width).abs() > 0.5 || view.fit_bounds()
-        });
+        let size_drifted =
+            terminal.read_with(cx, |view, _| (view.panel_width() - width).abs() > 0.5);
         if size_drifted {
-            terminal.update(cx, |terminal, _| {
-                terminal.set_panel_width(width);
-                terminal.set_fit_bounds(false);
-            });
+            terminal.update(cx, |terminal, _| terminal.set_panel_width(width));
         }
         let minimize_focus =
             self.transcript_control_focus(format!("terminal-minimize-{terminal_id}"), cx);
@@ -2128,10 +2124,6 @@ impl Waku {
         if (terminal.read(cx).panel_width() - inner_width).abs() > 0.5 {
             terminal.update(cx, |terminal, _| terminal.set_panel_width(inner_width));
         }
-        // The card's fixed height bounds the view: the grid sizes to its
-        // painted rows so the shell's input line never clips under the
-        // card's bottom edge.
-        terminal.update(cx, |terminal, _| terminal.set_fit_bounds(true));
         let card_height = (f32::from(window.viewport_size().height) * 0.4)
             .clamp(DOCKED_TERMINAL_MIN_HEIGHT, DOCKED_TERMINAL_MAX_HEIGHT);
         let record = self.terminal_records.get(&terminal_id);

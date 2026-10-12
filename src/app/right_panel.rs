@@ -6327,7 +6327,6 @@ impl Waku {
                         .inspect(|terminal| {
                             terminal.update(cx, |terminal, _| {
                                 terminal.set_panel_width(width);
-                                terminal.set_fit_bounds(false);
                             });
                         })
                         .map(IntoElement::into_any_element)
