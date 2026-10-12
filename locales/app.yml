@@ -2605,6 +2605,10 @@ project.no_project:
   en: Don't work in a project
 project.no_project_name:
   en: No project
+project.new_chat:
+  en: New chat
+project.temporary_chat:
+  en: Temporary chat
 project.chat:
   en: Chat
 project.choose_project:

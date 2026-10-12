@@ -1,0 +1,1 @@
+- Choose **New chat** in the project picker to start a regular chat without a project, or choose **Temporary chat** to start an incognito chat. Temporary chat displays the incognito icon.

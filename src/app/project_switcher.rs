@@ -28,6 +28,7 @@ const MAX_SEARCH_RESULTS: usize = 50;
 const WINDOW_MARGIN: f32 = 44.0;
 const VERTICAL_BIAS: f32 = 0.08;
 const VERTICAL_BIAS_MAX: f32 = 96.0;
+const TEMPORARY_CHAT_PICKER_ID: Uuid = Uuid::from_u128(u128::MAX);
 
 /// What a commit retargets: the draft the ⌘N gesture was opened on, the
 /// open Projects page's own project — the ⌘⇧P gesture's — Big Picture's
@@ -214,7 +215,12 @@ fn filtered_project_ids(
             } else {
                 settings::abbreviate_home_path(&project.path, home)
             };
-            let text = format!("{} {path} directory folder project", project.display_name());
+            let name = if project.is_projectless() {
+                tr!("project.new_chat")
+            } else {
+                project.display_name()
+            };
+            let text = format!("{name} {path} directory folder project");
             pattern
                 .score(Utf32Str::new(&text, &mut utf32), &mut matcher)
                 .map(|score| (score, project.id))
@@ -648,7 +654,13 @@ impl Waku {
     ) -> bool {
         let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
         let projects = self.project_switcher_pool(target, exclude_projectless);
-        let ordered = ordered_project_ids(current_project, &recent, &projects);
+        let mut ordered = ordered_project_ids(current_project, &recent, &projects);
+        if matches!(
+            target,
+            ProjectSwitcherTarget::Draft | ProjectSwitcherTarget::BossChat
+        ) {
+            ordered.push(TEMPORARY_CHAT_PICKER_ID);
+        }
         let Some(highlighted_index) =
             task_switcher::initial_highlight_index(&ordered, current_project, reverse)
         else {
@@ -739,12 +751,29 @@ impl Waku {
 
     fn filter_project_switcher(&mut self, query: &str, cx: &mut Context<Self>) {
         let projects = self.project_switcher_pool(self.project_switcher.target, false);
-        self.project_switcher.ordered_project_ids = filtered_project_ids(
+        let mut ordered = filtered_project_ids(
             &self.project_switcher.recent_project_ids,
             &projects,
             self.home_directory.as_deref(),
             query,
         );
+        if matches!(
+            self.project_switcher.target,
+            ProjectSwitcherTarget::Draft | ProjectSwitcherTarget::BossChat
+        ) {
+            let label = tr!("project.temporary_chat");
+            let pattern = Pattern::parse(query.trim(), CaseMatching::Ignore, Normalization::Smart);
+            let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
+            let mut utf32 = Vec::new();
+            if !query.trim().is_empty()
+                && pattern
+                    .score(Utf32Str::new(&label, &mut utf32), &mut matcher)
+                    .is_some()
+            {
+                ordered.push(TEMPORARY_CHAT_PICKER_ID);
+            }
+        }
+        self.project_switcher.ordered_project_ids = ordered;
         self.project_switcher.highlighted_project_id =
             self.project_switcher.ordered_project_ids.first().copied();
         self.project_switcher.reveal_highlight();
@@ -784,6 +813,30 @@ impl Waku {
         let original = self.project_switcher.original_session_id;
         let target = self.project_switcher.target;
         let previous_focus = self.project_switcher.dismiss();
+        if target == ProjectSwitcherTarget::Draft
+            && !pointer_selection
+            && self.state.selected_session != original
+        {
+            if let Some(previous_focus) = previous_focus {
+                window.focus(&previous_focus, cx);
+            }
+            cx.notify();
+            return;
+        }
+        if selected == Some(TEMPORARY_CHAT_PICKER_ID)
+            && matches!(
+                target,
+                ProjectSwitcherTarget::Draft | ProjectSwitcherTarget::BossChat
+            )
+        {
+            self.settings_page = None;
+            self.create_incognito_projectless_session(cx);
+            if let Some(previous_focus) = previous_focus {
+                window.focus(&previous_focus, cx);
+            }
+            cx.notify();
+            return;
+        }
         // A Big Picture commit retargets the overlay's standing new-task
         // draft — the destination its untargeted composer submits into —
         // never the session idling underneath the scrim.
@@ -907,9 +960,8 @@ impl Waku {
         }
         let may_commit = pointer_selection || self.state.selected_session == original;
         let mut focus_after = previous_focus;
-        // A projectless pick always commits: the collapsed row stands for a
-        // fresh workspace, so "already on it" is never true — even a draft
-        // bound to that project row must be moved off its spent directory.
+        // A projectless pick always commits: the collapsed New chat row
+        // stands for a fresh workspace, so "already on it" is never true.
         let projectless_target = selected.is_some_and(|project_id| {
             self.state
                 .projects
@@ -1079,7 +1131,11 @@ impl Waku {
                     .truncate()
                     .text_size(sp(13.0))
                     .text_color(theme.text)
-                    .child(project.display_name()),
+                    .child(if project.is_projectless() {
+                        tr!("project.new_chat")
+                    } else {
+                        project.display_name()
+                    }),
             )
             .when_some(path, |entry, path| {
                 entry.child(
@@ -1092,6 +1148,58 @@ impl Waku {
                         .child(path),
                 )
             })
+            .into_any_element()
+    }
+
+    fn render_temporary_chat_entry(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let highlighted =
+            self.project_switcher.highlighted_project_id == Some(TEMPORARY_CHAT_PICKER_ID);
+        div()
+            .id("project-switcher-temporary-chat")
+            .h(px(ROW_HEIGHT))
+            .w_full()
+            .flex_none()
+            .px(px(ROW_INSET_X))
+            .rounded(px(ROW_RADIUS))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .cursor_default()
+            .when(highlighted, |entry| entry.bg(theme.overlay_strong))
+            .hover(|entry| entry.bg(theme.overlay))
+            .on_mouse_move(cx.listener(|this, _, _, cx| {
+                if let Some(index) = this
+                    .project_switcher
+                    .ordered_project_ids
+                    .iter()
+                    .position(|candidate| *candidate == TEMPORARY_CHAT_PICKER_ID)
+                {
+                    this.set_project_switcher_highlight(index, cx);
+                }
+            }))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(|this, _, window, cx| {
+                if this.project_switcher.open {
+                    this.project_switcher.highlighted_project_id = Some(TEMPORARY_CHAT_PICKER_ID);
+                    this.finish_project_switcher(true, window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(crate::ui::icon(
+                "icons/eye-off.svg",
+                14.0,
+                theme.text_secondary,
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text)
+                    .child(tr!("project.temporary_chat")),
+            )
             .into_any_element()
     }
 
@@ -1118,6 +1226,9 @@ impl Waku {
                     .find(|project| project.id == *project_id)
                 {
                     return Some(self.render_project_switcher_entry(project, cx));
+                }
+                if *project_id == TEMPORARY_CHAT_PICKER_ID {
+                    return Some(self.render_temporary_chat_entry(cx));
                 }
                 self.boss_key_for_project(*project_id)
                     .map(|key| self.render_project_switcher_boss_entry(key, *project_id, cx))
