@@ -8610,6 +8610,12 @@ impl Waku {
                             .when_some(managed, |row, chip| row.child(chip))
                             .when(!hide_workspace_selector, |row| row.child(worktree_selector))
                             .children(branch_selector)
+                            .child(
+                                div()
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child("⌘S to save draft."),
+                            )
                             .child(div().flex_1())
                             .children(briefing_controls)
                             .children(usage_meter),

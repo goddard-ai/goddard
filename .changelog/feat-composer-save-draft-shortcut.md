@@ -1,0 +1,1 @@
+- Save a non-empty composer as a draft with ⌘S; the composer clears after the saved draft is written, and ⌘S still opens branch sync when the composer is empty or unfocused.

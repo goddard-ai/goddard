@@ -4817,7 +4817,7 @@ impl Waku {
             .unwrap_or(&[])
     }
 
-    pub(super) fn save(&mut self) {
+    pub(super) fn save(&mut self) -> bool {
         self.capture_ui_state();
         self.last_stream_save = Instant::now();
         let daemon_error = self
@@ -4847,11 +4847,13 @@ impl Waku {
             self.state.sessions.extend(watched);
             result
         };
+        let app_saved = app_error.is_none();
         if let Some(error) = daemon_error.or(app_error) {
             self.show_toast(tr!("errors.save_local_state", error = error));
         } else {
             self.stream_state_dirty = false;
         }
+        app_saved
     }
 
     fn checkpoint_capture_pending(&self, session_id: Uuid, turn_count: usize) -> bool {

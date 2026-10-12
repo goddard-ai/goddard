@@ -78,6 +78,13 @@ impl Waku {
             hidden: false,
         };
         self.state.saved_drafts.insert(0, saved.clone());
+        // Persist the parked copy before clearing the live composer. If this
+        // write fails, leave the full payload in place for recovery.
+        if !self.save() {
+            self.state.saved_drafts.retain(|draft| draft.id != saved.id);
+            cx.notify();
+            return;
+        }
         self.draft_use_undos.push(DraftUseUndo {
             kind: DraftUndoKind::Create,
             saved,
@@ -93,7 +100,6 @@ impl Waku {
         self.composer_drafts.remove(key);
         self.apply_composer_draft(Some(key), ComposerDraft::default(), cx);
         self.schedule_composer_draft_save(cx);
-        self.save();
         self.show_success_toast(tr!("drafts.saved_toast"));
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);

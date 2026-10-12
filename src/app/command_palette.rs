@@ -2813,11 +2813,11 @@ impl Waku {
             commands.push(item);
         }
 
-        // Same reachability as ⌘S outside the file editor: a session's
-        // workspace or a selected project supplies the repository, and any
-        // registered project lets the fallback picker ask for one. The
-        // chord itself belongs to SaveFile — its handler falls through to
-        // the branch picker — so the hint advertises that action's binding.
+        // Same reachability as ⌘S when the composer is empty or unfocused:
+        // a session's workspace or selected project supplies the repository,
+        // and any registered project lets the fallback picker ask for one.
+        // SaveFile remains the chord's action, so the hint advertises its
+        // binding alongside this direct command.
         if self.selected_workspace_path().is_some()
             || self.selected_project().is_some()
             || self

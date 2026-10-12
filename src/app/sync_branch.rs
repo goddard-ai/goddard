@@ -4,9 +4,10 @@
 //! supplies a repository folder, the command palette's project step asks
 //! which project to sync and a pick re-enters this picker rooted there.
 //!
-//! The chord still belongs to SaveFile — the save handler falls through to
-//! `open_sync_branch` whenever no file-editor surface is active, so saving an
-//! edited file keeps precedence. The list is the repository's own checkouts:
+//! The chord still belongs to SaveFile — a focused, non-empty composer parks
+//! its payload as a saved draft; otherwise the handler falls through to
+//! `open_sync_branch` when no file-editor surface is active. The list is the
+//! repository's own checkouts:
 //! `ListRepoBranches` reports each local branch's upstream and the worktree
 //! holding it, and only rows with both can take a `git pull`. The session's
 //! checkout leads the list as "Current branch". Confirming runs

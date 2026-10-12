@@ -2055,7 +2055,6 @@ impl Waku {
             .on_action(cx.listener(|_, _: &OpenResumePicker, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &RunProjectScript, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &FocusTerminal, _, cx| cx.stop_propagation()))
-            .on_action(cx.listener(|_, _: &SaveFile, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &OpenFind, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &OpenFindReplace, _, cx| cx.stop_propagation()))
             .on_action(cx.listener(|_, _: &FindNext, _, cx| cx.stop_propagation()))

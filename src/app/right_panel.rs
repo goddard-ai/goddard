@@ -52,6 +52,10 @@ pub(super) fn positive_number(value: &str) -> bool {
         && value.parse::<usize>().is_ok_and(|value| value > 0)
 }
 
+fn should_park_composer_on_save_shortcut(composer_focused: bool, composer_empty: bool) -> bool {
+    composer_focused && !composer_empty
+}
+
 /// The host whose Boss document lists `session_id`'s plan owns its reads —
 /// the caller's key when it lists the plan, else whichever connected host
 /// does, else the caller. `daemons.session_owner` resolves an unclaimed
@@ -2592,6 +2596,13 @@ mod tests {
         assert!(!markdown_preview_mode(true, false, false, false));
         assert!(markdown_preview_mode(true, false, true, true));
         assert!(!markdown_preview_mode(false, true, false, true));
+    }
+
+    #[test]
+    fn save_shortcut_parks_only_a_focused_nonempty_composer() {
+        assert!(should_park_composer_on_save_shortcut(true, false));
+        assert!(!should_park_composer_on_save_shortcut(true, true));
+        assert!(!should_park_composer_on_save_shortcut(false, false));
     }
 
     struct FinishedGoalsLayoutHarness {
@@ -11164,9 +11175,18 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // ⌘S doubles as "Sync branch…" outside the file editor: with no file
-        // surface active the chord opens the branch picker instead — unless
-        // the visible surface is a document the user cannot save anyway.
+        // A focused, non-empty composer gets the chord first. Otherwise ⌘S
+        // saves a visible file, or opens "Sync branch…" when no file editor
+        // is active (plan documents keep their existing no-op behavior).
+        if self.composer_mounted()
+            && should_park_composer_on_save_shortcut(
+                self.composer_focus(cx).contains_focused(window, cx),
+                self.composer_is_empty(cx),
+            )
+        {
+            self.create_saved_draft(window, cx);
+            return;
+        }
         let Some(relative_path) = self.visible_right_panel_file_path() else {
             if matches!(
                 self.active_right_panel_surface(),
