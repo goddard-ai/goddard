@@ -3070,6 +3070,16 @@ boss.voice_play: "ボスチャットを開いて再生"
 
 deliverable.open: "開く"
 deliverable.dismiss: "サイドバーから削除"
+deliverable.pin_many: "%{count} 件の成果物をピン留め"
+deliverable.unpin_many: "%{count} 件の成果物のピン留めを解除"
+deliverable.sweep_many: "%{count} 件の成果物を休眠に移動"
+deliverable.restore_many: "%{count} 件の成果物を復元"
+deliverable.archive_many: "%{count} 件の成果物をアーカイブ"
+deliverable.dismiss_many: "%{count} 件の成果物をサイドバーから削除"
+deliverable.pinned: 成果物をピン留めしました
+deliverable.unpinned: 成果物のピン留めを解除しました
+deliverable.pinned_many: "%{count} 件の成果物をピン留めしました"
+deliverable.unpinned_many: "%{count} 件の成果物のピン留めを解除しました"
 
 boss.greeting: 今日は何をしましょうか？
 boss.new_face: 新しい顔

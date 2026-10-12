@@ -2220,8 +2220,11 @@ impl Waku {
         self.session_navigation.remove(session_id);
         self.task_switcher.remove(session_id);
         self.project_switcher.session_removed(session_id);
-        self.sidebar_multi_selection.remove(&session_id);
-        if self.sidebar_multi_selection_anchor == Some(session_id) {
+        self.sidebar_multi_selection
+            .remove(&sidebar::SidebarSelection::Session(session_id));
+        if self.sidebar_multi_selection_anchor
+            == Some(sidebar::SidebarSelection::Session(session_id))
+        {
             self.sidebar_multi_selection_anchor = None;
         }
         self.transcript_scroll_positions.remove(&session_id);
@@ -2578,8 +2581,11 @@ impl Waku {
         self.session_navigation.remove(session_id);
         self.task_switcher.remove(session_id);
         self.project_switcher.session_removed(session_id);
-        self.sidebar_multi_selection.remove(&session_id);
-        if self.sidebar_multi_selection_anchor == Some(session_id) {
+        self.sidebar_multi_selection
+            .remove(&sidebar::SidebarSelection::Session(session_id));
+        if self.sidebar_multi_selection_anchor
+            == Some(sidebar::SidebarSelection::Session(session_id))
+        {
             self.sidebar_multi_selection_anchor = None;
         }
         self.transcript_scroll_positions.remove(&session_id);
@@ -2937,10 +2943,16 @@ impl Waku {
     ) {
         // A sidebar multi-selection archives as a batch; each member keeps
         // its own row position for the neighbor-selection fallback.
+        // Selected deliverables archive through their daemon alongside the
+        // task members.
         let targets = self.sidebar_multi_selection_targets();
-        if !targets.is_empty() {
+        let deliverables = self.sidebar_deliverable_multi_selection_targets();
+        if !targets.is_empty() || !deliverables.is_empty() {
             for session_id in targets {
                 self.archive_session(session_id, window, cx);
+            }
+            for (key, id) in deliverables {
+                self.set_deliverable_archived(key, id, true, cx);
             }
             return;
         }
@@ -3091,18 +3103,44 @@ impl Waku {
         }
         // A sidebar multi-selection pins as a batch: pin every member unless
         // all are already pinned, in which case the chord unpins the set.
+        // Deliverable members pin through their daemon with the same
+        // all-or-nothing rule.
         let targets = self.sidebar_multi_selection_targets();
-        if !targets.is_empty() {
+        let deliverables = self.sidebar_deliverable_multi_selection_targets();
+        if !targets.is_empty() || !deliverables.is_empty() {
             let pin = targets.iter().any(|session_id| {
                 self.state
                     .sessions
                     .iter()
                     .find(|session| session.id == *session_id)
                     .is_some_and(|session| session.pinned_at.is_none())
+            }) || deliverables.iter().any(|(key, id)| {
+                self.boss_deliverable(*key, *id)
+                    .is_some_and(|deliverable| deliverable.pinned_at.is_none())
             });
-            let changed = self.set_sessions_pinned(&targets, pin, cx);
-            if changed > 0 {
-                self.show_pin_toast(changed, pin, false);
+            let sessions_changed = self.set_sessions_pinned(&targets, pin, cx);
+            let mut deliverables_changed = 0;
+            for (key, id) in deliverables {
+                if self
+                    .boss_deliverable(key, id)
+                    .is_some_and(|deliverable| deliverable.pinned_at.is_some() != pin)
+                {
+                    self.set_deliverable_pinned(key, id, pin, cx);
+                    deliverables_changed += 1;
+                }
+            }
+            // The toast counts the kind it names: tasks first, then
+            // deliverables when the batch held no tasks.
+            if sessions_changed > 0 {
+                self.show_pin_toast(sessions_changed, pin, false);
+            } else if deliverables_changed > 0 {
+                let message = match (deliverables_changed, pin) {
+                    (1, true) => tr!("deliverable.pinned"),
+                    (1, false) => tr!("deliverable.unpinned"),
+                    (_, true) => tr!("deliverable.pinned_many", count = deliverables_changed),
+                    (_, false) => tr!("deliverable.unpinned_many", count = deliverables_changed),
+                };
+                self.show_success_toast(message);
             }
             return;
         }
@@ -4243,7 +4281,11 @@ impl Waku {
             self.show_unread_toast(stamped);
             return;
         }
-        if let Some(session_id) = self.composer_session_id() {
+        // A deliverable-only selection has no markable member — the chord
+        // must not reach the viewed task while the batch shows.
+        if self.sidebar_multi_selection.is_empty()
+            && let Some(session_id) = self.composer_session_id()
+        {
             let stamped = self.mark_session_unread(session_id, cx) as usize;
             self.show_unread_toast(stamped);
         }
@@ -4661,7 +4703,11 @@ impl Waku {
             self.copy_sessions_working_directory(&targets, cx);
             return;
         }
-        if let Some(session_id) = self.composer_session_id() {
+        // A deliverable-only selection has no copyable member — the chord
+        // must not reach the viewed task while the batch shows.
+        if self.sidebar_multi_selection.is_empty()
+            && let Some(session_id) = self.composer_session_id()
+        {
             self.copy_session_working_directory(session_id, cx);
         }
     }

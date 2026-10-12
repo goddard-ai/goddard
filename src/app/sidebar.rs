@@ -1105,6 +1105,15 @@ pub(super) enum SidebarRow {
     GroupSpacer,
 }
 
+/// A sidebar multi-selection member — a task row or a deliverable row.
+/// Deliverables key on the publishing daemon plus the record's own id, so
+/// the same file published by two daemons selects independently.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) enum SidebarSelection {
+    Session(Uuid),
+    Deliverable(waku_client::DaemonKey, Uuid),
+}
+
 /// Which tail a project group's fold row reveals next: the live sessions
 /// past the default cap, then the dormant tail once live is exhausted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1113,14 +1122,32 @@ enum SidebarFold {
     Dormant,
 }
 
+/// The multi-selection member a row stands for — `Planning` rows carry a
+/// session the same way `Session` rows do, and `Deliverable` rows select
+/// by daemon key plus record id.
+fn sidebar_row_selection(row: &SidebarRow) -> Option<SidebarSelection> {
+    match row {
+        SidebarRow::Session(id) | SidebarRow::Planning(id) => {
+            Some(SidebarSelection::Session(*id))
+        }
+        SidebarRow::Deliverable(key, id) => Some(SidebarSelection::Deliverable(*key, *id)),
+        _ => None,
+    }
+}
+
 /// The session a row navigates to — `Planning` rows carry a session the
 /// same way `Session` rows do, so every traversal that walks "the session
 /// rows" (⌘D, ⌘1–9, multi-select ranges, landing indexes) sees them.
 fn sidebar_row_session_id(row: &SidebarRow) -> Option<Uuid> {
-    match row {
-        SidebarRow::Session(id) | SidebarRow::Planning(id) => Some(*id),
+    match sidebar_row_selection(row) {
+        Some(SidebarSelection::Session(id)) => Some(id),
         _ => None,
     }
+}
+
+fn sidebar_selection_row_index(rows: &[SidebarRow], member: SidebarSelection) -> Option<usize> {
+    rows.iter()
+        .position(|row| sidebar_row_selection(row) == Some(member))
 }
 
 pub(super) fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<usize> {
@@ -4280,51 +4307,61 @@ impl Waku {
         })
     }
 
-    /// ⌘-click: toggle `session_id` in the multi-selection without making it
+    /// ⌘-click: toggle `member` in the multi-selection without making it
     /// the active surface. Creating the set seeds it with the active task —
     /// ⌘-click extends the current selection rather than replacing it, like
     /// Finder — so the viewed task joins the batch until ⌘-clicked back out,
     /// when its row falls back to the neutral active highlight. The clicked
     /// row becomes the range anchor either way — even when the toggle removed
     /// it — matching Finder's pivot.
-    fn toggle_sidebar_multi_selection(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn toggle_sidebar_multi_selection(
+        &mut self,
+        member: SidebarSelection,
+        cx: &mut Context<Self>,
+    ) {
         if self.sidebar_multi_selection.is_empty()
             && let Some(active) = sidebar_multi_selection_seed(
                 &self.state.sessions,
                 self.state.selected_session,
-                session_id,
+                member,
             )
         {
-            self.sidebar_multi_selection.insert(active);
+            self.sidebar_multi_selection
+                .insert(SidebarSelection::Session(active));
         }
-        if !self.sidebar_multi_selection.remove(&session_id) {
-            self.sidebar_multi_selection.insert(session_id);
+        if !self.sidebar_multi_selection.remove(&member) {
+            self.sidebar_multi_selection.insert(member);
         }
-        self.sidebar_multi_selection_anchor = Some(session_id);
+        self.sidebar_multi_selection_anchor = Some(member);
         cx.notify();
     }
 
-    /// ⌘⇧-click: grow the multi-selection to cover every session row between
-    /// the anchor and `session_id` in the current sidebar order. The anchor
-    /// is the last row a modified click touched, then the active session,
-    /// and finally the clicked row itself.
-    fn extend_sidebar_multi_selection(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    /// ⌘⇧-click: grow the multi-selection to cover every selectable row
+    /// between the anchor and `member` in the current sidebar order — task
+    /// and deliverable rows alike. The anchor is the last row a modified
+    /// click touched, then the active session, and finally the clicked row
+    /// itself.
+    pub(super) fn extend_sidebar_multi_selection(
+        &mut self,
+        member: SidebarSelection,
+        cx: &mut Context<Self>,
+    ) {
         let rows = self.sidebar_rows_cached(Local::now().date_naive());
-        let Some(target) = sidebar_session_row_index(&rows, session_id) else {
+        let Some(target) = sidebar_selection_row_index(&rows, member) else {
             return;
         };
         let anchor = self
             .sidebar_multi_selection_anchor
-            .or(self.state.selected_session)
-            .and_then(|session_id| sidebar_session_row_index(&rows, session_id))
+            .or_else(|| self.state.selected_session.map(SidebarSelection::Session))
+            .and_then(|anchor| sidebar_selection_row_index(&rows, anchor))
             .unwrap_or(target);
         let (lo, hi) = (anchor.min(target), anchor.max(target));
         for row in &rows[lo..=hi] {
-            if let Some(id) = sidebar_row_session_id(row) {
-                self.sidebar_multi_selection.insert(id);
+            if let Some(member) = sidebar_row_selection(row) {
+                self.sidebar_multi_selection.insert(member);
             }
         }
-        self.sidebar_multi_selection_anchor = Some(session_id);
+        self.sidebar_multi_selection_anchor = Some(member);
         cx.notify();
     }
 
@@ -4339,10 +4376,10 @@ impl Waku {
         cx.notify();
     }
 
-    /// The multi-selection's members in sidebar row order — the batch a row
-    /// menu or session shortcut acts on. Members hidden by a folded group or
-    /// an unrevealed "show more" window follow in session order: the set's
-    /// contract is whole-set, not visible-rows-only.
+    /// The multi-selection's task members in sidebar row order — the batch
+    /// a row menu or session shortcut acts on. Members hidden by a folded
+    /// group or an unrevealed "show more" window follow in session order:
+    /// the set's contract is whole-set, not visible-rows-only.
     pub(super) fn sidebar_multi_selection_targets(&self) -> Vec<Uuid> {
         if self.sidebar_multi_selection.is_empty() {
             return Vec::new();
@@ -4351,14 +4388,59 @@ impl Waku {
         let mut targets: Vec<Uuid> = rows
             .iter()
             .filter_map(|row| {
-                sidebar_row_session_id(row)
-                    .filter(|session_id| self.sidebar_multi_selection.contains(session_id))
+                sidebar_row_session_id(row).filter(|session_id| {
+                    self.sidebar_multi_selection
+                        .contains(&SidebarSelection::Session(*session_id))
+                })
             })
             .collect();
         for session in &self.state.sessions {
-            if self.sidebar_multi_selection.contains(&session.id) && !targets.contains(&session.id)
+            if self
+                .sidebar_multi_selection
+                .contains(&SidebarSelection::Session(session.id))
+                && !targets.contains(&session.id)
             {
                 targets.push(session.id);
+            }
+        }
+        targets
+    }
+
+    /// The multi-selection's deliverable members in sidebar row order — the
+    /// batch a deliverable row menu or a lifecycle chord acts on. A member
+    /// behind the group's "Show more" cap or dormant fold still belongs
+    /// while its record stays listed, matching the task set's contract.
+    pub(super) fn sidebar_deliverable_multi_selection_targets(
+        &self,
+    ) -> Vec<(waku_client::DaemonKey, Uuid)> {
+        if self.sidebar_multi_selection.is_empty() {
+            return Vec::new();
+        }
+        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let mut targets: Vec<(waku_client::DaemonKey, Uuid)> = rows
+            .iter()
+            .filter_map(|row| match sidebar_row_selection(row) {
+                Some(member @ SidebarSelection::Deliverable(key, id))
+                    if self.sidebar_multi_selection.contains(&member) =>
+                {
+                    Some((key, id))
+                }
+                _ => None,
+            })
+            .collect();
+        for (key, state) in &self.boss_ui.states {
+            for deliverable in &state.deliverables {
+                let member = SidebarSelection::Deliverable(*key, deliverable.id);
+                // Archived and plan-document records never list in the
+                // sidebar, so they cannot stay in the batch once a member
+                // leaves the visible set through another client.
+                if deliverable.archived_at.is_none()
+                    && deliverable.plan_id.is_none()
+                    && self.sidebar_multi_selection.contains(&member)
+                    && !targets.contains(&(*key, deliverable.id))
+                {
+                    targets.push((*key, deliverable.id));
+                }
             }
         }
         targets
@@ -5471,7 +5553,9 @@ impl Waku {
                 .map(|pending| pending.session_id),
             session_id,
         );
-        let multi_selected = self.sidebar_multi_selection.contains(&session_id);
+        let multi_selected = self
+            .sidebar_multi_selection
+            .contains(&SidebarSelection::Session(session_id));
         let pinned = session.pinned_at.is_some();
         // Pinned rows mix projects, so they keep the flat layout and
         // project-name detail even while Project grouping is active. A
@@ -5555,9 +5639,15 @@ impl Waku {
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                         let modifiers = event.modifiers();
                         if modifiers.secondary() && modifiers.shift {
-                            this.extend_sidebar_multi_selection(session_id, cx);
+                            this.extend_sidebar_multi_selection(
+                                SidebarSelection::Session(session_id),
+                                cx,
+                            );
                         } else if modifiers.secondary() {
-                            this.toggle_sidebar_multi_selection(session_id, cx);
+                            this.toggle_sidebar_multi_selection(
+                                SidebarSelection::Session(session_id),
+                                cx,
+                            );
                         } else if modifiers.shift {
                             let _ = this.toggle_session_pin(session_id, cx);
                         } else {
@@ -5604,7 +5694,10 @@ impl Waku {
                         any_reclaimable,
                     ) = waku
                         .update(cx, |waku, cx| {
-                            let targets = if waku.sidebar_multi_selection.contains(&session_id) {
+                            let targets = if waku
+                                .sidebar_multi_selection
+                                .contains(&SidebarSelection::Session(session_id))
+                            {
                                 waku.sidebar_multi_selection_targets()
                             } else {
                                 waku.clear_sidebar_multi_selection(cx);
@@ -5690,9 +5783,14 @@ impl Waku {
                                     // The menu click clears selection in capture phase.
                                     // Keep the batch selected so the next menu can undo it.
                                     if batch {
-                                        waku.sidebar_multi_selection
-                                            .extend(pin_targets.iter().copied());
-                                        waku.sidebar_multi_selection_anchor = Some(session_id);
+                                        waku.sidebar_multi_selection.extend(
+                                            pin_targets
+                                                .iter()
+                                                .copied()
+                                                .map(SidebarSelection::Session),
+                                        );
+                                        waku.sidebar_multi_selection_anchor =
+                                            Some(SidebarSelection::Session(session_id));
                                         cx.notify();
                                     }
                                 });
@@ -7548,13 +7646,17 @@ fn localized_session_title(session: &AgentSession) -> String {
     }
 }
 
+/// The task the current selection stands for when a ⌘-click creates the
+/// set — the viewed, started task unless the click landed on it directly.
+/// Deliverable clicks seed the same way: the active task is the selection
+/// being extended no matter which row kind was clicked.
 fn sidebar_multi_selection_seed(
     sessions: &[AgentSession],
     selected_session: Option<Uuid>,
-    clicked_session: Uuid,
+    clicked: SidebarSelection,
 ) -> Option<Uuid> {
     selected_session.filter(|active| {
-        *active != clicked_session
+        SidebarSelection::Session(*active) != clicked
             && sessions.iter().any(|session| {
                 session.id == *active && session.has_started() && session.archived_at.is_none()
             })
@@ -8492,7 +8594,7 @@ mod tests {
     #[test]
     fn sidebar_multi_selection_skips_unstarted_and_archived_active_tasks() {
         let mut active = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-        let clicked = Uuid::new_v4();
+        let clicked = SidebarSelection::Session(Uuid::new_v4());
         assert_eq!(
             sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), clicked),
             None
@@ -8514,13 +8616,31 @@ mod tests {
             sidebar_multi_selection_seed(
                 std::slice::from_ref(&active),
                 Some(active.id),
-                Uuid::new_v4()
+                SidebarSelection::Session(Uuid::new_v4())
             ),
             Some(active.id)
         );
         assert_eq!(
-            sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), active.id),
+            sidebar_multi_selection_seed(
+                std::slice::from_ref(&active),
+                Some(active.id),
+                SidebarSelection::Session(active.id)
+            ),
             None
+        );
+    }
+
+    /// A ⌘-click that opens on a deliverable still extends the selection
+    /// the viewed task represents — the seed rule does not depend on the
+    /// clicked row's kind.
+    #[test]
+    fn sidebar_multi_selection_seeds_the_active_task_for_a_deliverable_click() {
+        let mut active = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        active.begin_turn("Started task");
+        let clicked = SidebarSelection::Deliverable(waku_client::DaemonKey::Local, Uuid::new_v4());
+        assert_eq!(
+            sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), clicked),
+            Some(active.id)
         );
     }
 

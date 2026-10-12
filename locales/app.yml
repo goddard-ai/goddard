@@ -6549,6 +6549,26 @@ deliverable.open:
   en: Open
 deliverable.dismiss:
   en: Remove from sidebar
+deliverable.pin_many:
+  en: "Pin %{count} deliverables"
+deliverable.unpin_many:
+  en: "Unpin %{count} deliverables"
+deliverable.sweep_many:
+  en: "Move %{count} deliverables to Dormant"
+deliverable.restore_many:
+  en: "Restore %{count} deliverables"
+deliverable.archive_many:
+  en: "Archive %{count} deliverables"
+deliverable.dismiss_many:
+  en: "Remove %{count} deliverables"
+deliverable.pinned:
+  en: Deliverable pinned.
+deliverable.unpinned:
+  en: Deliverable unpinned.
+deliverable.pinned_many:
+  en: "%{count} deliverables pinned."
+deliverable.unpinned_many:
+  en: "%{count} deliverables unpinned."
 
 boss.greeting:
   en: What should we do today?

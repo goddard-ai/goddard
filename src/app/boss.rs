@@ -4583,6 +4583,9 @@ impl Waku {
         // once the chat lands. The row keeps a selected highlight until a
         // send or session switch clears the arm.
         let armed = self.boss_ui.command_deliverable == Some((key, deliverable_id));
+        let multi_selected = self
+            .sidebar_multi_selection
+            .contains(&sidebar::SidebarSelection::Deliverable(key, deliverable_id));
         let group_name = SharedString::from(format!("deliverable-row-{key:?}-{deliverable_id}"));
         // The row drags like a task row: the drop stages a deliverable
         // reference chip, so the payload carries the publishing daemon and
@@ -4730,17 +4733,52 @@ impl Waku {
             .track_focus(&row_focus)
             .tab_index(0)
             .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .when(armed, |element| element.bg(theme.sidebar_item_background))
-            .hover(|element| element.bg(theme.sidebar_item_background))
-            .active(|element| element.bg(theme.sidebar_item_background))
+            // The multi-selection wears an accent wash so it never reads as
+            // the armed row's neutral highlight; hover and press deepen it
+            // instead of dropping back to the single-selection tint.
+            .when(multi_selected, |element| {
+                element.bg(theme.accent.opacity(0.14))
+            })
+            .when(!multi_selected && armed, |element| {
+                element.bg(theme.sidebar_item_background)
+            })
+            .hover(|element| {
+                element.bg(if multi_selected {
+                    theme.accent.opacity(0.2)
+                } else {
+                    theme.sidebar_item_background
+                })
+            })
+            .active(|element| {
+                element.bg(if multi_selected {
+                    theme.accent.opacity(0.26)
+                } else {
+                    theme.sidebar_item_background
+                })
+            })
             .tooltip(Tooltip::text(
                 deliverable
                     .source_path
                     .clone()
                     .unwrap_or_else(|| deliverable.path.clone()),
             ))
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.open_deliverable_task(key, deliverable_id, cx);
+            // ⌘-click and ⌘⇧-click select like a task row; a plain click
+            // opens the deliverable's task page.
+            .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                let modifiers = event.modifiers();
+                if modifiers.secondary() && modifiers.shift {
+                    this.extend_sidebar_multi_selection(
+                        sidebar::SidebarSelection::Deliverable(key, deliverable_id),
+                        cx,
+                    );
+                } else if modifiers.secondary() {
+                    this.toggle_sidebar_multi_selection(
+                        sidebar::SidebarSelection::Deliverable(key, deliverable_id),
+                        cx,
+                    );
+                } else {
+                    this.open_deliverable_task(key, deliverable_id, cx);
+                }
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let key_name = event.keystroke.key.as_str();
@@ -4841,11 +4879,67 @@ impl Waku {
                 .child(row),
             SharedString::from(format!("deliverable-menu-{key:?}-{deliverable_id}")),
             &menu,
-            move |_cx| {
+            move |cx| {
                 let pin_waku = waku.clone();
                 let sweep_waku = waku.clone();
+                let restore_waku = waku.clone();
                 let archive_waku = waku.clone();
-                let remove_waku = waku.clone();
+                let dismiss_waku = waku.clone();
+                // The batch settles at open like a task row's menu: a menu on
+                // a member of the multi-selection acts on the whole
+                // deliverable batch, while a menu on an outsider drops the
+                // set and acts on that row alone. Item callbacks run after
+                // the root's plain-click capture has cleared the set, so
+                // they close over the resolved list instead of re-reading it.
+                let member = sidebar::SidebarSelection::Deliverable(key, deliverable_id);
+                let (targets, all_pinned, dormant_targets) = waku
+                    .update(cx, |waku, cx| {
+                        let targets = if waku.sidebar_multi_selection.contains(&member) {
+                            waku.sidebar_deliverable_multi_selection_targets()
+                        } else {
+                            waku.clear_sidebar_multi_selection(cx);
+                            vec![(key, deliverable_id)]
+                        };
+                        let all_pinned = targets.iter().all(|(key, id)| {
+                            waku.boss_deliverable(*key, *id)
+                                .is_some_and(|deliverable| deliverable.pinned_at.is_some())
+                        });
+                        // A pinned record is never dormant — the same flag
+                        // the row shows.
+                        let dormant_targets = targets
+                            .iter()
+                            .copied()
+                            .filter(|(key, id)| {
+                                waku.boss_deliverable(*key, *id).is_some_and(|deliverable| {
+                                    deliverable.dormant_at.is_some()
+                                        && deliverable.pinned_at.is_none()
+                                })
+                            })
+                            .collect::<Vec<_>>();
+                        (targets, all_pinned, dormant_targets)
+                    })
+                    .unwrap_or((vec![(key, deliverable_id)], pinned, Vec::new()));
+                let all_dormant = dormant_targets.len() == targets.len();
+                // A batch labels every item with the count it acts on — the
+                // multi-selection can hold members the row menu doesn't
+                // show (folded rows), so the number is the honest contract.
+                let batch = targets.len() > 1;
+                let item_label = |single: &'static str, many: &'static str, count: usize| {
+                    if batch {
+                        tr!(many, count = count)
+                    } else {
+                        tr!(single).to_string()
+                    }
+                };
+                let sweep_targets = targets
+                    .iter()
+                    .copied()
+                    .filter(|target| !dormant_targets.contains(target))
+                    .collect::<Vec<_>>();
+                let pin_targets = targets.clone();
+                let archive_targets = targets.clone();
+                let restore_targets = dormant_targets;
+                let dismiss_targets = targets;
                 let mut items = vec![
                     MenuItem::new(tr!("deliverable.open"), {
                         let path = path.clone();
@@ -4859,62 +4953,111 @@ impl Waku {
                     .icon("icons/folder-open.svg"),
                     MenuItem::Separator,
                     MenuItem::new(
-                        if pinned {
-                            tr!("session.unpin")
+                        if all_pinned {
+                            item_label("session.unpin", "deliverable.unpin_many", pin_targets.len())
                         } else {
-                            tr!("session.pin")
+                            item_label("session.pin", "deliverable.pin_many", pin_targets.len())
                         },
                         move |_, cx| {
                             let _ = pin_waku.update(cx, |waku, cx| {
-                                waku.set_deliverable_pinned(key, deliverable_id, !pinned, cx);
+                                for (key, id) in pin_targets.iter().copied() {
+                                    if waku.boss_deliverable(key, id).is_some_and(|deliverable| {
+                                        deliverable.pinned_at.is_some() != !all_pinned
+                                    }) {
+                                        waku.set_deliverable_pinned(key, id, !all_pinned, cx);
+                                    }
+                                }
+                                // The menu click clears selection in capture phase.
+                                // Keep the batch selected so the next menu can undo it.
+                                if batch {
+                                    waku.sidebar_multi_selection.extend(
+                                        pin_targets.iter().copied().map(|(key, id)| {
+                                            sidebar::SidebarSelection::Deliverable(key, id)
+                                        }),
+                                    );
+                                    waku.sidebar_multi_selection_anchor = Some(member);
+                                    cx.notify();
+                                }
                             });
                         },
                     )
-                    .icon(if pinned {
+                    .shortcut_action(&ToggleSessionPin)
+                    .icon(if all_pinned {
                         "icons/pin-off.svg"
                     } else {
                         "icons/pin.svg"
                     }),
                 ];
                 // Sweep and restore are complementary halves of the same
-                // lifecycle, the same split a task row's menu makes.
-                if dormant {
+                // lifecycle, the same split a task row's menu makes: a
+                // mixed batch can show both, each acting on the half it
+                // applies to.
+                if !all_dormant {
                     items.push(
-                        MenuItem::new(tr!("session.restore"), move |_, cx| {
-                            let _ = sweep_waku.update(cx, |waku, cx| {
-                                waku.set_deliverable_dormant(key, deliverable_id, false, cx);
-                            });
-                        })
-                        .icon("icons/rotate-cw.svg"),
-                    );
-                } else {
-                    items.push(
-                        MenuItem::new(tr!("session.sweep"), move |_, cx| {
-                            let _ = sweep_waku.update(cx, |waku, cx| {
-                                waku.set_deliverable_dormant(key, deliverable_id, true, cx);
-                            });
-                        })
+                        MenuItem::new(
+                            item_label("session.sweep", "deliverable.sweep_many", sweep_targets.len()),
+                            move |_, cx| {
+                                let _ = sweep_waku.update(cx, |waku, cx| {
+                                    for (key, id) in sweep_targets.iter().copied() {
+                                        waku.set_deliverable_dormant(key, id, true, cx);
+                                    }
+                                });
+                            },
+                        )
                         .icon("icons/broom.svg"),
                     );
                 }
+                if !restore_targets.is_empty() {
+                    items.push(
+                        MenuItem::new(
+                            item_label(
+                                "session.restore",
+                                "deliverable.restore_many",
+                                restore_targets.len(),
+                            ),
+                            move |_, cx| {
+                                let _ = restore_waku.update(cx, |waku, cx| {
+                                    for (key, id) in restore_targets.iter().copied() {
+                                        waku.set_deliverable_dormant(key, id, false, cx);
+                                    }
+                                });
+                            },
+                        )
+                        .icon("icons/rotate-cw.svg"),
+                    );
+                }
                 items.extend([
-                    MenuItem::new(tr!("session.archive"), move |_, cx| {
-                        let _ = archive_waku.update(cx, |waku, cx| {
-                            waku.set_deliverable_archived(key, deliverable_id, true, cx);
-                        });
-                    })
+                    MenuItem::new(
+                        item_label(
+                            "session.archive",
+                            "deliverable.archive_many",
+                            archive_targets.len(),
+                        ),
+                        move |_, cx| {
+                            let _ = archive_waku.update(cx, |waku, cx| {
+                                for (key, id) in archive_targets.iter().copied() {
+                                    waku.set_deliverable_archived(key, id, true, cx);
+                                }
+                            });
+                        },
+                    )
+                    .shortcut_action(&ArchiveSession)
                     .icon("icons/archive.svg"),
                     MenuItem::Separator,
-                    MenuItem::new(tr!("deliverable.dismiss"), move |_, cx| {
-                        let _ = remove_waku.update(cx, |waku, cx| {
-                            waku.boss_request(
-                                key,
-                                BossOperation::DismissDeliverable { id: deliverable_id },
-                                BossReply::List,
-                                cx,
-                            );
-                        });
-                    })
+                    MenuItem::new(
+                        item_label(
+                            "deliverable.dismiss",
+                            "deliverable.dismiss_many",
+                            dismiss_targets.len(),
+                        ),
+                        move |_, cx| {
+                            let _ = dismiss_waku.update(cx, |waku, cx| {
+                                for (key, id) in dismiss_targets.iter().copied() {
+                                    waku.dismiss_deliverable(key, id, cx);
+                                }
+                            });
+                        },
+                    )
                     .icon("icons/trash.svg"),
                 ]);
                 items
@@ -5153,10 +5296,32 @@ impl Waku {
         }
     }
 
+    /// The daemon-owned record behind a sidebar deliverable row.
+    pub(super) fn boss_deliverable(
+        &self,
+        key: DaemonKey,
+        id: Uuid,
+    ) -> Option<&waku_client::boss::BossDeliverable> {
+        self.boss_ui
+            .states
+            .get(&key)
+            .and_then(|state| state.deliverables.iter().find(|d| d.id == id))
+    }
+
+    /// A deliverable whose row left the sidebar — archived or dismissed —
+    /// drops out of the multi-selection the way a departed task does.
+    fn prune_deliverable_multi_selection(&mut self, key: DaemonKey, id: Uuid) {
+        let member = sidebar::SidebarSelection::Deliverable(key, id);
+        self.sidebar_multi_selection.remove(&member);
+        if self.sidebar_multi_selection_anchor == Some(member) {
+            self.sidebar_multi_selection_anchor = None;
+        }
+    }
+
     /// Task affordances on a deliverable row are daemon mutations — the deliverable
     /// record is boss state, so the pin, sweep, and archive the row shows
     /// round-trip through the owning daemon like a publish or dismiss.
-    fn set_deliverable_pinned(
+    pub(super) fn set_deliverable_pinned(
         &mut self,
         key: DaemonKey,
         id: Uuid,
@@ -5186,16 +5351,31 @@ impl Waku {
         );
     }
 
-    fn set_deliverable_archived(
+    pub(super) fn set_deliverable_archived(
         &mut self,
         key: DaemonKey,
         id: Uuid,
         archived: bool,
         cx: &mut Context<Self>,
     ) {
+        if archived {
+            self.prune_deliverable_multi_selection(key, id);
+        }
         self.boss_request(
             key,
             BossOperation::ArchiveDeliverable { id, archived },
+            BossReply::List,
+            cx,
+        );
+    }
+
+    /// Dismiss removes the record outright — the same prune an archive
+    /// applies, then the daemon call that deletes it.
+    fn dismiss_deliverable(&mut self, key: DaemonKey, id: Uuid, cx: &mut Context<Self>) {
+        self.prune_deliverable_multi_selection(key, id);
+        self.boss_request(
+            key,
+            BossOperation::DismissDeliverable { id },
             BossReply::List,
             cx,
         );
@@ -8950,12 +9130,7 @@ impl Waku {
                 items.push(
                     MenuItem::new(tr!("deliverable.dismiss"), move |_, cx| {
                         let _ = dismiss_waku.update(cx, |waku, cx| {
-                            waku.boss_request(
-                                key,
-                                BossOperation::DismissDeliverable { id: deliverable_id },
-                                BossReply::List,
-                                cx,
-                            );
+                            waku.dismiss_deliverable(key, deliverable_id, cx);
                         });
                     })
                     .icon("icons/trash.svg"),

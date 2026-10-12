@@ -3022,6 +3022,16 @@ boss.voice_play: "打开老板聊天并播放"
 
 deliverable.open: "打开"
 deliverable.dismiss: "从边栏移除"
+deliverable.pin_many: "置顶 %{count} 个交付物"
+deliverable.unpin_many: "取消置顶 %{count} 个交付物"
+deliverable.sweep_many: "将 %{count} 个交付物移至休眠"
+deliverable.restore_many: "恢复 %{count} 个交付物"
+deliverable.archive_many: "归档 %{count} 个交付物"
+deliverable.dismiss_many: "从边栏移除 %{count} 个交付物"
+deliverable.pinned: 交付物已置顶
+deliverable.unpinned: 交付物已取消置顶
+deliverable.pinned_many: "已置顶 %{count} 个交付物"
+deliverable.unpinned_many: "已取消置顶 %{count} 个交付物"
 
 boss.greeting: 今天我们做些什么？
 boss.new_face: 新面孔

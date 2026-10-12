@@ -3357,13 +3357,16 @@ pub struct Waku {
     /// Sidebar terminal currently showing its inline rename field — the
     /// same `session_rename_input` editor serves both rows.
     terminal_rename: Option<Uuid>,
-    /// Sessions ⌘-clicked into the sidebar's multi-selection: a batch target
-    /// for row menus and session shortcuts that never steals the active
-    /// surface. Runtime-only — any unmodified click or Escape clears it.
-    sidebar_multi_selection: HashSet<Uuid>,
+    /// Rows ⌘-clicked into the sidebar's multi-selection: a batch target
+    /// for row menus and shortcuts that never steals the active surface.
+    /// Tasks and deliverables share one set — a ⌘⇧-click range covers
+    /// every selectable row between its ends, and each menu batches the
+    /// members of its own kind. Runtime-only — any unmodified click or
+    /// Escape clears it.
+    sidebar_multi_selection: HashSet<sidebar::SidebarSelection>,
     /// Pivot a ⌘⇧-click range grows from: the last row a modified click
     /// touched, kept even when a toggle removed it from the set.
-    sidebar_multi_selection_anchor: Option<Uuid>,
+    sidebar_multi_selection_anchor: Option<sidebar::SidebarSelection>,
     /// Short accent wash on a ⌘D jump past the adjacent sidebar sessions.
     sidebar_jump_flash: Option<(Uuid, u64)>,
     sidebar_jump_flash_generation: u64,
