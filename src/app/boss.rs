@@ -7438,7 +7438,7 @@ impl Waku {
                 .find(|employee| employee.session_id == session_id)
                 .map(|employee| (state, employee))
         })?;
-        let rows = Rc::new(self.employee_assignment_rows(session, state, employee));
+        let rows = Rc::new(self.employee_assignment_rows(state, employee));
         let handle = self.menu_handle(format!("employee-assignment-{session_id}"), cx);
         let trigger = div()
             .id(SharedString::from(format!(
@@ -7527,11 +7527,10 @@ impl Waku {
     }
 
     /// The inventory the employee top bar's assignment popover lists —
-    /// label/value pairs for the brief, persona, model, workspace,
-    /// access, and resource state the summon recorded.
+    /// label/value pairs for the brief, persona, access, and resource
+    /// state the summon recorded.
     fn employee_assignment_rows(
         &self,
-        session: &AgentSession,
         state: &BossState,
         employee: &waku_protocol::boss::BossEmployee,
     ) -> Vec<(String, String)> {
@@ -7564,17 +7563,6 @@ impl Waku {
                 }
             }
             (None, role) => role,
-        };
-        let workspace = match &session.workspace {
-            SessionWorkspace::Local => tr!("boss.assignment_workspace_local"),
-            SessionWorkspace::NewWorktree { .. } => tr!("boss.assignment_workspace_new"),
-            SessionWorkspace::Worktree { name, path, .. } => {
-                if name.is_empty() {
-                    path.display().to_string()
-                } else {
-                    name.clone()
-                }
-            }
         };
         let permissions = &employee.permissions;
         let mut access = Vec::new();
@@ -7641,12 +7629,9 @@ impl Waku {
             .as_ref()
             .map(|ticket| ticket.prompt.trim().to_owned())
             .filter(|prompt| !prompt.is_empty());
-        let model = self.session_sidebar_model_detail(session);
         let mut rows: Vec<(String, String)> = [
             brief.map(|brief| (tr!("boss.assignment_brief"), brief)),
             persona_name.map(|name| (tr!("boss.assignment_persona"), name)),
-            Some((tr!("boss.assignment_model"), model)),
-            Some((tr!("boss.assignment_workspace"), workspace)),
             Some((
                 tr!("boss.assignment_access"),
                 if access.is_empty() {

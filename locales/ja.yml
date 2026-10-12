@@ -3262,10 +3262,6 @@ boss.dispatching_detail: スロット確保済み——プロバイダーを起�
 boss.assignment: 割り当て
 boss.assignment_brief: 概要
 boss.assignment_persona: ペルソナ
-boss.assignment_model: モデル
-boss.assignment_workspace: ワークスペース
-boss.assignment_workspace_local: プロジェクトのチェックアウト
-boss.assignment_workspace_new: 新規ワークツリー
 boss.assignment_access: アクセス
 boss.assignment_access_none: タスクのデフォルトのみ
 boss.assignment_buckets: "メモリバケット: %{count}"

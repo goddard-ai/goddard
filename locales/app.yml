@@ -6736,14 +6736,6 @@ boss.assignment_brief:
   en: Brief
 boss.assignment_persona:
   en: Persona
-boss.assignment_model:
-  en: Model
-boss.assignment_workspace:
-  en: Workspace
-boss.assignment_workspace_local:
-  en: Project checkout
-boss.assignment_workspace_new:
-  en: New worktree
 boss.assignment_access:
   en: Access
 boss.assignment_access_none:

@@ -3213,10 +3213,6 @@ boss.dispatching_detail: 槽位已预留——Provider 正在启动。
 boss.assignment: 分配信息
 boss.assignment_brief: 任务说明
 boss.assignment_persona: 角色设定
-boss.assignment_model: 模型
-boss.assignment_workspace: 工作区
-boss.assignment_workspace_local: 项目检出
-boss.assignment_workspace_new: 新工作树
 boss.assignment_access: 访问权限
 boss.assignment_access_none: 仅任务默认权限
 boss.assignment_buckets: "记忆存储桶：%{count}"
