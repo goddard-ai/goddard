@@ -972,7 +972,14 @@ impl Backend for WakuBackend {
                                 .reasoning_effort
                                 .clone_from(&existing.reasoning_effort);
                         }
-                        if employee.is_some() || self.boss.is_managed(session_id) {
+                        // The `boss_managed` stamp outlives document
+                        // membership: a rotated-out Boss chat is in no
+                        // roster and owns no pointer, yet its archival stays
+                        // daemon-owned and out of a stale save's reach.
+                        if employee.is_some()
+                            || existing.boss_managed
+                            || self.boss.is_managed(session_id)
+                        {
                             merge_stale_session_metadata(existing, session);
                             true
                         } else if !session.detail_loaded {

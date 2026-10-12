@@ -387,9 +387,8 @@ impl Waku {
                     anyhow::ensure!(
                         session.id == id
                             && session.boss_managed
-                            && session.archived_at.is_some()
                             && session.planning.is_none(),
-                        "not an archived Boss conversation"
+                        "not a retired Boss conversation"
                     );
                     Ok::<_, anyhow::Error>(BossHistorySession::new(session))
                 })

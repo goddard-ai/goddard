@@ -766,6 +766,32 @@ fn a_managed_merge_drops_client_removed_queue_entries() {
 }
 
 #[test]
+fn a_stale_client_save_cannot_unarchive_a_managed_session() {
+    let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    existing.boss_managed = true;
+    existing.archived_at = Some(1_000);
+    existing.updated_at = 1_000;
+
+    // A rotation archived the chat at 1_000; a client still holding the
+    // pre-rotation copy writes it back under a newer stamp.
+    let mut stale = existing.clone();
+    stale.archived_at = None;
+    stale.updated_at = 2_000;
+    merge_stale_session_metadata(&mut existing, stale);
+    assert_eq!(existing.archived_at, Some(1_000));
+    assert_eq!(existing.updated_at, 2_000);
+
+    // A fresh archive still lands.
+    let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    existing.boss_managed = true;
+    let mut incoming = existing.clone();
+    incoming.archived_at = Some(3_000);
+    incoming.updated_at = existing.updated_at + 1;
+    merge_stale_session_metadata(&mut existing, incoming);
+    assert_eq!(existing.archived_at, Some(3_000));
+}
+
+#[test]
 fn expired_archives_are_purged_when_state_loads() {
     let root = std::env::temp_dir().join(format!("waku-archive-{}", Uuid::new_v4()));
     let store = StateStore::daemon(root.join("app.db"));

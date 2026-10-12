@@ -1,0 +1,1 @@
+- Fixed Boss chat scrollback dead-ending partway through earlier conversations: a retired conversation could lose its archived flag and get rejected, leaving older pages behind a retry that could never succeed.

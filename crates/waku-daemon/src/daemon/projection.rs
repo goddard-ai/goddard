@@ -192,7 +192,10 @@ pub(super) fn merge_stale_session_metadata(existing: &mut AgentSession, incoming
         existing.agent_preset = incoming.agent_preset;
         existing.updated_at = incoming.updated_at;
         existing.last_reply_at = incoming.last_reply_at.or(existing.last_reply_at);
-        existing.archived_at = incoming.archived_at;
+        // Managed archive transitions are daemon-owned — rotation retires a
+        // Boss chat, a resume unarchives an employee — so a stale client copy
+        // may never clear the stamp, only adopt it.
+        existing.archived_at = existing.archived_at.or(incoming.archived_at);
         existing.pinned_at = incoming.pinned_at;
         existing.dormant_at = incoming.dormant_at;
         existing.dormant_exempt_until = incoming.dormant_exempt_until;
