@@ -8669,6 +8669,50 @@ fn a_summon_at_capacity_admits_a_durable_queued_ticket() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// Archiving a queued employee's task cancels its ticket — the next
+/// dispatch pass expires the record instead of launching a runtime for
+/// a session the user already put away.
+#[test]
+fn archiving_a_queued_employee_drops_its_ticket() {
+    use waku_protocol::boss::{BossResult, EmployeeLifecycle, ExpiryCause};
+    let root = std::env::temp_dir().join(format!("summon-archived-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    let (_held_task, _held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "queued job",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .expect("at capacity the summon must still be accepted")
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+
+    backend.archive_sessions(&[session_id]).unwrap();
+    backend.run_summon_scheduler();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert!(employee.expired);
+    assert_eq!(
+        employee.expiry.as_ref().map(|expiry| expiry.cause),
+        Some(ExpiryCause::Stopped)
+    );
+    assert!(backend.boss.queued_heads().is_empty());
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A queued ticket holds on the unresolved Employee base instead of
 /// dispatching under a guessed persona, and the human's recorded pick
 /// releases it into the normal launch path.

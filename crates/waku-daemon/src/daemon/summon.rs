@@ -441,6 +441,20 @@ impl WakuBackend {
             return Ok(false);
         };
         let session_id = employee.session_id;
+        // The ticket's task must still be an open session: an archived
+        // or removed shell leaves the queue here instead of dispatching
+        // a runtime for a task the user already put away.
+        if self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_none_or(|session| session.archived_at.is_some())
+        {
+            self.stop_queued_employee(session_id)?;
+            return Ok(true);
+        }
         // A chain-bound ticket may only launch while its attempt still
         // waits for a dispatcher — a pause/cancel landed meanwhile, or a
         // newer attempt superseded it, ends the stale admission here.
@@ -452,18 +466,7 @@ impl WakuBackend {
             })
             | None => {}
             Some(_) => {
-                let _ = self.boss.mark_cancelled(session_id);
-                record_daemon_interrupt(
-                    &self.task_state,
-                    &self.task_store,
-                    session_id,
-                    Some("Cancelled while queued"),
-                )?;
-                self.finish_boss_employee(
-                    session_id,
-                    false,
-                    waku_protocol::boss::EmployeeSettle::Stopped,
-                )?;
+                self.stop_queued_employee(session_id)?;
                 return Ok(true);
             }
         }
@@ -1665,6 +1668,25 @@ impl WakuBackend {
         }
     }
 
+    /// End a queued ticket that will never dispatch — a supervisor stop,
+    /// a stale binding, or a task archived out from under it. `cancelled`
+    /// is durable intent — it lands before the transcript row and the
+    /// finish so a racing settle classifies as the intentional stop it is.
+    pub(super) fn stop_queued_employee(&self, session_id: Uuid) -> anyhow::Result<()> {
+        self.boss.mark_cancelled(session_id)?;
+        record_daemon_interrupt(
+            &self.task_state,
+            &self.task_store,
+            session_id,
+            Some("Cancelled while queued"),
+        )?;
+        self.finish_boss_employee(
+            session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::Stopped,
+        )
+    }
+
     /// Controls a queued employee's ticket. `prompt` appends durable
     /// instructions to the dispatch envelope; `steer` cannot steer a turn
     /// that does not exist; `stop` cancels the pending work; model and
@@ -1695,21 +1717,7 @@ impl WakuBackend {
                 bail!("employee is queued, not running — steer needs a live turn")
             }
             EmployeeControl::Stop => {
-                // `cancelled` is durable intent — it lands before the
-                // transcript row and the finish so a racing settle
-                // classifies as the intentional stop it is.
-                self.boss.mark_cancelled(session_id)?;
-                record_daemon_interrupt(
-                    &self.task_state,
-                    &self.task_store,
-                    session_id,
-                    Some("Cancelled while queued"),
-                )?;
-                self.finish_boss_employee(
-                    session_id,
-                    false,
-                    waku_protocol::boss::EmployeeSettle::Stopped,
-                )?;
+                self.stop_queued_employee(session_id)?;
                 Ok(BossResult::Saved)
             }
             EmployeeControl::SetModel {
