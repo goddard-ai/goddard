@@ -136,6 +136,9 @@ fn context_items(session: &AgentSession) -> Vec<ContextItem> {
             }
             let block_turn = turn_of(block.turn_id).or(last_turn);
             for (activity_index, activity) in block.activities.iter().enumerate() {
+                if crate::model::is_context_compaction(activity) {
+                    continue;
+                }
                 if let Some(text) = activity_text(activity) {
                     items.push(ContextItem {
                         id: format!("b{block_index}.{activity_index}"),

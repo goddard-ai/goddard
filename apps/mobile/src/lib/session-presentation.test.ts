@@ -118,7 +118,7 @@ describe('mobile session presentation', () => {
     expect(expanded.map((row) => row.kind)).toEqual(['user', 'fold', 'activities', 'md']);
   });
 
-  test('keeps a compaction receipt out of the fold', () => {
+  test('hides compaction receipts from the transcript', () => {
     const current = session({
       turns: [
         turn({ id: 'turn', status: 'completed', started_at: 10, completed_at: 12 }),
@@ -146,11 +146,10 @@ describe('mobile session presentation', () => {
         },
       }],
     });
-    // The receipt keeps its own row — no generic "Worked for X" replaces it.
+    // Compaction bookkeeping never creates a row or a fold.
     expect(buildTranscriptRows(current).map((row) => row.kind)).toEqual([
       'user',
       'md',
-      'activities',
     ]);
   });
 

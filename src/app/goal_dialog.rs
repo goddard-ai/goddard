@@ -363,6 +363,7 @@ impl Waku {
         let activities = session.transcript_blocks.iter()
             .filter(|block| block.turn_id.is_some_and(|id| goal_turn_ids.contains(&id)))
             .flat_map(|block| block.activities.iter())
+            .filter(|activity| !crate::model::is_context_compaction(activity))
             .rev().take(60).map(|activity| json!({
                 "title": activity.title,
                 "tool": activity.tool_name,

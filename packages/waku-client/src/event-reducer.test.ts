@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { reduceRuntimeEvent } from './event-reducer'
+import { activitiesForBlock, reduceRuntimeEvent } from './event-reducer'
 import { activityDisclosureSections, activityDisplayTitle, wireTranslationText } from './transcript-presentation'
 import type { AgentSession, SequencedEvent } from './generated'
 
@@ -557,4 +557,23 @@ test('a keyed activity title renders in the client locale before heuristics', ()
     `${key}(${params?.query ?? ''})`
   expect(activityDisplayTitle(activity, t)).toBe('activity.search_for(cats)')
   expect(activityDisplayTitle(activity)).toBe('Searching for cats')
+})
+
+
+test('transcript activities hide compaction lifecycle notices without changing stored history', () => {
+  const notices = ['compacting_context', 'compacted_context', 'compaction_failed'].map((key) => ({
+    id: key,
+    source_id: key,
+    kind: 'tool' as const,
+    title: 'Context compaction',
+    title_i18n: { key: `activity.${key}` },
+    detail: null,
+    failed: key === 'compaction_failed',
+    complete: key !== 'compacting_context',
+  }))
+  const command = { ...notices[1]!, id: 'command', title: 'Run command', title_i18n: null }
+  const block = { after_message: 0, turn_id: null, content: { kind: 'activities' as const, data: [...notices, command] } }
+  expect(activitiesForBlock(block)).toEqual([command])
+  expect(block.content.data).toHaveLength(4)
+  expect(activitiesForBlock({ ...block, content: { kind: 'activities', data: notices } })).toEqual([])
 })

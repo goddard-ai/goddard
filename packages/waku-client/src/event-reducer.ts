@@ -1,3 +1,4 @@
+import { isContextCompaction } from './transcript-presentation'
 import type {
   ActivityItem,
   ActivityKind,
@@ -695,7 +696,7 @@ function lastReasoning(session: AgentSession) {
 }
 
 export function activitiesForBlock(block: TranscriptBlock): ActivityItem[] {
-  if (block.content.kind === 'activities') return block.content.data
+  if (block.content.kind === 'activities') return block.content.data.filter((activity) => !isContextCompaction(activity))
   const reasoning = block.content.data
   return [
     {

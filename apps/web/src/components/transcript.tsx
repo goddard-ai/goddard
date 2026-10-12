@@ -46,7 +46,6 @@ import {
   formatDuration,
   formatMessageTime,
   formatWorkingElapsed,
-  isContextCompaction,
   partitionPendingSteerRows,
   reasoningTitle,
   shouldVirtualizeActivityText,
@@ -969,6 +968,7 @@ type TranscriptItem =
 function transcriptRows(session: AgentSession): TranscriptItem[] {
   const blocks = new Map<number, Array<{ block: AgentSession['transcript_blocks'][number]; index: number }>>()
   session.transcript_blocks.forEach((block, index) => {
+    if (!activitiesForBlock(block).length) return;
     const anchor = Math.min(block.after_message, session.messages.length)
     const at = blocks.get(anchor) ?? []
     at.push({ block, index })
@@ -1001,12 +1001,6 @@ function transcriptRows(session: AgentSession): TranscriptItem[] {
   return rows
 }
 
-function isCompactionBlockRow(row: TranscriptItem) {
-  if (row.kind !== 'block') return false
-  const activities = activitiesForBlock(row.block)
-  return activities.length > 0 && activities.every(isContextCompaction)
-}
-
 function turnFolds(session: AgentSession, rows: TranscriptItem[]) {
   const hidden = new Set<string>()
   const anchors = new Map<string, { turnId: string; turn: AgentSession['turns'][number] }>()
@@ -1023,10 +1017,7 @@ function turnFolds(session: AgentSession, rows: TranscriptItem[]) {
     const answerStart = turnAnswerStart(turnRows, (row) => (
       row.kind === 'message' && Boolean(row.message.content.trim())
     ))
-    // A compaction block is the transcript's only record that `/compact`
-    // ran — folding it behind a generic "Worked for …" row erases the
-    // evidence, so it keeps its own row.
-    const work = turnRows.slice(0, answerStart).filter((row) => !isCompactionBlockRow(row))
+    const work = turnRows.slice(0, answerStart)
     if (!work.length) continue
     anchors.set(work[0]!.key, { turnId: turn.id, turn })
     for (const row of work) hidden.add(row.key)

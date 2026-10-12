@@ -4396,7 +4396,7 @@ fn row_kinds_and_row_count_describe_the_same_rows() {
 }
 
 #[test]
-fn compaction_receipt_survives_the_turn_fold() {
+fn compaction_never_appears_in_the_transcript() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     let first_turn = session.begin_turn("Summarize this");
     session.push_message(MessageRole::Assistant, "Done.");
@@ -4422,6 +4422,11 @@ fn compaction_receipt_survives_the_turn_fold() {
         turn_id: Some(compact_turn),
         activities: vec![compacting],
     });
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::from([compact_turn]), None),
+        vec![Message(0), Message(1), ResponseFooter(first_turn, 1)],
+        "live compaction renders no transcript row",
+    );
     // `item/completed` flips the same card to its settled label — the keyed
     // title must move with it or the row would read "Compacting" forever.
     let mut compacted = ActivityItem::new(
@@ -4444,22 +4449,9 @@ fn compaction_receipt_survives_the_turn_fold() {
         Some("activity.compacted_context")
     );
     assert_eq!(
-        activity_header_title(
-            &session.transcript_blocks[block_index].activities,
-            false,
-            None
-        ),
-        "Compacted context"
-    );
-    assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new(), None),
-        vec![
-            Message(0),
-            Message(1),
-            ResponseFooter(first_turn, 1),
-            TurnBlock(block_index),
-        ],
-        "the compaction receipt keeps its own row — no generic fold replaces it"
+        vec![Message(0), Message(1), ResponseFooter(first_turn, 1),],
+        "compaction bookkeeping renders no transcript row"
     );
 }
 

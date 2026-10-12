@@ -731,6 +731,7 @@ pub(super) fn turn_eval_state(
         .iter()
         .filter(|block| block.turn_id == Some(turn_id))
         .flat_map(|block| block.activities.iter())
+        .filter(|activity| !crate::model::is_context_compaction(activity))
         .collect();
     let work_activities: Vec<&ActivityItem> = activities
         .iter()

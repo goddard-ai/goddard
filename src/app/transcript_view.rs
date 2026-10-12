@@ -4125,6 +4125,20 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let visible: Vec<ActivityItem>;
+        let activities = if activities.iter().any(crate::model::is_context_compaction) {
+            visible = activities
+                .iter()
+                .filter(|activity| !crate::model::is_context_compaction(activity))
+                .cloned()
+                .collect();
+            visible.as_slice()
+        } else {
+            activities
+        };
+        if activities.is_empty() {
+            return div().into_any_element();
+        }
         // A `boss_summon` marker lands in the supervisor's transcript when
         // the daemon completes a summon — it renders as the live employee
         // card and is lifted out of the activity fold entirely.

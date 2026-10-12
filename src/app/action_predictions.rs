@@ -540,7 +540,7 @@ fn next_action_candidates(
         .iter()
         .filter(|block| block.turn_id == Some(turn_id))
         .flat_map(|block| block.activities.iter())
-        .any(|activity| activity.failed);
+        .any(|activity| activity.failed && !crate::model::is_context_compaction(activity));
     let mut candidates: Vec<(&'static str, &'static str)> = vec![
         ("whats-next", "Ask the agent what to do next"),
         ("archive", "Archive this session"),

@@ -1485,7 +1485,20 @@ pub(super) fn folded_transcript_row_kinds(
         .iter()
         .map(|block| block.after_message)
         .collect::<Vec<_>>();
-    let raw_rows = transcript_row_kinds(session.messages.len(), &anchors);
+    // Compaction is provider bookkeeping, not transcript content.
+    let raw_rows = transcript_row_kinds(session.messages.len(), &anchors)
+        .into_iter()
+        .filter(|row| match row {
+            TranscriptRowKind::TurnBlock(index) => {
+                let activities = &session.transcript_blocks[*index].activities;
+                activities.is_empty()
+                    || activities
+                        .iter()
+                        .any(|activity| !crate::model::is_context_compaction(activity))
+            }
+            _ => true,
+        })
+        .collect::<Vec<_>>();
     // Bucket every turn's rows in one pass: the owner of a row is the turn
     // id its assistant message or block already carries, and `raw_rows`
     // order is the transcript order `turn_rows` reproduces. Rebuilding each
@@ -1509,9 +1522,6 @@ pub(super) fn folded_transcript_row_kinds(
         if let Some(message_index) = response_footer_message_index_from_rows(session, turn_rows) {
             response_footers.insert(turn.id, message_index);
         }
-        // A compaction block is the transcript's only record that `/compact`
-        // ran — folding it behind a generic "Worked for …" row erases the
-        // evidence, so it keeps its own row.
         let hidden: Vec<TranscriptRowKind> = turn_rows[..turn_answer_start(session, turn_rows)]
             .iter()
             .copied()
@@ -1522,13 +1532,8 @@ pub(super) fn folded_transcript_row_kinds(
                 let Some(block) = session.transcript_blocks.get(*index) else {
                     return true;
                 };
-                let compaction = !block.activities.is_empty()
-                    && block
-                        .activities
-                        .iter()
-                        .all(crate::model::is_context_compaction);
                 let durable_card = block.activities.iter().any(is_boss_transcript_card);
-                !compaction && !durable_card
+                !durable_card
             })
             .collect();
         let Some(anchor) = hidden.first().copied() else {
