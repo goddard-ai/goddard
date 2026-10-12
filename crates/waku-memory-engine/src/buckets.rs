@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     fs::{self, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -63,6 +63,15 @@ pub struct BucketNote {
     pub text: String,
     pub retry_key: String,
     pub created_at: u64,
+}
+
+/// One tombstone line in a bucket's `RETRACTED.jsonl` — the note's log
+/// entry stays so sequence positions and summary ranges still resolve.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct Retraction {
+    note_id: String,
+    retracted_at: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -196,8 +205,15 @@ impl BucketStore {
         self.with_bucket_lock(bucket_id, || {
             let path = self.bucket_dir(bucket_id).join("LOG.jsonl");
             let notes = read_notes(&path)?;
+            let retracted = self.retracted_ids(bucket_id)?;
             let digest = hex_digest(text.as_bytes());
-            if let Some(existing) = notes.iter().find(|note| note.retry_key == retry_key) {
+            // A retracted note frees its retry key: an undo followed by the
+            // same record call lands as a fresh note rather than reviving
+            // the tombstoned one.
+            if let Some(existing) = notes
+                .iter()
+                .find(|note| note.retry_key == retry_key && !retracted.contains(&note.id))
+            {
                 if hex_digest(existing.text.as_bytes()) != digest || existing.kind != kind {
                     bail!("memory retry key was already used for a different note")
                 }
@@ -234,7 +250,8 @@ impl BucketStore {
         self.require(access, principal, bucket_id, false)?;
         self.with_bucket_lock(bucket_id, || {
             let notes = read_notes(&self.bucket_dir(bucket_id).join("LOG.jsonl"))?;
-            let items = self.overview_items(bucket_id, &notes)?;
+            let retracted = self.retracted_ids(bucket_id)?;
+            let items = self.overview_items(bucket_id, &notes, &retracted)?;
             let compression = self.next_compression(bucket_id)?;
             Ok(Overview {
                 bucket_id: bucket_id.into(),
@@ -244,8 +261,9 @@ impl BucketStore {
         })
     }
 
-    /// Every original note in the bucket, in log order. Summaries live in
-    /// separate files and never appear here.
+    /// Every live note in the bucket, in log order. Summaries live in
+    /// separate files and retracted notes keep their log positions but
+    /// never appear here.
     pub fn notes(
         &self,
         access: &BucketAccess,
@@ -254,8 +272,73 @@ impl BucketStore {
     ) -> Result<Vec<BucketNote>> {
         self.require(access, principal, bucket_id, false)?;
         self.with_bucket_lock(bucket_id, || {
-            read_notes(&self.bucket_dir(bucket_id).join("LOG.jsonl"))
+            let notes = read_notes(&self.bucket_dir(bucket_id).join("LOG.jsonl"))?;
+            let retracted = self.retracted_ids(bucket_id)?;
+            Ok(notes
+                .into_iter()
+                .filter(|note| !retracted.contains(&note.id))
+                .collect())
         })
+    }
+
+    /// Retract one recorded note — the transcript memory card's undo. The
+    /// log line stays so summary ranges and retry keys keep meaning; a
+    /// tombstone in `RETRACTED.jsonl` removes the note from every read
+    /// surface (`overview`, `notes`, `zoom`, `search`, `Feed`). Retracting
+    /// needs the same insert grant recording did.
+    pub fn retract(
+        &self,
+        access: &BucketAccess,
+        principal: &str,
+        bucket_id: &str,
+        note_id: &str,
+    ) -> Result<BucketNote> {
+        self.require(access, principal, bucket_id, true)?;
+        self.with_bucket_lock(bucket_id, || {
+            let notes = read_notes(&self.bucket_dir(bucket_id).join("LOG.jsonl"))?;
+            let note = notes
+                .into_iter()
+                .find(|note| note.id == note_id)
+                .ok_or_else(|| anyhow::anyhow!("unknown memory note {note_id}"))?;
+            let mut retracted = self.retracted_ids(bucket_id)?;
+            if !retracted.insert(note_id.to_owned()) {
+                bail!("memory note {note_id} was already retracted")
+            }
+            let retraction = Retraction {
+                note_id: note_id.to_owned(),
+                retracted_at: now(),
+            };
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(self.bucket_dir(bucket_id).join("RETRACTED.jsonl"))?;
+            serde_json::to_writer(&mut file, &retraction)?;
+            file.write_all(b"\n")?;
+            file.sync_data()?;
+            Ok(note)
+        })
+    }
+
+    /// The tombstoned note ids for one bucket — empty when no retractions
+    /// have been recorded.
+    fn retracted_ids(&self, bucket_id: &str) -> Result<HashSet<String>> {
+        let path = self.bucket_dir(bucket_id).join("RETRACTED.jsonl");
+        let file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(HashSet::new());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        BufReader::new(file)
+            .lines()
+            .map(|line| {
+                let line = line?;
+                let retraction: Retraction = serde_json::from_str(&line)
+                    .context("invalid memory bucket retraction entry")?;
+                Ok(retraction.note_id)
+            })
+            .collect()
     }
 
     pub fn zoom(
@@ -276,9 +359,13 @@ impl BucketStore {
                 bail!("memory range {start}–{end} is outside bucket {bucket_id}")
             }
             if start == end {
-                return Ok(vec![OverviewItem::Note {
-                    note: notes[start as usize - 1].clone(),
-                }]);
+                let note = &notes[start as usize - 1];
+                anyhow::ensure!(
+                    !self.retracted_ids(bucket_id)?.contains(&note.id),
+                    "memory note {} was retracted",
+                    note.id
+                );
+                return Ok(vec![OverviewItem::Note { note: note.clone() }]);
             }
             let mid = start + (end - start) / 2;
             let mut items = Vec::with_capacity(2);
@@ -310,9 +397,12 @@ impl BucketStore {
         }
         let query = query.to_lowercase();
         let notes = read_notes(&self.bucket_dir(bucket_id).join("LOG.jsonl"))?;
+        let retracted = self.retracted_ids(bucket_id)?;
         Ok(notes
             .into_iter()
-            .filter(|note| note.text.to_lowercase().contains(&query))
+            .filter(|note| {
+                !retracted.contains(&note.id) && note.text.to_lowercase().contains(&query)
+            })
             .collect())
     }
 
@@ -374,7 +464,12 @@ impl BucketStore {
         Ok(())
     }
 
-    fn overview_items(&self, bucket_id: &str, notes: &[BucketNote]) -> Result<Vec<OverviewItem>> {
+    fn overview_items(
+        &self,
+        bucket_id: &str,
+        notes: &[BucketNote],
+        retracted: &HashSet<String>,
+    ) -> Result<Vec<OverviewItem>> {
         if notes.is_empty() {
             return Ok(Vec::new());
         }
@@ -400,9 +495,12 @@ impl BucketStore {
                 cursor = summary.end + 1;
                 items.push(OverviewItem::Summary { summary });
             } else {
-                items.push(OverviewItem::Note {
-                    note: notes[cursor as usize - 1].clone(),
-                });
+                // A retracted note keeps its sequence slot — ranges and
+                // summaries still align — it just stops being listed.
+                let note = &notes[cursor as usize - 1];
+                if !retracted.contains(&note.id) {
+                    items.push(OverviewItem::Note { note: note.clone() });
+                }
                 cursor += 1;
             }
         }
@@ -410,13 +508,16 @@ impl BucketStore {
             if items.len() >= OVERVIEW_SEGMENT_LIMIT {
                 break;
             }
-            items.push(OverviewItem::Note { note: note.clone() });
+            if !retracted.contains(&note.id) {
+                items.push(OverviewItem::Note { note: note.clone() });
+            }
         }
         Ok(items)
     }
 
     fn next_compression(&self, bucket_id: &str) -> Result<Option<CompressionRequest>> {
         let notes = read_notes(&self.bucket_dir(bucket_id).join("LOG.jsonl"))?;
+        let retracted = self.retracted_ids(bucket_id)?;
         let count = notes.len() as u64;
         let mut size = 2_u64;
         while size <= count {
@@ -425,8 +526,15 @@ impl BucketStore {
                 let end = start + size - 1;
                 if self.read_summary(bucket_id, start, end)?.is_none() {
                     let half = size / 2;
-                    let left = self.summary_source(bucket_id, &notes, start, start + half - 1)?;
-                    let right = self.summary_source(bucket_id, &notes, start + half, end)?;
+                    let left = self.summary_source(
+                        bucket_id,
+                        &notes,
+                        &retracted,
+                        start,
+                        start + half - 1,
+                    )?;
+                    let right =
+                        self.summary_source(bucket_id, &notes, &retracted, start + half, end)?;
                     if let (Some(left), Some(right)) = (left, right) {
                         return Ok(Some(CompressionRequest {
                             bucket_id: bucket_id.into(),
@@ -447,12 +555,17 @@ impl BucketStore {
         &self,
         bucket_id: &str,
         notes: &[BucketNote],
+        retracted: &HashSet<String>,
         start: u64,
         end: u64,
     ) -> Result<Option<SummarySource>> {
         if start == end {
+            // A retracted note offers no source — the pair containing it
+            // stays uncompressible rather than feeding removed text to a
+            // summary.
             return Ok(notes
                 .get(start as usize - 1)
+                .filter(|note| !retracted.contains(&note.id))
                 .cloned()
                 .map(|note| SummarySource::Note { note }));
         }
@@ -684,6 +797,107 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("unknown")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// A retracted note keeps its sequence slot but leaves every read
+    /// surface, frees its retry key, and cannot be retracted twice.
+    #[test]
+    fn retract_tombstones_a_note() {
+        let (root, store, access) = fixture();
+        let note = store
+            .insert(
+                &access,
+                "employee",
+                "project-demo",
+                NoteKind::Fact,
+                "remember this",
+                "k1",
+            )
+            .unwrap()
+            .note;
+        assert_eq!(
+            store
+                .notes(&access, "employee", "project-demo")
+                .unwrap()
+                .len(),
+            1
+        );
+
+        let removed = store
+            .retract(&access, "employee", "project-demo", &note.id)
+            .unwrap();
+        assert_eq!(removed.id, note.id);
+        assert!(
+            store
+                .notes(&access, "employee", "project-demo")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .search(&access, "employee", "project-demo", "remember")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .overview(&access, "employee", "project-demo")
+                .unwrap()
+                .items
+                .is_empty()
+        );
+        assert!(
+            store
+                .zoom(&access, "employee", "project-demo", 1, 1)
+                .unwrap_err()
+                .to_string()
+                .contains("retracted")
+        );
+        assert!(
+            store
+                .retract(&access, "employee", "project-demo", &note.id)
+                .unwrap_err()
+                .to_string()
+                .contains("already retracted")
+        );
+
+        // Positions never shift: the next note still takes sequence 2.
+        let second = store
+            .insert(
+                &access,
+                "employee",
+                "project-demo",
+                NoteKind::Fact,
+                "next note",
+                "k2",
+            )
+            .unwrap()
+            .note;
+        assert_eq!(second.sequence, 2);
+
+        // The tombstoned note's retry key is free again — a re-record
+        // lands as a fresh note rather than reviving the old one.
+        let rerecorded = store
+            .insert(
+                &access,
+                "employee",
+                "project-demo",
+                NoteKind::Fact,
+                "remember this",
+                "k1",
+            )
+            .unwrap()
+            .note;
+        assert_eq!(rerecorded.sequence, 3);
+        assert_ne!(rerecorded.id, note.id);
+        assert_eq!(
+            store
+                .notes(&access, "employee", "project-demo")
+                .unwrap()
+                .len(),
+            2
         );
         let _ = fs::remove_dir_all(root);
     }

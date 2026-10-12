@@ -462,12 +462,16 @@ impl Waku {
                 }
             }
             DriverEvent::RichActivity(item) => {
-                // A summon card is daemon-recorded transcript state, not
-                // turn output — a summon admitted while the supervisor sits
-                // idle must still render where its persisted marker will.
-                let summon_card = item.tool_name.as_deref()
-                    == Some(crate::model::BOSS_SUMMON_TOOL_NAME);
-                if summon_card || self.accepts_turn_output(session_id) {
+                // Summon and memory cards are daemon-recorded transcript
+                // state, not turn output — a marker landing while the
+                // session sits idle must still render where its persisted
+                // form will.
+                let transcript_card = matches!(
+                    item.tool_name.as_deref(),
+                    Some(crate::model::BOSS_SUMMON_TOOL_NAME)
+                        | Some(crate::model::MEMORY_RECORD_TOOL_NAME)
+                );
+                if transcript_card || self.accepts_turn_output(session_id) {
                     let refresh_branch =
                         should_refresh_branch_after_activity(item.kind, item.complete)
                             && self.state.selected_session == Some(session_id);

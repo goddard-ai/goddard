@@ -567,6 +567,11 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"json":{"type":"memory","notes":"two child summaries or the original note"}}),
             "goddard-agent boss memory zoom --project octane 1 8".to_owned(),
         ),
+        "boss memory retract" => (
+            json!({"BUCKET":{"positional":true,"required":"optional — omit with --project or to use the caller's project bucket","type":"named bucket ID"},"NOTE_ID":{"positional":true,"required":true,"type":"note id to remove from the bucket"},"--project":{"optional":true,"type":"registered project name/id or absolute project root; resolves to the project's shared bucket"}}),
+            json!({"json":{"type":"memory","retracted":"removed original note"}}),
+            "goddard-agent boss memory retract --project octane 3-a1b2c3".to_owned(),
+        ),
         "boss memory migrate" => (
             json!({"BUCKET":{"positional":true,"required":true,"type":"existing named bucket ID"},"SOURCE":{"positional":true,"required":true,"type":"'boss' or absolute project root"},"--dry-run":{"type":"boolean","default":true,"notes":"false appends candidates; source files are never modified"}}),
             json!({"json":{"type":"memory","migration":{"dryRun":"candidate list when true; imported count when false","candidates":"inspectable source paths and original note text"}}}),
@@ -601,6 +606,11 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"BUCKET":{"positional":true,"required":"optional — omit with --project or to use this session's project bucket","type":"named bucket ID"},"START":{"positional":true,"required":true,"type":"first note index"},"END":{"positional":true,"required":true,"type":"last note index"},"--project":{"optional":true,"type":"registered project name/id or absolute project root; resolves to the project's shared bucket"}}),
             json!({"json":{"type":"memory","notes":"two child summaries or the original note"}}),
             "goddard-agent memory zoom 1 8".to_owned(),
+        ),
+        "memory retract" => (
+            json!({"BUCKET":{"positional":true,"required":"optional — omit with --project or to use this session's project bucket","type":"named bucket ID"},"NOTE_ID":{"positional":true,"required":true,"type":"note id to remove from the bucket"},"--project":{"optional":true,"type":"registered project name/id or absolute project root; resolves to the project's shared bucket"}}),
+            json!({"json":{"type":"memory","retracted":"removed original note"}}),
+            "goddard-agent memory retract 3-a1b2c3".to_owned(),
         ),
         "boss plan create" => (
             json!({"--title":{"required":true,"type":"plan display title"},"--plan-file":{"required":true,"type":"relative path under plans/"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 planning brief"},"--provider":{"enum":providers,"optional":true,"default":"codex"},"--model":{"type":"provider model ID","optional":true,"default":"gpt-6.1-sol on codex"},"--effort":{"type":"provider effort ID","optional":true,"default":"medium"}}),
@@ -849,6 +859,7 @@ fn schema() -> serde_json::Value {
         "boss memory summary",
         "boss memory scan",
         "boss memory zoom",
+        "boss memory retract",
         "boss memory migrate",
         "memory buckets",
         "memory overview",
@@ -856,6 +867,7 @@ fn schema() -> serde_json::Value {
         "memory summary",
         "memory scan",
         "memory zoom",
+        "memory retract",
         "boss plan create",
         "boss plan finalize",
         "boss plan items",
@@ -1782,7 +1794,10 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
                 id: pos[0].parse().context("invalid deliverable ID")?,
             })?)
         }
-        ("memory", "buckets" | "create" | "overview" | "record" | "summary" | "scan" | "zoom") => {
+        (
+            "memory",
+            "buckets" | "create" | "overview" | "record" | "summary" | "scan" | "zoom" | "retract",
+        ) => {
             let memory = memory_leaf("boss memory", &operation, args)?;
             print_boss(boss_request(Op::Memory { operation: memory })?)
         }
@@ -2153,6 +2168,14 @@ fn memory_leaf(
                     json!({"type":kind,"bucket":pos[0],"start":pos[1].parse::<u64>().context("invalid start note index")?,"end":pos[2].parse::<u64>().context("invalid end note index")?})
                 }
                 _ => bail!("usage: {command} zoom [BUCKET|--project PROJECT] START END"),
+            },
+            "retract" => match (pos.len(), project) {
+                (1, Some(project)) => {
+                    json!({"type":kind,"project":project,"noteId":pos[0]})
+                }
+                (1, None) => json!({"type":kind,"noteId":pos[0]}),
+                (2, None) => json!({"type":kind,"bucket":pos[0],"noteId":pos[1]}),
+                _ => bail!("usage: {command} retract [BUCKET|--project PROJECT] NOTE_ID"),
             },
             _ => bail!("usage: {command} {operation} [BUCKET|--project PROJECT] [QUERY|START END]"),
         };
@@ -2761,13 +2784,13 @@ fn task_memory(args: Vec<String>) -> anyhow::Result<()> {
     use waku_protocol::boss::BossOperation;
     let operation = args.first().cloned().unwrap_or_default();
     match operation.as_str() {
-        "buckets" | "overview" | "record" | "summary" | "scan" | "zoom" => {
+        "buckets" | "overview" | "record" | "summary" | "scan" | "zoom" | "retract" => {
             let memory = memory_leaf("memory", &operation, args[1..].to_vec())?;
             print_boss(boss_request(BossOperation::Memory { operation: memory })?)
         }
         "create" | "migrate" => bail!("`memory {operation}` is a Boss-only operation"),
         _ => bail!(
-            "usage: goddard-agent memory buckets|overview|record|summary|scan|zoom; each leaf documents its flags under --help"
+            "usage: goddard-agent memory buckets|overview|record|summary|scan|zoom|retract; each leaf documents its flags under --help"
         ),
     }
 }

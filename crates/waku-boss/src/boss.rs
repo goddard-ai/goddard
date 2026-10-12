@@ -192,6 +192,9 @@ fn memory_bucket_ref(
         }
         | MemoryOperation::ZoomBucket {
             bucket, project, ..
+        }
+        | MemoryOperation::Retract {
+            bucket, project, ..
         } => Some((bucket, project)),
         MemoryOperation::ListBuckets
         | MemoryOperation::CreateBucket { .. }
@@ -4976,6 +4979,7 @@ impl BossService {
         let mut compression = None;
         let mut bucket = None;
         let mut recorded = None;
+        let mut retracted = None;
         let mut migration = None;
         let mut feed = None;
         match operation {
@@ -5048,6 +5052,14 @@ impl BossService {
                 )?;
                 recorded = Some(serde_json::to_value(result.note)?);
                 compression = result.compression.map(serde_json::to_value).transpose()?;
+            }
+            MemoryOperation::Retract { note_id, .. } => {
+                let bucket_id = resolved_bucket
+                    .clone()
+                    .expect("bucket-addressed ops resolve a target");
+                bucket = Some(bucket_id.clone());
+                let note = buckets.retract(&bucket_access, &principal, &bucket_id, &note_id)?;
+                retracted = Some(serde_json::to_value(note)?);
             }
             MemoryOperation::SubmitSummary {
                 start, end, text, ..
@@ -5209,13 +5221,19 @@ impl BossService {
                 });
             }
         }
+        let bucket_name = bucket
+            .as_ref()
+            .and_then(|id| known_buckets.iter().find(|known| &known.id == id))
+            .map(|known| known.name.clone());
         Ok(BossResult::Memory {
             buckets: bucket_list,
             overview,
             notes,
             compression,
             recorded,
+            retracted,
             bucket,
+            bucket_name,
             migration,
             feed,
         })

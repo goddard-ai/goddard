@@ -3648,6 +3648,46 @@ impl BossSummonCard {
     }
 }
 
+/// The `tool_name` the daemon stamps on the transcript activity it records
+/// into a session when a `MemoryOperation::Record` succeeds. `arguments`
+/// carries the note's [`MemoryRecordCard`] as JSON — the desktop renders
+/// that activity as the compact memory card with its undo affordance
+/// instead of a tool row.
+pub const MEMORY_RECORD_TOOL_NAME: &str = "memory_record";
+
+/// The recorded note a `memory_record` transcript marker's `arguments`
+/// carries, frozen at record time so the card still renders the text and
+/// bucket label if the bucket is later renamed or summarized. Undo acts
+/// on the live store through `note_id` + `bucket_id`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryRecordCard {
+    pub note_id: String,
+    pub bucket_id: String,
+    /// The bucket's display name at record time.
+    pub bucket: String,
+    pub sequence: u64,
+    pub kind: crate::boss::MemoryNoteKind,
+    pub text: String,
+    pub created_at: u64,
+    /// Display name of the session that recorded the note — the boss's
+    /// identity name, an employee's name, or absent for other callers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_by: Option<String>,
+    /// `true` once a `Retract` removed the note — the daemon patches the
+    /// persisted marker so the card reads removed after a restart.
+    #[serde(default)]
+    pub retracted: bool,
+}
+
+impl MemoryRecordCard {
+    /// Reads a `memory_record` marker's `arguments`. `None` for anything
+    /// that is not a card payload.
+    pub fn parse(arguments: &str) -> Option<Self> {
+        serde_json::from_str(arguments).ok()
+    }
+}
+
 /// The character range carrying a session id inside an atom span: one
 /// variation selector per hex nibble, in byte order — 32 chars for the 16
 /// id bytes. Variation selectors are invisible text, so the encoding leaks

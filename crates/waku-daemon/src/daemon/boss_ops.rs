@@ -195,7 +195,7 @@ impl WakuBackend {
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         use waku_protocol::boss::{
-            AutomationOperation, BossOperation, BossResult, EmployeeControl,
+            AutomationOperation, BossOperation, BossResult, EmployeeControl, MemoryOperation,
         };
         anyhow::ensure!(
             self.settings.get().boss_experiment_enabled,
@@ -1243,7 +1243,47 @@ impl WakuBackend {
                             .any(|session| session.id == *id && session.boss_managed)
                     })
                     .and_then(|id| self.session_memory_project(id));
-                self.boss.memory(caller, caller_project, operation)
+                let retract_target = match &operation {
+                    MemoryOperation::Retract {
+                        note_id, session, ..
+                    } => Some((note_id.clone(), *session)),
+                    _ => None,
+                };
+                let result = self.boss.memory(caller, caller_project, operation)?;
+                // Every successful record leaves a durable card in the
+                // recording session's transcript — the row the user's undo
+                // hangs off. The note already persisted, so a failed
+                // marker logs rather than reporting the record as failed.
+                if let Some(session_id) = caller
+                    && let BossResult::Memory {
+                        recorded: Some(note),
+                        bucket_name,
+                        ..
+                    } = &result
+                    && let Err(error) = self.post_memory_marker(
+                        session_id,
+                        note,
+                        bucket_name.as_deref(),
+                        events,
+                    )
+                {
+                    eprintln!("could not post memory transcript marker: {error:#}");
+                }
+                // A retract settles that card to its removed state — the
+                // marker is durable transcript history, so the card reads
+                // removed on reopen, not just in the live view.
+                if let Some((note_id, session_hint)) = retract_target
+                    && matches!(
+                        &result,
+                        BossResult::Memory {
+                            retracted: Some(_),
+                            ..
+                        }
+                    )
+                {
+                    self.settle_memory_marker(session_hint, &note_id, events);
+                }
+                Ok(result)
             }
             operation => {
                 let rename = matches!(operation, BossOperation::Rename { .. });
@@ -1349,6 +1389,164 @@ impl WakuBackend {
                 }
                 Ok(result)
             }
+        }
+    }
+
+    /// The durable memory card in the recording session's transcript — the
+    /// note's text, bucket label, and identity frozen at record time so
+    /// the row still renders if the bucket is renamed or summarized away —
+    /// plus the live-stream send a registered runtime can take. Like the
+    /// summon marker it stays outside the turn's work fold.
+    pub(super) fn post_memory_marker(
+        &self,
+        session_id: Uuid,
+        note: &serde_json::Value,
+        bucket_name: Option<&str>,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct RecordedNote {
+            id: String,
+            bucket_id: String,
+            sequence: u64,
+            kind: waku_protocol::boss::MemoryNoteKind,
+            text: String,
+            created_at: u64,
+        }
+        let note: RecordedNote =
+            serde_json::from_value(note.clone()).context("invalid recorded memory note")?;
+        let document = self.boss.document();
+        let recorded_by = if document.session_id == Some(session_id) {
+            Some(document.identity.name.clone())
+        } else {
+            document
+                .employees
+                .iter()
+                .find(|employee| employee.session_id == session_id)
+                .map(|employee| employee.identity.name.clone())
+        };
+        let card = waku_protocol::model::MemoryRecordCard {
+            note_id: note.id,
+            bucket_id: note.bucket_id.clone(),
+            bucket: bucket_name.unwrap_or(&note.bucket_id).to_owned(),
+            sequence: note.sequence,
+            kind: note.kind,
+            text: note.text,
+            created_at: note.created_at,
+            recorded_by,
+            retracted: false,
+        };
+        // The marker keys on the note id: a `record` retry deduped to the
+        // same note refreshes its existing card in place rather than
+        // stacking a duplicate row.
+        let mut marker = crate::model::ActivityItem::new(
+            Some(format!("memory-record-{}", card.note_id)),
+            crate::model::ActivityKind::Tool,
+            "Recorded a memory".to_owned(),
+            None,
+            true,
+        )
+        .with_tool_name(Some(waku_protocol::model::MEMORY_RECORD_TOOL_NAME));
+        marker.arguments = Some(serde_json::to_string(&card)?);
+        let event = DriverEvent::RichActivity(marker);
+        record_boss_event(&self.task_state, &self.task_store, session_id, &event)?;
+        // `Command::Boss` requests carry no runtime id — the agent CLI
+        // sends nil — so the card must ride the session's registered
+        // runtime or the hub's runtime check drops it. A session with no
+        // live runtime gets the persisted marker only: there is no stream
+        // to light up.
+        if let Some(runtime_id) = self
+            .sessions
+            .lock()
+            .get(&session_id)
+            .map(|entry| entry.runtime_id)
+        {
+            let _ = events
+                .for_session(session_id, runtime_id)
+                .send(event_to_wire(event)?);
+        }
+        Ok(())
+    }
+
+    /// Patch a `memory_record` marker to its removed state after a
+    /// successful `Retract`. `session_hint` names the transcript the undo
+    /// came from; without it, hydrated sessions are scanned for the
+    /// marker's source id — a marker sitting in an unhydrated transcript
+    /// keeps its recorded payload until that session loads.
+    fn settle_memory_marker(&self, session_hint: Option<Uuid>, note_id: &str, events: &EventSink) {
+        let source_id = format!("memory-record-{note_id}");
+        let mut state = self.task_state.lock();
+        let hinted =
+            session_hint.and_then(|id| state.sessions.iter_mut().find(|session| session.id == id));
+        fn scan_marker(
+            session: &mut AgentSession,
+            source_id: &str,
+        ) -> Option<crate::model::ActivityItem> {
+            for block in &mut session.transcript_blocks {
+                for activity in &mut block.activities {
+                    if activity.source_id.as_deref() != Some(source_id) {
+                        continue;
+                    }
+                    let mut card = activity
+                        .arguments
+                        .as_deref()
+                        .and_then(waku_protocol::model::MemoryRecordCard::parse)?;
+                    if card.retracted {
+                        return None;
+                    }
+                    card.retracted = true;
+                    activity.title = "Removed a memory".to_owned();
+                    activity.arguments = serde_json::to_string(&card).ok();
+                    return Some(activity.clone());
+                }
+            }
+            None
+        }
+        let mut settled = None;
+        if let Some(session) = hinted {
+            if self.task_store.hydrate(session).is_ok()
+                && let Some(item) = scan_marker(session, &source_id)
+            {
+                session.updated_at = crate::model::unix_time();
+                settled = Some((session.id, item));
+            }
+        } else {
+            // No transcript hint: only already-hydrated sessions are
+            // scanned — loading every skeleton to find one marker costs
+            // more than the settle is worth, and an unloaded marker's
+            // card settles the next time the note is retracted from it.
+            for session in &mut state.sessions {
+                if !session.detail_loaded {
+                    continue;
+                }
+                if let Some(item) = scan_marker(session, &source_id) {
+                    session.updated_at = crate::model::unix_time();
+                    settled = Some((session.id, item));
+                    break;
+                }
+            }
+        }
+        let Some((session_id, item)) = settled else {
+            return;
+        };
+        state.mark_session_dirty(session_id);
+        if let Err(error) = self.task_store.save(&mut state) {
+            eprintln!("could not persist memory marker settle: {error:#}");
+        }
+        drop(state);
+        // The live transcript replaces the activity in place by source id —
+        // the open card flips to removed without a session reload.
+        let Some(runtime_id) = self
+            .sessions
+            .lock()
+            .get(&session_id)
+            .map(|entry| entry.runtime_id)
+        else {
+            return;
+        };
+        if let Ok(wire) = event_to_wire(DriverEvent::RichActivity(item)) {
+            let _ = events.for_session(session_id, runtime_id).send(wire);
         }
     }
 

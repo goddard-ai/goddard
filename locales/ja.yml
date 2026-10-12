@@ -3473,6 +3473,10 @@ boss.memory_stale_results: 更新できませんでした — 以前の結果を
 boss.memory_expand: さらに表示
 boss.memory_collapse: 折りたたむ
 boss.memory_record_label: "%{bucket} メモリ、%{when} に記録"
+boss.memory_card_label: "%{bucket} メモリ"
+boss.memory_undo: 元に戻す
+boss.memory_removed: 削除済み
+boss.memory_removed_toast: メモリを削除しました。
 boss.status_switching_workspace: ワークスペースを切り替え中
 boss.employee_resume_queued: "%{name} は再開待ちです — メッセージは開始時に配信されます"
 boss.command_placeholder_memory_feedback: ボスにメモリのフィードバックを送信…

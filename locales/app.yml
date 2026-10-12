@@ -6274,6 +6274,14 @@ boss.memory_collapse:
   en: Show less
 boss.memory_record_label:
   en: "%{bucket} memory, recorded %{when}"
+boss.memory_card_label:
+  en: "%{bucket} memory"
+boss.memory_undo:
+  en: Undo
+boss.memory_removed:
+  en: Removed
+boss.memory_removed_toast:
+  en: Memory removed.
 boss.ask_correct:
   en: Ask Boss to correct
 boss.correction_request_hint:

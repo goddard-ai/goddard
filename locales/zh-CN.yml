@@ -3424,6 +3424,10 @@ boss.memory_stale_results: 刷新失败 — 显示的是之前的结果。
 boss.memory_expand: 显示更多
 boss.memory_collapse: 收起
 boss.memory_record_label: "%{bucket} 记忆，记录于 %{when}"
+boss.memory_card_label: "%{bucket} 记忆"
+boss.memory_undo: 撤销
+boss.memory_removed: 已移除
+boss.memory_removed_toast: 记忆已移除。
 boss.status_switching_workspace: 正在切换工作区
 boss.employee_resume_queued: "%{name} 已排队等待恢复 — 消息将在其启动时送达"
 boss.command_placeholder_memory_feedback: 向老板发送记忆反馈…

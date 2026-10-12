@@ -314,6 +314,10 @@ pub(super) struct MemoryFeed {
     /// A response has landed — distinguishes "loading" from "failed before
     /// anything arrived".
     pub(super) loaded: bool,
+    /// The daemon clock time the last applied feed was fetched — a
+    /// transcript memory card only trusts "absent means removed" when the
+    /// feed is this fresh.
+    refreshed_at: Option<u64>,
     /// A request is in flight or parked behind another boss operation.
     loading: bool,
     /// The last failure — records already on screen stay beside it.
@@ -336,6 +340,7 @@ impl Default for MemoryFeed {
         Self {
             records: Vec::new(),
             loaded: false,
+            refreshed_at: None,
             loading: false,
             error: None,
             visible: MEMORY_FEED_PAGE,
@@ -715,6 +720,17 @@ pub(super) struct BossUi {
     /// refresh issued mid-flight replaces it rather than dropping. Last
     /// submission wins.
     queued_memory_feed: Option<(DaemonKey, BossOperation)>,
+    /// `Retract` operations parked the same way, in click order — unlike a
+    /// feed refresh every undo must reach the daemon, so they queue
+    /// rather than collapsing.
+    queued_memory_retract: VecDeque<(DaemonKey, BossOperation)>,
+    /// The `(daemon, bucket, note)` identities of retracts issued but not
+    /// yet answered — replies pop in submission order since boss requests
+    /// serialize through `pending`.
+    pending_memory_retracts: VecDeque<(DaemonKey, String, String)>,
+    /// Notes confirmed removed this run — a transcript card whose marker
+    /// the daemon could not settle still reads removed.
+    retracted_memory: HashSet<(DaemonKey, String, String)>,
     editor: Option<BossEditor>,
     generation: u64,
     pending: bool,
@@ -824,6 +840,9 @@ impl Default for BossUi {
             memory_project: HashMap::new(),
             memory_query: String::new(),
             queued_memory_feed: None,
+            queued_memory_retract: VecDeque::new(),
+            pending_memory_retracts: VecDeque::new(),
+            retracted_memory: HashSet::new(),
             editor: None,
             generation: 0,
             pending: false,
@@ -1260,6 +1279,9 @@ pub(super) enum BossReply {
     List,
     /// The unified `Feed` page for the Memory section's record list.
     MemoryFeed,
+    /// A transcript memory card's Undo — the retracted note's identity
+    /// rides `pending_memory_retracts` since this enum stays `Copy`.
+    MemoryRetract,
     Saved,
     /// A `finalizePlan` dispatch for the planning session it names — the
     /// id marks the press's in-flight window so the chip hides and the
@@ -2314,6 +2336,18 @@ impl Waku {
                 // A feed refresh behind another request parks the same way —
                 // the completion re-issues the freshest one.
                 self.boss_ui.queued_memory_feed = Some((key, operation));
+            } else if matches!(
+                &operation,
+                BossOperation::Memory {
+                    operation: MemoryOperation::Retract { .. }
+                }
+            ) && reply == BossReply::MemoryRetract
+            {
+                // An undo behind another request parks in click order —
+                // every retract must reach the daemon.
+                self.boss_ui
+                    .queued_memory_retract
+                    .push_back((key, operation));
             }
             return;
         }
@@ -2551,6 +2585,32 @@ impl Waku {
                                     .collect::<Vec<_>>();
                                 this.apply_boss_memory_feed(key, records, cx);
                             }
+                            BossResult::Memory { retracted, .. }
+                                if reply == BossReply::MemoryRetract =>
+                            {
+                                let pending = this.boss_ui.pending_memory_retracts.pop_front();
+                                if retracted.is_some()
+                                    && let Some((retract_key, bucket, note_id)) = pending
+                                {
+                                    this.boss_ui.retracted_memory.insert((
+                                        retract_key,
+                                        bucket.clone(),
+                                        note_id.clone(),
+                                    ));
+                                    if let Some(feed) =
+                                        this.boss_ui.memory_feed.get_mut(&retract_key)
+                                    {
+                                        feed.records.retain(|record| {
+                                            !(record.bucket_id == bucket && record.id == note_id)
+                                        });
+                                        feed.pending_refresh.retain(|record| {
+                                            !(record.bucket_id == bucket && record.id == note_id)
+                                        });
+                                    }
+                                    this.refresh_memory_note_status();
+                                    this.show_success_toast(tr!("boss.memory_removed_toast"));
+                                }
+                            }
                             _ => {}
                         }
                         if matches!(reply, BossReply::Saved) {
@@ -2608,6 +2668,27 @@ impl Waku {
                             search.pending_offset = None;
                             search.error = Some(error);
                             this.sync_boss_page_rows();
+                        } else if reply == BossReply::MemoryRetract {
+                            let pending = this.boss_ui.pending_memory_retracts.pop_front();
+                            // "Already retracted" and "unknown note" both
+                            // leave the bucket without the record — the
+                            // undo's end state — so the card settles rather
+                            // than nagging about a race it already won.
+                            if let Some((retract_key, bucket, note_id)) = pending {
+                                if error.contains("retracted")
+                                    || error.contains("unknown memory note")
+                                {
+                                    this.boss_ui.retracted_memory.insert((
+                                        retract_key,
+                                        bucket,
+                                        note_id,
+                                    ));
+                                } else {
+                                    this.show_toast(tr!("boss.failed", error = error.clone()));
+                                }
+                            } else {
+                                this.show_toast(tr!("boss.failed", error = error.clone()));
+                            }
                         } else {
                             this.show_toast(tr!("boss.failed", error = error.clone()));
                         }
@@ -2653,6 +2734,12 @@ impl Waku {
                         this.boss_ui.queued_memory_feed.take()
                 {
                     this.boss_request(queued_key, operation, BossReply::MemoryFeed, cx);
+                }
+                if !this.boss_ui.pending
+                    && let Some((queued_key, operation)) =
+                        this.boss_ui.queued_memory_retract.pop_front()
+                {
+                    this.boss_request(queued_key, operation, BossReply::MemoryRetract, cx);
                 }
                 cx.notify();
             });
@@ -2846,6 +2933,69 @@ impl Waku {
         );
     }
 
+    /// Whether a transcript memory card's note is gone from its bucket —
+    /// the daemon-settled marker, a retract confirmed this run, or a
+    /// loaded feed that no longer lists the record. A parked feed refresh
+    /// still counts as present: additions waiting behind "New memories
+    /// available" are not proof of removal.
+    pub(super) fn memory_card_removed(
+        &self,
+        key: DaemonKey,
+        card: &waku_protocol::model::MemoryRecordCard,
+    ) -> bool {
+        if self.boss_ui.retracted_memory.contains(&(
+            key,
+            card.bucket_id.clone(),
+            card.note_id.clone(),
+        )) {
+            return true;
+        }
+        let Some(feed) = self.boss_ui.memory_feed.get(&key) else {
+            return false;
+        };
+        // A feed fetched before the note existed cannot testify either
+        // way — only a fetch at or after its record time can call it gone.
+        feed.loaded
+            && feed
+                .refreshed_at
+                .is_some_and(|refreshed| refreshed >= card.created_at)
+            && !feed
+                .records
+                .iter()
+                .chain(feed.pending_refresh.iter())
+                .any(|record| record.bucket_id == card.bucket_id && record.id == card.note_id)
+    }
+
+    /// The memory card's Undo: retract the note from its bucket and settle
+    /// the card in this transcript — `session_id` names the transcript so
+    /// the daemon patches the persisted marker in place.
+    pub(super) fn retract_memory_record(
+        &mut self,
+        session_id: Uuid,
+        card: waku_protocol::model::MemoryRecordCard,
+        cx: &mut Context<Self>,
+    ) {
+        let key = self.daemons.session_owner(session_id);
+        self.boss_ui.pending_memory_retracts.push_back((
+            key,
+            card.bucket_id.clone(),
+            card.note_id.clone(),
+        ));
+        self.boss_request(
+            key,
+            BossOperation::Memory {
+                operation: MemoryOperation::Retract {
+                    bucket: Some(card.bucket_id.clone()),
+                    project: None,
+                    note_id: card.note_id.clone(),
+                    session: Some(session_id),
+                },
+            },
+            BossReply::MemoryRetract,
+            cx,
+        );
+    }
+
     /// Merge one `Feed` reply into the host's browse state. Pure additions
     /// park behind "New memories available" so a row being read never
     /// shifts; removals and rewrites apply immediately — a record the user
@@ -2860,6 +3010,7 @@ impl Waku {
             let feed = self.boss_ui.memory_feed.entry(key).or_default();
             feed.loading = false;
             feed.error = None;
+            feed.refreshed_at = Some(unix_time());
             if !feed.loaded {
                 feed.records = fresh;
                 feed.loaded = true;

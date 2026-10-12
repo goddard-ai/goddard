@@ -4139,15 +4139,18 @@ impl Waku {
         if activities.is_empty() {
             return div().into_any_element();
         }
-        // A `boss_summon` marker lands in the supervisor's transcript when
-        // the daemon completes a summon — it renders as the live employee
-        // card and is lifted out of the activity fold entirely.
+        // `boss_summon` and `memory_record` markers land in the transcript
+        // as daemon-recorded cards — a summon renders the live employee
+        // card, a recorded memory its compact card — and both are lifted
+        // out of the activity fold entirely.
         let summons: Vec<waku_protocol::model::BossSummonCard> =
             activities.iter().filter_map(boss_summon_card).collect();
-        if !summons.is_empty()
-            && activities
-                .iter()
-                .all(|activity| boss_summon_session_id(activity).is_some())
+        let memories: Vec<waku_protocol::model::MemoryRecordCard> =
+            activities.iter().filter_map(memory_record_card).collect();
+        if !activities.is_empty()
+            && activities.iter().all(|activity| {
+                boss_summon_session_id(activity).is_some() || memory_record_card(activity).is_some()
+            })
         {
             return div()
                 .w_full()
@@ -4155,20 +4158,26 @@ impl Waku {
                 .flex()
                 .flex_col()
                 .gap(px(6.0))
-                .children(
-                    summons
-                        .iter()
-                        .map(|card| self.render_summon_card(session_id, card, theme, cx)),
-                )
+                .children(activities.iter().filter_map(|activity| {
+                    if let Some(card) = boss_summon_card(activity) {
+                        Some(self.render_summon_card(session_id, &card, theme, cx))
+                    } else {
+                        memory_record_card(activity)
+                            .map(|card| self.render_memory_card(session_id, &card, theme, cx))
+                    }
+                }))
                 .into_any_element();
         }
         let plain: Vec<ActivityItem>;
-        let activities: &[ActivityItem] = if summons.is_empty() {
+        let activities: &[ActivityItem] = if summons.is_empty() && memories.is_empty() {
             activities
         } else {
             plain = activities
                 .iter()
-                .filter(|activity| boss_summon_session_id(activity).is_none())
+                .filter(|activity| {
+                    boss_summon_session_id(activity).is_none()
+                        && memory_record_card(activity).is_none()
+                })
                 .cloned()
                 .collect();
             &plain
@@ -4279,6 +4288,11 @@ impl Waku {
                     summons
                         .iter()
                         .map(|card| self.render_summon_card(session_id, card, theme, cx)),
+                )
+                .children(
+                    memories
+                        .iter()
+                        .map(|card| self.render_memory_card(session_id, card, theme, cx)),
                 )
                 .into_any_element();
         }
@@ -4847,6 +4861,11 @@ impl Waku {
                     .iter()
                     .map(|card| self.render_summon_card(session_id, card, theme, cx)),
             )
+            .children(
+                memories
+                    .iter()
+                    .map(|card| self.render_memory_card(session_id, card, theme, cx)),
+            )
             .into_any_element()
     }
 
@@ -5067,6 +5086,119 @@ impl Waku {
                     } else {
                         summon_card_preview(commentary, theme, cx)
                     }),
+            )
+            .into_any_element()
+    }
+
+    /// The compact card a `memory_record` transcript marker becomes: the
+    /// note's text clamped to two lines under its bucket label, recorder,
+    /// and age. The card opens the daemon's Memory page; its Undo button
+    /// retracts the note from the bucket — the daemon-settled marker then
+    /// renders the removed state instead.
+    pub(super) fn render_memory_card(
+        &self,
+        owner_session: Uuid,
+        card: &waku_protocol::model::MemoryRecordCard,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let daemon = self.daemons.session_owner(owner_session);
+        let removed = card.retracted || self.memory_card_removed(daemon, card);
+        let age = boss::memory_record_age(unix_time().saturating_sub(card.created_at));
+        let mut provenance = format!("{} · {}", card.bucket, age);
+        if let Some(recorded_by) = card.recorded_by.as_deref().filter(|name| !name.is_empty()) {
+            provenance.push_str(" · ");
+            provenance.push_str(recorded_by);
+        }
+        let card_id = format!("memory-card-{owner_session}-{}", card.note_id);
+        let focus = self.transcript_control_focus(card_id.clone(), cx);
+        let card_surface = theme.surface.blend(theme.overlay.opacity(0.7));
+        let action = if removed {
+            div()
+                .flex_none()
+                .text_size(sp(11.0))
+                .line_height(sp(14.0))
+                .text_color(theme.text_tertiary)
+                .child(tr!("boss.memory_removed"))
+                .into_any_element()
+        } else {
+            let card = card.clone();
+            boss::boss_button(
+                SharedString::from(format!("{card_id}-undo")),
+                tr!("boss.memory_undo"),
+                theme,
+            )
+            .child(tr!("boss.memory_undo"))
+            .on_activation(cx, move |this, _, cx| {
+                this.retract_memory_record(owner_session, card.clone(), cx);
+            })
+            .into_any_element()
+        };
+        div()
+            .id(SharedString::from(card_id))
+            .track_focus(&focus)
+            .tab_index(0)
+            .w_full()
+            .min_w_0()
+            .overflow_hidden()
+            .rounded(px(11.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(card_surface)
+            .px(px(10.0))
+            .py(px(8.0))
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .cursor_pointer()
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .hover(|style| style.bg(theme.surface.blend(theme.overlay)))
+            .aria_label(tr!("boss.memory_card_label", bucket = card.bucket.clone()))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_boss_page(daemon, boss::BossTab::Memory, window, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.open_boss_page(daemon, boss::BossTab::Memory, window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(icon("icons/brain.svg", 11.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(11.0))
+                            .line_height(sp(14.0))
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from(provenance)),
+                    )
+                    .child(action),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .text_size(sp(12.5))
+                    .line_height(sp(15.0))
+                    .text_color(if removed {
+                        theme.text_tertiary
+                    } else {
+                        theme.text_secondary
+                    })
+                    .whitespace_normal()
+                    .line_clamp(2)
+                    .text_overflow(gpui::TextOverflow::Truncate("...".into()))
+                    .overflow_hidden()
+                    .child(SharedString::from(card.text.clone())),
             )
             .into_any_element()
     }
@@ -5570,6 +5702,20 @@ pub(super) fn boss_summon_card(
 /// `None` for every ordinary activity item.
 pub(super) fn boss_summon_session_id(activity: &ActivityItem) -> Option<Uuid> {
     boss_summon_card(activity).map(|card| card.session_id)
+}
+
+/// The recorded note a `memory_record` marker activity carries in
+/// `arguments` — `None` for every ordinary activity item.
+pub(super) fn memory_record_card(
+    activity: &ActivityItem,
+) -> Option<waku_protocol::model::MemoryRecordCard> {
+    if activity.tool_name.as_deref() != Some(waku_protocol::model::MEMORY_RECORD_TOOL_NAME) {
+        return None;
+    }
+    activity
+        .arguments
+        .as_deref()
+        .and_then(waku_protocol::model::MemoryRecordCard::parse)
 }
 
 fn decode_activity_image(image_url: &str) -> Option<std::sync::Arc<gpui::Image>> {

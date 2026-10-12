@@ -15,7 +15,18 @@ import type { Project } from "./Project";
 import type { SummonAdmission } from "./SummonAdmission";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type BossResult = { "type": "planRejected", error: PlanContractError, } | { "type": "planPreview", reviewed: PlanReview, content: string, } | { "type": "state", state: BossState, } | { "type": "roster", roster: string, } | { "type": "context", context: string, } | { "type": "automations", state: AutomationsState, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "session", session: AgentSession, project: Project, } | { "type": "browse", sessionId: string, url: string, title: string | null, } | { "type": "planFinalized", sessionId: string, planFile: string, finalizedAt: number, } | { "type": "terminalRequested", title: string, cwd: string, } | { "type": "summoned", sessionId: string, state: EmployeeLifecycle, admission?: SummonAdmission, } | { "type": "resourcePolicySet", policy: BossResourcePolicy, } | { "type": "transcript", transcript: AgentSessionTranscript, } | { "type": "historySearch", result: AgentHistorySearchResult, } | { "type": "personaDefaults", defaults: Array<PersonaDefaultInfo>, } | { "type": "speak", delivered: number, } | { "type": "eval", value: JsonValue, output: string, } | { "type": "memory", buckets: Array<JsonValue>, overview?: JsonValue | null, notes: Array<JsonValue>, compression?: JsonValue | null, recorded?: JsonValue | null, bucket?: string | null, migration?: MemoryMigrationReport | null,
+export type BossResult = { "type": "planRejected", error: PlanContractError, } | { "type": "planPreview", reviewed: PlanReview, content: string, } | { "type": "state", state: BossState, } | { "type": "roster", roster: string, } | { "type": "context", context: string, } | { "type": "automations", state: AutomationsState, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "session", session: AgentSession, project: Project, } | { "type": "browse", sessionId: string, url: string, title: string | null, } | { "type": "planFinalized", sessionId: string, planFile: string, finalizedAt: number, } | { "type": "terminalRequested", title: string, cwd: string, } | { "type": "summoned", sessionId: string, state: EmployeeLifecycle, admission?: SummonAdmission, } | { "type": "resourcePolicySet", policy: BossResourcePolicy, } | { "type": "transcript", transcript: AgentSessionTranscript, } | { "type": "historySearch", result: AgentHistorySearchResult, } | { "type": "personaDefaults", defaults: Array<PersonaDefaultInfo>, } | { "type": "speak", delivered: number, } | { "type": "eval", value: JsonValue, output: string, } | { "type": "memory", buckets: Array<JsonValue>, overview?: JsonValue | null, notes: Array<JsonValue>, compression?: JsonValue | null, recorded?: JsonValue | null,
+/**
+ * The `Retract` operation's removed note — `None` for every other
+ * memory operation.
+ */
+retracted?: JsonValue | null, bucket?: string | null,
+/**
+ * The resolved bucket's display name — `Some` whenever `bucket`
+ * names a known bucket. Transcript memory cards freeze it so the
+ * row still labels correctly after a rename.
+ */
+bucketName?: string | null, migration?: MemoryMigrationReport | null,
 /**
  * The `Feed` operation's page — `{"records": [...]}` of decorated
  * notes. `None` for every other memory operation.

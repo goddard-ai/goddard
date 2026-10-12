@@ -3369,6 +3369,22 @@ pub enum MemoryOperation {
         start: u64,
         end: u64,
     },
+    /// Remove one recorded note from its bucket — the transcript memory
+    /// card's undo. The note's sequence slot is preserved so summary
+    /// ranges keep resolving; the record stops appearing in overview,
+    /// scan, zoom, and the feed. `session` optionally names the transcript
+    /// holding the note's memory card, so the daemon can settle that
+    /// marker to its removed state; callers without a transcript context
+    /// omit it.
+    Retract {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bucket: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
+        note_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<Uuid>,
+    },
     /// Every original note across the caller's visible buckets, newest
     /// first, decorated with its bucket label and resolved project
     /// association — the unified Memory Records feed. Read-only: it
@@ -3527,8 +3543,17 @@ pub enum BossResult {
         compression: Option<serde_json::Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         recorded: Option<serde_json::Value>,
+        /// The `Retract` operation's removed note — `None` for every other
+        /// memory operation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retracted: Option<serde_json::Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bucket: Option<String>,
+        /// The resolved bucket's display name — `Some` whenever `bucket`
+        /// names a known bucket. Transcript memory cards freeze it so the
+        /// row still labels correctly after a rename.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bucket_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         migration: Option<MemoryMigrationReport>,
         /// The `Feed` operation's page — `{"records": [...]}` of decorated

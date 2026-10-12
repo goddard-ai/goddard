@@ -1711,7 +1711,7 @@ pub(super) fn folded_transcript_row_kinds(
 fn is_boss_transcript_card(activity: &crate::model::ActivityItem) -> bool {
     matches!(
         activity.tool_name.as_deref(),
-        Some(crate::model::BOSS_SUMMON_TOOL_NAME)
+        Some(crate::model::BOSS_SUMMON_TOOL_NAME) | Some(crate::model::MEMORY_RECORD_TOOL_NAME)
     )
 }
 

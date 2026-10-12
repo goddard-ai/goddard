@@ -1810,6 +1810,109 @@ fn task_agent_memory_ops_scope_to_the_task_project() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// A successful `record` leaves a `memory_record` marker in the caller's
+/// transcript, and a `Retract` naming that transcript settles the same
+/// marker to its removed state while the note leaves the bucket.
+#[test]
+fn a_memory_record_posts_a_transcript_card_that_retract_settles() {
+    let root = std::env::temp_dir().join(format!("waku-memory-card-{}", Uuid::new_v4()));
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let store = StateStore::daemon(root.join("app.db"));
+    let mut state = PersistedState::fresh(repo.clone());
+    state.sessions[0].begin_turn("seed");
+    state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+    let session_id = state.sessions[0].id;
+    store.save(&mut state).unwrap();
+    let backend = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        store,
+    )
+    .unwrap();
+    use waku_protocol::boss::{BossOperation, BossResult, MemoryNoteKind, MemoryOperation};
+
+    let BossResult::Memory {
+        recorded: Some(note),
+        ..
+    } = backend
+        .handle_boss_operation(
+            Some(session_id),
+            BossOperation::Memory {
+                operation: MemoryOperation::Record {
+                    bucket: None,
+                    project: None,
+                    kind: MemoryNoteKind::Fact,
+                    text: "the release freeze lands on Fridays".into(),
+                    retry_key: "freeze-1".into(),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("record returns the note")
+    };
+    let note_id = note["id"].as_str().unwrap().to_owned();
+
+    let marker_card = || {
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        let marker = session
+            .transcript_blocks
+            .iter()
+            .flat_map(|block| &block.activities)
+            .find(|activity| {
+                activity.tool_name.as_deref() == Some(waku_protocol::model::MEMORY_RECORD_TOOL_NAME)
+            })
+            .expect("record posts a memory card marker");
+        waku_protocol::model::MemoryRecordCard::parse(marker.arguments.as_deref().unwrap())
+            .expect("marker arguments carry the card")
+    };
+    let card = marker_card();
+    assert_eq!(card.text, "the release freeze lands on Fridays");
+    assert!(!card.retracted);
+
+    backend
+        .handle_boss_operation(
+            Some(session_id),
+            BossOperation::Memory {
+                operation: MemoryOperation::Retract {
+                    bucket: None,
+                    project: None,
+                    note_id: note_id.clone(),
+                    session: Some(session_id),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+
+    // The persisted marker settles in place — the open transcript reads
+    // removed without a reload — and the note is out of the bucket.
+    assert!(marker_card().retracted);
+    let BossResult::Memory {
+        feed: Some(feed), ..
+    } = backend
+        .handle_boss_operation(
+            Some(session_id),
+            BossOperation::Memory {
+                operation: MemoryOperation::Feed,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("feed returns the records page")
+    };
+    assert!(feed["records"].as_array().unwrap().is_empty());
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn boss_prompts_carry_the_header_and_a_pending_verdict_upgrades_to_the_digest() {
     let root = std::env::temp_dir().join(format!("waku-boss-header-{}", Uuid::new_v4()));
