@@ -46,6 +46,7 @@ disabled or that a model follows the delivered instructions.
 | Stale attempt fenced when retirement wins on another thread | `plan_acceptance_concurrent_retirement_fences_stale_attempt` |
 | Implementation attachments withheld, persisted, delivered exactly once | `plan_acceptance_attachments_reach_the_execution_input_exactly_once` |
 | Settled input turn counts as acceptance; failed settle holds as unconfirmed | 2 rows in `plan_acceptance_settled_input_turn_also_counts_as_acceptance` |
+| Intentional interrupt while acceptance is uncertain holds; post-delivery interrupt is ordinary cancellation | 2 rows in `plan_acceptance_intentional_interrupt_mid_submission_holds_uncertain_input` |
 | Codex/Devin × direct/worktree-path/cross-project × success/unconfirmed delivery/launch failure/auth revoked during launch/provider switch/workspace switch | 36 rows in `plan_acceptance_provider_workspace_and_launch_fault_matrix` |
 | Ordinary no-plan Codex/Devin, employee/unmanaged | 4 rows in `plan_acceptance_ordinary_no_plan_work_keeps_unstaged_dispatch` |
 | Real daemon restart redelivers recovered briefs, legacy reviewing-phase records recover without fresh approval, grant retirement, provider event pump | `plan_delivery_runtime_delivers_before_execution_and_recovers_exact_revision` |
@@ -60,7 +61,7 @@ one with `supervisor_notified_at`. The daemon replay test also counts exactly on
 supervisor queued/transcript message. None of these checks means a human read the
 notice or validates rendered UI visibility.
 
-The verified run on macOS after the verified-delivery contract reported 47 Rust
+The verified run on macOS after the verified-delivery contract reported 48 Rust
 tests passed, zero failed and zero ignored, including 36 required-plan runtime
 matrix rows and four ordinary work rows. These totals include the existing A/B/C
 tests.

@@ -266,6 +266,34 @@ fn plan_acceptance_attachments_reach_the_execution_input_exactly_once() {
 }
 
 #[test]
+fn plan_acceptance_intentional_interrupt_mid_submission_holds_uncertain_input() {
+    // An intentional stop while the submitted input's acceptance is unknown
+    // holds the attempt rather than risking an overlapping redispatch; the
+    // withheld brief stays durable for a fresh attempt's verified redelivery.
+    let fixture = Fixture::new("approved bytes");
+    fixture.gate.submit(BRIEF.into(), Vec::new());
+    fixture.gate.interrupt_delivery();
+    assert!(!fixture.gate.delivered());
+    assert_eq!(
+        fixture.gate.review.lock().receipt.phase,
+        Phase::Blocked
+    );
+    let stored = fixture.stored();
+    assert_eq!(stored.receipt.phase, Phase::Blocked);
+    assert_eq!(stored.withheld[0].0, BRIEF);
+    fixture.gate.submit("RETRY_SENTINEL".into(), Vec::new());
+    assert_eq!(mutations(&fixture), 1);
+    // Interrupting after verified acceptance is ordinary cancellation — the
+    // delivered marker and cleared withheld state are unaffected.
+    let fixture = Fixture::new("approved bytes");
+    fixture.gate.submit(BRIEF.into(), Vec::new());
+    fixture.accept();
+    fixture.gate.interrupt_delivery();
+    assert!(fixture.gate.delivered());
+    assert!(fixture.stored().withheld.is_empty());
+}
+
+#[test]
 fn plan_acceptance_settled_input_turn_also_counts_as_acceptance() {
     // An adapter that settles the submitted turn without a start signal still
     // delivered the input; a failed settle is uncertainty and holds.
