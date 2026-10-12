@@ -1,0 +1,1 @@
+- Fixed text selection in agent responses containing tables: dragging inside a table cell no longer collapses the selection or snaps it to the row's first cell, so a short span inside a single cell selects as expected.

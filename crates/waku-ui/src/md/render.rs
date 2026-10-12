@@ -2787,32 +2787,42 @@ fn layout_missing(layout: &TextLayout) -> bool {
 }
 
 /// The registry entry containing `position`, else the nearest by vertical
-/// distance so a drag through a gutter or between blocks clamps sensibly.
+/// then horizontal distance so a drag through a gutter or between blocks
+/// clamps sensibly. The horizontal tiebreak matters wherever elements sit
+/// side by side — table cells share a row's vertical band, so a y-only scan
+/// would always hand the drag's head to the row's first cell.
 fn registry_point(
     registry: &SelectionRegistry<TextGeometry>,
     position: Point<Pixels>,
 ) -> Option<(usize, usize)> {
-    let mut best: Option<(usize, f32)> = None;
+    let mut best: Option<(usize, f32, f32)> = None;
     for (index, entry) in registry.entries().iter().enumerate() {
         if entry.geometry.is_missing() {
             continue;
         }
         let bounds = entry.geometry.bounds();
-        let distance = if position.y < bounds.top() {
+        let distance_y = if position.y < bounds.top() {
             f32::from(bounds.top() - position.y)
         } else if position.y > bounds.bottom() {
             f32::from(position.y - bounds.bottom())
         } else {
             0.0
         };
-        if best.is_none_or(|(_, best)| distance < best) {
-            best = Some((index, distance));
+        let distance_x = if position.x < bounds.left() {
+            f32::from(bounds.left() - position.x)
+        } else if position.x > bounds.right() {
+            f32::from(position.x - bounds.right())
+        } else {
+            0.0
+        };
+        if best.is_none_or(|(_, best_y, best_x)| (distance_y, distance_x) < (best_y, best_x)) {
+            best = Some((index, distance_y, distance_x));
         }
-        if distance == 0.0 {
+        if distance_y == 0.0 && distance_x == 0.0 {
             break;
         }
     }
-    let (index, _) = best?;
+    let (index, ..) = best?;
     let offset = match registry.entries()[index]
         .geometry
         .index_for_position(position)
@@ -5380,6 +5390,134 @@ mod tests {
         assert!(
             rects.iter().all(|rect| rect.left() == left),
             "a full selection must include each wrapped row's first glyph: {rects:?}"
+        );
+    }
+
+    struct SelectionHarness {
+        markdown: MarkdownView,
+        selection: TranscriptSelection,
+    }
+
+    impl gpui::Render for SelectionHarness {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            let palette = palette();
+            let ctx = Ctx::new(
+                "selection-test",
+                &palette,
+                Metrics::BODY,
+                self.selection.clone(),
+            );
+            let selection = self.selection.clone();
+            div()
+                .w(px(500.0))
+                .flex()
+                .flex_col()
+                .child(frame_reset(self.selection.clone()))
+                .children(markdown(&self.markdown, &ctx))
+                .child(
+                    canvas(
+                        |bounds, window, _| {
+                            window
+                                .insert_hitbox(bounds, gpui::HitboxBehavior::Normal)
+                                .id
+                        },
+                        move |_, region, window, _| {
+                            install_selection_input(region, window, &selection, None)
+                        },
+                    )
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+                )
+        }
+    }
+
+    /// A drag inside one visual row of one element must select just the
+    /// touched span — not the element from its start.
+    #[gpui::test]
+    fn drag_within_a_single_line_selects_only_the_touched_span(cx: &mut TestAppContext) {
+        let mut markdown = MarkdownView::new();
+        markdown.set_text(
+            "first paragraph with some words in it\n\nsecond paragraph here too",
+            false,
+        );
+        let (view, cx) = cx.add_window_view(|_, _| SelectionHarness {
+            markdown,
+            selection: TranscriptSelection::default(),
+        });
+        cx.run_until_parked();
+
+        let (key, start, end) = view.read_with(cx, |view, _| {
+            let registry = view.selection.registry.borrow();
+            let entry = &registry.entries()[1];
+            let bounds = entry.geometry.bounds();
+            let y = (bounds.top() + bounds.bottom()) / 2.0;
+            (
+                entry.key.clone(),
+                point(bounds.left() + px(10.0), y),
+                point(bounds.left() + px(40.0), y),
+            )
+        });
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::none());
+        cx.simulate_mouse_move(end, Some(MouseButton::Left), gpui::Modifiers::none());
+        let spans = view.read_with(cx, |view, _| {
+            view.selection.selection.borrow().spans().to_vec()
+        });
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].key, key);
+        assert!(spans[0].range.start > 0, "span began at the element start");
+        assert!(
+            spans[0].range.end < spans[0].text.len(),
+            "span ran to the element end"
+        );
+    }
+
+    /// Table cells share a visual row: the drag's head must resolve to the
+    /// cell under the pointer, not the first cell on that row.
+    #[gpui::test]
+    fn drag_inside_a_table_cell_selects_within_that_cell(cx: &mut TestAppContext) {
+        let mut markdown = MarkdownView::new();
+        markdown.set_text(
+            "| aaa bbb | ccc ddd |\n| --- | --- |\n| eee fff | ggg hhh |",
+            false,
+        );
+        let (view, cx) = cx.add_window_view(|_, _| SelectionHarness {
+            markdown,
+            selection: TranscriptSelection::default(),
+        });
+        cx.run_until_parked();
+
+        // Last body cell: the bottom-most registered entry.
+        let (key, start, end) = view.read_with(cx, |view, _| {
+            let registry = view.selection.registry.borrow();
+            let entry = registry.entries().last().unwrap();
+            let bounds = entry.geometry.bounds();
+            let y = (bounds.top() + bounds.bottom()) / 2.0;
+            (
+                entry.key.clone(),
+                point(bounds.left() + px(4.0), y),
+                point(bounds.left() + px(30.0), y),
+            )
+        });
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::none());
+        cx.simulate_mouse_move(end, Some(MouseButton::Left), gpui::Modifiers::none());
+        let spans = view.read_with(cx, |view, _| {
+            view.selection
+                .selection
+                .borrow()
+                .spans()
+                .iter()
+                .map(|span| (span.key.clone(), span.range.clone()))
+                .collect::<Vec<_>>()
+        });
+        let [(span_key, range)] = spans.as_slice() else {
+            panic!("expected a single in-cell span, got {spans:?}");
+        };
+        assert_eq!(*span_key, key, "{spans:?}");
+        assert!(
+            range.end - range.start < 7,
+            "whole cell selected: {spans:?}"
         );
     }
 
