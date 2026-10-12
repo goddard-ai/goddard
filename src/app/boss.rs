@@ -641,6 +641,10 @@ pub(super) struct BossUi {
         HashMap<Uuid, (DaemonKey, ProviderKind, String, Option<String>)>,
     pub recent: HashMap<DaemonKey, Vec<Uuid>>,
     pub sidebar_idle_visible: HashMap<DaemonKey, usize>,
+    /// The Errands group's own finished-employee reveal count — the same
+    /// "name finished ago" fold as `sidebar_idle_visible`, kept per section
+    /// so one group's expansion never reveals the other's tail.
+    pub sidebar_errand_idle_visible: HashMap<DaemonKey, usize>,
     /// The deliverable a sidebar click armed the composer with: the next main-
     /// composer submission commands the boss with this file attached.
     /// Cleared by a send or any landing that is not re-arming it — the
@@ -793,6 +797,7 @@ impl Default for BossUi {
             queued_model_targets: HashMap::new(),
             recent: HashMap::new(),
             sidebar_idle_visible: HashMap::new(),
+            sidebar_errand_idle_visible: HashMap::new(),
             command_deliverable: None,
             pending_deliverable: None,
             deliverable_page: None,
@@ -4555,6 +4560,9 @@ impl Waku {
                 &theme,
                 detail_provider,
             ))
+            // The flagged employee wears the same unread dot its folded
+            // group header does — boss-flagged attention is the only
+            // "unread" an employee row carries.
             .when(attention_unread, |row| {
                 row.child(
                     div()
@@ -4564,13 +4572,8 @@ impl Waku {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_size(px(8.0))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(theme.text)
                         .tooltip(Tooltip::text(tr!("boss.employee_needs_attention")))
-                        .bg(theme.info)
-                        .rounded_full()
-                        .child("!"),
+                        .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
                 )
             })
             .when_some(status_indicator, |row, indicator| {

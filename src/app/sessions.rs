@@ -837,8 +837,16 @@ impl Waku {
             self.flush_pending_boss_speech_for(key, cx);
             // Every landing on a boss chat — sidebar click, project
             // switcher, open intent, history navigation — folds a
-            // finished-employee list the user expanded back down.
-            if self.boss_ui.sidebar_idle_visible.remove(&key).is_some() {
+            // finished-employee list the user expanded back down, and puts
+            // the Errands group itself away.
+            let mut folds_changed = self.boss_ui.sidebar_idle_visible.remove(&key).is_some();
+            folds_changed |= self
+                .boss_ui
+                .sidebar_errand_idle_visible
+                .remove(&key)
+                .is_some();
+            folds_changed |= self.sidebar_collapsed_groups.insert(SidebarGroup::Errands);
+            if folds_changed {
                 self.sidebar_rows_fingerprint.set(None);
             }
         }

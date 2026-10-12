@@ -1085,6 +1085,7 @@ pub enum PersistedSidebarGroup {
     Terminals,
     Dormant,
     Errands,
+    Outcomes,
     Planning,
     Date(usize),
     Project(Uuid),
