@@ -427,6 +427,16 @@ impl WakuBackend {
     ) -> anyhow::Result<bool> {
         let lifecycle = self.runtime_lifecycles.session(employee.session_id);
         let _owner = lifecycle.lock();
+        // Scheduler heads are snapshots taken before acquiring this lock.
+        // A queued setModel can have committed a new selection meanwhile.
+        // Admission and launch must use the same authoritative ticket.
+        let Some(employee) = self.boss.employee(employee.session_id) else {
+            return Ok(false);
+        };
+        if employee.lifecycle() != waku_protocol::boss::EmployeeLifecycle::Queued {
+            return Ok(false);
+        }
+        let employee = &employee;
         let Some(ticket) = employee.ticket.clone() else {
             return Ok(false);
         };
@@ -1663,6 +1673,8 @@ impl WakuBackend {
         action: waku_protocol::boss::EmployeeControl,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         use waku_protocol::boss::{BossResult, EmployeeControl};
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let _owner = lifecycle.lock();
         match action {
             EmployeeControl::Prompt { prompt, delivery } => {
                 if prompt.trim().is_empty() {
@@ -1810,8 +1822,8 @@ impl WakuBackend {
     /// re-enters admission against the new pool and a fresh generation's
     /// runtime launches on the ticket's values; a same-pair change asks
     /// the live driver to retune and only falls back to requeue when the
-    /// driver refuses mid-turn. Expired records refuse — a prompt or
-    /// steer revives first.
+    /// driver refuses mid-turn. Expired records apply the selection on
+    /// their new admission ticket before any runtime can resume.
     pub(super) fn control_employee_model(
         &self,
         caller: Option<Uuid>,
@@ -1823,17 +1835,40 @@ impl WakuBackend {
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let _owner = lifecycle.lock();
-        if self.boss.employee(session_id).is_some_and(|e| e.expired)
+        let was_expired = self.boss.employee(session_id).is_some_and(|e| e.expired)
             || self
                 .boss
                 .document()
                 .retired_employees
                 .iter()
-                .any(|e| e.session_id == session_id)
-        {
-            bail!("employee has expired; prompt or steer can resume it");
-        }
+                .any(|e| e.session_id == session_id);
         let (model_id, effort) = self.validate_employee_model(provider, model, reasoning_effort)?;
+        if was_expired {
+            // Requeue owns role, chain and adopted-worktree validation.
+            // Selection and continuation commit in the same ticket update;
+            // waking admission can never launch the previous selection.
+            let cause = self
+                .boss
+                .employee_including_retired(session_id)
+                .and_then(|employee| employee.expiry.map(|expiry| expiry.cause))
+                .unwrap_or(waku_protocol::boss::ExpiryCause::Finished);
+            self.requeue_employee(session_id, |ticket, started| {
+                ticket.provider = provider;
+                ticket.model = model_id.clone();
+                ticket.reasoning_effort = effort.clone();
+                if started {
+                    ticket.prompt.clear();
+                    ticket.pending_prompts.push(format!(
+                        "Your supervisor changed your model configuration to {} {model_id}. \
+                         Verify the state of your partial work and continue where it left off.",
+                        provider.display_name(),
+                    ));
+                }
+                ticket.resume_count = ticket.resume_count.saturating_add(1);
+                ticket.last_resumed_cause = Some(cause);
+            })?;
+            return Ok(waku_protocol::boss::BossResult::Saved);
+        }
         let (current, runtime_mode) = {
             let state = self.task_state.lock();
             let session = state

@@ -9880,6 +9880,199 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
 /// `setModel` rejects what the catalog cannot serve — an unlisted model
 /// and an effort the model does not support — before touching anything.
 #[test]
+fn setmodel_dispatch_uses_the_current_ticket_after_a_script_switch() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeLifecycle};
+    let root = std::env::temp_dir().join(format!("stale-model-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 1);
+    let BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "queued switch",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected summon")
+    };
+    // Scheduler has copied the old queued head; switch commits before it
+    // acquires the lifecycle lock. Both pools remain closed for the switch.
+    let stale = backend.boss.employee(session_id).unwrap();
+    set_model_policy(&backend, ProviderKind::Claude, "claude-opus-4-5", 0, 1);
+    backend.handle_boss_operation(Some(boss), BossOperation::Eval {
+        script: format!("control(\"{session_id}\", #{{type: \"setModel\", provider: \"claude\", model: \"claude-opus-4-5\"}})"),
+    }, &EventSink::detached()).unwrap();
+    // Old pool has capacity now; it must not admit or launch the old head.
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    assert!(!backend.dispatch_queued_head(&stale).unwrap());
+    let current = backend.boss.employee(session_id).unwrap();
+    assert_eq!(current.lifecycle(), EmployeeLifecycle::Queued);
+    assert_eq!(
+        current.ticket.as_ref().unwrap().provider,
+        ProviderKind::Claude
+    );
+    assert!(!backend.sessions.lock().contains_key(&session_id));
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn setmodel_recovers_an_expired_employee_atomically() {
+    use waku_protocol::boss::{BossOperation, EmployeeControl, EmployeeLifecycle};
+    for provider in [ProviderKind::Codex, ProviderKind::Claude] {
+        let root = std::env::temp_dir().join(format!("expired-model-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "recover",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap_err();
+        let session_id = backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id != boss)
+            .unwrap()
+            .id;
+        {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|s| s.id == session_id)
+                .unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            session.begin_turn("preserve this assignment");
+            session.provider_cursor = Some(ProviderResumeCursor::Codex {
+                thread_id: "old-thread".into(),
+            });
+            backend.task_store.save(&mut state).unwrap();
+        }
+        let before = backend.boss.employee(session_id).unwrap();
+        assert!(before.expired);
+        let control = |model: &str, effort: Option<String>| {
+            backend.handle_boss_operation(
+                Some(boss),
+                BossOperation::Control {
+                    session_id,
+                    action: EmployeeControl::SetModel {
+                        provider,
+                        model: model.into(),
+                        reasoning_effort: effort,
+                    },
+                },
+                &EventSink::detached(),
+            )
+        };
+        assert!(control("no-such-model", None).is_err());
+        let model = if provider == ProviderKind::Codex {
+            "gpt-5.5"
+        } else {
+            "claude-opus-4-5"
+        };
+        assert!(control(model, Some("light-speed".into())).is_err());
+        let unchanged = backend.boss.employee(session_id).unwrap();
+        assert!(unchanged.expired);
+        assert_eq!(
+            unchanged.ticket.as_ref().unwrap().generation,
+            before.ticket.as_ref().unwrap().generation
+        );
+        assert!(!backend.sessions.lock().contains_key(&session_id));
+        set_model_policy(&backend, provider, model, 0, 1);
+        let requested_effort = (provider == ProviderKind::Codex).then(|| "high".to_owned());
+        let (_, effort) = backend
+            .validate_employee_model(provider, model, requested_effort)
+            .unwrap();
+        if provider == ProviderKind::Claude {
+            backend.handle_boss_operation(Some(boss), BossOperation::Eval {
+                script: format!("control(\"{session_id}\", #{{type: \"setModel\", provider: \"claude\", model: \"{model}\"}})"),
+            }, &EventSink::detached()).unwrap();
+        } else {
+            control(model, effort.clone()).unwrap();
+        }
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+        let ticket = employee.ticket.as_ref().unwrap();
+        assert_eq!(ticket.provider, provider);
+        assert_eq!(ticket.model, model);
+        assert_eq!(ticket.reasoning_effort, effort);
+        assert_eq!(
+            ticket.generation,
+            before.ticket.as_ref().unwrap().generation + 1
+        );
+        assert_eq!(ticket.resume_count, 1);
+        assert!(ticket.prompt.is_empty());
+        assert_eq!(ticket.pending_prompts.len(), 1);
+        assert!(!ticket.blocked_by.is_empty());
+        assert!(!backend.sessions.lock().contains_key(&session_id));
+        let capture = Arc::new(CaptureDriver::default());
+        set_model_policy(&backend, provider, model, 1, 1);
+        backend.sessions.lock().insert(
+            session_id,
+            RuntimeEntry {
+                plan_gate: None,
+                runtime_id: Uuid::new_v4(),
+                driver: DriverHandle::from_control(capture.clone()),
+                last_active: std::time::Instant::now(),
+                resumable: true,
+                computer_use_available: false,
+                provider,
+                cwd: root.clone(),
+            },
+        );
+        // A stale scheduler snapshot is harmless after the first dispatch.
+        assert!(backend.dispatch_queued_head(&employee).unwrap());
+        assert!(!backend.dispatch_queued_head(&employee).unwrap());
+        assert_eq!(capture.prompts.lock().len(), 1);
+        assert!(capture.prompts.lock()[0].contains("Verify the state"));
+        let state = backend.task_state.lock();
+        let session = state.sessions.iter().find(|s| s.id == session_id).unwrap();
+        assert_eq!(session.provider, provider);
+        assert_eq!(session.model.as_deref(), Some(model));
+        assert_eq!(session.reasoning_effort, effort);
+        assert!(
+            session
+                .messages
+                .iter()
+                .any(|m| m.content.contains("preserve this assignment"))
+        );
+        if provider == ProviderKind::Codex {
+            assert!(matches!(
+                session.provider_cursor,
+                Some(ProviderResumeCursor::Codex { .. })
+            ));
+        } else {
+            assert!(session.provider_cursor.is_none());
+            assert!(
+                session
+                    .suspended_provider_sessions
+                    .iter()
+                    .any(|s| s.provider == ProviderKind::Codex)
+            );
+        }
+        drop(state);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[test]
 fn setmodel_validates_the_selection_before_reconfiguring() {
     use waku_protocol::boss::{BossOperation, BossResult, EmployeeControl, EmployeeLifecycle};
     let root = std::env::temp_dir().join(format!("summon-setmodel-bad-{}", Uuid::new_v4()));

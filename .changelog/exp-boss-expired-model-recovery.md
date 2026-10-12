@@ -1,0 +1,1 @@
+- Switching a finished or failed Boss employee’s model now resumes its existing assignment through capacity admission with the selected provider, model, and effort.
