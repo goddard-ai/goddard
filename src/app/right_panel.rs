@@ -2269,12 +2269,12 @@ enum BossOutcomeItem {
         focus: FocusHandle,
     },
     Row(Arc<BossOutcomePanelRow>),
-    /// An expanded outcome's employee — one recorded assignment attempt
+    /// An expanded outcome's current assignment — one per session,
     /// painted with the shared employee card the Employees tab uses.
     Employee(Arc<boss::BossEmployeeRow>),
-    /// A note line nested under an expanded outcome — the conflict,
-    /// handoff, wait, or empty marker — the item's own height keeps the
-    /// list's uniform geometry.
+    /// A line nested under an expanded outcome — an earlier attempt's
+    /// history, the conflict, handoff, wait, or empty marker — the
+    /// item's own height keeps the list's uniform geometry.
     Entry(Arc<BossOutcomeEntry>),
     HistoryToggle {
         older_count: usize,
@@ -4459,6 +4459,83 @@ mod tests {
             !failure.aria.starts_with("Open conversation"),
             "an unknown conversation does not promise navigation"
         );
+    }
+
+    /// A session's retries collapse to one card: the newest generation —
+    /// and anything still in flight — keeps `current`; earlier settled
+    /// generations compress into quiet history lines that still carry
+    /// the verdict, the recorded cause, and the stamp.
+    #[test]
+    fn outcome_attempt_history_collapses_to_lines() {
+        use waku_protocol::boss::{
+            AssignmentSettle, AssignmentVerdict, ExpiryCause, OutcomeState,
+        };
+        let now = 1_000u64;
+        let session_id = Uuid::new_v4();
+        let other = Uuid::new_v4();
+
+        let mut row = outcome_row(OutcomeState::Open, Vec::new());
+        // Two settled generations of one session — the retry history the
+        // expanded outcome used to paint as two full cards.
+        let mut first = outcome_assignment(session_id, 1);
+        first.settled = Some(AssignmentSettle {
+            verdict: AssignmentVerdict::Failed,
+            cause: Some(ExpiryCause::ExitedMidTurn),
+            blocked: false,
+            at: Some(940),
+        });
+        let mut second = outcome_assignment(session_id, 2);
+        second.settled = Some(AssignmentSettle {
+            verdict: AssignmentVerdict::Cancelled,
+            cause: None,
+            blocked: false,
+            at: Some(980),
+        });
+        // An unsettled attempt elsewhere stays a card.
+        let running = outcome_assignment(other, 1);
+        row.outcome.assignments = vec![first, second, running];
+
+        let sessions: HashMap<Uuid, &AgentSession> = HashMap::new();
+        let queued: HashMap<Uuid, String> = HashMap::new();
+        let fields = boss_outcome_employee_fields(&row, &sessions, &queued);
+        assert_eq!(fields.len(), 3);
+        let by_generation = |session: Uuid, generation: u64| {
+            fields
+                .iter()
+                .find(|fields| {
+                    fields.session_id == session
+                        && fields.key.ends_with(&format!(":{generation}"))
+                })
+                .unwrap()
+        };
+        assert!(!by_generation(session_id, 1).current);
+        assert!(by_generation(session_id, 2).current);
+        assert!(by_generation(other, 1).current);
+
+        let history = boss_outcome_attempt_entry(by_generation(session_id, 1), now);
+        assert_eq!(
+            history.title,
+            format!(
+                "{} — {}",
+                tr!("boss.goals_entry_unavailable"),
+                tr!("boss.goals_status_failed")
+            )
+        );
+        assert!(
+            history.detail.contains("provider exited mid-turn"),
+            "{}",
+            history.detail
+        );
+        assert!(
+            history
+                .detail
+                .contains(&sidebar::format_time_ago(now - 940)),
+            "{}",
+            history.detail
+        );
+        assert_eq!(history.session, Some(session_id));
+        assert!(!history.destination);
+        assert_eq!(history.icon, "icons/x-bold.svg");
     }
 
     /// The expanded view's member joins and note lines: two running
@@ -12320,92 +12397,99 @@ impl Waku {
         }
     }
 
-    /// An expanded outcome's employee rows — `boss_outcome_employee_fields`
+    /// An expanded outcome's assignment rows — `boss_outcome_employee_fields`
     /// supplies the derivable parts; this adds what only the view knows:
-    /// the face, project, plan chips, and the status slot's color.
-    fn prepare_boss_outcome_employees(
+    /// the face, project, plan chips, and the status slot's color. Only
+    /// each session's current attempt keeps the shared employee card;
+    /// every earlier attempt compresses into a one-line history entry so
+    /// a retried outcome cannot fill the panel with repeating cards.
+    fn prepare_boss_outcome_assignments(
         &self,
         row: &boss::BossOutcomeRow,
         key: waku_client::DaemonKey,
         sessions: &HashMap<Uuid, &AgentSession>,
         now: u64,
         cx: &App,
-    ) -> Vec<boss::BossEmployeeRow> {
+    ) -> (Vec<boss::BossEmployeeRow>, Vec<BossOutcomeEntry>) {
         let theme = Theme::current(cx);
-        boss_outcome_employee_fields(row, sessions, &self.boss_ui.queued)
-            .into_iter()
-            .map(|fields| {
-                let member = row
-                    .members
-                    .iter()
-                    .find(|member| member.employee.session_id == fields.session_id);
-                let employee = member.map(|member| &member.employee);
-                let session = sessions.get(&fields.session_id).copied();
-                let avatar = fields
-                    .identity
-                    .as_ref()
-                    .map(|identity| {
-                        self.prepare_boss_employee_avatar(identity, boss::BOSS_EMPLOYEE_AVATAR, cx)
+        let mut employees = Vec::new();
+        let mut history = Vec::new();
+        for fields in boss_outcome_employee_fields(row, sessions, &self.boss_ui.queued) {
+            if !fields.current {
+                history.push(boss_outcome_attempt_entry(&fields, now));
+                continue;
+            }
+            let member = row
+                .members
+                .iter()
+                .find(|member| member.employee.session_id == fields.session_id);
+            let employee = member.map(|member| &member.employee);
+            let session = sessions.get(&fields.session_id).copied();
+            let avatar = fields
+                .identity
+                .as_ref()
+                .map(|identity| {
+                    self.prepare_boss_employee_avatar(identity, boss::BOSS_EMPLOYEE_AVATAR, cx)
+                })
+                .unwrap_or_else(|| boss::BossEmployeeAvatar::Still {
+                    image: None,
+                    circular: false,
+                    initial: SharedString::from("?"),
+                });
+            let project = session
+                .and_then(|session| {
+                    self.state
+                        .projects
+                        .iter()
+                        .find(|project| project.id == session.project_id)
+                })
+                .map(|project| project.display_name())
+                .or_else(|| {
+                    employee
+                        .and_then(|employee| employee.ticket.as_ref())
+                        .map(|ticket| ticket.project.trim().to_owned())
+                })
+                .filter(|project| !project.is_empty());
+            let (_, tone, _) = fields.status.marker();
+            employees.push(boss::BossEmployeeRow {
+                slot: fields.key,
+                session_id: fields.session_id,
+                key,
+                avatar,
+                name: fields.name,
+                detail: fields.detail,
+                job_icon: employee
+                    .and_then(|employee| {
+                        self.boss_ui
+                            .employee_icons
+                            .get(&employee.session_id)
+                            .copied()
+                            .flatten()
                     })
-                    .unwrap_or_else(|| boss::BossEmployeeAvatar::Still {
-                        image: None,
-                        circular: false,
-                        initial: SharedString::from("?"),
-                    });
-                let project = session
-                    .and_then(|session| {
-                        self.state
-                            .projects
-                            .iter()
-                            .find(|project| project.id == session.project_id)
-                    })
-                    .map(|project| project.display_name())
-                    .or_else(|| {
-                        employee
-                            .and_then(|employee| employee.ticket.as_ref())
-                            .map(|ticket| ticket.project.trim().to_owned())
-                            .filter(|project| !project.is_empty())
-                    });
-                let (_, tone, _) = fields.status.marker();
-                boss::BossEmployeeRow {
-                    slot: fields.key,
-                    session_id: fields.session_id,
-                    key,
-                    avatar,
-                    name: fields.name,
-                    detail: fields.detail,
-                    job_icon: employee
-                        .and_then(|employee| {
-                            self.boss_ui
-                                .employee_icons
-                                .get(&employee.session_id)
-                                .copied()
-                                .flatten()
-                        })
-                        .map(crate::custom_commands::icon_path)
-                        .unwrap_or_else(|| boss::job_title_icon(&fields.job)),
-                    project,
-                    stamp: fields.stamp,
-                    now,
-                    reasons: fields.reasons,
-                    readiness: fields.readiness,
-                    status: Some((fields.status.label(), tone.color(&theme))),
-                    plan_recovery: employee
-                        .and_then(|employee| self.employee_plan_recovery(key, employee)),
-                    focus: None,
-                    navigable: fields.navigable,
-                    nested: true,
-                    aria: Some(fields.aria),
-                }
-            })
-            .collect()
+                    .map(crate::custom_commands::icon_path)
+                    .unwrap_or_else(|| boss::job_title_icon(&fields.job)),
+                project,
+                stamp: fields.stamp,
+                now,
+                reasons: fields.reasons,
+                readiness: fields.readiness,
+                status: Some((fields.status.label(), tone.color(&theme))),
+                plan_recovery: employee
+                    .and_then(|employee| self.employee_plan_recovery(key, employee)),
+                focus: None,
+                navigable: fields.navigable,
+                nested: true,
+                aria: Some(fields.aria),
+            });
+        }
+        (employees, history)
     }
 }
 
-/// One expanded-outcome employee row's derivable fields — everything the
-/// shared card paints that does not need the live view. `Waku`'s
-/// `prepare_boss_outcome_employees` adds the avatar, project, and chip
-/// data only the view can resolve.
+/// One expanded-outcome assignment row's derivable fields — everything
+/// the shared card or the compressed history line paints that does not
+/// need the live view. `Waku`'s `prepare_boss_outcome_assignments` adds
+/// the avatar, project, and chip data only the view can resolve.
 struct BossOutcomeEmployeeFields {
     /// The entry's stable key — `{outcome}:{session}:{generation}` — the
     /// row's element-id slot and focus-handle key.
@@ -12425,6 +12509,10 @@ struct BossOutcomeEmployeeFields {
     /// Blocked/queued/cause text — each on the card's own line.
     reasons: Vec<boss::BossEmployeeReason>,
     readiness: Option<String>,
+    /// Still in flight or the session's newest recorded attempt — the
+    /// only rows painted with the full employee card. Older attempts
+    /// compress into history lines.
+    current: bool,
     /// The settle or assignment stamp the card shows.
     stamp: Option<u64>,
     /// Newest-first ordering — the member's summon stamp, then the
@@ -12445,6 +12533,17 @@ fn boss_outcome_employee_fields(
     sessions: &HashMap<Uuid, &AgentSession>,
     queued: &HashMap<Uuid, String>,
 ) -> Vec<BossOutcomeEmployeeFields> {
+    // Each session's newest recorded generation is its current attempt —
+    // the one row that keeps the full employee card. Earlier generations
+    // compress into history lines, so the live plan chips and readiness
+    // can never repeat across a session's retries.
+    let mut latest_generation: HashMap<Uuid, u64> = HashMap::new();
+    for assignment in &row.outcome.assignments {
+        let latest = latest_generation
+            .entry(assignment.session)
+            .or_default();
+        *latest = (*latest).max(assignment.generation);
+    }
     let mut fields: Vec<BossOutcomeEmployeeFields> = row
         .outcome
         .assignments
@@ -12459,8 +12558,13 @@ fn boss_outcome_employee_fields(
             let name = assignment
                 .identity
                 .as_ref()
-                .map(|identity| identity.name.clone())
-                .or_else(|| member.map(|member| member.employee.identity.name.clone()));
+                .map(|identity| identity.name.trim().to_owned())
+                .filter(|name| !name.is_empty())
+                .or_else(|| {
+                    member
+                        .map(|member| member.employee.identity.name.trim().to_owned())
+                        .filter(|name| !name.is_empty())
+                });
             let job = assignment
                 .job_title
                 .as_deref()
@@ -12568,6 +12672,9 @@ fn boss_outcome_employee_fields(
                 reasons,
                 readiness: member
                     .and_then(|member| boss::boss_plan_readiness_label(&member.employee)),
+                current: assignment.settled.is_none()
+                    || latest_generation.get(&assignment.session)
+                        == Some(&assignment.generation),
                 stamp,
                 sort_key: member
                     .and_then(|member| member.employee.created_at)
@@ -12595,6 +12702,43 @@ fn boss_outcome_employee_fields(
     // in admission order under the shared stamp.
     fields.sort_by_key(|fields| std::cmp::Reverse(fields.sort_key));
     fields
+}
+
+/// An earlier attempt's history line — the status marker, name and
+/// verdict up front, then the attempt context, recorded cause, and age
+/// in the detail. Only the current attempt keeps the full card, so a
+/// session's retries read as one card plus quiet lines instead of a wall
+/// of repeated chips and readiness labels.
+fn boss_outcome_attempt_entry(
+    fields: &BossOutcomeEmployeeFields,
+    now: u64,
+) -> BossOutcomeEntry {
+    let (icon, tone, spin) = fields.status.marker();
+    let mut detail = fields.detail.clone();
+    for reason in &fields.reasons {
+        if !detail.is_empty() {
+            detail.push_str(" · ");
+        }
+        detail.push_str(reason.text());
+    }
+    if let Some(stamp) = fields.stamp {
+        if !detail.is_empty() {
+            detail.push_str(" · ");
+        }
+        detail.push_str(&sidebar::format_time_ago(now.saturating_sub(stamp)));
+    }
+    BossOutcomeEntry {
+        focus: None,
+        key: fields.key.clone(),
+        session: Some(fields.session_id),
+        icon,
+        tone,
+        spin,
+        title: format!("{} — {}", fields.name, fields.status.label()),
+        detail,
+        aria: fields.aria.clone(),
+        destination: fields.navigable,
+    }
 }
 
 /// The expanded outcome's note lines — the owed-decision and wait
@@ -12765,13 +12909,15 @@ impl Waku {
                 .clone();
             let prepared = Arc::new(self.prepare_boss_outcome_row(row, key, &sessions, now, focus));
             if prepared.expanded {
-                // The outcome's employees paint the same card the
+                // Each session's current attempt paints the same card the
                 // Employees tab uses, newest summoned first, followed by
-                // the conflict/handoff/wait notes. Entries that name a
-                // conversation the session snapshot knows get the list's
-                // persistent focus handle; the rest stay inert.
-                let mut detail_items: Vec<BossOutcomeItem> = self
-                    .prepare_boss_outcome_employees(row, key, &sessions, now, cx)
+                // the conflict/handoff/wait notes; earlier attempts
+                // compress into quiet history lines at the end. Entries
+                // that name a conversation the session snapshot knows get
+                // the list's persistent focus handle; the rest stay inert.
+                let (employees, attempt_history) =
+                    self.prepare_boss_outcome_assignments(row, key, &sessions, now, cx);
+                let mut detail_items: Vec<BossOutcomeItem> = employees
                     .into_iter()
                     .map(|mut employee| {
                         if employee.navigable {
@@ -12786,22 +12932,24 @@ impl Waku {
                         BossOutcomeItem::Employee(Arc::new(employee))
                     })
                     .collect();
+                let mut entries_focus = |mut entry: BossOutcomeEntry| {
+                    if entry.destination {
+                        entry.focus = Some(
+                            self.boss_ui
+                                .goals_focus_handles
+                                .entry((key, format!("entry:{}", entry.key)))
+                                .or_insert_with(|| cx.focus_handle().tab_stop(true))
+                                .clone(),
+                        );
+                    }
+                    BossOutcomeItem::Entry(Arc::new(entry))
+                };
                 detail_items.extend(
                     boss_outcome_note_entries(row, &sessions, now)
                         .into_iter()
-                        .map(|mut entry| {
-                            if entry.destination {
-                                entry.focus = Some(
-                                    self.boss_ui
-                                        .goals_focus_handles
-                                        .entry((key, format!("entry:{}", entry.key)))
-                                        .or_insert_with(|| cx.focus_handle().tab_stop(true))
-                                        .clone(),
-                                );
-                            }
-                            BossOutcomeItem::Entry(Arc::new(entry))
-                        }),
+                        .map(&mut entries_focus),
                 );
+                detail_items.extend(attempt_history.into_iter().map(&mut entries_focus));
                 if detail_items.is_empty() {
                     detail_items.push(BossOutcomeItem::Entry(Arc::new(boss_outcome_empty_entry(
                         row.outcome.id,

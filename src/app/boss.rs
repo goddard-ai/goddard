@@ -10362,20 +10362,20 @@ pub(super) fn boss_employee_row_element(
                             )
                         }),
                 )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.0))
-                        .min_w_0()
-                        .text_size(sp(13.0))
-                        .line_height(sp(15.0))
-                        .text_color(theme.text_tertiary)
-                        .when(!row.detail.is_empty(), |line| {
-                            line.child(icon(row.job_icon, 12.0, theme.text_tertiary))
-                        })
-                        .child(div().min_w_0().truncate().child(row.detail.clone())),
-                )
+                .when(!row.detail.is_empty(), |text| {
+                    text.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .min_w_0()
+                            .text_size(sp(13.0))
+                            .line_height(sp(15.0))
+                            .text_color(theme.text_tertiary)
+                            .child(icon(row.job_icon, 12.0, theme.text_tertiary))
+                            .child(div().min_w_0().truncate().child(row.detail.clone())),
+                    )
+                })
                 .children(row.reasons.iter().map(|reason| {
                     div()
                         .min_w_0()

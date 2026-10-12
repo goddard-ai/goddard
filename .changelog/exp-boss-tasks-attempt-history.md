@@ -1,0 +1,1 @@
+- **Boss task attempts:** Expanding a Boss task in the Tasks tab now shows a full employee card only for each assignee's current attempt; earlier retries collapse into one-line history entries that still name the verdict, cause, and time — so repeated plan-delivery retries no longer fill the tab with duplicate "Open plan" and "Retry plan delivery" controls.
