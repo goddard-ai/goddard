@@ -4129,6 +4129,25 @@ impl Waku {
             .is_some_and(|session| session.incognito)
     }
 
+    /// Whether the session is a temporary chat: an unstarted incognito
+    /// draft parked on a projectless workspace — the picker row's product.
+    /// A draft `/incognito`'d on a real project is not one: its flag is a
+    /// deliberate choice that survives a project move, while a temporary
+    /// chat's retires wherever a pick lands the draft.
+    pub(super) fn is_temporary_chat_draft(&self, session_id: Uuid) -> bool {
+        self.state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| {
+                session.incognito
+                    && !session.has_started()
+                    && self.state.projects.iter().any(|project| {
+                        project.id == session.project_id && project.is_projectless()
+                    })
+            })
+    }
+
     fn active_turn_finished_event(
         &self,
         session_id: Uuid,

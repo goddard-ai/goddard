@@ -1697,7 +1697,14 @@ impl Waku {
             )),
             _ => None,
         };
+        // A pick that carries a temporary chat's draft elsewhere retires
+        // its incognito flag with the chat's destination — the draft
+        // arrives as an ordinary one.
+        let retires_temporary_chat = self.is_temporary_chat_draft(session_id);
         if let Some(session) = self.state.session_mut(session_id) {
+            if retires_temporary_chat {
+                session.incognito = false;
+            }
             session.project_id = project_id;
             if let Some(workspace) = workspace {
                 session.workspace = workspace;
@@ -7133,6 +7140,9 @@ impl Waku {
             .find(|session| {
                 !session.has_started()
                     && !session.is_side_chat()
+                    // A temporary chat's draft cannot stand in for a plain
+                    // pick — reusing it would land the pick off the record.
+                    && !session.incognito
                     && !self.session_is_boss_managed(session)
                     && projectless_draft_owns_workspace(&self.state.sessions, session)
                     && self.state.projects.iter().any(|project| {
@@ -7160,6 +7170,30 @@ impl Waku {
         if !incognito && let Some(draft_id) = self.reusable_projectless_draft() {
             self.select_session(draft_id, cx);
             self.move_composer_draft_after_project_change(draft_source, cx);
+            return;
+        }
+
+        // A "No project" pick made on a temporary chat needs no new
+        // workspace — the draft already owns a projectless one. The pick
+        // retires its incognito and keeps the draft where it is.
+        if !incognito
+            && let Some(draft_id) = retarget_draft
+            && self.is_temporary_chat_draft(draft_id)
+            && self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == draft_id)
+                .is_some_and(|session| {
+                    projectless_draft_owns_workspace(&self.state.sessions, session)
+                })
+        {
+            self.state
+                .session_mut(draft_id)
+                .map(|session| session.incognito = false);
+            self.select_session(draft_id, cx);
+            self.move_composer_draft_after_project_change(draft_source, cx);
+            self.schedule_composer_draft_save(cx);
             return;
         }
 
@@ -7192,15 +7226,26 @@ impl Waku {
                     // project — unless it started or materialized a
                     // worktree while provisioning was in flight, in which
                     // case the fresh-draft path takes over.
-                    if let Some(draft_id) = retarget_draft
-                        && let Some(session) = waku.state.session_mut(draft_id)
-                        && !session.has_started()
-                        && !matches!(session.workspace, SessionWorkspace::Worktree { .. })
-                    {
-                        session.project_id = project_id;
-                        session.workspace = SessionWorkspace::Local;
-                        waku.daemons
-                            .claim_session(draft_id, waku.daemons.project_owner(project_id));
+                    if let Some(draft_id) = retarget_draft {
+                        // Same retirement `retarget_draft_session` applies —
+                        // reachable when a sibling task owns the temporary
+                        // chat's workspace and the pick had to provision.
+                        let retires_temporary_chat = waku.is_temporary_chat_draft(draft_id);
+                        if let Some(session) = waku.state.session_mut(draft_id)
+                            && !session.has_started()
+                            && !matches!(session.workspace, SessionWorkspace::Worktree { .. })
+                        {
+                            if retires_temporary_chat {
+                                session.incognito = false;
+                            }
+                            session.project_id = project_id;
+                            session.workspace = SessionWorkspace::Local;
+                            waku.daemons
+                                .claim_session(draft_id, waku.daemons.project_owner(project_id));
+                            if retires_temporary_chat {
+                                waku.schedule_composer_draft_save(cx);
+                            }
+                        }
                     }
                     // The provisioned project is itself projectless, so it
                     // must take the direct creation path — `create_session_for`

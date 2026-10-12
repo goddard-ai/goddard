@@ -4409,7 +4409,7 @@ impl Waku {
         true
     }
 
-    fn disable_composer_incognito(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn disable_composer_incognito(&mut self, cx: &mut Context<Self>) {
         if self.big_picture.is_open() && self.big_picture.target().is_none() {
             self.big_picture.new_task_incognito = false;
         } else if let Some(session) = self
@@ -8136,7 +8136,9 @@ impl Waku {
                                             })
                                         })
                                     };
-                                    if !subject_projectless {
+                                    if subject_projectless {
+                                        this.disable_composer_incognito(cx);
+                                    } else {
                                         this.create_projectless_session_from_composer(cx);
                                     }
                                 });

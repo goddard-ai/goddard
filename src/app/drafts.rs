@@ -391,7 +391,13 @@ impl Waku {
         if let Some(draft_id) = draft_id
             && collapse_draft.is_none()
         {
+            // The pick retires a temporary chat's incognito — its text
+            // becomes persistable draft state under the destination.
+            let retires_temporary_chat = self.is_temporary_chat_draft(draft_id);
             self.retarget_draft_session(draft_id, project_id);
+            if retires_temporary_chat {
+                self.schedule_composer_draft_save(cx);
+            }
         }
         self.select_project(project_id, cx);
         if self.big_picture.is_open() {
@@ -526,7 +532,12 @@ impl Waku {
                             .any(|project| project.id == project_id && project.is_projectless())
                     })
                 };
-                if !subject_projectless {
+                if subject_projectless {
+                    // Already the plain destination — unless the subject is
+                    // a temporary chat, where the pick retires incognito
+                    // and keeps the workspace.
+                    self.disable_composer_incognito(cx);
+                } else {
                     self.create_projectless_session_from_composer(cx);
                 }
             }
