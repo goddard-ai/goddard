@@ -262,9 +262,9 @@ fn session_group_header(theme: &Theme, height: f32) -> Div {
 
 /// One boss-employee section — Outcomes or Errands — nested under its boss
 /// row: the header, the working members, then the finished tail capped by a
-/// "name finished ago" fold row. A collapsed group still keeps the selected
-/// member's row, or the freshest member when nothing inside is selected —
-/// a non-empty group never renders without an employee.
+/// "name finished ago" fold row. A collapsed group renders just its header —
+/// the header aggregates its hidden members' unread and working state, and
+/// the at-least-one-member rule only applies to an expanded group.
 fn append_sidebar_employee_group(
     rows: &mut Vec<SidebarRow>,
     group: SidebarGroup,
@@ -272,19 +272,13 @@ fn append_sidebar_employee_group(
     active: &[Uuid],
     idle: &[Uuid],
     collapsed: bool,
-    selected: Option<Uuid>,
     idle_visible: usize,
 ) {
     if active.is_empty() && idle.is_empty() {
         return;
     }
     rows.push(SidebarRow::Header(group));
-    if collapsed {
-        let kept = selected
-            .filter(|id| active.contains(id) || idle.contains(id))
-            .or_else(|| active.first().or(idle.first()).copied());
-        rows.extend(kept.into_iter().map(SidebarRow::Employee));
-    } else {
+    if !collapsed {
         rows.extend(active.iter().copied().map(SidebarRow::Employee));
         // The fold never swallows the whole section: with no working
         // member to hold a row, the freshest finished one stays out.
@@ -3975,17 +3969,6 @@ impl Waku {
         {
             fingerprint = mix_uuid(fingerprint, terminal_id);
         }
-        // A collapsed employee group keeps the selected member's row, so the
-        // selection joins the fingerprint while either group is folded.
-        if self
-            .sidebar_collapsed_groups
-            .contains(&SidebarGroup::Errands)
-            || self
-                .sidebar_collapsed_groups
-                .contains(&SidebarGroup::Outcomes)
-        {
-            fingerprint = mix_uuid(fingerprint, self.state.selected_session.unwrap_or(Uuid::nil()));
-        }
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
             let (rows, collapsed_members) = self.sidebar_rows(today);
             *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(rows);
@@ -4093,7 +4076,6 @@ impl Waku {
 
         let mut collapsed_members: HashMap<SidebarGroup, Vec<Uuid>> = HashMap::new();
         if self.state.boss_experiment_enabled && !self.boss_ui.hosts.is_empty() {
-            let selected = self.state.selected_session;
             let outcomes_collapsed = self
                 .sidebar_collapsed_groups
                 .contains(&SidebarGroup::Outcomes);
@@ -4170,7 +4152,6 @@ impl Waku {
                     &active_outcomes,
                     &idle_outcomes,
                     outcomes_collapsed,
-                    selected,
                     self.boss_ui
                         .sidebar_idle_visible
                         .get(key)
@@ -4184,7 +4165,6 @@ impl Waku {
                     &active_errands,
                     &idle_errands,
                     errands_collapsed,
-                    selected,
                     self.boss_ui
                         .sidebar_errand_idle_visible
                         .get(key)
@@ -5174,7 +5154,8 @@ impl Waku {
         .when_some(compose, |element, compose| element.child(compose))
         .when_some(open_all, |element, open_all| element.child(open_all))
         // A folded employee group reports work in flight with the spinner
-        // its hidden rows would carry.
+        // its hidden rows would carry, in the same accent a working row
+        // earns from `status_color`.
         .when(has_working, |element| {
             element.child(
                 div()
@@ -5186,7 +5167,7 @@ impl Waku {
                     .child(motion::spin_slow(icon(
                         "icons/loader-circle.svg",
                         12.0,
-                        theme.text_secondary,
+                        theme.accent,
                     ))),
             )
         })
@@ -8260,12 +8241,13 @@ mod tests {
     }
 
     #[test]
-    fn employee_group_fold_preserves_a_member_and_stable_order() {
+    fn employee_group_fold_hides_members_and_keeps_stable_order() {
         let key = waku_client::DaemonKey::Local;
         let active = [Uuid::from_u128(1), Uuid::from_u128(2)];
         let idle = [Uuid::from_u128(3), Uuid::from_u128(4), Uuid::from_u128(5)];
 
-        // Collapsed keeps the selected member's row...
+        // A collapsed group renders only its header and trailing spacer —
+        // every member hides behind the fold.
         let mut rows = Vec::new();
         append_sidebar_employee_group(
             &mut rows,
@@ -8274,35 +8256,12 @@ mod tests {
             &active,
             &idle,
             true,
-            Some(idle[1]),
             0,
         );
         assert_eq!(
             rows,
             vec![
                 SidebarRow::Header(SidebarGroup::Errands),
-                SidebarRow::Employee(idle[1]),
-                SidebarRow::GroupSpacer
-            ]
-        );
-
-        // ...or the freshest member when nothing inside is selected.
-        rows.clear();
-        append_sidebar_employee_group(
-            &mut rows,
-            SidebarGroup::Errands,
-            key,
-            &active,
-            &idle,
-            true,
-            None,
-            0,
-        );
-        assert_eq!(
-            rows,
-            vec![
-                SidebarRow::Header(SidebarGroup::Errands),
-                SidebarRow::Employee(active[0]),
                 SidebarRow::GroupSpacer
             ]
         );
@@ -8317,7 +8276,6 @@ mod tests {
             &active,
             &idle,
             false,
-            None,
             0,
         );
         assert_eq!(
@@ -8341,7 +8299,6 @@ mod tests {
             &[],
             &idle,
             false,
-            None,
             0,
         );
         assert_eq!(
@@ -8363,7 +8320,6 @@ mod tests {
             &[],
             &[],
             false,
-            None,
             0,
         );
         assert!(rows.is_empty());
