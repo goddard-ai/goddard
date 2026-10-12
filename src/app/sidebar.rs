@@ -111,8 +111,8 @@ pub(super) enum SidebarGroup {
     /// Swept and stale tasks, always the last section regardless of
     /// grouping. Starts collapsed like Terminals.
     Dormant,
-    /// Boss-published files and folders from the last twelve hours, always
-    /// directly above the Pinned section in either grouping.
+    /// Boss-published files and folders from the last day, in their own
+    /// section directly above the Boss block in either grouping.
     Deliverables,
     Planning,
     /// Employees whose work finishes an outcome or goal — the boss's
@@ -346,7 +346,7 @@ fn append_sidebar_group_rows(
 
 /// The published deliverables the sidebar lists, split like a project group's
 /// sessions: live rows first, then the dormant tail a "Show dormant" row
-/// reveals. A live deliverable keeps its row for twelve hours after its last
+/// reveals. A live deliverable keeps its row for twenty-four hours after its last
 /// publish — an older one ages out of the sidebar entirely rather than
 /// falling into a date or project group. Pinned and dormant deliverables are
 /// user-managed state and never age out; a pin outranks a sweep the way a
@@ -459,7 +459,7 @@ const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
 
 /// How long a published deliverable keeps its row in the Recent deliverables group —
 /// measured from its last publish, so a re-published deliverable jumps back in.
-const SIDEBAR_DELIVERABLE_RECENT_SECS: u64 = 12 * 60 * 60;
+const SIDEBAR_DELIVERABLE_RECENT_SECS: u64 = 24 * 60 * 60;
 /// Live deliverables shown before the rest fold behind "Show more" — a
 /// tighter cap than a project group's since the section is a jump rail, not
 /// a list to browse. Pinned rows lead and count toward the cap.
@@ -1290,7 +1290,7 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
         SidebarRow::Search | SidebarRow::Projects | SidebarRow::Inbox | SidebarRow::Automations => {
             SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP
         }
-        SidebarRow::Header(SidebarGroup::Terminals) => {
+        SidebarRow::Header(SidebarGroup::Terminals | SidebarGroup::Deliverables) => {
             SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
@@ -4113,6 +4113,60 @@ impl Waku {
         }
         rows.push(SidebarRow::GroupSpacer);
 
+        // Deliverables an employee produced and the boss published get their own
+        // section directly above the Boss block in either grouping. Under project
+        // grouping they keep this dedicated group rather than folding into a
+        // project — a deliverable's detail line names its file, not a project.
+        let (recent_deliverables, dormant_deliverables) = if self.state.boss_experiment_enabled {
+            sidebar_recent_deliverables(&self.boss_ui.states, now)
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        if !recent_deliverables.is_empty() || !dormant_deliverables.is_empty() {
+            rows.push(SidebarRow::Header(SidebarGroup::Deliverables));
+            if !self
+                .sidebar_collapsed_groups
+                .contains(&SidebarGroup::Deliverables)
+            {
+                // The group folds like a project section: live rows cap at
+                // SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE behind "Show more",
+                // then a swept deliverable keeps a "Show dormant" fold row
+                // rather than vanishing.
+                let revealed_live = self
+                    .sidebar_project_reveal_counts
+                    .get(&SidebarGroup::Deliverables)
+                    .copied()
+                    .unwrap_or_default();
+                let revealed_dormant = self
+                    .sidebar_project_dormant_reveals
+                    .get(&SidebarGroup::Deliverables)
+                    .copied()
+                    .unwrap_or_default();
+                let (visible, fold) = visible_group_rows(
+                    &recent_deliverables,
+                    &dormant_deliverables,
+                    SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE,
+                    revealed_live,
+                    revealed_dormant,
+                );
+                rows.extend(
+                    visible
+                        .into_iter()
+                        .map(|(key, id)| SidebarRow::Deliverable(key, id)),
+                );
+                match fold {
+                    Some(SidebarFold::More) => {
+                        rows.push(SidebarRow::ShowMore(SidebarGroup::Deliverables))
+                    }
+                    Some(SidebarFold::Dormant) => {
+                        rows.push(SidebarRow::ShowDormant(SidebarGroup::Deliverables))
+                    }
+                    None => {}
+                }
+            }
+            rows.push(SidebarRow::GroupSpacer);
+        }
+
         let mut collapsed_members: HashMap<SidebarGroup, Vec<Uuid>> = HashMap::new();
         if self.state.boss_experiment_enabled && !self.boss_ui.hosts.is_empty() {
             let outcomes_collapsed = self
@@ -4224,60 +4278,6 @@ impl Waku {
                         .copied()
                         .unwrap_or(0),
                 );
-            }
-            rows.push(SidebarRow::GroupSpacer);
-        }
-
-        // Deliverables an employee produced and the boss published get their own
-        // section directly above Pinned in either grouping. Under project
-        // grouping they keep this dedicated group rather than folding into a
-        // project — a deliverable's detail line names its file, not a project.
-        let (recent_deliverables, dormant_deliverables) = if self.state.boss_experiment_enabled {
-            sidebar_recent_deliverables(&self.boss_ui.states, now)
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        if !recent_deliverables.is_empty() || !dormant_deliverables.is_empty() {
-            rows.push(SidebarRow::Header(SidebarGroup::Deliverables));
-            if !self
-                .sidebar_collapsed_groups
-                .contains(&SidebarGroup::Deliverables)
-            {
-                // The group folds like a project section: live rows cap at
-                // SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE behind "Show more",
-                // then a swept deliverable keeps a "Show dormant" fold row
-                // rather than vanishing.
-                let revealed_live = self
-                    .sidebar_project_reveal_counts
-                    .get(&SidebarGroup::Deliverables)
-                    .copied()
-                    .unwrap_or_default();
-                let revealed_dormant = self
-                    .sidebar_project_dormant_reveals
-                    .get(&SidebarGroup::Deliverables)
-                    .copied()
-                    .unwrap_or_default();
-                let (visible, fold) = visible_group_rows(
-                    &recent_deliverables,
-                    &dormant_deliverables,
-                    SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE,
-                    revealed_live,
-                    revealed_dormant,
-                );
-                rows.extend(
-                    visible
-                        .into_iter()
-                        .map(|(key, id)| SidebarRow::Deliverable(key, id)),
-                );
-                match fold {
-                    Some(SidebarFold::More) => {
-                        rows.push(SidebarRow::ShowMore(SidebarGroup::Deliverables))
-                    }
-                    Some(SidebarFold::Dormant) => {
-                        rows.push(SidebarRow::ShowDormant(SidebarGroup::Deliverables))
-                    }
-                    None => {}
-                }
             }
             rows.push(SidebarRow::GroupSpacer);
         }
@@ -4784,10 +4784,13 @@ impl Waku {
             .entry(group)
             .or_insert_with(|| cx.focus_handle())
             .clone();
-        let show_group_icon = matches!(
+        // A compose affordance only exists where it can create something —
+        // the Deliverables group's hover action is its "view all" button.
+        let compose_group = matches!(
             group,
             SidebarGroup::Project(_) | SidebarGroup::Projectless | SidebarGroup::Terminals
         );
+        let show_group_icon = compose_group || group == SidebarGroup::Deliverables;
         let project_is_projectless = match group {
             SidebarGroup::Project(project_id) => self
                 .state
@@ -4831,6 +4834,7 @@ impl Waku {
             {
                 "icons/user-round.svg"
             }
+            SidebarGroup::Deliverables => "icons/gift.svg",
             _ if collapsed => "icons/folder.svg",
             _ => "icons/folder-open.svg",
         };
@@ -4893,7 +4897,7 @@ impl Waku {
                 .invisible()
                 .group_hover(group_name.clone(), |icon| icon.visible())
         });
-        let compose = show_group_icon.then(|| {
+        let compose = compose_group.then(|| {
             let compose_focus = self
                 .sidebar_group_compose_focuses
                 .borrow_mut()
@@ -5043,11 +5047,11 @@ impl Waku {
                     )
             });
 
-        // The Terminals group reads as a third action row, so it matches the
-        // New Task and Search rows' metrics — height, padding, icon box,
-        // gap, and regular label weight; every other group keeps the
-        // section-header styling.
-        let action_row = group == SidebarGroup::Terminals;
+        // The Terminals and Recent deliverables groups read as action rows —
+        // they match the New Task and Search rows' metrics: height, padding,
+        // icon box, gap, and regular label weight. Every other group keeps
+        // the section-header styling.
+        let action_row = matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables);
         let order_entry = sidebar_project_order_entry(group);
         let reorderable_group = order_entry.is_some()
             && self.state.sidebar_grouping == SidebarGrouping::Project
@@ -8027,7 +8031,7 @@ mod tests {
     }
 
     #[test]
-    fn recent_deliverables_stay_within_twelve_hours_sorted_newest_first() {
+    fn recent_deliverables_stay_within_a_day_sorted_newest_first() {
         let now = 1_000_000_000;
         let deliverable = |age: u64| BossDeliverable {
             id: Uuid::new_v4(),

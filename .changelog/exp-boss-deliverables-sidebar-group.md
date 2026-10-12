@@ -1,0 +1,1 @@
+- The sidebar's Deliverables section now sits above the Boss block with a gift icon and the same label style as the action rows, and a published deliverable keeps its row for a day instead of twelve hours.
