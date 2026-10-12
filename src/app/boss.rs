@@ -9670,7 +9670,7 @@ fn boss_employee_plan_chips(
 }
 
 /// The employee card the Employees tab and an expanded outcome's member
-/// list share — avatar, name over the job line with its project and
+/// list share — avatar, name over the row detail with its project and
 /// stamp, each blocked/queued reason on its own line, the status, and the
 /// action chips the caller resolved. `waku` backs activation
 /// and chip dispatch; callers holding `Context<Waku>` hand over
