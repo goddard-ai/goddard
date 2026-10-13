@@ -1396,6 +1396,11 @@ pub struct BossEmployee {
     /// Explicit research is read-only; legacy assignments default to implementation.
     #[serde(default)]
     pub assignment_kind: PlanAssignmentKind,
+    /// Explicit assignment purpose, independent of reporting and plan access.
+    /// Missing on legacy records; keep those visible in Employees until classified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub purpose: Option<EmployeePurpose>,
     /// Exact authority selected at acceptance; never upgraded by dispatch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -1695,6 +1700,26 @@ pub enum PlanAssignmentKind {
     #[default]
     Implementation,
     Research,
+}
+
+/// Why the assignment exists, independent of lifecycle and implementation access.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EmployeePurpose {
+    /// Features, fixes, and other lasting changes.
+    Building,
+    /// Research, reviews, checks, monitoring, and chores.
+    Helping,
+}
+
+impl EmployeePurpose {
+    /// Only use this mapping when the caller explicitly supplies assignmentKind.
+    pub fn from_assignment_kind(kind: PlanAssignmentKind) -> Self {
+        match kind {
+            PlanAssignmentKind::Implementation => Self::Building,
+            PlanAssignmentKind::Research => Self::Helping,
+        }
+    }
 }
 
 /// The identity of the complete document shown to the human before approval.
@@ -2962,6 +2987,12 @@ pub enum BossOperation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         assignment_kind: Option<PlanAssignmentKind>,
+        /// Explicit purpose overrides assignmentKind's purpose default without
+        /// changing access. New admission requires one of these explicit inputs;
+        /// legacy payloads still decode and legacy request retries remain valid.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        purpose: Option<EmployeePurpose>,
         /// The `PlanItem::id` inside the selected explicit/inherited plan —
         /// an unknown or already done/dropped item
         /// fails the summon. Omitted lists the employee under the plan's
@@ -3576,6 +3607,11 @@ pub enum BossResult {
     rename_all_fields = "camelCase"
 )]
 pub enum EmployeeControl {
+    /// Classify or reclassify an assignment without restarting it or changing
+    /// its completion behavior, plan authority, grants, or retention.
+    SetPurpose {
+        purpose: EmployeePurpose,
+    },
     Prompt {
         prompt: String,
         /// How the prompt reaches a working employee: `interrupt`

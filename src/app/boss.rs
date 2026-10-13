@@ -623,7 +623,7 @@ pub(super) struct BossUi {
     pub(super) employee_icons: HashMap<Uuid, Option<CustomCommandIcon>>,
     pub active: HashMap<DaemonKey, Vec<Uuid>>,
     pub working: HashSet<Uuid>,
-    pub errands: HashSet<Uuid>,
+    pub employee_purposes: HashMap<Uuid, waku_protocol::boss::EmployeePurpose>,
     pub expired: HashSet<Uuid>,
     /// Employees wearing the user-attention unread marker right now:
     /// flagged at summon or by hand, expired, and not viewed since that
@@ -650,6 +650,8 @@ pub(super) struct BossUi {
     /// "name finished ago" fold as `sidebar_idle_visible`, kept per section
     /// so one group's expansion never reveals the other's tail.
     pub sidebar_errand_idle_visible: HashMap<DaemonKey, usize>,
+    /// Legacy Employees keeps its own finished-tail reveal counter.
+    pub sidebar_employee_idle_visible: HashMap<DaemonKey, usize>,
     /// The deliverable a sidebar click armed the composer with: the next main-
     /// composer submission commands the boss with this file attached.
     /// Cleared by a send or any landing that is not re-arming it — the
@@ -810,7 +812,7 @@ impl Default for BossUi {
             employee_icons: HashMap::new(),
             active: HashMap::new(),
             working: HashSet::new(),
-            errands: HashSet::new(),
+            employee_purposes: HashMap::new(),
             expired: HashSet::new(),
             attention: HashSet::new(),
             workspace_transitions: HashSet::new(),
@@ -820,6 +822,7 @@ impl Default for BossUi {
             recent: HashMap::new(),
             sidebar_idle_visible: HashMap::new(),
             sidebar_errand_idle_visible: HashMap::new(),
+            sidebar_employee_idle_visible: HashMap::new(),
             command_deliverable: None,
             composer_targets: HashMap::new(),
             pending_deliverable: None,
@@ -1384,25 +1387,6 @@ struct PersonaDefaultPane {
     reset_preview: bool,
 }
 
-/// Explicit outcome/chain completion metadata overrides the legacy work goal.
-/// A planning summoner always makes an errand, including a designated finisher.
-fn sidebar_employee_is_errand(
-    employee: &BossEmployee,
-    planning_summoners: &HashSet<Uuid>,
-    chain_finishers: &HashMap<Uuid, bool>,
-) -> bool {
-    let chain_finisher = chain_finishers.get(&employee.session_id).copied();
-    let outcome_finisher = employee
-        .assignment
-        .as_ref()
-        .map(|assignment| assignment.finishes_outcome);
-    let finishes = match (chain_finisher, outcome_finisher) {
-        (None, None) => employee.work_goal == waku_protocol::boss::EmployeeGoal::Goal,
-        (chain, outcome) => chain.unwrap_or(false) || outcome.unwrap_or(false),
-    };
-    planning_summoners.contains(&employee.supervisor_id) || !finishes
-}
-
 /// Sidebar employee order: newest summon first. `created_at` is the
 /// summon stamp — records predating the field fall back to their
 /// session's creation time, also stamped at summon. Sorting on anything
@@ -1715,7 +1699,7 @@ impl Waku {
             self.boss_ui.job_titles.clear();
             self.boss_ui.employee_icons.clear();
             self.boss_ui.working.clear();
-            self.boss_ui.errands.clear();
+            self.boss_ui.employee_purposes.clear();
             self.boss_ui.expired.clear();
             self.boss_ui.attention.clear();
             self.boss_ui.workspace_transitions.clear();
@@ -1731,18 +1715,6 @@ impl Waku {
             for (key, state) in &self.boss_ui.states {
                 if let Some(id) = state.session_id {
                     self.boss_ui.managed.insert(id);
-                }
-                let planning_summoners =
-                    state.planning.iter().map(|plan| plan.session_id).collect();
-                let mut chain_finishers = HashMap::new();
-                for chain in &state.chains {
-                    for (index, step) in chain.steps.iter().enumerate() {
-                        for attempt in &step.attempts {
-                            if let Some(id) = attempt.employee_id {
-                                chain_finishers.insert(id, index + 1 == chain.steps.len());
-                            }
-                        }
-                    }
                 }
                 let queue_rank = boss_queue_ranks(state);
                 let mut employees = state.employees.iter().collect::<Vec<_>>();
@@ -1760,8 +1732,10 @@ impl Waku {
                         .collect(),
                 );
                 for employee in employees {
-                    if sidebar_employee_is_errand(employee, &planning_summoners, &chain_finishers) {
-                        self.boss_ui.errands.insert(employee.session_id);
+                    if let Some(purpose) = employee.purpose {
+                        self.boss_ui
+                            .employee_purposes
+                            .insert(employee.session_id, purpose);
                     }
                     self.boss_ui
                         .job_titles
@@ -11660,6 +11634,7 @@ mod tests {
 
     fn boss_employee(created_at: Option<u64>) -> waku_protocol::boss::BossEmployee {
         waku_protocol::boss::BossEmployee {
+            purpose: None,
             assignment_kind: Default::default(),
             plan_binding: None,
             plan_readiness: None,
@@ -11697,43 +11672,6 @@ mod tests {
             item_id: None,
             assignment: None,
         }
-    }
-
-    #[test]
-    fn sidebar_errands_use_summoner_or_explicit_nonfinisher_metadata() {
-        use waku_protocol::boss::{Assignment, EmployeeGoal};
-        let mut employee = boss_employee(None);
-        let mut planning = HashSet::new();
-        let mut chains = HashMap::new();
-        assert!(sidebar_employee_is_errand(&employee, &planning, &chains));
-        employee.work_goal = EmployeeGoal::Goal;
-        assert!(!sidebar_employee_is_errand(&employee, &planning, &chains));
-        employee.assignment = Some(Assignment {
-            outcome_id: Uuid::new_v4(),
-            after_success: String::new(),
-            finishes_outcome: false,
-            prerequisites: Vec::new(),
-        });
-        assert!(sidebar_employee_is_errand(&employee, &planning, &chains));
-        employee.work_goal = EmployeeGoal::Errand;
-        employee.assignment.as_mut().unwrap().finishes_outcome = true;
-        assert!(!sidebar_employee_is_errand(&employee, &planning, &chains));
-        chains.insert(employee.session_id, false);
-        assert!(!sidebar_employee_is_errand(&employee, &planning, &chains));
-        employee.assignment.as_mut().unwrap().finishes_outcome = false;
-        assert!(sidebar_employee_is_errand(&employee, &planning, &chains));
-        chains.insert(employee.session_id, true);
-        assert!(!sidebar_employee_is_errand(&employee, &planning, &chains));
-        planning.insert(employee.supervisor_id);
-        assert!(sidebar_employee_is_errand(&employee, &planning, &chains));
-        employee.expired = true;
-        employee.needs_attention = true;
-        assert!(sidebar_employee_is_errand(&employee, &planning, &chains));
-        let restored: BossEmployee =
-            serde_json::from_value(serde_json::to_value(&employee).unwrap()).unwrap();
-        assert!(sidebar_employee_is_errand(&restored, &planning, &chains));
-        planning.clear();
-        assert!(!sidebar_employee_is_errand(&restored, &planning, &chains));
     }
 
     #[test]
@@ -12018,6 +11956,7 @@ mod tests {
     ) -> waku_protocol::boss::BossEmployee {
         let session_id = Uuid::from_u128(id);
         waku_protocol::boss::BossEmployee {
+            purpose: None,
             assignment_kind: Default::default(),
             plan_binding: None,
             plan_readiness: None,

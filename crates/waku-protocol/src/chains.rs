@@ -61,6 +61,10 @@ chain_enum!(ChainControl {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChainStepDefinition {
+    /// Explicit assignment purpose; absent only on legacy step definitions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub purpose: Option<crate::boss::EmployeePurpose>,
     pub title: String,
     pub prompt: String,
     pub project_id: Uuid,

@@ -1312,7 +1312,8 @@ impl WakuBackend {
         prerequisites: Vec<Uuid>,
         plan: Option<String>,
         item: Option<Uuid>,
-        assignment_kind: waku_protocol::boss::PlanAssignmentKind,
+        assignment_kind: Option<waku_protocol::boss::PlanAssignmentKind>,
+        purpose: Option<waku_protocol::boss::EmployeePurpose>,
         request_id: Option<Uuid>,
         needs_attention: bool,
         events: &EventSink,
@@ -1334,7 +1335,12 @@ impl WakuBackend {
             (_, Some(_)) => bail!("adoptWorktree only applies to workspace \"adopt\""),
             _ => None,
         };
-        let fingerprint = serde_json::to_string(&serde_json::json!({
+        let explicit_purpose = purpose;
+        let purpose = purpose.or_else(|| {
+            assignment_kind.map(waku_protocol::boss::EmployeePurpose::from_assignment_kind)
+        });
+        let assignment_kind = assignment_kind.unwrap_or_default();
+        let mut fingerprint_fields = serde_json::json!({
             "personaId": persona_id, "jobTitle": job_title, "prompt": prompt,
             "project": project, "provider": provider, "model": model,
             "reasoningEffort": reasoning_effort, "workspace": workspace,
@@ -1347,7 +1353,12 @@ impl WakuBackend {
             "prerequisites": prerequisites,
             "plan": plan, "item": item, "assignmentKind": assignment_kind,
             "needsAttention": needs_attention,
-        }))?;
+        });
+        let legacy_fingerprint = serde_json::to_string(&fingerprint_fields)?;
+        if let Some(purpose) = purpose {
+            fingerprint_fields["purpose"] = serde_json::to_value(purpose)?;
+        }
+        let fingerprint = serde_json::to_string(&fingerprint_fields)?;
         if let Some(request_id) = request_id
             && let Some(existing) = self
                 .boss
@@ -1357,12 +1368,18 @@ impl WakuBackend {
                 .find(|entry| entry.request_id == Some(request_id))
                 .cloned()
         {
-            if existing.request_fingerprint.as_deref() == Some(fingerprint.as_str()) {
+            if existing.request_fingerprint.as_deref() == Some(fingerprint.as_str())
+                || (explicit_purpose.is_none()
+                    && existing.request_fingerprint.as_deref() == Some(legacy_fingerprint.as_str()))
+            {
                 // Lost-response retry — the original admission stands.
                 return Ok((existing.session_id, false));
             }
             bail!("requestId was already used for a different summon");
         }
+        let purpose = purpose.ok_or_else(|| anyhow!(
+            "summon requires purpose (building or helping) or explicit assignmentKind (implementation or research)"
+        ))?;
         // The plan tag resolves at admission — unknown or closed plans and
         // unknown or finished items fail here rather than landing untagged.
         let plan_binding =
@@ -1452,6 +1469,7 @@ impl WakuBackend {
         employee.request_fingerprint = request_id.map(|_| fingerprint);
         employee.needs_attention = needs_attention;
         employee.assignment_kind = assignment_kind;
+        employee.purpose = Some(purpose);
         employee.plan_id = plan_binding.as_ref().map(|binding| binding.plan_id);
         employee.item_id = item;
         employee.plan_binding = plan_binding;
@@ -1788,6 +1806,10 @@ impl WakuBackend {
             EmployeeControl::SetPersona { persona_id } => {
                 self.boss.set_employee_persona(session_id, persona_id)?;
                 self.boss.reset_context(session_id);
+                Ok(BossResult::Saved)
+            }
+            EmployeeControl::SetPurpose { purpose } => {
+                self.boss.set_employee_purpose(session_id, purpose)?;
                 Ok(BossResult::Saved)
             }
             EmployeeControl::SetPlan { plan, item } => {

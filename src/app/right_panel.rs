@@ -3941,6 +3941,7 @@ mod tests {
         blocker: Option<&str>,
     ) -> waku_protocol::boss::BossEmployee {
         waku_protocol::boss::BossEmployee {
+            purpose: None,
             assignment_kind: Default::default(),
             plan_binding: None,
             plan_readiness: None,

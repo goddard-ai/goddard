@@ -866,6 +866,7 @@ mod tests {
 
         fn step(&self, boundary: HandoffBoundary) -> ChainStepDefinition {
             ChainStepDefinition {
+                purpose: Some(waku_protocol::boss::EmployeePurpose::Helping),
                 title: "step".into(),
                 prompt: "do the work".into(),
                 project_id: self.project_id,

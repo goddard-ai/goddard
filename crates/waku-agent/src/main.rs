@@ -80,6 +80,7 @@ const VALUE_OPTIONS: &[&str] = &[
     "--effort",
     "--work-goal",
     "--assignment-kind",
+    "--purpose",
     "--workspace",
     "--base-branch",
     "--adopt-worktree",
@@ -367,7 +368,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent read TASK_ID --turn 3".to_owned(),
         ),
         "boss summon" => (
-            json!({"--persona":{"type":"exact visible persona name or UUID — an employee role layered on the canonical Employee base (a shipped specialist or custom persona); omit for the base alone","optional":true},"--title":{"required":true,"type":"job title"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--icon":{"enum":employee_icons,"optional":true},"--workspace":{"enum":["local","worktree","adopt"],"default":"local"},"--base-branch":{"requiredWhen":"workspace=worktree"},"--adopt-worktree":{"requiredWhen":"workspace=adopt; worktree address"},"--work-goal":{"enum":["errand","goal"],"default":"errand"},"--assignment-kind":{"enum":["implementation","research"],"default":"implementation","notes":"Research is read-only; draft tags never authorize implementation"},"--plan":{"type":"plan id, planning-session id, or plans/<file>.md; otherwise inherit the outcome attached plan","optional":true},"--item":{"type":"work item UUID inside the explicit or outcome attached plan","optional":true},"--project":{"type":"absolute path","default":"current project; required if none is assigned"},"--provider":{"enum":providers,"optional":"inherits current provider"},"--model":"optional; inherits current model","--effort":"optional; inherits current reasoning effort","--request-id":"optional UUID idempotency key","--needs-attention":{"type":"boolean flag","notes":"flag the employee for user attention: its sidebar entry stays unread once finished and is never swept by roster retirement"},"--boss-authority":{"type":"boolean flag","notes":"grant Boss-level operation authority for this admission — boss or human callers only; fixed at summon, ends with the assignment, cannot be passed on"}}),
+            json!({"--persona":{"type":"exact visible persona name or UUID — an employee role layered on the canonical Employee base (a shipped specialist or custom persona); omit for the base alone","optional":true},"--title":{"required":true,"type":"job title"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--icon":{"enum":employee_icons,"optional":true},"--workspace":{"enum":["local","worktree","adopt"],"default":"local"},"--base-branch":{"requiredWhen":"workspace=worktree"},"--adopt-worktree":{"requiredWhen":"workspace=adopt; worktree address"},"--work-goal":{"enum":["errand","goal"],"default":"errand"},"--assignment-kind":{"enum":["implementation","research"],"optional":true,"notes":"Research is read-only; explicit implementation defaults purpose to Building, explicit research to Helping"},"--purpose":{"enum":["building","helping"],"requiredUnless":"--assignment-kind","notes":"Lasting changes are Building; research, reviews, checks, monitoring and chores are Helping. Explicit purpose overrides the assignment kind default without changing access"},"--plan":{"type":"plan id, planning-session id, or plans/<file>.md; otherwise inherit the outcome attached plan","optional":true},"--item":{"type":"work item UUID inside the explicit or outcome attached plan","optional":true},"--project":{"type":"absolute path","default":"current project; required if none is assigned"},"--provider":{"enum":providers,"optional":"inherits current provider"},"--model":"optional; inherits current model","--effort":"optional; inherits current reasoning effort","--request-id":"optional UUID idempotency key","--needs-attention":{"type":"boolean flag","notes":"flag the employee for user attention: its sidebar entry stays unread once finished and is never swept by roster retirement"},"--boss-authority":{"type":"boolean flag","notes":"grant Boss-level operation authority for this admission — boss or human callers only; fixed at summon, ends with the assignment, cannot be passed on"}}),
             json!({"json":{"type":"summoned","sessionId":"employee UUID","state":"queued|dispatching|working","admission":{"provider":"resolved provider","model":"resolved model","reasoningEffort":"resolved effort or null","queuePosition":"optional queue position","blockedBy":"admission blockers"}}}),
             "goddard-agent boss summon --persona Researcher --title 'Review diff' --file brief.md"
                 .to_owned(),
@@ -431,6 +432,11 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucketIds":{"type":"string[]","optional":true,"notes":"Boss-created bucket IDs; project bucket access is automatic"},"integrationIds":{"type":"string[]","optional":true},"summonEmployees":{"type":"boolean","optional":true},"computerUse":{"type":"boolean","optional":true}}}}),
             json!({"json":{"type":"saved"}}),
             "goddard-agent boss employee permissions EMPLOYEE_ID --json '{\"bucketIds\":[\"operating-rules\"]}'".to_owned(),
+        ),
+        "boss employee purpose" => (
+            json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"PURPOSE":{"positional":true,"required":true,"enum":["building","helping"],"notes":"Classify existing work, including legacy Employees, without changing lifecycle or access"}}),
+            json!({"json":{"type":"saved"}}),
+            "goddard-agent boss employee purpose EMPLOYEE_ID helping".to_owned(),
         ),
         "boss employee plan" => (
             json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"plan":{"type":"plan id, planning-session id, or plans/<file>.md; null clears the tag","optional":true},"item":{"type":"work item UUID inside the plan; null drops to unallocated","optional":true}}}}),
@@ -834,6 +840,7 @@ fn schema() -> serde_json::Value {
         "boss employee model",
         "boss employee permissions",
         "boss employee plan",
+        "boss employee purpose",
         "boss employee persona",
         "boss employee workspace",
         "boss employee resources",
@@ -1508,7 +1515,7 @@ fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
                     else {
                         bail!("unexpected Boss view result")
                     };
-                    let employees = state.employees.into_iter().map(|e| json!({"id":e.session_id,"name":e.identity.name,"jobTitle":e.job_title,"lifecycle":e.state,"workGoal":e.work_goal})).collect::<Vec<_>>();
+                    let employees = state.employees.into_iter().map(|e| json!({"id":e.session_id,"name":e.identity.name,"jobTitle":e.job_title,"lifecycle":e.state,"workGoal":e.work_goal,"purpose":e.purpose})).collect::<Vec<_>>();
                     println!(
                         "{}",
                         serde_json::to_string_pretty(&json!({"employees":employees}))?
@@ -1968,6 +1975,19 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
             )?;
             print_boss(boss_request(op)?)
         }
+        ("employee", "purpose") => {
+            let (pos, _) = flags(args, &[], true)?;
+            if pos.len() != 2 {
+                bail!("usage: boss employee purpose EMPLOYEE_ID building|helping");
+            }
+            let id: Uuid = pos[0].parse().context("invalid employee ID")?;
+            let purpose =
+                serde_json::from_value(json!(pos[1])).context("invalid employee purpose")?;
+            print_boss(boss_request(Op::Control {
+                session_id: id,
+                action: waku_protocol::boss::EmployeeControl::SetPurpose { purpose },
+            })?)
+        }
         ("employee", "plan") => {
             let (pos, opts) = flags(args, &["json", "json-file"], true)?;
             if pos.len() != 1 {
@@ -2325,6 +2345,7 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
             "effort",
             "work-goal",
             "assignment-kind",
+            "purpose",
             "plan",
             "item",
             "workspace",
@@ -2448,13 +2469,18 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
     } else {
         json!([])
     };
+    if !opts.contains_key("purpose") && !opts.contains_key("assignment-kind") {
+        bail!(
+            "summon requires --purpose building|helping or explicit --assignment-kind implementation|research"
+        );
+    }
     let operation: BossOperation = serde_json::from_value(json!({
         "type":"summon", "personaId":persona.as_ref().map(|persona| persona.0), "jobTitle":opts["title"], "prompt":prompt,
         "project":project, "provider":opts.get("provider"), "model":opts.get("model"),
         "reasoningEffort":opts.get("effort"), "workspace":workspace, "baseBranch":opts.get("base-branch"),
         "adoptWorktree":opts.get("adopt-worktree"), "workGoal":opts.get("work-goal").map(String::as_str).unwrap_or("errand"),
         "icon":icon, "plan":opts.get("plan"), "item":opts.get("item"), "requestId":opts.get("request-id"),
-        "assignmentKind":opts.get("assignment-kind").map(String::as_str).unwrap_or("implementation"),
+        "assignmentKind":opts.get("assignment-kind"), "purpose":opts.get("purpose"),
         "permissions":structured("permissions")?, "resources":structured("resources")?,
         "allowBurst":opts.contains_key("allow-burst"), "groupId":opts.get("group-id"), "priority":priority,
         "outcomeId":opts.get("outcome-id"), "newOutcome":structured("new-outcome")?,

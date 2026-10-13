@@ -48,7 +48,7 @@ exist only during this script invocation; use named memory buckets for durable s
   context()                                 work digest string
   automation(#{type:list|create|update|delete|pause|resume,...})
                                             automation document with schedules and run history
-  summon(#{personaId?,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,outcomeId?,newOutcome?,afterSuccess?,finishesOutcome?,prerequisites?,plan?,assignmentKind?,item?,requestId?})
+  summon(#{personaId?,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,outcomeId?,newOutcome?,afterSuccess?,finishesOutcome?,prerequisites?,plan?,assignmentKind?,purpose?,item?,requestId?})
                                             employee session id — icon overrides the
                                             persona icon for this employee; resources
                                             declares host-resource needs for the job's
@@ -71,9 +71,21 @@ exist only during this script invocation; use named memory buckets for durable s
                                             read-only work on draft plans; the
                                             default \"implementation\" requires
                                             the exact approved plan revision
+                                            Set purpose: \"building\" for lasting
+                                            changes or \"helping\" for research,
+                                            reviews, checks, monitoring and chores.
+                                            When purpose is omitted, an explicit
+                                            assignmentKind defaults implementation
+                                            to Building and research to Helping.
+                                            Explicit Helping may use implementation
+                                            access for chores. New summons must supply
+                                            purpose or explicit assignmentKind. Legacy
+                                            records stay under Employees until
+                                            setPurpose classifies them; never infer from titles,
+                                            workGoal, finisher status or access defaults.
   control(sessionId, \"stop\")               shorthand for a bare action
   control(sessionId, #{type:prompt|steer|stop|setModel|setPermissions|
-                        setWorkspace|setResources|setPlan,...})
+                        setWorkspace|setResources|setPlan|setPurpose,...})
                                             setWorkspace takes workspace:
                                             \"local\"|\"worktree\" plus baseBranch
                                             for worktree — stops, rebinds, resumes;

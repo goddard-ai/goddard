@@ -1,0 +1,1 @@
+- Boss employees now group under Building for lasting changes and Helping for research, reviews, checks, monitoring, and chores. Choose purpose when assigning work; older unclassified employees remain visible under Employees until explicitly classified.

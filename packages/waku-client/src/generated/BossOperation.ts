@@ -7,6 +7,7 @@ import type { ChainOperation } from "./ChainOperation";
 import type { CustomCommandIcon } from "./CustomCommandIcon";
 import type { EmployeeControl } from "./EmployeeControl";
 import type { EmployeeGoal } from "./EmployeeGoal";
+import type { EmployeePurpose } from "./EmployeePurpose";
 import type { HandoffDecision } from "./HandoffDecision";
 import type { HistorySourceKind } from "./HistorySourceKind";
 import type { MemoryOperation } from "./MemoryOperation";
@@ -156,6 +157,12 @@ prerequisites?: Array<string>,
  * authorize only explicitly classified research.
  */
 plan?: string, assignmentKind?: PlanAssignmentKind,
+/**
+ * Explicit purpose overrides assignmentKind's purpose default without
+ * changing access. New admission requires one of these explicit inputs;
+ * legacy payloads still decode and legacy request retries remain valid.
+ */
+purpose?: EmployeePurpose,
 /**
  * The `PlanItem::id` inside the selected explicit/inherited plan —
  * an unknown or already done/dropped item

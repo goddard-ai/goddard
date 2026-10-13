@@ -2192,6 +2192,24 @@ impl BossService {
             })
     }
 
+    /// Persist purpose only; classification must not change the runtime or lifecycle.
+    pub fn set_employee_purpose(
+        &self,
+        session: Uuid,
+        purpose: waku_protocol::boss::EmployeePurpose,
+    ) -> anyhow::Result<()> {
+        self.update(|state| {
+            let employee = state
+                .employees
+                .iter_mut()
+                .chain(state.retired_employees.iter_mut())
+                .find(|entry| entry.session_id == session)
+                .ok_or_else(|| anyhow!("unknown employee"))?;
+            employee.purpose = Some(purpose);
+            Ok(())
+        })
+    }
+
     /// Replace an employee's custom role — the deliberate resolution for
     /// an unavailable assignment persona. Grants, pinned documents, and
     /// the icon stay exactly as assigned; only the composed instructions
@@ -2297,6 +2315,7 @@ impl BossService {
             Ok(())
         })?;
         Ok(BossEmployee {
+            purpose: None,
             assignment_kind: Default::default(),
             plan_binding: None,
             plan_readiness: None,
@@ -8028,6 +8047,7 @@ mod tests {
         service
             .update(|state| {
                 state.employees.push(BossEmployee {
+                    purpose: None,
                     assignment_kind: Default::default(),
                     plan_binding: None,
                     plan_readiness: None,
@@ -8108,6 +8128,7 @@ mod tests {
         service
             .update(|state| {
                 state.employees.push(BossEmployee {
+                    purpose: None,
                     assignment_kind: Default::default(),
                     plan_binding: None,
                     plan_readiness: None,
@@ -8497,6 +8518,7 @@ mod tests {
         service
             .update(|state| {
                 state.employees.push(BossEmployee {
+                    purpose: None,
                     assignment_kind: Default::default(),
                     plan_binding: None,
                     plan_readiness: None,
@@ -8647,6 +8669,7 @@ mod tests {
             service
                 .update(|state| {
                     state.employees.push(BossEmployee {
+                        purpose: None,
                         assignment_kind: Default::default(),
                         plan_binding: None,
                         plan_readiness: None,
@@ -9350,6 +9373,7 @@ mod tests {
         service
             .update(|state| {
                 state.employees.push(BossEmployee {
+                    purpose: None,
                     assignment_kind: Default::default(),
                     plan_binding: None,
                     plan_readiness: None,
@@ -10072,6 +10096,7 @@ mod tests {
         service
             .update(|state| {
                 state.employees.push(BossEmployee {
+                    purpose: None,
                     assignment_kind: Default::default(),
                     plan_binding: None,
                     plan_readiness: None,
@@ -12383,6 +12408,35 @@ mod memory_op_tests {
             })
             .unwrap();
         (service, boss)
+    }
+
+    #[test]
+    fn employee_purpose_persists_without_inventing_legacy_intent() {
+        use waku_protocol::boss::EmployeePurpose;
+        let root = std::env::temp_dir().join(format!("purpose-persistence-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let employee = admit(&service, boss, "Build the app", None);
+        assert_eq!(employee.purpose, None);
+        let legacy: BossEmployee =
+            serde_json::from_value(serde_json::to_value(&employee).unwrap()).unwrap();
+        assert_eq!(legacy.purpose, None);
+        assert_eq!(
+            legacy.assignment_kind,
+            waku_protocol::boss::PlanAssignmentKind::Implementation
+        );
+        service
+            .set_employee_purpose(employee.session_id, EmployeePurpose::Helping)
+            .unwrap();
+        let mut expected = serde_json::to_value(employee).unwrap();
+        expected["purpose"] = serde_json::json!("helping");
+        drop(service);
+        let reopened = BossService::open(root.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(reopened.employee(legacy.session_id).unwrap()).unwrap(),
+            expected
+        );
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn admit(

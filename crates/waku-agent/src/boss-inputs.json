@@ -415,6 +415,9 @@
             "assignmentKind": {
               "$ref": "#/definitions/PlanAssignmentKind"
             },
+            "purpose": {
+              "$ref": "#/definitions/EmployeePurpose"
+            },
             "item": {
               "type": "string",
               "format": "uuid"
@@ -1335,6 +1338,22 @@
     },
     "EmployeeControl": {
       "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "setPurpose"
+            },
+            "purpose": {
+              "$ref": "#/definitions/EmployeePurpose"
+            }
+          },
+          "required": [
+            "type",
+            "purpose"
+          ],
+          "additionalProperties": false
+        },
         {
           "type": "object",
           "properties": {
@@ -2847,6 +2866,9 @@
     "ChainStepDefinition": {
       "type": "object",
       "properties": {
+        "purpose": {
+          "$ref": "#/definitions/EmployeePurpose"
+        },
         "title": {
           "type": "string"
         },
@@ -3139,6 +3161,16 @@
         },
         {
           "const": "goal"
+        }
+      ]
+    },
+    "EmployeePurpose": {
+      "anyOf": [
+        {
+          "const": "building"
+        },
+        {
+          "const": "helping"
         }
       ]
     },

@@ -363,6 +363,7 @@ impl WakuBackend {
             employee.request_id = Some(attempt.dispatch_id);
             employee.request_fingerprint = Some(fingerprint);
             employee.assignment_kind = PlanAssignmentKind::Implementation;
+            employee.purpose = definition.purpose;
             employee.plan_id = definition.plan_id;
             employee.item_id = definition.item_id;
             employee.plan_binding = self.chain_plan_binding(chain, definition)?;

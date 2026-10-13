@@ -672,6 +672,7 @@ impl WakuBackend {
                 plan,
                 item,
                 assignment_kind,
+                purpose,
                 request_id,
                 needs_attention,
             } => {
@@ -703,7 +704,8 @@ impl WakuBackend {
                         prerequisites,
                         plan,
                         item,
-                        assignment_kind.unwrap_or_default(),
+                        assignment_kind,
+                        purpose,
                         request_id,
                         needs_attention,
                         events,
@@ -729,6 +731,10 @@ impl WakuBackend {
                 }
                 self.boss.with_operation_lock(|| {
                     self.boss.require_control(caller, session_id)?;
+                    if let EmployeeControl::SetPurpose { purpose } = &action {
+                        self.boss.set_employee_purpose(session_id, *purpose)?;
+                        return Ok(BossResult::Saved);
+                    }
                     // Retags validate plan authority. A live assignment
                     // keeps its accepted revision rather than switching plans.
                     if let EmployeeControl::SetPlan { plan, item } = &action {
@@ -977,7 +983,8 @@ impl WakuBackend {
                         | EmployeeControl::SetPersona { .. }
                         | EmployeeControl::SetWorkspace { .. }
                         | EmployeeControl::SetResources { .. }
-                        | EmployeeControl::SetPlan { .. } => {
+                        | EmployeeControl::SetPlan { .. }
+                        | EmployeeControl::SetPurpose { .. } => {
                             unreachable!("handled above")
                         }
                     }

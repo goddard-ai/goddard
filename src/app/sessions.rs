@@ -853,6 +853,11 @@ impl Waku {
                 .sidebar_errand_idle_visible
                 .remove(&key)
                 .is_some();
+            folds_changed |= self
+                .boss_ui
+                .sidebar_employee_idle_visible
+                .remove(&key)
+                .is_some();
             folds_changed |= self.sidebar_collapsed_groups.insert(SidebarGroup::Errands);
             if folds_changed {
                 self.sidebar_rows_fingerprint.set(None);

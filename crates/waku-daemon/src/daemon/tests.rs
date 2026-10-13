@@ -7766,7 +7766,8 @@ fn boss_summon_runs_the_employee_in_a_managed_worktree() {
     let result = backend.handle_boss_operation(
         Some(boss),
         BossOperation::Summon {
-            assignment_kind: Default::default(),
+            purpose: None,
+            assignment_kind: Some(waku_protocol::boss::PlanAssignmentKind::Implementation),
             persona_id: Some(persona),
 
             job_title: "Worktree job".into(),
@@ -7854,7 +7855,8 @@ fn boss_summon_marker_freezes_the_card_identity() {
     let result = backend.handle_boss_operation(
         Some(boss),
         BossOperation::Summon {
-            assignment_kind: Default::default(),
+            purpose: None,
+            assignment_kind: Some(waku_protocol::boss::PlanAssignmentKind::Implementation),
             persona_id: Some(persona),
 
             job_title: "Release checks".into(),
@@ -8094,6 +8096,7 @@ impl AdoptFixture {
         self.backend.handle_boss_operation(
             Some(self.boss),
             BossOperation::Summon {
+                purpose: Some(waku_protocol::boss::EmployeePurpose::Building),
                 assignment_kind: Default::default(),
                 persona_id: Some(self.backend.boss.document().personas[0].id),
                 job_title: "Adopt job".into(),
@@ -8452,6 +8455,7 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
         backend.handle_boss_operation(
             Some(boss),
             BossOperation::Summon {
+                purpose: Some(waku_protocol::boss::EmployeePurpose::Building),
                 assignment_kind: Default::default(),
                 persona_id: Some(persona),
 
@@ -8618,7 +8622,8 @@ fn summon_op(
     model: Option<&str>,
 ) -> waku_protocol::boss::BossOperation {
     waku_protocol::boss::BossOperation::Summon {
-        assignment_kind: Default::default(),
+        purpose: None,
+        assignment_kind: Some(waku_protocol::boss::PlanAssignmentKind::Implementation),
         persona_id: Some(backend.boss.document().personas[0].id),
         job_title: job.into(),
         prompt: format!("Work on {job}"),
@@ -8950,6 +8955,203 @@ fn summon_response_times_out_without_inventing_admission() {
     assert_eq!(session_id, employee.session_id);
     assert_eq!(state, waku_protocol::boss::EmployeeLifecycle::Queued);
     assert_eq!(backend.boss.queued_heads().len(), 1);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn employee_purpose_admission_defaults_and_control_preserve_lifecycle() {
+    use waku_protocol::boss::{
+        BossOperation, BossResult, EmployeeControl, EmployeePurpose, PlanAssignmentKind,
+    };
+    let root = std::env::temp_dir().join(format!("employee-purpose-{}", Uuid::new_v4()));
+    let (mut backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+    let events = EventSink::detached();
+    for (kind, explicit, expected) in [
+        (
+            Some(PlanAssignmentKind::Implementation),
+            None,
+            EmployeePurpose::Building,
+        ),
+        (
+            Some(PlanAssignmentKind::Research),
+            None,
+            EmployeePurpose::Helping,
+        ),
+        (
+            Some(PlanAssignmentKind::Implementation),
+            Some(EmployeePurpose::Helping),
+            EmployeePurpose::Helping,
+        ),
+        (
+            None,
+            Some(EmployeePurpose::Building),
+            EmployeePurpose::Building,
+        ),
+    ] {
+        let mut operation = summon_op(
+            &backend,
+            &root,
+            "same title",
+            ProviderKind::Codex,
+            Some("gpt-5.5"),
+        );
+        if let BossOperation::Summon {
+            assignment_kind,
+            purpose,
+            request_id,
+            ..
+        } = &mut operation
+        {
+            *assignment_kind = kind;
+            *purpose = explicit;
+            *request_id = Some(Uuid::new_v4());
+        }
+        let BossResult::Summoned { session_id, .. } = backend
+            .handle_boss_operation(Some(boss), operation.clone(), &events)
+            .unwrap()
+        else {
+            panic!("expected queued summon");
+        };
+        let before = backend.boss.employee(session_id).unwrap();
+        assert_eq!(before.purpose, Some(expected));
+        assert_eq!(before.assignment_kind, kind.unwrap_or_default());
+        let BossResult::Summoned {
+            session_id: retry, ..
+        } = backend
+            .handle_boss_operation(Some(boss), operation.clone(), &events)
+            .unwrap()
+        else {
+            panic!("expected retry");
+        };
+        assert_eq!(retry, session_id);
+        if let BossOperation::Summon { purpose, .. } = &mut operation {
+            *purpose = Some(if expected == EmployeePurpose::Helping {
+                EmployeePurpose::Building
+            } else {
+                EmployeePurpose::Helping
+            });
+        }
+        assert!(
+            backend
+                .handle_boss_operation(Some(boss), operation, &events)
+                .unwrap_err()
+                .to_string()
+                .contains("different summon")
+        );
+        let control = BossOperation::Control {
+            session_id,
+            action: EmployeeControl::SetPurpose {
+                purpose: EmployeePurpose::Helping,
+            },
+        };
+        assert!(
+            backend
+                .handle_boss_operation(Some(Uuid::new_v4()), control.clone(), &events)
+                .is_err()
+        );
+        backend
+            .handle_boss_operation(Some(boss), control, &events)
+            .unwrap();
+        let after = backend.boss.employee(session_id).unwrap();
+        let mut expected_record = serde_json::to_value(&before).unwrap();
+        expected_record["purpose"] = serde_json::json!("helping");
+        assert_eq!(serde_json::to_value(after).unwrap(), expected_record);
+        assert!(!backend.sessions.lock().contains_key(&session_id));
+    }
+    let mut old_request = summon_op(
+        &backend,
+        &root,
+        "legacy retry",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon { request_id, .. } = &mut old_request {
+        *request_id = Some(Uuid::new_v4());
+    }
+    let BossResult::Summoned {
+        session_id: legacy_id,
+        ..
+    } = backend
+        .handle_boss_operation(Some(boss), old_request.clone(), &events)
+        .unwrap()
+    else {
+        panic!("expected summon");
+    };
+    let path = root.join("boss/boss.json");
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let employee = document["employees"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|entry| entry["sessionId"] == serde_json::json!(legacy_id))
+        .unwrap();
+    employee.as_object_mut().unwrap().remove("purpose");
+    let mut fingerprint: serde_json::Value =
+        serde_json::from_str(employee["requestFingerprint"].as_str().unwrap()).unwrap();
+    fingerprint.as_object_mut().unwrap().remove("purpose");
+    employee["requestFingerprint"] =
+        serde_json::json!(serde_json::to_string(&fingerprint).unwrap());
+    std::fs::write(&path, serde_json::to_vec_pretty(&document).unwrap()).unwrap();
+    backend.boss = Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap());
+    let BossResult::Summoned {
+        session_id: replay, ..
+    } = backend
+        .handle_boss_operation(Some(boss), old_request.clone(), &events)
+        .unwrap()
+    else {
+        panic!("expected legacy retry");
+    };
+    assert_eq!(replay, legacy_id);
+    assert_eq!(backend.boss.employee(replay).unwrap().purpose, None);
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id: legacy_id,
+                action: EmployeeControl::SetPurpose {
+                    purpose: EmployeePurpose::Helping,
+                },
+            },
+            &events,
+        )
+        .unwrap();
+    let BossResult::Summoned {
+        session_id: replay, ..
+    } = backend
+        .handle_boss_operation(Some(boss), old_request, &events)
+        .unwrap()
+    else {
+        panic!("expected classified legacy retry");
+    };
+    assert_eq!(replay, legacy_id);
+    assert_eq!(
+        backend.boss.employee(replay).unwrap().purpose,
+        Some(EmployeePurpose::Helping)
+    );
+    let mut missing = summon_op(
+        &backend,
+        &root,
+        "unknown",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon {
+        assignment_kind, ..
+    } = &mut missing
+    {
+        *assignment_kind = None;
+    }
+    assert!(
+        backend
+            .handle_boss_operation(Some(boss), missing, &events)
+            .unwrap_err()
+            .to_string()
+            .contains("summon requires purpose")
+    );
+    assert_eq!(backend.boss.document().employees.len(), 5);
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -14722,6 +14924,7 @@ fn summon_with_tag(
     request_id: Option<Uuid>,
 ) -> waku_protocol::boss::BossOperation {
     waku_protocol::boss::BossOperation::Summon {
+        purpose: None,
         assignment_kind: Some(waku_protocol::boss::PlanAssignmentKind::Research),
         persona_id: Some(persona),
 
@@ -17122,6 +17325,7 @@ fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
         )
         .unwrap();
     let step = ChainStepDefinition {
+        purpose: Some(waku_protocol::boss::EmployeePurpose::Helping),
         title: "Investigate".into(),
         prompt: "Read-only investigation".into(),
         project_id,
@@ -17257,6 +17461,7 @@ fn chain_test_definition(
         finishes_outcome: true,
         steps: vec![
             ChainStepDefinition {
+                purpose: Some(waku_protocol::boss::EmployeePurpose::Helping),
                 project_id: project,
                 title: "investigate".into(),
                 prompt: "find the root cause".into(),
@@ -17278,6 +17483,7 @@ fn chain_test_definition(
                 item_id: None,
             },
             ChainStepDefinition {
+                purpose: Some(waku_protocol::boss::EmployeePurpose::Helping),
                 project_id: project,
                 title: "verify".into(),
                 prompt: "verify the fix".into(),
@@ -17444,6 +17650,14 @@ fn chains_execute_in_order_sealing_handoffs_quietly() {
     // Creation admitted the first step — a real employee, durable binding.
     let chain_id = state.chains[0].id;
     let first = state.employees[0].clone();
+    assert_eq!(
+        first.purpose,
+        Some(waku_protocol::boss::EmployeePurpose::Helping)
+    );
+    assert_eq!(
+        first.assignment_kind,
+        waku_protocol::boss::PlanAssignmentKind::Implementation
+    );
     assert_eq!(
         Some(first.session_id),
         state.chains[0].steps[0].attempts[0].employee_id

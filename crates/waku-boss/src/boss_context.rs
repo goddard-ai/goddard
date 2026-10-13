@@ -695,6 +695,7 @@ mod tests {
 
     fn employee(session_id: Uuid, name: &str, expired: bool, supervisor_id: Uuid) -> BossEmployee {
         BossEmployee {
+            purpose: None,
             assignment_kind: Default::default(),
             plan_binding: None,
             plan_readiness: None,

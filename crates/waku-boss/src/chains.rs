@@ -353,6 +353,10 @@ impl BossService {
                         result = Some(existing.clone());
                         return Ok(());
                     }
+                    ensure!(
+                        definition.steps.iter().all(|step| step.purpose.is_some()),
+                        "new chain steps require explicit purpose (building or helping)"
+                    );
                     validate_definition(state, &definition)?;
                     for step in &definition.steps {
                         self.validate_bucket_ids(&step.permissions.bucket_ids)?;
@@ -556,6 +560,10 @@ impl BossService {
                     step,
                     definition,
                 } => {
+                    ensure!(
+                        definition.purpose.is_some(),
+                        "revised chain steps require explicit purpose (building or helping)"
+                    );
                     self.validate_bucket_ids(&definition.permissions.bucket_ids)?;
                     let predecessor = state
                         .chains
@@ -1340,6 +1348,35 @@ mod tests {
         service: BossService,
         definition: ChainDefinition,
     }
+    #[test]
+    fn employee_purpose_chain_intake_requires_choice_and_decodes_legacy_steps() {
+        use waku_protocol::boss::EmployeePurpose;
+        let mut fixture = Fixture::new();
+        fixture.definition.steps[0].purpose = None;
+        let legacy: ChainStepDefinition =
+            serde_json::from_value(serde_json::to_value(&fixture.definition.steps[0]).unwrap())
+                .unwrap();
+        assert_eq!(legacy.purpose, None);
+        let error = fixture
+            .service
+            .chain_operation(
+                None,
+                ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition: fixture.definition.clone(),
+                },
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("require explicit purpose"));
+        assert!(fixture.service.document().chains.is_empty());
+        fixture.definition.steps[0].purpose = Some(EmployeePurpose::Helping);
+        let chain = fixture.create();
+        assert_eq!(
+            chain.steps[0].definition.purpose,
+            Some(EmployeePurpose::Helping)
+        );
+    }
+
     impl Fixture {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!("chain-safety-{}", Uuid::new_v4()));
@@ -1349,6 +1386,7 @@ mod tests {
                 .unwrap()
                 .id;
             let step = ChainStepDefinition {
+                purpose: Some(waku_protocol::boss::EmployeePurpose::Helping),
                 title: "Investigate".into(),
                 prompt: "Investigate only".into(),
                 project_id: Uuid::new_v4(),

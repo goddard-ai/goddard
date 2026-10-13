@@ -5,6 +5,7 @@ import type { CustomCommandIcon } from "./CustomCommandIcon";
 import type { EmployeeExpiry } from "./EmployeeExpiry";
 import type { EmployeeGoal } from "./EmployeeGoal";
 import type { EmployeeLifecycle } from "./EmployeeLifecycle";
+import type { EmployeePurpose } from "./EmployeePurpose";
 import type { PersonaPermissions } from "./PersonaPermissions";
 import type { PlanAssignmentKind } from "./PlanAssignmentKind";
 import type { PlanBinding } from "./PlanBinding";
@@ -128,6 +129,11 @@ planId?: string,
  * Explicit research is read-only; legacy assignments default to implementation.
  */
 assignmentKind: PlanAssignmentKind,
+/**
+ * Explicit assignment purpose, independent of reporting and plan access.
+ * Missing on legacy records; keep those visible in Employees until classified.
+ */
+purpose?: EmployeePurpose,
 /**
  * Exact authority selected at acceptance; never upgraded by dispatch.
  */

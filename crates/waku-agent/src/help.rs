@@ -31,7 +31,7 @@ Bindings with direct-command counterparts:
     workspace defaults local; worktree requires baseBranch; adopt requires adoptWorktree. outcomeId or newOutcome assigns an outcome; finishesOutcome requires success criteria. prerequisites are sibling employee UUIDs; groupId groups a completion wave. permissions overrides per-field inherited grants (bucketIds, integrationIds, summonEmployees, computerUse); supervisor grants clamp delegation. resources declares host needs, allowBurst requests capacity within hard caps; priority is recorded; FIFO admission does not reorder on it. afterSuccess is durable follow-up intent.
   setResourcePolicy(#{expectedRevision,modelLimits,host?}) — update against the current revision; modelLimits contains provider/model/liveLimit/hardCap, and host contains capacity counts.
   control(sessionId, "stop" | #{type:ACTION,...})
-    ACTION: prompt (prompt, delivery?=interrupt), steer (prompt, jobTitle?), stop, setModel (provider, model, reasoningEffort?), setPermissions (permissions), setPersona (personaId or ()), setWorkspace (workspace: local|worktree, baseBranch?), setResources (resources), setPlan (plan?, item?; omitted keeps, () clears).
+    ACTION: prompt (prompt, delivery?=interrupt), steer (prompt, jobTitle?), stop, setModel (provider, model, reasoningEffort?), setPermissions (permissions), setPersona (personaId or ()), setWorkspace (workspace: local|worktree, baseBranch?), setResources (resources), setPlan (plan?, item?; omitted keeps, () clears), setPurpose (purpose: building|helping).
   readFile(path), writeFile(path, content), listFiles([path]), createFolder(path)
   publishDeliverable(path[, name]), dismissDeliverable(id)
   speak(parts | "utterance"), browse(url[, title]), terminal(title,cwd[,command])
@@ -152,6 +152,9 @@ fn purpose(path: &str) -> &str {
         }
         "boss employee persona" => {
             "Select an employee role or clear it to the canonical Employee base."
+        }
+        "boss employee purpose" => {
+            "Classify an assignment as Building or Helping without changing access or lifecycle"
         }
         "boss employee plan" => {
             "Retag plan/item links; omitted fields keep, null clears, changing plan alone drops item."
