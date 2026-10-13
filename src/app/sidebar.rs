@@ -4111,12 +4111,11 @@ impl Waku {
                 rows.push(SidebarRow::Terminal(terminal_id));
             }
         }
-        rows.push(SidebarRow::GroupSpacer);
-
-        // Deliverables an employee produced and the boss published get their own
-        // section directly above the Boss block in either grouping. Under project
-        // grouping they keep this dedicated group rather than folding into a
-        // project — a deliverable's detail line names its file, not a project.
+        // Deliverables an employee produced and the boss published stay in the
+        // utility cluster beside Terminals, above the spacer before the Boss
+        // block. Under project grouping they keep this dedicated group rather
+        // than folding into a project — a deliverable's detail line names its
+        // file, not a project.
         let (recent_deliverables, dormant_deliverables) = if self.state.boss_experiment_enabled {
             sidebar_recent_deliverables(&self.boss_ui.states, now)
         } else {
@@ -4164,8 +4163,9 @@ impl Waku {
                     None => {}
                 }
             }
-            rows.push(SidebarRow::GroupSpacer);
         }
+        // Separate the whole utility cluster from the Boss block below.
+        rows.push(SidebarRow::GroupSpacer);
 
         let mut collapsed_members: HashMap<SidebarGroup, Vec<Uuid>> = HashMap::new();
         if self.state.boss_experiment_enabled && !self.boss_ui.hosts.is_empty() {
