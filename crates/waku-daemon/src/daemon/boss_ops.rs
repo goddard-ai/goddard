@@ -924,6 +924,12 @@ impl WakuBackend {
                             if prompt.trim().is_empty() {
                                 bail!("employee prompts cannot be empty");
                             }
+                            if caller.is_some_and(|id| self.boss.is_boss_principal(id))
+                                && !matches!(delivery, Some(AgentPromptDelivery::Steer))
+                            {
+                                self.deliver_boss_employee_prompt(session_id, prompt, caller, events)?;
+                                return Ok(BossResult::Saved);
+                            }
                             let driver = self.steerable_driver(session_id);
                             match delivery.unwrap_or_default() {
                                 AgentPromptDelivery::Interrupt => match driver {

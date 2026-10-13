@@ -1568,6 +1568,7 @@ struct CaptureDriver {
     options: Mutex<Vec<crate::driver::SessionOptions>>,
     applies_options: bool,
     surface_delivery: crate::driver::AgentSurfaceDelivery,
+    cannot_steer: bool,
 }
 
 impl crate::driver::DriverControl for CaptureDriver {
@@ -1578,7 +1579,7 @@ impl crate::driver::DriverControl for CaptureDriver {
         *self.shutdowns.lock() += 1;
     }
     fn supports_steer(&self) -> bool {
-        true
+        !self.cannot_steer
     }
     fn agent_surface_delivery(&self) -> crate::driver::AgentSurfaceDelivery {
         self.surface_delivery
@@ -5906,22 +5907,18 @@ fn a_failed_turn_settles_as_failed() {
 /// settle to `parkedWork` — the record counts what never delivered.
 #[test]
 fn a_parked_prompt_settles_as_parked_work() {
-    use waku_protocol::boss::{BossOperation, EmployeeControl, EmployeeSettle, ExpiryCause};
+    use waku_protocol::boss::{EmployeeSettle, ExpiryCause};
     let root = std::env::temp_dir().join(format!("boss-settle-parked-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, _parent, _child) = employee_finish_fixture(&root);
     backend
         .agent
         .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+    // Seed a legacy persisted queue entry without applying new Boss routing.
     backend
-        .handle_boss_operation(
+        .queue_agent_prompt(
+            employee_id,
+            "queued while working".into(),
             Some(supervisor),
-            BossOperation::Control {
-                session_id: employee_id,
-                action: EmployeeControl::Prompt {
-                    prompt: "queued while working".into(),
-                    delivery: Some(crate::protocol::AgentPromptDelivery::Queue),
-                },
-            },
             &EventSink::detached(),
         )
         .unwrap();
@@ -6028,22 +6025,18 @@ fn a_stopped_employee_sends_no_report() {
 /// the supervisor hears the parked count.
 #[test]
 fn a_parked_work_expiry_reports_the_count() {
-    use waku_protocol::boss::{BossOperation, EmployeeControl, EmployeeSettle};
+    use waku_protocol::boss::EmployeeSettle;
     let root = std::env::temp_dir().join(format!("boss-report-parked-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, parent_capture, _child) = employee_finish_fixture(&root);
     backend
         .agent
         .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+    // Seed a legacy persisted queue entry without applying new Boss routing.
     backend
-        .handle_boss_operation(
+        .queue_agent_prompt(
+            employee_id,
+            "queued while working".into(),
             Some(supervisor),
-            BossOperation::Control {
-                session_id: employee_id,
-                action: EmployeeControl::Prompt {
-                    prompt: "queued while working".into(),
-                    delivery: Some(crate::protocol::AgentPromptDelivery::Queue),
-                },
-            },
             &EventSink::detached(),
         )
         .unwrap();
@@ -10406,7 +10399,7 @@ fn queued_employees_take_prompts_and_expire_without_claims() {
     };
     control(EmployeeControl::Prompt {
         prompt: "also check the migrations".into(),
-        delivery: Some(AgentPromptDelivery::Interrupt),
+        delivery: Some(AgentPromptDelivery::Queue),
     })
     .unwrap();
     let employee = backend.boss.employee(session_id).unwrap();
@@ -12574,7 +12567,7 @@ fn a_resume_refuses_an_adopted_worktree() {
 /// note — the ordinary ticket merge does the ordering.
 #[test]
 fn a_resume_drains_parked_prompts_first() {
-    use waku_protocol::boss::{BossOperation, EmployeeControl, EmployeeLifecycle, EmployeeSettle};
+    use waku_protocol::boss::{BossOperation, EmployeeLifecycle, EmployeeSettle};
     let root = std::env::temp_dir().join(format!("boss-resume-parked-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, _parent, _child) = employee_finish_fixture(&root);
     // Pin a model so the synthesized ticket takes a pool the test
@@ -12593,16 +12586,12 @@ fn a_resume_drains_parked_prompts_first() {
     backend
         .agent
         .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+    // Seed a legacy persisted queue entry without applying new Boss routing.
     backend
-        .handle_boss_operation(
+        .queue_agent_prompt(
+            employee_id,
+            "queued while working".into(),
             Some(supervisor),
-            BossOperation::Control {
-                session_id: employee_id,
-                action: EmployeeControl::Prompt {
-                    prompt: "queued while working".into(),
-                    delivery: Some(crate::protocol::AgentPromptDelivery::Queue),
-                },
-            },
             &EventSink::detached(),
         )
         .unwrap();
@@ -12689,7 +12678,7 @@ fn a_human_resume_requeues_a_stopped_employee() {
 /// empty — settles the record.
 #[test]
 fn an_employee_with_parked_prompts_drains_instead_of_expiring() {
-    use waku_protocol::boss::{BossOperation, EmployeeControl, ExpiryCause};
+    use waku_protocol::boss::ExpiryCause;
     let root = std::env::temp_dir().join(format!("boss-drain-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, _parent, child_capture) = employee_finish_fixture(&root);
     // The settle's finish rides the callback `start_automations` binds
@@ -12706,16 +12695,12 @@ fn an_employee_with_parked_prompts_drains_instead_of_expiring() {
     backend
         .agent
         .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+    // Seed a legacy persisted queue entry without applying new Boss routing.
     backend
-        .handle_boss_operation(
+        .queue_agent_prompt(
+            employee_id,
+            "queued while working".into(),
             Some(supervisor),
-            BossOperation::Control {
-                session_id: employee_id,
-                action: EmployeeControl::Prompt {
-                    prompt: "queued while working".into(),
-                    delivery: Some(crate::protocol::AgentPromptDelivery::Queue),
-                },
-            },
             &EventSink::detached(),
         )
         .unwrap();
@@ -15017,6 +15002,7 @@ fn a_prompt_to_an_idle_employee_starts_a_turn() {
     use waku_protocol::boss::{BossOperation, EmployeeControl};
     let root = std::env::temp_dir().join(format!("boss-idle-wake-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, _parent, child) = employee_finish_fixture(&root);
+    backend.agent.note_user_stop(employee_id);
     for text in ["follow up", "and another"] {
         backend
             .handle_boss_operation(
@@ -15025,7 +15011,7 @@ fn a_prompt_to_an_idle_employee_starts_a_turn() {
                     session_id: employee_id,
                     action: EmployeeControl::Prompt {
                         prompt: text.into(),
-                        delivery: Some(AgentPromptDelivery::Interrupt),
+                        delivery: Some(AgentPromptDelivery::Queue),
                     },
                 },
                 &EventSink::detached(),
@@ -15050,14 +15036,15 @@ fn a_prompt_to_an_idle_employee_starts_a_turn() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// A supervisor's plain prompt interrupts the running turn — the
-/// default delivery steers in like an explicit steer, and only an
-/// explicit `queue` parks behind the open turn.
+/// Boss default and explicit queue delivery both steer the running turn.
 #[test]
 fn a_supervisor_prompt_steers_the_running_turn() {
     use waku_protocol::boss::{BossOperation, EmployeeControl};
     let root = std::env::temp_dir().join(format!("boss-steer-default-{}", Uuid::new_v4()));
     let (backend, supervisor, employee_id, _parent, child) = employee_finish_fixture(&root);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
     backend
         .agent
         .note_driver_event(employee_id, &DriverEvent::TurnStarted);
@@ -15068,21 +15055,55 @@ fn a_supervisor_prompt_steers_the_running_turn() {
                 session_id: employee_id,
                 action: EmployeeControl::Prompt {
                     prompt: "redirect".into(),
-                    delivery: Some(delivery),
+                    delivery,
                 },
             },
             &EventSink::detached(),
         )
     };
-    prompt(AgentPromptDelivery::Interrupt).unwrap();
+    prompt(None).unwrap();
     let steers = child.steers.lock().clone();
     assert_eq!(steers.len(), 1);
     assert!(steers[0].contains("redirect"));
     drop(steers);
     assert!(child.prompts.lock().is_empty());
     assert!(!backend.agent.has_queued(employee_id));
-    // An explicit queue still parks behind the open turn.
-    prompt(AgentPromptDelivery::Queue).unwrap();
+    // Explicit queue is normalized only for Boss-origin delivery.
+    prompt(Some(AgentPromptDelivery::Queue)).unwrap();
+    assert_eq!(child.steers.lock().len(), 2);
+    assert!(!backend.agent.has_queued(employee_id));
+    backend
+        .agent_prompt(
+            Some(supervisor),
+            Some(employee_id),
+            None,
+            None,
+            "CLI correction".into(),
+            AgentPromptDelivery::Queue,
+            EventSink::detached(),
+        )
+        .unwrap();
+    assert_eq!(child.steers.lock().len(), 3);
+    assert!(!backend.agent.has_queued(employee_id));
+    backend.handle_boss_operation(Some(supervisor), BossOperation::Eval {
+        script: format!("control(\"{employee_id}\", #{{type: \"prompt\", prompt: \"script correction\", delivery: \"queue\"}})"),
+    }, &EventSink::detached()).unwrap();
+    assert_eq!(child.steers.lock().len(), 4);
+    assert!(!backend.agent.has_queued(employee_id));
+    // Callerless human control retains explicit queue semantics.
+    backend
+        .handle_boss_operation(
+            None,
+            BossOperation::Control {
+                session_id: employee_id,
+                action: EmployeeControl::Prompt {
+                    prompt: "human followup".into(),
+                    delivery: Some(AgentPromptDelivery::Queue),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
     assert!(backend.agent.has_queued(employee_id));
     let _ = std::fs::remove_dir_all(root);
 }
@@ -15099,16 +15120,12 @@ fn a_queued_prompt_survives_expiry_and_drains_before_the_revive_prompt() {
     backend
         .agent
         .note_driver_event(employee_id, &DriverEvent::TurnStarted);
+    // Seed a legacy persisted queue entry without applying new Boss routing.
     backend
-        .handle_boss_operation(
+        .queue_agent_prompt(
+            employee_id,
+            "queued while working".into(),
             Some(supervisor),
-            BossOperation::Control {
-                session_id: employee_id,
-                action: EmployeeControl::Prompt {
-                    prompt: "queued while working".into(),
-                    delivery: Some(AgentPromptDelivery::Queue),
-                },
-            },
             &EventSink::detached(),
         )
         .unwrap();
@@ -19418,3 +19435,76 @@ mod rotation_oracle;
 mod rotation_status;
 
 mod employee_composer;
+
+#[test]
+fn boss_prompt_cancels_unsupported_provider_and_preserves_durable_correction() {
+    use waku_protocol::boss::{BossOperation, EmployeeControl};
+    for parked in [false, true] {
+        let root = std::env::temp_dir().join(format!("boss-prompt-fallback-{}", Uuid::new_v4()));
+        let (backend, supervisor, employee, _, _) = employee_finish_fixture(&root);
+        let capture = Arc::new(CaptureDriver {
+            cannot_steer: true,
+            ..Default::default()
+        });
+        backend.sessions.lock().get_mut(&employee).unwrap().driver =
+            DriverHandle::from_control(capture.clone());
+        backend
+            .agent
+            .note_driver_event(employee, &DriverEvent::TurnStarted);
+        if parked {
+            backend
+                .agent
+                .note_driver_event(employee, &DriverEvent::TurnParked);
+        }
+        backend
+            .handle_boss_operation(
+                Some(supervisor),
+                BossOperation::Control {
+                    session_id: employee,
+                    action: EmployeeControl::Prompt {
+                        prompt: "correct immediately".into(),
+                        delivery: Some(AgentPromptDelivery::Queue),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        assert_eq!(*capture.cancels.lock(), 1);
+        assert!(capture.prompts.lock().is_empty());
+        assert!(capture.steers.lock().is_empty());
+        assert!(backend.agent.take_daemon_interrupt(employee));
+        let queued_id = {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|s| s.id == employee)
+                .unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            assert_eq!(session.queued_messages.len(), 1);
+            session.queued_messages[0].id
+        };
+        // Reload the stored document and lose the memory queue, as on restart.
+        *backend.task_state.lock() = backend.task_store.load().unwrap();
+        backend.agent.remove_queued(employee, queued_id);
+        backend.agent.note_driver_event(
+            employee,
+            &DriverEvent::TurnFinished {
+                success: false,
+                summary: None,
+                summary_i18n: None,
+            },
+        );
+        let driver = DriverHandle::from_control(capture.clone());
+        backend
+            .drain_agent_queue(employee, &driver, &EventSink::detached())
+            .unwrap();
+        backend
+            .drain_agent_queue(employee, &driver, &EventSink::detached())
+            .unwrap();
+        assert_eq!(capture.prompts.lock().len(), 1);
+        assert!(capture.prompts.lock()[0].contains("correct immediately"));
+        assert!(!backend.agent.has_queued(employee));
+        let _ = std::fs::remove_dir_all(root);
+    }
+}

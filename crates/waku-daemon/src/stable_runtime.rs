@@ -1122,6 +1122,22 @@ impl LinkShared {
     }
 
     fn submit(&self, input: Value) {
+        // A new controller-owned prompt explicitly resumes dispatch after a
+        // cancellation hold. Reattachment alone must never release that hold.
+        let permission = {
+            let mut client = self.client.lock().unwrap();
+            execute_safe(&mut client, &self.envelope(Uuid::new_v4(), CanonicalAction::PermitDispatch))
+        };
+        if !matches!(permission, Ok(ref receipt) if matches!(receipt.disposition,
+            waku_runtime::contract::CommandDisposition::Terminal {
+                outcome: waku_runtime::contract::TerminalOutcome::Completed, ..
+            }))
+        {
+            let _ = self.sender.send(DriverEvent::Error(
+                format!("runtime dispatch permission was not confirmed: {permission:?}"),
+            ));
+            return;
+        }
         let turn_id = Uuid::new_v4();
         *self.active_turn.lock().unwrap() = Some(turn_id);
         self.command(
@@ -2502,6 +2518,10 @@ mod tests {
         assert_eq!(*replacement.shared.active_turn.lock().unwrap(), Some(turn));
         successor.cancel();
         assert!(adapter.cancels().contains(&turn));
+        successor.prompt("correction after cancellation".into());
+        assert_eq!(adapter.dispatched().len(), 2);
+        assert!(matches!(adapter.dispatched().last(), Some(CanonicalAction::Submit { input, .. })
+            if input == &Value::String("correction after cancellation".into())));
     }
 
     #[test]

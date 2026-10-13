@@ -130,7 +130,16 @@ pub(super) fn agent_prompt_waiting(
     task_store: &StateStore,
     automations: &AutomationService,
 ) -> bool {
-    if agent.user_stopped(target) {
+    if agent.user_stopped(target)
+        || (entry
+            .sender
+            .is_some_and(|sender| boss.is_boss_principal(sender))
+            && boss.employee(target).is_some()
+            && agent.has_open_turn(target)
+            && !driver.supports_steer())
+    {
+        // Unsupported providers must finish cancellation before a Boss
+        // correction opens another turn, including while parked for input.
         return true;
     }
     if automation_prompt_waiting(

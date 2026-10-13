@@ -1,0 +1,1 @@
+- Boss corrections and followups now reach an employee’s active turn immediately, including prompts sent with explicit queue delivery. Employees waiting for capacity still wait for admission.

@@ -44,6 +44,73 @@ impl WakuBackend {
         }
     }
 
+    /// Boss corrections own immediate delivery; scheduler admission is handled
+    /// by the caller before reaching this live-runtime boundary. Legacy parked
+    /// prompts retain their identities and are never bulk-steered here.
+    pub(super) fn deliver_boss_employee_prompt(
+        &self,
+        target: Uuid,
+        prompt: String,
+        sender: Option<Uuid>,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
+        if self.session_quarantined(target) {
+            bail!("received files are quarantined until trusted");
+        }
+        if self
+            .boss
+            .employee(target)
+            .is_some_and(|employee| employee.workspace_transition)
+        {
+            return self.queue_agent_prompt(target, prompt, sender, events);
+        }
+        self.agent.clear_user_stop(target);
+        if let Some(driver) = self.steerable_driver(target) {
+            self.send_agent_steer(&driver, target, prompt, sender);
+            return Ok(());
+        }
+        let fallback = self
+            .sessions
+            .lock()
+            .get(&target)
+            .map(|entry| entry.driver.clone())
+            .filter(|driver| !driver.supports_steer() && self.agent.has_open_turn(target));
+        if let Some(driver) = fallback {
+            // Persist without draining: even a parked unsupported turn must
+            // settle before we can open the correction. A crash leaves the
+            // same durable ID for ordinary recovery, never a second assignment.
+            let queued_id = Uuid::new_v4();
+            mirror_agent_queued_prompt(
+                &self.task_state,
+                &self.task_store,
+                target,
+                queued_id,
+                &prompt,
+                sender,
+                false,
+                None,
+            )?;
+            self.agent.enqueue(
+                target,
+                crate::agent::AgentPrompt {
+                    prompt,
+                    transport: None,
+                    sender,
+                    queued_id: Some(queued_id),
+                    context: None,
+                    hidden: false,
+                    report_trigger: None,
+                },
+            );
+            self.agent.expect_daemon_interrupt(target);
+            driver.cancel();
+            self.wake_summon_queue();
+        } else {
+            self.queue_agent_prompt(target, prompt, sender, events)?;
+        }
+        Ok(())
+    }
+
     /// `agent prompt`: deliver a message to an existing task, by Waku task
     /// id or provider-native thread id. Queue mode holds the prompt in a
     /// daemon-side per-session queue until the target is idle; steer mode
@@ -132,6 +199,13 @@ impl WakuBackend {
         }
         if self.session_quarantined(target) {
             bail!("received files are quarantined until trusted");
+        }
+        if sender.is_some_and(|id| self.boss.is_boss_principal(id))
+            && self.boss.employee(target).is_some()
+            && !matches!(delivery, AgentPromptDelivery::Steer)
+        {
+            self.deliver_boss_employee_prompt(target, prompt, sender, &events)?;
+            return Ok(ResponsePayload::Ack);
         }
         if employee_update_streaming(target, sender, &self.agent, &self.boss) {
             self.queue_agent_prompt(target, prompt, sender, &events)?;

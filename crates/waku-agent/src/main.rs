@@ -374,7 +374,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         "boss prompt" => (
             json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--delivery":{"enum":["interrupt","queue","steer"],"default":"interrupt"}}),
-            json!({"json":"BossResult::Saved after the employee accepts the queued prompt or steer"}),
+            json!({"json":"BossResult::Saved after accepting immediate Boss delivery (queue is normalized) or admission pending capacity"}),
             "goddard-agent boss prompt EMPLOYEE_ID --file followup.md".to_owned(),
         ),
         "boss transcript" => (

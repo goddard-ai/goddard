@@ -11,8 +11,10 @@ templates: substitute your values. Examples are never executed. Text inputs use 
 text on terminals and JSON in pipes; --output text|json overrides it."#;
 
 const WORKFLOW: &str = r#"Summon starts a new job; accepted/queued is not finished and is not a failure. Do not summon
-duplicates while waiting. Prompt defaults to interrupt: steer a live turn, otherwise queue;
-queue waits behind current work; steer requires a live turn. Boss policy requires an explicit
+duplicates while waiting. Boss prompts deliver immediately: default interrupt and explicit queue both steer a live
+turn, or cancel and deliver after settlement when steering is unsupported. Idle employees
+resume through admission; queued assignments still respect capacity. Human and non-Boss
+queue delivery waits behind current work; explicit steer requires a live turn. Boss policy requires an explicit
 employee icon even though the CLI permits omission. Respect assigned model routing, resource
 caps and human preferences. Employees own execution, watching, commits and merge submit; Boss
 delegates those jobs. errand finishes report upward; goal completion is visible in Goals
@@ -38,7 +40,7 @@ Bindings with direct-command counterparts:
     workspace defaults local; worktree requires baseBranch; adopt requires adoptWorktree. outcomeId or newOutcome assigns an outcome; finishesOutcome requires success criteria. prerequisites are sibling employee UUIDs; groupId groups a completion wave. permissions overrides per-field inherited grants (bucketIds, integrationIds, summonEmployees, computerUse); supervisor grants clamp delegation. resources declares host needs, allowBurst requests capacity within hard caps; priority is recorded; FIFO admission does not reorder on it. afterSuccess is durable follow-up intent.
   setResourcePolicy(#{expectedRevision,modelLimits,host?}) — update against the current revision; modelLimits contains provider/model/liveLimit/hardCap, and host contains capacity counts.
   control(sessionId, "stop" | #{type:ACTION,...})
-    ACTION: prompt (prompt, delivery?=interrupt), steer (prompt, jobTitle?), stop, setModel (provider, model, reasoningEffort?), setPermissions (permissions), setPersona (personaId or ()), setWorkspace (workspace: local|worktree, baseBranch?), setResources (resources), setPlan (plan?, item?; omitted keeps, () clears), setPurpose (purpose: building|helping).
+    ACTION: prompt (prompt, delivery?=interrupt; Boss queue also delivers immediately), steer (prompt, jobTitle?), stop, setModel (provider, model, reasoningEffort?), setPermissions (permissions), setPersona (personaId or ()), setWorkspace (workspace: local|worktree, baseBranch?), setResources (resources), setPlan (plan?, item?; omitted keeps, () clears), setPurpose (purpose: building|helping).
   readFile(path), writeFile(path, content), listFiles([path]), createFolder(path)
   publishDeliverable(path[, name]), dismissDeliverable(id)
   speak(parts | "utterance"), browse(url[, title]), terminal(title,cwd[,command])
