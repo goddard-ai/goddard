@@ -776,6 +776,11 @@ pub(super) struct BossUi {
     /// feed refresh every undo must reach the daemon, so they queue
     /// rather than collapsing.
     queued_memory_retract: VecDeque<(DaemonKey, BossOperation)>,
+    /// Every other operation parked while a request held the pipe, in
+    /// issue order — a batch archive's members, a second save behind an
+    /// in-flight one. Unlike a refresh these are user mutations: every
+    /// one must reach the daemon, so they queue rather than dropping.
+    queued_ops: VecDeque<(DaemonKey, BossOperation, BossReply)>,
     /// The `(daemon, bucket, note)` identities of retracts issued but not
     /// yet answered — replies pop in submission order since boss requests
     /// serialize through `pending`.
@@ -897,6 +902,7 @@ impl Default for BossUi {
             memory_query: String::new(),
             queued_memory_feed: None,
             queued_memory_retract: VecDeque::new(),
+            queued_ops: VecDeque::new(),
             pending_memory_retracts: VecDeque::new(),
             retracted_memory: HashSet::new(),
             editor: None,
@@ -2482,6 +2488,12 @@ impl Waku {
                 self.boss_ui
                     .queued_memory_retract
                     .push_back((key, operation));
+            } else {
+                // Any remaining operation is a user mutation — a batch
+                // archive's members, a save behind an in-flight one —
+                // that must not drop. Park it in issue order; each
+                // completion re-issues the head of the queue.
+                self.boss_ui.queued_ops.push_back((key, operation, reply));
             }
             return;
         }
@@ -2902,6 +2914,16 @@ impl Waku {
                         this.boss_ui.queued_memory_retract.pop_front()
                 {
                     this.boss_request(queued_key, operation, BossReply::MemoryRetract, cx);
+                }
+                // Parked mutations drain last: a navigation or refresh
+                // parked after them still goes first, and the batch —
+                // say a multi-select archive's members — trickles out
+                // one per completion until the queue empties.
+                if !this.boss_ui.pending
+                    && let Some((queued_key, operation, queued_reply)) =
+                        this.boss_ui.queued_ops.pop_front()
+                {
+                    this.boss_request(queued_key, operation, queued_reply, cx);
                 }
                 cx.notify();
             });
