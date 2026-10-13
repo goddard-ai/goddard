@@ -260,6 +260,10 @@ fn session_group_header(theme: &Theme, height: f32) -> Div {
         .text_color(theme.text_secondary)
 }
 
+fn sidebar_group_header_shows_spinner(has_unread: bool, has_working: bool) -> bool {
+    has_working && !has_unread
+}
+
 /// One boss-employee section — Outcomes or Errands — nested under its boss
 /// row: the header, the working members, then the finished tail capped by a
 /// "name finished ago" fold row. A collapsed group renders just its header —
@@ -5213,21 +5217,24 @@ impl Waku {
         // A folded employee group reports work in flight with the spinner
         // its hidden rows would carry, in the same accent a working row
         // earns from `status_color`.
-        .when(has_working, |element| {
-            element.child(
-                div()
-                    .flex_none()
-                    .size(px(12.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(motion::spin_slow(icon(
-                        "icons/loader-circle.svg",
-                        12.0,
-                        theme.accent,
-                    ))),
-            )
-        })
+        .when(
+            sidebar_group_header_shows_spinner(has_unread, has_working),
+            |element| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .size(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(motion::spin_slow(icon(
+                            "icons/loader-circle.svg",
+                            12.0,
+                            theme.accent,
+                        ))),
+                )
+            },
+        )
         // The folded group's unread dot takes the same right-edge slot a
         // session row's indicator does, past the always-reserved compose
         // box so it stays put whether or not hover reveals the button.
@@ -7959,6 +7966,14 @@ pub(super) fn sidebar_session_selected(
 mod tests {
     use super::*;
     use waku_client::boss::{BossDeliverable, BossIdentity, BossResourcePolicy, BossState};
+
+    #[test]
+    fn sidebar_group_header_unread_takes_precedence_over_spinner() {
+        assert!(!sidebar_group_header_shows_spinner(false, false));
+        assert!(sidebar_group_header_shows_spinner(false, true));
+        assert!(!sidebar_group_header_shows_spinner(true, false));
+        assert!(!sidebar_group_header_shows_spinner(true, true));
+    }
 
     #[test]
     fn planning_sidebar_hides_finalized_plans_from_either_sync_channel() {

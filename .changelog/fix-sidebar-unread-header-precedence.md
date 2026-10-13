@@ -1,0 +1,1 @@
+- Fixed collapsed sidebar group headers showing both an unread dot and a working spinner at once; unread now takes precedence.
