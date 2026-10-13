@@ -15700,6 +15700,52 @@ fn rotation_boss(backend: &WakuBackend) -> Uuid {
 }
 
 #[test]
+fn employee_client_archive_remains_allowed_even_in_the_boss_project() {
+    let root = std::env::temp_dir().join(format!("employee-archive-scope-{}", Uuid::new_v4()));
+    let (backend, _, employee, _, _) = employee_finish_fixture(&root);
+    let boss_project = backend.boss.identity_and_session().0.id;
+    let mut incoming = {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(employee).unwrap();
+        session.boss_managed = true;
+        session.project_id = boss_project;
+        let incoming = session.clone();
+        state.mark_session_dirty(employee);
+        backend.task_store.save(&mut state).unwrap();
+        incoming
+    };
+    incoming.updated_at += 10;
+    incoming.archived_at = Some(incoming.updated_at);
+    backend
+        .handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command: Command::SaveTaskState {
+                    projects: Vec::new(),
+                    live_session_ids: Vec::new(),
+                    sessions: vec![incoming],
+                    session_tails: Vec::new(),
+                },
+            },
+            EventSink::detached(),
+            None,
+        )
+        .unwrap();
+    assert!(
+        backend
+            .task_store
+            .load_session_detail(employee)
+            .unwrap()
+            .unwrap()
+            .archived_at
+            .is_some()
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn active_boss_archive_is_rejected_from_client_saves_and_bulk_archive() {
     let root = std::env::temp_dir().join(format!("boss-archive-guard-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);

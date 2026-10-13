@@ -988,9 +988,11 @@ impl Backend for WakuBackend {
                         .iter_mut()
                         .find(|existing| existing.id == session_id)
                     {
+                        let employee = self.boss.employee_including_retired(session_id);
                         // Boss chat archival belongs to rotation, never a client
                         // projection. Preserve both the active and retired flags.
-                        if existing.boss_managed
+                        if employee.is_none()
+                            && existing.boss_managed
                             && existing.planning.is_none()
                             && existing.project_id == self.boss.identity_and_session().0.id
                         {
@@ -998,7 +1000,6 @@ impl Backend for WakuBackend {
                         }
                         // Employee launch selection belongs to the daemon, including
                         // retired employees. Boss chats still accept human picker edits.
-                        let employee = self.boss.employee_including_retired(session_id);
                         if employee.is_some() {
                             session.provider = existing.provider;
                             session.model.clone_from(&existing.model);
