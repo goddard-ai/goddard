@@ -108,7 +108,10 @@ attach/reattach over IPC, applied-marker ack boundaries, replay of only
 unapplied events, receipt-deduped ingress effects, agent-grant ingress
 over real sockets, loud failure on unregistered adapters, fenced-epoch
 surfacing, wholesale daemon replacement over one `app.db` reattaching to
-the surviving session, and the env opt-in gate.
+the surviving session, the env opt-in gate, strict per-provider launch
+payloads decoded by the real adapter structs, native delta/completion/
+request projection, effective-config writes onto the durable session
+record, and native request-resolution dialects.
 
 ## Product mapping and controller safety
 

@@ -698,6 +698,28 @@ pub(super) fn forward_driver_events(
                 }
                 DriverEvent::Connected { provider_cursor }
             }
+            DriverEvent::ConfigActivated {
+                provider,
+                model,
+                reasoning_effort,
+            } => {
+                // The runtime's confirmed configuration is daemon-owned
+                // truth: write it inside this event's application so the
+                // applied marker that follows proves it durable.
+                record_effective_config(
+                    &task_state,
+                    &task_store,
+                    session_id,
+                    provider.as_deref(),
+                    model.as_deref(),
+                    reasoning_effort.as_deref(),
+                );
+                DriverEvent::ConfigActivated {
+                    provider,
+                    model,
+                    reasoning_effort,
+                }
+            }
             DriverEvent::SteerAccepted { message, .. } => {
                 let steer = agent.take_pending_steer(session_id, &message);
                 // An enveloped steer echoes the envelope; the transcript and

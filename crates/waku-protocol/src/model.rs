@@ -4694,6 +4694,16 @@ pub enum DriverEvent {
     /// provider process exists. Ephemeral — replayed to nobody, cleared by
     /// `SandboxSetupStatus::Ready` or any setup failure.
     SandboxSetup(SandboxSetupStatus),
+    /// The runtime confirmed which provider/model/effort the session is
+    /// actually running — the stable host's journaled `ConfigActivated`
+    /// fact. Fields are `None` when the provider did not report them, never
+    /// a signal to clear a stored selection. Adapter-private options (thread
+    /// ids, owner evidence) deliberately do not cross this boundary.
+    ConfigActivated {
+        provider: Option<String>,
+        model: Option<String>,
+        reasoning_effort: Option<String>,
+    },
     TurnFinished {
         success: bool,
         summary: Option<String>,

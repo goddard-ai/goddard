@@ -210,6 +210,11 @@ struct LinkShared {
     /// The last configuration revision the link requested — reconfigure is
     /// monotone, never rolled back by a stale caller.
     config_revision: Mutex<u64>,
+    /// Devin elicitation schemas keyed by request id — recorded when an
+    /// input request opens so `respond_user_input` can coerce the product's
+    /// string answers into the declared primitive field types, and evicted
+    /// when the request settles.
+    input_schemas: Mutex<HashMap<String, Value>>,
     /// Set on drop — pump and service threads retire between polls.
     stop: Arc<AtomicBool>,
     threads: Mutex<Vec<JoinHandle<()>>>,
@@ -358,6 +363,7 @@ pub(super) fn start_link(
         service,
         active_turn: Mutex::new(inventory.sessions.iter().find(|inv| inv.session == sref).and_then(|inv| inv.open_turns.first().copied())),
         config_revision: Mutex::new(inventory_config_revision(&inventory, &sref)),
+        input_schemas: Mutex::new(HashMap::new()),
         stop: Arc::new(AtomicBool::new(false)),
         threads: Mutex::new(Vec::new()),
     });
@@ -888,6 +894,9 @@ fn pump_loop(shared: Arc<LinkShared>) {
                                 *active = None;
                             }
                         }
+                        ProviderEvent::RequestAnswered { request_id } => {
+                            shared.input_schemas.lock().unwrap().remove(request_id);
+                        }
                         _ => {}
                     }
                     match &env.event {
@@ -905,6 +914,21 @@ fn pump_loop(shared: Arc<LinkShared>) {
                                     .and_then(Value::as_str)
                                     .map(str::to_owned),
                             );
+                            // The provider-confirmed configuration is a
+                            // daemon-recorded fact, ahead of the applied
+                            // marker — a later app save cannot resurrect a
+                            // superseded requested pair.
+                            if shared
+                                .sender
+                                .send(DriverEvent::ConfigActivated {
+                                    provider: effective.provider.clone(),
+                                    model: effective.model.clone(),
+                                    reasoning_effort: effective.effort.clone(),
+                                })
+                                .is_err()
+                            {
+                                return;
+                            }
                         }
                         ProviderEvent::RequestOpened {
                             request_id,
@@ -912,6 +936,17 @@ fn pump_loop(shared: Arc<LinkShared>) {
                             class,
                             ..
                         } => {
+                            if *class == RequestClass::Input
+                                && shared.provider == ProviderKind::Devin
+                            {
+                                if let Some(schema) = subject.get("requestedSchema") {
+                                    shared
+                                        .input_schemas
+                                        .lock()
+                                        .unwrap()
+                                        .insert(request_id.clone(), schema.clone());
+                                }
+                            }
                             let event = native.request(shared.provider, request_id, subject).or_else(|| {
                                 if *class == RequestClass::Tool {
                                     Some(DriverEvent::Error("provider tool is waiting for the unqualified product bridge".into()))
@@ -1159,22 +1194,84 @@ impl DriverControl for StableLink {
     }
 
     fn respond_user_input(&self, request_id: String, answers: Vec<crate::model::UserInputAnswer>) {
+        let resolution = match self.shared.provider {
+            ProviderKind::Codex => {
+                let values: serde_json::Map<String, Value> = answers
+                    .into_iter()
+                    .map(|answer| (answer.question_id, json!({"answers": answer.answers})))
+                    .collect();
+                json!({"answers": values})
+            }
+            ProviderKind::Devin => {
+                // The adapter writes the resolution verbatim as the
+                // elicitation result: an ACP `{"action":"accept","content"}`
+                // envelope whose values must match the field types declared
+                // in the original `requestedSchema`.
+                let schema = self
+                    .shared
+                    .input_schemas
+                    .lock()
+                    .unwrap()
+                    .remove(&request_id);
+                let mut content = serde_json::Map::new();
+                for answer in answers {
+                    let Some(text) = answer.answers.first() else {
+                        continue;
+                    };
+                    let field = schema
+                        .as_ref()
+                        .and_then(|schema| schema.get("properties"))
+                        .and_then(|properties| properties.get(&answer.question_id));
+                    let value = match field
+                        .and_then(|field| field.get("type").and_then(Value::as_str))
+                    {
+                        Some("boolean") => text
+                            .parse::<bool>()
+                            .map(Value::Bool)
+                            .unwrap_or_else(|_| Value::String(text.clone())),
+                        Some("number") => text
+                            .parse::<f64>()
+                            .map(Value::from)
+                            .unwrap_or_else(|_| Value::String(text.clone())),
+                        Some("integer") => text
+                            .parse::<i64>()
+                            .map(Value::from)
+                            .unwrap_or_else(|_| Value::String(text.clone())),
+                        _ => Value::String(text.clone()),
+                    };
+                    content.insert(answer.question_id, value);
+                }
+                json!({"action": "accept", "content": Value::Object(content)})
+            }
+            _ => serde_json::to_value(&answers).unwrap_or(Value::Null),
+        };
         self.shared.command(
             Uuid::new_v4(),
             CanonicalAction::ResolveRequest {
                 request_id,
-                resolution: match self.shared.provider {
-                    ProviderKind::Codex => {
-                        let values: serde_json::Map<String, Value> = answers
-                            .into_iter()
-                            .map(|answer| (answer.question_id, json!({"answers": answer.answers})))
-                            .collect();
-                        json!({"answers": values})
-                    }
-                    _ => serde_json::to_value(&answers).unwrap_or(Value::Null),
-                },
+                resolution,
             },
         );
+    }
+
+    /// Dismiss an open input prompt. Devin's elicitation responder expects
+    /// the ACP cancel action; other providers' asks expire on their own
+    /// deadline.
+    fn cancel_user_input(&self, request_id: String) {
+        self.shared
+            .input_schemas
+            .lock()
+            .unwrap()
+            .remove(&request_id);
+        if self.shared.provider == ProviderKind::Devin {
+            self.shared.command(
+                Uuid::new_v4(),
+                CanonicalAction::ResolveRequest {
+                    request_id,
+                    resolution: json!({ "action": "cancel" }),
+                },
+            );
+        }
     }
 
     fn apply_options(&self, options: crate::driver::SessionOptions) -> bool {
@@ -1364,20 +1461,52 @@ mod tests {
         StableLink,
         crossbeam_channel::Receiver<DriverEvent>,
     ) {
+        link_for(rig, ProviderKind::Codex, runtime_id, service, options())
+    }
+
+    fn link_for(
+        rig: &Rig,
+        provider: ProviderKind,
+        runtime_id: Uuid,
+        service: Option<Arc<dyn IngressService>>,
+        options: DriverStartOptions,
+    ) -> (
+        DriverHandle,
+        StableLink,
+        crossbeam_channel::Receiver<DriverEvent>,
+    ) {
         let (sender, rx) = crate::driver::test_event_channel();
         let (handle, link) = start_link(
             &rig.backend,
             rig.backend.task_store(),
             rig.session_id,
             runtime_id,
-            ProviderKind::Codex,
-            &options(),
+            provider,
+            &options,
             sender,
             &rig.runtime_root,
             service,
         )
         .expect("link attaches");
         (handle, link, rx)
+    }
+
+    /// Collect `want` projected events, ignoring cursor markers; fails the
+    /// test with the observed count when the deadline expires.
+    fn collect_events(
+        rx: &crossbeam_channel::Receiver<DriverEvent>,
+        want: usize,
+    ) -> Vec<DriverEvent> {
+        let mut events = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while events.len() < want {
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(DriverEvent::RuntimeEventCursorAdvanced(_)) => {}
+                Ok(event) => events.push(event),
+                Err(_) => assert!(Instant::now() < deadline, "only {} events arrived", events.len()),
+            }
+        }
+        events
     }
 
     /// A controller client for the host, independent of any link.
@@ -2061,6 +2190,193 @@ for line in sys.stdin:
         assert_eq!(rig.backend.task_store().stable_link(rig.session_id).unwrap(), Some(replacement));
         let inventory = original.shared.client.lock().unwrap().reconcile(original.shared.epoch).unwrap();
         assert!(inventory.sessions.iter().any(|session| session.session == original.sref() && session.status == SessionStatus::Terminated));
+    }
+
+    /// A Devin elicitation subject (`requestedSchema`) projects a real
+    /// question card, and its answers/cancel resolve in the ACP envelope the
+    /// strict Devin adapter validates — a bare answers array would be
+    /// refused.
+    #[test]
+    fn devin_link_projects_and_answers_elicitations() {
+        let rig = rig(&["devin"]);
+        let mut options = options();
+        options.mode = crate::model::RuntimeMode::Ask;
+        let (handle, link, rx) = link_for(&rig, ProviderKind::Devin, Uuid::new_v4(), None, options);
+        let driver = rig
+            .factory
+            .for_session(link.sref().session_id)
+            .expect("adapter attached");
+        driver.emit(ProviderEvent::RequestOpened {
+            request_id: "elic-1".into(),
+            class: RequestClass::Input,
+            // ACP elicitation params — no RPC `method` envelope like Codex.
+            subject: json!({
+                "requestedSchema": {
+                    "type": "object",
+                    "properties": {
+                        "label": {
+                            "type": "string",
+                            "description": "Label?"
+                        },
+                        "budget": {
+                            "type": "integer",
+                            "description": "Budget?"
+                        }
+                    }
+                }
+            }),
+            deadline_ms: None,
+        });
+        let events = collect_events(&rx, 1);
+        match &events[0] {
+            DriverEvent::UserInputRequested { request_id, questions } => {
+                assert_eq!(request_id, "elic-1");
+                assert_eq!(questions[0].id, "label");
+                assert_eq!(questions[0].question, "Label?");
+                assert_eq!(questions[1].id, "budget");
+            }
+            event => panic!("expected an input request, got {event:?}"),
+        }
+        handle.respond_user_input(
+            "elic-1".into(),
+            vec![
+                crate::model::UserInputAnswer {
+                    question_id: "label".into(),
+                    answers: vec!["Name".into()],
+                },
+                crate::model::UserInputAnswer {
+                    question_id: "budget".into(),
+                    answers: vec!["7".into()],
+                },
+            ],
+        );
+        driver.emit(ProviderEvent::RequestOpened {
+            request_id: "elic-2".into(),
+            class: RequestClass::Input,
+            subject: json!({
+                "requestedSchema": {
+                    "type": "object",
+                    "properties": { "more": { "type": "string" } }
+                }
+            }),
+            deadline_ms: None,
+        });
+        let _ = collect_events(&rx, 1);
+        handle.cancel_user_input("elic-2".into());
+        until("the answers and cancel to dispatch", || {
+            driver.dispatched().len() >= 2
+        });
+        let dispatched = driver.dispatched();
+        let resolved: Vec<_> = dispatched
+            .iter()
+            .filter_map(|action| match action {
+                CanonicalAction::ResolveRequest {
+                    request_id,
+                    resolution,
+                } => Some((request_id.clone(), resolution.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            resolved,
+            vec![
+                (
+                    "elic-1".to_string(),
+                    json!({"action":"accept","content":{"label":"Name","budget":7}}),
+                ),
+                ("elic-2".to_string(), json!({"action":"cancel"})),
+            ]
+        );
+    }
+
+    /// A `ConfigActivated` applied through the real forwarder lands on the
+    /// durable session record — a reload projects what the provider
+    /// activated, not the last requested pair.
+    #[test]
+    fn config_activation_writes_the_durable_session_record() {
+        let runtime_root = temp_root("runtime");
+        let backend_root = temp_root("backend");
+        let factory = FakeFactory::new();
+        let mut registry = AdapterRegistry::new();
+        registry.register(
+            "codex",
+            Arc::new(factory.clone()) as Arc<dyn AdapterFactory>,
+        );
+        let host = RuntimeHost::open(
+            &runtime_root,
+            HostOptions {
+                namespace: STABLE_NAMESPACE.into(),
+                budgets: Budgets::default(),
+                journal_fault: None,
+            },
+            Arc::new(registry),
+            Box::new(SystemClock),
+        )
+        .expect("host opens");
+        let _server = RuntimeServer::bind(host, &runtime_root, Duration::from_millis(5))
+            .expect("server binds");
+
+        let binary = backend_root.join("controlled-provider");
+        std::fs::create_dir_all(&backend_root).unwrap();
+        std::fs::write(&binary, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700))
+                .unwrap();
+        }
+        {
+            let settings = crate::DaemonSettingsStore::open(backend_root.join("settings.json"))
+                .unwrap();
+            let mut document = settings.get();
+            document.agent_tools_enabled = false;
+            document.agent_settings_enabled = false;
+            document.subagents_enabled = false;
+            document
+                .provider_binary_overrides
+                .insert(ProviderKind::Codex, binary.display().to_string());
+            settings.replace(document).unwrap();
+        }
+        let (mut backend, session_id) =
+            crate::daemon::tests::surface_test_backend(&backend_root);
+        backend.set_daemon_address("http://127.0.0.1:1".into());
+        backend.stable_test_root = Some(runtime_root.clone());
+        let backend = Arc::new(backend);
+        backend.install_weak_self();
+        let events = crate::EventSink::detached();
+
+        let (attempt, _handle) = backend
+            .ensure_agent_runtime(session_id, &events)
+            .expect("cold runtime attaches");
+        let adapter = factory.for_session(attempt).expect("adapter attached");
+        adapter.emit(ProviderEvent::ConfigActivated {
+            revision: 1,
+            boundary: waku_runtime::contract::ActivationBoundary::NextTurn,
+            effective: waku_runtime::contract::RequestedConfig {
+                provider: Some("codex".into()),
+                model: Some("gpt-5.5".into()),
+                effort: Some("high".into()),
+                options: json!({"codexThreadId": "thr_private"}),
+            },
+        });
+        until("the activation to apply durably", || {
+            backend
+                .task_store()
+                .stable_link(session_id)
+                .ok()
+                .flatten()
+                .is_some_and(|row| row.applied_seq >= 1)
+        });
+        let session = backend
+            .task_store()
+            .load_session_detail(session_id)
+            .unwrap()
+            .expect("session detail");
+        assert_eq!(session.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+        // Provider-private effective options never enter the session record.
+        let serialized = serde_json::to_value(&session).unwrap();
+        assert!(!serialized.to_string().contains("thr_private"));
     }
 
 }

@@ -2,7 +2,9 @@
 //! native replies and lifecycle authority remain in the stable host.
 
 use super::{DriverEventSink, acp, codex};
-use crate::model::{DriverEvent, PermissionOption, ProviderKind};
+use crate::model::{
+    DriverEvent, PermissionOption, ProviderKind, UserInputOption, UserInputQuestion,
+};
 use crossbeam_channel::SendError;
 use serde_json::Value;
 use std::sync::Mutex;
@@ -64,6 +66,50 @@ impl NativeEventProjection {
                     title_i18n: None,
                     detail_i18n: None,
                     options,
+                })
+            }
+            ProviderKind::Devin if subject.get("requestedSchema").is_some() => {
+                let properties = subject
+                    .pointer("/requestedSchema/properties")?
+                    .as_object()?;
+                if properties.is_empty() {
+                    return None;
+                }
+                Some(DriverEvent::UserInputRequested {
+                    request_id: id.into(),
+                    questions: properties
+                        .iter()
+                        .map(|(name, field)| UserInputQuestion {
+                            id: name.clone(),
+                            header: field
+                                .get("title")
+                                .and_then(Value::as_str)
+                                .unwrap_or(name)
+                                .to_owned(),
+                            question: field
+                                .get("description")
+                                .and_then(Value::as_str)
+                                .unwrap_or(name)
+                                .to_owned(),
+                            options: field
+                                .get("enum")
+                                .and_then(Value::as_array)
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|value| {
+                                    let label = value
+                                        .as_str()
+                                        .map(str::to_owned)
+                                        .unwrap_or_else(|| value.to_string());
+                                    (!label.is_empty()).then_some(UserInputOption {
+                                        label,
+                                        description: None,
+                                    })
+                                })
+                                .collect(),
+                            multi_select: false,
+                        })
+                        .collect(),
                 })
             }
             _ => None,

@@ -171,6 +171,18 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::GoalUpdated(goal) => ("goalUpdated", serde_json::to_value(goal)?),
         DriverEvent::ProjectMap(status) => ("projectMap", serde_json::to_value(status)?),
         DriverEvent::SandboxSetup(status) => ("sandboxSetup", serde_json::to_value(status)?),
+        DriverEvent::ConfigActivated {
+            provider,
+            model,
+            reasoning_effort,
+        } => (
+            "configActivated",
+            json!({
+                "provider": provider,
+                "model": model,
+                "reasoningEffort": reasoning_effort,
+            }),
+        ),
         DriverEvent::TurnFinished {
             success,
             summary,
@@ -323,6 +335,21 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         "goalUpdated" => DriverEvent::GoalUpdated(serde_json::from_value(payload)?),
         "projectMap" => DriverEvent::ProjectMap(serde_json::from_value(payload)?),
         "sandboxSetup" => DriverEvent::SandboxSetup(serde_json::from_value(payload)?),
+        "configActivated" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct ActivatedWire {
+                provider: Option<String>,
+                model: Option<String>,
+                reasoning_effort: Option<String>,
+            }
+            let activated: ActivatedWire = serde_json::from_value(payload)?;
+            DriverEvent::ConfigActivated {
+                provider: activated.provider,
+                model: activated.model,
+                reasoning_effort: activated.reasoning_effort,
+            }
+        }
         "turnFinished" => {
             let finished: TurnFinishedWire = serde_json::from_value(payload)?;
             DriverEvent::TurnFinished {

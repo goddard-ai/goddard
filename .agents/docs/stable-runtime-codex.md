@@ -139,13 +139,21 @@ continuity. No user daemon or active product session was restarted for this
 qualification work.
 
 
-The landed opt-in daemon link is not yet adapter-compatible: its generic launch
-payload includes unsupported mode/service-tier/preset/MCP/cursor fields; its
-projection stringifies native JSON deltas, expects normalized approval/input
-subjects, ignores effective configuration and reports every completion as
-successful. Stage 2C/reconciliation must own the strict launch mapping, native
-projection and stable tool/grant bridge before product cutover. Do not paper over
-these conflicts by silently dropping configuration or resuming legacy sessions.
+The opt-in daemon link now maps admissions into each adapter's strict launch
+shape — Codex receives only `CodexLaunch` fields (binary, cwd,
+approvalPolicy, sandbox, optional developerInstructions); Devin receives its
+`cwd`-only payload — and turns that cannot map fail admission loudly. Event
+projection decodes the native dialects instead of flattening them: Codex RPC
+notifications and ACP session updates project text/reasoning/activity and
+usage truth, unknown shapes drop rather than stringify into the transcript,
+turn completions carry the provider's recorded verdict, and `ConfigActivated`
+projects the effective provider/model/effort into a daemon-recorded fact a
+generic app save cannot supersede. Request answers resolve in the native
+dialect recorded at `RequestOpened` (`decision`/`answers` for Codex,
+`optionId`/`action`+content for ACP). What remains before product cutover:
+real CLI/MCP/callback binaries speaking ingress, stable tool/grant bridge,
+leases, and live app/daemon reload qualification. Do not paper over these
+conflicts by silently dropping configuration or resuming legacy sessions.
 
 The shared executable selects Devin from `--devin-binary ABS_PATH`,
 `WAKU_RUNTIME_DEVIN_BINARY`, or trusted startup PATH and passes the resolved path
