@@ -663,6 +663,10 @@ pub(super) struct BossUi {
     /// another's. Absent means the armed command's default — the boss
     /// chat. Session ids keep a pick stable across roster reorders.
     pub(super) composer_targets: HashMap<DaemonKey, Uuid>,
+    /// Explicit Boss -> Employee switches made inside that employee's chat.
+    pub(super) employee_composer_interactions: HashMap<DaemonKey, Uuid>,
+    /// Keep the submission identity through a lost reply and restored draft.
+    pub(super) employee_composer_submissions: HashMap<Uuid, (Uuid, String, waku_client::AgentPromptDelivery)>,
     /// The deliverable whose row click is still navigating to its task page —
     /// the boss chat. Session activation clears `command_deliverable` as stale
     /// context, so the click parks its deliverable here and the finish reapplies
@@ -825,6 +829,8 @@ impl Default for BossUi {
             sidebar_employee_idle_visible: HashMap::new(),
             command_deliverable: None,
             composer_targets: HashMap::new(),
+            employee_composer_interactions: HashMap::new(),
+            employee_composer_submissions: HashMap::new(),
             pending_deliverable: None,
             deliverable_page: None,
             deliverable_page_scroll: HashMap::new(),
@@ -1246,7 +1252,49 @@ pub(super) enum ComposerTargetPick {
     Stale(Uuid),
 }
 
+/// Admission intent requires both the explicit switch and the current viewed
+/// employee. A pick from the Boss page or another chat cannot inherit it.
+pub(super) fn employee_composer_interaction(
+    context: &BossCommandContext,
+    selected: Option<Uuid>,
+    target: Option<Uuid>,
+    switched: bool,
+) -> bool {
+    switched && matches!(context, BossCommandContext::Employee(viewed)
+        if selected == Some(*viewed) && target == Some(*viewed))
+}
+
 impl BossUi {
+    /// Only a restored failed draft reuses its receipt. Two fresh sends of
+    /// identical text are distinct user requests, even while one is in flight.
+    pub(super) fn employee_composer_submission(
+        &mut self,
+        employee: Uuid,
+        prompt: &str,
+        delivery: waku_client::AgentPromptDelivery,
+    ) -> Uuid {
+        self.employee_composer_submissions.remove(&employee)
+            .filter(|stored| stored.1 == prompt && stored.2 == delivery)
+            .map(|stored| stored.0)
+            .unwrap_or_else(Uuid::new_v4)
+    }
+
+    pub(super) fn restore_employee_composer_submission(
+        &mut self,
+        employee: Uuid,
+        id: Uuid,
+        prompt: String,
+        delivery: waku_client::AgentPromptDelivery,
+    ) {
+        self.employee_composer_submissions.insert(employee, (id, prompt, delivery));
+    }
+
+    pub(super) fn accept_employee_composer_submission(&mut self, employee: Uuid, id: Uuid) {
+        if self.employee_composer_submissions.get(&employee).is_some_and(|stored| stored.0 == id) {
+            self.employee_composer_submissions.remove(&employee);
+        }
+    }
+
     /// Resolve the daemon's stored chip pick against its current roster.
     /// A session id keeps a pick stable across reorders; membership in the
     /// roster (expired employees stay listed) keeps it live, anything
@@ -3408,6 +3456,21 @@ impl Waku {
         target: Option<Uuid>,
         cx: &mut Context<Self>,
     ) {
+        if self.boss_ui.composer_targets.get(&key).copied() == target {
+            return;
+        }
+        let interaction = self.composer_boss_command().and_then(|command| {
+            let was_boss = matches!(self.composer_target(&command), ComposerTarget::Boss);
+            employee_composer_interaction(
+                &command.context, self.state.selected_session, target, was_boss,
+            ).then_some(target).flatten()
+        });
+        self.boss_ui.employee_composer_interactions.remove(&key);
+        if let Some(employee) = interaction {
+            self.boss_ui
+                .employee_composer_interactions
+                .insert(key, employee);
+        }
         match target {
             Some(employee) => {
                 self.boss_ui.composer_targets.insert(key, employee);
@@ -11934,6 +11997,8 @@ mod tests {
             adopt_worktree: None,
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
+            human_interaction: false,
+            composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: None,
             priority: None,
@@ -13061,6 +13126,48 @@ mod tests {
             ui.composer_target_pick(other_key),
             ComposerTargetPick::Unpicked
         ));
+    }
+
+    #[test]
+    fn employee_composer_retry_keeps_identity_and_stale_replies_keep_newer_submissions() {
+        let mut ui = BossUi::default();
+        let employee = Uuid::new_v4();
+        let delivery = waku_client::AgentPromptDelivery::Queue;
+        let first = ui.employee_composer_submission(employee, "original", delivery);
+        let repeated = ui.employee_composer_submission(employee, "original", delivery);
+        assert_ne!(first, repeated); // distinct fresh sends, including in flight
+        ui.restore_employee_composer_submission(employee, first, "original".into(), delivery);
+        assert_eq!(first, ui.employee_composer_submission(employee, "original", delivery));
+        ui.restore_employee_composer_submission(employee, first, "original".into(), delivery);
+        let edited = ui.employee_composer_submission(employee, "edited", delivery);
+        assert_ne!(first, edited);
+        ui.restore_employee_composer_submission(employee, edited, "edited".into(), delivery);
+        ui.accept_employee_composer_submission(employee, first);
+        assert_eq!(edited, ui.employee_composer_submission(employee, "edited", delivery));
+        ui.restore_employee_composer_submission(employee, edited, "edited".into(), delivery);
+        ui.accept_employee_composer_submission(employee, edited);
+        assert_ne!(edited, ui.employee_composer_submission(employee, "edited", delivery));
+    }
+
+    #[test]
+    fn employee_composer_interaction_requires_the_current_chats_explicit_switch() {
+        let viewed = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let context = BossCommandContext::Employee(viewed);
+        assert!(employee_composer_interaction(&context, Some(viewed), Some(viewed), true));
+        for (selected, target, switched) in [
+            (Some(viewed), Some(viewed), false), // ordinary/global pick
+            (Some(other), Some(viewed), true), // another chat
+            (Some(viewed), Some(other), true), // another employee
+            (Some(viewed), None, true), // switched back to Boss
+            (None, Some(viewed), true),
+        ] {
+            assert!(!employee_composer_interaction(&context, selected, target, switched));
+        }
+        let deliverable = BossCommandContext::Deliverable {
+            path: PathBuf::from("report.md"), name: "Report".into(), directory: false,
+        };
+        assert!(!employee_composer_interaction(&deliverable, Some(viewed), Some(viewed), true));
     }
 
     /// An employee chat's composer names only the boss and its own

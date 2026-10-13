@@ -403,7 +403,12 @@ impl WakuBackend {
         &self,
         ticket: &waku_protocol::boss::SummonTicket,
     ) -> waku_protocol::resources::AdmissionClaim {
-        let rule = self.boss.model_limit(ticket.provider, &ticket.model);
+        // An explicit human interaction is outside autonomous model caps for
+        // this generation. It still counts against other model admissions and
+        // claims its complete hardware set through the same broker transaction.
+        let rule = (!ticket.human_interaction)
+            .then(|| self.boss.model_limit(ticket.provider, &ticket.model))
+            .flatten();
         waku_protocol::resources::AdmissionClaim {
             daemon: self.boss.document().identity.id,
             provider: ticket.provider.id().to_owned(),
@@ -441,19 +446,28 @@ impl WakuBackend {
             return Ok(false);
         };
         let session_id = employee.session_id;
-        // The ticket's task must still be an open session: an archived
-        // or removed shell leaves the queue here instead of dispatching
-        // a runtime for a task the user already put away.
-        if self
-            .task_state
-            .lock()
-            .sessions
-            .iter()
+        // Unstarted shells are memory-only. Absence after restart is not a
+        // cancellation: reconstruct from the durable accepted ticket. Explicit
+        // removal and archive still fence dispatch, including stale snapshots.
+        let shell = self.task_state.lock().sessions.iter()
             .find(|session| session.id == session_id)
-            .is_none_or(|session| session.archived_at.is_some())
+            .map(|session| session.archived_at.is_some());
+        if employee.cancelled || shell == Some(true)
+            || self.removed_session_ids.lock().contains(&session_id)
         {
             self.stop_queued_employee(session_id)?;
             return Ok(true);
+        }
+        if shell.is_none() {
+            let project = dunce::canonicalize(Path::new(&ticket.project))?;
+            let registered = self.task_state.lock().projects.iter().any(|entry| {
+                dunce::canonicalize(&entry.path).is_ok_and(|path| path == project)
+            });
+            if !registered {
+                self.stop_queued_employee(session_id)?;
+                return Ok(true);
+            }
+            self.restore_employee_shell(employee, &ticket)?;
         }
         // A chain-bound ticket may only launch while its attempt still
         // waits for a dispatcher — a pause/cancel landed meanwhile, or a
@@ -712,26 +726,7 @@ impl WakuBackend {
             .iter()
             .any(|session| session.id == session_id)
         {
-            // A pre-dispatch shell is memory-only — a restart between
-            // admission and dispatch leaves the durable ticket pointing
-            // at nothing. Rebuild the shell from the ticket's committed
-            // selection so the queued admission replays instead of
-            // failing the launch.
-            let resolved = self.resolve_agent_task_selection(
-                Some(current.supervisor_id),
-                &AgentCreateSelection {
-                    provider: Some(ticket.provider),
-                    model: Some(ticket.model.clone()),
-                    reasoning_effort: ticket.reasoning_effort.clone(),
-                    title: Some(current.identity.name.clone()),
-                    service_tier: None,
-                    context_window: None,
-                },
-                Path::new(&ticket.project),
-                &ticket.prompt,
-                true,
-            )?;
-            self.create_employee_shell(&current, &resolved, ticket)?;
+            self.restore_employee_shell(&current, ticket)?;
         }
         let started = {
             let mut state = self.task_state.lock();
@@ -1452,6 +1447,8 @@ impl WakuBackend {
             adopt_worktree,
             resources,
             allow_burst,
+            human_interaction: false,
+            composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id,
             priority,
@@ -1645,6 +1642,28 @@ impl WakuBackend {
         })
     }
 
+    /// Reconstruct a memory-only shell from its committed admission identity;
+    /// this creates neither a turn nor a provider session.
+    fn restore_employee_shell(
+        &self,
+        employee: &waku_protocol::boss::BossEmployee,
+        ticket: &waku_protocol::boss::SummonTicket,
+    ) -> anyhow::Result<()> {
+        let resolved = self.resolve_agent_task_selection(
+            Some(employee.supervisor_id),
+            &AgentCreateSelection {
+                provider: Some(ticket.provider),
+                model: Some(ticket.model.clone()),
+                reasoning_effort: ticket.reasoning_effort.clone(),
+                title: Some(employee.identity.name.clone()),
+                service_tier: None,
+                context_window: None,
+            },
+            Path::new(&ticket.project), &ticket.prompt, true,
+        )?;
+        self.create_employee_shell(employee, &resolved, ticket)
+    }
+
     /// The minimal managed task a queued ticket owns: registered project,
     /// stamped session, resolved selection — but no adopted prompt,
     /// worktree, runtime, or claims until dispatch.
@@ -1705,6 +1724,127 @@ impl WakuBackend {
             false,
             waku_protocol::boss::EmployeeSettle::Stopped,
         )
+    }
+
+    /// Only the authenticated human UI command reaches this lane. Persist the
+    /// prompt and exemption together before dispatch; the lifecycle owner
+    /// serializes this transaction with scheduler snapshots and cancellation.
+    pub(super) fn employee_composer_prompt(
+        &self,
+        session_id: Uuid,
+        submission_id: Uuid,
+        prompt: String,
+        delivery: AgentPromptDelivery,
+        events: &EventSink,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        use waku_protocol::boss::{BossResult, EmployeeComposerReceipt, EmployeeLifecycle};
+        anyhow::ensure!(self.settings.get().boss_experiment_enabled,
+            "Boss is disabled by the experiment setting");
+        self.boss.activate()?;
+        anyhow::ensure!(
+            !prompt.trim().is_empty(),
+            "employee prompts cannot be empty"
+        );
+        let queued = self
+            .boss
+            .with_operation_lock(|| -> anyhow::Result<bool> {
+                let lifecycle = self.runtime_lifecycles.session(session_id);
+                let _owner = lifecycle.lock();
+                self.boss.require_control(None, session_id)?;
+                let employee = self
+                    .boss
+                    .employee_including_retired(session_id)
+                    .ok_or_else(|| anyhow!("{session_id} is not a Boss employee"))?;
+                let ticket = employee
+                    .ticket
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("employee has no admission ticket"))?;
+                if let Some(receipt) = ticket
+                    .composer_receipts
+                    .iter()
+                    .find(|receipt| receipt.submission_id == submission_id)
+                {
+                    anyhow::ensure!(
+                        receipt.prompt == prompt && receipt.delivery == delivery,
+                        "composer submission id was reused with different content"
+                    );
+                    anyhow::ensure!(
+                        receipt.accepted,
+                        "composer submission delivery is uncertain; it will not be replayed"
+                    );
+                    return Ok(false);
+                }
+                anyhow::ensure!(
+                    employee.lifecycle() != EmployeeLifecycle::Finishing,
+                    "employee is finishing; try again once it has settled"
+                );
+                let mut receipt = EmployeeComposerReceipt {
+                    submission_id,
+                    prompt: prompt.clone(),
+                    delivery,
+                    accepted: true,
+                };
+                match employee.lifecycle() {
+                    EmployeeLifecycle::Queued => {
+                        self.boss.update_employee_ticket(session_id, |ticket| {
+                            ticket.pending_prompts.push(prompt.clone());
+                            ticket.human_interaction = true;
+                            ticket.composer_receipts.push(receipt);
+                        })?;
+                        Ok(true)
+                    }
+                    EmployeeLifecycle::Expired => {
+                        self.requeue_employee(session_id, |ticket, started| {
+                            if started {
+                                ticket.prompt.clear();
+                                ticket.pending_prompts.push(prompt.clone());
+                            } else {
+                                ticket.prompt = prompt.clone();
+                                ticket.pending_prompts.clear();
+                            }
+                            ticket.human_interaction = true;
+                            ticket.composer_receipts.push(receipt);
+                        })?;
+                        Ok(true)
+                    }
+                    _ => {
+                        // Preserve live steering/queue delivery. Intent precedes
+                        // provider contact: a crash in the forwarding window is
+                        // uncertain, never an automatic duplicate provider call.
+                        let driver = self.steerable_driver(session_id);
+                        if delivery == AgentPromptDelivery::Steer && driver.is_none() {
+                            bail!("employee has no steerable running turn");
+                        }
+                        receipt.accepted = false;
+                        self.boss.update_employee_ticket(session_id, |ticket| {
+                            ticket.composer_receipts.push(receipt);
+                        })?;
+                        match (delivery, driver) {
+                            (AgentPromptDelivery::Interrupt | AgentPromptDelivery::Steer, Some(driver)) => {
+                                self.send_agent_steer(&driver, session_id, prompt.clone(), None);
+                            }
+                            _ => self.queue_agent_prompt(session_id, prompt.clone(), None, events)?,
+                        }
+                        self.boss.update_employee_ticket(session_id, |ticket| {
+                            if let Some(receipt) = ticket.composer_receipts.iter_mut()
+                                .find(|receipt| receipt.submission_id == submission_id)
+                            {
+                                receipt.accepted = true;
+                            }
+                        })?;
+                        Ok(false)
+                    }
+                }
+            })?;
+        if queued {
+            // Attempt this employee now, independently of the summon queue's
+            // model ordering. The broker still owns resource FIFO.
+            if let Some(employee) = self.boss.employee(session_id) {
+                self.dispatch_queued_head(&employee)?;
+            }
+            self.wake_summon_queue();
+        }
+        Ok(BossResult::Saved)
     }
 
     /// Controls a queued employee's ticket. `prompt` appends durable
@@ -2239,6 +2379,8 @@ impl WakuBackend {
                 adopt_worktree: None,
                 resources: waku_protocol::resources::ResourceSet::default(),
                 allow_burst: false,
+                human_interaction: false,
+                composer_receipts: Vec::new(),
                 pending_prompts: Vec::new(),
                 group_id: None,
                 priority: None,

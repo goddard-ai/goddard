@@ -657,6 +657,15 @@ impl WakuBackend {
     /// a projectless workspace, that workspace leaves with it — its live
     /// directory and any archive zip — since no session can reach it again.
     pub(super) fn remove_session(&self, session_id: Uuid) -> anyhow::Result<()> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let _owner = lifecycle.lock();
+        // A queued shell can be memory-only. Record cancellation before
+        // deletion so restart cannot reconstruct work the user removed.
+        if self.boss.employee_lifecycle(session_id)
+            == Some(waku_protocol::boss::EmployeeLifecycle::Queued)
+        {
+            self.stop_queued_employee(session_id)?;
+        }
         let mut removed_workspace = None;
         let mut removed_ids;
         let mut workspace_roots: Vec<PathBuf>;

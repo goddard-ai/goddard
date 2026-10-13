@@ -18922,3 +18922,5 @@ fn plan_blocker_receipt_replays_once_without_employee_cli_authentication() {
 mod plan_acceptance;
 mod rotation_oracle;
 mod rotation_status;
+
+mod employee_composer;

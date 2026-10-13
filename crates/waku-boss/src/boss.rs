@@ -3418,7 +3418,13 @@ impl BossService {
                 return Ok(());
             }
             if let Some(ticket) = &mut entry.ticket {
+                let selection = (ticket.provider, ticket.model.clone());
                 change(ticket);
+                // A queued reconfigure cannot transfer a human's exemption
+                // to another model pool without a fresh composer submission.
+                if selection.0 != ticket.provider || selection.1 != ticket.model {
+                    ticket.human_interaction = false;
+                }
                 done = true;
             }
             Ok(())
@@ -3682,6 +3688,7 @@ impl BossService {
             }
             ticket.blocked_by.clear();
             ticket.dispatch_event = None;
+            ticket.human_interaction = false;
             adjust(&mut ticket);
             state.next_sequence = state.next_sequence.saturating_add(1);
             ticket.sequence = state.next_sequence;
@@ -11341,6 +11348,8 @@ mod memory_op_tests {
             adopt_worktree: None,
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
+            human_interaction: false,
+            composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: Some("wave".into()),
             priority: None,
@@ -11454,6 +11463,8 @@ mod memory_op_tests {
             adopt_worktree: None,
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
+            human_interaction: false,
+            composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: None,
             priority: None,
@@ -11718,6 +11729,8 @@ mod memory_op_tests {
             adopt_worktree: None,
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
+            human_interaction: false,
+            composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: None,
             priority: None,
@@ -13143,6 +13156,8 @@ mod memory_op_tests {
             adopt_worktree: None,
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
+            human_interaction: false,
+            composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: None,
             priority: None,
@@ -14271,6 +14286,8 @@ mod memory_op_tests {
             adopt_worktree: None,
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
+            human_interaction: false,
+            composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: None,
             priority: None,

@@ -406,6 +406,8 @@ impl WakuBackend {
                 adopt_worktree: inputs.adopt_worktree.clone(),
                 resources: definition.resources.clone(),
                 allow_burst: false,
+                human_interaction: false,
+                composer_receipts: Vec::new(),
                 pending_prompts: Vec::new(),
                 group_id: None,
                 priority: None,

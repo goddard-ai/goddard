@@ -119,6 +119,7 @@ export type { DaemonStatsSample } from "./DaemonStatsSample";
 export type { DaySlice } from "./DaySlice";
 export type { DispatchNotification } from "./DispatchNotification";
 export type { EmployeeChain } from "./EmployeeChain";
+export type { EmployeeComposerReceipt } from "./EmployeeComposerReceipt";
 export type { EmployeeControl } from "./EmployeeControl";
 export type { EmployeeExpiry } from "./EmployeeExpiry";
 export type { EmployeeGoal } from "./EmployeeGoal";

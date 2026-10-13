@@ -1010,6 +1010,17 @@ pub struct InterruptionRecord {
 /// oldest entries drop past the cap.
 pub const INTERRUPTION_HISTORY_CAP: usize = 16;
 
+/// A composer submission's durable deduplication receipt. A forwarding
+/// receipt is uncertain after interruption and must never be replayed.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EmployeeComposerReceipt {
+    pub submission_id: Uuid,
+    pub prompt: String,
+    pub delivery: crate::AgentPromptDelivery,
+    pub accepted: bool,
+}
+
 /// The durable admission ticket a summon persists before it returns.
 /// Everything the deferred launch needs lives here so a restart re-creates
 /// the pending admission idempotently rather than re-asking the boss.
@@ -1055,6 +1066,15 @@ pub struct SummonTicket {
     /// `hardCap`; without it admission stops at `liveLimit`.
     #[serde(default)]
     pub allow_burst: bool,
+    /// This generation was directly requested through the viewed employee's
+    /// Boss -> Employee composer switch. Only model admission is exempt;
+    /// hardware claims and all launch validation remain enforced.
+    #[serde(default)]
+    pub human_interaction: bool,
+    /// Kept across generations so a lost-response retry cannot start a
+    /// second turn, including after expiry or daemon replacement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub composer_receipts: Vec<EmployeeComposerReceipt>,
     /// Prompts parked while the ticket waits — they join the dispatch
     /// envelope in submission order and survive restart.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

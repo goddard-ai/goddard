@@ -272,6 +272,30 @@ impl Backend for WakuBackend {
             Command::Boss { operation } => Ok(ResponsePayload::Boss {
                 result: self.handle_boss_operation(agent, operation, &events)?,
             }),
+            Command::EmployeeComposerPrompt {
+                viewed_employee_id,
+                submission_id,
+                prompt,
+                delivery,
+            } => {
+                anyhow::ensure!(
+                    agent.is_none(),
+                    "employee composer intent requires a human client"
+                );
+                anyhow::ensure!(
+                    session_id == viewed_employee_id,
+                    "composer target differs from viewed employee"
+                );
+                Ok(ResponsePayload::Boss {
+                    result: self.employee_composer_prompt(
+                        session_id,
+                        submission_id,
+                        prompt,
+                        delivery,
+                        &events,
+                    )?,
+                })
+            }
             Command::ClaimManagedGoalTurn { goal_id, turn_id } => {
                 let mut claims = self.managed_goal_claims.lock();
                 let claimed = claim_managed_goal_turn(&mut claims, session_id, goal_id, turn_id);

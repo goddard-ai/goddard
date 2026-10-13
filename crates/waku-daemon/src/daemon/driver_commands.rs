@@ -169,6 +169,7 @@ pub(super) fn handle_driver_command(
         | Command::SetFriendNickname { .. }
         | Command::GetAutomations
         | Command::Boss { .. }
+        | Command::EmployeeComposerPrompt { .. }
         | Command::GetDaemonStats
         | Command::UpsertAutomation { .. }
         | Command::RemoveAutomation { .. }

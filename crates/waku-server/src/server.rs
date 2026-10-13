@@ -2429,6 +2429,7 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::LoadProviderSession { .. }
             | Command::ForkProviderSession { .. }
             | Command::Workspace { .. }
+            | Command::EmployeeComposerPrompt { .. }
             | Command::Boss {
                 operation: waku_protocol::boss::BossOperation::Summon { .. }
                     | waku_protocol::boss::BossOperation::CreatePlan { .. }
@@ -2687,6 +2688,7 @@ fn handle_request(
 fn command_kind(command: &Command) -> &'static str {
     match command {
         Command::Boss { .. } => "boss",
+        Command::EmployeeComposerPrompt { .. } => "employeeComposerPrompt",
         Command::AttachSession => "attachSession",
         Command::Start { .. } => "start",
         Command::Prompt { .. } => "prompt",

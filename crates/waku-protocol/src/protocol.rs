@@ -181,6 +181,14 @@ pub enum Command {
     Boss {
         operation: crate::boss::BossOperation,
     },
+    /// Human UI intent: submit after switching Boss -> Employee in the
+    /// viewed employee's composer. Not exposed by Boss scripts or agent CLI.
+    EmployeeComposerPrompt {
+        viewed_employee_id: Uuid,
+        submission_id: Uuid,
+        prompt: String,
+        delivery: AgentPromptDelivery,
+    },
     /// Resolve the daemon-owned provider runtime for an existing task.
     ///
     /// Clients use this after reconnecting or opening the same daemon from a

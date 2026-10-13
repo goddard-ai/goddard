@@ -6920,8 +6920,20 @@ impl Waku {
             // Both callers only hand employee-targeted sends here.
             boss::ComposerTarget::Boss => return,
         };
-        let prompt = submission.prompt.trim().to_owned();
-        if prompt.is_empty() {
+        let interaction = boss::employee_composer_interaction(
+            &command.context,
+            self.state.selected_session,
+            Some(session_id),
+            self.composer_command_daemon(&command).is_some_and(|key| {
+                self.boss_ui.employee_composer_interactions.get(&key) == Some(&session_id)
+            }),
+        );
+        let prompt = if interaction {
+            submission.prompt.clone()
+        } else {
+            submission.prompt.trim().to_owned()
+        };
+        if prompt.trim().is_empty() {
             // The daemon refuses an empty employee prompt — so does the
             // composer, quietly, keeping whatever else the draft staged.
             self.restore_composer_submission(restore_session, submission, cx);
@@ -6952,28 +6964,39 @@ impl Waku {
         // same early unarchive the expired-send path does.
         self.unarchive_session(session_id, false, cx);
         let was_expired = self.boss_ui.expired.contains(&session_id);
-        let operation = waku_client::boss::BossOperation::Control {
-            session_id,
-            action: waku_client::boss::EmployeeControl::Prompt {
+        let submission_id = interaction.then(|| {
+            self.boss_ui.employee_composer_submission(session_id, &prompt, delivery)
+        });
+        let request = if let Some(submission_id) = submission_id {
+            waku_client::Command::EmployeeComposerPrompt {
+                viewed_employee_id: session_id,
+                submission_id,
                 prompt,
-                delivery: Some(delivery),
-            },
+                delivery,
+            }
+        } else {
+            waku_client::Command::Boss {
+                operation: waku_client::boss::BossOperation::Control {
+                    session_id,
+                    action: waku_client::boss::EmployeeControl::Prompt {
+                        prompt,
+                        delivery: Some(delivery),
+                    },
+                },
+            }
         };
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move {
-                    client.request(
-                        Uuid::nil(),
-                        Uuid::nil(),
-                        waku_client::Command::Boss { operation },
-                    )
-                })
+                .spawn(async move { client.request(session_id, Uuid::nil(), request) })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
                 match result {
                     Ok(_) => {
-                        if was_expired {
+                        if let Some(id) = submission_id {
+                            waku.boss_ui.accept_employee_composer_submission(session_id, id);
+                        }
+                        if was_expired && !interaction {
                             let name = waku
                                 .boss_ui
                                 .identities
@@ -6987,6 +7010,11 @@ impl Waku {
                         }
                     }
                     Err(error) => {
+                        if let Some(id) = submission_id {
+                            waku.boss_ui.restore_employee_composer_submission(
+                                session_id, id, submission.prompt.clone(), delivery,
+                            );
+                        }
                         waku.restore_composer_submission(restore_session, submission, cx);
                         waku.show_toast(format!("{error:#}"));
                     }
