@@ -451,6 +451,22 @@ impl Waku {
                 if !merged.iter().any(|command| command.name == "goal") {
                     merged.push(waku_goal_command());
                 }
+                // `/clear` is the Boss chat's own reset — offered only on
+                // that surface and shadowing any provider entry so the
+                // shown row matches what Enter actually runs.
+                if self.boss_chat_key().is_some() {
+                    merged.retain(|command| command.name != "clear");
+                    merged.push(SlashCommand {
+                        name: "clear".to_owned(),
+                        description: tr!("commands.clear_description"),
+                        scope: composer_complete::CommandScope::Waku,
+                        argument_hint: None,
+                        template: None,
+                    });
+                    merged.sort_by(|a, b| {
+                        (a.scope.display_rank(), &a.name).cmp(&(b.scope.display_rank(), &b.name))
+                    });
+                }
                 self.slash_command_index = Rc::new(merged);
                 self.slash_command_index_key = Some(command_key);
                 self.slash_command_index_loading = false;

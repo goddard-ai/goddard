@@ -889,6 +889,164 @@ impl WakuBackend {
         Ok(())
     }
 
+    /// `BossOperation::Clear` under the Boss operation lock — retire the
+    /// pointed chat, publish a fresh one under the same configuration, and
+    /// name every earlier boss-owned chat generation for removal. Unlike
+    /// a rotation the successor carries no transcript handoff: the
+    /// conversation starts empty, and the swap is recorded in the journal
+    /// as a committed `Requested` generation so the removed sessions stay
+    /// fenced by name.
+    ///
+    /// Planning sessions keep their own lifecycle — they back durable
+    /// plan records — and employees live outside the Boss project; only
+    /// the chat generations leave. Returns the reply and the retired ids:
+    /// `remove_session` parks on each runtime's event-pump gate, so the
+    /// caller runs the removals after this lock is dropped.
+    pub(super) fn clear_boss_chat(
+        &self,
+    ) -> anyhow::Result<(waku_protocol::boss::BossResult, Vec<Uuid>)> {
+        use waku_protocol::boss::BossResult;
+        let settings = self.settings.get();
+        let now = crate::model::unix_time();
+        let (identity, active) = self.boss.identity_and_session();
+        let mut project = Project::from_path(self.boss.owned_workspace()?);
+        project.id = identity.id;
+        project.name = "Boss".into();
+        let new_id = Uuid::new_v4();
+        let journal_path = self.boss_journal_path();
+        let continuity_path = self.boss_continuity_path();
+        let mut journal = RotationJournal::load(&journal_path)?;
+        // A rotation staged but uncommitted dies with the clear — its
+        // successor was never published, so it joins the retired rows.
+        journal.abort();
+        let mut ledger = ContinuityLedger::load(&continuity_path)?;
+        // A durable refresh request — manual compact or incident — is
+        // answered by the clear itself: the fresh chat must not inherit
+        // the request and immediately rotate again.
+        if ledger.rotation_request.is_some() {
+            ledger.resolve_rotation_request();
+        }
+        // Repoint before staging: a pointer divergence fails the compare-
+        // and-swap while nothing has changed, and a later failure leaves a
+        // missing session `Open` repairs rather than a stray live chat.
+        match active {
+            Some(active) => self.boss.replace_session_id(active, new_id)?,
+            None => self.boss.set_session_id(new_id)?,
+        }
+        let next = {
+            let mut state = self.task_state.lock();
+            if let Some(existing) = state
+                .projects
+                .iter_mut()
+                .find(|entry| entry.id == project.id)
+            {
+                *existing = project.clone();
+            } else {
+                state.projects.push(project.clone());
+            }
+            let mut old =
+                active.and_then(|id| state.sessions.iter_mut().find(|session| session.id == id));
+            if let Some(old) = &mut old {
+                // The archive flag fences the retired chat immediately —
+                // the journal commit below gives it a durable generation
+                // record, and the removal pass deletes the row outright.
+                old.archived_at.get_or_insert(now);
+                old.updated_at = now;
+            }
+            let old = old.map(|session| session.clone());
+            let mut next = AgentSession::new(
+                project.id,
+                old.as_ref()
+                    .map(|session| session.provider)
+                    .unwrap_or(state.last_provider),
+            );
+            next.id = new_id;
+            next.title = identity.name.clone();
+            next.agent_rename_allowed = false;
+            next.boss_managed = true;
+            if let Some(old) = &old {
+                next.model = old.model.clone();
+                next.runtime_mode = old.runtime_mode;
+                next.environment = old.environment();
+                next.reasoning_effort = old.reasoning_effort.clone();
+                next.service_tier = old.service_tier.clone();
+                next.context_window = old.context_window.clone();
+                next.agent_preset = old.agent_preset.clone();
+            }
+            next.push_message(MessageRole::System, "Boss session cleared.");
+            state.push_session(next.clone());
+            self.task_store.save(&mut state)?;
+            next
+        };
+        // The clear is a committed swap, not an in-place edit: the retired
+        // chat enters the generation chain it was fenced under, and the
+        // journal's pointer continues to track the live owner.
+        if let Some(active) = active {
+            journal.active_session_id = Some(active);
+            journal.begin(identity.id, active, new_id, now)?;
+            let intent = journal.intent.as_mut().expect("begun clear intent");
+            intent.reason = Some("user cleared the Boss chat".into());
+            intent.diagnostics.cause = RotationCause::Requested;
+            journal.commit(now)?;
+        } else {
+            journal.active_session_id = Some(new_id);
+        }
+        journal.persist(&journal_path)?;
+        // Every earlier chat generation leaves the store — the retired
+        // chats, an aborted stage's successor, and the session the clear
+        // just replaced. Ledger deliveries bound for a removed session go
+        // with it; a still-pointed delivery belongs to the fresh chat.
+        let retired: Vec<Uuid> = {
+            let state = self.task_state.lock();
+            state
+                .sessions
+                .iter()
+                .filter(|session| {
+                    session.boss_managed
+                        && session.project_id == identity.id
+                        && session.id != new_id
+                        && session.planning.is_none()
+                        && self.boss.employee_including_retired(session.id).is_none()
+                })
+                .map(|session| session.id)
+                .collect()
+        };
+        if !retired.is_empty() {
+            ledger
+                .deliveries
+                .retain(|delivery| !retired.contains(&delivery.session_id));
+        }
+        if let Err(error) = ledger.persist(&continuity_path) {
+            eprintln!("could not record the Boss clear in the continuity ledger: {error:#}");
+        }
+        for id in &retired {
+            self.boss.reset_context(*id);
+        }
+        self.boss.router_defer_context(new_id);
+        // The retired chat's unsent composer draft belongs to its
+        // replacement — same re-key a committed rotation performs.
+        if settings.composer_drafts_experiment_enabled
+            && let Some(active) = active
+            && let Err(error) = self.composer_drafts.move_draft(
+                crate::persistence::ComposerDraftKey::Session(active),
+                crate::persistence::ComposerDraftKey::Session(new_id),
+            )
+        {
+            eprintln!("Boss chat clear: composer draft carry failed: {error}");
+        }
+        self.wake_summon_queue();
+        if let Some(notifier) = self.task_notifier.lock().clone() {
+            notifier();
+        }
+        Ok((
+            BossResult::Session {
+                session: Box::new(next),
+                project: Box::new(project),
+            },
+            retired,
+        ))
+    }
+
     /// Close the provider-unconfirmed turn a fence-denied prompt left open.
     /// Only a turn opened after the fence rose is certainly orphaned — an
     /// earlier unconfirmed turn's prompt may still be in flight and its

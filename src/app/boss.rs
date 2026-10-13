@@ -1345,6 +1345,9 @@ pub(super) enum BossReply {
     /// The paused-refresh banner's retry — confirms the dispatch and
     /// refreshes state like `Resume`.
     RotationRetry,
+    /// A `/clear` dispatch — its Session reply takes the same landing the
+    /// boss row's Open gets: swap bookkeeping, catalog insert, activation.
+    Clear,
     /// An Employees → History lookup — the reply merges into the host's
     /// `BossHistorySearch` instead of the roster list.
     HistorySearch,
@@ -2451,12 +2454,14 @@ impl Waku {
         // An Open's reply navigates only while the surface it was issued
         // from survives — a picker commit or a sidebar click in between
         // means the user moved on and the late reply must not drag them
-        // back.
-        self.boss_ui.open_from = if matches!(operation, BossOperation::Open { .. }) {
-            self.state.selected_session
-        } else {
-            None
-        };
+        // back. A `/clear` follows the same contract: the fresh chat opens
+        // only while the composer still shows the chat it replaced.
+        self.boss_ui.open_from =
+            if matches!(operation, BossOperation::Open { .. } | BossOperation::Clear) {
+                self.state.selected_session
+            } else {
+                None
+            };
         if let BossReply::Finalize(session_id) = reply {
             self.boss_ui.plan_finalizing.insert(session_id);
         }
@@ -2543,7 +2548,7 @@ impl Waku {
                                 signal_event_pump(&this.event_wake_tx);
                             }
                             BossResult::Session { session, project }
-                                if matches!(reply, BossReply::Open) =>
+                                if matches!(reply, BossReply::Open | BossReply::Clear) =>
                             {
                                 this.daemons.claim_project(project.id, key);
                                 this.boss_ui.projects.insert(project.id, *project);
@@ -2684,6 +2689,13 @@ impl Waku {
                         }
                         if matches!(reply, BossReply::RotationRetry) {
                             this.show_success_toast(tr!("boss.rotation_retry_sent"));
+                            this.refresh_boss_state_on(key, cx);
+                        }
+                        if matches!(reply, BossReply::Clear) {
+                            this.show_success_toast(tr!("boss.cleared"));
+                            // The Session arm above already landed the swap;
+                            // this pull keeps the roster and pointers honest
+                            // while the daemon's pushes are still in flight.
                             this.refresh_boss_state_on(key, cx);
                         }
                         if matches!(reply, BossReply::Resume) {

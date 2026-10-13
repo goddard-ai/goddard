@@ -2754,6 +2754,12 @@ pub enum BossOperation {
     /// and threshold rules, so retrying can only advance a pending
     /// intent or wait, never force an unsafe swap.
     RetryRotation,
+    /// Reset the Boss chat: retire the pointed session, publish a fresh
+    /// one under the same configuration, and remove the retired
+    /// boss-owned chats — every earlier chat generation — from the task
+    /// store. Unlike a rotation the successor carries no transcript
+    /// handoff: the conversation starts empty. Human-only.
+    Clear,
     Open {
         provider: ProviderKind,
         model: Option<String>,

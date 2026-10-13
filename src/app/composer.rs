@@ -3858,10 +3858,40 @@ impl Waku {
             || self.execute_rename_composer_command(prompt, cx)
             || self.execute_land_composer_command(prompt, cx)
             || self.execute_compact_composer_command(prompt, cx)
+            || self.execute_clear_boss_command(prompt, cx)
             || self.execute_side_composer_command(prompt, cx)
             || self.execute_incognito_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
+    }
+
+    /// `/clear` on the Boss chat — reset the session and remove the retired
+    /// boss-owned chat generations. Reserved on boss surfaces only: on any
+    /// other session the text resolves against the command catalog, so a
+    /// provider's own `/clear` still reaches it.
+    fn execute_clear_boss_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        if prompt.trim() != "/clear" {
+            return false;
+        }
+        let Some(session_id) = self.composer_session_id() else {
+            return false;
+        };
+        let Some(key) = self
+            .boss_ui
+            .states
+            .iter()
+            .find_map(|(key, state)| (state.session_id == Some(session_id)).then_some(*key))
+        else {
+            return false;
+        };
+        self.composer.update(cx, |input, cx| input.clear(cx));
+        self.boss_request(
+            key,
+            waku_client::boss::BossOperation::Clear,
+            boss::BossReply::Clear,
+            cx,
+        );
+        true
     }
 
     fn execute_rename_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {

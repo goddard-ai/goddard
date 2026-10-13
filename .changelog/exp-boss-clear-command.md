@@ -1,0 +1,1 @@
+- **Boss chat `/clear` command:** Type `/clear` in the Boss chat to reset the conversation — a fresh chat takes over with no transcript carried over, and retired Boss chat sessions are removed. Employees, planning sessions, and memory are untouched.

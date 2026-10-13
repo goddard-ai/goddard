@@ -70,6 +70,18 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "clear"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "open"
             },
             "provider": {
@@ -1754,6 +1766,53 @@
             "type",
             "start",
             "end"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "retract"
+            },
+            "bucket": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "noteId": {
+              "type": "string"
+            },
+            "session": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "noteId"
           ],
           "additionalProperties": false
         },
@@ -4012,7 +4071,27 @@
                 }
               ]
             },
+            "retracted": {
+              "anyOf": [
+                {
+                  "protocolType": "JsonValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "bucket": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "bucketName": {
               "anyOf": [
                 {
                   "type": "string"

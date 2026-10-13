@@ -15069,6 +15069,139 @@ fn rotation_boss(backend: &WakuBackend) -> Uuid {
     session.id
 }
 
+/// `/clear` retires the pointed chat without a handoff, removes every
+/// earlier chat generation from the store, and keeps the boss's other
+/// surfaces — planning sessions and employees — while the journal records
+/// the swap so the removed ids stay fenced.
+#[test]
+fn clear_replaces_the_boss_chat_and_removes_retired_generations() {
+    use crate::boss_rotation::RotationJournal;
+    use waku_boss::boss_rotation::RotationCause;
+    use waku_protocol::boss::{BossOperation, BossResult};
+    let root = std::env::temp_dir().join(format!("boss-clear-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let events = EventSink::detached();
+    let active = rotation_boss(&backend);
+    let identity = backend.boss.document().identity.id;
+    // Earlier generations and boss surfaces: a retired chat, a planning
+    // session in the same workspace, and an employee task in a user project.
+    let mut retired = AgentSession::new(identity, ProviderKind::Codex);
+    retired.boss_managed = true;
+    retired.archived_at = Some(1);
+    let mut planning = AgentSession::new(identity, ProviderKind::Codex);
+    planning.boss_managed = true;
+    planning.planning = Some(crate::model::SessionPlanning {
+        plan_file: "plans/auth.md".into(),
+        idea: "Auth".into(),
+        label: waku_protocol::WireTranslation::new("boss.planning_label", []),
+        finalized_at: None,
+    });
+    let mut employee = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    employee.boss_managed = true;
+    {
+        let mut state = backend.task_state.lock();
+        state.push_session(retired.clone());
+        state.push_session(planning.clone());
+        state.push_session(employee.clone());
+        backend.task_store.save(&mut state).unwrap();
+    }
+    // Scoped callers may not clear — the chat is the human's surface.
+    assert!(
+        backend
+            .handle_boss_operation(Some(Uuid::new_v4()), BossOperation::Clear, &events)
+            .is_err()
+    );
+    let BossResult::Session {
+        session: cleared,
+        project,
+    } = backend
+        .handle_boss_operation(None, BossOperation::Clear, &events)
+        .unwrap()
+    else {
+        panic!("expected the fresh boss chat")
+    };
+    assert_ne!(cleared.id, active);
+    assert_eq!(cleared.provider, ProviderKind::Codex);
+    assert_eq!(cleared.model.as_deref(), Some("gpt-6.1-sol"));
+    assert!(cleared.boss_managed);
+    assert_eq!(cleared.project_id, identity);
+    assert_eq!(project.id, identity);
+    assert_eq!(backend.boss.document().session_id, Some(cleared.id));
+    {
+        let state = backend.task_state.lock();
+        assert!(
+            state
+                .sessions
+                .iter()
+                .any(|session| session.id == cleared.id)
+        );
+        for gone in [active, retired.id] {
+            assert!(
+                !state.sessions.iter().any(|session| session.id == gone),
+                "retired generation {gone} should be removed"
+            );
+        }
+        assert!(
+            state
+                .sessions
+                .iter()
+                .any(|session| session.id == planning.id)
+        );
+        assert!(
+            state
+                .sessions
+                .iter()
+                .any(|session| session.id == employee.id)
+        );
+    }
+    // The journal records the swap: the removed generations stay fenced by
+    // name and the fresh chat is the tracked owner.
+    let journal = RotationJournal::load(&backend.boss_journal_path()).unwrap();
+    assert_eq!(journal.active_session_id, Some(cleared.id));
+    let rotation = journal.rotations.last().expect("clear recorded a swap");
+    assert_eq!(rotation.old_session_id, active);
+    assert_eq!(rotation.new_session_id, cleared.id);
+    assert_eq!(rotation.diagnostics.cause, RotationCause::Requested);
+    assert!(backend.boss_fenced_chat(active));
+    assert!(!backend.boss_fenced_chat(cleared.id));
+    assert!(backend.boss.is_boss(cleared.id));
+    // The chain survives bookkeeping: a second clear swaps again.
+    let BossResult::Session {
+        session: cleared_next,
+        ..
+    } = backend
+        .handle_boss_operation(None, BossOperation::Clear, &events)
+        .unwrap()
+    else {
+        panic!("expected the fresh boss chat")
+    };
+    assert_eq!(backend.boss.document().session_id, Some(cleared_next.id));
+    assert_eq!(
+        RotationJournal::load(&backend.boss_journal_path())
+            .unwrap()
+            .rotations
+            .len(),
+        2
+    );
+    {
+        let state = backend.task_state.lock();
+        assert!(
+            state
+                .sessions
+                .iter()
+                .any(|session| session.id == cleared_next.id)
+        );
+        assert!(
+            !state
+                .sessions
+                .iter()
+                .any(|session| session.id == cleared.id)
+        );
+    }
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
     use crate::boss_rotation::RotationJournal;

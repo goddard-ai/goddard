@@ -1101,6 +1101,20 @@ impl WakuBackend {
                     state: self.boss.document(),
                 })
             }
+            BossOperation::Clear => {
+                anyhow::ensure!(caller.is_none(), "only the human can clear the Boss chat");
+                let (result, retired) =
+                    self.boss.with_operation_lock(|| self.clear_boss_chat())?;
+                // Retired runtime teardown parks on the event-pump gate,
+                // so it runs after the operation lock dropped — same
+                // posture the reconciler takes for rotated chats.
+                for id in retired {
+                    if let Err(error) = self.remove_session(id) {
+                        eprintln!("Boss chat clear could not remove session {id}: {error:#}");
+                    }
+                }
+                Ok(result)
+            }
             BossOperation::Roster => {
                 if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can read the employee roster");

@@ -3516,6 +3516,8 @@ session.agent_rename_always:
   en: Always allow
 commands.compact_description:
   en: Compact the conversation context
+commands.clear_description:
+  en: Start a fresh Boss chat and remove its retired sessions
 commands.incognito_description:
   en: Start a temporary chat — in memory only, outside project memory
 commands.incognito_no_draft:
@@ -6568,6 +6570,8 @@ boss.rotation_retry:
   en: Retry refresh
 boss.rotation_retry_sent:
   en: Refresh retry sent
+boss.cleared:
+  en: Boss chat cleared
 boss.unreachable:
   en: The boss's daemon is unavailable.
 boss.project_required:

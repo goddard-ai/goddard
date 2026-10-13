@@ -4237,6 +4237,7 @@ impl BossService {
             | BossOperation::Resume { .. }
             | BossOperation::RetryPlanReview { .. }
             | BossOperation::RetryRotation
+            | BossOperation::Clear
             | BossOperation::ReportBlocker { .. }
             | BossOperation::Transcript { .. }
             | BossOperation::HistorySearch { .. }
