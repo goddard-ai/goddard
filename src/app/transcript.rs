@@ -373,17 +373,31 @@ impl Waku {
 
     pub(super) fn selected_transcript_anchor_row(&self) -> Option<usize> {
         let anchor = self.transcript_anchor.get()?;
-        let session = self.selected_session()?;
-        if session.id != anchor.session_id {
-            return None;
-        }
+        let selected = self.selected_session()?;
+        let historical = selected.id != anchor.session_id;
+        let session = if historical {
+            if !self.boss_history_chain().0.contains(&anchor.session_id) {
+                return None;
+            }
+            &self.boss_history_session(anchor.session_id)?.session
+        } else {
+            selected
+        };
         let message_index = session.messages.iter().position(|message| {
             message.role == MessageRole::User && message.turn_id == Some(anchor.turn_id)
         })?;
+        let row = if historical {
+            TranscriptRowKind::BossHistory(
+                anchor.session_id,
+                BossHistoryRow::Message(message_index),
+            )
+        } else {
+            TranscriptRowKind::Message(message_index)
+        };
         self.transcript_row_kinds
             .borrow()
             .iter()
-            .position(|kind| *kind == TranscriptRowKind::Message(message_index))
+            .position(|kind| *kind == row)
     }
 
     pub(super) fn scroll_transcript_to_anchor(&self) {

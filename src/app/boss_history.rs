@@ -178,6 +178,23 @@ fn boss_chat_predecessor(session: &AgentSession) -> Option<Uuid> {
     })
 }
 
+/// Preserve the same content row and its intra-row offset as the live rows
+/// acquire a historical owner and predecessor pages are inserted above them.
+fn refresh_scroll_offset(
+    previous: &[TranscriptRowKind],
+    next: &[TranscriptRowKind],
+    scroll: ListOffset,
+) -> ListOffset {
+    let item_ix = previous
+        .get(scroll.item_ix)
+        .and_then(|row| next.iter().position(|candidate| candidate == row))
+        .unwrap_or(scroll.item_ix.min(next.len().saturating_sub(1)));
+    ListOffset {
+        item_ix,
+        offset_in_item: scroll.offset_in_item,
+    }
+}
+
 impl BossChatHistory {
     /// Newest first. Stop at the first unloaded predecessor, never skip a gap.
     fn chain(&self, live: &AgentSession) -> (Vec<Uuid>, Option<Uuid>) {
@@ -196,6 +213,44 @@ impl BossChatHistory {
         }
         (loaded, None)
     }
+    /// Commit a hydrated successor without a visit. The mounted transcript
+    /// becomes history before selection changes, so there is never an empty
+    /// conversation between the two generations.
+    fn swap_live_session(
+        &mut self,
+        sessions: &[AgentSession],
+        selected: &mut Option<Uuid>,
+        successor: Uuid,
+    ) -> bool {
+        let Some(old) = sessions.iter().find(|entry| Some(entry.id) == *selected) else {
+            return false;
+        };
+        let Some(next) = sessions.iter().find(|entry| entry.id == successor) else {
+            return false;
+        };
+        let (loaded, boundary) = self.chain(next);
+        if old.id == next.id
+            || !old.detail_loaded
+            || !next.detail_loaded
+            || !old.boss_managed
+            || !next.boss_managed
+            || old.planning.is_some()
+            || next.planning.is_some()
+            || old.project_id != next.project_id
+            || next.archived_at.is_some()
+            || !(loaded.contains(&old.id) || boundary == Some(old.id))
+        {
+            return false;
+        }
+        self.finish_load(
+            old.id,
+            Some(old.project_id),
+            Ok(BossHistorySession::new(old.clone())),
+        );
+        *selected = Some(next.id);
+        true
+    }
+
     fn begin_load(&mut self, id: Uuid) -> bool {
         if self.sessions.contains_key(&id) || !self.loading.insert(id) {
             return false;
@@ -328,6 +383,83 @@ impl Waku {
         )
     }
 
+    /// A refresh changes the backing session, never the current surface.
+    /// Recheck on both document/catalog arrivals and hydration completion.
+    pub(super) fn reconcile_boss_chat_refresh(&mut self, cx: &mut Context<Self>) {
+        let Some(from) = self.state.selected_session else {
+            return;
+        };
+        let Some(to) = self.live_boss_chat_target(from) else {
+            return;
+        };
+        let Some(key) = self.boss_chat_key() else {
+            return;
+        };
+        let Some(next) = self.state.sessions.iter().find(|entry| entry.id == to) else {
+            return;
+        };
+        if !next.detail_loaded {
+            self.ensure_session_loaded(to, cx);
+            return;
+        }
+        // Several swaps can overtake hydration. Fill any intervening link
+        // before moving the backing id, retaining the mounted old transcript.
+        let history = self.boss_ui.chat_history.entry(key).or_default();
+        let (loaded, boundary) = history.chain(next);
+        if !loaded.contains(&from) && boundary != Some(from) {
+            if let Some(id) = boundary.filter(|id| !history.errors.contains_key(id)) {
+                self.load_boss_history(key, id, cx);
+            }
+            return;
+        }
+        // Catalog delivery may precede the Boss pointer push. Carry the
+        // id-keyed draft state now as well; a later push is idempotent.
+        if self.boss_ui.rotated_chat_drafts.get(&from) != Some(&to) {
+            self.migrate_voice_scratchpad(from, to);
+            self.migrate_boss_composer_draft(from, to, cx);
+            self.migrate_boss_queue_drain(from, to);
+        }
+        // Resolve GPUI's implicit bottom anchor into the actual viewport
+        // position before appending the successor; otherwise a tail anchor
+        // would jump to the new generation rather than stay on the old text.
+        self.pin_transcript_for_disclosure();
+        let previous = self.transcript_row_kinds.borrow().clone();
+        let scroll = self.active_transcript_rows().logical_scroll_top();
+        let previous: Vec<_> = previous
+            .into_iter()
+            .map(|row| {
+                BossHistoryRow::from_content(row)
+                    .map_or(row, |content| TranscriptRowKind::BossHistory(from, content))
+            })
+            .collect();
+        let history = self.boss_ui.chat_history.entry(key).or_default();
+        if !history.swap_live_session(&self.state.sessions, &mut self.state.selected_session, to) {
+            return;
+        }
+        if let Some(retired) = history.sessions.get_mut(&from) {
+            retired.expanded_blocks = self.activities_expanded.clone();
+        }
+        // Block indexes are local to a session. Keep the mounted disclosure
+        // state on its historical owner, rather than applying it to the
+        // successor's unrelated blocks.
+        self.activities_expanded.clear();
+        // No activate_session: it resets pages, composer, focus, expansion,
+        // navigation and landing. Only splice transcript data and keep its
+        // exact logical anchor, including the pixel offset within the row.
+        self.splice_transcript_rows_after_visibility_change(&previous);
+        let next = self.transcript_row_kinds.borrow();
+        let scroll = refresh_scroll_offset(&previous, &next, scroll);
+        drop(next);
+        self.active_transcript_rows().scroll_to(scroll);
+        if let Some(mut position) = self.transcript_scroll_positions.remove(&from) {
+            position.offset = scroll;
+            self.transcript_scroll_positions.insert(to, position);
+        }
+        self.ensure_recent_boss_history(cx);
+        self.sync_composer_placeholder(cx);
+        cx.notify();
+    }
+
     /// Called on activation, not from a row builder. Only the immediate
     /// predecessor is eager; subsequent links require the history control.
     pub(super) fn ensure_recent_boss_history(&mut self, cx: &mut Context<Self>) {
@@ -429,6 +561,7 @@ impl Waku {
                         this.remeasure_transcript_rows(boundary..boundary + 1);
                     }
                 }
+                this.reconcile_boss_chat_refresh(cx);
                 cx.notify();
             });
         })
@@ -541,6 +674,116 @@ mod tests {
         next.messages.insert(1, link);
         for block in &mut next.transcript_blocks {
             block.after_message += 1;
+        }
+    }
+
+    #[test]
+    fn refresh_keeps_mounted_scrollback_until_successor_is_hydrated() {
+        let project = Uuid::new_v4();
+        let mut old = chat(project, "Earlier conversation");
+        let mut next = chat(project, "After refresh");
+        rotate(&mut old, &mut next);
+        let mut history = BossChatHistory::default();
+        let mut selected = Some(old.id);
+        let projection = next.list_projection();
+        // The old Open/activation path lands on a projection with no link:
+        // there is no earlier content to display until hydration finishes.
+        assert!(
+            history
+                .transcript_rows(&projection, &HashSet::new(), None)
+                .iter()
+                .all(|row| !matches!(row, TranscriptRowKind::BossHistory(..)))
+        );
+        assert!(!history.swap_live_session(&[old.clone(), projection], &mut selected, next.id));
+        assert_eq!(selected, Some(old.id));
+        assert!(history.swap_live_session(&[old.clone(), next.clone()], &mut selected, next.id));
+        assert_eq!(selected, Some(next.id));
+        assert_eq!(
+            history.sessions[&old.id].session.messages[0].content,
+            old.messages[0].content
+        );
+        let rows = history.transcript_rows(&next, &HashSet::new(), None);
+        assert!(rows.contains(&TranscriptRowKind::BossHistory(
+            old.id,
+            BossHistoryRow::Message(0)
+        )));
+        assert!(
+            rows.iter()
+                .any(|row| matches!(row, TranscriptRowKind::Message(_)))
+        );
+        assert!(!history.swap_live_session(&[old, next.clone()], &mut selected, next.id));
+        assert_eq!(history.sessions.len(), 1);
+        // An older Open reply arriving after the swap is a projection. It
+        // must not erase the successor's hydrated predecessor link.
+        let mut catalog = vec![next.clone()];
+        super::super::runtime::merge_remote_session_catalog(
+            &mut catalog,
+            vec![next.list_projection()],
+            |_| false,
+            |_| false,
+            false,
+        );
+        assert!(catalog[0].detail_loaded);
+        assert_eq!(
+            boss_chat_predecessor(&catalog[0]),
+            Some(history.chain(&next).0[0])
+        );
+    }
+
+    #[test]
+    fn refresh_preserves_reading_position_across_chained_swaps() {
+        let project = Uuid::new_v4();
+        let mut old = chat(project, "Reading here");
+        let mut middle = chat(project, "Intermediate");
+        let mut latest = chat(project, "Latest");
+        rotate(&mut old, &mut middle);
+        rotate(&mut middle, &mut latest);
+        let mut selected = Some(old.id);
+        let mut history = BossChatHistory::default();
+        let sessions = [old.clone(), latest.clone()];
+        // A newer refresh overtakes the successor load. Do not skip a gap.
+        assert!(!history.swap_live_session(&sessions, &mut selected, latest.id));
+        assert_eq!(selected, Some(old.id));
+        history.finish_load(
+            middle.id,
+            Some(project),
+            Ok(BossHistorySession::new(middle)),
+        );
+        let previous: Vec<_> = history
+            .transcript_rows(&old, &HashSet::new(), None)
+            .into_iter()
+            .map(|row| {
+                BossHistoryRow::from_content(row).map_or(row, |content| {
+                    TranscriptRowKind::BossHistory(old.id, content)
+                })
+            })
+            .collect();
+        assert!(history.swap_live_session(&sessions, &mut selected, latest.id));
+        let next = history.transcript_rows(&latest, &HashSet::new(), None);
+        let scroll = ListOffset {
+            item_ix: 1,
+            offset_in_item: px(17.5),
+        };
+        let kept = refresh_scroll_offset(&previous, &next, scroll);
+        assert_eq!(next[kept.item_ix], previous[scroll.item_ix]);
+        assert_eq!(kept.offset_in_item, px(17.5));
+        assert!(history.chain(&latest).0.contains(&old.id));
+    }
+
+    #[test]
+    fn refresh_completion_cannot_select_boss_after_the_reader_leaves() {
+        let project = Uuid::new_v4();
+        let mut old = chat(project, "Earlier");
+        let mut next = chat(project, "Successor");
+        rotate(&mut old, &mut next);
+        let another = chat(Uuid::new_v4(), "Other page");
+        let mut history = BossChatHistory::default();
+        let sessions = [old, next.clone(), another.clone()];
+        for mut selected in [Some(another.id), None] {
+            let before = selected;
+            assert!(!history.swap_live_session(&sessions, &mut selected, next.id));
+            assert_eq!(selected, before);
+            assert!(history.sessions.is_empty());
         }
     }
 

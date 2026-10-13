@@ -1629,7 +1629,6 @@ impl Waku {
     pub(super) fn drain_boss_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         let mut finalized_plan_host = None;
-        let mut rotated_chat_host = None;
         while let Ok((key, state)) = self.boss_events.try_recv() {
             if self.boss_ui.states.get(&key).is_some_and(|previous| {
                 previous.identity.id == state.identity.id && previous.revision > state.revision
@@ -1840,70 +1839,25 @@ impl Waku {
             // A boss chat opening or an employee expiring can arm or
             // disarm the composer's command target.
             self.sync_composer_placeholder(cx);
-            // The selection sitting on a retired Boss chat strands the user
-            // on an archived session — the swap already happened elsewhere
-            // and a one-shot redirect condition cannot reach every ordering:
-            // a Boss page or preview covered the chat when the document
-            // landed, an activation was in flight, or the pointer trailed
-            // the catalog. Every applied state re-checks instead, on two
-            // signals: a replacement the catalog already carries, or the
-            // document's pointer naming a different chat for the boss whose
-            // workspace owns the selected session. A covered surface
-            // repoints underneath it; the bare chat redirects through the
-            // Open round trip.
-            if let Some(selected) = self.state.selected_session {
-                let resolved = self.live_boss_chat_target(selected);
-                let retired_key = self
-                    .state
-                    .sessions
-                    .iter()
-                    .find(|session| {
-                        session.id == selected && session.boss_managed && session.planning.is_none()
-                    })
-                    .and_then(|entry| {
-                        self.boss_ui.states.iter().find_map(|(key, state)| {
-                            (state.identity.id == entry.project_id
-                                && state.session_id.is_some_and(|id| id != selected))
-                            .then_some(*key)
-                        })
-                    });
-                if resolved.is_some() || retired_key.is_some() {
-                    if !self.session_surface_active()
-                        || self.big_picture.is_open()
-                        || self.boss_ui.deliverable_page.is_some()
-                    {
-                        if let Some(resolved) = resolved {
-                            self.state.selected_session = Some(resolved);
-                            self.sync_composer_placeholder(cx);
-                        }
-                    } else if let Some(key) = retired_key
-                        .or_else(|| {
-                            self.boss_ui.states.iter().find_map(|(key, state)| {
-                                (state.session_id == resolved || state.session_id == Some(selected))
-                                    .then_some(*key)
-                            })
-                        })
-                        .or_else(|| {
-                            self.state
-                                .sessions
-                                .iter()
-                                .find(|session| session.id == selected)
-                                .and_then(|entry| self.boss_key_for_project(entry.project_id))
-                        })
-                    {
-                        rotated_chat_host = Some(key);
-                    }
-                }
-            }
-            if let Some(key) = self.boss_chat_key() {
-                if self
+            // Catalog snapshots omit the Boss pseudo-project. Recover it
+            // for a restored chat without activating or uncovering a page.
+            // A refresh itself uses only catalog hydration below.
+            if let Some(key) = self.boss_chat_key()
+                && self
                     .boss_ui
                     .states
                     .get(&key)
                     .is_some_and(|state| !self.boss_ui.projects.contains_key(&state.identity.id))
-                {
-                    self.chat_with_boss(key, cx);
-                }
+            {
+                let session = self.selected_session();
+                let operation = BossOperation::Open {
+                    provider: session.map_or(ProviderKind::Codex, |session| session.provider),
+                    model: session.and_then(|session| session.model.clone()),
+                    mode: session
+                        .map(|session| session.runtime_mode)
+                        .unwrap_or_default(),
+                };
+                self.boss_request(key, operation, BossReply::List, cx);
             }
         }
         if let Some(key) = finalized_plan_host
@@ -1917,9 +1871,10 @@ impl Waku {
             // message, regardless of the reader's normal scroll preference.
             self.transcript_scroll_positions.remove(&session_id);
         }
-        if let Some(key) = rotated_chat_host.or(finalized_plan_host) {
+        if let Some(key) = finalized_plan_host {
             self.chat_with_boss(key, cx);
         }
+        self.reconcile_boss_chat_refresh(cx);
         self.pump_boss_avatars(cx);
         if changed {
             self.sync_boss_tasks_panel(cx);
@@ -2351,6 +2306,11 @@ impl Waku {
             return;
         }
         if self.boss_ui.pending {
+            // Passive pseudo-project recovery can wait for the next state
+            // arrival; it must never use the click's activation shortcut.
+            if reply == BossReply::List && matches!(operation, BossOperation::Open { .. }) {
+                return;
+            }
             // A boss-chat click while a request is in flight must not die —
             // under exactly the slowness an Open suffers, a dropped click
             // reads as a broken sidebar. A live session the app already
@@ -2568,7 +2528,7 @@ impl Waku {
                                 signal_event_pump(&this.event_wake_tx);
                             }
                             BossResult::Session { session, project }
-                                if matches!(reply, BossReply::Open | BossReply::Clear) =>
+                                if matches!(reply, BossReply::Open | BossReply::Clear | BossReply::List) =>
                             {
                                 this.daemons.claim_project(project.id, key);
                                 this.boss_ui.projects.insert(project.id, *project);
@@ -2579,6 +2539,7 @@ impl Waku {
                                 // a backwards new→old swap.
                                 let rotated_from = if session.planning.is_none()
                                     && session.archived_at.is_none()
+                                    && this.resolve_boss_chat_session(session.id) == session.id
                                 {
                                     this.boss_ui
                                         .states
@@ -2599,17 +2560,35 @@ impl Waku {
                                     this.migrate_boss_queue_drain(from, id);
                                 }
                                 this.daemons.claim_session(id, key);
-                                if let Some(existing) =
-                                    this.state.sessions.iter_mut().find(|entry| entry.id == id)
-                                {
-                                    *existing = *session;
+                                if session.detail_loaded {
+                                    if let Some(existing) =
+                                        this.state.sessions.iter_mut().find(|entry| entry.id == id)
+                                    {
+                                        *existing = *session;
+                                    } else {
+                                        this.state.sessions.push(*session);
+                                    }
                                 } else {
-                                    this.state.sessions.push(*session);
+                                    // Open returns a list projection for an
+                                    // existing chat. Preserve resident details
+                                    // and rotation links, just as catalog sync does.
+                                    let runtime_ids: HashSet<_> =
+                                        this.runtimes.keys().copied().collect();
+                                    super::runtime::merge_remote_session_catalog(
+                                        &mut this.state.sessions,
+                                        vec![*session],
+                                        |_| false,
+                                        |id| runtime_ids.contains(&id),
+                                        false,
+                                    );
                                 }
-                                if boss_open_reply_navigates(
-                                    this.boss_ui.open_from,
-                                    this.state.selected_session,
-                                ) {
+                                let navigates = matches!(reply, BossReply::Open | BossReply::Clear)
+                                    && boss_open_reply_navigates(
+                                        this.boss_ui.open_from,
+                                        this.state.selected_session,
+                                    );
+                                this.reconcile_boss_chat_refresh(cx);
+                                if navigates {
                                     this.request_session_activation(
                                         id,
                                         SessionActivationTransition::Visit,
@@ -3186,10 +3165,15 @@ impl Waku {
             return None;
         }
         let id = self.state.selected_session?;
-        self.boss_ui
-            .states
-            .iter()
-            .find_map(|(key, state)| (state.session_id == Some(id)).then_some(*key))
+        let identity = self
+            .selected_session()
+            .filter(|session| session.boss_managed && session.planning.is_none())
+            .map(|session| session.project_id);
+        self.boss_ui.states.iter().find_map(|(key, state)| {
+            // Keep the mounted predecessor a Boss chat while the catalog
+            // and successor hydration catch up with the new pointer.
+            (state.session_id == Some(id) || identity == Some(state.identity.id)).then_some(*key)
+        })
     }
 
     /// The boss owning the selected session's surface beyond the chat

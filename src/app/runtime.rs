@@ -3908,12 +3908,24 @@ impl Waku {
                             turn.status == TurnStatus::Running && !turn.provider_turn_started
                         })
                         .map(|turn| turn.id);
+                    let boss_rows = (self.boss_chat_key().is_some()
+                        && self.state.selected_session == Some(session_id))
+                    .then(|| self.transcript_row_kinds.borrow().clone());
                     self.install_prepared_driver(session_id, prepared);
                     self.watch_unstarted_turn(session_id, unstarted_turn, cx);
-                    if self.state.selected_session == Some(session_id) {
-                        self.reset_visible_state();
-                        self.reset_transcript_rows(self.transcript_row_count());
-                        self.reapply_transcript_landing(session_id, cx);
+                    let selected_before_refresh = self.state.selected_session;
+                    self.reconcile_boss_chat_refresh(cx);
+                    let refreshed = selected_before_refresh != self.state.selected_session;
+                    if !refreshed && self.state.selected_session == Some(session_id) {
+                        if let Some(previous) = boss_rows {
+                            // Attaching the successor's runtime is data arrival,
+                            // not a second landing after an in-place refresh.
+                            self.splice_transcript_rows_after_visibility_change(&previous);
+                        } else {
+                            self.reset_visible_state();
+                            self.reset_transcript_rows(self.transcript_row_count());
+                            self.reapply_transcript_landing(session_id, cx);
+                        }
                     }
                     cx.notify();
                 }

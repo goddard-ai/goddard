@@ -763,6 +763,9 @@ impl Waku {
                         } else {
                             false
                         };
+                        let selected_before_refresh = waku.state.selected_session;
+                        waku.reconcile_boss_chat_refresh(cx);
+                        let refreshed = selected_before_refresh != waku.state.selected_session;
                         let pending = waku
                             .pending_session_activation
                             .filter(|pending| pending.session_id == session_id);
@@ -771,7 +774,7 @@ impl Waku {
                         }
                         if replaced && let Some(pending) = pending {
                             waku.finish_session_activation(session_id, pending.transition, cx);
-                        } else if waku.state.selected_session == Some(session_id) {
+                        } else if !refreshed && waku.state.selected_session == Some(session_id) {
                             waku.reset_visible_state();
                             waku.reset_transcript_rows(waku.transcript_row_count());
                             if !waku.transcript_is_scrolled.get() {
