@@ -204,6 +204,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "headphones",
     "headphones-generated",
     "rotate-ccw",
+    "undo",
     "fast-forward",
     "hourglass",
     "hexagon",

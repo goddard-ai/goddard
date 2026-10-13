@@ -76,7 +76,7 @@ impl RenderOnce for MemoryCard {
                 .track_focus(&self.undo_focus)
                 .tab_stop(true)
                 .aria_label(tr!("boss.memory_undo"))
-                .child(icon("icons/rotate-ccw.svg", 12.0, theme.text_secondary))
+                .child(icon("icons/undo.svg", 12.0, theme.text_secondary))
                 .child(tr!("boss.memory_undo"))
                 .on_activation_app(move |window, cx| (self.undo)(window, cx))
                 .into_any_element()
