@@ -1436,21 +1436,38 @@ struct PersonaDefaultPane {
     reset_preview: bool,
 }
 
-/// Sidebar employee order: newest summon first. `created_at` is the
-/// summon stamp — records predating the field fall back to their
-/// session's creation time, also stamped at summon. Sorting on anything
-/// mutable, like session activity, would shuffle a row on every state
-/// revision; this key never changes after the employee appears.
+/// Active employees keep newest-summon-first order. Finished employees sort
+/// by their most recent ended turn, falling back to their summon stamp for
+/// sessions without a completion timestamp.
 fn sort_boss_employees(
     employees: &mut Vec<&waku_protocol::boss::BossEmployee>,
-    session_created_at: &HashMap<Uuid, u64>,
+    sessions: &HashMap<Uuid, &waku_protocol::model::AgentSession>,
 ) {
     employees.sort_by_key(|employee| {
-        std::cmp::Reverse(
+        let session = sessions.get(&employee.session_id).copied();
+        let timestamp = if employee.expired {
+            session
+                .and_then(|session| {
+                    session
+                        .turns
+                        .iter()
+                        .filter_map(|turn| turn.completed_at)
+                        .max()
+                })
+                .or_else(|| session.and_then(|session| session.last_reply_at))
+                .or(employee.created_at)
+                .or_else(|| session.map(|session| session.created_at))
+                .unwrap_or(0)
+        } else {
             employee
                 .created_at
-                .or_else(|| session_created_at.get(&employee.session_id).copied())
-                .unwrap_or(0),
+                .or_else(|| session.map(|session| session.created_at))
+                .unwrap_or(0)
+        };
+        (
+            employee.expired,
+            std::cmp::Reverse(timestamp),
+            employee.session_id,
         )
     });
 }
@@ -1756,11 +1773,11 @@ impl Waku {
             self.boss_ui.queued.clear();
             self.boss_ui.dispatching.clear();
             self.boss_ui.queued_model_targets.clear();
-            let session_created_at: HashMap<Uuid, u64> = self
+            let sessions_by_id: HashMap<Uuid, &waku_protocol::model::AgentSession> = self
                 .state
                 .sessions
                 .iter()
-                .map(|session| (session.id, session.created_at))
+                .map(|session| (session.id, session))
                 .collect();
             for (key, state) in &self.boss_ui.states {
                 if let Some(id) = state.session_id {
@@ -1768,7 +1785,7 @@ impl Waku {
                 }
                 let queue_rank = boss_queue_ranks(state);
                 let mut employees = state.employees.iter().collect::<Vec<_>>();
-                sort_boss_employees(&mut employees, &session_created_at);
+                sort_boss_employees(&mut employees, &sessions_by_id);
                 self.boss_ui.recent.insert(
                     *key,
                     employees.iter().map(|entry| entry.session_id).collect(),
@@ -11820,39 +11837,169 @@ mod tests {
     }
 
     #[test]
-    fn employees_sort_newest_summon_first_regardless_of_lifecycle() {
-        let oldest = boss_employee(Some(100));
-        let mut finished = boss_employee(Some(200));
-        finished.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 250);
+    fn employees_keep_active_order_and_sort_idle_by_latest_completion() {
         let mut queued = boss_employee(Some(300));
         queued.state = waku_protocol::boss::EmployeeLifecycle::Queued;
-        // A queued summon with no session yet still tops the list, and a
-        // finished employee holds the position its summon earned.
-        let mut employees = vec![&oldest, &queued, &finished];
-        sort_boss_employees(&mut employees, &HashMap::new());
+        let working = boss_employee(Some(200));
+
+        let mut created_later = boss_employee(Some(900));
+        created_later.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 950);
+        let mut completed_later = boss_employee(Some(100));
+        completed_later.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 950);
+        let mut tie_first = boss_employee(Some(1));
+        tie_first.session_id = Uuid::from_u128(1);
+        tie_first.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 950);
+        let mut tie_second = boss_employee(Some(2));
+        tie_second.session_id = Uuid::from_u128(2);
+        tie_second.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 950);
+        let mut legacy_reply = boss_employee(Some(50));
+        legacy_reply.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 950);
+        let mut no_completion = boss_employee(Some(70));
+        no_completion.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 950);
+
+        let session_for = |id, created_at, last_reply_at, completion| {
+            let mut session = waku_protocol::model::AgentSession::new(
+                Uuid::new_v4(),
+                waku_protocol::model::ProviderKind::Codex,
+            );
+            session.id = id;
+            session.created_at = created_at;
+            session.last_reply_at = last_reply_at;
+            if let Some(completion) = completion {
+                session.begin_turn("fixture");
+                let turn = session.turns.last_mut().unwrap();
+                turn.status = waku_protocol::model::TurnStatus::Completed;
+                turn.completed_at = Some(completion);
+            }
+            session
+        };
+        let sessions = vec![
+            session_for(created_later.session_id, 900, Some(100), Some(100)),
+            session_for(completed_later.session_id, 100, Some(900), Some(900)),
+            session_for(tie_first.session_id, 1, Some(500), Some(500)),
+            session_for(tie_second.session_id, 2, Some(500), Some(500)),
+            session_for(legacy_reply.session_id, 50, Some(800), None),
+            session_for(no_completion.session_id, 70, None, None),
+        ];
+        let sessions_by_id = sessions
+            .iter()
+            .map(|session| (session.id, session))
+            .collect::<HashMap<_, _>>();
+        // Completed turns outrank creation and last_reply_at; legacy sessions
+        // use last_reply_at, then the old summon/session-creation fallback.
+        let mut employees = vec![
+            &created_later,
+            &no_completion,
+            &working,
+            &tie_second,
+            &legacy_reply,
+            &queued,
+            &tie_first,
+            &completed_later,
+        ];
+        sort_boss_employees(&mut employees, &sessions_by_id);
         assert_eq!(
             employees
                 .iter()
                 .map(|employee| employee.session_id)
                 .collect::<Vec<_>>(),
-            vec![queued.session_id, finished.session_id, oldest.session_id]
+            vec![
+                queued.session_id,
+                working.session_id,
+                completed_later.session_id,
+                legacy_reply.session_id,
+                tie_first.session_id,
+                tie_second.session_id,
+                created_later.session_id,
+                no_completion.session_id,
+            ]
         );
     }
 
     #[test]
-    fn employees_without_a_summon_stamp_fall_back_to_session_creation() {
-        let legacy = boss_employee(None);
-        let stamped = boss_employee(Some(200));
-        let unknown = boss_employee(None);
-        let session_created_at = HashMap::from([(legacy.session_id, 300)]);
-        let mut employees = vec![&stamped, &legacy, &unknown];
-        sort_boss_employees(&mut employees, &session_created_at);
+    fn idle_employees_without_completion_keep_legacy_creation_fallback() {
+        let mut legacy = boss_employee(None);
+        legacy.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 400);
+        let mut stamped = boss_employee(Some(200));
+        stamped.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 400);
+        let mut unknown = boss_employee(None);
+        unknown.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 400);
+        let mut session = waku_protocol::model::AgentSession::new(
+            Uuid::new_v4(),
+            waku_protocol::model::ProviderKind::Codex,
+        );
+        session.id = legacy.session_id;
+        session.created_at = 300;
+        let sessions = HashMap::from([(session.id, &session)]);
+        let mut employees = vec![&unknown, &stamped, &legacy];
+
+        sort_boss_employees(&mut employees, &sessions);
         assert_eq!(
             employees
                 .iter()
                 .map(|employee| employee.session_id)
                 .collect::<Vec<_>>(),
             vec![legacy.session_id, stamped.session_id, unknown.session_id]
+        );
+    }
+
+    #[test]
+    fn resumed_employees_rejoin_active_order_then_return_to_completion_order() {
+        fn sorted_ids(
+            finished: &waku_protocol::boss::BossEmployee,
+            peer: &waku_protocol::boss::BossEmployee,
+            session: &waku_protocol::model::AgentSession,
+            peer_session: &waku_protocol::model::AgentSession,
+        ) -> Vec<Uuid> {
+            let sessions = HashMap::from([(session.id, session), (peer_session.id, peer_session)]);
+            let mut employees = vec![finished, peer];
+            sort_boss_employees(&mut employees, &sessions);
+            employees
+                .iter()
+                .map(|employee| employee.session_id)
+                .collect()
+        }
+
+        let mut finished = boss_employee(Some(100));
+        finished.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 200);
+        let mut peer = boss_employee(Some(200));
+        peer.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 300);
+        let mut session = waku_protocol::model::AgentSession::new(
+            Uuid::new_v4(),
+            waku_protocol::model::ProviderKind::Codex,
+        );
+        session.id = finished.session_id;
+        session.begin_turn("first turn");
+        session.turns.last_mut().unwrap().status = waku_protocol::model::TurnStatus::Completed;
+        session.turns.last_mut().unwrap().completed_at = Some(900);
+        let mut peer_session = waku_protocol::model::AgentSession::new(
+            Uuid::new_v4(),
+            waku_protocol::model::ProviderKind::Codex,
+        );
+        peer_session.id = peer.session_id;
+        peer_session.begin_turn("peer turn");
+        peer_session.turns.last_mut().unwrap().status = waku_protocol::model::TurnStatus::Completed;
+        peer_session.turns.last_mut().unwrap().completed_at = Some(300);
+
+        assert_eq!(
+            sorted_ids(&finished, &peer, &session, &peer_session),
+            vec![finished.session_id, peer.session_id]
+        );
+
+        // Resume makes the employee active; finishing a newer turn moves it
+        // back to the idle head using the new turn's completion timestamp.
+        finished.expired = false;
+        finished.state = waku_protocol::boss::EmployeeLifecycle::Working;
+        assert_eq!(
+            sorted_ids(&finished, &peer, &session, &peer_session),
+            vec![finished.session_id, peer.session_id]
+        );
+        finished.set_lifecycle(waku_protocol::boss::EmployeeLifecycle::Expired, 1_000);
+        session.begin_turn("resumed turn");
+        session.turns.last_mut().unwrap().completed_at = Some(1_100);
+        assert_eq!(
+            sorted_ids(&finished, &peer, &session, &peer_session),
+            vec![finished.session_id, peer.session_id]
         );
     }
 
