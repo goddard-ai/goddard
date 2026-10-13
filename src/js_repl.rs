@@ -637,11 +637,13 @@ fn create_kernel(
     let interrupt_cancelled = cancelled.clone();
     let mut next_cancel_check = Instant::now();
     runtime.set_interrupt_handler(Some(Box::new(move || {
+        // Stale cancellation belongs to the previous call, not bootstrap or
+        // reset. execute() clears it before activating the next deadline.
+        let Some(deadline) = *interrupt_deadline.lock() else {
+            return false;
+        };
         let now = Instant::now();
-        if interrupt_deadline
-            .lock()
-            .is_some_and(|deadline| now >= deadline)
-        {
+        if now >= deadline {
             interrupt_timed_out.store(true, Ordering::Release);
             return true;
         }
@@ -1769,6 +1771,8 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("waku-repl-cancel-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&directory).unwrap();
+        let marker = directory.join(KERNEL_CANCEL_FILE);
+        fs::write(&marker, b"").unwrap();
         let mut repl = JavaScriptRepl::with_bridge(NativeComputerUseClient {
             connection: None,
             config: Some(SessionConfig {
@@ -1780,7 +1784,10 @@ mod tests {
             grants_revision: None,
         })
         .unwrap();
-        let marker = directory.join(KERNEL_CANCEL_FILE);
+        assert_eq!(
+            call(&mut repl, "jsRepl.write(2);")["content"][0]["text"],
+            "2"
+        );
         let spawn_marker = |delay: Duration| {
             let marker = marker.clone();
             thread::spawn(move || {
@@ -1811,6 +1818,13 @@ mod tests {
             "JavaScript execution cancelled"
         );
 
+        // Reset also initializes a kernel while the cancelled call's marker
+        // still exists. It must remain usable afterward.
+        repl.reset().unwrap();
+        assert_eq!(
+            call(&mut repl, "jsRepl.write(3);")["content"][0]["text"],
+            "3"
+        );
         drop(repl);
         fs::remove_dir_all(directory).unwrap();
     }

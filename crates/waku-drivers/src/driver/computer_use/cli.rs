@@ -1,6 +1,6 @@
 //! Task-owned private REPL transport. Providers see only the scoped CLI.
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, bail};
 use base64::Engine as _;
-use crossbeam_channel::{Receiver, bounded};
+use crossbeam_channel::{Receiver, RecvTimeoutError, bounded};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -34,6 +34,7 @@ pub fn for_task(task: Uuid) -> anyhow::Result<Arc<Service>> {
 struct Connection {
     input: ChildStdin,
     output: Receiver<anyhow::Result<Value>>,
+    stderr_path: PathBuf,
 }
 
 pub struct Service {
@@ -89,15 +90,57 @@ impl Service {
             // different kernel inside this task-owned private subprocess.
             .env_remove("GODDARD_COMPUTER_USE_SESSIONS_DIRECTORY");
         let mut command = crate::command_env::guard_command(command.into_inner());
+        let stderr_path = self
+            .config
+            .process_directory
+            .join(format!("kernel-{}.stderr.log", Uuid::new_v4().simple()));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut stderr_log = options
+            .open(&stderr_path)
+            .context("could not create private kernel diagnostics")?;
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         let mut child = crate::command_env::spawn(&mut command)
             .context("could not start the computer-use kernel")?;
         let input = child.stdin.take().context("kernel stdin unavailable")?;
         let output = child.stdout.take().context("kernel stdout unavailable")?;
+        let mut stderr = child.stderr.take().context("kernel stderr unavailable")?;
         *child_slot = Some(child);
+        if let Err(error) = std::thread::Builder::new()
+            .name("goddard-computer-use-stderr".into())
+            .spawn(move || {
+                // Drain continuously so diagnostics cannot block the kernel.
+                // Keep at most 64 KiB; never copy private helper output into
+                // CLI errors or transcript activities.
+                let mut remaining = 64 * 1024;
+                let mut buffer = [0; 4096];
+                while let Ok(count) = stderr.read(&mut buffer) {
+                    if count == 0 {
+                        break;
+                    }
+                    let keep = count.min(remaining);
+                    if stderr_log.write_all(&buffer[..keep]).is_err() {
+                        remaining = 0;
+                    } else {
+                        remaining -= keep;
+                    }
+                }
+            })
+        {
+            if let Some(mut child) = child_slot.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            return Err(error.into());
+        }
         let (sender, receiver) = bounded(1);
         if let Err(error) = std::thread::Builder::new()
             .name("goddard-computer-use-reader".into())
@@ -133,6 +176,7 @@ impl Service {
         Ok(Connection {
             input,
             output: receiver,
+            stderr_path,
         })
     }
 
@@ -223,7 +267,15 @@ impl Service {
             let response = transport
                 .output
                 .recv_timeout(Duration::from_millis(timeout_ms + 10_000))
-                .context("computer-use kernel stopped or timed out; kernel state was lost")??;
+                .map_err(|error| match error {
+                    RecvTimeoutError::Timeout => anyhow::anyhow!(
+                        "computer-use kernel response timed out after {} ms; kernel state was lost",
+                        timeout_ms + 10_000
+                    ),
+                    RecvTimeoutError::Disconnected => anyhow::anyhow!(
+                        "computer-use kernel output disconnected before a response; kernel state was lost"
+                    ),
+                })??;
             if response["id"] != id {
                 bail!("unexpected computer-use response id");
             }
@@ -240,6 +292,12 @@ impl Service {
             Err(error) => {
                 // Never replay an action after a lost response: it may have
                 // already changed the user's app. The next call gets a fresh kernel.
+                let stderr_path = transport.stderr_path.clone();
+                let status = self
+                    .child
+                    .lock()
+                    .as_mut()
+                    .and_then(|child| child.try_wait().ok().flatten());
                 super::stop_registered_processes(
                     &self.config.process_directory,
                     &self.config.server_path,
@@ -249,7 +307,14 @@ impl Service {
                     let _ = child.kill();
                     let _ = child.wait();
                 }
-                return Err(error);
+                let status = status.map_or_else(
+                    || "kernel exit status unavailable".to_owned(),
+                    |status| format!("kernel {status}"),
+                );
+                return Err(error.context(format!(
+                    "{status}; private kernel stderr: {}",
+                    stderr_path.display()
+                )));
             }
         };
         if self.closed.load(Ordering::Acquire) {
@@ -483,6 +548,58 @@ mod tests {
             "disconnect\n"
         );
         assert_eq!(fixture.call("text")["content"][0]["text"], "1");
+    }
+
+    #[test]
+    fn cli_service_distinguishes_disconnect_from_timeout_and_keeps_private_diagnostics() {
+        let fixture = Fixture::new(None);
+        let error = fixture
+            .service
+            .call(Some("crash"), Some(100), None)
+            .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("output disconnected before a response"),
+            "{message}"
+        );
+        assert!(!message.contains("timed out"));
+        assert!(!message.contains("synthetic startup failure"));
+        let log = std::fs::read_dir(&fixture.root)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.to_string_lossy().ends_with(".stderr.log"))
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::fs::metadata(&log).unwrap().len() < 64 * 1024 {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let diagnostics = std::fs::read(&log).unwrap();
+        assert_eq!(diagnostics.len(), 64 * 1024);
+        assert!(diagnostics.starts_with(b"synthetic startup failure\n"));
+        assert_eq!(
+            std::fs::metadata(&log).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join("executions")).unwrap(),
+            "crash\n"
+        );
+        assert_eq!(fixture.call("text")["content"][0]["text"], "1");
+
+        // The real kernel clears this marker on entry; the transport-only
+        // fixture deliberately leaves cancellation handling to its caller.
+        std::fs::remove_file(fixture.root.join("cancel-kernel")).unwrap();
+        let error = fixture
+            .service
+            .call(Some("block"), Some(1), None)
+            .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("response timed out after 10001 ms"),
+            "{message}"
+        );
+        assert!(!message.contains("output disconnected"));
     }
 
     #[test]

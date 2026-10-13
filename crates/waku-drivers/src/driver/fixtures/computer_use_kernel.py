@@ -17,6 +17,10 @@ for line in sys.stdin:
         log.write(code + "\n")
     if code == "disconnect":
         sys.exit(0)
+    if code == "crash":
+        sys.stderr.write("synthetic startup failure\n" + "x" * (128 * 1024))
+        sys.stderr.flush()
+        sys.exit(23)
     if code == "block":
         (root / "started").touch()
         while not (root / "cancel-kernel").exists():
