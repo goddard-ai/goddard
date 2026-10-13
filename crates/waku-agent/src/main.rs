@@ -367,7 +367,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent read TASK_ID --turn 3".to_owned(),
         ),
         "boss summon" => (
-            json!({"--persona":{"type":"exact visible persona name or UUID — an employee role layered on the canonical Employee base (a shipped specialist or custom persona); omit for the base alone","optional":true},"--title":{"required":true,"type":"job title"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--icon":{"enum":employee_icons,"optional":true},"--workspace":{"enum":["local","worktree","adopt"],"default":"local"},"--base-branch":{"requiredWhen":"workspace=worktree"},"--adopt-worktree":{"requiredWhen":"workspace=adopt; worktree address"},"--work-goal":{"enum":["errand","goal"],"default":"errand"},"--assignment-kind":{"enum":["implementation","research"],"optional":true,"notes":"Research is read-only; explicit implementation defaults purpose to Building, explicit research to Helping"},"--purpose":{"enum":["building","helping"],"requiredUnless":"--assignment-kind","notes":"Lasting changes are Building; research, reviews, checks, monitoring and chores are Helping. Explicit purpose overrides the assignment kind default without changing access"},"--plan":{"type":"plan id, planning-session id, or plans/<file>.md; otherwise inherit the outcome attached plan","optional":true},"--item":{"type":"work item UUID inside the explicit or outcome attached plan","optional":true},"--project":{"type":"absolute path","default":"current project; required if none is assigned"},"--provider":{"enum":providers,"optional":"inherits current provider"},"--model":"optional; inherits current model","--effort":"optional; inherits current reasoning effort","--request-id":"optional UUID idempotency key","--needs-attention":{"type":"boolean flag","notes":"flag the employee for user attention: its sidebar entry stays unread once finished and is never swept by roster retirement"},"--boss-authority":{"type":"boolean flag","notes":"grant Boss-level operation authority for this admission — boss or human callers only; fixed at summon, ends with the assignment, cannot be passed on"}}),
+            json!({"--persona":{"type":"exact visible persona name or UUID — an employee role layered on the canonical Employee base (a shipped specialist or custom persona); omit for the base alone","optional":true},"--title":{"required":true,"type":"job title"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--icon":{"enum":employee_icons,"optional":true},"--workspace":{"enum":["local","worktree","adopt"],"default":"local"},"--base-branch":{"requiredWhen":"workspace=worktree"},"--adopt-worktree":{"requiredWhen":"workspace=adopt; worktree address"},"--work-goal":{"enum":["errand","goal"],"default":"errand"},"--assignment-kind":{"enum":["implementation","research"],"optional":true,"notes":"Research is read-only; explicit implementation defaults purpose to Building, explicit research to Helping"},"--purpose":{"enum":["building","helping"],"requiredUnless":"a selected persona default or --assignment-kind","notes":"Lasting changes are Building; research, reviews, checks, monitoring and chores are Helping. Explicit purpose overrides the persona default, then assignment kind fallback without changing access"},"--plan":{"type":"plan id, planning-session id, or plans/<file>.md; otherwise inherit the outcome attached plan","optional":true},"--item":{"type":"work item UUID inside the explicit or outcome attached plan","optional":true},"--project":{"type":"absolute path","default":"current project; required if none is assigned"},"--provider":{"enum":providers,"optional":"inherits current provider"},"--model":"optional; inherits current model","--effort":"optional; inherits current reasoning effort","--request-id":"optional UUID idempotency key","--needs-attention":{"type":"boolean flag","notes":"flag the employee for user attention: its sidebar entry stays unread once finished and is never swept by roster retirement"},"--boss-authority":{"type":"boolean flag","notes":"grant Boss-level operation authority for this admission — boss or human callers only; fixed at summon, ends with the assignment, cannot be passed on"}}),
             json!({"json":{"type":"summoned","sessionId":"employee UUID","state":"queued|dispatching|working","admission":{"provider":"resolved provider","model":"resolved model","reasoningEffort":"resolved effort or null","queuePosition":"optional queue position","blockedBy":"admission blockers"}}}),
             "goddard-agent boss summon --persona Researcher --title 'Review diff' --file brief.md"
                 .to_owned(),
@@ -498,7 +498,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss persona delete PERSONA_ID".to_owned(),
         ),
         "boss persona upsert" => (
-            json!({"forms":"Use either --name with --text|--file or one --json|--json-file configuration; do not combine forms","--new|--id":{"required":"exactly one; --new creates with a daemon-assigned UUID"},"--name":{"requiredUnless":"--json|--json-file"},"--text|--file":{"requiredUnless":"--json|--json-file","exactlyOne":true,"type":"persona Markdown"},"--json|--json-file":{"requiredUnless":"--name and --text|--file","exactlyOne":true,"object":{"name":{"required":true,"type":"string"},"markdown":{"required":true,"type":"string"},"pinnedFiles":{"type":"string[]","default":[]},"permissions":{"default":"empty grants","fields":{"bucketIds":"string[] of existing Boss-created buckets","integrationIds":"string[]","summonEmployees":"boolean","computerUse":"boolean"}},"icon":{"enum":employee_icons,"nullable":true,"optional":"omitted preserves on update; null clears"}}}}),
+            json!({"forms":"Use either --name with --text|--file or one --json|--json-file configuration; do not combine forms","--new|--id":{"required":"exactly one; --new creates with a daemon-assigned UUID"},"--name":{"requiredUnless":"--json|--json-file"},"--text|--file":{"requiredUnless":"--json|--json-file","exactlyOne":true,"type":"persona Markdown"},"--json|--json-file":{"requiredUnless":"--name and --text|--file","exactlyOne":true,"object":{"name":{"required":true,"type":"string"},"markdown":{"required":true,"type":"string"},"pinnedFiles":{"type":"string[]","default":[]},"permissions":{"default":"empty grants","fields":{"bucketIds":"string[] of existing Boss-created buckets","integrationIds":"string[]","summonEmployees":"boolean","computerUse":"boolean"}},"defaultPurpose":{"enum":["building","helping"],"nullable":true,"optional":"omitted preserves on update; null clears"},"icon":{"enum":employee_icons,"nullable":true,"optional":"omitted preserves on update; null clears"}}}}),
             json!({"json":{"type":"state","state":"updated BossState including the persona record"},"notes":"editing a canonical default keeps the text beneath the latest shipped base — submissions without the base prefix save whole as the appended customization"}),
             "goddard-agent boss persona upsert --new --name Reviewer --file persona.md".to_owned(),
         ),
@@ -1049,6 +1049,8 @@ struct CommandRemovePayload {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct PersonaUpsertInput {
+    #[serde(default, deserialize_with = "deserialize_optional_purpose")]
+    default_purpose: Option<Option<waku_protocol::boss::EmployeePurpose>>,
     name: String,
     markdown: String,
     #[serde(default)]
@@ -1057,6 +1059,15 @@ struct PersonaUpsertInput {
     permissions: waku_protocol::boss::PersonaPermissions,
     #[serde(default, deserialize_with = "deserialize_optional_icon")]
     icon: Option<Option<CustomCommandIcon>>,
+}
+
+fn deserialize_optional_purpose<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<waku_protocol::boss::EmployeePurpose>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<waku_protocol::boss::EmployeePurpose>::deserialize(deserializer).map(Some)
 }
 
 fn deserialize_optional_icon<'de, D>(
@@ -1699,6 +1710,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
                 let input: PersonaUpsertInput = serde_json::from_str(&json_input(&opts)?)
                     .context("invalid persona configuration")?;
                 waku_protocol::boss::BossPersonaUpsert {
+                    default_purpose: input.default_purpose,
                     id: persona_id,
                     name: input.name,
                     markdown: input.markdown,
@@ -1711,6 +1723,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
                     .get("name")
                     .ok_or_else(|| anyhow!("persona upsert requires --name"))?;
                 waku_protocol::boss::BossPersonaUpsert {
+                    default_purpose: None,
                     id: persona_id,
                     name: name.clone(),
                     markdown: raw_input(&opts)?,
@@ -2468,9 +2481,9 @@ fn boss_summon(args: Vec<String>) -> anyhow::Result<()> {
     } else {
         json!([])
     };
-    if !opts.contains_key("purpose") && !opts.contains_key("assignment-kind") {
+    if !opts.contains_key("purpose") && !opts.contains_key("assignment-kind") && persona.is_none() {
         bail!(
-            "summon requires --purpose building|helping or explicit --assignment-kind implementation|research"
+            "summon requires --purpose building|helping or a persona default or explicit --assignment-kind implementation|research"
         );
     }
     let operation: BossOperation = serde_json::from_value(json!({

@@ -8,7 +8,7 @@ import type { ResourceSet } from "./ResourceSet";
 
 export type ChainStepDefinition = {
 /**
- * Explicit assignment purpose; absent only on legacy step definitions.
+ * Explicit purpose overrides the selected persona default, snapshotted at intake.
  */
 purpose?: EmployeePurpose, title: string, prompt: string, projectId: string, personaId: string | null, provider: ProviderKind,
 /**

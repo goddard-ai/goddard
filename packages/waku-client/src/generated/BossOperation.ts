@@ -158,8 +158,8 @@ prerequisites?: Array<string>,
  */
 plan?: string, assignmentKind?: PlanAssignmentKind,
 /**
- * Explicit purpose overrides assignmentKind's purpose default without
- * changing access. New admission requires one of these explicit inputs;
+ * Explicit purpose overrides the selected persona default, then assignmentKind,
+ * without changing access. Admission rejects unresolved purpose;
  * legacy payloads still decode and legacy request retries remain valid.
  */
 purpose?: EmployeePurpose,

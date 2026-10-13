@@ -6924,6 +6924,14 @@ boss.persona_search:
   en: Search personas
 boss.persona_buckets:
   en: Granted memory bucket IDs
+boss.purpose_building:
+  en: Building
+boss.purpose_helping:
+  en: Helping
+boss.persona_default_purpose_label:
+  en: Default purpose
+boss.persona_default_purpose:
+  en: Default purpose for new assignments (explicit purpose overrides this)
 boss.persona_icon_hint:
   en: Persona icon (employees inherit this unless overridden)
 boss.persona_scope_hint:

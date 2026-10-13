@@ -68,6 +68,7 @@ function bossPayload(result: BossResult): ResponsePayload {
 const IDENTITY = { id: "boss-1", name: "Boss", avatarSeed: "seed", avatarStyle: "diceBear" as const };
 
 const PERSONA_DEFAULTS: PersonaDefaultsState = {
+  purposesSeeded: true,
   boss: { seenRevision: 0 },
   employee: { seenRevision: 0 },
   researcher: { seenRevision: 0 },

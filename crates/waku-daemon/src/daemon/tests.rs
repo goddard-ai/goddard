@@ -9053,6 +9053,80 @@ fn employee_purpose_admission_defaults_and_control_preserve_lifecycle() {
         assert_eq!(serde_json::to_value(after).unwrap(), expected_record);
         assert!(!backend.sessions.lock().contains_key(&session_id));
     }
+    let persona_id = backend.boss.document().specialist_persona_ids
+        [&waku_protocol::boss::PersonaDefaultRole::Researcher];
+    for (kind, explicit, expected) in [
+        (None, None, EmployeePurpose::Helping),
+        (
+            Some(PlanAssignmentKind::Implementation),
+            None,
+            EmployeePurpose::Building,
+        ),
+        (
+            None,
+            Some(EmployeePurpose::Helping),
+            EmployeePurpose::Helping,
+        ),
+    ] {
+        let mut operation = summon_op(
+            &backend,
+            &root,
+            "persona default",
+            ProviderKind::Codex,
+            Some("gpt-5.5"),
+        );
+        if let BossOperation::Summon {
+            persona_id: persona,
+            assignment_kind,
+            purpose,
+            request_id,
+            ..
+        } = &mut operation
+        {
+            *persona = Some(persona_id);
+            *assignment_kind = kind;
+            *purpose = explicit;
+            *request_id = Some(Uuid::new_v4());
+        }
+        let BossResult::Summoned { session_id, .. } = backend
+            .handle_boss_operation(Some(boss), operation.clone(), &events)
+            .unwrap()
+        else {
+            panic!("expected summon")
+        };
+        let employee = backend.boss.employee(session_id).unwrap();
+        assert_eq!(employee.purpose, Some(expected));
+        let mut persona = backend
+            .boss
+            .document()
+            .personas
+            .into_iter()
+            .find(|entry| entry.id == persona_id)
+            .unwrap();
+        persona.default_purpose = Some(EmployeePurpose::Building);
+        backend
+            .boss
+            .handle(
+                Some(boss),
+                BossOperation::UpsertPersona {
+                    persona: persona.into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(backend.boss.employee(session_id).unwrap()).unwrap(),
+            serde_json::to_value(employee).unwrap()
+        );
+        let BossResult::Summoned {
+            session_id: retry, ..
+        } = backend
+            .handle_boss_operation(Some(boss), operation, &events)
+            .unwrap()
+        else {
+            panic!("expected retry")
+        };
+        assert_eq!(retry, session_id);
+    }
     let mut old_request = summon_op(
         &backend,
         &root,
@@ -9144,7 +9218,7 @@ fn employee_purpose_admission_defaults_and_control_preserve_lifecycle() {
             .to_string()
             .contains("summon requires purpose")
     );
-    assert_eq!(backend.boss.document().employees.len(), 5);
+    assert_eq!(backend.boss.document().employees.len(), 8);
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }

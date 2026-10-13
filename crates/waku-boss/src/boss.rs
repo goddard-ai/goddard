@@ -4494,6 +4494,7 @@ impl BossService {
                         .find(|entry| entry.id == id)
                         .and_then(|entry| entry.icon);
                     let mut record = BossPersona {
+                        default_purpose: persona.default_purpose.unwrap_or_else(|| state.personas.iter().find(|entry| entry.id == id).and_then(|entry| entry.default_purpose)),
                         id,
                         name,
                         markdown: persona.markdown,
@@ -6994,6 +6995,7 @@ fn persona_matches_seed(persona: &BossPersona, role: PersonaDefaultRole) -> bool
         && persona.markdown == seed.markdown
         && persona.pinned_files.is_empty()
         && persona.icon == seed.icon
+        && persona.default_purpose == seed.default_purpose
         && persona.permissions.bucket_ids.is_empty()
         && persona.permissions.integration_ids.is_empty()
         && !persona.permissions.summon_employees
@@ -7076,6 +7078,7 @@ fn reconcile_persona_defaults(state: &mut BossState) {
         .filter(|id| !state.personas.iter().any(|persona| persona.id == *id))
     {
         state.personas.push(BossPersona {
+            default_purpose: None,
             id,
             name: "Employee".into(),
             markdown: shipped_persona_default(PersonaDefaultRole::Employee)
@@ -7115,6 +7118,7 @@ fn reconcile_persona_defaults(state: &mut BossState) {
                 // always have a target.
                 let id = Uuid::new_v4();
                 state.personas.push(BossPersona {
+                    default_purpose: None,
                     id,
                     name: "Employee".into(),
                     markdown: shipped_persona_default(PersonaDefaultRole::Employee)
@@ -7202,6 +7206,20 @@ fn reconcile_persona_defaults(state: &mut BossState) {
                 }
             }
         }
+    }
+    if !state.persona_defaults.purposes_seeded {
+        for role in PersonaDefaultRole::SPECIALISTS {
+            if let Some(persona) = state
+                .specialist_persona_ids
+                .get(role)
+                .and_then(|id| state.personas.iter_mut().find(|persona| persona.id == *id))
+            {
+                if persona.default_purpose.is_none() {
+                    persona.default_purpose = role.default_purpose();
+                }
+            }
+        }
+        state.persona_defaults.purposes_seeded = true;
     }
     // Only untouched, unreferenced seed copies are disposable. Referenced
     // copies keep their identities so even retired assignments remain valid.
@@ -7399,6 +7417,7 @@ fn persona_default_notice_text(notice: &PersonaDefaultNotice) -> String {
 /// implies permission.
 fn seeded_persona(id: Uuid, role: PersonaDefaultRole) -> BossPersona {
     BossPersona {
+        default_purpose: role.default_purpose(),
         id,
         name: role.label().into(),
         markdown: shipped_persona_default(role).markdown.to_owned(),
@@ -7421,6 +7440,7 @@ fn fresh_state() -> BossState {
     let mut personas = vec![
         seeded_persona(employee_id, PersonaDefaultRole::Employee),
         BossPersona {
+            default_purpose: None,
             id: persona_id,
             name: "Boss".into(),
             markdown: shipped_persona_default(PersonaDefaultRole::Boss)
@@ -10036,6 +10056,115 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn persona_purpose_migration_and_edits_preserve_assignment_intent() {
+        use waku_protocol::boss::EmployeePurpose;
+        let root = std::env::temp_dir().join(format!("persona-purpose-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let mut legacy = serde_json::to_value(service.document()).unwrap();
+        legacy["personaDefaults"]
+            .as_object_mut()
+            .unwrap()
+            .remove("purposesSeeded");
+        for persona in legacy["personas"].as_array_mut().unwrap() {
+            persona.as_object_mut().unwrap().remove("defaultPurpose");
+        }
+        let mut migrated: BossState = serde_json::from_value(legacy).unwrap();
+        reconcile_persona_defaults(&mut migrated);
+        assert!(migrated.persona_defaults.purposes_seeded);
+        for role in PersonaDefaultRole::SPECIALISTS {
+            let id = migrated.specialist_persona_ids[role];
+            assert_eq!(
+                migrated.employee_purpose(None, Some(id), None),
+                role.default_purpose()
+            );
+            assert_eq!(
+                migrated.employee_purpose(Some(EmployeePurpose::Helping), Some(id), None),
+                Some(EmployeePurpose::Helping)
+            );
+        }
+        assert_eq!(
+            migrated.employee_purpose(None, Some(migrated.persona_id), None),
+            None
+        );
+        assert_eq!(migrated.employee_purpose(None, None, None), None);
+        let developer = migrated.specialist_persona_ids[&PersonaDefaultRole::FeatureDeveloper];
+        assert_eq!(
+            migrated.employee_purpose(
+                None,
+                Some(developer),
+                Some(waku_protocol::boss::PlanAssignmentKind::Research)
+            ),
+            Some(EmployeePurpose::Building)
+        );
+        assert_eq!(
+            migrated.employee_purpose(
+                None,
+                migrated.employee_persona_id,
+                Some(waku_protocol::boss::PlanAssignmentKind::Research)
+            ),
+            Some(EmployeePurpose::Helping)
+        );
+        assert_eq!(
+            migrated.employee_purpose(
+                None,
+                None,
+                Some(waku_protocol::boss::PlanAssignmentKind::Research)
+            ),
+            Some(EmployeePurpose::Helping)
+        );
+        let id = migrated.specialist_persona_ids[&PersonaDefaultRole::FeatureDeveloper];
+        migrated
+            .personas
+            .iter_mut()
+            .find(|persona| persona.id == id)
+            .unwrap()
+            .default_purpose = None;
+        reconcile_persona_defaults(&mut migrated);
+        assert_eq!(migrated.employee_purpose(None, Some(id), None), None);
+
+        let mut persona = serde_json::json!({"id": Uuid::nil(), "name":"Custom builder", "markdown":"Build", "permissions":{}, "defaultPurpose":"building"});
+        let upsert = |value| BossOperation::UpsertPersona {
+            persona: serde_json::from_value(value).unwrap(),
+        };
+        service.handle(None, upsert(persona.clone())).unwrap();
+        let custom = service
+            .document()
+            .personas
+            .into_iter()
+            .find(|entry| entry.name == "Custom builder")
+            .unwrap();
+        persona["id"] = serde_json::json!(custom.id);
+        persona.as_object_mut().unwrap().remove("defaultPurpose");
+        service.handle(None, upsert(persona.clone())).unwrap();
+        assert_eq!(
+            service
+                .document()
+                .employee_purpose(None, Some(custom.id), None),
+            Some(EmployeePurpose::Building)
+        );
+        drop(service);
+        let service = BossService::open(root.clone()).unwrap();
+        assert_eq!(
+            service
+                .document()
+                .employee_purpose(None, Some(custom.id), None),
+            Some(EmployeePurpose::Building)
+        );
+        persona["defaultPurpose"] = serde_json::Value::Null;
+        service.handle(None, upsert(persona)).unwrap();
+        drop(service);
+        let service = BossService::open(root.clone()).unwrap();
+        assert_eq!(
+            service
+                .document()
+                .employee_purpose(None, Some(custom.id), None),
+            None
+        );
+        drop(service);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -13891,6 +14020,7 @@ mod memory_op_tests {
         service
             .update(|state| {
                 state.personas.push(BossPersona {
+                    default_purpose: None,
                     id: Uuid::new_v4(),
                     name: "Researcher".into(),
                     markdown: "User's own researcher policy.".into(),
@@ -14102,6 +14232,7 @@ mod memory_op_tests {
             .to_owned();
         let custom = {
             let persona = BossPersona {
+                default_purpose: None,
                 id: Uuid::new_v4(),
                 // Deliberately collides with the base's display name —
                 // identity, not the name, decides composition.
@@ -14415,6 +14546,7 @@ mod memory_op_tests {
                 state.personas[0].name = "Helper".into();
                 state.personas[0].markdown = "Custom helper policy.".into();
                 state.personas.push(BossPersona {
+                    default_purpose: None,
                     id: identifiable,
                     name: "Employee".into(),
                     markdown: untouched.to_owned(),
@@ -14453,6 +14585,7 @@ mod memory_op_tests {
                 state.personas[0].name = "Helper".into();
                 state.personas[0].markdown = "Custom helper policy.".into();
                 state.personas.push(BossPersona {
+                    default_purpose: None,
                     id: second,
                     name: "Employee".into(),
                     markdown: "Reviewer scope only.".into(),
@@ -14879,6 +15012,7 @@ mod memory_op_tests {
             )
             .unwrap();
         let updated = BossPersonaUpsert {
+            default_purpose: None,
             id: employee,
             name: "Renamed Role".into(),
             markdown: "Edited after reset.".into(),

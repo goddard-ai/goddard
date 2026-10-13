@@ -44,7 +44,7 @@ Bindings with direct-command counterparts:
   readFile(path), writeFile(path, content), listFiles([path]), createFolder(path)
   publishDeliverable(path[, name]), dismissDeliverable(id)
   speak(parts | "utterance"), browse(url[, title]), terminal(title,cwd[,command])
-  upsertPersona(#{name,markdown,id?,pinnedFiles?,permissions?,icon?})
+  upsertPersona(#{name,markdown,id?,pinnedFiles?,permissions?,icon?,defaultPurpose?})
   setEmployeeIcon(sessionId, icon | ()), rename(name), renameEmployee(sessionId,name), regenerateAvatar([sessionId])
   memory(#{type:TYPE,bucket,...}) — listBuckets/createBucket/overview/record/submitSummary/scan/zoomBucket; content operations name the bucket.
   automation(#{type:TYPE,...}) — list/create/update/delete/pause/resume

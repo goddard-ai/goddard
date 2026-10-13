@@ -354,8 +354,10 @@ impl BossService {
                         return Ok(());
                     }
                     ensure!(
-                        definition.steps.iter().all(|step| step.purpose.is_some()),
-                        "new chain steps require explicit purpose (building or helping)"
+                        definition.steps.iter().all(|step| state
+                            .employee_purpose(step.purpose, step.persona_id, None)
+                            .is_some()),
+                        "new chain steps require explicit purpose (building or helping) or a persona default"
                     );
                     validate_definition(state, &definition)?;
                     for step in &definition.steps {
@@ -365,11 +367,16 @@ impl BossService {
                         .steps
                         .iter()
                         .cloned()
-                        .map(|definition| ChainStep {
-                            definition,
-                            status: StepStatus::NotStarted,
-                            attempts: Vec::new(),
-                            approvals: Vec::new(),
+                        .map(|mut definition| {
+                            definition.purpose = state.employee_purpose(
+                                definition.purpose, definition.persona_id, None,
+                            );
+                            ChainStep {
+                                definition,
+                                status: StepStatus::NotStarted,
+                                attempts: Vec::new(),
+                                approvals: Vec::new(),
+                            }
                         })
                         .collect::<Vec<_>>();
                     steps[0].status = StepStatus::Waiting;
@@ -560,9 +567,11 @@ impl BossService {
                     step,
                     definition,
                 } => {
+                    let mut definition = definition;
+                    definition.purpose = state.employee_purpose(definition.purpose, definition.persona_id, None);
                     ensure!(
                         definition.purpose.is_some(),
-                        "revised chain steps require explicit purpose (building or helping)"
+                        "revised chain steps require explicit purpose (building or helping) or a persona default"
                     );
                     self.validate_bucket_ids(&definition.permissions.bucket_ids)?;
                     let predecessor = state
@@ -1369,6 +1378,67 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("require explicit purpose"));
         assert!(fixture.service.document().chains.is_empty());
+        fixture.definition.steps[0].purpose = Some(EmployeePurpose::Helping);
+        let chain = fixture.create();
+        assert_eq!(
+            chain.steps[0].definition.purpose,
+            Some(EmployeePurpose::Helping)
+        );
+    }
+
+    #[test]
+    fn persona_purpose_chain_snapshots_default_and_preserves_override() {
+        use waku_protocol::boss::{EmployeePurpose, PersonaDefaultRole};
+        let mut fixture = Fixture::new();
+        let state = fixture.service.document();
+        let id = state.specialist_persona_ids[&PersonaDefaultRole::FeatureDeveloper];
+        fixture.definition.steps[0].persona_id = Some(id);
+        fixture.definition.steps[0].purpose = None;
+        let chain = fixture.create();
+        assert_eq!(
+            chain.steps[0].definition.purpose,
+            Some(EmployeePurpose::Building)
+        );
+        let mut persona = state
+            .personas
+            .into_iter()
+            .find(|entry| entry.id == id)
+            .unwrap();
+        persona.default_purpose = Some(EmployeePurpose::Helping);
+        fixture
+            .service
+            .handle(
+                None,
+                BossOperation::UpsertPersona {
+                    persona: persona.into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            fixture.read(chain.id).steps[0].definition.purpose,
+            Some(EmployeePurpose::Building)
+        );
+        let paused = fixture.control(chain.id, ChainControl::Pause).unwrap();
+        let mut definition = fixture.definition.steps[1].clone();
+        definition.persona_id = Some(id);
+        definition.purpose = None;
+        let revised = fixture
+            .service
+            .chain_operation(
+                None,
+                ChainOperation::Revise {
+                    chain_id: chain.id,
+                    expected_revision: paused.revision,
+                    expected_definition_version: chain.definition_version,
+                    step: 1,
+                    definition,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            revised.steps[1].definition.purpose,
+            Some(EmployeePurpose::Helping)
+        );
         fixture.definition.steps[0].purpose = Some(EmployeePurpose::Helping);
         let chain = fixture.create();
         assert_eq!(

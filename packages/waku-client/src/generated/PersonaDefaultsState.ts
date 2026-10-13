@@ -5,4 +5,8 @@ import type { PersonaDefaultState } from "./PersonaDefaultState";
  * Every canonical default's revision provenance — the base roles plus
  * one entry per shipped specialist.
  */
-export type PersonaDefaultsState = { boss: PersonaDefaultState, employee: PersonaDefaultState, researcher: PersonaDefaultState, featureDeveloper: PersonaDefaultState, bugInvestigator: PersonaDefaultState, verifier: PersonaDefaultState, };
+export type PersonaDefaultsState = {
+/**
+ * One-time migration preserves later explicit clears of specialist defaults.
+ */
+purposesSeeded: boolean, boss: PersonaDefaultState, employee: PersonaDefaultState, researcher: PersonaDefaultState, featureDeveloper: PersonaDefaultState, bugInvestigator: PersonaDefaultState, verifier: PersonaDefaultState, };

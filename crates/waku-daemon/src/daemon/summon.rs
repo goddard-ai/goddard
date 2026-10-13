@@ -1347,6 +1347,11 @@ impl WakuBackend {
             _ => None,
         };
         let explicit_purpose = purpose;
+        let resolved_purpose =
+            self.boss
+                .document()
+                .employee_purpose(purpose, persona_id, assignment_kind);
+        // Fingerprint caller intent, independent of editable persona defaults.
         let purpose = purpose.or_else(|| {
             assignment_kind.map(waku_protocol::boss::EmployeePurpose::from_assignment_kind)
         });
@@ -1388,8 +1393,8 @@ impl WakuBackend {
             }
             bail!("requestId was already used for a different summon");
         }
-        let purpose = purpose.ok_or_else(|| anyhow!(
-            "summon requires purpose (building or helping) or explicit assignmentKind (implementation or research)"
+        let purpose = resolved_purpose.ok_or_else(|| anyhow!(
+            "summon requires purpose (building or helping) or a persona default or explicit assignmentKind (implementation or research)"
         ))?;
         // The plan tag resolves at admission — unknown or closed plans and
         // unknown or finished items fail here rather than landing untagged.

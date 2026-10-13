@@ -1386,6 +1386,8 @@ struct BossEditor {
     permissions: PersonaPermissions,
     icon: Option<CustomCommandIcon>,
     original_icon: Option<CustomCommandIcon>,
+    default_purpose: Option<waku_protocol::boss::EmployeePurpose>,
+    original_default_purpose: Option<waku_protocol::boss::EmployeePurpose>,
     original: Vec<String>,
     original_permissions: PersonaPermissions,
     integrations: Vec<String>,
@@ -4467,6 +4469,7 @@ impl Waku {
         .map(|input| input.read(cx).content().to_owned())
         .collect::<Vec<_>>();
         values != editor.original
+            || editor.default_purpose != editor.original_default_purpose
             || editor.icon != editor.original_icon
             || serde_json::to_value(&editor.permissions).ok()
                 != serde_json::to_value(&editor.original_permissions).ok()
@@ -4560,6 +4563,8 @@ impl Waku {
             original_permissions: permissions.clone(),
             icon,
             original_icon: icon,
+            default_purpose: persona.as_ref().and_then(|entry| entry.default_purpose),
+            original_default_purpose: persona.as_ref().and_then(|entry| entry.default_purpose),
             integrations: self
                 .daemons
                 .supervisor(key)
@@ -4591,6 +4596,7 @@ impl Waku {
             key,
             BossOperation::UpsertPersona {
                 persona: BossPersonaUpsert {
+                    default_purpose: Some(editor.default_purpose),
                     id: editor.persona,
                     name,
                     markdown: content,
@@ -8739,7 +8745,7 @@ impl Waku {
                 tr!("boss.detail_no")
             }
         };
-        let rows: Vec<(String, AnyElement)> = vec![
+        let mut rows: Vec<(String, AnyElement)> = vec![
             (
                 tr!("boss.detail_buckets"),
                 boss_plain_value(&theme, bucket_line),
@@ -8761,6 +8767,23 @@ impl Waku {
                 boss_plain_value(&theme, yes_no(permissions.computer_use)),
             ),
         ];
+        if persona.id != state.persona_id {
+            rows.push((
+                tr!("boss.persona_default_purpose_label"),
+                boss_plain_value(
+                    &theme,
+                    match persona.default_purpose {
+                        Some(waku_protocol::boss::EmployeePurpose::Building) => {
+                            tr!("boss.purpose_building")
+                        }
+                        Some(waku_protocol::boss::EmployeePurpose::Helping) => {
+                            tr!("boss.purpose_helping")
+                        }
+                        None => tr!("boss.detail_none"),
+                    },
+                ),
+            ));
+        }
         let count = rows.len();
         let mut info = div().mt(px(14.0)).flex().flex_col();
         for (index, (label, value)) in rows.into_iter().enumerate() {
@@ -10481,6 +10504,51 @@ impl Waku {
             .child(boss_input(editor.buckets.clone(), &theme))
             .child(tr!("boss.pinned_files"))
             .child(boss_input(editor.pinned.clone(), &theme))
+            .when(
+                self.boss_ui
+                    .states
+                    .get(&editor.key)
+                    .is_some_and(|state| state.persona_id != editor.persona),
+                |form| {
+                    form.child(tr!("boss.persona_default_purpose")).child(
+                        div().flex().gap(px(4.0)).children(
+                            [
+                                (None, tr!("boss.detail_none")),
+                                (
+                                    Some(waku_protocol::boss::EmployeePurpose::Building),
+                                    tr!("boss.purpose_building"),
+                                ),
+                                (
+                                    Some(waku_protocol::boss::EmployeePurpose::Helping),
+                                    tr!("boss.purpose_helping"),
+                                ),
+                            ]
+                            .into_iter()
+                            .map(|(choice, label)| {
+                                boss_button(
+                                    format!("persona-purpose-{label}"),
+                                    label.clone(),
+                                    &theme,
+                                )
+                                .child(if editor.default_purpose == choice {
+                                    format!("✓ {label}")
+                                } else {
+                                    label
+                                })
+                                .on_activation(
+                                    cx,
+                                    move |this, _, cx| {
+                                        if let Some(editor) = &mut this.boss_ui.editor {
+                                            editor.default_purpose = choice;
+                                        }
+                                        cx.notify();
+                                    },
+                                )
+                            }),
+                        ),
+                    )
+                },
+            )
             .child(tr!("boss.persona_icon_hint"))
             .child(
                 div().flex().flex_wrap().gap(px(4.0)).children(

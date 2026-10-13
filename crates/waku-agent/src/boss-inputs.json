@@ -2470,6 +2470,16 @@
     "BossPersonaUpsert": {
       "type": "object",
       "properties": {
+        "defaultPurpose": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EmployeePurpose"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "id": {
           "type": "string",
           "format": "uuid"

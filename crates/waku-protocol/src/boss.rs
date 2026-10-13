@@ -108,6 +108,9 @@ impl PermissionOverrides {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossPersona {
+    /// Default purpose for new assignments; existing employees keep their purpose.
+    #[serde(default)]
+    pub default_purpose: Option<EmployeePurpose>,
     pub id: Uuid,
     pub name: String,
     pub markdown: String,
@@ -122,13 +125,20 @@ pub struct BossPersona {
 }
 
 /// The upsert payload for a persona — identical to [`BossPersona`] except
-/// `icon` is tri-state: an absent field preserves the stored default,
-/// `null` clears it, and an identifier replaces it. A summon copies the
-/// resolved icon onto the employee record, so later edits here never
-/// reach existing employees.
+/// `icon` and `defaultPurpose` are tri-state: an absent field preserves the
+/// stored default, `null` clears it, and a value replaces it. Admission
+/// copies resolved defaults onto the employee; later edits do not reach it.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossPersonaUpsert {
+    /// Absent preserves, null clears, and a value replaces the default.
+    #[serde(
+        default,
+        deserialize_with = "double_option::deserialize",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(optional)]
+    pub default_purpose: Option<Option<EmployeePurpose>>,
     /// Nil assigns a fresh id on write.
     pub id: Uuid,
     pub name: String,
@@ -166,10 +176,10 @@ mod double_option {
 }
 
 impl From<BossPersona> for BossPersonaUpsert {
-    /// Round-trips a fetched record — `Some` makes the icon field
-    /// always-replace, writing back exactly what the record held.
+    /// Round-trips a fetched record, replacing defaults with exactly its values.
     fn from(persona: BossPersona) -> Self {
         Self {
+            default_purpose: Some(persona.default_purpose),
             id: persona.id,
             name: persona.name,
             markdown: persona.markdown,
@@ -245,9 +255,16 @@ impl PersonaDefaultRole {
         }
     }
 
-    /// The icon a freshly seeded record carries. Base roles seed without
-    /// one — the Boss row is drawn separately and the Employee base keeps
-    /// the generic persona glyph.
+    /// Specialist purpose for new assignments; base roles require caller intent.
+    pub fn default_purpose(self) -> Option<EmployeePurpose> {
+        match self {
+            Self::FeatureDeveloper | Self::BugInvestigator => Some(EmployeePurpose::Building),
+            Self::Researcher | Self::Verifier => Some(EmployeePurpose::Helping),
+            Self::Boss | Self::Employee => None,
+        }
+    }
+
+    /// The icon a freshly seeded record carries. Base roles seed without one.
     pub fn default_icon(self) -> Option<crate::custom_commands::CustomCommandIcon> {
         use crate::custom_commands::CustomCommandIcon;
         match self {
@@ -604,6 +621,8 @@ pub struct PersonaDefaultNotice {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PersonaDefaultsState {
+    /// One-time migration preserves later explicit clears of specialist defaults.
+    pub purposes_seeded: bool,
     pub boss: PersonaDefaultState,
     pub employee: PersonaDefaultState,
     pub researcher: PersonaDefaultState,
@@ -2098,6 +2117,23 @@ pub struct PlanGroup<'a> {
 }
 
 impl BossState {
+    /// Admission snapshots this value; persona edits do not reclassify assignments.
+    pub fn employee_purpose(
+        &self,
+        explicit: Option<EmployeePurpose>,
+        persona_id: Option<Uuid>,
+        kind: Option<PlanAssignmentKind>,
+    ) -> Option<EmployeePurpose> {
+        explicit
+            .or_else(|| {
+                persona_id
+                    .filter(|id| *id != self.persona_id)
+                    .and_then(|id| self.personas.iter().find(|persona| persona.id == id))
+                    .and_then(|persona| persona.default_purpose)
+            })
+            .or_else(|| kind.map(EmployeePurpose::from_assignment_kind))
+    }
+
     /// The canonical persona record a default role names — the one that
     /// carries shipped-default provenance and review, regardless of its
     /// saved name.
@@ -3007,8 +3043,8 @@ pub enum BossOperation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         assignment_kind: Option<PlanAssignmentKind>,
-        /// Explicit purpose overrides assignmentKind's purpose default without
-        /// changing access. New admission requires one of these explicit inputs;
+        /// Explicit purpose overrides the selected persona default, then assignmentKind,
+        /// without changing access. Admission rejects unresolved purpose;
         /// legacy payloads still decode and legacy request retries remain valid.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]

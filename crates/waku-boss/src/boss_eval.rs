@@ -74,13 +74,14 @@ exist only during this script invocation; use named memory buckets for durable s
                                             Set purpose: \"building\" for lasting
                                             changes or \"helping\" for research,
                                             reviews, checks, monitoring and chores.
-                                            When purpose is omitted, an explicit
+                                            When purpose is omitted, the selected persona
+                                            default wins; otherwise explicit
                                             assignmentKind defaults implementation
                                             to Building and research to Helping.
                                             Explicit Helping may use implementation
                                             access for chores. New summons must supply
-                                            purpose or explicit assignmentKind. Legacy
-                                            records stay under Employees until
+                                            purpose, a persona default, or explicit assignmentKind.
+                                            Legacy records remain unclassified until
                                             setPurpose classifies them; never infer from titles,
                                             workGoal, finisher status or access defaults.
   control(sessionId, \"stop\")               shorthand for a bare action
@@ -127,9 +128,10 @@ exist only during this script invocation; use named memory buckets for durable s
   speak(parts | \"whole utterance\")         client connections reached
   browse(url[, title])                     open an http(s) page in the boss chat panel
   terminal(title, cwd[, command])           pinned standalone terminal request
-  upsertPersona(#{name,markdown,...})       id/pinnedFiles/permissions default;
+  upsertPersona(#{name,markdown,defaultPurpose?,...})       id/pinnedFiles/permissions default;
                                             icon takes an employee icon — omit
-                                            keeps, () clears
+                                            keeps, () clears. defaultPurpose accepts
+                                            building/helping; omit keeps, () clears
   setEmployeeIcon(sessionId, icon | ())
   rename(name)                              the boss's name
   renameEmployee(sessionId, name)
