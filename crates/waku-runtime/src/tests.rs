@@ -1339,6 +1339,235 @@ fn reconfigure_requires_forward_revisions() {
     ));
 }
 
+// -- resolved-metadata retention --------------------------------------------
+
+#[test]
+fn expired_command_tombstones_stay_bounded_and_keep_rejecting() {
+    // Resolved identities are never evicted to make room — past the bound
+    // the host refuses NEW commands while recorded truth still answers.
+    let root = TestRoot::new();
+    let budgets = Budgets {
+        retry_window_ms: 1_000,
+        tombstone_limit: 4,
+        ..Default::default()
+    };
+    let mut rig = open(&root, budgets);
+    let grant = rig.control();
+    let (session, _) = rig.admit(&grant);
+
+    // Submits to a missing session reject at once — six resolved commands
+    // plus the admission itself are tombstone material.
+    let mut tombstoned = Vec::new();
+    for _ in 0..6 {
+        let cmd = Uuid::new_v4();
+        let receipt = rig
+            .host
+            .execute(
+                &rig.creds().0,
+                rig.session_env(
+                    &grant,
+                    cmd,
+                    Uuid::new_v4(),
+                    submit(Uuid::new_v4(), Uuid::new_v4(), "x"),
+                ),
+            )
+            .unwrap();
+        assert!(matches!(
+            disposition(&receipt),
+            CommandDisposition::Rejected { .. }
+        ));
+        tombstoned.push(cmd);
+    }
+    // An accepted command is unresolved evidence — it never tombstones.
+    let turn = Uuid::new_v4();
+    let live_env = rig.session_env(
+        &grant,
+        Uuid::new_v4(),
+        session,
+        submit(turn, Uuid::new_v4(), "live"),
+    );
+    let receipt = rig
+        .host
+        .execute(&rig.creds().0, live_env.clone())
+        .unwrap();
+    assert_eq!(*disposition(&receipt), CommandDisposition::ProviderAccepted);
+
+    // Past the window the resolved commands tombstone; past the bound the
+    // next new command refuses.
+    rig.clock.advance(60_000);
+    let grant2 = rig.control();
+    let err = rig
+        .host
+        .execute(
+            &rig.creds().0,
+            rig.env(&grant2, Uuid::new_v4(), admit(Uuid::new_v4())),
+        )
+        .unwrap_err();
+    assert!(matches!(err, HostError::Capacity(_)));
+    assert!(rig.host.status(&rig.creds().0).unwrap().expired_command_ids >= 6);
+
+    // Tombstoned identities still reject — even under a fresh window.
+    let err = rig
+        .host
+        .execute(
+            &rig.creds().0,
+            rig.env(&grant2, tombstoned[0], admit(Uuid::new_v4())),
+        )
+        .unwrap_err();
+    assert_eq!(err, HostError::ExpiredWindow(tombstoned[0]));
+    assert!(matches!(
+        rig.host.command(&rig.creds().0, tombstoned[0]).unwrap().disposition,
+        CommandDisposition::Rejected {
+            code: RejectCode::Stale,
+            ..
+        }
+    ));
+    // Recorded truth still dedups — the bound never rewrites history and
+    // never lets an old identity become new work.
+    let receipt = rig.host.execute(&rig.creds().0, live_env).unwrap();
+    assert_eq!(*disposition(&receipt), CommandDisposition::ProviderAccepted);
+}
+
+#[test]
+fn expired_identity_rejection_survives_compaction_and_reload() {
+    let root = TestRoot::new();
+    let budgets = Budgets {
+        retry_window_ms: 1_000,
+        aggregate_journal_bytes: 16 * 1024,
+        control_reserve_bytes: 512,
+        compact_at_fraction: 0.4,
+        ..Default::default()
+    };
+    let mut rig = open(&root, budgets);
+    let grant = rig.control();
+    let (session, _) = rig.admit(&grant);
+    let fake = rig.factory.for_session(session).unwrap();
+
+    // Four commands terminally attributed to their turns.
+    let mut tombstoned = Vec::new();
+    for _ in 0..4 {
+        let turn = Uuid::new_v4();
+        let cmd = Uuid::new_v4();
+        rig.host
+            .execute(
+                &rig.creds().0,
+                rig.session_env(&grant, cmd, session, submit(turn, Uuid::new_v4(), "x")),
+            )
+            .unwrap();
+        fake_emit_completed(&mut rig, session, turn);
+        tombstoned.push(cmd);
+    }
+    for _ in 0..30 {
+        fake.emit_delta(Uuid::new_v4(), &"d".repeat(64));
+    }
+    rig.host.pump();
+    rig.clock.advance(60_000);
+    let grant2 = rig.control();
+    let high = rig.events(&grant2, session, 0).high_water;
+    // Acknowledgement reclaims the stream and drives the tombstone sweep
+    // plus compaction — retained payloads stay reconstructible.
+    rig.host
+        .acknowledge(&rig.creds().0, grant2.epoch, rig.cursor(session, high))
+        .unwrap();
+    assert!(rig.host.status(&rig.creds().0).unwrap().expired_command_ids >= 5);
+    assert!(
+        rig.host.status(&rig.creds().0).unwrap().journal_bytes < 16 * 1024,
+        "compaction did not bound the journal"
+    );
+
+    drop(rig.host);
+    let mut rig2 = open(&root, Budgets::default());
+    let grant3 = rig2.control();
+    rig2.host.reconcile(&rig2.creds().0, grant3.epoch).unwrap();
+    // Under a new instance, epoch and window the resolved identity still
+    // rejects — compaction and reload changed nothing.
+    let err = rig2
+        .host
+        .execute(
+            &rig2.creds().0,
+            rig2.session_env(
+                &grant3,
+                tombstoned[0],
+                session,
+                submit(Uuid::new_v4(), Uuid::new_v4(), "x"),
+            ),
+        )
+        .unwrap_err();
+    assert_eq!(err, HostError::ExpiredWindow(tombstoned[0]));
+}
+
+#[test]
+fn sustained_acknowledged_traffic_keeps_metadata_bounded() {
+    // The acceptance shape: rounds of acknowledged stream traffic plus
+    // resolving commands under small budgets. Events reclaim, commands
+    // tombstone, compaction rewrites — no metadata grows without bound.
+    let root = TestRoot::new();
+    let budgets = Budgets {
+        retry_window_ms: 1_000,
+        tombstone_limit: 128,
+        aggregate_journal_bytes: 32 * 1024,
+        control_reserve_bytes: 512,
+        compact_at_fraction: 0.5,
+        ..Default::default()
+    };
+    let mut rig = open(&root, budgets);
+    let mut grant = rig.control();
+    let (session, _) = rig.admit(&grant);
+    let fake = rig.factory.for_session(session).unwrap();
+
+    let mut applied = 0u64;
+    for _ in 0..30 {
+        grant = rig.control();
+        let turn = Uuid::new_v4();
+        rig.host
+            .execute(
+                &rig.creds().0,
+                rig.session_env(
+                    &grant,
+                    Uuid::new_v4(),
+                    session,
+                    submit(turn, Uuid::new_v4(), "go"),
+                ),
+            )
+            .unwrap();
+        for _ in 0..8 {
+            fake.emit_delta(turn, &"x".repeat(128));
+        }
+        fake.emit_completed(turn);
+        rig.host.pump();
+        applied = rig.events(&grant, session, applied).high_water;
+        rig.host
+            .acknowledge(&rig.creds().0, grant.epoch, rig.cursor(session, applied))
+            .unwrap();
+        rig.clock.advance(2_000);
+    }
+
+    let status = rig.host.status(&rig.creds().0).unwrap();
+    // Every acknowledged payload is reclaimed and compaction holds the
+    // journal inside its aggregate bound through sustained traffic.
+    assert_eq!(status.retained_event_bytes, 0);
+    assert!(
+        status.journal_bytes < 32 * 1024,
+        "journal grew past its bound: {}",
+        status.journal_bytes
+    );
+    // Resolved identities accumulated into bounded tombstones — under the
+    // cap, so the host still accepts work.
+    assert!(status.expired_command_ids >= 28);
+    let grant = rig.control();
+    rig.host
+        .execute(
+            &rig.creds().0,
+            rig.session_env(
+                &grant,
+                Uuid::new_v4(),
+                session,
+                submit(Uuid::new_v4(), Uuid::new_v4(), "still working"),
+            ),
+        )
+        .unwrap();
+}
+
 #[test]
 fn agent_ingress_env_pins_the_cli_on_path_and_carries_pairs() {
     let ingress = AgentIngress {

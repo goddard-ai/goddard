@@ -43,12 +43,16 @@ struct Rig {
 }
 
 fn open(root: &TestRoot) -> Rig {
+    open_with(root, Budgets::default())
+}
+
+fn open_with(root: &TestRoot, budgets: Budgets) -> Rig {
     let factory = FakeFactory::new();
     let clock = ManualClock::new(1_000_000);
     let fault = Arc::new(AtomicBool::new(false));
     let options = HostOptions {
         namespace: NS.into(),
-        budgets: Budgets::default(),
+        budgets,
         journal_fault: Some(fault.clone()),
     };
     let host = RuntimeHost::open(
@@ -513,4 +517,179 @@ fn pending_ingress_cannot_outlive_original_grant_on_reattach() {
     // A later wall-clock rollback cannot renew the original grant.
     rig.clock.set(1_000_000);
     assert_eq!(rig.host.check_grant(&grant), Err(HostError::Unauthorized));
+}
+
+// -- resolved-metadata retention ----------------------------------------------
+
+#[test]
+fn terminal_ingress_records_reclaim_past_their_horizon() {
+    let root = TestRoot::new();
+    let budgets = Budgets {
+        retry_window_ms: 1_000,
+        ..Default::default()
+    };
+    let mut rig = open_with(&root, budgets);
+    let control = rig.control();
+    let session = rig.admit(&control);
+    // The grant outlives every horizon in this test.
+    let grant = rig.grant_for(&control, session, 5_000_000);
+
+    // One resolved request, one that expires undispatched, and one that
+    // becomes uncertain — only the uncertain record is unreclaimable.
+    let completed = rig.request(2_000_000);
+    rig.host.ingress_submit(&grant, completed.clone()).unwrap();
+    assert_eq!(
+        rig.host
+            .ingress_drain(&rig.creds().0, control.epoch)
+            .unwrap()
+            .len(),
+        1
+    );
+    rig.host
+        .ingress_resolve(
+            &rig.creds().0,
+            control.epoch,
+            completed.request_id,
+            ForwardedOutcome::Completed {
+                result: json!({ "ok": true }),
+            },
+        )
+        .unwrap();
+    let forwarded = rig.request(1_200_000);
+    rig.host.ingress_submit(&grant, forwarded.clone()).unwrap();
+    assert_eq!(
+        rig.host
+            .ingress_drain(&rig.creds().0, control.epoch)
+            .unwrap()
+            .len(),
+        1
+    );
+    let undispatched = rig.request(1_200_000);
+    rig.host.ingress_submit(&grant, undispatched.clone()).unwrap();
+    assert_eq!(rig.host.status(&rig.creds().0).unwrap().ingress_records, 3);
+
+    // Past its deadline but inside the query horizon the never-dispatched
+    // request reports its recorded `Expired` truth.
+    rig.clock.set(1_200_500);
+    rig.host.pump();
+    assert_eq!(
+        rig.host
+            .ingress_query(&grant, undispatched.request_id)
+            .unwrap()
+            .disposition,
+        IngressDisposition::Expired
+    );
+
+    // Past each record's deadline + retry horizon the terminal truth is
+    // reclaimed; the uncertain record stays for reconciliation.
+    rig.clock.set(2_002_000);
+    rig.host.pump();
+    assert_eq!(rig.host.status(&rig.creds().0).unwrap().ingress_records, 1);
+    assert!(matches!(
+        rig.host
+            .ingress_query(&grant, forwarded.request_id)
+            .unwrap()
+            .disposition,
+        IngressDisposition::Uncertain { .. }
+    ));
+    assert_eq!(
+        rig.host.ingress_query(&grant, completed.request_id),
+        Err(HostError::Unauthorized)
+    );
+
+    // A re-submitted identity can only re-record as already-Expired — its
+    // original deadline travels with it, so it never re-dispatches.
+    let again = rig.host.ingress_submit(&grant, completed.clone()).unwrap();
+    assert_eq!(again.disposition, IngressDisposition::Expired);
+    assert!(!again.forwarded);
+    assert!(
+        rig.host
+            .ingress_drain(&rig.creds().0, control.epoch)
+            .unwrap()
+            .is_empty()
+    );
+
+    // Crash-recovery reload: folded records are swept by the same policy —
+    // uncertain evidence survives, reclaimed records stay gone.
+    drop(rig.host);
+    let mut rig = open_with(
+        &root,
+        Budgets {
+            retry_window_ms: 1_000,
+            ..Default::default()
+        },
+    );
+    rig.clock.set(2_002_000);
+    let control = rig.control();
+    rig.host.reconcile(&rig.creds().0, control.epoch).unwrap();
+    rig.host.pump();
+    assert!(matches!(
+        rig.host
+            .ingress_query(&grant, forwarded.request_id)
+            .unwrap()
+            .disposition,
+        IngressDisposition::Uncertain { .. }
+    ));
+    assert_eq!(
+        rig.host.ingress_query(&grant, completed.request_id),
+        Err(HostError::Unauthorized)
+    );
+}
+
+#[test]
+fn ingress_record_limit_refuses_new_and_preserves_evidence() {
+    let root = TestRoot::new();
+    let budgets = Budgets {
+        retry_window_ms: 1_000,
+        ingress_record_limit: 3,
+        ..Default::default()
+    };
+    let mut rig = open_with(&root, budgets);
+    let control = rig.control();
+    let session = rig.admit(&control);
+    let grant = rig.grant_for(&control, session, 5_000_000);
+
+    // One request the daemon will leave uncertain, then two more pending —
+    // the generation's retention bound is full.
+    let held = rig.request(2_000_000);
+    rig.host.ingress_submit(&grant, held.clone()).unwrap();
+    assert_eq!(
+        rig.host
+            .ingress_drain(&rig.creds().0, control.epoch)
+            .unwrap()
+            .len(),
+        1
+    );
+    let a = rig.request(2_000_000);
+    rig.host.ingress_submit(&grant, a.clone()).unwrap();
+    rig.host
+        .ingress_submit(&grant, rig.request(2_000_000))
+        .unwrap();
+    assert!(matches!(
+        rig.host.ingress_submit(&grant, rig.request(2_000_000)),
+        Err(HostError::Capacity(_))
+    ));
+    // Dedup still answers recorded truth under the full bound.
+    let again = rig.host.ingress_submit(&grant, a).unwrap();
+    assert_eq!(again.disposition, IngressDisposition::Pending);
+
+    // Past deadline + horizon: never-dispatched records expire then
+    // reclaim; the forwarded one is unresolved evidence and stays.
+    rig.clock.set(2_002_000);
+    rig.host.pump();
+    assert_eq!(rig.host.status(&rig.creds().0).unwrap().ingress_records, 1);
+    assert!(matches!(
+        rig.host
+            .ingress_query(&grant, held.request_id)
+            .unwrap()
+            .disposition,
+        IngressDisposition::Uncertain { .. }
+    ));
+    // With room again, new submissions are accepted — and arrive honestly
+    // expired against their original deadlines.
+    let late = rig
+        .host
+        .ingress_submit(&grant, rig.request(2_000_000))
+        .unwrap();
+    assert_eq!(late.disposition, IngressDisposition::Expired);
 }

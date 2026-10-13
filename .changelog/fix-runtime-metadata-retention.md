@@ -1,0 +1,1 @@
+- **Stable runtime:** resolved command tombstones and agent-ingress records can no longer grow without bound — the host refuses new commands and ingress submissions at explicit retention limits instead of accumulating metadata and compaction work indefinitely, while expired identities keep rejecting and unresolved requests are never reclaimed.

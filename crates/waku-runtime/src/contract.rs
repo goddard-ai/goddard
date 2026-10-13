@@ -595,6 +595,15 @@ pub struct HostStatus {
     pub journal_bytes: u64,
     /// Records accepted into emergency buffering but not yet durable.
     pub buffered_records: usize,
+    /// Expired command tombstones retained so resolved identities keep
+    /// rejecting — bounded by `Budgets::tombstone_limit`, after which new
+    /// commands refuse.
+    #[serde(default)]
+    pub expired_command_ids: usize,
+    /// Agent-ingress records retained across all generations — bounded by
+    /// `Budgets::ingress_record_limit` per generation.
+    #[serde(default)]
+    pub ingress_records: usize,
     /// Recovered owners whose physical cleanup is not yet proven.
     #[serde(default)]
     pub unfenced_survivors: Vec<SessionRef>,

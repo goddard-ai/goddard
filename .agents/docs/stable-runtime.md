@@ -88,6 +88,19 @@ product edits cannot rebuild it. Keep it that way.
 - **Attach, not resume.** `start_link` reconciles the host inventory
   before admitting; a live recorded session reattaches under the new
   epoch with its event cursor, pending requests, and claims intact.
+- **Resolved metadata is bounded, unresolved evidence is not.**
+  `Budgets::tombstone_limit` caps retained expired-command tombstones;
+  they are never evicted, so at the limit NEW commands refuse with
+  `Capacity` while recorded truth, replay, fencing and emergency stop
+  still answer. `Budgets::ingress_record_limit` caps retained
+  agent-ingress records per generation; terminal records are reclaimed
+  one retry window past their own deadline — a retry carries its
+  original deadline, so it can only re-record as `Expired`, never
+  re-dispatch — while pending, forwarded and uncertain records are
+  unresolved evidence and stay. Expired grants can never verify again
+  and are swept with the same pass. Remaining unbounded-but-tiny
+  classes: retry-window entries (one per epoch) and provider-native
+  pending-request records.
 
 ## Verified by deterministic tests (`mbx test -p waku-runtime`)
 
@@ -101,7 +114,10 @@ message drop markers; disk-failure bounded buffering + recovery; corrupt
 tail; emergency stop without a controller; incompatible-hello preserving
 sessions; singleton lock; retry-window expiry + clock-rollback floor;
 pending-request single resolution and evidence reconciliation; journal
-compaction preserving pending requests and requested config.
+compaction preserving pending requests and requested config; bounded
+expired-command tombstones that keep rejecting past the bound; terminal
+ingress reclamation that never redispatches; sustained acknowledged
+traffic staying inside small journal budgets.
 
 Daemon-side coverage (`mbx test -p waku-daemon stable_runtime`): link
 attach/reattach over IPC, applied-marker ack boundaries, replay of only
@@ -212,9 +228,9 @@ and drain, and never signals a process from a PID alone.
 Verification: `mbx test -p waku-runtime -p waku-runtime-host`. The executable tests
 use disposable roots and prove launcher exit, 25 controller transfers, stale
 instance rejection, and emergency status under saturated normal connections.
-These are harness results. Full aggregate
-metadata budgets, stable tool ingress/grants, daemon event projection and watcher
-build/run lane integration remain independent qualification gates.
+These are harness results. Stable tool ingress/grants, daemon event
+projection and watcher build/run lane integration remain independent
+qualification gates.
 
 
 The production executable now registers Codex and the landed Devin factory

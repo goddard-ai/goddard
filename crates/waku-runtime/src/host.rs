@@ -76,8 +76,23 @@ pub struct Budgets {
     /// providers that can be paused.
     pub channel_depth: usize,
     /// Command identities stay redeemable for this long after recording.
-    /// Afterwards their tombstones still reject.
+    /// Afterwards their tombstones still reject. It is also the retention
+    /// horizon for resolved ingress truth: a terminal record stays
+    /// queryable for one retry window past its own deadline.
     pub retry_window_ms: u64,
+    /// Retained tombstones for expired command identities. Tombstones are
+    /// never evicted — each keeps a resolved identity rejecting — so this
+    /// is also the host's effective command lifetime: at the limit NEW
+    /// commands refuse with `HostError::Capacity` while recorded truth,
+    /// replay, fencing and emergency control still answer.
+    pub tombstone_limit: usize,
+    /// Retained agent-ingress records per session generation. Terminal
+    /// records are reclaimed one retry horizon after their deadline — a
+    /// retry carries its original deadline, so it can only re-record as
+    /// `Expired`, never re-dispatch. Pending, forwarded and uncertain
+    /// records are unresolved evidence and are never reclaimed; at the
+    /// limit new submissions refuse with `HostError::Capacity`.
+    pub ingress_record_limit: usize,
     /// Rewrite the journal once it exceeds this fraction of the aggregate
     /// budget; retained state is re-emitted so recovery sees one truth.
     pub compact_at_fraction: f64,
@@ -99,6 +114,8 @@ impl Default for Budgets {
             max_sessions: 64,
             channel_depth: 512,
             retry_window_ms: 24 * 60 * 60 * 1000,
+            tombstone_limit: 262_144,
+            ingress_record_limit: 8_192,
             compact_at_fraction: 0.75,
             emergency_records: 4096,
         }
@@ -718,6 +735,13 @@ impl RuntimeHost {
         if self.now() > expires {
             return Err(HostError::ExpiredWindow(env.retry_window_id));
         }
+        // Tombstones are never evicted — the bound refuses new commands
+        // rather than letting an expired identity become new work.
+        if self.expired.len() >= self.budgets.tombstone_limit {
+            return Err(HostError::Capacity(
+                "expired-command tombstone budget exhausted".into(),
+            ));
+        }
 
         if self.journal.bytes() + self.budgets.control_reserve_bytes
             >= self.budgets.aggregate_journal_bytes
@@ -871,6 +895,7 @@ impl RuntimeHost {
                 .unwrap()
                 .acknowledged = cursor.applied;
             self.reclaim(cursor.session_id, cursor.generation);
+            self.sweep_expired();
             self.maybe_compact();
         }
         Ok(())
@@ -926,6 +951,13 @@ impl RuntimeHost {
                 .sum(),
             journal_bytes: self.journal.bytes(),
             buffered_records: self.pending_journal.len(),
+            expired_command_ids: self.expired.len(),
+            ingress_records: self
+                .sessions
+                .values()
+                .flat_map(|s| s.gens.iter())
+                .map(|g| g.ingress.len())
+                .sum(),
             unfenced_survivors: self
                 .unfenced_survivors
                 .iter()
@@ -1110,6 +1142,11 @@ impl RuntimeHost {
                     return Ok(existing.clone());
                 }
                 return Err(HostError::PayloadMismatch);
+            }
+            if g.ingress.len() >= self.budgets.ingress_record_limit {
+                return Err(HostError::Capacity(
+                    "ingress record budget exhausted for this generation".into(),
+                ));
             }
         }
         // A request landing on a fenced or ended generation is evidence,
@@ -2658,6 +2695,22 @@ impl RuntimeHost {
                         r.disposition = disposition.clone();
                     }
                 }
+            }
+        }
+        // Resolved-metadata retention: an expired grant can never verify
+        // again, and a terminal record one retry horizon past its deadline
+        // can only re-present as a fresh `Expired` record — its original
+        // deadline travels with the retry, so it can never re-dispatch.
+        // Pending, forwarded and uncertain records are unresolved evidence
+        // and are never reclaimed.
+        let horizon = self.budgets.retry_window_ms;
+        for session in self.sessions.values_mut() {
+            for g in &mut session.gens {
+                g.grants.retain(|_, grant| now < grant.expires_at_ms);
+                g.ingress.retain(|_, record| {
+                    !(record.disposition.is_terminal()
+                        && now > record.deadline_ms.saturating_add(horizon))
+                });
             }
         }
     }
