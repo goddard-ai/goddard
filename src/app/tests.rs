@@ -1196,13 +1196,16 @@ fn session_mentions_offer_only_the_composers_project() {
     side_chat.side_chat_of = Some(Uuid::new_v4());
     let unstarted = AgentSession::new(project, ProviderKind::Codex);
 
-    assert!(session_mention_candidate(&same, Some(project)));
-    assert!(!session_mention_candidate(&foreign, Some(project)));
-    assert!(!session_mention_candidate(&archived, Some(project)));
-    assert!(!session_mention_candidate(&side_chat, Some(project)));
-    assert!(!session_mention_candidate(&unstarted, Some(project)));
+    assert!(session_mention_candidate(&same, Some(project), false));
+    assert!(!session_mention_candidate(&foreign, Some(project), false));
+    assert!(!session_mention_candidate(&archived, Some(project), false));
+    assert!(!session_mention_candidate(&side_chat, Some(project), false));
+    assert!(!session_mention_candidate(&unstarted, Some(project), false));
+    // Employees stay out even when started, unarchived, and in scope.
+    assert!(!session_mention_candidate(&same, Some(project), true));
+    assert!(!session_mention_candidate(&same, None, true));
     // A composer with no draft slot has no project to scope to.
-    assert!(session_mention_candidate(&foreign, None));
+    assert!(session_mention_candidate(&foreign, None, false));
 }
 
 #[test]

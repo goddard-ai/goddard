@@ -71,8 +71,8 @@ pub(super) enum AutocompleteRow {
 
 /// What a session `@` row carries: the id the atom records, the title the
 /// popup matches and the mention paints, the project for disambiguation,
-/// and the row's glyph — the seeded identity an employee or the boss chat
-/// wears, or the planning marker that swaps it for the compass.
+/// and the row's glyph — the boss chat's seeded identity, or the planning
+/// marker that swaps it for the compass.
 #[derive(Clone)]
 pub(super) struct ComposerSessionRef {
     pub id: Uuid,
@@ -135,13 +135,18 @@ pub(super) fn is_boss_reference_candidate(kind: AtomRefKind) -> bool {
 }
 
 /// The `mentionable_sessions` pool minus the staged/target exclusions:
-/// started, unarchived, not a side chat, and in the composer's own project
-/// when one is known — a cross-project reference is a sidebar drag away,
-/// not worth the autocomplete noise. Shared with the fingerprint so both
-/// watch the same pool.
-pub(super) fn session_mention_candidate(session: &AgentSession, project: Option<Uuid>) -> bool {
+/// started, unarchived, not an employee or side chat, and in the composer's
+/// own project when one is known — a cross-project reference is a sidebar
+/// drag away, not worth the autocomplete noise. Shared with the fingerprint
+/// so both watch the same pool.
+pub(super) fn session_mention_candidate(
+    session: &AgentSession,
+    project: Option<Uuid>,
+    is_employee: bool,
+) -> bool {
     session.has_started()
         && session.archived_at.is_none()
+        && !is_employee
         && !session.is_side_chat()
         && project.is_none_or(|project| session.project_id == project)
 }
@@ -800,9 +805,9 @@ impl Waku {
         self.boss_key_for_project(project)
     }
 
-    /// Sessions the `@` popup can offer — started, unarchived, not side chats,
-    /// and in the composer's own project — minus the session the composer
-    /// addresses and any already staged. Recent activity first.
+    /// Sessions the `@` popup can offer — started, unarchived, not employees
+    /// or side chats, and in the composer's own project — minus the session
+    /// the composer addresses and any already staged. Recent activity first.
     fn mentionable_sessions_for(
         &self,
         surface: &composer::ComposerCard,
@@ -822,7 +827,7 @@ impl Waku {
             .sessions
             .iter()
             .filter(|session| {
-                session_mention_candidate(session, project)
+                session_mention_candidate(session, project, self.session_is_employee(session))
                     && self.surface_session_atom_allowed(surface, session.id)
             })
             .collect();
@@ -999,7 +1004,7 @@ impl Waku {
         }
         let boss = self.surface_boss_key(surface);
         for session in &self.state.sessions {
-            if session_mention_candidate(session, project) {
+            if session_mention_candidate(session, project, self.session_is_employee(session)) {
                 session.id.hash(&mut hasher);
                 session.display_title().hash(&mut hasher);
                 session.is_planning().hash(&mut hasher);
