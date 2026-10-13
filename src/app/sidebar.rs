@@ -341,6 +341,22 @@ fn sidebar_employee_idle_shown(idle_visible: usize, no_active: bool) -> usize {
     idle_visible.max(usize::from(no_active))
 }
 
+/// The boss's draft planning sessions — its own work rather than delegated
+/// tasks, nested under the boss row ahead of the employee sections. Every
+/// draft lists while the group is expanded: there is no working/idle split
+/// and no fold row. A collapsed group keeps only its header, which
+/// aggregates the hidden sessions' unread and working state.
+fn append_sidebar_planning_group(rows: &mut Vec<SidebarRow>, sessions: &[Uuid], collapsed: bool) {
+    if sessions.is_empty() {
+        return;
+    }
+    rows.push(SidebarRow::Header(SidebarGroup::Planning));
+    if !collapsed {
+        rows.extend(sessions.iter().copied().map(SidebarRow::Planning));
+    }
+    rows.push(SidebarRow::GroupSpacer);
+}
+
 /// Whether a rostered employee lists on the sidebar. Rows the user archived
 /// off the sidebar stay on the boss's roster — they still list on the brain
 /// page's employee history — so the dismissal filter lives at the listing,
@@ -4239,13 +4255,21 @@ impl Waku {
         if self.state.boss_experiment_enabled && !self.boss_ui.hosts.is_empty() {
             for key in &self.boss_ui.hosts {
                 rows.push(SidebarRow::Boss(*key));
-                // Planning sessions row directly under the boss and above
+                // Planning sessions group directly under the boss and above
                 // its employees — they are the boss's own work, not
-                // delegated tasks.
-                rows.extend(
-                    self.sidebar_planning_session_ids(*key)
-                        .into_iter()
-                        .map(SidebarRow::Planning),
+                // delegated tasks. The fold flag is shared across hosts like
+                // the employee groups', so the member lists merge too.
+                let planning_ids = self.sidebar_planning_session_ids(*key);
+                if !planning_ids.is_empty() {
+                    collapsed_members
+                        .entry(SidebarGroup::Planning)
+                        .or_insert_with(Vec::new)
+                        .extend(planning_ids.iter().copied());
+                }
+                append_sidebar_planning_group(
+                    &mut rows,
+                    &planning_ids,
+                    self.sidebar_collapsed_groups.contains(&SidebarGroup::Planning),
                 );
                 for group in [
                     SidebarGroup::Outcomes,
@@ -4415,7 +4439,7 @@ impl Waku {
         }
 
         let has_session_header = rows.iter().any(|row| {
-            matches!(row, SidebarRow::Header(group) if !matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees))
+            matches!(row, SidebarRow::Header(group) if !matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees))
         });
         if !has_session_header {
             // Keep the header actions visible while there is no history.
@@ -4696,9 +4720,9 @@ impl Waku {
                 // The header actions belong to the session history — the
                 // Terminals and Recent deliverables groups sit above it but never
                 // carry them.
-                let first = !matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees)
+                let first = !matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees)
                     && !rows[..index].iter().any(|row| {
-                        matches!(row, SidebarRow::Header(other) if !matches!(other, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees))
+                        matches!(row, SidebarRow::Header(other) if !matches!(other, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees))
                     });
                 self.render_sidebar_group_header(group, first, cx)
                     .into_any_element()
@@ -4787,22 +4811,38 @@ impl Waku {
                         })
                     }),
             };
-        // A folded employee group whose hidden members include work in
-        // flight wears the spinner those rows would carry.
+        // A folded employee or planning group whose hidden members include
+        // work in flight wears the spinner those rows would carry. Employee
+        // progress lives on the boss roster; a planning session's lives on
+        // the session itself.
         let has_working = collapsed
-            && matches!(
-                group,
-                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees
-            )
-            && self
-                .sidebar_collapsed_group_members
-                .borrow()
-                .get(&group)
-                .is_some_and(|members| {
-                    members
-                        .iter()
-                        .any(|session_id| self.boss_ui.working.contains(session_id))
-                });
+            && match group {
+                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees => self
+                    .sidebar_collapsed_group_members
+                    .borrow()
+                    .get(&group)
+                    .is_some_and(|members| {
+                        members
+                            .iter()
+                            .any(|session_id| self.boss_ui.working.contains(session_id))
+                    }),
+                SidebarGroup::Planning => self
+                    .sidebar_collapsed_group_members
+                    .borrow()
+                    .get(&group)
+                    .is_some_and(|members| {
+                        members.iter().any(|member| {
+                            self.state.sessions.iter().any(|session| {
+                                session.id == *member
+                                    && matches!(
+                                        session.status,
+                                        SessionStatus::Connecting | SessionStatus::Working
+                                    )
+                            })
+                        })
+                    }),
+                _ => false,
+            };
         let queued_count = if collapsed
             && matches!(
                 group,
@@ -5137,12 +5177,15 @@ impl Waku {
                 .font_weight(FontWeight::NORMAL)
                 .text_size(sp(14.0))
         })
-        // The boss-employee groups' headers indent to the same column their
-        // employee rows use — they read as nested under the boss block.
+        // The boss-section groups' headers indent to the same column their
+        // rows use — they read as nested under the boss block.
         .when(
             matches!(
                 group,
-                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees
+                SidebarGroup::Errands
+                    | SidebarGroup::Outcomes
+                    | SidebarGroup::Employees
+                    | SidebarGroup::Planning
             ),
             |element| element.pl(px(SIDEBAR_GROUP_CHILD_PADDING)),
         )
@@ -8592,6 +8635,44 @@ mod tests {
             SidebarGroup::from_persisted(SidebarGroup::Outcomes.persisted()),
             Some(SidebarGroup::Outcomes)
         );
+        assert_eq!(
+            SidebarGroup::from_persisted(SidebarGroup::Planning.persisted()),
+            Some(SidebarGroup::Planning)
+        );
+    }
+
+    /// The boss's planning section folds like an employee group: the
+    /// header and trailing spacer survive a collapse, every draft row
+    /// hides behind the fold, and an empty roster emits nothing.
+    #[test]
+    fn planning_group_fold_hides_sessions_and_keeps_stable_order() {
+        let sessions = [Uuid::from_u128(1), Uuid::from_u128(2)];
+
+        let mut rows = Vec::new();
+        append_sidebar_planning_group(&mut rows, &sessions, false);
+        assert_eq!(
+            rows,
+            vec![
+                SidebarRow::Header(SidebarGroup::Planning),
+                SidebarRow::Planning(sessions[0]),
+                SidebarRow::Planning(sessions[1]),
+                SidebarRow::GroupSpacer,
+            ]
+        );
+
+        rows.clear();
+        append_sidebar_planning_group(&mut rows, &sessions, true);
+        assert_eq!(
+            rows,
+            vec![
+                SidebarRow::Header(SidebarGroup::Planning),
+                SidebarRow::GroupSpacer
+            ]
+        );
+
+        rows.clear();
+        append_sidebar_planning_group(&mut rows, &[], false);
+        assert!(rows.is_empty());
     }
 
     /// The listing gate every employee group applies: a dismissed or

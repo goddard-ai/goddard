@@ -1,0 +1,1 @@
+- Draft planning sessions now list under a collapsible Planning group beneath their boss in the sidebar, and each row names the project it is planning for instead of a generic Planning label.

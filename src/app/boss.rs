@@ -5273,6 +5273,26 @@ impl Waku {
         let Some(planning) = session.planning.as_ref() else {
             return div().into_any_element();
         };
+        // The session's project carries the row's detail line, labeled the
+        // way an ordinary task row names its project: the projectless
+        // workspace reads "Chat", and a project missing from the catalog
+        // owns up to being unknown rather than bluffing a name.
+        let project = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id);
+        let (planning_project_label, planning_project_icon) =
+            if project.is_some_and(Project::is_projectless) {
+                (tr!("project.chat"), "icons/chat.svg")
+            } else {
+                (
+                    project
+                        .map(Project::display_name)
+                        .unwrap_or_else(|| tr!("sidebar.unknown_project")),
+                    "icons/folder.svg",
+                )
+            };
         let status_indicator = self.session_status_indicator(session, &theme);
         let selected = sidebar::sidebar_session_selected(
             self.state.selected_session,
@@ -5369,9 +5389,9 @@ impl Waku {
             }))
             .child(boss_sidebar_label(
                 planning.idea.clone(),
-                planning.label.render(),
+                planning_project_label,
                 None,
-                Some("icons/compass.svg"),
+                Some(planning_project_icon),
                 true,
                 &theme,
                 None,
