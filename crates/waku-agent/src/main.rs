@@ -21,6 +21,7 @@
 mod boss_contract;
 mod help;
 mod resources;
+mod transport;
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -32,15 +33,13 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
-use waku_client::DaemonClient;
 use waku_protocol::computer_use::ComputerUseRunRequest;
 use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
 use waku_protocol::model::{
     HistorySourceKind, ProjectMapIntent, ProviderKind, UserInputOption, UserInputQuestion,
 };
 use waku_protocol::{
-    AGENT_TASK_ENV, AGENT_TOKEN_ENV, AgentPromptDelivery, AgentWorkspace, Command,
-    DAEMON_ADDRESS_ENV, ResponsePayload,
+    AGENT_TASK_ENV, AgentPromptDelivery, AgentWorkspace, Command, ResponsePayload,
 };
 
 const USAGE: &str = "\
@@ -3187,12 +3186,8 @@ fn provider_kind(id: &str) -> anyhow::Result<ProviderKind> {
         })
 }
 
-fn connect() -> anyhow::Result<DaemonClient> {
-    let address = std::env::var(DAEMON_ADDRESS_ENV)
-        .context("GODDARD_DAEMON_ADDRESS is not set; this session has no agent surface")?;
-    let token = std::env::var(AGENT_TOKEN_ENV)
-        .context("GODDARD_AGENT_TOKEN is not set; this session has no agent surface")?;
-    DaemonClient::connect(&address, token).context("could not reach the Goddard daemon")
+fn connect() -> anyhow::Result<transport::AgentClient> {
+    transport::AgentClient::connect()
 }
 
 fn request_session_id() -> Uuid {

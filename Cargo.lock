@@ -11437,6 +11437,7 @@ dependencies = [
  "uuid",
  "waku-client",
  "waku-protocol",
+ "waku-runtime",
 ]
 
 [[package]]

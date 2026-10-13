@@ -221,3 +221,47 @@ adapter is preserved and requires explicit drain, never automatic replacement.
 Replay pages fit the 8-MiB frame bound without acknowledging or skipping the
 remaining suffix. See [Codex qualification](stable-runtime-codex.md) for actual
 provider evidence, recovery ownership proof and remaining daemon/tool gates.
+
+## Opt-in product CLI ingress
+
+On Unix, `goddard-agent` can use runtime ingress when the session launcher sets
+`GODDARD_RUNTIME_INGRESS` to a private descriptor file. Without that variable it
+keeps the existing daemon transport. An invalid descriptor fails closed; it does
+not fall back to a daemon token. This is a transport seam, not provider cutover.
+
+The descriptor is a version-1 JSON object with `version`, `root`, `taskId` and
+`grant` (the original runtime-issued `SessionGrant`). It must be a bounded regular
+file owned by the current user with no group/other permissions. Keep its grant
+secret; do not place the descriptor contents in logs or command arguments.
+The runtime verifies the scoped grant on every call. The CLI neither issues nor
+renews grants and has no controller credential.
+
+Before submitting a product `Command`, the CLI persists its request identity,
+task/session/generation binding, canonical subject and original deadline beside
+the descriptor, in a private `.requests` directory. File and directory sync
+precede submission. A partial/corrupt record blocks that identity. Concurrent
+writers serialize under a directory lock. Retention stops new requests at 1024
+records or 16 MiB; individual records are bounded at 1 MiB. No automatic pruning
+can erase unresolved execution evidence. Retention exhaustion requires explicit
+reconciliation before further admission through this descriptor.
+
+For a single-request CLI invocation, `GODDARD_RUNTIME_REQUEST_ID` selects a UUID
+for querying/repeating the same persisted intent after CLI replacement. Changed
+payload or owner rejects. Without it the CLI creates and persists a fresh UUID;
+errors after submission identify the UUID needed for reconciliation. Do not reuse
+one explicit UUID across a compound command's different requests. The host's
+recorded result is authoritative; uncertainty is reported and never resubmitted
+under a new identity automatically. Ordinary requests retain a 120-second bound;
+explicit long/human waits are capped at 600 seconds on this qualified transport.
+The legacy transport's wait behavior is unchanged.
+
+`mbx test -p waku-agent --test stable_ingress` runs the real CLI against a private
+socket host with a fake provider and scripted daemon service. It exercises
+detachment, 25 controller transfers, original-identity/deadline replay, caller
+death after forwarding, uncertainty, changed payload, private file/task binding,
+corrupt intents, expiry and retention refusal. This does not qualify real
+provider-launched product tools. Production descriptor/helper provisioning,
+restoring daemon product grants without renewal, surviving worker/resource leases,
+MCP/callback adaptation and actual rebuilt daemon/provider reload evidence remain
+open. App configuration consumers, pending-card reconstruction and atomic
+event/effect/cursor settlement are separate Stage 2C work.

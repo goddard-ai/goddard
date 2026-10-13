@@ -65,7 +65,8 @@ impl RuntimeClient {
         if !ipc::same_user(&stream)? {
             return Err(HostError::Unauthorized.into());
         }
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(35)))?;
+        let agent = matches!(&auth, ConnectAuth::Agent { .. });
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(if agent { 10 } else { 35 })))?;
         stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
         ipc::send(
             &mut stream,
@@ -79,6 +80,7 @@ impl RuntimeClient {
         if let WireResponse::Error { error } = response {
             return Err(ClientError::Host(error));
         }
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(35)))?;
         let identity = match &response {
             WireResponse::Hello { hello } => {
                 Some((hello.runtime_instance, hello.namespace.as_str()))
@@ -170,6 +172,17 @@ impl RuntimeClient {
         ipc::send(&mut self.stream, request)?;
         ipc::recv::<WireResponse>(&mut self.stream)?
             .ok_or_else(|| ClientError::Protocol("connection closed".into()))
+    }
+
+    /// Bound transport I/O by the caller's remaining request deadline.
+    /// Long-poll waits must fit inside this bound; zero is refused.
+    pub fn set_request_timeout(&mut self, timeout: std::time::Duration) -> Result<(), ClientError> {
+        if timeout.is_zero() {
+            return Err(ClientError::Protocol("request timeout must be positive".into()));
+        }
+        self.stream.set_read_timeout(Some(timeout))?;
+        self.stream.set_write_timeout(Some(timeout.min(std::time::Duration::from_secs(5))))?;
+        Ok(())
     }
 
     pub fn hello(&mut self, client: &ClientHello) -> Result<Hello, ClientError> {
