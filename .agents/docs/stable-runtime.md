@@ -74,7 +74,16 @@ product edits cannot rebuild it. Keep it that way.
   is reported as `Interrupted`, distinct from a clean `Terminated`.
 - **Held dispatch.** `CancelTurn` records a hold; queued submits become
   `DispatchPending` until `PermitDispatch` — the controller's explicit
-  policy release, never implicit unwind.
+  policy release, never implicit unwind. The link sends that release only
+  once every cancellation it knows of has confirmed settlement: its own
+  `cancel` enters the turn eagerly (an uncertain or unreceived answer
+  keeps the gate shut), attach inherits the host's `open_turns` as
+  possibly-settling work, and only the turn's terminal event — or a
+  `Rejected` receipt, which proves the host journaled no hold — clears
+  it. A held delivery is owed the release: the first settled point sends
+  the epoch-fenced `PermitDispatch`, whether that point is the terminal
+  event, the next prompt, or a reattach that finds held commands with no
+  open turn.
 - **Tools/approvals.** `ResolveRequest` resolves once under current
   authority and original request identity. Answer delivery
   (`RequestDisposition`) and provider consumption (`RequestAnswered`
@@ -127,7 +136,10 @@ surfacing, wholesale daemon replacement over one `app.db` reattaching to
 the surviving session, the env opt-in gate, strict per-provider launch
 payloads decoded by the real adapter structs, native delta/completion/
 request projection, effective-config writes onto the durable session
-record, and native request-resolution dialects.
+record, cancel-hold release gating (held until the cancelled turn's
+terminal event, retention on uncertain answers, release across link
+replacement for orphaned held deliveries and settled holds), and native
+request-resolution dialects.
 
 ## Product mapping and controller safety
 

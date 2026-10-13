@@ -1,0 +1,1 @@
+- **Stable runtime:** cancelling a stable-runtime turn no longer lets the next prompt race ahead of the provider — dispatch stays held until the cancelled turn's terminal event is durable, across daemon reloads; an uncertain or unanswered cancellation keeps the hold instead of guessing.

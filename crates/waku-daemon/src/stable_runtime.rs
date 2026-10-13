@@ -21,7 +21,7 @@
 //! - Uncertain, never resent: effects the daemon cannot confirm stay
 //!   `Uncertain` — no automatic resend on either side.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -169,6 +169,44 @@ impl Drop for LinkLifetime {
     }
 }
 
+/// The host's dispatch hold as this link can lawfully observe it.
+///
+/// `CancelTurn` durably records a hold: queued submits become
+/// `DispatchPending` until an explicit, epoch-fenced `PermitDispatch`.
+/// That release is lawful only after confirmed settlement — the
+/// cancelled turn's terminal event — never on a timeout, a
+/// reattachment, or an uncertain outcome.
+#[derive(Default)]
+struct DispatchGate {
+    /// Open turns inherited at attach — each may be a prior owner's
+    /// settling cancellation, so only its terminal event clears it.
+    inherited: BTreeSet<Uuid>,
+    /// Turns this link asked the host to cancel. `cancel` enters its
+    /// target eagerly — while the outcome is unseen the gate bars
+    /// `PermitDispatch`, so an uncertain result retains the hold rather
+    /// than guessing. Only the turn's terminal event or a `Rejected`
+    /// receipt (the host journaled no hold for it) removes it.
+    cancelling: BTreeSet<Uuid>,
+    /// A delivery rode to the host's held queue while the gate was
+    /// closed — the first point with nothing left settling owes it the
+    /// fenced release.
+    release_pending: bool,
+}
+
+impl DispatchGate {
+    /// The host may hold dispatch — a cancellation is still settling.
+    fn closed(&self) -> bool {
+        !self.inherited.is_empty() || !self.cancelling.is_empty()
+    }
+
+    /// The turn's terminal event is the settlement evidence for both
+    /// kinds of hold.
+    fn settle(&mut self, turn_id: &Uuid) {
+        self.inherited.remove(turn_id);
+        self.cancelling.remove(turn_id);
+    }
+}
+
 pub(crate) struct ControllerLease {
     instance: Uuid,
     grant: ControlGrant,
@@ -212,6 +250,9 @@ struct LinkShared {
     service: Arc<dyn IngressService>,
     /// The host turn the last `Submit` opened — `cancel` cancels it.
     active_turn: Mutex<Option<Uuid>>,
+    /// The dispatch-hold gate: which turns must settle before the link
+    /// may release the host's held queue.
+    gate: Mutex<DispatchGate>,
     /// The last configuration revision the link requested — reconfigure is
     /// monotone, never rolled back by a stale caller.
     config_revision: Mutex<u64>,
@@ -410,6 +451,21 @@ pub(super) fn start_link(
         sender,
         service,
         active_turn: Mutex::new(inventory.sessions.iter().find(|inv| inv.session == sref).and_then(|inv| inv.open_turns.first().copied())),
+        // An inherited open turn may be a prior owner's settling
+        // cancellation — it gates the release until its terminal event
+        // arrives. A recorded held delivery is owed that release.
+        gate: Mutex::new({
+            let inv = inventory.sessions.iter().find(|inv| inv.session == sref);
+            DispatchGate {
+                inherited: inv
+                    .map(|inv| inv.open_turns.iter().copied().collect())
+                    .unwrap_or_default(),
+                cancelling: BTreeSet::new(),
+                release_pending: inv.is_some_and(|inv| {
+                    inv.status == SessionStatus::Live && inv.held_commands > 0
+                }),
+            }
+        }),
         config_revision: Mutex::new(inventory_config_revision(&inventory, &sref)),
         input_schemas: Mutex::new(HashMap::new()),
         agent_delivery: match (options.agent.is_some(), provider) {
@@ -435,6 +491,10 @@ pub(super) fn start_link(
     controller.routes.lock().unwrap().insert(sref.session_id, Arc::downgrade(&shared));
     spawn_pump(&shared);
     spawn_service(&shared);
+    // A prior owner may have left a delivery held behind an already
+    // settled cancellation — the fenced release completes that recorded
+    // intent; nothing is replayed or admitted anew.
+    shared.release_if_settled();
     Ok((DriverHandle::from_control(Arc::new(link.clone())), link))
 }
 
@@ -1097,11 +1157,15 @@ impl LinkShared {
     /// One command against the host. `Command::Prompt`-style identities are
     /// chosen by the caller and stay stable across transport loss; failures
     /// surface as error events, never silent drops.
-    fn command(&self, command_id: Uuid, action: CanonicalAction) {
+    fn command(
+        &self,
+        command_id: Uuid,
+        action: CanonicalAction,
+    ) -> Option<waku_runtime::contract::CommandReceipt> {
         let mut client = self.client.lock().unwrap();
         match execute_safe(&mut client, &self.envelope(command_id, action)) {
             Ok(receipt) => {
-                match receipt.disposition {
+                match &receipt.disposition {
                     waku_runtime::contract::CommandDisposition::Rejected { code, detail } => {
                         let _ = self.sender.send(DriverEvent::Error(format!(
                             "runtime command rejected ({code:?}): {detail}"
@@ -1112,35 +1176,81 @@ impl LinkShared {
                     }
                     _ => {}
                 }
+                Some(receipt)
             }
             Err(error) => {
                 let _ = self.sender.send(DriverEvent::Error(format!(
                     "runtime command failed: {error}"
                 )));
+                None
             }
         }
     }
 
-    fn submit(&self, input: Value) {
-        // A new controller-owned prompt explicitly resumes dispatch after a
-        // cancellation hold. Reattachment alone must never release that hold.
+    /// The only lawful release for the host's dispatch hold: an explicit,
+    /// epoch-fenced `PermitDispatch`. A rejection or an unconfirmed answer
+    /// is reported rather than treated as permission.
+    fn permit_dispatch(&self) -> bool {
         let permission = {
             let mut client = self.client.lock().unwrap();
             execute_safe(&mut client, &self.envelope(Uuid::new_v4(), CanonicalAction::PermitDispatch))
         };
-        if !matches!(permission, Ok(ref receipt) if matches!(receipt.disposition,
+        let confirmed = matches!(permission, Ok(ref receipt) if matches!(receipt.disposition,
             waku_runtime::contract::CommandDisposition::Terminal {
                 outcome: waku_runtime::contract::TerminalOutcome::Completed, ..
-            }))
-        {
+            }));
+        if !confirmed {
             let _ = self.sender.send(DriverEvent::Error(
                 format!("runtime dispatch permission was not confirmed: {permission:?}"),
             ));
-            return;
+        }
+        confirmed
+    }
+
+    /// The first point at which nothing is left settling owes any held
+    /// delivery the fenced release — attach recovery and post-terminal
+    /// pumping share it.
+    fn release_if_settled(&self) {
+        let owed = {
+            let mut gate = self.gate.lock().unwrap();
+            !gate.closed() && std::mem::take(&mut gate.release_pending)
+        };
+        if owed {
+            self.permit_dispatch();
+        }
+    }
+
+    /// The turn's terminal event confirmed settlement — clear both hold
+    /// kinds and release the held queue if a delivery is waiting.
+    fn note_turn_settled(&self, turn_id: &Uuid) {
+        self.gate.lock().unwrap().settle(turn_id);
+        self.release_if_settled();
+    }
+
+    fn submit(&self, input: Value) {
+        // A cancellation holds dispatch until its turn provably settles;
+        // the release is an explicit, epoch-fenced PermitDispatch — never
+        // a timeout, a reattachment, or an uncertain outcome. While a
+        // cancelled turn is still settling the submit rides to the host's
+        // held queue and the settled point releases it.
+        let settling = {
+            let mut gate = self.gate.lock().unwrap();
+            if gate.closed() {
+                gate.release_pending = true;
+                true
+            } else {
+                false
+            }
+        };
+        if !settling {
+            if !self.permit_dispatch() {
+                return;
+            }
+            self.gate.lock().unwrap().release_pending = false;
         }
         let turn_id = Uuid::new_v4();
         *self.active_turn.lock().unwrap() = Some(turn_id);
-        self.command(
+        let _ = self.command(
             Uuid::new_v4(),
             CanonicalAction::Submit {
                 delivery_id: Uuid::new_v4(),
@@ -1314,6 +1424,16 @@ fn pump_loop(shared: Arc<LinkShared>) {
                             if *active == Some(*turn_id) {
                                 *active = None;
                             }
+                            drop(active);
+                            shared.note_turn_settled(turn_id);
+                        }
+                        ProviderEvent::Terminated { .. } => {
+                            // The generation is fenced — held commands
+                            // were refused and no release is lawful.
+                            let mut gate = shared.gate.lock().unwrap();
+                            gate.inherited.clear();
+                            gate.cancelling.clear();
+                            gate.release_pending = false;
                         }
                         ProviderEvent::RequestAnswered { request_id } => {
                             shared.input_schemas.lock().unwrap().remove(request_id);
@@ -1608,8 +1728,25 @@ impl DriverControl for StableLink {
     fn cancel(&self) {
         let turn = self.shared.active_turn.lock().unwrap().take();
         if let Some(turn_id) = turn {
-            self.shared
-                .command(Uuid::new_v4(), CanonicalAction::CancelTurn { turn_id });
+            // Enter the turn eagerly: while its terminal event is unseen
+            // the gate bars PermitDispatch — an uncertain outcome retains
+            // the hold rather than guessing the cancellation landed.
+            self.shared.gate.lock().unwrap().cancelling.insert(turn_id);
+            let rejected = matches!(
+                self.shared
+                    .command(Uuid::new_v4(), CanonicalAction::CancelTurn { turn_id })
+                    .map(|receipt| receipt.disposition),
+                Some(waku_runtime::contract::CommandDisposition::Rejected { .. })
+            );
+            if rejected {
+                // The host journaled no hold on this link's authority —
+                // only this link's own insert clears; a turn the prior
+                // owner was already cancelling stays inherited-settled.
+                let mut gate = self.shared.gate.lock().unwrap();
+                gate.cancelling.remove(&turn_id);
+                drop(gate);
+                self.shared.release_if_settled();
+            }
         }
     }
 
@@ -1619,7 +1756,7 @@ impl DriverControl for StableLink {
     fn begin_shutdown(&self) {}
 
     fn respond(&self, request_id: String, option_id: String) {
-        self.shared.command(
+        let _ = self.shared.command(
             Uuid::new_v4(),
             CanonicalAction::ResolveRequest {
                 request_id,
@@ -1683,7 +1820,7 @@ impl DriverControl for StableLink {
             }
             _ => serde_json::to_value(&answers).unwrap_or(Value::Null),
         };
-        self.shared.command(
+        let _ = self.shared.command(
             Uuid::new_v4(),
             CanonicalAction::ResolveRequest {
                 request_id,
@@ -1702,7 +1839,7 @@ impl DriverControl for StableLink {
             .unwrap()
             .remove(&request_id);
         if self.shared.provider == ProviderKind::Devin {
-            self.shared.command(
+            let _ = self.shared.command(
                 Uuid::new_v4(),
                 CanonicalAction::ResolveRequest {
                     request_id,
@@ -1937,6 +2074,16 @@ mod tests {
         )
         .expect("link attaches");
         (handle, link, rx)
+    }
+
+    /// Poll `condition` until it holds or the deadline expires — the
+    /// assertion form for effects that cross the pump/settle barrier.
+    fn wait_until(condition: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !condition() {
+            assert!(Instant::now() < deadline, "condition never held");
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Collect `want` projected events, ignoring cursor markers; fails the
@@ -2518,10 +2665,132 @@ mod tests {
         assert_eq!(*replacement.shared.active_turn.lock().unwrap(), Some(turn));
         successor.cancel();
         assert!(adapter.cancels().contains(&turn));
+        // A prompt submitted while the cancellation still settles rides to
+        // the host's held queue — the cancelled turn's terminal event is
+        // the only settlement evidence that releases it.
         successor.prompt("correction after cancellation".into());
-        assert_eq!(adapter.dispatched().len(), 2);
+        assert_eq!(adapter.dispatched().len(), 1);
+        adapter.emit(ProviderEvent::TurnCancelled { turn_id: turn });
+        wait_until(|| adapter.dispatched().len() == 2);
         assert!(matches!(adapter.dispatched().last(), Some(CanonicalAction::Submit { input, .. })
             if input == &Value::String("correction after cancellation".into())));
+    }
+
+    /// An uncertain cancellation answer retains the hold: only the
+    /// cancelled turn's own terminal event is lawful settlement evidence.
+    #[test]
+    fn stable_uncertain_cancel_retains_hold_until_settlement() {
+        let rig = rig(&["codex"]);
+        let (handle, link1, rx) = link(&rig, Uuid::new_v4(), None);
+        let adapter = rig.factory.for_session(link1.sref().session_id).unwrap();
+        handle.prompt("first".into());
+        let turn = link1.shared.active_turn.lock().unwrap().unwrap();
+        adapter.emit(ProviderEvent::TurnStarted {
+            turn_id: turn,
+            delivery_id: Uuid::new_v4(),
+        });
+        link1
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(link1.shared.epoch)
+            .unwrap();
+        adapter.script_cancel(waku_runtime::adapter::CancelOutcome::Unknown {
+            detail: "cancel acknowledgement lost".into(),
+        });
+        handle.cancel();
+        assert!(adapter.cancels().contains(&turn));
+        handle.prompt("held while uncertain".into());
+        assert_eq!(adapter.dispatched().len(), 1);
+        // Another turn's terminal event is not this turn's settlement —
+        // the pump consumes it without releasing the held queue.
+        adapter.emit(ProviderEvent::TurnCancelled {
+            turn_id: Uuid::new_v4(),
+        });
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(DriverEvent::TurnFinished { .. }) => break,
+                Ok(_) => continue,
+                Err(_) => assert!(Instant::now() < deadline, "no TurnFinished observed"),
+            }
+        }
+        assert_eq!(adapter.dispatched().len(), 1);
+        adapter.emit(ProviderEvent::TurnCancelled { turn_id: turn });
+        wait_until(|| adapter.dispatched().len() == 2);
+    }
+
+    /// A delivery held behind a cancellation is not stranded by its owner
+    /// detaching mid-settlement: the replacement's fenced release runs it
+    /// once the cancelled turn provably settles.
+    #[test]
+    fn stable_held_prompt_releases_after_owner_replacement() {
+        let rig = rig(&["codex"]);
+        let (handle, link1, _rx) = link(&rig, Uuid::new_v4(), None);
+        let adapter = rig.factory.for_session(link1.sref().session_id).unwrap();
+        handle.prompt("first".into());
+        let turn = link1.shared.active_turn.lock().unwrap().unwrap();
+        adapter.emit(ProviderEvent::TurnStarted {
+            turn_id: turn,
+            delivery_id: Uuid::new_v4(),
+        });
+        link1
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(link1.shared.epoch)
+            .unwrap();
+        handle.cancel();
+        assert!(adapter.cancels().contains(&turn));
+        handle.prompt("queued behind cancellation".into());
+        assert_eq!(adapter.dispatched().len(), 1);
+        // The owner detaches before the cancellation settles; settlement
+        // lands while no daemon watches and the replacement's attach
+        // releases exactly the recorded held delivery.
+        drop(handle);
+        drop(link1);
+        adapter.emit(ProviderEvent::TurnCancelled { turn_id: turn });
+        let (_handle2, _link2, _rx2) = link(&rig, Uuid::new_v4(), None);
+        wait_until(|| adapter.dispatched().len() == 2);
+        assert!(matches!(adapter.dispatched().last(), Some(CanonicalAction::Submit { input, .. })
+            if input == &Value::String("queued behind cancellation".into())));
+    }
+
+    /// A cancellation that settled under a detached owner leaves only an
+    /// unreleased hold — the replacement's next prompt permits dispatch
+    /// with no open turn outstanding.
+    #[test]
+    fn stable_settled_hold_releases_on_next_prompt_after_replacement() {
+        let rig = rig(&["codex"]);
+        let (handle, link1, _rx) = link(&rig, Uuid::new_v4(), None);
+        let adapter = rig.factory.for_session(link1.sref().session_id).unwrap();
+        handle.prompt("first".into());
+        let turn = link1.shared.active_turn.lock().unwrap().unwrap();
+        adapter.emit(ProviderEvent::TurnStarted {
+            turn_id: turn,
+            delivery_id: Uuid::new_v4(),
+        });
+        link1
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(link1.shared.epoch)
+            .unwrap();
+        handle.cancel();
+        assert!(adapter.cancels().contains(&turn));
+        // Detach before settlement; the cancelled turn's terminal event
+        // is journaled while no daemon watches.
+        drop(handle);
+        drop(link1);
+        adapter.emit(ProviderEvent::TurnCancelled { turn_id: turn });
+        let (handle2, _link2, _rx2) = link(&rig, Uuid::new_v4(), None);
+        handle2.prompt("after settled cancellation".into());
+        wait_until(|| adapter.dispatched().len() == 2);
+        assert!(matches!(adapter.dispatched().last(), Some(CanonicalAction::Submit { input, .. })
+            if input == &Value::String("after settled cancellation".into())));
     }
 
     #[test]
