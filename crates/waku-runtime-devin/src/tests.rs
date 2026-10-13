@@ -81,6 +81,177 @@ fn permission(rx: &Receiver<ProviderEvent>) -> String {
 }
 
 #[test]
+fn original_free_form_responder_validates_and_preserves_wire_answer() {
+    let fixture = Fixture::new();
+    let (mut handle, rx) = fixture.spawn(16);
+    handle.dispatch(&submit("input"));
+    let id = permission(&rx);
+    assert!(matches!(
+        handle.dispatch(&CanonicalAction::ResolveRequest {
+            request_id: id.clone(),
+            resolution: json!({"action":"accept","content":{"label":42}})
+        }),
+        DispatchOutcome::Rejected { .. }
+    ));
+    let response = json!({"action":"accept", "content":{"label":"release 42\nsecond line"}});
+    assert!(matches!(
+        handle.dispatch(&CanonicalAction::ResolveRequest {
+            request_id: id.clone(),
+            resolution: response.clone()
+        }),
+        DispatchOutcome::Unknown { .. }
+    ));
+    assert!(matches!(recv(&rx), ProviderEvent::TurnCompleted { .. }));
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            &std::fs::read_to_string(fixture.root.join("input-answer")).unwrap()
+        )
+        .unwrap(),
+        response
+    );
+    assert!(rx.try_recv().is_err());
+    assert!(matches!(
+        handle.dispatch(&CanonicalAction::ResolveRequest {
+            request_id: id,
+            resolution: response
+        }),
+        DispatchOutcome::Rejected { .. }
+    ));
+    let action = submit("input");
+    let CanonicalAction::Submit { turn_id, .. } = action else {
+        unreachable!()
+    };
+    handle.dispatch(&action);
+    let id = permission(&rx);
+    // Cancel must quiesce free-form responders as well as permissions.
+    handle.cancel(turn_id);
+    assert_eq!(recv(&rx), ProviderEvent::TurnCancelled { turn_id });
+    assert!(matches!(
+        handle.dispatch(&CanonicalAction::ResolveRequest {
+            request_id: id,
+            resolution: json!({"action":"cancel"})
+        }),
+        DispatchOutcome::Rejected { .. }
+    ));
+    handle.terminate();
+    recv(&rx);
+}
+
+#[test]
+fn revision_activation_requires_advertised_values_and_provider_confirmation() {
+    let fixture = Fixture::new();
+    let (mut handle, rx) = fixture.spawn(16);
+    let target = RequestedConfig {
+        model: Some("model-b".into()),
+        effort: Some("high".into()),
+        ..Default::default()
+    };
+    assert!(matches!(
+        handle.dispatch(&CanonicalAction::Reconfigure {
+            revision: 1,
+            target: RequestedConfig {
+                model: Some("foreign".into()),
+                ..Default::default()
+            }
+        }),
+        DispatchOutcome::Rejected { .. }
+    ));
+    assert!(!fixture.root.join("config-writes").exists());
+    assert!(matches!(
+        handle.dispatch(&CanonicalAction::Reconfigure {
+            revision: 1,
+            target: target.clone()
+        }),
+        DispatchOutcome::Unknown { .. }
+    ));
+    match recv(&rx) {
+        ProviderEvent::ConfigActivated {
+            revision: 1,
+            effective,
+            ..
+        } => {
+            assert_eq!(effective.model, target.model);
+            assert_eq!(effective.effort, target.effort);
+        }
+        event => panic!("unexpected {event:?}"),
+    }
+    assert!(matches!(
+        handle.dispatch(&CanonicalAction::Reconfigure {
+            revision: 1,
+            target: target.clone()
+        }),
+        DispatchOutcome::Rejected { .. }
+    ));
+    let action = submit("wait for approval");
+    handle.dispatch(&action);
+    permission(&rx);
+    assert!(matches!(
+        handle.dispatch(&CanonicalAction::Reconfigure {
+            revision: 2,
+            target: target.clone()
+        }),
+        DispatchOutcome::Rejected { .. }
+    ));
+    let CanonicalAction::Submit { turn_id, .. } = action else {
+        unreachable!()
+    };
+    handle.cancel(turn_id);
+    assert!(matches!(recv(&rx), ProviderEvent::TurnCancelled { .. }));
+    assert!(matches!(
+        handle.dispatch(&CanonicalAction::Reconfigure {
+            revision: 2,
+            target: RequestedConfig {
+                model: Some("ignored".into()),
+                ..Default::default()
+            }
+        }),
+        DispatchOutcome::Unknown { .. }
+    ));
+    assert!(matches!(recv(&rx), ProviderEvent::ProviderFailed { .. }));
+    assert!(matches!(
+        recv(&rx),
+        ProviderEvent::Terminated {
+            reason: TerminateReason::Interrupted { .. }
+        }
+    ));
+    assert!(!handle.alive());
+}
+
+#[test]
+fn admission_applies_explicit_configuration_before_session_live() {
+    let fixture = Fixture::new();
+    let (sink, rx) = sync_channel(16);
+    let mut handle = DevinFactory::new(fixture.binary.clone())
+        .spawn(SessionContext {
+            session_id: Uuid::new_v4(),
+            generation: 1,
+            namespace: "devin-test".into(),
+            adapter: "devin".into(),
+            launch: json!({"cwd":fixture.root}),
+            requested: RequestedConfig {
+                model: Some("model-b".into()),
+                effort: Some("high".into()),
+                ..Default::default()
+            },
+            sink,
+        })
+        .unwrap();
+    assert_eq!(recv(&rx), ProviderEvent::SessionLive);
+    let ProviderEvent::ConfigActivated {
+        revision: 0,
+        effective,
+        ..
+    } = recv(&rx)
+    else {
+        panic!("missing activation")
+    };
+    assert_eq!(effective.model.as_deref(), Some("model-b"));
+    assert_eq!(effective.effort.as_deref(), Some("high"));
+    handle.terminate();
+    recv(&rx);
+}
+
+#[test]
 fn original_responder_survives_controller_absence_and_consumption_is_not_fabricated() {
     let fixture = Fixture::new();
     let (mut handle, rx) = fixture.spawn(16);
@@ -348,6 +519,15 @@ fn host_controller_reload_storm_replays_one_live_turn_without_redispatch() {
         ),
     )
     .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while host.status(&credential).unwrap().sessions[0].status
+        == waku_runtime::contract::SessionStatus::Stopping
+    {
+        host.pump();
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    assert_stopped_projection(&mut host, &credential, grant.epoch, cursor);
 }
 
 #[test]
@@ -716,16 +896,369 @@ fn installed_devin_streams_on_original_runtime_transport() {
         );
         std::thread::yield_now();
     }
-    assert!(
-        host.events(&credential, grant.epoch, cursor)
-            .unwrap()
-            .events
+    assert_stopped_projection(&mut host, &credential, grant.epoch, cursor);
+}
+
+fn assert_stopped_projection(
+    host: &mut RuntimeHost,
+    credential: &str,
+    epoch: u64,
+    cursor: EventCursor,
+) {
+    // Subsequent pumps exercise sender disconnect after terminal ingestion.
+    for _ in 0..3 {
+        host.pump();
+    }
+    let events = host.events(credential, epoch, cursor).unwrap().events;
+    assert_eq!(
+        events
             .iter()
-            .any(|e| matches!(
-                e.event,
-                ProviderEvent::Terminated {
-                    reason: TerminateReason::Requested
-                }
-            ))
+            .filter(|e| matches!(e.event, ProviderEvent::Terminated { .. }))
+            .count(),
+        1
     );
+    assert!(events.iter().any(|e| matches!(
+        e.event,
+        ProviderEvent::Terminated {
+            reason: TerminateReason::Requested
+        }
+    )));
+    let inventory = host.reconcile(credential, epoch).unwrap();
+    assert!(!inventory.sessions[0].adapter_alive);
+    assert_eq!(
+        inventory.sessions[0].status,
+        waku_runtime::contract::SessionStatus::Terminated
+    );
+}
+
+#[test]
+#[ignore = "requires installed authenticated Devin; disposable native configuration session"]
+fn installed_devin_confirms_revisioned_model_and_effort() {
+    let fixture = Fixture::new();
+    let (sink, rx) = sync_channel(32);
+    let mut handle = DevinFactory::new(PathBuf::from("/opt/homebrew/bin/devin"))
+        .spawn(SessionContext {
+            session_id: Uuid::new_v4(),
+            generation: 1,
+            namespace: "devin-config-live".into(),
+            adapter: "devin".into(),
+            launch: json!({"cwd":fixture.root}),
+            requested: RequestedConfig {
+                model: Some("swe-2-high".into()),
+                effort: Some("high".into()),
+                ..Default::default()
+            },
+            sink,
+        })
+        .unwrap();
+    assert_eq!(recv(&rx), ProviderEvent::SessionLive);
+    let ProviderEvent::ConfigActivated {
+        effective: original,
+        ..
+    } = recv(&rx)
+    else {
+        panic!("no initial config")
+    };
+    for (revision, model, effort) in [(1, "swe-2-high", "max"), (2, "gpt-6-sol-medium", "medium")] {
+        assert!(matches!(
+            handle.dispatch(&CanonicalAction::Reconfigure {
+                revision,
+                target: RequestedConfig {
+                    model: Some(model.into()),
+                    effort: Some(effort.into()),
+                    ..Default::default()
+                }
+            }),
+            DispatchOutcome::Unknown { .. }
+        ));
+        let ProviderEvent::ConfigActivated {
+            revision: actual,
+            effective,
+            ..
+        } = recv(&rx)
+        else {
+            panic!("native configuration not confirmed")
+        };
+        assert_eq!(actual, revision);
+        assert_eq!(effective.model.as_deref(), Some(model));
+        assert_eq!(effective.effort.as_deref(), Some(effort));
+        assert_eq!(effective.options, original.options);
+        eprintln!(
+            "Actual Devin config evidence: revision={revision}, model={model}, effort={effort}, identity={}",
+            effective.options
+        );
+    }
+    handle.terminate();
+    assert!(matches!(
+        recv(&rx),
+        ProviderEvent::Terminated {
+            reason: TerminateReason::Requested
+        }
+    ));
+}
+
+#[test]
+#[ignore = "requires installed authenticated Devin; billable disposable approval and cancel turns"]
+fn installed_devin_approval_and_cancel_preserve_original_responders() {
+    let fixture = Fixture::new();
+    let (sink, rx) = sync_channel(128);
+    let mut handle = DevinFactory::new(PathBuf::from("/opt/homebrew/bin/devin"))
+        .spawn(SessionContext {
+            session_id: Uuid::new_v4(),
+            generation: 1,
+            namespace: "devin-approval-live".into(),
+            adapter: "devin".into(),
+            launch: json!({"cwd":fixture.root}),
+            requested: RequestedConfig::default(),
+            sink,
+        })
+        .unwrap();
+    assert_eq!(recv(&rx), ProviderEvent::SessionLive);
+    recv(&rx);
+    for (marker, cancel) in [("approved-marker", false), ("cancelled-marker", true)] {
+        let action = submit(&format!(
+            "Execute exactly this shell command using your shell tool: python3 -c \"from pathlib import Path; Path('{marker}').write_text('confirmed')\". Do not use an edit tool or any other command. Then reply DONE."
+        ));
+        let CanonicalAction::Submit { turn_id, .. } = action else {
+            unreachable!()
+        };
+        handle.dispatch(&action);
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        let (id, subject) = loop {
+            let event = rx.recv_timeout(Duration::from_secs(120)).unwrap();
+            match event {
+                ProviderEvent::RequestOpened {
+                    request_id,
+                    class: RequestClass::Approval,
+                    subject,
+                    ..
+                } => break (request_id, subject),
+                ProviderEvent::TurnCompleted { .. } => {
+                    panic!("native provider completed without approval; gate not established")
+                }
+                ProviderEvent::ProviderFailed { detail } => panic!("{detail}"),
+                _ => {}
+            }
+            assert!(std::time::Instant::now() < deadline);
+        };
+        assert!(
+            !fixture.root.join(marker).exists(),
+            "execution preceded approval"
+        );
+        // This is a measured observation window, not an upper bound on native deadlines.
+        let observed = std::time::Instant::now();
+        while observed.elapsed() < Duration::from_secs(2) {
+            match rx.recv_timeout(Duration::from_secs(2).saturating_sub(observed.elapsed())) {
+                Ok(ProviderEvent::TurnDelta { .. }) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
+                other => panic!("approval did not remain pending: {other:?}"),
+            }
+            assert!(!fixture.root.join(marker).exists());
+        }
+        eprintln!(
+            "Actual Devin original approval retained for {} ms; cancel={cancel}",
+            observed.elapsed().as_millis()
+        );
+        if cancel {
+            assert!(matches!(
+                handle.cancel(turn_id),
+                CancelOutcome::Unknown { .. }
+            ));
+        } else {
+            let option = subject["options"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|o| o["kind"] == "allow_once")
+                .unwrap()["optionId"]
+                .as_str()
+                .unwrap();
+            assert!(matches!(
+                handle.dispatch(&CanonicalAction::ResolveRequest {
+                    request_id: id.clone(),
+                    resolution: json!({"optionId":option})
+                }),
+                DispatchOutcome::Unknown { .. }
+            ));
+        }
+        loop {
+            match rx.recv_timeout(Duration::from_secs(120)).unwrap() {
+                ProviderEvent::TurnCompleted {
+                    turn_id: actual, ..
+                } if !cancel => {
+                    assert_eq!(actual, turn_id);
+                    break;
+                }
+                ProviderEvent::TurnCancelled { turn_id: actual } if cancel => {
+                    assert_eq!(actual, turn_id);
+                    break;
+                }
+                ProviderEvent::ProviderFailed { detail } => panic!("{detail}"),
+                ProviderEvent::RequestAnswered { .. } => {
+                    panic!("fabricated consumption acknowledgement")
+                }
+                _ => {}
+            }
+            assert!(std::time::Instant::now() < deadline);
+        }
+        assert_eq!(fixture.root.join(marker).exists(), !cancel);
+        assert!(matches!(
+            handle.dispatch(&CanonicalAction::ResolveRequest {
+                request_id: id,
+                resolution: json!({"optionId":"allow"})
+            }),
+            DispatchOutcome::Rejected { .. }
+        ));
+    }
+    handle.terminate();
+    assert!(matches!(
+        recv(&rx),
+        ProviderEvent::Terminated {
+            reason: TerminateReason::Requested
+        }
+    ));
+}
+
+#[test]
+fn recovered_devin_owner_blocks_reconciliation_and_new_admission_without_pid_signalling() {
+    let fixture = Fixture::new();
+    let root = fixture.root.join("recovery-host");
+    let factory = Arc::new(DevinFactory::new(fixture.binary.clone()));
+    let mut host = RuntimeHost::open(
+        &root,
+        HostOptions::new("devin-recovery"),
+        factory.clone(),
+        Box::new(ManualClock::new(1_000_000)),
+    )
+    .unwrap();
+    let credential = host.credentials().controller.clone();
+    let grant = host
+        .acquire_control(&credential, &ClientHello::current())
+        .unwrap();
+    let original = Uuid::new_v4();
+    host.execute(
+        &credential,
+        ActionEnvelope {
+            namespace: "devin-recovery".into(),
+            runtime_instance: host.instance(),
+            epoch: grant.epoch,
+            retry_window_id: grant.retry_window_id,
+            command_id: Uuid::new_v4(),
+            session: None,
+            action: CanonicalAction::AdmitSession {
+                session_id: original,
+                adapter: "devin".into(),
+                launch: json!({"cwd":fixture.root}),
+                requested: RequestedConfig::default(),
+            },
+        },
+    )
+    .unwrap();
+    host.pump();
+    drop(host); // no durable drain: physical cleanup cannot be inferred from a PID
+    let mut host = RuntimeHost::open(
+        &root,
+        HostOptions::new("devin-recovery"),
+        factory.clone(),
+        Box::new(ManualClock::new(1_000_000)),
+    )
+    .unwrap();
+    let grant = host
+        .acquire_control(&credential, &ClientHello::current())
+        .unwrap();
+    assert_eq!(
+        host.status(&credential).unwrap().unfenced_survivors,
+        vec![SessionRef {
+            session_id: original,
+            generation: 1
+        }]
+    );
+    assert_eq!(
+        host.reconcile(&credential, grant.epoch),
+        Err(waku_runtime::contract::HostError::NotReconciled)
+    );
+    assert!(matches!(
+        host.execute(
+            &credential,
+            ActionEnvelope {
+                namespace: "devin-recovery".into(),
+                runtime_instance: host.instance(),
+                epoch: grant.epoch,
+                retry_window_id: grant.retry_window_id,
+                command_id: Uuid::new_v4(),
+                session: None,
+                action: CanonicalAction::AdmitSession {
+                    session_id: Uuid::new_v4(),
+                    adapter: "devin".into(),
+                    launch: json!({"cwd":fixture.root}),
+                    requested: RequestedConfig::default()
+                }
+            }
+        ),
+        Ok(waku_runtime::contract::CommandReceipt {
+            disposition: CommandDisposition::Rejected { .. },
+            ..
+        })
+    ));
+    let mut unrelated = Helper(
+        std::process::Command::new("/bin/sleep")
+            .arg("60")
+            .spawn()
+            .unwrap(),
+    );
+    assert!(matches!(
+        factory.fence_recovered(&RecoveredOwner {
+            namespace: "devin-recovery".into(),
+            session: SessionRef {
+                session_id: original,
+                generation: 1
+            },
+            adapter: "devin".into(),
+            launch: json!({"cwd":fixture.root}),
+            effective: Some(waku_runtime::contract::EffectiveConfig {
+                revision: 0,
+                boundary: ActivationBoundary::Immediate,
+                config: RequestedConfig {
+                    options: json!({"ownedPid":unrelated.0.id()}),
+                    ..Default::default()
+                }
+            })
+        }),
+        Termination::Unconfirmed { .. }
+    ));
+    assert!(unrelated.0.try_wait().unwrap().is_none());
+}
+
+#[test]
+fn unanswered_configuration_expires_without_activation_or_prompt_dispatch() {
+    let fixture = Fixture::new();
+    let (mut handle, rx) = fixture.spawn(16);
+    let start = std::time::Instant::now();
+    assert!(matches!(
+        handle.dispatch(&CanonicalAction::Reconfigure {
+            revision: 1,
+            target: RequestedConfig {
+                model: Some("no-response".into()),
+                ..Default::default()
+            }
+        }),
+        DispatchOutcome::Unknown { .. }
+    ));
+    assert!(matches!(
+        handle.dispatch(&submit("must not run")),
+        DispatchOutcome::Rejected { .. }
+    ));
+    assert!(matches!(
+        rx.recv_timeout(Duration::from_secs(15)).unwrap(),
+        ProviderEvent::ProviderFailed { .. }
+    ));
+    assert!(start.elapsed() < Duration::from_secs(15));
+    assert!(matches!(
+        recv(&rx),
+        ProviderEvent::Terminated {
+            reason: TerminateReason::Interrupted { .. }
+        }
+    ));
+    assert!(!fixture.root.join("prompts").exists());
+    assert!(!handle.alive());
 }

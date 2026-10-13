@@ -9,6 +9,10 @@ assert not any(key.startswith(("GODDARD_", "WAKU_")) for key in os.environ)
 
 pending = None
 prompt_count = 0
+config = [
+    {"id":"model", "name":"Model", "category":"model", "type":"select", "currentValue":"model-a", "options":[{"value":"model-a","name":"A"},{"value":"model-b","name":"B"},{"value":"ignored","name":"Ignored"},{"value":"no-response","name":"No response"}]},
+    {"id":"thought_level", "name":"Effort", "category":"thought_level", "type":"select", "currentValue":"low", "options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]},
+]
 
 def send(message):
     print(json.dumps(message), flush=True)
@@ -25,7 +29,17 @@ for raw in sys.stdin:
     if method == "initialize":
         reply(request, {"protocolVersion": 1, "agentCapabilities": {"loadSession": False}, "authMethods": []})
     elif method == "session/new":
-        reply(request, {"sessionId": "original"})
+        reply(request, {"sessionId": "original", "configOptions": config})
+    elif method == "session/set_config_option":
+        params = request["params"]
+        Path("config-writes").open("a").write(json.dumps(params) + "\n")
+        if params["value"] == "no-response":
+            continue
+        if params["value"] != "ignored":
+            for option in config:
+                if option["id"] == params["configId"]:
+                    option["currentValue"] = params["value"]
+        reply(request, {"configOptions": config})
     elif method == "session/prompt":
         prompt_count += 1
         Path("prompts").write_text(f"{prompt_count}\n")
@@ -36,7 +50,9 @@ for raw in sys.stdin:
             continue
         if request["params"]["prompt"][0]["text"] == "lose-connection":
             sys.exit(1)
-        if request["params"]["prompt"][0]["text"] == "flood":
+        if request["params"]["prompt"][0]["text"] == "input":
+            send({"jsonrpc":"2.0", "id":"original-input", "method":"elicitation/create", "params":{"sessionId":"original", "message":"Release label?", "requestedSchema":{"type":"object", "properties":{"label":{"type":"string"}}, "required":["label"]}}})
+        elif request["params"]["prompt"][0]["text"] == "flood":
             for i in range(10000):
                 update(str(i))
         else:
@@ -50,3 +66,8 @@ for raw in sys.stdin:
         if request["result"].get("outcome", {}).get("outcome") == "selected":
             reply(pending, {"stopReason": "end_turn"})
             pending = None
+
+    elif request.get("id") == "original-input" and "result" in request and pending:
+        Path("input-answer").write_text(json.dumps(request["result"]))
+        reply(pending, {"stopReason": "end_turn"})
+        pending = None

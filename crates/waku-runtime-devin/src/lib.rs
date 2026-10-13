@@ -8,11 +8,13 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     CancelNotification, ClientCapabilities, ContentBlock, Implementation, InitializeRequest,
     NewSessionRequest, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionNotification, StopReason,
-    TextContent,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
+    SessionConfigOptionCategory, SessionConfigSelectOptions, SessionNotification,
+    SetSessionConfigOptionRequest, StopReason, TextContent,
 };
 use agent_client_protocol::{
-    AcpAgent, AcpAgentConfig, Agent, Client, ConnectTo, ConnectionTo, Responder, UntypedMessage,
+    AcpAgent, AcpAgentConfig, Agent, Client, ConnectTo, ConnectionTo, Handled, Responder,
+    UntypedMessage,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -55,6 +57,14 @@ enum Command {
         delivery_id: Uuid,
         text: String,
     },
+    InputAnswer {
+        id: String,
+        response: Value,
+    },
+    Configure {
+        revision: u64,
+        target: RequestedConfig,
+    },
     Cancel(Uuid),
     Answer {
         id: String,
@@ -70,7 +80,11 @@ struct Turn {
 struct State {
     turn: Option<Turn>,
     permissions: HashMap<String, (Responder<RequestPermissionResponse>, Vec<String>)>,
+    inputs: HashMap<String, (Responder<Value>, Value)>,
     native_session: Option<String>,
+    config: Vec<SessionConfigOption>,
+    revision: u64,
+    configuring: bool,
 }
 struct Shared {
     state: Mutex<State>,
@@ -138,12 +152,10 @@ impl AdapterFactory for DevinFactory {
             .provider
             .as_deref()
             .is_some_and(|p| p != "devin")
-            || ctx.requested.model.is_some()
-            || ctx.requested.effort.is_some()
             || !ctx.requested.options.is_null()
         {
             return Err(SpawnError(
-                "explicit Devin configuration is not yet qualified".into(),
+                "Devin configuration requires provider devin and null options".into(),
             ));
         }
         let (commands, rx) = smol::channel::bounded(8);
@@ -152,7 +164,11 @@ impl AdapterFactory for DevinFactory {
             state: Mutex::new(State {
                 turn: None,
                 permissions: HashMap::new(),
+                inputs: HashMap::new(),
                 native_session: None,
+                config: Vec::new(),
+                revision: 0,
+                configuring: false,
             }),
             sink: Mutex::new(Some(ctx.sink)),
             stop,
@@ -167,10 +183,11 @@ impl AdapterFactory for DevinFactory {
         let worker = shared.clone();
         let binary = self.binary.clone();
         std::thread::Builder::new().name("runtime-devin-acp".into()).spawn(move || {
-            let result = smol::block_on(run_owned(binary, launch.cwd, rx, stop_rx, worker.clone(), ready_tx));
+            let result = smol::block_on(run_owned(binary, launch.cwd, ctx.requested, rx, stop_rx, worker.clone(), ready_tx));
             worker.live.store(false, Ordering::Release);
             let mut state = worker.state.lock().unwrap();
             state.permissions.clear();
+            state.inputs.clear();
             state.turn.take();
             if let Err(_error) = result {
                 // SDK errors may include captured stderr/credentials. Keep raw
@@ -242,7 +259,7 @@ impl AdapterHandle for DevinHandle {
                 if text.len() > 256 * 1024 {
                     return refused("Devin text input exceeds bounded command intake");
                 }
-                if state.turn.is_some() {
+                if state.turn.is_some() || state.configuring {
                     return refused("Devin already has an unresolved turn");
                 }
                 state.turn = Some(Turn {
@@ -271,6 +288,29 @@ impl AdapterHandle for DevinHandle {
                 request_id,
                 resolution,
             } => {
+                if resolution.to_string().len() > 256 * 1024 {
+                    return refused("Devin response exceeds bounded command intake");
+                }
+                if let Some((_, schema)) = state.inputs.get(request_id) {
+                    if !valid_input_response(schema, resolution) {
+                        return refused(
+                            "Devin input response requires original primitive field types and offered enum values",
+                        );
+                    }
+                    if self
+                        .commands
+                        .try_send(Command::InputAnswer {
+                            id: request_id.clone(),
+                            response: resolution.clone(),
+                        })
+                        .is_err()
+                    {
+                        return refused("Devin input answer intake closed or full");
+                    }
+                    return uncertain(
+                        "ACP input responder delivery has no consumption acknowledgement; never resend",
+                    );
+                }
                 let Some(option) = resolution.get("optionId").and_then(Value::as_str) else {
                     return refused("permission resolution requires optionId");
                 };
@@ -293,6 +333,30 @@ impl AdapterHandle for DevinHandle {
                 uncertain(
                     "ACP responder delivery has no provider-consumption acknowledgement; never resend",
                 )
+            }
+            CanonicalAction::Reconfigure { revision, target } => {
+                if state.turn.is_some() || state.configuring || *revision <= state.revision {
+                    return refused(
+                        "Devin configuration requires an idle session and newer revision",
+                    );
+                }
+                if config_writes(&state.config, target).is_err() {
+                    return refused(
+                        "Devin configuration must use advertised model/effort values and null options",
+                    );
+                }
+                if self
+                    .commands
+                    .try_send(Command::Configure {
+                        revision: *revision,
+                        target: target.clone(),
+                    })
+                    .is_err()
+                {
+                    return refused("Devin configuration intake closed or full");
+                }
+                state.configuring = true;
+                uncertain("configuration queued; activation requires original provider response")
             }
             _ => refused("action not supported by Devin adapter"),
         }
@@ -440,6 +504,7 @@ impl Drop for GroupGuard {
 async fn run_owned(
     binary: PathBuf,
     cwd: PathBuf,
+    requested: RequestedConfig,
     commands: smol::channel::Receiver<Command>,
     stop: smol::channel::Receiver<()>,
     shared: Arc<Shared>,
@@ -508,6 +573,7 @@ async fn run_owned(
         connection(
             agent_client_protocol::Lines::new(Box::pin(outgoing), Box::pin(incoming)),
             cwd,
+            requested,
             commands,
             shared.clone(),
             ready,
@@ -541,6 +607,163 @@ async fn run_owned(
     shared.ended.store(ended, Ordering::Release);
     drop(stderr_task);
     result
+}
+
+// Elicitation form responses retain the native wire shape. Validate the
+// requested primitive field types rather than accepting unrelated answers.
+fn valid_input_response(schema: &Value, response: &Value) -> bool {
+    let Some(action) = response.get("action").and_then(Value::as_str) else {
+        return false;
+    };
+    if matches!(action, "cancel" | "decline") {
+        return response.get("content").is_none();
+    }
+    if action != "accept" {
+        return false;
+    }
+    let Some(content) = response.get("content").and_then(Value::as_object) else {
+        return false;
+    };
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return false;
+    };
+    if schema
+        .get("required")
+        .and_then(Value::as_array)
+        .is_some_and(|fields| {
+            fields
+                .iter()
+                .any(|f| f.as_str().is_none_or(|name| !content.contains_key(name)))
+        })
+    {
+        return false;
+    }
+    content.iter().all(|(name, value)| {
+        let Some(field) = properties.get(name) else {
+            return false;
+        };
+        let typed = match field.get("type").and_then(Value::as_str) {
+            Some("string") => value.is_string(),
+            Some("boolean") => value.is_boolean(),
+            Some("number") => value.is_number(),
+            Some("integer") => value.is_i64() || value.is_u64(),
+            _ => false,
+        };
+        typed
+            && field
+                .get("enum")
+                .and_then(Value::as_array)
+                .is_none_or(|values| values.contains(value))
+    })
+}
+
+fn config_error(detail: &str) -> agent_client_protocol::Error {
+    agent_client_protocol::Error::internal_error().data(detail)
+}
+
+// Map only exact advertised values. Never guess aliases or use a fallback
+// model endpoint, which could turn a rejected write into silent substitution.
+fn config_option<'a>(
+    options: &'a [SessionConfigOption],
+    model: bool,
+) -> Option<&'a SessionConfigOption> {
+    let names: &[&str] = if model {
+        &["model", "models"]
+    } else {
+        &["thought_level"]
+    };
+    let category = if model {
+        SessionConfigOptionCategory::Model
+    } else {
+        SessionConfigOptionCategory::ThoughtLevel
+    };
+    options
+        .iter()
+        .find(|o| names.contains(&o.id.to_string().as_str()))
+        .or_else(|| {
+            options
+                .iter()
+                .find(|o| o.category.as_ref() == Some(&category) && o.id.to_string() != "provider")
+        })
+}
+
+fn config_writes(
+    options: &[SessionConfigOption],
+    target: &RequestedConfig,
+) -> Result<Vec<(String, String)>, &'static str> {
+    if target.provider.as_deref().is_some_and(|p| p != "devin") || !target.options.is_null() {
+        return Err("unsupported Devin configuration");
+    }
+    let mut writes = Vec::new();
+    for (model, value) in [(true, &target.model), (false, &target.effort)] {
+        let Some(value) = value else { continue };
+        let option = config_option(options, model).ok_or("configuration option not advertised")?;
+        let SessionConfigKind::Select(select) = &option.kind else {
+            return Err("configuration is not a select");
+        };
+        let offered = match &select.options {
+            SessionConfigSelectOptions::Ungrouped(values) => {
+                values.iter().any(|o| o.value.to_string() == *value)
+            }
+            SessionConfigSelectOptions::Grouped(groups) => groups
+                .iter()
+                .any(|g| g.options.iter().any(|o| o.value.to_string() == *value)),
+            _ => false,
+        };
+        if !offered {
+            return Err("configuration value not advertised");
+        }
+        if select.current_value.to_string() != *value {
+            writes.push((option.id.to_string(), value.clone()));
+        }
+    }
+    Ok(writes)
+}
+
+async fn configure(
+    connection: &ConnectionTo<Agent>,
+    session: &agent_client_protocol::schema::v1::SessionId,
+    mut options: Vec<SessionConfigOption>,
+    target: &RequestedConfig,
+) -> agent_client_protocol::Result<Vec<SessionConfigOption>> {
+    config_writes(&options, target).map_err(config_error)?;
+    // Model writes may replace the effort catalog. Revalidate against every
+    // returned catalog and verify actual current values before publishing.
+    for model in [true, false] {
+        let value = if model { &target.model } else { &target.effort };
+        let Some(value) = value else { continue };
+        let partial = RequestedConfig {
+            model: model.then(|| value.clone()),
+            effort: (!model).then(|| value.clone()),
+            ..Default::default()
+        };
+        for (id, value) in config_writes(&options, &partial).map_err(config_error)? {
+            let response = smol::future::race(
+                connection
+                    .send_request(SetSessionConfigOptionRequest::new(
+                        session.clone(),
+                        id,
+                        value.as_str(),
+                    ))
+                    .block_task(),
+                async {
+                    smol::Timer::after(Duration::from_secs(10)).await;
+                    Err(config_error("Devin configuration response deadline"))
+                },
+            )
+            .await?;
+            options = response.config_options;
+        }
+    }
+    if !config_writes(&options, target)
+        .map_err(config_error)?
+        .is_empty()
+    {
+        return Err(config_error(
+            "Devin did not activate requested configuration",
+        ));
+    }
+    Ok(options)
 }
 
 fn initial_config(
@@ -582,6 +805,7 @@ fn initial_config(
 async fn connection(
     agent: impl ConnectTo<Client>,
     cwd: PathBuf,
+    requested: RequestedConfig,
     commands: smol::channel::Receiver<Command>,
     shared: Arc<Shared>,
     ready: SyncSender<()>,
@@ -609,7 +833,7 @@ async fn connection(
                     return responder.respond(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled));
                 }
                 shared.started(&mut state);
-                if state.permissions.len() >= 64 {
+                if state.permissions.len() + state.inputs.len() >= 64 {
                     responder.respond(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))?;
                     shared.emit(ProviderEvent::ProviderFailed { detail: "Devin pending permission capacity exhausted; interrupting transport".into() });
                     shared.commands.close();
@@ -622,6 +846,32 @@ async fn connection(
                 state.permissions.insert(id.clone(), (responder, options));
                 shared.emit(ProviderEvent::RequestOpened { request_id: id, class: RequestClass::Approval, subject, deadline_ms: None });
                 Ok(())
+            }
+        }, agent_client_protocol::on_receive_request!())
+        .on_receive_request({
+            let shared = shared.clone();
+            async move |request: UntypedMessage, responder: Responder<Value>, _connection| {
+                if request.method() != "elicitation/create" {
+                    return Ok(Handled::No { message: (request, responder), retry: false });
+                }
+                let mut state = shared.state.lock().unwrap();
+                let params = request.params();
+                let schema = params.get("requestedSchema");
+                // One native session owns this connection. When an extension
+                // supplies a session ID, it must name that original session.
+                if state.turn.is_none() || shared.stopping.load(Ordering::Acquire)
+                    || params.get("sessionId").is_some_and(|id| id.as_str() != state.native_session.as_deref())
+                    || state.permissions.len() + state.inputs.len() >= 64
+                    || schema.is_none_or(|s| s.get("type").and_then(Value::as_str) != Some("object"))
+                    || params.get("mode").is_some_and(|m| m != "form") {
+                    responder.respond(serde_json::json!({"action":"cancel"}))?;
+                    return Ok(Handled::Yes);
+                }
+                shared.started(&mut state);
+                let id = responder.id().to_string();
+                state.inputs.insert(id.clone(), (responder, schema.unwrap().clone()));
+                shared.emit(ProviderEvent::RequestOpened { request_id: id, class: RequestClass::Input, subject: params.clone(), deadline_ms: None });
+                Ok(Handled::Yes)
             }
         }, agent_client_protocol::on_receive_request!())
         .on_receive_notification({
@@ -642,11 +892,13 @@ async fn connection(
         .connect_with(agent, async move |connection: ConnectionTo<Agent>| {
             connection.send_request(InitializeRequest::new(ProtocolVersion::V1).client_capabilities(ClientCapabilities::new().terminal(false)).client_info(Implementation::new("goddard-runtime", env!("CARGO_PKG_VERSION")))).block_task().await?;
             let session = connection.send_request(NewSessionRequest::new(cwd)).block_task().await?;
-            let effective = initial_config(&session.session_id.to_string(), session.config_options.as_deref().unwrap_or_default(), shared.owned_pid.load(Ordering::Acquire));
+            let config = configure(&connection, &session.session_id, session.config_options.unwrap_or_default(), &requested).await?;
+            let effective = initial_config(&session.session_id.to_string(), &config, shared.owned_pid.load(Ordering::Acquire));
             let session_id = session.session_id;
             {
                 let mut state = shared.state.lock().unwrap();
                 state.native_session = Some(session_id.to_string());
+                state.config = config;
                 shared.live.store(true, Ordering::Release);
                 shared.emit(ProviderEvent::SessionLive);
                 shared.emit(ProviderEvent::ConfigActivated { revision: 0, boundary: ActivationBoundary::Immediate, effective });
@@ -682,20 +934,43 @@ async fn connection(
                                     let _ = callback.stop.try_send(());
                                 }
                             }
+                            for (_, (responder, _)) in state.inputs.drain() {
+                                let _ = responder.respond(serde_json::json!({"action":"cancel"}));
+                            }
                             for (_, (responder, _)) in state.permissions.drain() {
                                 let _ = responder.respond(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled));
                             }
                             Ok(())
                         })?;
                     }
+                    Command::Configure { revision, target } => {
+                        let options = shared.state.lock().unwrap().config.clone();
+                        // A failed/ambiguous multi-write cannot claim the old or new
+                        // configuration. End transport rather than silently dispatch.
+                        let options = configure(&connection, &session_id, options, &target).await?;
+                        let mut state = shared.state.lock().unwrap();
+                        let effective = initial_config(&session_id.to_string(), &options, shared.owned_pid.load(Ordering::Acquire));
+                        state.config = options;
+                        state.revision = revision;
+                        state.configuring = false;
+                        shared.emit(ProviderEvent::ConfigActivated { revision, boundary: ActivationBoundary::Immediate, effective });
+                    }
                     Command::Cancel(turn_id) => {
                         let mut state = shared.state.lock().unwrap();
                         if let Some(turn) = &mut state.turn && turn.id == turn_id {
                             connection.send_notification(CancelNotification::new(session_id.clone()))?;
                             turn.cancel_requested = true;
+                            for (_, (responder, _)) in state.inputs.drain() {
+                                let _ = responder.respond(serde_json::json!({"action":"cancel"}));
+                            }
                             for (_, (responder, _)) in state.permissions.drain() {
                                 let _ = responder.respond(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled));
                             }
+                        }
+                    }
+                    Command::InputAnswer { id, response } => {
+                        if let Some((responder, _)) = shared.state.lock().unwrap().inputs.remove(&id) {
+                            responder.respond(response)?;
                         }
                     }
                     Command::Answer { id, option } => {
