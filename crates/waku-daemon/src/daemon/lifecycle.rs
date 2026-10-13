@@ -846,6 +846,10 @@ impl WakuBackend {
             let mut state = self.task_state.lock();
             let now = crate::model::unix_time();
             for id in session_ids {
+                // The active Boss chat is continuous; only rotation retires it.
+                if self.boss.is_boss(*id) {
+                    continue;
+                }
                 let Some(session) = state.sessions.iter().find(|session| {
                     session.id == *id
                         && session.archived_at.is_none()

@@ -15699,6 +15699,174 @@ fn rotation_boss(backend: &WakuBackend) -> Uuid {
     session.id
 }
 
+#[test]
+fn active_boss_archive_is_rejected_from_client_saves_and_bulk_archive() {
+    let root = std::env::temp_dir().join(format!("boss-archive-guard-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let active = rotation_boss(&backend);
+    {
+        let mut state = backend.task_state.lock();
+        state.session_mut(active).unwrap().begin_turn("Prior conversation");
+        state.mark_session_dirty(active);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend.archive_sessions(&[active]).unwrap();
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .session_mut(active)
+            .unwrap()
+            .archived_at
+            .is_none()
+    );
+    for skeleton in [false, true] {
+        let mut incoming = backend
+            .task_state
+            .lock()
+            .session_mut(active)
+            .unwrap()
+            .clone();
+        if skeleton {
+            incoming = incoming.list_projection();
+        }
+        incoming.updated_at += 10;
+        incoming.archived_at = Some(incoming.updated_at);
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::SaveTaskState {
+                        projects: Vec::new(),
+                        live_session_ids: Vec::new(),
+                        sessions: vec![incoming],
+                        session_tails: Vec::new(),
+                    },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        assert!(
+            backend
+                .task_store
+                .load_session_detail(active)
+                .unwrap()
+                .unwrap()
+                .archived_at
+                .is_none()
+        );
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn archived_active_boss_recovers_on_open_send_and_reconciliation() {
+    let root = std::env::temp_dir().join(format!("boss-archive-recovery-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let active = rotation_boss(&backend);
+    {
+        let mut state = backend.task_state.lock();
+        state.session_mut(active).unwrap().begin_turn("Prior conversation");
+        state.mark_session_dirty(active);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let capture = Arc::new(CaptureDriver::default());
+    let runtime_id = Uuid::new_v4();
+    backend.sessions.lock().insert(
+        active,
+        RuntimeEntry {
+            plan_gate: None,
+            runtime_id,
+            driver: DriverHandle::from_control(capture.clone()),
+            stable: None,
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.clone(),
+        },
+    );
+    let retired = Uuid::new_v4();
+    {
+        let mut state = backend.task_state.lock();
+        let mut old = state.session_mut(active).unwrap().clone();
+        old.id = retired;
+        old.archived_at = Some(crate::model::unix_time());
+        state.sessions.push(old);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    for recovery in ["open", "reconcile", "send"] {
+        {
+            let mut state = backend.task_state.lock();
+            let session = state.session_mut(active).unwrap();
+            session.archived_at = Some(crate::model::unix_time());
+            session.push_message(MessageRole::System, "Preserve this conversation");
+            state.mark_session_dirty(active);
+            backend.task_store.save(&mut state).unwrap();
+            if recovery == "reconcile" {
+                // Restart loads a list projection; recovery must hydrate and
+                // preserve the durable conversation before saving the repair.
+                let session = state.session_mut(active).unwrap();
+                *session = session.list_projection();
+            }
+        }
+        match recovery {
+            "open" => assert_eq!(rotation_boss(&backend), active),
+            "reconcile" => backend
+                .reconcile_boss_rotation(crate::model::unix_time())
+                .unwrap(),
+            "send" => {
+                backend
+                    .handle(
+                        Request {
+                            request_id: Uuid::new_v4(),
+                            session_id: active,
+                            runtime_id,
+                            command: Command::Prompt {
+                                prompt: "Continue coordinating".into(),
+                                turn_id: None,
+                                message_id: None,
+                                hidden: false,
+                                attachments: Vec::new(),
+                            },
+                        },
+                        EventSink::detached(),
+                        None,
+                    )
+                    .unwrap();
+                assert_eq!(capture.prompts.lock().len(), 1);
+            }
+            _ => unreachable!(),
+        }
+        let stored = backend
+            .task_store
+            .load_session_detail(active)
+            .unwrap()
+            .unwrap();
+        assert!(stored.archived_at.is_none());
+        assert!(
+            stored
+                .messages
+                .iter()
+                .any(|message| message.content == "Preserve this conversation")
+        );
+        assert_eq!(backend.boss.identity_and_session().1, Some(active));
+        assert!(
+            backend
+                .task_store
+                .load_session_detail(retired)
+                .unwrap()
+                .unwrap()
+                .archived_at
+                .is_some()
+        );
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// `/clear` retires the pointed chat without a handoff, removes every
 /// earlier chat generation from the store, and keeps the boss's other
 /// surfaces — planning sessions and employees — while the journal records

@@ -447,6 +447,7 @@ impl WakuBackend {
                     bail!("only the human can open the boss");
                 }
                 self.boss.with_operation_lock(|| {
+                    self.recover_archived_active_boss_chat()?;
                     let (identity, boss_session_id) = self.boss.identity_and_session();
                     let mut project = Project::from_path(self.boss.owned_workspace()?);
                     project.id = identity.id;

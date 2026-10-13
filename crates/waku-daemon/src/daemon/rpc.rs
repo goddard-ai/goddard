@@ -259,6 +259,7 @@ impl Backend for WakuBackend {
             None
         };
         if boss_chat_command {
+            self.recover_archived_active_boss_chat()?;
             anyhow::ensure!(
                 self.task_state
                     .lock()
@@ -987,6 +988,14 @@ impl Backend for WakuBackend {
                         .iter_mut()
                         .find(|existing| existing.id == session_id)
                     {
+                        // Boss chat archival belongs to rotation, never a client
+                        // projection. Preserve both the active and retired flags.
+                        if existing.boss_managed
+                            && existing.planning.is_none()
+                            && existing.project_id == self.boss.identity_and_session().0.id
+                        {
+                            session.archived_at = existing.archived_at;
+                        }
                         // Employee launch selection belongs to the daemon, including
                         // retired employees. Boss chats still accept human picker edits.
                         let employee = self.boss.employee_including_retired(session_id);

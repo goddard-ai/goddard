@@ -1,0 +1,1 @@
+- Boss messages no longer fail because the active chat was archived; the daemon restores that chat automatically while keeping retired conversations archived.

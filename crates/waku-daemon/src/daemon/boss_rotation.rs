@@ -190,6 +190,42 @@ impl WakuBackend {
         return driver;
     }
 
+    /// Repair only the durable pointer's chat. Callers hold the Boss operation
+    /// lock, so rotation cannot retire this row while it is being restored.
+    pub(super) fn recover_archived_active_boss_chat(&self) -> anyhow::Result<()> {
+        let (identity, active) = self.boss.identity_and_session();
+        let Some(active) = active else {
+            return Ok(());
+        };
+        let mut state = self.task_state.lock();
+        let Some(session) = state.session_mut(active) else {
+            return Ok(());
+        };
+        if session.archived_at.is_none() {
+            return Ok(());
+        }
+        self.task_store.hydrate(session)?;
+        anyhow::ensure!(
+            session.boss_managed && session.project_id == identity.id && session.planning.is_none(),
+            "active Boss pointer does not name a Boss chat"
+        );
+        let archived_at = session.archived_at;
+        let updated_at = session.updated_at;
+        session.archived_at = None;
+        session.updated_at = session.updated_at.max(crate::model::unix_time());
+        state.mark_session_dirty(active);
+        if let Err(error) = self.task_store.save(&mut state) {
+            if let Some(session) = state.session_mut(active) {
+                session.archived_at = archived_at;
+                session.updated_at = updated_at;
+            }
+            state.mark_session_dirty(active);
+            return Err(error.into());
+        }
+        eprintln!("recovered archived active Boss chat {active}");
+        Ok(())
+    }
+
     /// The Boss scheduler checks settled chats, including after restart.
     /// Fresh chats use the same durable initialization and lazy provider
     /// launch as BossOperation::Open. Every pass republishes the journal's
@@ -201,7 +237,9 @@ impl WakuBackend {
         }
         let mut retired = Vec::new();
         self.boss.with_operation_lock(|| {
-            let result = self.rotate_boss_chat(&settings, now, &mut retired);
+            let result = self
+                .recover_archived_active_boss_chat()
+                .and_then(|()| self.rotate_boss_chat(&settings, now, &mut retired));
             if let Err(error) = &result {
                 self.note_rotation_failure(now, error);
             }
