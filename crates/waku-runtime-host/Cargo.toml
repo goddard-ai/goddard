@@ -1,0 +1,23 @@
+[package]
+name = "waku-runtime-host"
+version = "0.1.0"
+edition = "2024"
+description = "Independently pinned executable for the stable provider runtime"
+license = "GPL-3.0-only"
+
+[[bin]]
+name = "waku-runtime-host"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1.0"
+sha2 = "0.10"
+waku-runtime = { path = "../waku-runtime" }
+waku-runtime-codex = { path = "../waku-runtime-codex" }
+waku-runtime-devin = { path = "../waku-runtime-devin" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+uuid = { version = "1.18", features = ["v4"] }

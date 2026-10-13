@@ -33,7 +33,8 @@ pub mod server;
 
 pub use adapter::{
     AdapterFactory, AdapterHandle, CancelOutcome, CancellationLimit, DeadlineBound,
-    DispatchOutcome, Enforcement, OfflineMatrix, SessionContext, SpawnError, Termination,
+    DispatchOutcome, Enforcement, OfflineMatrix, RecoveredOwner, SessionContext, SpawnError,
+    Termination,
 };
 pub use contract::*;
 pub use fake::{FakeAdapter, FakeFactory, ManualClock};

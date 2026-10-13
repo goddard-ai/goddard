@@ -35,7 +35,10 @@ pub struct RuntimeClient {
     stream: UnixStream,
 }
 
-fn payload<T>(response: WireResponse, extract: impl FnOnce(WireResponse) -> Option<T>) -> Result<T, ClientError> {
+fn payload<T>(
+    response: WireResponse,
+    extract: impl FnOnce(WireResponse) -> Option<T>,
+) -> Result<T, ClientError> {
     match response {
         WireResponse::Error { error } => Err(ClientError::Host(error)),
         other => extract(other).ok_or_else(|| ClientError::Protocol("unexpected response".into())),
@@ -50,11 +53,24 @@ impl RuntimeClient {
         let endpoint = Endpoint::load(root).map_err(ClientError::Io)?;
         // The endpoint records where the server actually bound — trust
         // the record over re-deriving the path.
-        let mut stream = UnixStream::connect(&endpoint.socket).map_err(ClientError::Io)?;
+        let socket = if matches!(&auth, ConnectAuth::Emergency { .. }) {
+            endpoint
+                .emergency_socket
+                .as_deref()
+                .unwrap_or(&endpoint.socket)
+        } else {
+            &endpoint.socket
+        };
+        let mut stream = UnixStream::connect(socket).map_err(ClientError::Io)?;
+        if !ipc::same_user(&stream)? {
+            return Err(HostError::Unauthorized.into());
+        }
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(35)))?;
+        stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
         ipc::send(
             &mut stream,
             &Connect {
-                namespace: endpoint.namespace,
+                namespace: endpoint.namespace.clone(),
                 auth,
             },
         )?;
@@ -62,6 +78,20 @@ impl RuntimeClient {
             .ok_or_else(|| ClientError::Protocol("connection closed during handshake".into()))?;
         if let WireResponse::Error { error } = response {
             return Err(ClientError::Host(error));
+        }
+        let identity = match &response {
+            WireResponse::Hello { hello } => {
+                Some((hello.runtime_instance, hello.namespace.as_str()))
+            }
+            WireResponse::Status { status } => {
+                Some((status.runtime_instance, endpoint.namespace.as_str()))
+            }
+            _ => None,
+        };
+        if identity.is_some_and(|(instance, namespace)| {
+            instance != endpoint.instance || namespace != endpoint.namespace
+        }) {
+            return Err(HostError::Unauthorized.into());
         }
         Ok((Self { stream }, response))
     }

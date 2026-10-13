@@ -11704,6 +11704,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "waku-runtime-codex"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "uuid",
+ "waku-runtime",
+]
+
+[[package]]
 name = "waku-runtime-devin"
 version = "0.1.0"
 dependencies = [
@@ -11715,6 +11728,19 @@ dependencies = [
  "smol",
  "uuid",
  "waku-runtime",
+]
+
+[[package]]
+name = "waku-runtime-host"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde_json",
+ "sha2 0.10.9",
+ "uuid",
+ "waku-runtime",
+ "waku-runtime-codex",
+ "waku-runtime-devin",
 ]
 
 [[package]]

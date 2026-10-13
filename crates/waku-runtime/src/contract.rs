@@ -408,6 +408,7 @@ pub struct EventPage {
 pub struct ClientHello {
     pub protocol_min: u32,
     pub protocol_max: u32,
+    /// Capabilities this controller requires from the host.
     #[serde(default)]
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -429,6 +430,14 @@ impl ClientHello {
 #[serde(rename_all = "camelCase")]
 pub struct Hello {
     pub protocol: u32,
+    #[serde(default)]
+    pub protocol_min: u32,
+    #[serde(default)]
+    pub protocol_max: u32,
+    #[serde(default)]
+    pub runtime_build: String,
+    #[serde(default)]
+    pub adapter_versions: std::collections::BTreeMap<String, String>,
     pub namespace: String,
     pub runtime_instance: Uuid,
     pub recovery: RecoveryState,
@@ -578,6 +587,9 @@ pub struct HostStatus {
     pub journal_bytes: u64,
     /// Records accepted into emergency buffering but not yet durable.
     pub buffered_records: usize,
+    /// Recovered owners whose physical cleanup is not yet proven.
+    #[serde(default)]
+    pub unfenced_survivors: Vec<SessionRef>,
 }
 
 /// Drain intent: defer while work is live, or fence and terminate now.
@@ -599,7 +611,8 @@ pub enum DrainPolicy {
     rename_all_fields = "camelCase"
 )]
 pub enum DrainReport {
-    /// Live work remains; nothing was fenced.
+    /// Work or unconfirmed termination remains. A forced attempt may
+    /// already have fenced affected owners.
     Deferred {
         live_sessions: Vec<Uuid>,
     },
@@ -761,6 +774,7 @@ pub struct ResourceClaim {
 #[derive(Clone, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "error",
+    content = "detail",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]

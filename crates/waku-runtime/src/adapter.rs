@@ -13,7 +13,9 @@ use std::sync::mpsc::SyncSender;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::contract::{CanonicalAction, ProviderEvent, RequestedConfig};
+use crate::contract::{
+    CanonicalAction, EffectiveConfig, ProviderEvent, RequestedConfig, SessionRef,
+};
 
 /// Spawn-time context for one provider generation. The sink is bounded so a
 /// provider that cannot pause is visible as backpressure instead of growing
@@ -85,7 +87,9 @@ pub enum CancelOutcome {
 /// Observed result of a termination attempt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Termination {
-    /// The owner provably ended.
+    /// The owner provably ended and pre-terminal intake is complete.
+    /// Remaining facts are already queued; no worker may produce earlier
+    /// stream data after this confirmation.
     Confirmed,
     /// Termination cannot be proven; the host keeps the session visibly
     /// stopping rather than claiming it stopped.
@@ -96,6 +100,30 @@ pub enum Termination {
 /// session record, decides how a provider is launched.
 pub trait AdapterFactory: Send + Sync {
     fn spawn(&self, ctx: SessionContext) -> Result<Box<dyn AdapterHandle>, SpawnError>;
+
+    /// Declared adapter ABI versions, not a claim of actual-provider qualification.
+    fn adapter_versions(&self) -> std::collections::BTreeMap<String, String> {
+        std::collections::BTreeMap::new()
+    }
+
+    /// Qualify cleanup of a recovered owner before any new provider starts.
+    /// Never spawn or resume here. Unknown ownership stays blocked; a PID
+    /// alone is insufficient evidence for signalling another process.
+    fn fence_recovered(&self, _owner: &RecoveredOwner) -> Termination {
+        Termination::Unconfirmed {
+            detail: "adapter recovery cleanup is unqualified".into(),
+        }
+    }
+}
+
+/// Durable, provider-specific evidence of the owner lost with an instance.
+/// Launch material stays private; it is not a log or a resume instruction.
+pub struct RecoveredOwner {
+    pub namespace: String,
+    pub session: SessionRef,
+    pub adapter: String,
+    pub launch: Value,
+    pub effective: Option<EffectiveConfig>,
 }
 
 #[derive(Debug, Error)]

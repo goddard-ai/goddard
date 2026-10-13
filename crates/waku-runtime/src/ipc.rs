@@ -18,7 +18,7 @@ use uuid::Uuid;
 /// One frame carries one JSON message. The bound is a transport integrity
 /// check — the host's own budgets cap semantic payloads far lower, and a
 /// frame this size can never be a legitimate control message.
-pub const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 
 const ENDPOINT_NAME: &str = "endpoint.json";
 
@@ -88,11 +88,7 @@ enum PartRead {
 /// Fill `buf` or explain why not. A retryable timeout is only possible
 /// when nothing of this part was consumed; a part-consumed buffer is a
 /// torn frame the stream cannot recover from.
-fn read_frame_part(
-    stream: &mut UnixStream,
-    buf: &mut [u8],
-    eof_ok: bool,
-) -> io::Result<PartRead> {
+fn read_frame_part(stream: &mut UnixStream, buf: &mut [u8], eof_ok: bool) -> io::Result<PartRead> {
     let mut filled = 0;
     while filled < buf.len() {
         match stream.read(&mut buf[filled..]) {
@@ -107,7 +103,8 @@ fn read_frame_part(
             }
             Ok(n) => filled += n,
             Err(e)
-                if filled == 0
+                if eof_ok
+                    && filled == 0
                     && (e.kind() == io::ErrorKind::WouldBlock
                         || e.kind() == io::ErrorKind::TimedOut) =>
             {
@@ -118,7 +115,7 @@ fn read_frame_part(
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("frame torn after {filled} bytes: {e}"),
-                ))
+                ));
             }
         }
     }
@@ -135,6 +132,8 @@ pub struct Endpoint {
     pub instance: Uuid,
     pub socket: String,
     pub pid: u32,
+    #[serde(default)]
+    pub emergency_socket: Option<String>,
 }
 
 impl Endpoint {
@@ -151,16 +150,38 @@ impl Endpoint {
             instance,
             socket: socket_path(root).to_string_lossy().into_owned(),
             pid: std::process::id(),
+            emergency_socket: Some(emergency_socket_path(root).to_string_lossy().into_owned()),
         };
         let raw = serde_json::to_vec_pretty(&endpoint).map_err(io::Error::other)?;
-        fs::write(Self::path(root), raw)?;
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(Self::path(root), fs::Permissions::from_mode(0o600));
+        use std::os::unix::fs::OpenOptionsExt;
+        let temporary = root.join(format!("endpoint-{}", Uuid::new_v4()));
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(&raw)?;
+        file.sync_all()?;
+        fs::rename(temporary, Self::path(root))?;
+        fs::File::open(root)?.sync_all()?;
         Ok(())
     }
 
     /// Load and sanity-check an endpoint record.
     pub fn load(root: &Path) -> io::Result<Self> {
+        private_root(root).map_err(io::Error::other)?;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let metadata = fs::symlink_metadata(Self::path(root))?;
+        if !metadata.is_file()
+            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.permissions().mode() & 0o077 != 0
+            || metadata.len() > 16 * 1024
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "invalid endpoint ownership",
+            ));
+        }
         let raw = fs::read(Self::path(root))?;
         serde_json::from_slice(&raw).map_err(io::Error::other)
     }
@@ -169,12 +190,36 @@ impl Endpoint {
 /// Bind the runtime's private listener inside its namespace root. A stale
 /// socket file is removed — the namespace lock is the singleton proof, so
 /// only a dead owner could have left it behind.
+pub fn emergency_socket_path(root: &Path) -> PathBuf {
+    socket_path(root).with_extension("emergency.sock")
+}
+
 pub fn bind(root: &Path) -> io::Result<UnixListener> {
-    let path = socket_path(root);
-    let _ = fs::remove_file(&path);
-    let listener = UnixListener::bind(&path)?;
+    bind_path(&socket_path(root))
+}
+pub fn bind_emergency(root: &Path) -> io::Result<UnixListener> {
+    bind_path(&emergency_socket_path(root))
+}
+fn bind_path(path: &Path) -> io::Result<UnixListener> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.file_type().is_socket() && metadata.uid() == unsafe { libc::geteuid() } =>
+        {
+            fs::remove_file(path)?
+        }
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "foreign socket path",
+            ));
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let listener = UnixListener::bind(path)?;
     use std::os::unix::fs::PermissionsExt;
-    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     Ok(listener)
 }
 
@@ -213,7 +258,11 @@ fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
             &mut len,
         )
     };
-    if rc == 0 { Ok(cred.uid) } else { Err(io::Error::last_os_error()) }
+    if rc == 0 {
+        Ok(cred.uid)
+    } else {
+        Err(io::Error::last_os_error())
+    }
 }
 
 /// Whether the peer on this connection is the same OS user. Anything less
@@ -221,4 +270,22 @@ fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
 /// presents.
 pub fn same_user(stream: &UnixStream) -> io::Result<bool> {
     Ok(peer_uid(stream)? == unsafe { libc::geteuid() })
+}
+
+/// Create or verify a current-user-owned, mode-0700 state root.
+pub fn private_root(root: &Path) -> Result<(), crate::HostError> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true).mode(0o700);
+    builder
+        .create(root)
+        .map_err(|e| crate::HostError::Io(e.to_string()))?;
+    let metadata = fs::symlink_metadata(root).map_err(|e| crate::HostError::Io(e.to_string()))?;
+    if !metadata.is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.permissions().mode() & 0o077 != 0
+    {
+        return Err(crate::HostError::Unauthorized);
+    }
+    Ok(())
 }

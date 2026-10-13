@@ -208,7 +208,7 @@ pub(super) fn start_link(
     root: &Path,
     service_override: Option<Arc<dyn IngressService>>,
 ) -> anyhow::Result<(DriverHandle, StableLink)> {
-    std::fs::create_dir_all(root).context("could not create the runtime namespace root")?;
+    waku_runtime::ipc::private_root(root).context("could not verify the private runtime namespace root")?;
     ensure_host(root)?;
     let creds = load_credentials(root).context("the runtime host's identity is unreadable")?;
     let (mut client, hello) = RuntimeClient::controller(root, &creds.controller, &ClientHello::current())
@@ -990,7 +990,7 @@ mod tests {
     fn temp_root(tag: &str) -> PathBuf {
         let root = std::env::temp_dir()
             .join(format!("waku-stable-{tag}-{}", Uuid::new_v4().simple()));
-        std::fs::create_dir_all(&root).unwrap();
+        waku_runtime::ipc::private_root(&root).unwrap();
         root
     }
 

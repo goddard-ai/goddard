@@ -267,7 +267,7 @@ impl Session {
             pending_requests: g
                 .pending
                 .iter()
-                .filter(|(_, p)| p.answer == AnswerDisposition::Pending)
+                .filter(|(_, p)| !p.consumed)
                 .map(|(id, _)| id.clone())
                 .collect(),
             held_commands: g.held.len(),
@@ -313,6 +313,8 @@ pub struct RuntimeHost {
     /// Tombstoned command ids: retained only to keep rejecting.
     expired: HashSet<Uuid>,
     needs_reconcile: bool,
+    unfenced_survivors: HashSet<Uuid>,
+    build_identity: String,
     reconciled: bool,
     persistence_ok: bool,
     admission_open: bool,
@@ -339,6 +341,9 @@ impl RuntimeHost {
         factory: Arc<dyn AdapterFactory>,
         clock: Box<dyn Clock>,
     ) -> Result<Self, HostError> {
+        #[cfg(unix)]
+        crate::ipc::private_root(root)?;
+        #[cfg(not(unix))]
         fs::create_dir_all(root).map_err(io_err)?;
         // The namespace root holds credentials, the journal, and the IPC
         // endpoint — owner-only, like the identity file inside it.
@@ -379,6 +384,8 @@ impl RuntimeHost {
             commands: BTreeMap::new(),
             expired: HashSet::new(),
             needs_reconcile: false,
+            unfenced_survivors: HashSet::new(),
+            build_identity: env!("CARGO_PKG_VERSION").into(),
             reconciled: false,
             persistence_ok: true,
             admission_open: true,
@@ -406,10 +413,11 @@ impl RuntimeHost {
             host.needs_reconcile = !host.sessions.is_empty();
         }
 
-        host.journal_best_effort(JournalRecord::HostStarted {
+        host.journal_record(JournalRecord::HostStarted {
             instance: host.instance,
             namespace: host.namespace.clone(),
-        });
+        })
+        .map_err(|_| HostError::PersistenceUnavailable)?;
 
         // Record the instance in the lock file for observability; the lock
         // itself is the singleton proof.
@@ -427,6 +435,12 @@ impl RuntimeHost {
     /// The credential set controllers and the emergency route use.
     pub fn credentials(&self) -> &Credentials {
         &self.creds
+    }
+
+    /// Set the immutable executable identity during host composition, before IPC publication.
+    pub fn with_build_identity(mut self, build: String) -> Self {
+        self.build_identity = build;
+        self
     }
 
     pub fn instance(&self) -> Uuid {
@@ -551,12 +565,29 @@ impl RuntimeHost {
                 client.protocol_min, client.protocol_max
             )));
         }
+        let mut capabilities = vec!["emergency-stop".into(), "reconfigure".into()];
+        if cfg!(unix) {
+            capabilities.push("private-ipc-v1".into());
+        }
+        if client
+            .capabilities
+            .iter()
+            .any(|required| !capabilities.contains(required))
+        {
+            return Err(HostError::Incompatible(
+                "required capability unavailable".into(),
+            ));
+        }
         Ok(Hello {
             protocol: PROTOCOL_VERSION,
+            protocol_min: PROTOCOL_VERSION,
+            protocol_max: PROTOCOL_VERSION,
+            runtime_build: self.build_identity.clone(),
+            adapter_versions: self.factory.adapter_versions(),
             namespace: self.namespace.clone(),
             runtime_instance: self.instance,
             recovery: self.recovery,
-            capabilities: vec!["emergency-stop".into(), "reconfigure".into()],
+            capabilities,
         })
     }
 
@@ -574,22 +605,25 @@ impl RuntimeHost {
         if self.drained {
             return Err(HostError::Drained);
         }
-        self.epoch = self.next_epoch;
-        self.next_epoch += 1;
+        let epoch = self.next_epoch;
         let window = Uuid::new_v4();
         let expires = self.now() + self.budgets.retry_window_ms;
-        self.windows.insert(window, expires);
-        self.current_window = Some((self.epoch, window, expires));
+
         let grant = ControlGrant {
-            epoch: self.epoch,
+            epoch,
             retry_window_id: window,
             retry_window_expires_at_ms: expires,
         };
-        self.journal_best_effort(JournalRecord::ControllerAcquired {
-            epoch: self.epoch,
+        self.journal_record(JournalRecord::ControllerAcquired {
+            epoch,
             retry_window_id: window,
             expires_at_ms: expires,
-        });
+        })
+        .map_err(|_| HostError::PersistenceUnavailable)?;
+        self.epoch = epoch;
+        self.next_epoch += 1;
+        self.windows.insert(window, expires);
+        self.current_window = Some((epoch, window, expires));
         Ok(grant)
     }
 
@@ -599,9 +633,14 @@ impl RuntimeHost {
         self.check_controller(credential)?;
         self.check_epoch(epoch)?;
         self.pump();
+        self.try_fence_recovered();
+        if !self.unfenced_survivors.is_empty() {
+            return Err(HostError::NotReconciled);
+        }
+        self.journal_record(JournalRecord::Reconciled { epoch })
+            .map_err(|_| HostError::PersistenceUnavailable)?;
         self.reconciled = true;
         self.needs_reconcile = false;
-        self.journal_best_effort(JournalRecord::Reconciled { epoch });
         Ok(self.inventory(epoch))
     }
 
@@ -703,6 +742,9 @@ impl RuntimeHost {
             },
         );
         self.route(env.command_id);
+        if !self.persistence_ok {
+            return Err(HostError::PersistenceUnavailable);
+        }
         Ok(CommandReceipt {
             command_id: env.command_id,
             disposition: self
@@ -746,6 +788,9 @@ impl RuntimeHost {
         self.check_controller(credential)?;
         self.check_epoch(epoch)?;
         self.pump();
+        if !self.persistence_ok {
+            return Err(HostError::PersistenceUnavailable);
+        }
         let session = self
             .sessions
             .get(&cursor.session_id)
@@ -810,12 +855,18 @@ impl RuntimeHost {
         let session = self.sessions.get_mut(&cursor.session_id).unwrap();
         let g = session.generation_at_mut(cursor.generation).unwrap();
         if cursor.applied > g.acknowledged {
-            g.acknowledged = cursor.applied;
-            self.journal_best_effort(JournalRecord::Acknowledged {
+            self.journal_record(JournalRecord::Acknowledged {
                 session_id: cursor.session_id,
                 generation: cursor.generation,
                 applied: cursor.applied,
-            });
+            })
+            .map_err(|_| HostError::PersistenceUnavailable)?;
+            self.sessions
+                .get_mut(&cursor.session_id)
+                .unwrap()
+                .generation_at_mut(cursor.generation)
+                .unwrap()
+                .acknowledged = cursor.applied;
             self.reclaim(cursor.session_id, cursor.generation);
             self.maybe_compact();
         }
@@ -872,6 +923,14 @@ impl RuntimeHost {
                 .sum(),
             journal_bytes: self.journal.bytes(),
             buffered_records: self.pending_journal.len(),
+            unfenced_survivors: self
+                .unfenced_survivors
+                .iter()
+                .map(|id| SessionRef {
+                    session_id: *id,
+                    generation: self.sessions[id].generation(),
+                })
+                .collect(),
         })
     }
 
@@ -907,8 +966,24 @@ impl RuntimeHost {
             // Forced drain reports interruption, not a clean stop.
             self.interrupt_session(id, FenceKind::Drained);
         }
+        self.try_fence_recovered();
+        let mut unconfirmed: Vec<Uuid> = self
+            .sessions
+            .values()
+            .filter(|s| s.adapter.is_some())
+            .map(|s| s.id)
+            .collect();
+        unconfirmed.extend(self.unfenced_survivors.iter().copied());
+        unconfirmed.sort();
+        unconfirmed.dedup();
+        if !unconfirmed.is_empty() {
+            return Ok(DrainReport::Deferred {
+                live_sessions: unconfirmed,
+            });
+        }
+        self.journal_record(JournalRecord::Drained)
+            .map_err(|_| HostError::PersistenceUnavailable)?;
         self.drained = true;
-        self.journal_best_effort(JournalRecord::Drained);
         Ok(DrainReport::Drained { sessions: count })
     }
 
@@ -989,7 +1064,11 @@ impl RuntimeHost {
                 self.now() <= issued.expires_at_ms
                     && bool::from(grant.token.as_bytes().ct_eq(issued.token.as_bytes()))
             });
-        if ok { Ok(target) } else { Err(HostError::Unauthorized) }
+        if ok {
+            Ok(target)
+        } else {
+            Err(HostError::Unauthorized)
+        }
     }
 
     /// Accept one agent request under its session grant. Identity dedup is
@@ -1144,9 +1223,11 @@ impl RuntimeHost {
             .sessions
             .iter()
             .find_map(|(sid, s)| {
-                s.gens
-                    .iter()
-                    .find_map(|g| g.ingress.contains_key(&request_id).then_some((*sid, g.number)))
+                s.gens.iter().find_map(|g| {
+                    g.ingress
+                        .contains_key(&request_id)
+                        .then_some((*sid, g.number))
+                })
             })
             .ok_or(HostError::Malformed("unknown ingress request".into()))?;
         {
@@ -1216,7 +1297,12 @@ impl RuntimeHost {
 
     /// Release a claim by identity. Only the current controller releases;
     /// the claim's absence afterwards is a journaled fact, not a lapse.
-    pub fn release_claim(&mut self, credential: &str, epoch: u64, claim_id: Uuid) -> Result<(), HostError> {
+    pub fn release_claim(
+        &mut self,
+        credential: &str,
+        epoch: u64,
+        claim_id: Uuid,
+    ) -> Result<(), HostError> {
         self.check_controller(credential)?;
         self.check_epoch(epoch)?;
         self.pump();
@@ -1267,7 +1353,8 @@ impl RuntimeHost {
                     return count;
                 };
                 match session.rx.as_ref().map(|rx| rx.try_recv()) {
-                    Some(Ok(event)) => Some(event),
+                    Some(Ok(event)) if !session.current().ended => Some(event),
+                    Some(Ok(_)) => continue,
                     Some(Err(mpsc::TryRecvError::Disconnected))
                         if !session.adapter.as_ref().is_some_and(|a| a.alive()) =>
                     {
@@ -1275,6 +1362,9 @@ impl RuntimeHost {
                         // event — the transport is gone.
                         session.adapter = None;
                         session.rx = None;
+                        if session.current().ended {
+                            return count;
+                        }
                         Some(ProviderEvent::Terminated {
                             reason: TerminateReason::Interrupted {
                                 detail: "provider transport lost".into(),
@@ -1340,6 +1430,26 @@ impl RuntimeHost {
             let g = session.current_mut();
             // One oversized message is refused with a sequenced marker —
             // visible in replay, never a silent gap.
+            let event = match event {
+                ProviderEvent::Terminated {
+                    reason: TerminateReason::Requested,
+                } => match g.fence {
+                    Some(FenceKind::Backpressure) => ProviderEvent::Terminated {
+                        reason: TerminateReason::Backpressure,
+                    },
+                    Some(FenceKind::Drained) | Some(FenceKind::Interrupted) => {
+                        ProviderEvent::Terminated {
+                            reason: TerminateReason::Interrupted {
+                                detail: "provider owner interrupted".into(),
+                            },
+                        }
+                    }
+                    _ => ProviderEvent::Terminated {
+                        reason: TerminateReason::Requested,
+                    },
+                },
+                event => event,
+            };
             let event = if size > self.budgets.max_message_bytes {
                 ProviderEvent::Dropped {
                     reason: DropReason::Oversize,
@@ -1465,7 +1575,10 @@ impl RuntimeHost {
                 && let Some(g) = session.generation_at_mut(generation)
                 && let Some(p) = g.pending.get_mut(request_id)
                 && p.consumed
-                && matches!(p.answer, AnswerDisposition::Uncertain { .. })
+                && matches!(
+                    p.answer,
+                    AnswerDisposition::Attempted | AnswerDisposition::Uncertain { .. }
+                )
             {
                 p.answer = AnswerDisposition::Accepted;
                 reconciled = true;
@@ -1703,13 +1816,22 @@ impl RuntimeHost {
         }
         // Admission is durable before the provider is contacted — a crash
         // between them is reconciled, not rediscovered.
-        self.journal_best_effort(JournalRecord::Admitted {
-            session_id,
-            generation: 1,
-            adapter: adapter.clone(),
-            launch: launch.clone(),
-            requested: requested.clone(),
-        });
+        if self
+            .journal_record(JournalRecord::Admitted {
+                session_id,
+                generation: 1,
+                adapter: adapter.clone(),
+                launch: launch.clone(),
+                requested: requested.clone(),
+            })
+            .is_err()
+        {
+            return self.reject(
+                command_id,
+                RejectCode::InvalidAction,
+                "admission persistence failed; provider was not contacted",
+            );
+        }
         let (tx, rx) = mpsc::sync_channel(self.budgets.channel_depth);
         let ctx = SessionContext {
             session_id,
@@ -1831,16 +1953,31 @@ impl RuntimeHost {
                         "no open turn with that id",
                     );
                 }
-                self.set_disposition(command_id, CommandDisposition::DispatchAttempted);
-                self.journal_best_effort(JournalRecord::DispatchHeld {
-                    session_id,
-                    generation: target.generation,
-                });
+                if self
+                    .journal_record(JournalRecord::DispatchHeld {
+                        session_id,
+                        generation: target.generation,
+                    })
+                    .is_err()
+                {
+                    self.set_disposition(
+                        command_id,
+                        CommandDisposition::Uncertain {
+                            stage: UncertainStage::DispatchUnknown,
+                            detail: "cancel hold was not durable; provider was not contacted"
+                                .into(),
+                        },
+                    );
+                    return;
+                }
                 {
                     let session = self.sessions.get_mut(&session_id).unwrap();
                     let g = session.current_mut();
                     g.hold = true;
                     g.turns.insert(turn_id, TurnState::Cancelling);
+                }
+                if !self.record_dispatch_attempt(command_id) {
+                    return;
                 }
                 let outcome = self
                     .sessions
@@ -2003,13 +2140,25 @@ impl RuntimeHost {
         if let Some((code, detail)) = blocked {
             return self.reject(command_id, code, detail);
         }
-        self.journal_best_effort(JournalRecord::RequestDisposition {
-            session_id,
-            generation: target.generation,
-            request_id: request_id.clone(),
-            disposition: AnswerDisposition::Attempted,
-            consumed: false,
-        });
+        if self
+            .journal_record(JournalRecord::RequestDisposition {
+                session_id,
+                generation: target.generation,
+                request_id: request_id.clone(),
+                disposition: AnswerDisposition::Attempted,
+                consumed: false,
+            })
+            .is_err()
+        {
+            self.set_disposition(
+                command_id,
+                CommandDisposition::Uncertain {
+                    stage: UncertainStage::DispatchUnknown,
+                    detail: "reply intent was not durable; provider was not contacted".into(),
+                },
+            );
+            return;
+        }
         {
             let session = self.sessions.get_mut(&session_id).unwrap();
             let g = session.generation_at_mut(target.generation).unwrap();
@@ -2023,6 +2172,15 @@ impl RuntimeHost {
                 resolution,
             },
         );
+        // Dispatch can synchronously pump consumption evidence. Never
+        // overwrite that evidence with a guessed post-dispatch disposition.
+        if self.sessions[&session_id]
+            .generation_at(target.generation)
+            .and_then(|g| g.pending.get(&request_id))
+            .is_some_and(|p| p.consumed)
+        {
+            return;
+        }
         // The answer-delivery disposition follows the dispatch truth — a
         // separate recorded fact from the controller's decision.
         let answer = match self.commands.get(&command_id).map(|c| &c.disposition) {
@@ -2048,8 +2206,33 @@ impl RuntimeHost {
 
     /// Record dispatch intent, then contact the provider. The order is the
     /// whole point of the journal.
+    fn record_dispatch_attempt(&mut self, command_id: Uuid) -> bool {
+        if self
+            .journal_record(JournalRecord::Disposition {
+                command_id,
+                disposition: CommandDisposition::DispatchAttempted,
+            })
+            .is_err()
+        {
+            self.set_disposition(
+                command_id,
+                CommandDisposition::Uncertain {
+                    stage: UncertainStage::DispatchUnknown,
+                    detail: "dispatch intent was not durable; provider was not contacted".into(),
+                },
+            );
+            return false;
+        }
+        if let Some(command) = self.commands.get_mut(&command_id) {
+            command.disposition = CommandDisposition::DispatchAttempted;
+        }
+        true
+    }
+
     fn dispatch(&mut self, command_id: Uuid, target: SessionRef, action: CanonicalAction) {
-        self.set_disposition(command_id, CommandDisposition::DispatchAttempted);
+        if !self.record_dispatch_attempt(command_id) {
+            return;
+        }
         let outcome = self
             .sessions
             .get_mut(&target.session_id)
@@ -2101,17 +2284,23 @@ impl RuntimeHost {
             .get(&session_id)
             .map(|s| s.generation())
             .unwrap_or(1);
-        self.journal_best_effort(JournalRecord::Fence {
-            session_id,
-            generation,
-            fence,
-        });
+        let recorded_fence = self
+            .sessions
+            .get(&session_id)
+            .and_then(|s| s.current().fence);
+        if recorded_fence.is_none() {
+            self.journal_best_effort(JournalRecord::Fence {
+                session_id,
+                generation,
+                fence,
+            });
+        }
         let held: Vec<Uuid> = {
             let Some(session) = self.sessions.get_mut(&session_id) else {
                 return;
             };
             let g = session.current_mut();
-            g.fence = Some(fence);
+            g.fence = Some(recorded_fence.unwrap_or(fence));
             g.hold = false;
             g.held.drain(..).collect()
         };
@@ -2146,7 +2335,33 @@ impl RuntimeHost {
             if let Some(session) = self.sessions.get_mut(&session_id) {
                 session.adapter = None;
             }
-            self.set_session_status(session_id, SessionStatus::Terminated);
+            // Capture facts already queued before the observed exit. The
+            // adapter must not confirm exit while its intake worker can still
+            // produce pre-terminal facts.
+            loop {
+                let event = self
+                    .sessions
+                    .get(&session_id)
+                    .and_then(|s| s.rx.as_ref())
+                    .and_then(|rx| rx.try_recv().ok());
+                let Some(event) = event else {
+                    break;
+                };
+                if !self.sessions[&session_id].current().ended {
+                    self.ingest(session_id, event);
+                }
+            }
+            if self.sessions[&session_id].current().ended {
+                return;
+            }
+            let reason = match fence {
+                FenceKind::Stop | FenceKind::EmergencyStop => TerminateReason::Requested,
+                FenceKind::Backpressure => TerminateReason::Backpressure,
+                _ => TerminateReason::Interrupted {
+                    detail: "provider owner fenced".into(),
+                },
+            };
+            self.ingest(session_id, ProviderEvent::Terminated { reason });
         }
         // Unconfirmed termination is reported honestly: the session stays
         // Stopping — never claimed stopped.
@@ -2161,7 +2376,12 @@ impl RuntimeHost {
         // Whether or not termination was provable, the session's end was an
         // interruption — that is the truthful final status.
         if was_active {
-            self.set_session_status(session_id, SessionStatus::Interrupted);
+            let status = if self.sessions[&session_id].adapter.is_some() {
+                SessionStatus::Stopping
+            } else {
+                SessionStatus::Interrupted
+            };
+            self.set_session_status(session_id, status);
         }
     }
 
@@ -2170,6 +2390,9 @@ impl RuntimeHost {
             let Some(session) = self.sessions.get_mut(&session_id) else {
                 return;
             };
+            if session.status == status {
+                return;
+            }
             session.status = status;
             session.generation()
         };
@@ -2740,6 +2963,27 @@ impl RuntimeHost {
     /// Crash recovery: surviving sessions keep their history but lose
     /// their owner. They are fenced — never respawned, never replayed —
     /// and their unfinished commands become honestly uncertain.
+    fn try_fence_recovered(&mut self) {
+        let ids: Vec<Uuid> = self.unfenced_survivors.iter().copied().collect();
+        for id in ids {
+            let session = &self.sessions[&id];
+            let owner = crate::adapter::RecoveredOwner {
+                namespace: self.namespace.clone(),
+                session: SessionRef {
+                    session_id: id,
+                    generation: session.generation(),
+                },
+                adapter: session.adapter_name.clone(),
+                launch: session.launch.clone(),
+                effective: session.effective.clone(),
+            };
+            if self.factory.fence_recovered(&owner) == Termination::Confirmed {
+                self.set_session_status(id, SessionStatus::Interrupted);
+                self.unfenced_survivors.remove(&id);
+            }
+        }
+    }
+
     fn fence_survivors(&mut self) -> usize {
         let mut interrupted = 0;
         let ids: Vec<Uuid> = self.sessions.keys().copied().collect();
@@ -2756,13 +3000,14 @@ impl RuntimeHost {
                 {
                     let session = self.sessions.get_mut(&id).unwrap();
                     session.current_mut().fence = Some(FenceKind::Interrupted);
-                    session.status = SessionStatus::Interrupted;
+                    session.status = SessionStatus::Stopping;
                 }
                 self.journal_best_effort(JournalRecord::SessionStatus {
                     session_id: id,
                     generation,
-                    status: SessionStatus::Interrupted,
+                    status: SessionStatus::Stopping,
                 });
+                self.unfenced_survivors.insert(id);
             }
         }
         // Forwarded-but-unresolved agent requests cannot prove their
@@ -2774,9 +3019,8 @@ impl RuntimeHost {
                 for record in g.ingress.values_mut() {
                     if record.disposition == IngressDisposition::Forwarded {
                         record.disposition = IngressDisposition::Uncertain {
-                            detail:
-                                "runtime restarted while the request was with the service"
-                                    .into(),
+                            detail: "runtime restarted while the request was with the service"
+                                .into(),
                         };
                         uncertain.push(record.request_id);
                     }
@@ -2815,6 +3059,7 @@ impl RuntimeHost {
             };
             self.set_disposition(id, disposition);
         }
+        self.try_fence_recovered();
         interrupted
     }
 }
@@ -2887,3 +3132,7 @@ fn load_or_mint_identity(root: &Path, namespace: &str) -> Result<Credentials, Ho
 fn io_err(e: std::io::Error) -> HostError {
     HostError::Io(e.to_string())
 }
+
+#[cfg(test)]
+#[path = "host_qualification_tests.rs"]
+mod qualification_tests;

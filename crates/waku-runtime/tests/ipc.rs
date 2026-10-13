@@ -337,8 +337,10 @@ fn service_binds_the_epoch_it_serves() {
     let rig = serve();
     let mut daemon = rig.controller();
     let grant1 = daemon.acquire_control(&ClientHello::current()).unwrap();
+    let mut old_service = RuntimeClient::service(rig.root.path(), &rig.controller, grant1.epoch, &ClientHello::current()).unwrap().0;
     // Epoch 2 takes over — epoch 1's service can no longer connect.
     let grant2 = daemon.acquire_control(&ClientHello::current()).unwrap();
+    assert!(matches!(old_service.service_drain(grant2.epoch, 0), Err(ClientError::Host(HostError::StaleEpoch { .. }))));
     let stale = RuntimeClient::service(
         rig.root.path(),
         &rig.controller,
@@ -456,4 +458,25 @@ fn claims_and_pending_ingress_reconcile_over_ipc() {
     let inv = &inventory.sessions[0];
     assert_eq!(inv.claims, vec![claim]);
     assert_eq!(inv.pending_ingress.len(), 1);
+}
+
+#[test]
+fn large_detached_history_pages_without_skipping_or_acknowledging_unseen_events() {
+    let rig = serve();
+    let mut daemon = rig.controller();
+    let grant = daemon.acquire_control(&ClientHello::current()).unwrap();
+    let session = rig.admit(&mut daemon, &grant);
+    let fake = rig.factory.for_session(session).unwrap();
+    fake.emit_live();
+    let turn = Uuid::new_v4();
+    for _ in 0..13 { fake.emit_delta(turn, &"x".repeat(750_000)); }
+    let first = daemon.events(grant.epoch, rig.cursor(session, 0), 0).unwrap();
+    assert!(first.events.len() < 14);
+    let applied = first.events.last().unwrap().sequence;
+    assert!(applied < first.high_water);
+    daemon.acknowledge(grant.epoch, rig.cursor(session, applied)).unwrap();
+    let next = daemon.events(grant.epoch, rig.cursor(session, applied), 0).unwrap();
+    assert_eq!(next.events.first().unwrap().sequence, applied + 1);
+    assert_eq!(next.events.last().unwrap().sequence, first.high_water);
+    assert_eq!(first.events.len() + next.events.len(), 14);
 }

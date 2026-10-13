@@ -89,6 +89,11 @@ impl FakeFactory {
 }
 
 impl AdapterFactory for FakeFactory {
+    fn fence_recovered(&self, _: &crate::adapter::RecoveredOwner) -> Termination {
+        // This harness owns no OS children. Never interpret it as provider
+        // crash-cleanup qualification.
+        Termination::Confirmed
+    }
     fn spawn(&self, ctx: SessionContext) -> Result<Box<dyn AdapterHandle>, SpawnError> {
         if let Some(fault) = self.next_spawn_fault.lock().unwrap().take() {
             return Err(fault);

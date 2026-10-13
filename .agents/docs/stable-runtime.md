@@ -119,3 +119,49 @@ credentials), resource broker/credential lease migration onto claims,
 watcher/updater integration and pinned-artifact isolation, truthful
 reconnect surface states in the app projections, measured native callback
 deadlines, non-Unix crash cleanup qualification.
+
+## Independent executable prerequisite
+
+`crates/waku-runtime-host` now owns the production `waku-runtime-host` binary.
+The runtime crate's explicit fake binary is `waku-runtime-fixture`; it is a
+harness, not the independently pinned provider owner. The production launcher
+accepts `start|serve|status|drain --root ABS_PATH --namespace ENV_PROJECT`; flags
+without an operation retain the daemon's existing launch interface. `start`
+copies its executable to a SHA256-addressed, mode-0500 artifact inside the private
+root and detaches that copy. Compatible launches adopt the authenticated live
+instance. Namespace, protocol or instance disagreement never causes replacement.
+No provider resumes or command retries occur during adoption.
+
+This consumes the landed `RuntimeClient`/`RuntimeServer` and ingress vocabulary.
+Discovery is atomically published, private and verified against the live hello;
+both ends verify the OS user. Framing is bounded at 8 MiB, with eight normal
+connections and two reserved emergency connections on a separate private socket.
+Read/write waits and long-polls are bounded. `HostError` uses adjacent `error` and
+`detail` fields: the previous internally tagged encoding could not serialize
+scalar errors such as `Incompatible`, silently closing the handshake instead.
+Clients and servers must be updated together for this private prerelease wire.
+
+Confirmed drain exits the independent owner and removes only its own discovery
+record. Confirmed termination requires quiesced adapter intake. Admission,
+controller acquisition, dispatch intent and acknowledgements fail closed when
+the journal cannot persist. Callback consumption observed during dispatch is
+not overwritten by subsequent bookkeeping. Recovery requires the registered
+factory's `fence_recovered` evidence; the default is unconfirmed, blocks admission
+and drain, and never signals a process from a PID alone.
+
+Verification: `mbx test -p waku-runtime -p waku-runtime-host`. The executable tests
+use disposable roots and prove launcher exit, 25 controller transfers, stale
+instance rejection, and emergency status under saturated normal connections.
+These are harness results. Full aggregate
+metadata budgets, stable tool ingress/grants, daemon event projection and watcher
+build/run lane integration remain independent qualification gates.
+
+
+The production executable now registers Codex and the landed Devin factory
+(using an explicit trusted binary or startup PATH). Hello includes the protocol
+range, runtime package version plus immutable executable SHA256, and declared
+adapter ABI versions. A compatible existing instance missing a required provider
+adapter is preserved and requires explicit drain, never automatic replacement.
+Replay pages fit the 8-MiB frame bound without acknowledging or skipping the
+remaining suffix. See [Codex qualification](stable-runtime-codex.md) for actual
+provider evidence, recovery ownership proof and remaining daemon/tool gates.

@@ -16,7 +16,7 @@
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -31,7 +31,7 @@ enum Role {
     /// Full control authority — the product daemon.
     Controller(String),
     /// The daemon's service endpoint for forwarded agent traffic.
-    Service(String),
+    Service(String, u64),
     /// Narrow local authority: status and emergency stop.
     Emergency(String),
     /// Session-scoped agent ingress.
@@ -51,19 +51,20 @@ struct Inner {
 pub struct RuntimeServer {
     inner: Arc<Inner>,
     accept: Option<JoinHandle<()>>,
+    emergency: Option<JoinHandle<()>>,
     pump: Option<JoinHandle<()>>,
+    root: std::path::PathBuf,
+    instance: uuid::Uuid,
 }
 
 impl RuntimeServer {
     /// Bind the namespace's private socket, publish `endpoint.json`, and
     /// start serving. The host keeps its OS-held singleton lock for the
     /// server's lifetime.
-    pub fn bind(
-        host: RuntimeHost,
-        root: &Path,
-        pump_interval: Duration,
-    ) -> io::Result<Self> {
+    pub fn bind(host: RuntimeHost, root: &Path, pump_interval: Duration) -> io::Result<Self> {
+        let instance = host.instance();
         let listener = ipc::bind(root)?;
+        let emergency_listener = ipc::bind_emergency(root)?;
         ipc::Endpoint::write(root, host.namespace(), host.instance())?;
         let inner = Arc::new(Inner {
             host: Mutex::new(host),
@@ -74,7 +75,13 @@ impl RuntimeServer {
             let inner = inner.clone();
             std::thread::Builder::new()
                 .name("waku-runtime-accept".into())
-                .spawn(move || accept_loop(listener, inner, pump_interval))?
+                .spawn(move || accept_loop(listener, inner, pump_interval, false))?
+        };
+        let emergency = {
+            let inner = inner.clone();
+            std::thread::Builder::new()
+                .name("waku-runtime-emergency".into())
+                .spawn(move || accept_loop(emergency_listener, inner, pump_interval, true))?
         };
         let pump = {
             let inner = inner.clone();
@@ -85,17 +92,36 @@ impl RuntimeServer {
         Ok(Self {
             inner,
             accept: Some(accept),
+            emergency: Some(emergency),
             pump: Some(pump),
+            root: root.into(),
+            instance,
         })
     }
 
     /// Stop accepting and stop the pump. In-flight connection threads
     /// finish their current request and see the flag.
+    pub fn is_shutdown(&self) -> bool {
+        self.inner.shutdown.load(Ordering::Acquire)
+    }
+
     pub fn shutdown(&mut self) {
         self.inner.shutdown.store(true, Ordering::Release);
         self.inner.changed.notify_all();
-        for handle in self.accept.take().into_iter().chain(self.pump.take()) {
+        for handle in self
+            .accept
+            .take()
+            .into_iter()
+            .chain(self.emergency.take())
+            .chain(self.pump.take())
+        {
             let _ = handle.join();
+        }
+        if ipc::Endpoint::load(&self.root).is_ok_and(|endpoint| endpoint.instance == self.instance)
+        {
+            let _ = std::fs::remove_file(ipc::Endpoint::path(&self.root));
+            let _ = std::fs::remove_file(ipc::socket_path(&self.root));
+            let _ = std::fs::remove_file(ipc::emergency_socket_path(&self.root));
         }
     }
 }
@@ -117,7 +143,14 @@ fn pump_loop(inner: Arc<Inner>, interval: Duration) {
     }
 }
 
-fn accept_loop(listener: UnixListener, inner: Arc<Inner>, interval: Duration) {
+fn accept_loop(
+    listener: UnixListener,
+    inner: Arc<Inner>,
+    interval: Duration,
+    emergency_only: bool,
+) {
+    let connections = Arc::new(AtomicUsize::new(0));
+    let limit = if emergency_only { 2 } else { 8 };
     let _ = listener.set_nonblocking(true);
     loop {
         if inner.shutdown.load(Ordering::Acquire) {
@@ -134,10 +167,27 @@ fn accept_loop(listener: UnixListener, inner: Arc<Inner>, interval: Duration) {
                 if !ipc::same_user(&stream).unwrap_or(false) {
                     continue;
                 }
+                if connections.load(Ordering::Acquire) >= limit {
+                    continue;
+                }
+                connections.fetch_add(1, Ordering::AcqRel);
+                let count = connections.clone();
                 let inner = inner.clone();
-                let _ = std::thread::Builder::new()
+                let spawned = std::thread::Builder::new()
                     .name("waku-runtime-conn".into())
-                    .spawn(move || handle_conn(stream, inner));
+                    .spawn(move || {
+                        struct Slot(Arc<AtomicUsize>);
+                        impl Drop for Slot {
+                            fn drop(&mut self) {
+                                self.0.fetch_sub(1, Ordering::AcqRel);
+                            }
+                        }
+                        let _slot = Slot(count);
+                        handle_conn(stream, inner, emergency_only);
+                    });
+                if spawned.is_err() {
+                    connections.fetch_sub(1, Ordering::AcqRel);
+                }
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => std::thread::sleep(interval),
             Err(_) => return,
@@ -153,14 +203,19 @@ fn error(error: HostError) -> WireResponse {
     WireResponse::Error { error }
 }
 
-fn handle_conn(mut stream: UnixStream, inner: Arc<Inner>) {
+fn handle_conn(mut stream: UnixStream, inner: Arc<Inner>, emergency_only: bool) {
     // A bounded read timeout lets connection threads notice shutdown; a
     // timeout is a retry, never a disconnect.
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
     let connect: Connect = match ipc::recv(&mut stream) {
         Ok(Some(c)) => c,
         _ => return,
     };
+    if emergency_only && !matches!(&connect.auth, ConnectAuth::Emergency { .. }) {
+        let _ = send(&mut stream, &error(HostError::Unauthorized));
+        return;
+    }
     let role = {
         let mut host = inner.host.lock().unwrap();
         if connect.namespace != host.namespace() {
@@ -168,21 +223,27 @@ fn handle_conn(mut stream: UnixStream, inner: Arc<Inner>) {
             return;
         }
         match &connect.auth {
-            ConnectAuth::Controller {
-                credential,
-                client,
-            } => match host.hello(credential, client) {
-                Ok(hello) => {
-                    if send(&mut stream, &WireResponse::Hello { hello: Box::new(hello) }).is_err() {
+            ConnectAuth::Controller { credential, client } => {
+                match host.hello(credential, client) {
+                    Ok(hello) => {
+                        if send(
+                            &mut stream,
+                            &WireResponse::Hello {
+                                hello: Box::new(hello),
+                            },
+                        )
+                        .is_err()
+                        {
+                            return;
+                        }
+                        Role::Controller(credential.clone())
+                    }
+                    Err(e) => {
+                        let _ = send(&mut stream, &error(e));
                         return;
                     }
-                    Role::Controller(credential.clone())
                 }
-                Err(e) => {
-                    let _ = send(&mut stream, &error(e));
-                    return;
-                }
-            },
+            }
             ConnectAuth::Service {
                 credential,
                 epoch,
@@ -197,12 +258,17 @@ fn handle_conn(mut stream: UnixStream, inner: Arc<Inner>) {
                     .filter(|_| *epoch == host.epoch());
                 match result {
                     Some(hello) => {
-                        if send(&mut stream, &WireResponse::Hello { hello: Box::new(hello) })
-                            .is_err()
+                        if send(
+                            &mut stream,
+                            &WireResponse::Hello {
+                                hello: Box::new(hello),
+                            },
+                        )
+                        .is_err()
                         {
                             return;
                         }
-                        Role::Service(credential.clone())
+                        Role::Service(credential.clone(), *epoch)
                     }
                     None => {
                         let _ = send(&mut stream, &error(HostError::Unauthorized));
@@ -212,9 +278,12 @@ fn handle_conn(mut stream: UnixStream, inner: Arc<Inner>) {
             }
             ConnectAuth::Emergency { credential } => match host.status(credential) {
                 Ok(status) => {
-                    if send(&mut stream, &WireResponse::Status {
-                        status: Box::new(status),
-                    })
+                    if send(
+                        &mut stream,
+                        &WireResponse::Status {
+                            status: Box::new(status),
+                        },
+                    )
                     .is_err()
                     {
                         return;
@@ -248,18 +317,28 @@ fn handle_conn(mut stream: UnixStream, inner: Arc<Inner>) {
             Ok(Some(r)) => r,
             Ok(None) => return,
             Err(e)
-                if e.kind() == io::ErrorKind::WouldBlock
-                    || e.kind() == io::ErrorKind::TimedOut =>
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut =>
             {
                 continue;
             }
-            Err(e) => {
-                eprintln!("waku-runtime: dropping connection: {e}");
+            Err(_) => {
+                eprintln!("waku-runtime: dropping malformed or closed connection");
                 return;
             }
         };
         let response = respond(&inner, &role, request);
-        if send(&mut stream, &response).is_err() {
+        let drained = matches!(
+            response,
+            WireResponse::Drain {
+                report: DrainReport::Drained { .. }
+            }
+        );
+        let delivered = send(&mut stream, &response);
+        if drained {
+            inner.shutdown.store(true, Ordering::Release);
+            inner.changed.notify_all();
+        }
+        if delivered.is_err() {
             return;
         }
     }
@@ -275,9 +354,18 @@ fn respond(inner: &Arc<Inner>, role: &Role, request: WireRequest) -> WireRespons
         };
     }
     macro_rules! service {
-        () => {
+        ($epoch:expr) => {
             match role {
-                Role::Service(credential) => credential,
+                Role::Service(credential, bound_epoch) => {
+                    let current = inner.host.lock().unwrap().epoch();
+                    if current != *bound_epoch || $epoch != *bound_epoch {
+                        return error(HostError::StaleEpoch {
+                            current,
+                            presented: *bound_epoch,
+                        });
+                    }
+                    credential
+                }
                 _ => return error(HostError::Unauthorized),
             }
         };
@@ -287,9 +375,7 @@ fn respond(inner: &Arc<Inner>, role: &Role, request: WireRequest) -> WireRespons
             let credential = controller!();
             let mut host = inner.host.lock().unwrap();
             host.hello(credential, &client)
-                .map(|h| WireResponse::Hello {
-                    hello: Box::new(h),
-                })
+                .map(|h| WireResponse::Hello { hello: Box::new(h) })
                 .unwrap_or_else(error)
         }
         WireRequest::AcquireControl { client } => {
@@ -328,15 +414,36 @@ fn respond(inner: &Arc<Inner>, role: &Role, request: WireRequest) -> WireRespons
             wait_ms,
         } => {
             let credential = controller!();
-            let deadline = Instant::now() + Duration::from_millis(wait_ms);
+            let deadline = Instant::now() + Duration::from_millis(wait_ms.min(30_000));
             loop {
                 let mut host = inner.host.lock().unwrap();
                 match host.events(credential, epoch, cursor) {
-                    Ok(page) => {
-                        if !page.events.is_empty()
-                            || wait_ms == 0
-                            || Instant::now() >= deadline
-                        {
+                    Ok(mut page) => {
+                        if !page.events.is_empty() || wait_ms == 0 || Instant::now() >= deadline {
+                            // Keep the original high-water mark. The omitted suffix
+                            // remains journaled and is fetched after the last applied
+                            // sequence; pagination never acknowledges unseen events.
+                            let mut bytes = 8192usize;
+                            let mut count = 0;
+                            for event in &page.events {
+                                let size = match serde_json::to_vec(event) {
+                                    Ok(value) => value.len(),
+                                    Err(_) => {
+                                        return error(HostError::Malformed("event encoding".into()));
+                                    }
+                                };
+                                if bytes.saturating_add(size + 1) > ipc::MAX_FRAME_BYTES {
+                                    break;
+                                }
+                                bytes += size + 1;
+                                count += 1;
+                            }
+                            if count == 0 && !page.events.is_empty() {
+                                return error(HostError::Capacity(
+                                    "event exceeds IPC frame budget".into(),
+                                ));
+                            }
+                            page.events.truncate(count);
                             return WireResponse::Page {
                                 page: Box::new(page),
                             };
@@ -358,7 +465,7 @@ fn respond(inner: &Arc<Inner>, role: &Role, request: WireRequest) -> WireRespons
         }
         WireRequest::Status => {
             let credential = match role {
-                Role::Controller(c) | Role::Service(c) | Role::Emergency(c) => c,
+                Role::Controller(c) | Role::Service(c, _) | Role::Emergency(c) => c,
                 Role::Agent(_) => return error(HostError::Unauthorized),
             };
             let mut host = inner.host.lock().unwrap();
@@ -393,9 +500,7 @@ fn respond(inner: &Arc<Inner>, role: &Role, request: WireRequest) -> WireRespons
             let credential = controller!();
             let mut host = inner.host.lock().unwrap();
             host.issue_grant(credential, epoch, session, ttl_ms)
-                .map(|g| WireResponse::Grant {
-                    grant: Box::new(g),
-                })
+                .map(|g| WireResponse::Grant { grant: Box::new(g) })
                 .unwrap_or_else(error)
         }
         WireRequest::RegisterClaim { epoch, claim } => {
@@ -413,8 +518,8 @@ fn respond(inner: &Arc<Inner>, role: &Role, request: WireRequest) -> WireRespons
                 .unwrap_or_else(error)
         }
         WireRequest::ServiceDrain { epoch, wait_ms } => {
-            let credential = service!();
-            let deadline = Instant::now() + Duration::from_millis(wait_ms);
+            let credential = service!(epoch);
+            let deadline = Instant::now() + Duration::from_millis(wait_ms.min(30_000));
             loop {
                 let mut host = inner.host.lock().unwrap();
                 match host.ingress_drain(credential, epoch) {
@@ -435,7 +540,7 @@ fn respond(inner: &Arc<Inner>, role: &Role, request: WireRequest) -> WireRespons
             request_id,
             outcome,
         } => {
-            let credential = service!();
+            let credential = service!(epoch);
             let mut host = inner.host.lock().unwrap();
             host.ingress_resolve(credential, epoch, request_id, outcome)
                 .map(|r| WireResponse::Ingress {
@@ -475,7 +580,7 @@ fn respond(inner: &Arc<Inner>, role: &Role, request: WireRequest) -> WireRespons
                 Role::Agent(grant) => grant,
                 _ => return error(HostError::Unauthorized),
             };
-            let deadline = Instant::now() + Duration::from_millis(wait_ms);
+            let deadline = Instant::now() + Duration::from_millis(wait_ms.min(30_000));
             loop {
                 let mut host = inner.host.lock().unwrap();
                 match host.ingress_query(grant, request_id) {

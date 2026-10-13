@@ -207,6 +207,8 @@ pub struct Journal {
     /// The tail was torn/corrupt and truncated on open.
     tail_corrupt: bool,
     fault: Option<JournalFault>,
+    #[cfg(test)]
+    pub(crate) fail_on: Option<fn(&JournalRecord) -> bool>,
 }
 
 impl Journal {
@@ -274,6 +276,8 @@ impl Journal {
                 floor_ms: floor,
                 tail_corrupt,
                 fault,
+                #[cfg(test)]
+                fail_on: None,
             },
             frames,
         ))
@@ -294,6 +298,10 @@ impl Journal {
     /// Append one record durably. Fails rather than pretending: the caller
     /// treats any error as "not accepted" and closes new work accordingly.
     pub fn append(&mut self, at_ms: u64, record: JournalRecord) -> Result<(), JournalError> {
+        #[cfg(test)]
+        if self.fail_on.is_some_and(|predicate| predicate(&record)) {
+            return Err(JournalError::Injected);
+        }
         if self
             .fault
             .as_ref()

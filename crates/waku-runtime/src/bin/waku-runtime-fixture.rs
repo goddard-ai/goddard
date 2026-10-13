@@ -1,9 +1,5 @@
-//! `waku-runtime-host` — the stable provider host executable.
-//!
-//! A dedicated process with an independently pinned artifact: it owns
-//! provider children, the durable journal, and the private IPC endpoint,
-//! and it does not exit because its parent app, daemon, or watcher did.
-//! The daemon and app attach as replaceable controllers.
+//! Explicit fake-host fixture for IPC qualification tests.
+//! The independently pinned production launcher lives in waku-runtime-host.
 
 use std::path::PathBuf;
 use std::process::ExitCode;

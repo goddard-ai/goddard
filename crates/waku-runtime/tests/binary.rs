@@ -18,7 +18,7 @@ use waku_runtime::ipc::Endpoint;
 
 const NS: &str = "binary-test-ns";
 
-const HOST: &str = env!("CARGO_BIN_EXE_waku-runtime-host");
+const HOST: &str = env!("CARGO_BIN_EXE_waku-runtime-fixture");
 
 struct TestRoot(PathBuf);
 
