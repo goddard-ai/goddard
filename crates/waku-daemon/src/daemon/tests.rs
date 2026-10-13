@@ -19129,6 +19129,86 @@ fn plan_delivery_runtime_delivers_before_execution_and_recovers_exact_revision()
 }
 
 #[test]
+fn plan_delivery_restored_accepted_attempts_do_not_replay_work_or_require_ack() {
+    use waku_protocol::boss::PlanReadinessPhase;
+    for phase in ["ready", "delivered"] {
+        let root = std::env::temp_dir().join(format!("plan-restore-{}", Uuid::new_v4()));
+        let (mut backend, session_id) = runtime_generation_launch_fixture(&root, true);
+        runtime_generation_configure_launch(&mut backend, &root);
+        let plan = boss_plan("plans/restored-bound.md", &[]);
+        backend.boss.add_plan(plan.clone()).unwrap();
+        let reviewed = review_plan_fixture(&backend, &plan.plan_file);
+        backend
+            .boss
+            .finalize_plan(&plan.plan_file, None, 1, &reviewed)
+            .unwrap();
+        backend
+            .boss
+            .set_employee_plan(session_id, Some(Some(plan.plan_file.clone())), None)
+            .unwrap();
+        let binding = backend
+            .boss
+            .employee(session_id)
+            .unwrap()
+            .plan_binding
+            .unwrap();
+        let capture = Arc::new(CaptureDriver::default());
+        let raw = capture.clone();
+        backend.runtime_test_start = Some(Arc::new(move |_, _, _| {
+            Ok(DriverHandle::from_control(raw.clone()))
+        }));
+        let source = EventSink::detached();
+        let (generation, driver) = backend.ensure_agent_runtime(session_id, &source).unwrap();
+        driver.prompt("ACCEPTED_BRIEF_SENTINEL".into());
+        let gate = backend.sessions.lock()[&session_id]
+            .plan_gate
+            .clone()
+            .unwrap();
+        gate.observe(&DriverEvent::TurnStarted);
+        assert!(gate.delivered());
+        let storage = dunce::canonicalize(backend.task_store.path().parent().unwrap()).unwrap();
+        let directory = storage.join("plan-delivery").join(session_id.to_string());
+        let attempt = std::fs::read_to_string(directory.join("current-attempt")).unwrap();
+        let record = directory.join(attempt.trim()).join("delivery.json");
+        let mut stored: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+        stored["receipt"]["phase"] = phase.into();
+        stored["receipt"]["acknowledged"] = false.into();
+        // Accepted-phase leftovers cannot become a second execution on restore.
+        stored["withheld"] = serde_json::json!([["ACCEPTED_BRIEF_SENTINEL", []]]);
+        std::fs::write(&record, serde_json::to_vec(&stored).unwrap()).unwrap();
+        drop_detached(backend.remove_runtime(session_id, Some(generation), false));
+        let (fresh_generation, fresh) = backend.ensure_agent_runtime(session_id, &source).unwrap();
+        assert_ne!(generation, fresh_generation);
+        assert_eq!(capture.prompts.lock().len(), 1, "{phase}");
+        fresh.prompt("RESTORED_ASSIGNMENT_SENTINEL".into());
+        let input = capture.prompts.lock()[1].clone();
+        assert!(input.contains("# Reviewed fixture\n"));
+        assert!(input.contains("RESTORED_ASSIGNMENT_SENTINEL"));
+        assert!(!input.contains("ACCEPTED_BRIEF_SENTINEL"));
+        let fresh_gate = backend.sessions.lock()[&session_id]
+            .plan_gate
+            .clone()
+            .unwrap();
+        assert!(!fresh_gate.delivered());
+        fresh_gate.observe(&DriverEvent::TurnStarted);
+        let employee = backend.boss.employee(session_id).unwrap();
+        let readiness = employee.plan_readiness.unwrap();
+        assert_eq!(employee.plan_binding.as_ref(), Some(&binding));
+        assert_eq!(readiness.binding, binding);
+        assert_eq!(readiness.phase, PlanReadinessPhase::Delivered);
+        assert!(readiness.delivered);
+        assert!(!readiness.acknowledged);
+        fresh.prompt("FOLLOWUP_SENTINEL".into());
+        assert_eq!(capture.prompts.lock().len(), 3);
+        assert!(!capture.prompts.lock()[2].contains("# Reviewed fixture\n"));
+        backend.shutdown();
+        drop(backend);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
 fn plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     for (provider, environment, supported) in [

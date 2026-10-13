@@ -15,6 +15,8 @@ use waku_protocol::boss::{
 const COMPLETE_INPUT_BYTES: usize = 256 * 1024;
 const SECTION_BYTES: usize = 8 * 1024;
 
+const DELIVERY_INSTRUCTION: &str = "Required-plan delivery is confirmed by the adapter accepting the complete approved text and assignment. No employee acknowledgement command or acknowledgement line is required or supported; acknowledged=false is a historical field and does not block a delivered attempt. An artifact digest alone is not delivery evidence. Preserve the approved binding and all assignment restrictions; report conflicting instructions to your supervisor rather than fabricating acknowledgement.";
+
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -215,7 +217,7 @@ impl Review {
     fn execution_input(&self, brief: &str) -> String {
         let revision = &self.receipt.revision;
         format!(
-            "{}\nApproved plan delivery — the complete approved revision is the authoritative specification for this assignment. Exact-version reread artifact: {}. Execution workspace: {}. Work only in this current assigned workspace; earlier workspace locators are historical.\nOwner: {}; plan: {}; approved revision: {}; approval actor: human; approved at: {}; SHA-256: {}; bytes: {}.\nAssignment: {}; attempt: {}; runtime generation: {}.\n\nComplete approved text (authoritative; identical to the bound artifact):\n{}\n\nImplementation assignment:\n{}",
+            "{}\n{DELIVERY_INSTRUCTION}\nApproved plan delivery — the complete approved revision is the authoritative specification for this assignment. Exact-version reread artifact: {}. Execution workspace: {}. Work only in this current assigned workspace; earlier workspace locators are historical.\nOwner: {}; plan: {}; approved revision: {}; approval actor: human; approved at: {}; SHA-256: {}; bytes: {}.\nAssignment: {}; attempt: {}; runtime generation: {}.\n\nComplete approved text (authoritative; identical to the bound artifact):\n{}\n\nImplementation assignment:\n{}",
             self.receipt.blocker_instruction(),
             self.receipt.artifact.display(),
             self.receipt.execution_workspace.display(),
@@ -237,7 +239,7 @@ impl Review {
     /// surface addressable without resending the approved bytes.
     fn followup_input(&self, prompt: &str) -> String {
         format!(
-            "{}\nApproved plan reread artifact: {} (revision {}, SHA-256 {}).\n\n{}",
+            "{}\n{DELIVERY_INSTRUCTION}\nApproved plan reread artifact: {} (revision {}, SHA-256 {}).\n\n{}",
             self.receipt.blocker_instruction(),
             self.receipt.artifact.display(),
             self.receipt.revision.id,

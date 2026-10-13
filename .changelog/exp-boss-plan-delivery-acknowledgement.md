@@ -1,0 +1,1 @@
+- Boss employee instructions and CLI help now explain that verified approved-plan delivery does not require a separate employee acknowledgement; existing assignment restrictions still apply.

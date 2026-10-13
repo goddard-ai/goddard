@@ -18,7 +18,14 @@ caps and human preferences. Employees own execution, watching, commits and merge
 delegates those jobs. errand finishes report upward; goal completion is visible in Goals
 without a routine success report; actionable blockers still report upward. Employees cannot prompt or steer supervisors; results are delivered at turn end. Persona names resolve exactly;
 use UUIDs if ambiguous. Project selection does not grant private memory access. Plan
-finalization freezes the human-approved document, never replaces human review. Commit project
+finalization freezes the human-approved document, never replaces human review. Required-plan
+delivery uses adapter-confirmed acceptance of the complete approved text and assignment.
+phase=delivered with delivered=true satisfies that delivery gate; acknowledged=false is
+historical evidence, not missing human approval. No employee acknowledgement command or
+PLAN-ACK line is required or supported. Preparing/blocked attempts remain unconfirmed;
+an artifact digest alone cannot establish delivery. Assignment restrictions still apply.
+Restored or adopted work revalidates the approved binding and current workspace through
+a fresh delivery attempt; it does not authorize changing the plan or fabricating evidence. Commit project
 documentation; publish Boss-facing reports as deliverables. On errors, correct the named input,
 consult that command's --help or --schema, and retry only when safe; do not automatically
 replay a mutation after losing its response."#;
