@@ -292,6 +292,15 @@ impl Waku {
                     }
                 }
             }
+            DriverEvent::ConfigActivated {
+                provider,
+                model,
+                reasoning_effort,
+            } => {
+                if let Some(session) = self.state.session_mut(session_id) {
+                    project_effective_config(session, provider.as_deref(), model, reasoning_effort);
+                }
+            }
             DriverEvent::AgentPresetSelected(agent_preset) => {
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.agent_preset = agent_preset;
@@ -1478,6 +1487,30 @@ pub(super) fn push_transcript_activity(
     }
 }
 
+/// Mirror the daemon's confirmed selection. Missing adapter observations do
+/// not clear a pinned selection, and unknown provider ids are not a retarget.
+fn project_effective_config(
+    session: &mut AgentSession,
+    provider: Option<&str>,
+    model: Option<String>,
+    reasoning_effort: Option<String>,
+) {
+    if let Some(provider) = provider.and_then(|id| {
+        ProviderKind::ALL
+            .iter()
+            .copied()
+            .find(|kind| kind.id() == id)
+    }) {
+        session.provider = provider;
+    }
+    if let Some(model) = model {
+        session.model = Some(model);
+    }
+    if let Some(effort) = reasoning_effort {
+        session.reasoning_effort = Some(effort);
+    }
+}
+
 pub(super) fn stream_delta_kind(event: &DriverEvent) -> Option<StreamDeltaKind> {
     match event {
         DriverEvent::TextDelta(_) => Some(StreamDeltaKind::Text),
@@ -1652,4 +1685,33 @@ fn text_delta_rejoins(previous: &str, delta: &str) -> bool {
         .is_some_and(|c| !matches!(c, '.' | '!' | '?' | ':' | '…'));
     let opens_fresh = delta.chars().next().is_some_and(char::is_uppercase);
     ends_mid_thought && !opens_fresh
+}
+
+#[cfg(test)]
+mod config_activation_tests {
+    use super::*;
+
+    #[test]
+    fn config_activation_projects_confirmed_fields_without_clearing_missing_selection() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.model = Some("pinned".into());
+        session.reasoning_effort = Some("high".into());
+        project_effective_config(&mut session, Some("unknown-provider"), None, None);
+        assert_eq!(session.provider, ProviderKind::Codex);
+        assert_eq!(session.model.as_deref(), Some("pinned"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+        project_effective_config(
+            &mut session,
+            Some("claude"),
+            Some("confirmed".into()),
+            Some("low".into()),
+        );
+        assert_eq!(session.provider, ProviderKind::Claude);
+        assert_eq!(session.model.as_deref(), Some("confirmed"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("low"));
+        project_effective_config(&mut session, None, Some("next".into()), None);
+        assert_eq!(session.provider, ProviderKind::Claude);
+        assert_eq!(session.model.as_deref(), Some("next"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("low"));
+    }
 }
