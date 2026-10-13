@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{Context as _, bail};
 
 #[derive(Default)]
 struct SubmissionQueue {
@@ -58,6 +58,15 @@ pub(crate) fn submit(
     )?;
     clean(source)?;
     no_operation(source)?;
+    // A submitting worktree attached to the QA branch would drive it
+    // directly — its rebase and commit move the branch without any landing
+    // checkout — so it must submit from a detached head like everyone else.
+    let source_branch = git_text(source, &["branch", "--show-current"])?;
+    if source_branch.trim() == branch {
+        bail!(
+            "the submitting worktree is itself checked out on the QA branch {branch:?}; detach it before submitting"
+        );
+    }
     let source_head = git_text(source, &["rev-parse", "--verify", "HEAD"])?;
     let source_head = source_head.trim().to_owned();
     let target = target.trim().to_owned();
@@ -95,24 +104,48 @@ pub(crate) fn submit(
     clean(source).context("the submitting worktree changed during verification")?;
     no_operation(source)?;
 
-    let dev_worktree = find_branch_worktree(&root, branch)?.ok_or_else(|| {
-        anyhow!("no checked-out worktree owns the configured QA branch {branch:?}")
-    })?;
+    let dev_worktrees = find_branch_worktrees(&root, branch)?;
+    let [dev_worktree] = dev_worktrees.as_slice() else {
+        if dev_worktrees.is_empty() {
+            bail!("no checked-out worktree owns the configured QA branch {branch:?}");
+        }
+        // Two checkouts on the QA branch means the first `worktree list`
+        // match is arbitrary — landings fast-forward whichever Git happens
+        // to name and strand the other's index at an older tip, where its
+        // staged state becomes a revert of everything landed since. Fail
+        // closed rather than pick one.
+        bail!(
+            "the QA branch {branch:?} is checked out in multiple worktrees; \
+             reconcile it to a single landing checkout before submitting:\n{}",
+            dev_worktrees
+                .iter()
+                .map(|worktree| worktree.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    };
     // Unrelated untracked files do not prevent a fast-forward. Git itself
     // rejects any that would be overwritten, preserving the landing checkout.
-    clean_status(&dev_worktree, "no", "QA landing checkout")?;
-    no_operation(&dev_worktree)?;
-    let actual_branch = git_text(&dev_worktree, &["branch", "--show-current"])?;
-    let actual_head = git_text(&dev_worktree, &["rev-parse", "--verify", "HEAD"])?;
+    clean_status(dev_worktree, "no", "QA landing checkout")?;
+    no_operation(dev_worktree)?;
+    let actual_branch = git_text(dev_worktree, &["branch", "--show-current"])?;
+    let actual_head = git_text(dev_worktree, &["rev-parse", "--verify", "HEAD"])?;
     if actual_branch.trim() != branch || actual_head.trim() != target {
         bail!("the QA checkout changed during submission; nothing was landed, retry merge submit");
     }
-    let merge = git_status(&dev_worktree, &["merge", "--ff-only", &rebased_head])?;
+    let merge = git_status(dev_worktree, &["merge", "--ff-only", &rebased_head])?;
     if !merge.status.success() {
         bail!(
             "could not fast-forward the QA landing checkout at {}: {}",
             dev_worktree.display(),
             command_error(&merge)
+        );
+    }
+    let landed_head = git_text(dev_worktree, &["rev-parse", "--verify", "HEAD"])?;
+    if landed_head.trim() != rebased_head {
+        bail!(
+            "the QA landing checkout at {} did not fast-forward to the submitted commit",
+            dev_worktree.display()
         );
     }
     Ok(rebased_head)
@@ -244,17 +277,20 @@ fn run_verification_command(cwd: &Path, command: &str) -> anyhow::Result<std::pr
         .with_context(|| format!("could not run verification command {command:?}"))
 }
 
-fn find_branch_worktree(root: &Path, branch: &str) -> anyhow::Result<Option<PathBuf>> {
+fn find_branch_worktrees(root: &Path, branch: &str) -> anyhow::Result<Vec<PathBuf>> {
     let listing = git_text(root, &["worktree", "list", "--porcelain", "-z"])?;
+    let mut worktrees = Vec::new();
     let mut path = None;
     for field in listing.split('\0') {
         if let Some(worktree) = field.strip_prefix("worktree ") {
             path = Some(PathBuf::from(worktree));
-        } else if field == format!("branch refs/heads/{branch}") {
-            return Ok(path);
+        } else if field == format!("branch refs/heads/{branch}")
+            && let Some(path) = path.take()
+        {
+            worktrees.push(path);
         }
     }
-    Ok(None)
+    Ok(worktrees)
 }
 
 pub(crate) fn is_ancestor(cwd: &Path, ancestor: &str, descendant: &str) -> anyhow::Result<bool> {
@@ -518,6 +554,50 @@ mod tests {
             std::fs::read_to_string(project.join("unit.txt")).unwrap(),
             "local work\n"
         );
+    }
+
+    #[test]
+    fn submission_refuses_a_second_qa_checkout() {
+        let (_root, project, employee, base) = landing_fixture();
+        // `symbolic-ref` bypasses the checked-out-branch guard, leaving two
+        // worktrees that both claim `dev` — landing in the first `worktree
+        // list` match would strand the other's index as a staged revert.
+        let dupe = project.with_file_name("dupe");
+        git(
+            &project,
+            &["worktree", "add", "--detach", dupe.to_str().unwrap(), "dev"],
+        );
+        git(&dupe, &["symbolic-ref", "HEAD", "refs/heads/dev"]);
+        assert!(git(&dupe, &["status", "--porcelain"]).is_empty());
+
+        let error = submit(&project, &employee, Some(&base), "dev")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("multiple worktrees"), "{error}");
+        assert!(error.contains(project.to_str().unwrap()), "{error}");
+        assert!(error.contains(dupe.to_str().unwrap()), "{error}");
+        assert_eq!(git(&project, &["rev-parse", "dev"]).trim(), base);
+        assert!(employee.join("unit.txt").exists());
+    }
+
+    #[test]
+    fn submission_refuses_a_submitting_worktree_on_the_qa_branch() {
+        let (_root, project, employee, base) = landing_fixture();
+        // Attached to the QA branch, the worktree's own commits and rebases
+        // drive it directly — no landing checkout, no verification gate.
+        git(&employee, &["symbolic-ref", "HEAD", "refs/heads/dev"]);
+        git(&employee, &["reset", "--hard", "HEAD"]);
+        let unit = commit(&employee, "unit2.txt", "unit2\n", "feat: employee unit");
+        assert_eq!(git(&project, &["rev-parse", "dev"]).trim(), unit);
+
+        let error = submit(&project, &employee, Some(&base), "dev")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("submitting worktree"), "{error}");
+        assert!(error.contains("QA branch"), "{error}");
+        assert_eq!(git(&project, &["rev-parse", "dev"]).trim(), unit);
     }
 
     #[test]

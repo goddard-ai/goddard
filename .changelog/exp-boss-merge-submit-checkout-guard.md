@@ -1,0 +1,1 @@
+- **Merge submit:** `goddard-agent merge submit` now refuses to land when the QA branch is checked out in more than one worktree, or when the submitting worktree itself sits on the QA branch, instead of fast-forwarding whichever checkout it found first.
