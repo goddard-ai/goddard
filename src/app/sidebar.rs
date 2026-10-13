@@ -272,14 +272,35 @@ fn session_group_header(theme: &Theme, height: f32) -> Div {
         .text_color(theme.text_secondary)
 }
 
-fn sidebar_group_header_shows_spinner(has_unread: bool, has_working: bool) -> bool {
-    has_working && !has_unread
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SidebarGroupHeaderStatus {
+    None,
+    Queued,
+    Working,
+    Unread,
+}
+
+fn sidebar_group_header_status(
+    has_unread: bool,
+    has_working: bool,
+    queued_count: usize,
+) -> SidebarGroupHeaderStatus {
+    if has_unread {
+        SidebarGroupHeaderStatus::Unread
+    } else if has_working {
+        SidebarGroupHeaderStatus::Working
+    } else if queued_count > 0 {
+        SidebarGroupHeaderStatus::Queued
+    } else {
+        SidebarGroupHeaderStatus::None
+    }
 }
 
 /// One boss-employee section — Building, Helping, or Employees — nested under its boss
 /// row: the header, the working members, then the finished tail capped by a
 /// "name finished ago" fold row. A collapsed group renders just its header —
-/// the header aggregates its hidden members' unread and working state, and
+/// the header aggregates its hidden members' unread, queued, and working
+/// state, and
 /// the at-least-one-member rule only applies to an expanded group.
 fn append_sidebar_employee_group(
     rows: &mut Vec<SidebarRow>,
@@ -4753,6 +4774,25 @@ impl Waku {
                         .iter()
                         .any(|session_id| self.boss_ui.working.contains(session_id))
                 });
+        let queued_count = if collapsed
+            && matches!(
+                group,
+                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees
+            )
+        {
+            self.sidebar_collapsed_group_members
+                .borrow()
+                .get(&group)
+                .map_or(0, |members| {
+                    members
+                        .iter()
+                        .filter(|session_id| self.boss_ui.queued.contains_key(session_id))
+                        .count()
+                })
+        } else {
+            0
+        };
+        let header_status = sidebar_group_header_status(has_unread, has_working, queued_count);
         let group_key = group.element_key();
         let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
         let header_focus = self
@@ -5195,28 +5235,36 @@ impl Waku {
         // A folded employee group reports work in flight with the spinner
         // its hidden rows would carry, in the same accent a working row
         // earns from `status_color`.
-        .when(
-            sidebar_group_header_shows_spinner(has_unread, has_working),
-            |element| {
-                element.child(
-                    div()
-                        .flex_none()
-                        .size(px(12.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(motion::spin_slow(icon(
-                            "icons/loader-circle.svg",
-                            12.0,
-                            theme.accent,
-                        ))),
-                )
-            },
-        )
+        .when(header_status == SidebarGroupHeaderStatus::Working, |element| {
+            element.child(
+                div()
+                    .flex_none()
+                    .size(px(12.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(motion::spin_slow(icon(
+                        "icons/loader-circle.svg",
+                        12.0,
+                        theme.accent,
+                    ))),
+            )
+        })
+        .when(header_status == SidebarGroupHeaderStatus::Queued, |element| {
+            element.child(
+                div()
+                    .flex_none()
+                    .size(px(12.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(icon("icons/hourglass.svg", 12.0, theme.text_secondary)),
+            )
+        })
         // The folded group's unread dot takes the same right-edge slot a
         // session row's indicator does, past the always-reserved compose
         // box so it stays put whether or not hover reveals the button.
-        .when(has_unread, |element| {
+        .when(header_status == SidebarGroupHeaderStatus::Unread, |element| {
             element.child(
                 div()
                     .flex_none()
@@ -7963,11 +8011,17 @@ mod tests {
     use waku_client::boss::{BossDeliverable, BossIdentity, BossResourcePolicy, BossState};
 
     #[test]
-    fn sidebar_group_header_unread_takes_precedence_over_spinner() {
-        assert!(!sidebar_group_header_shows_spinner(false, false));
-        assert!(sidebar_group_header_shows_spinner(false, true));
-        assert!(!sidebar_group_header_shows_spinner(true, false));
-        assert!(!sidebar_group_header_shows_spinner(true, true));
+    fn sidebar_group_header_status_distinguishes_queued_work_from_running() {
+        use SidebarGroupHeaderStatus::*;
+
+        assert_eq!(sidebar_group_header_status(false, false, 0), None);
+        assert_eq!(sidebar_group_header_status(false, false, 1), Queued);
+        assert_eq!(sidebar_group_header_status(false, false, 2), Queued);
+        assert_eq!(sidebar_group_header_status(false, true, 1), Working);
+        assert_eq!(sidebar_group_header_status(false, true, 0), Working);
+        assert_eq!(sidebar_group_header_status(true, false, 0), Unread);
+        assert_eq!(sidebar_group_header_status(true, false, 2), Unread);
+        assert_eq!(sidebar_group_header_status(true, true, 2), Unread);
     }
 
     #[test]

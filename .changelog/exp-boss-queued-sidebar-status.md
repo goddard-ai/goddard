@@ -1,0 +1,1 @@
+- Show an hourglass on collapsed Boss employee groups when their employees are queued; show the spinner only while work is running.
