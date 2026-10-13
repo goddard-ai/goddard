@@ -453,7 +453,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss employee workspace EMPLOYEE_ID --json-file workspace.json".to_owned(),
         ),
         "boss employee resources" => (
-            json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"exclusive":{"type":"string[]","default":[]},"resident_devices":{"type":"integer","default":0},"native_builds":{"type":"integer","default":0},"desktop_input":{"type":"integer","default":0}}}}),
+            json!({"EMPLOYEE_ID":{"positional":true,"required":true,"type":"UUID"},"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"exclusive":{"type":"string[]; ios:<UDID>, android:<AVD>, and linux:<name> keys are resident devices","default":[]},"resident_devices":{"type":"integer; must equal the number of ios:/android:/linux: exclusive keys","default":0},"native_builds":{"type":"integer","default":0},"desktop_input":{"type":"integer","default":0}}}}),
             json!({"json":{"type":"saved"}}),
             "goddard-agent boss employee resources EMPLOYEE_ID --json-file resources.json".to_owned(),
         ),
@@ -728,12 +728,12 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent computer reset".to_owned(),
         ),
         "resource acquire" => (
-            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"resources":{"required":true,"fields":{"exclusive":{"type":"string[]","default":[]},"resident_devices":{"type":"integer","default":0},"native_builds":{"type":"integer","default":0},"desktop_input":{"type":"integer","default":0}}},"purpose":{"required":true,"type":"string"},"wait_seconds":{"type":"integer 0..86400","default":600},"parent":{"type":"reservation UUID","optional":true}}}}),
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"resources":{"required":true,"fields":{"exclusive":{"type":"string[]; ios:<UDID>, android:<AVD>, and linux:<name> keys are resident devices","default":[]},"resident_devices":{"type":"integer; must equal the number of ios:/android:/linux: exclusive keys","default":0},"native_builds":{"type":"integer","default":0},"desktop_input":{"type":"integer","default":0}}},"purpose":{"required":true,"type":"string"},"wait_seconds":{"type":"integer 0..86400","default":600},"parent":{"type":"reservation UUID","optional":true}}}}),
             json!({"json":{"id":"reservation UUID","borrowed":"whether an enclosing reservation was reused"}}),
             "goddard-agent resource acquire --json '{\"resources\":{\"native_builds\":1},\"purpose\":\"native build\"}'".to_owned(),
         ),
         "resource run" => (
-            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"resources":{"required":true,"type":"ResourceSet; exclusive string[] and resident_devices/native_builds/desktop_input unsigned counts, each default 0"},"purpose":{"required":true,"type":"string"},"wait_seconds":{"type":"integer 0..86400","default":600},"parent":{"type":"reservation UUID","optional":true}}},"--":{"required":true,"type":"terminates reservation input; followed by executable and arguments"},"COMMAND":{"required":true,"type":"executable and arguments"}}),
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"resources":{"required":true,"type":"ResourceSet; exclusive string[] and resident_devices/native_builds/desktop_input unsigned counts, each default 0 — ios:<UDID>/android:<AVD>/linux:<name> exclusive keys are resident devices and must equal the resident_devices count"},"purpose":{"required":true,"type":"string"},"wait_seconds":{"type":"integer 0..86400","default":600},"parent":{"type":"reservation UUID","optional":true}}},"--":{"required":true,"type":"terminates reservation input; followed by executable and arguments"},"COMMAND":{"required":true,"type":"executable and arguments"}}),
             json!({"stdout":"subprocess stdout, passed through","stderr":"subprocess stderr, passed through","exitStatus":"subprocess exit code; reservation released on completion"}),
             "goddard-agent resource run --json '{\"resources\":{\"native_builds\":1},\"purpose\":\"native build\"}' -- mbx build".to_owned(),
         ),

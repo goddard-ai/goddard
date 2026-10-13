@@ -37,9 +37,32 @@ struct Observation {
     /// Device-class prefixes (`ios:`, `android:`) whose inventory probe
     /// failed or was skipped — requests naming them cannot be told apart
     /// from user-owned devices, so they stay parked. A failure in one
-    /// class must not blind the other.
+    /// class must not blind the other. `linux:` has no inventory probe,
+    /// so it can never be blind.
     blind: Vec<String>,
     errors: Vec<String>,
+}
+
+/// Exclusive keys that draw on the shared `resident_devices` pool:
+/// mobile simulators/emulators plus named Linux VMs. Other exclusive
+/// names remain plain locks that consume no resident capacity.
+fn resident_device(key: &str) -> bool {
+    key.starts_with("ios:") || key.starts_with("android:") || key.starts_with("linux:")
+}
+
+/// Resident classes the host inventory probe can report. A `linux:` VM
+/// is not observable: its residency is bounded by the reservation's own
+/// lifecycle rather than a retained idle-device observation.
+fn probed_device(key: &str) -> bool {
+    key.starts_with("ios:") || key.starts_with("android:")
+}
+
+/// Whether a resident key still proves live capacity after its
+/// reservation ends — the inventory still lists it, or its class's probe
+/// failed so it is conservatively retained.
+fn retained_device(key: &str, observation: &Observation) -> bool {
+    observation.devices.iter().any(|device| device == key)
+        || (probed_device(key) && !observation.errors.is_empty())
 }
 
 impl Broker {
@@ -139,16 +162,14 @@ impl Broker {
                 .resources
                 .exclusive
                 .iter()
-                .any(|key| observation.devices.contains(key))
-                || (r.resources.resident_devices > 0 && !observation.errors.is_empty());
+                .any(|key| resident_device(key) && retained_device(key, &observation));
             if !live_work && (r.cancelled || r.released) && live_device {
                 // A finished workload releases build/input capacity even when its
                 // idle simulator service remains resident outside the process group.
                 r.resources.native_builds = 0;
                 r.resources.desktop_input = 0;
                 r.resources.exclusive.retain(|key| {
-                    (key.starts_with("ios:") || key.starts_with("android:"))
-                        && (!observation.errors.is_empty() || observation.devices.contains(key))
+                    resident_device(key) && retained_device(key, &observation)
                 });
                 r.resources.resident_devices = r.resources.exclusive.len() as u32;
             }
@@ -555,6 +576,8 @@ fn validate_set(r: &mut ResourceSet, policy: &ResourcePolicy) -> Result<()> {
             );
         } else if key == "android:" {
             bail!("Android resource must name an AVD");
+        } else if key == "linux:" {
+            bail!("Linux resource must name a VM");
         }
     }
     r.exclusive.sort();
@@ -566,14 +589,10 @@ fn validate_set(r: &mut ResourceSet, policy: &ResourcePolicy) -> Result<()> {
     {
         bail!("exclusive resource names must contain 1–256 bytes (at most 32 names)");
     }
-    let devices = r
-        .exclusive
-        .iter()
-        .filter(|s| s.starts_with("ios:") || s.starts_with("android:"))
-        .count() as u32;
+    let devices = r.exclusive.iter().filter(|s| resident_device(s)).count() as u32;
     if devices != r.resident_devices {
         bail!(
-            "resident_devices must equal the number of ios:<UDID>/android:<AVD> exclusive resources"
+            "resident_devices must equal the number of ios:<UDID>/android:<AVD>/linux:<name> exclusive resources"
         );
     }
     if r.resident_devices > policy.resident_devices
@@ -1061,6 +1080,14 @@ mod tests {
             ..Default::default()
         }
     }
+    fn linux() -> ResourceSet {
+        ResourceSet {
+            exclusive: vec!["linux:gtk-proof-vm".into()],
+            resident_devices: 1,
+            native_builds: 1,
+            ..Default::default()
+        }
+    }
     fn id(s: &ResourceStatus) -> Uuid {
         s.request_id.unwrap()
     }
@@ -1488,6 +1515,218 @@ mod tests {
             .transaction(a, acquisition(ios(), None), observed())
             .unwrap();
         assert!(!granted(&same_device, id(&same_device)));
+    }
+
+    /// A brokered Linux VM is a named resident device: it validates like
+    /// ios:/android:, draws on the same shared resident pool, and keeps
+    /// its exclusive-key ownership.
+    #[test]
+    fn linux_vm_reservations_share_the_resident_pool_and_exclusive_ownership() {
+        let h = Harness::new();
+        h.op(Uuid::new_v4(), ResourceOperation::Status { id: None });
+        fs::write(
+            h.broker.root.join("policy.json"),
+            serde_json::to_vec(&ResourcePolicy {
+                resident_devices: 2,
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let c = Uuid::new_v4();
+        // The exact GTK-proof set: named VM, one resident slot, one build.
+        let first = h.acquire(a, linux());
+        assert!(granted(&first, id(&first)));
+        // A differently named VM takes the second resident slot; the same
+        // name is exclusive even with spare resident capacity.
+        let other_vm = h.acquire(
+            b,
+            ResourceSet {
+                exclusive: vec!["linux:other-vm".into()],
+                resident_devices: 1,
+                ..Default::default()
+            },
+        );
+        assert!(granted(&other_vm, id(&other_vm)));
+        let same_vm = h.acquire(c, linux());
+        assert!(!granted(&same_vm, id(&same_vm)));
+        // Ownership: another task cannot release or even poll a foreign id.
+        assert!(
+            h.broker
+                .transaction(
+                    c,
+                    ResourceOperation::Release { id: id(&first) },
+                    Observation::default()
+                )
+                .is_err()
+        );
+        h.op(a, ResourceOperation::Release { id: id(&first) });
+        let status = h.op(c, ResourceOperation::Status { id: None });
+        assert!(granted(&status, id(&same_vm)));
+    }
+
+    /// The resident slot is global: a held Linux VM leaves no room for a
+    /// mobile resident claim, and vice versa.
+    #[test]
+    fn linux_vm_residency_contends_with_mobile_devices_on_one_pool() {
+        let h = Harness::new();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let vm = h.acquire(a, linux());
+        assert!(granted(&vm, id(&vm)));
+        let mobile = h.acquire(b, ios());
+        assert!(!granted(&mobile, id(&mobile)));
+        h.op(a, ResourceOperation::Release { id: id(&vm) });
+        let status = h.op(b, ResourceOperation::Status { id: None });
+        assert!(granted(&status, id(&mobile)));
+    }
+
+    /// With no inventory probe a `linux:` claim lives and dies with its
+    /// reservation: release frees it even while mobile inventory probes
+    /// are failing, while an observed `linux:` key retains and excludes
+    /// exactly like a mobile device.
+    #[test]
+    fn linux_vm_residency_ends_with_the_reservation_unless_observed() {
+        let probe_failed = || Observation {
+            devices: vec![],
+            blind: vec!["ios:".into(), "android:".into()],
+            errors: vec!["probe failed".into()],
+        };
+        // Mobile claims stay conservatively retained across a probe
+        // failure; an unprobed Linux VM cannot outlive its reservation.
+        let mobile_host = Harness::new();
+        let a = Uuid::new_v4();
+        let first = mobile_host.acquire(a, ios());
+        mobile_host
+            .broker
+            .transaction(
+                a,
+                ResourceOperation::Release { id: id(&first) },
+                probe_failed(),
+            )
+            .unwrap();
+        let next = mobile_host
+            .broker
+            .transaction(Uuid::new_v4(), acquisition(ios(), None), probe_failed())
+            .unwrap();
+        assert!(!granted(&next, id(&next)));
+
+        let linux_host = Harness::new();
+        let first = linux_host.acquire(a, linux());
+        linux_host
+            .broker
+            .transaction(
+                a,
+                ResourceOperation::Release { id: id(&first) },
+                probe_failed(),
+            )
+            .unwrap();
+        let next = linux_host
+            .broker
+            .transaction(Uuid::new_v4(), acquisition(linux(), None), probe_failed())
+            .unwrap();
+        assert!(granted(&next, id(&next)));
+
+        // An observation that does report the VM retains its residency and
+        // its name exactly like a still-running mobile device.
+        let observed_host = Harness::new();
+        let vm_running = || Observation {
+            devices: vec!["linux:gtk-proof-vm".into()],
+            blind: vec![],
+            errors: vec![],
+        };
+        let first = observed_host.acquire(a, linux());
+        observed_host
+            .broker
+            .transaction(
+                a,
+                ResourceOperation::Release { id: id(&first) },
+                vm_running(),
+            )
+            .unwrap();
+        let same_vm = observed_host
+            .broker
+            .transaction(Uuid::new_v4(), acquisition(linux(), None), vm_running())
+            .unwrap();
+        assert!(!granted(&same_vm, id(&same_vm)));
+        let status = observed_host.op(a, ResourceOperation::Status { id: None });
+        assert!(granted(&status, id(&same_vm)));
+
+        // A VM reported running outside the ledger blocks its own name.
+        let external_host = Harness::new();
+        let external = external_host
+            .broker
+            .transaction(Uuid::new_v4(), acquisition(linux(), None), vm_running())
+            .unwrap();
+        assert!(!granted(&external, id(&external)));
+        assert_eq!(external.external_devices, ["linux:gtk-proof-vm"]);
+    }
+
+    /// A registered process group keeps a released Linux VM claim until
+    /// it exits — the same lifecycle gate mobile workloads get.
+    #[test]
+    #[cfg(unix)]
+    fn linux_vm_release_keeps_capacity_until_registered_process_group_exits() {
+        let h = Harness::new();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let first = h.acquire(a, linux());
+        let mut workload = Workload::start();
+        h.op(
+            a,
+            ResourceOperation::Attach {
+                id: id(&first),
+                workload_pid: workload.0.id(),
+            },
+        );
+        h.op(a, ResourceOperation::Release { id: id(&first) });
+        let second = h.acquire(b, linux());
+        assert!(!granted(&second, id(&second)));
+        workload.stop();
+        assert!(granted(
+            &h.op(b, ResourceOperation::Status { id: None }),
+            id(&second)
+        ));
+    }
+
+    #[test]
+    fn linux_vm_names_validate_like_mobile_devices() {
+        let h = Harness::new();
+        for resources in [
+            // Bare prefix names no VM.
+            ResourceSet {
+                exclusive: vec!["linux:".into()],
+                resident_devices: 1,
+                ..Default::default()
+            },
+            // A resident key still needs its resident_devices count.
+            ResourceSet {
+                exclusive: vec!["linux:gtk-proof-vm".into()],
+                ..Default::default()
+            },
+            // The count must come from named resident devices.
+            ResourceSet {
+                resident_devices: 1,
+                ..Default::default()
+            },
+            // The shared pool cap applies to Linux VMs too.
+            ResourceSet {
+                exclusive: vec!["linux:gtk-proof-vm".into(), "linux:other-vm".into()],
+                resident_devices: 2,
+                ..Default::default()
+            },
+        ] {
+            assert!(
+                h.broker
+                    .transaction(Uuid::new_v4(), acquisition(resources, None), Observation::default())
+                    .is_err()
+            );
+        }
+        // The exact rejected GTK-proof set is now a valid acquisition.
+        let status = h.acquire(Uuid::new_v4(), linux());
+        assert!(granted(&status, id(&status)));
     }
 
     #[test]

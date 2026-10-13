@@ -13,8 +13,9 @@ CLI.
 
 ## Run a command under a reservation
 
-The default policy allows one resident iOS simulator **or** Android emulator,
-one expensive native build, and one interactive desktop input session at a time.
+The default policy allows one resident iOS simulator, Android emulator, or
+named Linux VM, one expensive native build, and one interactive desktop input
+session at a time.
 A specific device is also exclusive. An isolated macOS app process needs no
 desktop reservation unless it manipulates shared focus or input.
 
@@ -42,17 +43,20 @@ goddard-agent resource run \
   -- ./scripts/ios-smoke-test.sh
 ```
 
-Use `android:<AVD-name>` for an Android emulator, `device:<stable-id>` for a
-physical device, and the same stable name in every project. iOS UUIDs are
-normalized. `resident_devices` must equal the number of named `ios:` and
-`android:` resources. For shared desktop interaction, request
-`"desktop_input":1`. Other exclusive names are supported for shared tools.
+Use `android:<AVD-name>` for an Android emulator, `linux:<name>` for a
+brokered Linux VM, `device:<stable-id>` for a physical device, and the same
+stable name in every project. iOS UUIDs are normalized. `resident_devices`
+must equal the number of named `ios:`, `android:`, and `linux:` resources.
+For shared desktop interaction, request `"desktop_input":1`. Other exclusive
+names are supported for shared tools.
 
 Boot and shut down an **owned** virtual device within the reserved workflow.
 A simulator left idle still consumes capacity. After the workload exits,
 Goddard retains its device reservation until the device stops; completed build
 and desktop-input capacity is freed separately. Goddard never shuts down,
-reboots, or adopts an already-running user-owned device.
+reboots, or adopts an already-running user-owned device. A `linux:` VM has no
+host inventory probe, so its residency cannot outlive its reservation — shut
+the VM down before the workload exits.
 
 ## Inspect, cancel, or reserve manually
 
@@ -124,7 +128,9 @@ inventory failures block new resident-device grants rather than assume free
 capacity. iOS discovery uses `simctl`; Android discovery recognizes local
 emulator/QEMU processes and their AVD names. Unknown emulator names still count
 as external capacity. AVD names containing spaces and remote Android sessions
-are not reliably attributable in this version.
+are not reliably attributable in this version. Linux VMs are not discovered:
+a `linux:` name is a reservation-bounded claim, so a VM started outside a
+reservation is invisible to the broker rather than counted.
 
 Scheduling is **cooperative**. Raw shell launches can bypass it; user-owned
 native builds and desktop interaction are not automatically discovered. The
