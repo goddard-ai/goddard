@@ -13143,6 +13143,278 @@ fn queued_tickets_survive_restart_with_their_goals() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A reminder whose delivery fails after its chip mirrors still counts as
+/// queued: the parked copy drains through the ordinary queue, so the batch
+/// marks and a rescan cannot stack a duplicate per pass — the regression
+/// behind the repeated "no active assignment" prompts, which piled one
+/// chip per scheduler tick while the Boss runtime was down and then
+/// delivered in a burst.
+#[test]
+fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
+    use waku_protocol::boss::OutcomeWait;
+    let root = std::env::temp_dir().join(format!("outcome-reminder-{}", Uuid::new_v4()));
+    let (mut backend, boss) = surface_test_backend(&root);
+    backend.boss.set_session_id(boss).unwrap();
+    backend.set_daemon_address("http://127.0.0.1:1".into());
+    backend.runtime_test_cli = Some("/usr/bin/true".into());
+    let mut daemon_settings = backend.settings.get();
+    daemon_settings
+        .provider_binary_overrides
+        .insert(ProviderKind::Codex, "/usr/bin/true".into());
+    backend.settings.replace(daemon_settings).unwrap();
+    // The boss chat owns no live runtime and every spawn attempt fails —
+    // the window the repeated reminders rode.
+    backend.runtime_test_start = Some(Arc::new(|_, _, _| {
+        Err(anyhow::anyhow!("provider launch down"))
+    }));
+    backend.runtime_test_forward = Some(Arc::new(|name, forward| {
+        std::thread::Builder::new().name(name).spawn(forward)
+    }));
+
+    let parked = || -> Vec<Uuid> {
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == boss)
+            .unwrap()
+            .queued_messages
+            .iter()
+            .map(|entry| entry.id)
+            .collect()
+    };
+    let last_reminder = || {
+        backend
+            .boss
+            .document()
+            .outcomes
+            .iter()
+            .map(|task| task.last_reminder.clone())
+            .collect::<Vec<_>>()
+    };
+
+    let task = backend
+        .boss
+        .create_outcome(None, "Keep reminders honest", "one nudge per period")
+        .unwrap();
+    let now = waku_protocol::model::unix_time();
+    let grace = waku_protocol::boss::OUTCOME_UNATTENDED_GRACE;
+
+    // The first scan only arms the grace clock — nothing queues.
+    backend.deliver_outcome_reminders(now).unwrap();
+    assert!(parked().is_empty());
+
+    // Grace lapsed: the chip mirrors durably, the spawn fails, and the
+    // batch still marks — the parked copy owns eventual delivery.
+    let due = now + grace + 1;
+    assert!(backend.deliver_outcome_reminders(due).is_err());
+    assert_eq!(parked().len(), 1);
+    assert!(last_reminder()[0].is_some(), "the parked nudge is marked");
+
+    // Repeated ticks over an unchanged set are no-ops however far the
+    // elapsed label drifts — the deterministic batch id dedupes the
+    // enqueue itself.
+    backend.deliver_outcome_reminders(due + 60).unwrap();
+    backend.deliver_outcome_reminders(due + 120).unwrap();
+    assert_eq!(parked().len(), 1, "a failed drain cannot stack duplicates");
+
+    // A recorded wait suppresses; clearing it re-arms a fresh period that
+    // parks under a different queue identity.
+    backend
+        .boss
+        .set_outcome_waiting(
+            None,
+            task.id,
+            Some(OutcomeWait::Dependency {
+                note: "awaiting review".into(),
+            }),
+            None,
+        )
+        .unwrap();
+    backend.deliver_outcome_reminders(due + 180).unwrap();
+    assert_eq!(parked().len(), 1);
+    backend
+        .boss
+        .set_outcome_waiting(None, task.id, None, None)
+        .unwrap();
+    let rearmed = due + 240;
+    backend.deliver_outcome_reminders(rearmed).unwrap();
+    assert_eq!(parked().len(), 1, "still inside the fresh grace period");
+    assert!(
+        backend
+            .deliver_outcome_reminders(rearmed + grace + 1)
+            .is_err()
+    );
+    let chips = parked();
+    assert_eq!(chips.len(), 2);
+    assert_ne!(chips[0], chips[1], "a new unattended period re-reminds");
+
+    // Reopening the boss document — the restart path — keeps the marks
+    // and the parked chips: nothing re-enqueues.
+    backend.boss = Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap());
+    backend
+        .deliver_outcome_reminders(rearmed + grace + 120)
+        .unwrap();
+    assert_eq!(parked().len(), 2);
+
+    // Once a runtime exists the parked copies drain, one per turn
+    // boundary — the same batch id names the delivered message, so a
+    // redriven enqueue folds onto the row that already landed.
+    let capture = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        boss,
+        RuntimeEntry {
+            plan_gate: None,
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(capture.clone()),
+            stable: None,
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.clone(),
+        },
+    );
+    let reminders = || -> usize {
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == boss)
+            .unwrap()
+            .messages
+            .iter()
+            .filter(|message| message.content.contains("no active assignment"))
+            .count()
+    };
+    backend.deliver_pending_agent_prompts();
+    assert_eq!(reminders(), 1);
+    {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == boss)
+            .unwrap();
+        session.finish_active_turn(TurnStatus::Completed);
+    }
+    backend.deliver_pending_agent_prompts();
+    assert_eq!(reminders(), 2);
+    assert!(parked().is_empty());
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A recorded wait or a live assignment covers a task end to end — the
+/// reminder never reaches the queue while either holds, and clearing the
+/// cover re-arms a fresh grace period.
+#[test]
+fn outcome_reminder_stays_suppressed_while_wait_or_assignment_covers_it() {
+    use waku_protocol::boss::{EmployeeGoal, OutcomeWait};
+    let root = std::env::temp_dir().join(format!("outcome-reminder-wait-{}", Uuid::new_v4()));
+    let (mut backend, boss) = surface_test_backend(&root);
+    backend.boss.set_session_id(boss).unwrap();
+    backend.set_daemon_address("http://127.0.0.1:1".into());
+    backend.runtime_test_cli = Some("/usr/bin/true".into());
+    let mut daemon_settings = backend.settings.get();
+    daemon_settings
+        .provider_binary_overrides
+        .insert(ProviderKind::Codex, "/usr/bin/true".into());
+    backend.settings.replace(daemon_settings).unwrap();
+    // The spawn failure is armed so an enqueue attempt would surface, but
+    // suppression means none is made.
+    backend.runtime_test_start = Some(Arc::new(|_, _, _| {
+        Err(anyhow::anyhow!("provider launch down"))
+    }));
+
+    let parked = || -> usize {
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == boss)
+            .unwrap()
+            .queued_messages
+            .len()
+    };
+    let task = backend
+        .boss
+        .create_outcome(None, "Stay quiet while covered", "coverage suppresses")
+        .unwrap();
+    let now = waku_protocol::model::unix_time();
+    let grace = waku_protocol::boss::OUTCOME_UNATTENDED_GRACE;
+
+    // A dependency wait shields the task before the grace clock starts.
+    backend
+        .boss
+        .set_outcome_waiting(
+            None,
+            task.id,
+            Some(OutcomeWait::Dependency {
+                note: "awaiting review".into(),
+            }),
+            None,
+        )
+        .unwrap();
+    backend.deliver_outcome_reminders(now).unwrap();
+    backend
+        .deliver_outcome_reminders(now + grace + 1)
+        .unwrap();
+    assert_eq!(parked(), 0, "a recorded wait never queues a reminder");
+
+    // Clearing the wait re-arms; a live assignment then takes over the
+    // cover — no chip appears while it stands.
+    backend
+        .boss
+        .set_outcome_waiting(None, task.id, None, None)
+        .unwrap();
+    let rearmed = now + 2 * grace + 2;
+    backend.deliver_outcome_reminders(rearmed).unwrap();
+    let assignment = backend
+        .boss
+        .assignment_admission(Some(task.id), None, false, None, Vec::new(), None)
+        .unwrap()
+        .unwrap();
+    let persona = backend.boss.document().personas[0].id;
+    let mut employee = backend
+        .boss
+        .prepare_employee(
+            boss,
+            Some(persona),
+            "Review the result".into(),
+            None,
+            false,
+            EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    employee.assignment = Some(assignment);
+    let employee_id = employee.session_id;
+    backend.boss.add_employee(employee).unwrap();
+    backend
+        .deliver_outcome_reminders(rearmed + grace + 1)
+        .unwrap();
+    assert_eq!(parked(), 0, "a live assignment never queues a reminder");
+
+    // The assignment cancelling frees the task: the next eligible stretch
+    // arms a fresh period and the reminder lands once the grace lapses.
+    backend.boss.mark_cancelled(employee_id).unwrap();
+    let released = rearmed + grace + 2;
+    backend.deliver_outcome_reminders(released).unwrap();
+    assert_eq!(parked(), 0, "a fresh grace period holds the reminder");
+    assert!(
+        backend
+            .deliver_outcome_reminders(released + grace + 1)
+            .is_err()
+    );
+    assert_eq!(parked(), 1);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// Old dispatch outbox entries must not become supervisor prompts after
 /// upgrading to silent dispatch.
 #[test]

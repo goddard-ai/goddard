@@ -189,7 +189,12 @@ impl WakuBackend {
     /// so a failed enqueue retries next pass instead of losing the nudge;
     /// no boss session (mid-rotation or none yet) skips delivery unmarked
     /// and a later pass collapses the wait into one reminder.
-    fn deliver_outcome_reminders(&self, now: u64) -> anyhow::Result<()> {
+    ///
+    /// The batch's queue id is deterministic over the covered tasks and
+    /// their period: a re-scan while a copy still waits parked finds the
+    /// mirrored chip and only marks — a post-enqueue failure can no longer
+    /// stack a duplicate reminder on every pass.
+    pub(super) fn deliver_outcome_reminders(&self, now: u64) -> anyhow::Result<()> {
         let due = self.boss.scan_outcome_reminders(now)?;
         if due.is_empty() {
             return Ok(());
@@ -197,6 +202,7 @@ impl WakuBackend {
         let Some(session) = self.boss.identity_and_session().1 else {
             return Ok(());
         };
+        let session = self.boss_active_alias(session);
         let document = self.boss.document();
         let lines: Vec<String> = due
             .iter()
@@ -225,9 +231,58 @@ impl WakuBackend {
             "These tasks have no active assignment or recorded waiting reason:\n{}",
             lines.join("\n")
         );
+        let batch = outcome_reminder_batch(session, &document.outcomes, &due);
         let events = self.event_source.lock().clone();
-        self.queue_agent_prompt(session, prompt, None, &events)?;
-        self.boss.mark_outcomes_reminded(&due, now)
+        let result = if self.agent_prompt_mirrored(session, batch) {
+            Ok(())
+        } else {
+            self.queue_agent_prompt_with_id(
+                session,
+                prompt,
+                None,
+                false,
+                Some(batch),
+                None,
+                &events,
+            )
+        };
+        match result {
+            Ok(()) => self.boss.mark_outcomes_reminded(&due, now),
+            Err(error) => {
+                // The mirror lands before the delivery attempt, so an
+                // error can leave the nudge durably queued — the parked
+                // chip still drains through the ordinary queue, and
+                // marking the batch keeps the next pass from enqueueing
+                // another copy. Nothing mirrored means the reminder never
+                // reached the queue and retries unmarked.
+                if self.agent_prompt_mirrored(session, batch) {
+                    self.boss.mark_outcomes_reminded(&due, now)?;
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// Whether the session document still mirrors the parked copy of a
+    /// queued agent prompt — `queue_agent_prompt_with_id` writes the mirror
+    /// before any delivery attempt, so its presence means the prompt is
+    /// durably queued even when the drain behind it failed.
+    fn agent_prompt_mirrored(&self, session_id: Uuid, queued_id: Uuid) -> bool {
+        let mut state = self.task_state.lock();
+        let Some(session) = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        else {
+            return false;
+        };
+        if self.task_store.hydrate(session).is_err() {
+            return false;
+        }
+        session
+            .queued_messages
+            .iter()
+            .any(|entry| entry.id == queued_id)
     }
 
     /// The host resource broker — or the test-rooted ledger a backend was
@@ -2572,6 +2627,41 @@ impl WakuBackend {
             events,
         )
     }
+}
+
+/// The deterministic queue identity for one reminder batch — the Boss
+/// session it targets plus every covered task's unattended period and last
+/// delivered reminder. A re-scan over an unchanged batch reproduces the
+/// same id, so its mirrored chip dedupes instead of stacking a copy per
+/// pass; a new unattended period, a changed task set, or a delivered batch
+/// mints a fresh reminder rather than folding onto the old one.
+fn outcome_reminder_batch(
+    session: Uuid,
+    outcomes: &[waku_protocol::boss::BossOutcome],
+    due: &[Uuid],
+) -> Uuid {
+    let mut material = session.as_bytes().to_vec();
+    let mut stamps: Vec<(Uuid, u64, u64)> = due
+        .iter()
+        .filter_map(|id| outcomes.iter().find(|task| task.id == *id))
+        .map(|task| {
+            (
+                task.id,
+                task.unattended_since.unwrap_or_default(),
+                task.last_reminder
+                    .as_ref()
+                    .map(|reminder| reminder.at)
+                    .unwrap_or_default(),
+            )
+        })
+        .collect();
+    stamps.sort();
+    for (id, since, reminded_at) in stamps {
+        material.extend_from_slice(id.as_bytes());
+        material.extend_from_slice(&since.to_be_bytes());
+        material.extend_from_slice(&reminded_at.to_be_bytes());
+    }
+    Uuid::new_v5(&Uuid::NAMESPACE_URL, &material)
 }
 
 /// A compact "for 2h 5m"-style label for a reminder's unattended stretch.
