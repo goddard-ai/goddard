@@ -329,9 +329,7 @@ fn append_sidebar_employee_group(
             });
         }
     }
-    if !collapsed || group != SidebarGroup::Outcomes {
-        rows.push(SidebarRow::GroupSpacer);
-    }
+    rows.push(SidebarRow::CollapsibleGroupSpacer { collapsed });
 }
 
 /// How many finished employees an expanded group lists before its fold row:
@@ -354,7 +352,7 @@ fn append_sidebar_planning_group(rows: &mut Vec<SidebarRow>, sessions: &[Uuid], 
     if !collapsed {
         rows.extend(sessions.iter().copied().map(SidebarRow::Planning));
     }
-    rows.push(SidebarRow::GroupSpacer);
+    rows.push(SidebarRow::CollapsibleGroupSpacer { collapsed });
 }
 
 /// Whether a rostered employee lists on the sidebar. Rows the user archived
@@ -395,7 +393,7 @@ fn append_sidebar_group_rows(
             None => {}
         }
     }
-    rows.push(SidebarRow::GroupSpacer);
+    rows.push(SidebarRow::CollapsibleGroupSpacer { collapsed });
 }
 
 /// The published deliverables the sidebar lists, split like a project group's
@@ -530,7 +528,7 @@ const SIDEBAR_ACTION_ROW_GAP: f32 = 2.0;
 const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
-/// The spacer a project group carries between its rows and the next group.
+/// The larger separation used after expanded groups and between sidebar blocks.
 const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
 
 /// How long a published deliverable keeps its row in the Recent deliverables group —
@@ -1259,6 +1257,8 @@ pub(super) enum SidebarRow {
     ShowDormant(SidebarGroup),
     /// Spacing between date groups.
     GroupSpacer,
+    /// Spacing after a collapsible group, compact while its rows are hidden.
+    CollapsibleGroupSpacer { collapsed: bool },
 }
 
 /// A sidebar multi-selection member — a task row or a deliverable row.
@@ -1380,6 +1380,13 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
         | SidebarRow::ShowMore(_)
         | SidebarRow::ShowDormant(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
         SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
+        SidebarRow::CollapsibleGroupSpacer { collapsed } => {
+            if collapsed {
+                SIDEBAR_GROUP_HEADER_BOTTOM_GAP
+            } else {
+                SIDEBAR_GROUP_SPACER_HEIGHT
+            }
+        }
     })
 }
 
@@ -4190,6 +4197,9 @@ impl Waku {
                 rows.push(SidebarRow::Terminal(terminal_id));
             }
         }
+        rows.push(SidebarRow::CollapsibleGroupSpacer {
+            collapsed: terminals_collapsed,
+        });
         // Deliverables an employee produced and the boss published stay in the
         // utility cluster beside Terminals, above the spacer before the Boss
         // block. Under project grouping they keep this dedicated group rather
@@ -4206,11 +4216,9 @@ impl Waku {
             &dormant_deliverables,
         );
         if !recent_deliverables.is_empty() || !dormant_deliverables.is_empty() {
+            let collapsed = self.sidebar_collapsed_groups.contains(&SidebarGroup::Deliverables);
             rows.push(SidebarRow::Header(SidebarGroup::Deliverables));
-            if !self
-                .sidebar_collapsed_groups
-                .contains(&SidebarGroup::Deliverables)
-            {
+            if !collapsed {
                 // The group folds like a project section: live rows cap at
                 // SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE behind "Show more",
                 // then a swept deliverable keeps a "Show dormant" fold row
@@ -4247,6 +4255,7 @@ impl Waku {
                     None => {}
                 }
             }
+            rows.push(SidebarRow::CollapsibleGroupSpacer { collapsed });
         }
         // Separate the whole utility cluster from the Boss block below.
         rows.push(SidebarRow::GroupSpacer);
@@ -4751,6 +4760,14 @@ impl Waku {
             SidebarRow::GroupSpacer => div()
                 .w_full()
                 .h(px(SIDEBAR_GROUP_SPACER_HEIGHT))
+                .into_any_element(),
+            SidebarRow::CollapsibleGroupSpacer { collapsed } => div()
+                .w_full()
+                .h(px(if collapsed {
+                    SIDEBAR_GROUP_HEADER_BOTTOM_GAP
+                } else {
+                    SIDEBAR_GROUP_SPACER_HEIGHT
+                }))
                 .into_any_element(),
         }
     }
@@ -8565,7 +8582,7 @@ mod tests {
             rows,
             vec![
                 SidebarRow::Header(SidebarGroup::Errands),
-                SidebarRow::GroupSpacer
+                SidebarRow::CollapsibleGroupSpacer { collapsed: true }
             ]
         );
 
@@ -8588,7 +8605,7 @@ mod tests {
                 SidebarRow::Employee(active[0]),
                 SidebarRow::Employee(active[1]),
                 SidebarRow::ErrandsShowMore(key),
-                SidebarRow::GroupSpacer
+                SidebarRow::CollapsibleGroupSpacer { collapsed: false }
             ]
         );
 
@@ -8610,7 +8627,7 @@ mod tests {
                 SidebarRow::Header(SidebarGroup::Outcomes),
                 SidebarRow::Employee(idle[0]),
                 SidebarRow::BossShowMore(key),
-                SidebarRow::GroupSpacer
+                SidebarRow::CollapsibleGroupSpacer { collapsed: false }
             ]
         );
 
@@ -8656,7 +8673,7 @@ mod tests {
                 SidebarRow::Header(SidebarGroup::Planning),
                 SidebarRow::Planning(sessions[0]),
                 SidebarRow::Planning(sessions[1]),
-                SidebarRow::GroupSpacer,
+                SidebarRow::CollapsibleGroupSpacer { collapsed: false },
             ]
         );
 
@@ -8666,7 +8683,7 @@ mod tests {
             rows,
             vec![
                 SidebarRow::Header(SidebarGroup::Planning),
-                SidebarRow::GroupSpacer
+                SidebarRow::CollapsibleGroupSpacer { collapsed: true }
             ]
         );
 
@@ -8712,7 +8729,7 @@ mod tests {
                 SidebarRow::Header(group),
                 SidebarRow::Session(sessions[0]),
                 SidebarRow::Session(sessions[1]),
-                SidebarRow::GroupSpacer,
+                SidebarRow::CollapsibleGroupSpacer { collapsed: false },
             ]
         );
 
@@ -8720,7 +8737,18 @@ mod tests {
         append_sidebar_group_rows(&mut collapsed, group, &sessions, true, None);
         assert_eq!(
             collapsed,
-            vec![SidebarRow::Header(group), SidebarRow::GroupSpacer,]
+            vec![
+                SidebarRow::Header(group),
+                SidebarRow::CollapsibleGroupSpacer { collapsed: true },
+            ]
+        );
+        assert_eq!(
+            sidebar_row_height(SidebarRow::CollapsibleGroupSpacer { collapsed: true }),
+            px(SIDEBAR_GROUP_HEADER_BOTTOM_GAP),
+        );
+        assert_eq!(
+            sidebar_row_height(SidebarRow::CollapsibleGroupSpacer { collapsed: false }),
+            px(SIDEBAR_GROUP_SPACER_HEIGHT),
         );
     }
 
@@ -8758,7 +8786,7 @@ mod tests {
             vec![
                 SidebarRow::Header(group),
                 SidebarRow::ShowMore(group),
-                SidebarRow::GroupSpacer,
+                SidebarRow::CollapsibleGroupSpacer { collapsed: false },
             ]
         );
 
@@ -8766,7 +8794,10 @@ mod tests {
         append_sidebar_group_rows(&mut collapsed, group, &[], true, Some(SidebarFold::More));
         assert_eq!(
             collapsed,
-            vec![SidebarRow::Header(group), SidebarRow::GroupSpacer]
+            vec![
+                SidebarRow::Header(group),
+                SidebarRow::CollapsibleGroupSpacer { collapsed: true },
+            ]
         );
     }
 

@@ -1,0 +1,1 @@
+- Boss sidebar groups sit closer together when collapsed and keep more separation when expanded.
