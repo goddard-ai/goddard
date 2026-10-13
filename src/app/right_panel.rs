@@ -1748,6 +1748,9 @@ fn tab_scroll_fade(
 /// the remaining history to the same scroll surface as active work.
 const GOALS_PANEL_ROW_HEIGHT: f32 = 50.0;
 const GOALS_PANEL_RECENT_LIMIT: usize = 5;
+/// A section's rows older than this fold behind its history toggle —
+/// the panel leads with what moved in the last day.
+const GOALS_PANEL_STALE_AGE_SECS: u64 = 24 * 60 * 60;
 const GOALS_PANEL_AVATAR: f32 = 16.0;
 const GOALS_PANEL_SECTION_GAP: f32 = 12.0;
 
@@ -2328,6 +2331,9 @@ enum BossOutcomeItem {
     /// item's own height keeps the list's uniform geometry.
     Entry(Arc<BossOutcomeEntry>),
     HistoryToggle {
+        /// The section the toggle unfolds — one toggle trails each
+        /// section's visible rows.
+        section: boss::BossGoalSection,
         older_count: usize,
         expanded: bool,
     },
@@ -2848,6 +2854,59 @@ mod tests {
         assert!(!should_park_composer_on_save_shortcut(false, false));
     }
 
+    #[gpui::test]
+    fn goals_section_fold_hides_day_old_rows_but_never_empties_a_section(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let row = |cx: &App, updated_sort: u64| {
+            Arc::new(BossOutcomePanelRow {
+                outcome: Uuid::from_u128(u128::from(updated_sort)),
+                focus: cx.focus_handle().tab_stop(true),
+                height: GOALS_PANEL_ROW_HEIGHT,
+                bucket: BossGoalBucket::Pending,
+                status: BossGoalStatus::Open,
+                queued_extra: 0,
+                title: "Outcome".into(),
+                member_name: None,
+                avatar: None,
+                project_label: None,
+                detail: None,
+                reason: None,
+                updated_label: None,
+                attention: false,
+                expanded: false,
+                aria: "Show details".into(),
+                updated_sort,
+                created_sort: 0,
+            })
+        };
+        cx.update(|cx| {
+            let now = unix_time();
+            let fresh = now - 3600;
+            let boundary = now - GOALS_PANEL_STALE_AGE_SECS;
+            let stale = now - GOALS_PANEL_STALE_AGE_SECS - 1;
+            // Fresh rows keep their place; stale ones fold in place.
+            let rows = vec![row(cx, stale), row(cx, fresh), row(cx, boundary), row(cx, stale)];
+            let (visible, hidden) = boss_goals_section_fold(&rows, now, usize::MAX);
+            assert_eq!(
+                visible.iter().map(|row| row.updated_sort).collect::<Vec<_>>(),
+                vec![fresh, boundary]
+            );
+            assert_eq!(hidden, 2);
+            // An all-stale section still shows its leading row.
+            let rows = vec![row(cx, stale), row(cx, stale), row(cx, stale)];
+            let (visible, hidden) = boss_goals_section_fold(&rows, now, usize::MAX);
+            assert_eq!(visible.len(), 1);
+            assert_eq!(hidden, 2);
+            // The cap bounds how many fresh rows a section shows.
+            let rows: Vec<_> = (0..8).map(|index| row(cx, now - index)).collect();
+            let (visible, hidden) =
+                boss_goals_section_fold(&rows, now, GOALS_PANEL_RECENT_LIMIT);
+            assert_eq!(visible.len(), GOALS_PANEL_RECENT_LIMIT);
+            assert_eq!(hidden, 3);
+        });
+    }
+
     struct FinishedGoalsLayoutHarness {
         ongoing: bool,
     }
@@ -3057,6 +3116,7 @@ mod tests {
             let mut all_items = build(finished, cx);
             if finished.len() > GOALS_PANEL_RECENT_LIMIT {
                 all_items.push(BossOutcomeItem::HistoryToggle {
+                    section: boss::BossGoalSection::Finished,
                     older_count: 0,
                     expanded: true,
                 });
@@ -13230,6 +13290,29 @@ fn boss_outcome_empty_entry(outcome: Uuid) -> BossOutcomeEntry {
     }
 }
 
+/// A section's fold split — the rows that stay above the fold and how many
+/// hide behind its history toggle. Rows untouched for a day fold away in
+/// place; a section never empties completely, keeping its leading row even
+/// when every outcome is stale. `cap` bounds how many rows a section can
+/// show (Finished's recent limit); the section's length means no cap.
+fn boss_goals_section_fold(
+    rows: &[Arc<BossOutcomePanelRow>],
+    now: u64,
+    cap: usize,
+) -> (Vec<Arc<BossOutcomePanelRow>>, usize) {
+    let mut visible: Vec<Arc<BossOutcomePanelRow>> = rows
+        .iter()
+        .filter(|row| now.saturating_sub(row.updated_sort) <= GOALS_PANEL_STALE_AGE_SECS)
+        .take(cap)
+        .cloned()
+        .collect();
+    if visible.is_empty() {
+        visible.extend(rows.iter().take(1).cloned());
+    }
+    let hidden = rows.len() - visible.len();
+    (visible, hidden)
+}
+
 impl Waku {
     fn render_boss_goals_panel(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
@@ -13365,31 +13448,9 @@ impl Waku {
                     .then_with(|| a.outcome.cmp(&b.outcome))
             });
         }
-        let finished_collapsed = self
-            .boss_ui
-            .goals_collapsed
-            .contains(&(key, boss::BossGoalSection::Finished));
-        let in_progress_collapsed = self
-            .boss_ui
-            .goals_collapsed
-            .contains(&(key, boss::BossGoalSection::InProgress));
-        let blocked_collapsed = self
-            .boss_ui
-            .goals_collapsed
-            .contains(&(key, boss::BossGoalSection::Blocked));
-        let pending_collapsed = self
-            .boss_ui
-            .goals_collapsed
-            .contains(&(key, boss::BossGoalSection::Pending));
-        let history_expanded = self.boss_ui.goals_history_expanded.contains(&key);
-        let recent_limit = if history_expanded {
-            finished.len()
-        } else {
-            GOALS_PANEL_RECENT_LIMIT.min(finished.len())
-        };
         // A row and its expanded detail items travel together through the
-        // single list that also contains section headers and the history
-        // toggle.
+        // single list that also contains section headers and each
+        // section's history toggle.
         let expand = |row: &Arc<BossOutcomePanelRow>,
                       entries: &HashMap<Uuid, Vec<BossOutcomeItem>>| {
             let mut items = Vec::with_capacity(1 + entries.get(&row.outcome).map_or(0, Vec::len));
@@ -13399,36 +13460,37 @@ impl Waku {
             }
             items
         };
-        let visible_finished: Vec<BossOutcomeItem> = finished
-            .iter()
-            .take(recent_limit)
-            .flat_map(|row| expand(row, &entries))
-            .collect();
-        let older_count = finished.len().saturating_sub(recent_limit);
         let mut items: Vec<BossOutcomeItem> = Vec::new();
-        for (section, label, section_rows, collapsed) in [
+        for (section, label, section_rows, cap) in [
             (
                 boss::BossGoalSection::Pending,
                 tr!("boss.goals_section_pending"),
                 &pending,
-                pending_collapsed,
+                usize::MAX,
             ),
             (
                 boss::BossGoalSection::Blocked,
                 tr!("boss.goals_section_blocked"),
                 &blocked,
-                blocked_collapsed,
+                usize::MAX,
             ),
             (
                 boss::BossGoalSection::InProgress,
                 tr!("boss.goals_in_progress"),
                 &running,
-                in_progress_collapsed,
+                usize::MAX,
+            ),
+            (
+                boss::BossGoalSection::Finished,
+                tr!("boss.goals_section_finished"),
+                &finished,
+                GOALS_PANEL_RECENT_LIMIT,
             ),
         ] {
             if section_rows.is_empty() {
                 continue;
             }
+            let collapsed = self.boss_ui.goals_collapsed.contains(&(key, section));
             items.push(BossOutcomeItem::Header {
                 section,
                 label,
@@ -13443,33 +13505,29 @@ impl Waku {
                     .or_insert_with(|| cx.focus_handle().tab_stop(true))
                     .clone(),
             });
-            if !collapsed {
-                items.extend(section_rows.iter().flat_map(|row| expand(row, &entries)));
+            if collapsed {
+                continue;
             }
-        }
-        if !finished.is_empty() {
-            items.push(BossOutcomeItem::Header {
-                section: boss::BossGoalSection::Finished,
-                label: tr!("boss.goals_section_finished"),
-                count: finished.len(),
-                attention: 0,
-                collapsed: finished_collapsed,
-                top_gap: !items.is_empty(),
-                focus: self
-                    .boss_ui
-                    .goals_focus_handles
-                    .entry((key, format!("header:{:?}", boss::BossGoalSection::Finished)))
-                    .or_insert_with(|| cx.focus_handle().tab_stop(true))
-                    .clone(),
-            });
-            if !finished_collapsed {
-                items.extend(visible_finished);
-                if finished.len() > GOALS_PANEL_RECENT_LIMIT {
-                    items.push(BossOutcomeItem::HistoryToggle {
-                        older_count,
-                        expanded: history_expanded,
-                    });
-                }
+            // The section's age fold leaves same-day rows visible and
+            // hides the rest behind its own toggle — revealing a section
+            // never unfolds its neighbors.
+            let history_expanded = self
+                .boss_ui
+                .goals_history_expanded
+                .contains(&(key, section));
+            let (visible, hidden) = boss_goals_section_fold(section_rows, now, cap);
+            let shown = if history_expanded {
+                section_rows.as_slice()
+            } else {
+                visible.as_slice()
+            };
+            items.extend(shown.iter().flat_map(|row| expand(row, &entries)));
+            if hidden > 0 {
+                items.push(BossOutcomeItem::HistoryToggle {
+                    section,
+                    older_count: hidden,
+                    expanded: history_expanded,
+                });
             }
         }
         // Focus handles live only while their item renders — a removed
@@ -13518,10 +13576,12 @@ impl Waku {
                 employee.reasons.len().hash(hasher);
             }
             BossOutcomeItem::HistoryToggle {
+                section,
                 older_count,
                 expanded,
             } => {
                 3u8.hash(hasher);
+                section.hash(hasher);
                 older_count.hash(hasher);
                 expanded.hash(hasher);
             }
@@ -13606,13 +13666,17 @@ impl Waku {
                                     boss_goal_entry_element(entry, &weak, cx).into_any_element()
                                 }
                                 BossOutcomeItem::HistoryToggle {
+                                    section,
                                     older_count,
                                     expanded,
                                 } => {
                                     let toggle_waku = weak.clone();
+                                    let section = *section;
                                     let theme = Theme::current(cx);
                                     div()
-                                        .id("boss-goals-history-toggle")
+                                        .id(SharedString::from(format!(
+                                            "boss-goals-history-toggle-{section:?}"
+                                        )))
                                         .tab_index(0)
                                         .flex_none()
                                         .h(px(28.0))
@@ -13634,9 +13698,15 @@ impl Waku {
                                         })
                                         .on_activation_app(move |_, cx| {
                                             let _ = toggle_waku.update(cx, |this, cx| {
-                                                if !this.boss_ui.goals_history_expanded.remove(&key)
+                                                let id = (key, section);
+                                                if !this
+                                                    .boss_ui
+                                                    .goals_history_expanded
+                                                    .remove(&id)
                                                 {
-                                                    this.boss_ui.goals_history_expanded.insert(key);
+                                                    this.boss_ui
+                                                        .goals_history_expanded
+                                                        .insert(id);
                                                 }
                                                 cx.notify();
                                             });

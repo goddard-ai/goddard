@@ -1,0 +1,1 @@
+- **Boss:** The Tasks tab folds tasks untouched for more than a day behind each group's "Show more" toggle, and each group always keeps at least its leading task visible.

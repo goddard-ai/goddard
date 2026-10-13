@@ -586,7 +586,9 @@ pub(super) struct BossUi {
     /// Daemons whose Pending section was seeded collapsed — the fold is a
     /// first-visit default; toggles after that win freely.
     pub(super) goals_collapsed_seeded: HashSet<DaemonKey>,
-    pub(super) goals_history_expanded: HashSet<DaemonKey>,
+    /// Sections whose age-folded rows the user revealed — honored per Boss
+    /// daemon and section across snapshots.
+    pub(super) goals_history_expanded: HashSet<(DaemonKey, BossGoalSection)>,
     /// Outcome rows the user opened for assignment detail — honored per
     /// Boss daemon across snapshots and section moves.
     pub(super) goals_row_expanded: HashSet<(DaemonKey, Uuid)>,
