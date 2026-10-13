@@ -143,10 +143,11 @@ impl Rig {
             turn_id: turn,
             input: json!(text),
         };
-        assert!(matches!(
-            self.execute(id, action.clone(), true),
-            CommandDisposition::ProviderAccepted
-        ));
+        let disposition = self.execute(id, action.clone(), true);
+        assert!(
+            matches!(disposition, CommandDisposition::ProviderAccepted),
+            "submit: {disposition:?}"
+        );
         (id, turn, action)
     }
     fn reconnect(&mut self) {
@@ -290,6 +291,70 @@ fn original_pipe_callbacks_survive_25_controller_transfers_and_deduplicate() {
             .filter(|v| v.get("method").is_none() && v["id"] == json!("11"))
             .count(),
         1
+    );
+}
+
+#[test]
+fn provider_resolved_and_turn_abandoned_requests_can_no_longer_be_answered() {
+    let mut rig = Rig::new(false);
+    let turn = Uuid::new_v4();
+    // The fixture abandons both requests and completes the turn inside the
+    // dispatch pump, so acceptance may already carry the terminal outcome.
+    assert!(matches!(
+        rig.execute(
+            Uuid::new_v4(),
+            CanonicalAction::Submit {
+                delivery_id: Uuid::new_v4(),
+                turn_id: turn,
+                input: json!("abandon"),
+            },
+            true
+        ),
+        CommandDisposition::ProviderAccepted | CommandDisposition::Terminal { .. }
+    ));
+    let events = rig.until(|events| {
+        opened(events, RequestClass::Tool).is_some()
+            && opened(events, RequestClass::Approval).is_some()
+    });
+    let tool = opened(&events, RequestClass::Tool).unwrap();
+    let approval = opened(&events, RequestClass::Approval).unwrap();
+    rig.until(|events| {
+        events
+            .iter()
+            .any(|e| matches!(e.event, ProviderEvent::TurnCompleted { turn_id, .. } if turn_id == turn))
+    });
+    // The provider resolved 77 with a notice and abandoned 78 at the turn
+    // boundary. A late controller answer to either dead native id is
+    // refused rather than written into the void.
+    for (request, resolution) in [
+        (
+            tool,
+            json!({"success":true,"contentItems":[{"type":"inputText","text":"late"}]}),
+        ),
+        (approval, json!({"decision":"accept"})),
+    ] {
+        assert!(matches!(
+            rig.execute(
+                Uuid::new_v4(),
+                CanonicalAction::ResolveRequest {
+                    request_id: request,
+                    resolution,
+                },
+                true
+            ),
+            CommandDisposition::Rejected { .. }
+        ));
+    }
+    let messages: Vec<Value> = fs::read_to_string(rig.root.join("received.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|s| serde_json::from_str(s).unwrap())
+        .collect();
+    // Nothing was ever written back to the dead native ids.
+    assert!(
+        !messages
+            .iter()
+            .any(|v| v.get("method").is_none() && (v["id"] == json!(77) || v["id"] == json!(78)))
     );
 }
 

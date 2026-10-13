@@ -1,0 +1,1 @@
+- **Stable runtime:** long-running Codex sessions no longer stall as resolved approvals and inputs accumulate; the adapter drops provider-resolved native requests and refuses answers to dead request ids instead of writing them into a void.

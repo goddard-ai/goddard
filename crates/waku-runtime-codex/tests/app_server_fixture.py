@@ -23,6 +23,12 @@ for line in sys.stdin:
             print('x'*1048577,flush=True)
         elif text=='cancel':
             notice('item/agentMessage/delta',{'threadId':thread,'turnId':turn,'delta':'waiting'})
+        elif text=='abandon':
+            request(77,'item/tool/call')
+            notice('serverRequest/resolved',{'threadId':thread,'requestId':77})
+            request(78,'item/commandExecution/requestApproval')
+            notice('item/agentMessage/delta',{'threadId':thread,'turnId':turn,'delta':'abandoned'})
+            notice('turn/completed',{'threadId':thread,'turn':{'id':turn,'status':'completed'}})
         else:
             notice('item/agentMessage/delta',{'threadId':thread,'turnId':turn,'delta':'before'})
             request(11,'item/tool/call')

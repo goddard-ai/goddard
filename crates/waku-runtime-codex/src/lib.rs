@@ -580,10 +580,13 @@ impl AdapterHandle for CodexAdapter {
     }
     fn offline_matrix(&self) -> OfflineMatrix {
         OfflineMatrix {
-            native_ops: vec![format!(
-                "native operations under fixed {} sandbox",
-                self.launch.sandbox
-            )],
+            native_ops: vec![
+                format!(
+                    "native operations under fixed {} sandbox",
+                    self.launch.sandbox
+                ),
+                "scoped CLI ingress needs a write-capable or approved exec; a strictly sandboxed command fails closed".into(),
+            ],
             revocation: Enforcement::Unavailable,
             callback_deadline: DeadlineBound::Unmeasured,
             can_pause_intake: false,
@@ -842,6 +845,21 @@ fn receive(
                 ProviderEvent::RequestAnswered { request_id: key }
             })
         } else if method == "serverRequest/resolved" {
+            // The provider resolved this native request. An unanswered entry
+            // is abandoned and can never accept a reply; an answered
+            // approval/input has no consumption evidence left to expect.
+            // Answered tool calls keep their entry until item/completed
+            // proves consumption. Without this the pending map only grows:
+            // long sessions collide with MAX_PENDING and replies are written
+            // to dead native ids.
+            let key = params["requestId"].to_string();
+            if state
+                .requests
+                .get(&key)
+                .is_some_and(|request| !request.answered || request.tool_call.is_none())
+            {
+                state.requests.remove(&key);
+            }
             // Preserve the raw evidence for reconciliation without fabricating an
             // acknowledgement. This notice can also mean cancellation/abandonment.
             state.turn.as_ref().map(|turn| ProviderEvent::TurnDelta {
@@ -876,6 +894,13 @@ fn receive(
             if !matches {
                 return;
             }
+            // A turn boundary resolves every turn-scoped native request
+            // upstream. Only answered tool calls still awaiting their
+            // item/completed consumption proof may be legitimately
+            // reconciled; everything else is dead reply capacity.
+            state
+                .requests
+                .retain(|_, request| request.answered && request.tool_call.is_some());
             state.turn.take().map(|turn| {
                 if params.pointer("/turn/status").and_then(Value::as_str) == Some("interrupted") {
                     ProviderEvent::TurnCancelled { turn_id: turn.id }

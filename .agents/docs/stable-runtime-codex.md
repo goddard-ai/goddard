@@ -35,6 +35,15 @@ release-acceptance limitation, not full callback qualification. Relevant
 upstream behavior is pinned to [Codex 0.162.1 dynamic tool response handling](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/dynamic_tools.rs)
 and [pending request resolution](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/request_processors/thread_lifecycle.rs).
 
+Provider-resolved and turn-scoped native requests now leave the adapter's
+pending map: a `serverRequest/resolved` notice drops the entry unless it is
+an answered tool call still awaiting `item/completed` consumption proof,
+and a turn boundary drops everything else because upstream resolves all
+turn-scoped requests on transition. Without this, every resolved
+approval/input leaked a pending slot until `MAX_PENDING` wedged the
+adapter, and a late reply could be written to a dead native id. A
+controller answer to a dead id is refused rather than sent.
+
 Cancellation uses the original native thread/turn IDs. An accepted interrupt
 remains uncertain until `turn/completed` reports interruption. The host holds
 later submits until explicit `PermitDispatch`. Stop kills the owned process group and waits for child exit and quiesced
@@ -88,12 +97,53 @@ stop ended another pending native tool while detached and fenced late submit.
 All probes used disposable read-only threads and cleaned their own children.
 No user daemon, app or active product session was restarted.
 
+The scoped agent surface is qualified against the same Codex CLI **0.162.1**
+through the independent executable:
+
+```sh
+CODEX_BINARY=/absolute/path/to/codex GODDARD_AGENT_BINARY=/absolute/path/to/goddard-agent \
+  mbx test -p waku-runtime-host --test process actual_codex_scoped_cli_ingress_and_native_request_boundaries -- --ignored --nocapture
+```
+
+The successful runs (2026-10-13) used runtime instances
+`b17e0ab1-d77c-4255-b904-acb2646fce87` and `9b171f25-0143-4f69-a786-56bf5633924f`
+with the daemon-style provisioned surface: launch-carried
+`GODDARD_RUNTIME_INGRESS`/`GODDARD_TASK_ID` env pairs plus a pinned helper
+directory, a real `SessionGrant` behind a mode-0600 descriptor, and a durable
+ingress claim. While a native dynamic tool and a real `goddard-agent models`
+request both waited, 25 controller replacements preserved the same provider
+pid/generation/open turn/pending identities; the new epoch's service drained
+the original CLI identity and deadline once, and the tool answer was consumed
+on the original pipe with one terminal completion. A repeated replay from the
+same cursor returned identical ordered envelopes under a new epoch.
+Deadline/rejection behavior under the real grant: an already-expired request
+was `Expired` on arrival and never forwarded, a changed payload under a reused
+identity was `PayloadMismatch`, a service-reported `Uncertain` outcome stopped
+draining without resend, and an unknown native request id was refused. In the
+second turn the model's `touch` exec triggered one actual
+`item/commandExecution/requestApproval`; the scoped `accept` escalated the
+exec, and the **provider's own `goddard-agent` process** then reached ingress
+(request `4fc583e8-6a28-4067-80f8-bb33edf6441e`/`53241c44-c7ad-4bd4-a0c5-b5b423d5ad15`),
+held through 5 further controller replacements, and returned `{"options":[]}`
+to the model — 30 replacements total on one owner pid.
+
+A companion probe under the `read-only` sandbox (same binary, `goddard-agent
+models` auto-approved without escalation) shows the honest boundary: the
+sandboxed exec could not persist the request intent, and the CLI failed closed
+with `stable ingress request intent cannot be persisted` — no daemon-token
+fallback. In-provider CLI ingress therefore requires an approved/elevated or
+write-capable exec; a sandboxed one cannot reach the socket at all. This is
+the adapter's declared offline-authority posture and is a product constraint,
+not a defect: a stable session's CLI surface is unavailable to strictly
+sandboxed commands by construction.
+
 The executable fixtures additionally prove deduplication of all three native
 callback ID classes, ordered replay, preserved live child PID/start count,
 instance authentication and crash cleanup with no resume or redispatch. These
-fixtures are distinct from actual Codex acceptance. Actual approval/input
-consumption, crash-at-every-boundary and concurrent Boss/ordinary/employee reload
-storm acceptance remain unqualified.
+fixtures are distinct from actual Codex acceptance. Approval/input
+consumption evidence (consumption stays honestly uncertain without resend),
+crash-at-every-boundary, concurrent Boss/ordinary/employee reload storm and
+measured native callback deadlines remain unqualified.
 
 ## Original-owner recovery evidence
 

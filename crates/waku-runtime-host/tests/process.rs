@@ -2,7 +2,7 @@
 use std::{
     fs,
     path::PathBuf,
-    process::Command,
+    process::{Command, Stdio},
     time::{Duration, Instant},
 };
 use waku_runtime::{ipc::Endpoint, *};
@@ -515,10 +515,11 @@ fn actual_codex_callback_through_independent_executable() {
     }
     client.execute(envelope(&host,&grant,Some(session),uuid::Uuid::new_v4(),CanonicalAction::ResolveRequest{request_id:request.clone(),resolution:serde_json::json!({"success":true,"contentItems":[{"type":"inputText","text":"stable-runtime-native-probe"}]})})).unwrap();
     drop(client);
-    std::thread::sleep(Duration::from_millis(100));
     client = host.client();
     grant = client.acquire_control(&ClientHello::current()).unwrap();
-    client.reconcile(grant.epoch).unwrap();
+    // The barrier is the reconciled inventory, not elapsed time: the
+    // answered request's consumption either reconciled or remains pending.
+    assert!(!client.reconcile(grant.epoch).unwrap().sessions.is_empty());
     let events = wait_events(&mut client, &grant, session, |events| {
         events
             .iter()
@@ -710,4 +711,689 @@ fn actual_codex_callback_through_independent_executable() {
         }
     ));
     eprintln!("actual Codex detached pending tool emergency-stop and late-submit fence qualified");
+}
+
+/// Actual-provider qualification for the scoped agent surface: the real
+/// `goddard-agent` binary rides runtime ingress under the session's own
+/// grant — inside and outside the provider's process tree — while native
+/// tool and approval replies cross 25 controller replacements on the
+/// original transport. Disposable namespace only; no product daemon, app,
+/// watcher, or existing provider is touched.
+#[test]
+#[ignore = "requires CODEX_BINARY + GODDARD_AGENT_BINARY and authenticated actual Codex; disposable session"]
+fn actual_codex_scoped_cli_ingress_and_native_request_boundaries() {
+    use std::os::unix::fs::PermissionsExt;
+    let host = Host::new();
+    let mut client = host.client();
+    let mut grant = client.acquire_control(&ClientHello::current()).unwrap();
+    let session = SessionRef {
+        session_id: uuid::Uuid::new_v4(),
+        generation: 1,
+    };
+    let task = uuid::Uuid::new_v4();
+    // Provision the agent surface the way the daemon does: a helper
+    // directory for the pinned CLI plus provisioned env pairs; the grant
+    // itself only ever travels through a private descriptor file.
+    let cli_dir = host.root.join("cli");
+    let agent_dir = host.root.join("agent").join(task.to_string());
+    let workspace = host.root.join("workspace");
+    fs::create_dir_all(&cli_dir).unwrap();
+    fs::create_dir_all(&agent_dir).unwrap();
+    fs::create_dir_all(&workspace).unwrap();
+    let helper = cli_dir.join("goddard-agent");
+    fs::copy(
+        std::env::var("GODDARD_AGENT_BINARY").expect("set GODDARD_AGENT_BINARY"),
+        &helper,
+    )
+    .unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o500)).unwrap();
+    let descriptor = agent_dir.join("ingress.json");
+    let binary = std::env::var("CODEX_BINARY").expect("set CODEX_BINARY");
+    let version = Command::new(&binary)
+        .arg("--version")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .unwrap_or_else(|_| "unknown".into());
+    let admit = client
+        .execute(envelope(
+            &host,
+            &grant,
+            None,
+            uuid::Uuid::new_v4(),
+            CanonicalAction::AdmitSession {
+                session_id: session.session_id,
+                adapter: "codex".into(),
+                launch: serde_json::json!({
+                    "binary":binary,"cwd":workspace,"approvalPolicy":"on-request","sandbox":"read-only",
+                    "developerInstructions":"You are inside a disposable stable-runtime qualification session. Follow each instruction literally, use the fewest possible steps, and do nothing else.",
+                    "dynamicTools":[{"name":"runtime_probe","description":"Return the runtime probe token. Call once when instructed.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}],
+                    "agent":{"env":{"GODDARD_RUNTIME_INGRESS":descriptor,"GODDARD_TASK_ID":task},"cliDir":cli_dir},
+                }),
+                requested: RequestedConfig::default(),
+            },
+        ))
+        .unwrap();
+    assert!(
+        matches!(admit.disposition, CommandDisposition::Terminal { .. }),
+        "actual admission: {admit:?}"
+    );
+    let agent_grant = client.issue_grant(grant.epoch, session, 600_000).unwrap();
+    fs::write(
+        &descriptor,
+        serde_json::to_vec(&IngressDescriptor {
+            version: INGRESS_DESCRIPTOR_VERSION,
+            root: host.root.clone(),
+            task_id: task,
+            grant: agent_grant.clone(),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    fs::set_permissions(&descriptor, fs::Permissions::from_mode(0o600)).unwrap();
+    client
+        .register_claim(
+            grant.epoch,
+            ResourceClaim {
+                claim_id: uuid::Uuid::new_v4(),
+                session,
+                resources: vec!["agent-ingress".into(), "cli-helper".into()],
+                detail: serde_json::json!({
+                    "descriptor":descriptor,
+                    "helperDir":cli_dir,
+                    "grantId":agent_grant.grant_id,
+                    "reservations":[],
+                }),
+            },
+        )
+        .unwrap();
+    // The provider group owner is a stable, live pid that must not change
+    // across controller replacement.
+    let events = wait_events(&mut client, &grant, session, |e| {
+        e.iter()
+            .any(|e| matches!(e.event, ProviderEvent::ConfigActivated { .. }))
+    });
+    let (owner_pid, thread_id) = events
+        .iter()
+        .find_map(|e| match &e.event {
+            ProviderEvent::ConfigActivated { effective, .. } => Some((
+                effective.options["ownerGroupPid"].as_u64().unwrap() as i32,
+                effective.options["codexThreadId"].as_str().unwrap().to_owned(),
+            )),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        unsafe { libc::kill(owner_pid, 0) },
+        0,
+        "provider group owner is not live"
+    );
+    // Turn A: one native dynamic tool waits on the original reply pipe.
+    let tool_opened_at = Instant::now();
+    client
+        .execute(envelope(
+            &host,
+            &grant,
+            Some(session),
+            uuid::Uuid::new_v4(),
+            CanonicalAction::Submit {
+                delivery_id: uuid::Uuid::new_v4(),
+                turn_id: uuid::Uuid::new_v4(),
+                input: serde_json::json!("Call runtime_probe exactly once and wait for its result."),
+            },
+        ))
+        .unwrap();
+    let opened = wait_events(&mut client, &grant, session, |events| {
+        events.iter().any(|e| {
+            matches!(
+                e.event,
+                ProviderEvent::RequestOpened {
+                    class: RequestClass::Tool,
+                    ..
+                }
+            )
+        })
+    });
+    let tool_request = opened
+        .iter()
+        .find_map(|e| match &e.event {
+            ProviderEvent::RequestOpened {
+                request_id,
+                class: RequestClass::Tool,
+                ..
+            } => Some(request_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    // The real CLI enters runtime ingress under the session grant while
+    // the native request is still pending.
+    let cli_id = uuid::Uuid::new_v4();
+    let cli = Command::new(&helper)
+        .args(["models"])
+        .env("GODDARD_RUNTIME_INGRESS", &descriptor)
+        .env("GODDARD_TASK_ID", task.to_string())
+        .env("GODDARD_RUNTIME_REQUEST_ID", cli_id.to_string())
+        .env_remove("GODDARD_DAEMON_ADDRESS")
+        .env_remove("GODDARD_AGENT_TOKEN")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Barrier: the request is durably recorded before the storm begins.
+    {
+        let mut agent = RuntimeClient::agent(&host.root, &agent_grant).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Ok(record) = agent.ingress_query(cli_id) {
+                assert_eq!(record.disposition, IngressDisposition::Pending);
+                assert_eq!(record.session, session);
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
+                assert!(
+                    record.deadline_ms > now_ms && record.deadline_ms <= now_ms + 600_000,
+                    "original CLI deadline not preserved: {}",
+                    record.deadline_ms
+                );
+                break;
+            }
+            assert!(Instant::now() < deadline, "CLI ingress never recorded");
+            std::thread::yield_now();
+        }
+    }
+    // 25 controller replacements while a native request and a scoped CLI
+    // request both wait: same pid, generation, pending identities.
+    for _ in 0..25 {
+        drop(client);
+        client = host.client();
+        grant = client.acquire_control(&ClientHello::current()).unwrap();
+        let inventory = client.reconcile(grant.epoch).unwrap();
+        let entry = &inventory.sessions[0];
+        assert_eq!(entry.session, session);
+        assert_eq!(entry.status, SessionStatus::Live);
+        assert!(entry.adapter_alive);
+        assert!(entry.pending_requests.contains(&tool_request));
+        assert!(entry.pending_ingress.contains(&cli_id));
+        assert_eq!(unsafe { libc::kill(owner_pid, 0) }, 0);
+    }
+    // The new epoch's service drains the original request identity and
+    // deadline exactly once; a repeated drain cannot re-dispatch it.
+    let mut service =
+        RuntimeClient::service(&host.root, &host.token, grant.epoch, &ClientHello::current())
+            .unwrap()
+            .0;
+    let forwarded = service.service_drain(grant.epoch, 0).unwrap();
+    let forwarded = forwarded
+        .iter()
+        .find(|r| r.request_id == cli_id)
+        .expect("CLI request was not forwarded");
+    assert_eq!(forwarded.session, session);
+    assert_eq!(forwarded.class, IngressKind::Cli);
+    service
+        .service_result(
+            grant.epoch,
+            cli_id,
+            ForwardedOutcome::Completed {
+                result: serde_json::json!({"type":"agentModelOptions","options":[]}),
+            },
+        )
+        .unwrap();
+    let output = cli.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+        serde_json::json!({"options":[]})
+    );
+    // Deadline and identity boundaries under the real grant: an already
+    // dead request expires on arrival, a reused identity with a changed
+    // payload is refused, and an uncertain outcome reconciles without
+    // resend.
+    let mut agent = RuntimeClient::agent(&host.root, &agent_grant).unwrap();
+    let future_ms = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            + 600_000
+    };
+    let dead = agent
+        .ingress(IngressRequest {
+            request_id: uuid::Uuid::new_v4(),
+            class: IngressKind::Cli,
+            subject: serde_json::json!({"type":"agentListModels"}),
+            deadline_ms: 1,
+        })
+        .unwrap();
+    assert_eq!(dead.disposition, IngressDisposition::Expired);
+    let mismatched = agent.ingress(IngressRequest {
+        request_id: cli_id,
+        class: IngressKind::Cli,
+        subject: serde_json::json!({"type":"agentListCommands"}),
+        deadline_ms: future_ms(),
+    });
+    assert!(matches!(
+        mismatched,
+        Err(ClientError::Host(HostError::PayloadMismatch))
+    ));
+    let uncertain_id = uuid::Uuid::new_v4();
+    let pending = agent
+        .ingress(IngressRequest {
+            request_id: uncertain_id,
+            class: IngressKind::Cli,
+            subject: serde_json::json!({"type":"agentListModels"}),
+            deadline_ms: future_ms(),
+        })
+        .unwrap();
+    assert_eq!(pending.disposition, IngressDisposition::Pending);
+    assert!(
+        service
+            .service_drain(grant.epoch, 0)
+            .unwrap()
+            .iter()
+            .any(|r| r.request_id == uncertain_id)
+    );
+    let reconciled = service
+        .service_result(
+            grant.epoch,
+            uncertain_id,
+            ForwardedOutcome::Uncertain {
+                detail: "effect may have occurred".into(),
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        reconciled.disposition,
+        IngressDisposition::Uncertain { .. }
+    ));
+    assert!(
+        !service
+            .service_drain(grant.epoch, 0)
+            .unwrap()
+            .iter()
+            .any(|r| r.request_id == uncertain_id),
+        "an uncertain request must never be redispatched"
+    );
+    // Unknown request identity is refused, not fabricated.
+    assert!(matches!(
+        client
+            .execute(envelope(
+                &host,
+                &grant,
+                Some(session),
+                uuid::Uuid::new_v4(),
+                CanonicalAction::ResolveRequest {
+                    request_id: "no-such-native-request".into(),
+                    resolution: serde_json::json!({"decision":"accept"}),
+                },
+            ))
+            .unwrap()
+            .disposition,
+        CommandDisposition::Rejected { .. }
+    ));
+    // One reply on the original pipe; the second identical command returns
+    // the recorded truth instead of writing again.
+    let resolve = CanonicalAction::ResolveRequest {
+        request_id: tool_request.clone(),
+        resolution: serde_json::json!({"success":true,"contentItems":[{"type":"inputText","text":"stable-runtime-scoped-probe"}]}),
+    };
+    let receipt = client
+        .execute(envelope(
+            &host,
+            &grant,
+            Some(session),
+            uuid::Uuid::new_v4(),
+            resolve.clone(),
+        ))
+        .unwrap();
+    let events = wait_events(&mut client, &grant, session, |events| {
+        events
+            .iter()
+            .any(|e| matches!(e.event, ProviderEvent::TurnCompleted { .. }))
+    });
+    let duplicate = client
+        .execute(envelope(
+            &host,
+            &grant,
+            Some(session),
+            receipt.command_id,
+            resolve,
+        ))
+        .unwrap();
+    assert!(
+        duplicate.disposition == receipt.disposition
+            || matches!(
+                duplicate.disposition,
+                CommandDisposition::Terminal {
+                    outcome: TerminalOutcome::Completed,
+                    event_sequence: Some(_)
+                }
+            ),
+        "duplicate resolve must return recorded truth: {duplicate:?} vs {receipt:?}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e.event, ProviderEvent::TurnCompleted { .. }))
+            .count(),
+        1
+    );
+    assert!(events.iter().any(
+        |e| matches!(&e.event,ProviderEvent::RequestAnswered{request_id} if request_id==&tool_request)
+    ));
+    eprintln!(
+        "actual Codex native tool held {}ms across 25 controller replacements on pid {owner_pid} thread {thread_id}",
+        tool_opened_at.elapsed().as_millis()
+    );
+    // Replay is deterministic across another replacement: identical
+    // ordered envelopes from the same cursor.
+    let first = events;
+    drop(client);
+    client = host.client();
+    grant = client.acquire_control(&ClientHello::current()).unwrap();
+    client.reconcile(grant.epoch).unwrap();
+    let second = client
+        .events(
+            grant.epoch,
+            EventCursor {
+                session_id: session.session_id,
+                generation: 1,
+                applied: 0,
+            },
+            0,
+        )
+        .unwrap()
+        .events;
+    assert_eq!(first, second);
+    assert!(second.windows(2).all(|w| w[1].sequence == w[0].sequence + 1));
+    // Turn B: the model executes the pinned goddard-agent inside the
+    // provider's own environment. A write op makes the exec require a
+    // native approval under the on-request policy; accepting escalates it,
+    // so the in-provider CLI can persist and reach ingress while more
+    // controller replacements land.
+    let mut in_provider_cli: Option<uuid::Uuid> = None;
+    client
+        .execute(envelope(
+            &host,
+            &grant,
+            Some(session),
+            uuid::Uuid::new_v4(),
+            CanonicalAction::Submit {
+                delivery_id: uuid::Uuid::new_v4(),
+                turn_id: uuid::Uuid::new_v4(),
+                input: serde_json::json!(format!(
+                    "Run exactly this shell command and nothing else: touch {}/probe.marker && {} models\nThen reply with the raw stdout of the goddard-agent command.",
+                    workspace.display(),
+                    helper.display()
+                )),
+            },
+        ))
+        .unwrap();
+    let approval_wait = Instant::now();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let mut resolved_requests: Vec<String> = Vec::new();
+    let mut service =
+        RuntimeClient::service(&host.root, &host.token, grant.epoch, &ClientHello::current())
+            .unwrap()
+            .0;
+    while in_provider_cli.is_none() {
+        let events = client
+            .events(
+                grant.epoch,
+                EventCursor {
+                    session_id: session.session_id,
+                    generation: 1,
+                    applied: 0,
+                },
+                0,
+            )
+            .unwrap()
+            .events;
+        // Answer each native request once, on its original identity: the
+        // pinned CLI command is approved; anything else is declined so the
+        // turn cannot stall on an unexpected prompt.
+        for (request_id, decision) in events
+            .iter()
+            .filter_map(|e| match &e.event {
+                ProviderEvent::RequestOpened {
+                    request_id,
+                    class: RequestClass::Approval,
+                    subject,
+                    ..
+                } if !resolved_requests.contains(request_id) => Some((
+                    request_id.clone(),
+                    if subject.to_string().contains("goddard-agent")
+                        || subject.to_string().contains("probe.marker")
+                    {
+                        "accept"
+                    } else {
+                        "decline"
+                    },
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+        {
+            client
+                .execute(envelope(
+                    &host,
+                    &grant,
+                    Some(session),
+                    uuid::Uuid::new_v4(),
+                    CanonicalAction::ResolveRequest {
+                        request_id: request_id.clone(),
+                        resolution: serde_json::json!({"decision":decision}),
+                    },
+                ))
+                .unwrap();
+            resolved_requests.push(request_id);
+        }
+        // Non-blocking input requests cannot be declined; answer empty
+        // once so the provider is never stuck on the harness.
+        for request_id in events
+            .iter()
+            .filter_map(|e| match &e.event {
+                ProviderEvent::RequestOpened {
+                    request_id,
+                    class: RequestClass::Input,
+                    ..
+                } if !resolved_requests.contains(request_id) => Some(request_id.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+        {
+            client
+                .execute(envelope(
+                    &host,
+                    &grant,
+                    Some(session),
+                    uuid::Uuid::new_v4(),
+                    CanonicalAction::ResolveRequest {
+                        request_id: request_id.clone(),
+                        resolution: serde_json::json!({"answers":{}}),
+                    },
+                ))
+                .unwrap();
+            resolved_requests.push(request_id);
+        }
+        let turn_b_ended = events
+            .iter()
+            .any(|e| matches!(e.event, ProviderEvent::Terminated { .. }))
+            || events
+                .iter()
+                .filter(|e| matches!(e.event, ProviderEvent::TurnCompleted { .. }))
+                .count()
+                >= 2;
+        if turn_b_ended {
+            break;
+        }
+        if let Some(request) = service
+            .service_drain(grant.epoch, 0)
+            .unwrap()
+            .into_iter()
+            .find(|r| {
+                r.session == session
+                    && r.class == IngressKind::Cli
+                    && r.subject["type"] == "agentListModels"
+                    && r.request_id != cli_id
+                    && r.request_id != uncertain_id
+            })
+        {
+            in_provider_cli = Some(request.request_id);
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "provider never ran the pinned CLI (approval or exec missing)"
+        );
+        std::thread::yield_now();
+    }
+    if in_provider_cli.is_none() {
+        // The in-provider CLI never reached ingress. This must be the
+        // honest closed boundary — never a silent fallback onto daemon
+        // credentials: read-only sandboxing cannot persist the request
+        // intent, and a declined approval skips the exec entirely.
+        let events = client
+            .events(
+                grant.epoch,
+                EventCursor {
+                    session_id: session.session_id,
+                    generation: 1,
+                    applied: 0,
+                },
+                0,
+            )
+            .unwrap()
+            .events;
+        let exec_items: Vec<serde_json::Value> = events
+            .iter()
+            .filter_map(|e| match &e.event {
+                ProviderEvent::TurnDelta { delta, .. }
+                    if delta["method"] == "item/completed"
+                        && delta["params"]["item"]["type"] == "commandExecution" =>
+                {
+                    Some(delta["params"]["item"].clone())
+                }
+                _ => None,
+            })
+            .collect();
+        let ran_cli = exec_items.iter().find(|item| {
+            item["command"].as_str().is_some_and(|c| c.contains("goddard-agent"))
+        });
+        let Some(item) = ran_cli else {
+            let methods: Vec<String> = events
+                .iter()
+                .filter_map(|e| match &e.event {
+                    ProviderEvent::TurnDelta { delta, .. } => {
+                        delta["method"].as_str().map(str::to_owned)
+                    }
+                    _ => None,
+                })
+                .collect();
+            panic!("provider never ran the pinned CLI; methods={methods:?}");
+        };
+        let output = item["aggregatedOutput"].as_str().unwrap_or_default();
+        assert!(
+            output.contains("stable ingress request intent cannot be persisted")
+                || output.contains("stable ingress request storage")
+                || output.contains("stable ingress authentication unavailable")
+                || output.contains("stable ingress task binding"),
+            "in-provider CLI must fail closed without daemon fallback, got: {output}"
+        );
+        eprintln!(
+            "actual Codex in-provider CLI under read-only sandbox failed closed as designed: {}",
+            &output[..output.len().min(240)]
+        );
+    }
+    if let Some(in_provider_id) = in_provider_cli {
+        // The provider's own CLI call waits through more controller
+        // replacement without redispatch or a new identity.
+        for _ in 0..5 {
+            drop(client);
+            client = host.client();
+            grant = client.acquire_control(&ClientHello::current()).unwrap();
+            let inventory = client.reconcile(grant.epoch).unwrap();
+            assert!(inventory.sessions[0]
+                .pending_ingress
+                .contains(&in_provider_id));
+            service = RuntimeClient::service(
+                &host.root,
+                &host.token,
+                grant.epoch,
+                &ClientHello::current(),
+            )
+            .unwrap()
+            .0;
+            assert!(
+                service
+                    .service_drain(grant.epoch, 0)
+                    .unwrap()
+                    .iter()
+                    .any(|r| r.request_id == in_provider_id),
+                "forwarded request must remain drainable under the new epoch"
+            );
+        }
+        service
+            .service_result(
+                grant.epoch,
+                in_provider_id,
+                ForwardedOutcome::Completed {
+                    result: serde_json::json!({"type":"agentModelOptions","options":[]}),
+                },
+            )
+            .unwrap();
+        wait_events(&mut client, &grant, session, |events| {
+            events
+                .iter()
+                .filter(|e| matches!(e.event, ProviderEvent::TurnCompleted { .. }))
+                .count()
+                == 2
+        });
+        eprintln!(
+            "actual Codex approval boundary + in-provider CLI qualified: approval waited {}ms across {} native request resolutions, CLI request {in_provider_id} held through 5 further epochs ({version})",
+            approval_wait.elapsed().as_millis(),
+            resolved_requests.len()
+        );
+    } else {
+        eprintln!(
+            "actual Codex approval/exec boundary qualified: turn B ended with {} resolved native requests ({version})",
+            resolved_requests.len()
+        );
+    }
+    // The same provider owner still holds the session; stop terminates it.
+    assert_eq!(unsafe { libc::kill(owner_pid, 0) }, 0);
+    client
+        .execute(envelope(
+            &host,
+            &grant,
+            Some(session),
+            uuid::Uuid::new_v4(),
+            CanonicalAction::StopSession,
+        ))
+        .unwrap();
+    wait_events(&mut client, &grant, session, |events| {
+        events.iter().any(|e| {
+            matches!(
+                e.event,
+                ProviderEvent::Terminated {
+                    reason: TerminateReason::Requested
+                }
+            )
+        })
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while unsafe { libc::kill(owner_pid, 0) } == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "provider group owner survived confirmed stop"
+        );
+        std::thread::yield_now();
+    }
+    eprintln!(
+        "actual Codex scoped ingress qualified: runtime={} thread={thread_id} pid={owner_pid} replacements=30 {version}",
+        host.endpoint.instance
+    );
 }
