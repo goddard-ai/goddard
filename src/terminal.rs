@@ -4839,9 +4839,7 @@ mod tests {
     }
 
     impl Render for FloatingCardHost {
-        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            self.terminal
-                .update(cx, |terminal, _| terminal.set_fit_bounds(true));
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
             div().size_full().flex().flex_col().child(
                 div()
                     .h(px(340.0))

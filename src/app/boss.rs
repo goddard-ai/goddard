@@ -1259,6 +1259,26 @@ impl BossUi {
     }
 }
 
+/// The roster pick an armed command honors. An employee chat's composer
+/// names only two destinations — the boss and the employee the chat
+/// belongs to — so a pick made for a colleague elsewhere resolves
+/// unpicked here rather than retargeting the draft onto them. The chat's
+/// own employee keeps its pick, live or stale; every other armed context
+/// keeps the whole roster's.
+fn composer_target_pick_for_context(
+    context: &BossCommandContext,
+    pick: ComposerTargetPick,
+) -> ComposerTargetPick {
+    let picked = match pick {
+        ComposerTargetPick::Live(employee) | ComposerTargetPick::Stale(employee) => employee,
+        ComposerTargetPick::Unpicked => return pick,
+    };
+    match context {
+        BossCommandContext::Employee(chat) if picked != *chat => ComposerTargetPick::Unpicked,
+        _ => pick,
+    }
+}
+
 /// Keep the accepted draft and its armed context together while asking the
 /// owning daemon for the current chat. Pushes are only a cache hint here.
 struct BossComposerSend {
@@ -3370,7 +3390,10 @@ impl Waku {
         let Some(key) = self.composer_command_daemon(command) else {
             return ComposerTarget::Boss;
         };
-        match self.boss_ui.composer_target_pick(key) {
+        match composer_target_pick_for_context(
+            &command.context,
+            self.boss_ui.composer_target_pick(key),
+        ) {
             ComposerTargetPick::Unpicked => ComposerTarget::Boss,
             ComposerTargetPick::Live(employee) => ComposerTarget::Employee(employee),
             ComposerTargetPick::Stale(employee) => ComposerTarget::Stale {
@@ -3397,6 +3420,26 @@ impl Waku {
             })
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| tr!("boss.trigger_employee"))
+    }
+
+    /// The identity a picked employee wears on the chip and in the send-to
+    /// menu — its persona identity while the roster knows it, a
+    /// name-derived stand-in once it does not, so the row never loses its
+    /// face.
+    fn employee_target_identity(&self, employee: Uuid) -> BossIdentity {
+        self.boss_ui
+            .identities
+            .get(&employee)
+            .cloned()
+            .unwrap_or_else(|| {
+                let name = self.employee_target_name(employee);
+                BossIdentity {
+                    id: employee,
+                    name: name.clone(),
+                    avatar_seed: name,
+                    avatar_style: AvatarStyle::default(),
+                }
+            })
     }
 
     /// Record the destination chip's pick for one boss daemon — `None`
@@ -3735,48 +3778,73 @@ impl Waku {
             ),
             ComposerTarget::Employee(employee) | ComposerTarget::Stale { employee, .. } => {
                 let name = self.employee_target_name(*employee);
-                let identity = self.boss_ui.identities.get(employee).cloned().or_else(|| {
-                    Some(BossIdentity {
-                        id: *employee,
-                        name: name.clone(),
-                        avatar_seed: name.clone(),
-                        avatar_style: AvatarStyle::default(),
-                    })
-                });
-                (name, identity)
+                (name, Some(self.employee_target_identity(*employee)))
             }
         };
         // Menu rows are a prebuilt snapshot: the items closure and its row
         // renders run inside the card's own paint, where the entity is
         // already borrowed, so faces come from the avatar cache only.
         let picked = self.boss_ui.composer_targets.get(&key).copied();
+        // An employee chat's send-to menu holds only its own employee
+        // beside the boss — colleagues stay off the chat's composer
+        // entirely. The row does not need roster membership: a retired
+        // employee's page still offers it, and the pick reads stale on
+        // send. Other armed contexts keep the whole roster.
+        let chat_employee = match &command.context {
+            BossCommandContext::Employee(employee) => Some(*employee),
+            _ => None,
+        };
+        // The check lands on the destination a send would take: the
+        // chat's own employee when picked, the boss for anything else an
+        // employee page cannot honor.
+        let boss_selected = match chat_employee {
+            Some(employee) => picked != Some(employee),
+            None => picked.is_none(),
+        };
         let boss_face = self.boss_avatar_cached(&command.identity, 18.0);
         let boss_identity = command.identity.clone();
-        let employees: Vec<(Uuid, BossIdentity, String, bool)> = self
-            .boss_ui
-            .recent
-            .get(&key)
-            .into_iter()
-            .flatten()
-            .filter_map(|employee| {
-                let identity = self.boss_ui.identities.get(employee)?.clone();
-                let job_title = self
-                    .boss_ui
-                    .job_titles
-                    .get(employee)
-                    .cloned()
-                    .unwrap_or_default();
-                Some((
-                    *employee,
-                    identity,
-                    job_title,
-                    self.boss_ui.expired.contains(employee),
-                ))
-            })
-            .collect();
+        let boss_detail = chat_employee.map(|_| tr!("boss.command_target_boss"));
+        let employees: Vec<(Uuid, BossIdentity, Option<String>)> = match chat_employee {
+            Some(employee) => vec![(
+                employee,
+                self.employee_target_identity(employee),
+                Some(tr!("boss.command_target_employee")),
+            )],
+            None => self
+                .boss_ui
+                .recent
+                .get(&key)
+                .into_iter()
+                .flatten()
+                .filter_map(|employee| {
+                    let identity = self.boss_ui.identities.get(employee)?.clone();
+                    let job_title = self
+                        .boss_ui
+                        .job_titles
+                        .get(employee)
+                        .cloned()
+                        .unwrap_or_default();
+                    let detail = match (
+                        job_title.is_empty(),
+                        self.boss_ui.expired.contains(employee),
+                    ) {
+                        (false, true) => {
+                            format!("{} · {}", job_title, tr!("boss.employee_finished"))
+                        }
+                        (true, true) => tr!("boss.employee_finished"),
+                        _ => job_title,
+                    };
+                    Some((
+                        *employee,
+                        identity,
+                        (!detail.is_empty()).then_some(detail),
+                    ))
+                })
+                .collect(),
+        };
         let employee_faces: Vec<Option<Arc<gpui::RenderImage>>> = employees
             .iter()
-            .map(|(_, identity, _, _)| self.boss_avatar_cached(identity, 18.0))
+            .map(|(_, identity, _)| self.boss_avatar_cached(identity, 18.0))
             .collect();
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle("boss-composer-target", cx);
@@ -3831,13 +3899,14 @@ impl Waku {
                             let boss_face = boss_face.clone();
                             let identity = boss_identity.clone();
                             let name = boss_identity.name.clone();
+                            let detail = boss_detail.clone();
                             move |_, _| {
                                 target_row(
                                     boss_face.clone(),
                                     &identity,
                                     &name,
-                                    None,
-                                    picked.is_none(),
+                                    detail.clone(),
+                                    boss_selected,
                                     &theme,
                                 )
                             }
@@ -3856,9 +3925,7 @@ impl Waku {
                     );
                 } else {
                     items.push(MenuItem::Separator);
-                    for (index, (employee, identity, job_title, expired)) in
-                        employees.iter().enumerate()
-                    {
+                    for (index, (employee, identity, detail)) in employees.iter().enumerate() {
                         let weak = weak.clone();
                         let employee = *employee;
                         items.push(
@@ -3867,22 +3934,14 @@ impl Waku {
                                 let face = employee_faces[index].clone();
                                 let identity = identity.clone();
                                 let name = identity.name.clone();
-                                let detail = match (job_title.is_empty(), *expired) {
-                                    (false, true) => format!(
-                                        "{} · {}",
-                                        job_title,
-                                        tr!("boss.employee_finished")
-                                    ),
-                                    (true, true) => tr!("boss.employee_finished"),
-                                    _ => job_title.clone(),
-                                };
+                                let detail = detail.clone();
                                 let selected = picked == Some(employee);
                                 move |_, _| {
                                     target_row(
                                         face.clone(),
                                         &identity,
                                         &name,
-                                        (!detail.is_empty()).then(|| detail.clone()),
+                                        detail.clone(),
                                         selected,
                                         &theme,
                                     )
@@ -13078,6 +13137,68 @@ mod tests {
         assert!(matches!(
             ui.composer_target_pick(other_key),
             ComposerTargetPick::Unpicked
+        ));
+    }
+
+    /// An employee chat's composer names only the boss and its own
+    /// employee: a pick made for a colleague elsewhere resolves unpicked
+    /// while the command answers to this page — the send commands the
+    /// boss rather than landing on a recipient the menu cannot offer.
+    /// The chat's own employee keeps its pick, live or stale, and other
+    /// armed contexts keep the whole roster's picks.
+    #[test]
+    fn employee_chat_composer_target_scopes_the_pick_to_its_employee() {
+        let chat = Uuid::new_v4();
+        let coworker = Uuid::new_v4();
+        let employee_context = BossCommandContext::Employee(chat);
+        let deliverable_context = BossCommandContext::Deliverable {
+            path: PathBuf::from("/boss/reports/summary.md"),
+            name: "Summary".into(),
+            directory: false,
+        };
+        // The chat's own employee keeps its pick — live or stale.
+        assert!(matches!(
+            composer_target_pick_for_context(&employee_context, ComposerTargetPick::Live(chat)),
+            ComposerTargetPick::Live(id) if id == chat
+        ));
+        assert!(matches!(
+            composer_target_pick_for_context(&employee_context, ComposerTargetPick::Stale(chat)),
+            ComposerTargetPick::Stale(id) if id == chat
+        ));
+        // A colleague's pick — live or stale — reads unpicked on this page.
+        assert!(matches!(
+            composer_target_pick_for_context(
+                &employee_context,
+                ComposerTargetPick::Live(coworker)
+            ),
+            ComposerTargetPick::Unpicked
+        ));
+        assert!(matches!(
+            composer_target_pick_for_context(
+                &employee_context,
+                ComposerTargetPick::Stale(coworker)
+            ),
+            ComposerTargetPick::Unpicked
+        ));
+        // Nothing picked stays unpicked.
+        assert!(matches!(
+            composer_target_pick_for_context(&employee_context, ComposerTargetPick::Unpicked),
+            ComposerTargetPick::Unpicked
+        ));
+        // Other armed contexts keep the whole roster's picks.
+        assert!(matches!(
+            composer_target_pick_for_context(
+                &deliverable_context,
+                ComposerTargetPick::Live(coworker)
+            ),
+            ComposerTargetPick::Live(id) if id == coworker
+        ));
+        assert!(matches!(
+            composer_target_pick_for_context(
+                &deliverable_context,
+                ComposerTargetPick::Stale(coworker)
+            ),
+            ComposerTargetPick::Stale(id) if id == coworker
         ));
     }
 }

@@ -6544,6 +6544,10 @@ boss.command_send_to:
   en: Send to
 boss.command_no_employees:
   en: No employees yet
+boss.command_target_boss:
+  en: Boss
+boss.command_target_employee:
+  en: Employee
 boss.command_target_gone:
   en: "%{name} is no longer available — the message was not sent"
 boss.save_first:
