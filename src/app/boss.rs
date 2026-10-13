@@ -5972,11 +5972,9 @@ impl Waku {
             .child(icon(icon_path, 12.0, theme.text_secondary))
     }
 
-    /// A deliverable row's click or Enter: the deliverable's task page is the boss
-    /// chat that published it, opened with the file armed as composer
-    /// context — and, when the file is previewable, its own preview page
-    /// on top of it. The arm parks in `pending_deliverable` so the session
-    /// switch the open triggers cannot clear it before the chat lands.
+    /// A previewable local file opens its task page with the file armed as
+    /// composer context. Directories and files that cannot be previewed go
+    /// to Finder without changing the current app surface.
     pub(super) fn open_deliverable_task(
         &mut self,
         key: DaemonKey,
@@ -5985,6 +5983,36 @@ impl Waku {
     ) {
         if !self.state.boss_experiment_enabled {
             return;
+        }
+        let path = self
+            .boss_ui
+            .states
+            .get(&key)
+            .and_then(|state| {
+                state
+                    .deliverables
+                    .iter()
+                    .find(|deliverable| deliverable.id == deliverable_id)
+            })
+            .map(|deliverable| (PathBuf::from(&deliverable.path), deliverable.directory));
+        if key == DaemonKey::Local
+            && let Some((path, recorded_directory)) = path
+        {
+            let exists = path.try_exists().unwrap_or(false);
+            let directory = recorded_directory || path.is_dir();
+            let action = deliverable_activation_action(&path, directory, exists && path.is_file());
+            if action == DeliverableActivationAction::RevealInFileManager {
+                self.mark_deliverable_viewed(key, deliverable_id, cx);
+                crate::platform::reveal_in_file_manager(&path, cx);
+                if !exists {
+                    self.show_toast(tr!(
+                        "files.unable_to_edit",
+                        error = "the deliverable is unavailable"
+                    ));
+                    cx.notify();
+                }
+                return;
+            }
         }
         let from = self.navigation_location();
         self.boss_ui
@@ -10594,6 +10622,24 @@ impl Waku {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeliverableActivationAction {
+    Preview,
+    RevealInFileManager,
+}
+
+fn deliverable_activation_action(
+    path: &Path,
+    directory: bool,
+    is_file: bool,
+) -> DeliverableActivationAction {
+    if directory || !is_file || !right_panel::transfer_file_is_previewable(path) {
+        DeliverableActivationAction::RevealInFileManager
+    } else {
+        DeliverableActivationAction::Preview
+    }
+}
+
 /// One label/value line of a detail pane's info table — the Skills
 /// detail's pattern.
 fn boss_info_row(theme: &Theme, label: String, value: AnyElement, last: bool) -> Div {
@@ -11567,6 +11613,26 @@ fn boss_input(input: Entity<TextInput>, theme: &Theme) -> Div {
 mod tests {
     use super::*;
     use waku_client::boss::{BossDeliverable, BossResourcePolicy};
+
+    #[test]
+    fn deliverable_activation_only_navigates_for_previewable_files() {
+        assert_eq!(
+            deliverable_activation_action(Path::new("report.md"), false, true),
+            DeliverableActivationAction::Preview
+        );
+        assert_eq!(
+            deliverable_activation_action(Path::new("archive.zip"), false, true),
+            DeliverableActivationAction::RevealInFileManager
+        );
+        assert_eq!(
+            deliverable_activation_action(Path::new("folder.md"), true, false),
+            DeliverableActivationAction::RevealInFileManager
+        );
+        assert_eq!(
+            deliverable_activation_action(Path::new("missing.md"), false, false),
+            DeliverableActivationAction::RevealInFileManager
+        );
+    }
 
     fn deliverable_state(updated_at: u64, viewed_at: Option<u64>) -> BossState {
         BossState {
