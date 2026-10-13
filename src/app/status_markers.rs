@@ -996,164 +996,142 @@ impl Waku {
         let marker_pill =
             self.floating_status_marker_pill(self.active_transcript_rows(), &theme, cx);
         Some(
-            div().w_full().h(px(0.0)).relative().child(
-                div()
-                    .absolute()
-                    .bottom(px(8.0))
-                    .left_0()
-                    .right_0()
-                    .px(px(20.0 - COMPOSER_OVERHANG))
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
-                            .mx_auto()
-                            .pl(px(COMPOSER_CHIP_INSET))
-                            .flex()
-                            .gap(px(6.0))
-                            .children(marker_pill)
-                            .children(actions.iter().enumerate().map(|(index, action)| {
-                                let (icon_path, label) = match action {
-                                    StatusSuggestedAction::Proceed => (
-                                        "icons/chat.svg",
-                                        action_predictions::suggested_prompt(
-                                            "proceed",
-                                            &self.state.suggested_prompts,
-                                        )
-                                        .unwrap_or_else(|| tr!("suggestions.proceed")),
-                                    ),
-                                    StatusSuggestedAction::MakeItHappen => (
-                                        "icons/play.svg",
-                                        action_predictions::suggested_prompt(
-                                            "make-it-happen",
-                                            &self.state.suggested_prompts,
-                                        )
-                                        .unwrap_or_else(|| tr!("suggestions.make_it_happen")),
-                                    ),
-                                    StatusSuggestedAction::KeepGoing => (
-                                        "icons/sparkle.svg",
-                                        action_predictions::suggested_prompt(
-                                            "keep-going",
-                                            &self.state.suggested_prompts,
-                                        )
-                                        .unwrap_or_else(|| tr!("suggestions.keep_going")),
-                                    ),
-                                    StatusSuggestedAction::FixErrors => (
-                                        "icons/sparkle.svg",
-                                        action_predictions::suggested_prompt(
-                                            "fix-errors",
-                                            &self.state.suggested_prompts,
-                                        )
-                                        .unwrap_or_else(|| tr!("suggestions.fix_errors")),
-                                    ),
-                                    StatusSuggestedAction::RunTests => (
-                                        "icons/sparkle.svg",
-                                        action_predictions::suggested_prompt(
-                                            "run-tests",
-                                            &self.state.suggested_prompts,
-                                        )
-                                        .unwrap_or_else(|| tr!("suggestions.run_tests")),
-                                    ),
-                                    // These chips label the action; the
-                                    // tooltip below shows the prompt text
-                                    // that clicking sends.
-                                    StatusSuggestedAction::YouDecide => (
-                                        "icons/chat.svg",
-                                        action_predictions::suggested_action_title("you-decide")
-                                            .unwrap_or_else(|| tr!("suggestions.you_decide")),
-                                    ),
-                                    StatusSuggestedAction::Diagnose => (
-                                        "icons/search.svg",
-                                        action_predictions::suggested_action_title("diagnose")
-                                            .unwrap_or_else(|| tr!("suggestions.diagnose")),
-                                    ),
-                                };
-                                let tooltip = action_predictions::suggested_prompt(
-                                    action.canned_id(),
-                                    &self.state.suggested_prompts,
-                                )
-                                .unwrap_or_else(|| label.clone());
-                                let display_label: String =
-                                    label.replace('\n', " ").chars().take(56).collect();
-                                let display_label =
-                                    if label.chars().count() > 56 || label.contains('\n') {
-                                        format!("{display_label}…")
+            div()
+                .max_w_full()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(6.0))
+                .children(marker_pill)
+                .children(actions.iter().enumerate().map(|(index, action)| {
+                    let (icon_path, label) = match action {
+                        StatusSuggestedAction::Proceed => (
+                            "icons/chat.svg",
+                            action_predictions::suggested_prompt(
+                                "proceed",
+                                &self.state.suggested_prompts,
+                            )
+                            .unwrap_or_else(|| tr!("suggestions.proceed")),
+                        ),
+                        StatusSuggestedAction::MakeItHappen => (
+                            "icons/play.svg",
+                            action_predictions::suggested_prompt(
+                                "make-it-happen",
+                                &self.state.suggested_prompts,
+                            )
+                            .unwrap_or_else(|| tr!("suggestions.make_it_happen")),
+                        ),
+                        StatusSuggestedAction::KeepGoing => (
+                            "icons/sparkle.svg",
+                            action_predictions::suggested_prompt(
+                                "keep-going",
+                                &self.state.suggested_prompts,
+                            )
+                            .unwrap_or_else(|| tr!("suggestions.keep_going")),
+                        ),
+                        StatusSuggestedAction::FixErrors => (
+                            "icons/sparkle.svg",
+                            action_predictions::suggested_prompt(
+                                "fix-errors",
+                                &self.state.suggested_prompts,
+                            )
+                            .unwrap_or_else(|| tr!("suggestions.fix_errors")),
+                        ),
+                        StatusSuggestedAction::RunTests => (
+                            "icons/sparkle.svg",
+                            action_predictions::suggested_prompt(
+                                "run-tests",
+                                &self.state.suggested_prompts,
+                            )
+                            .unwrap_or_else(|| tr!("suggestions.run_tests")),
+                        ),
+                        // These chips label the action; the
+                        // tooltip below shows the prompt text
+                        // that clicking sends.
+                        StatusSuggestedAction::YouDecide => (
+                            "icons/chat.svg",
+                            action_predictions::suggested_action_title("you-decide")
+                                .unwrap_or_else(|| tr!("suggestions.you_decide")),
+                        ),
+                        StatusSuggestedAction::Diagnose => (
+                            "icons/search.svg",
+                            action_predictions::suggested_action_title("diagnose")
+                                .unwrap_or_else(|| tr!("suggestions.diagnose")),
+                        ),
+                    };
+                    let tooltip = action_predictions::suggested_prompt(
+                        action.canned_id(),
+                        &self.state.suggested_prompts,
+                    )
+                    .unwrap_or_else(|| label.clone());
+                    let display_label: String = label.replace('\n', " ").chars().take(56).collect();
+                    let display_label = if label.chars().count() > 56 || label.contains('\n') {
+                        format!("{display_label}…")
+                    } else {
+                        display_label
+                    };
+                    let action = action.clone();
+                    let keyboard_action = action.clone();
+                    div()
+                        .id(format!("status-suggestion-{turn_id}-{index}"))
+                        .max_w_full()
+                        .flex()
+                        .items_center()
+                        .gap(px(5.0))
+                        .h(px(24.0))
+                        .px(px(9.0))
+                        .rounded(px(8.0))
+                        .border(hairline())
+                        .border_color(theme.border_subtle)
+                        .bg(theme.raised)
+                        .cursor_default()
+                        .track_focus(&self.status_suggestion_focuses[index])
+                        .tab_index(0)
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        // The wash composites over `raised` —
+                        // painting the translucent token alone
+                        // would let the transcript ghost through.
+                        .hover(|element| element.bg(theme.raised.blend(theme.overlay_strong)))
+                        .child(icon(icon_path, 11.0, theme.text_secondary))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex()
+                                .items_baseline()
+                                .gap(px(5.0))
+                                .child(div().min_w_0().truncate().child(display_label))
+                                .when_some(
+                                    if index == 0 {
+                                        shortcut_label.clone()
                                     } else {
-                                        display_label
-                                    };
-                                let action = action.clone();
-                                let keyboard_action = action.clone();
-                                div()
-                                    .id(format!("status-suggestion-{turn_id}-{index}"))
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(5.0))
-                                    .h(px(24.0))
-                                    .px(px(9.0))
-                                    .rounded(px(8.0))
-                                    .border(hairline())
-                                    .border_color(theme.border_subtle)
-                                    .bg(theme.raised)
-                                    .cursor_default()
-                                    .track_focus(&self.status_suggestion_focuses[index])
-                                    .tab_index(0)
-                                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                                    // The wash composites over `raised` —
-                                    // painting the translucent token alone
-                                    // would let the transcript ghost through.
-                                    .hover(|element| {
-                                        element.bg(theme.raised.blend(theme.overlay_strong))
-                                    })
-                                    .child(icon(icon_path, 11.0, theme.text_secondary))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_baseline()
-                                            .gap(px(5.0))
-                                            .child(display_label)
-                                            .when_some(
-                                                if index == 0 {
-                                                    shortcut_label.clone()
-                                                } else {
-                                                    None
-                                                },
-                                                |row, label| {
-                                                    row.child(
-                                                        div()
-                                                            .flex_none()
-                                                            .text_size(sp(11.0))
-                                                            .text_color(theme.text_tertiary)
-                                                            .child(label),
-                                                    )
-                                                },
-                                            ),
-                                    )
-                                    .tooltip(Tooltip::text(tooltip))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.accept_status_suggestion(turn_id, &action, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, _, cx| {
-                                            if matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            ) {
-                                                this.accept_status_suggestion(
-                                                    turn_id,
-                                                    &keyboard_action,
-                                                    cx,
-                                                );
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    ))
-                            }))
-                            // A pending plan approval and a voicing
-                            // briefing's pause/resume trail the row —
-                            // same slot, same chip shell.
-                            .children(self.plan_approval_chip(window, &theme, cx)),
-                    ),
-            ),
+                                        None
+                                    },
+                                    |row, label| {
+                                        row.child(
+                                            div()
+                                                .flex_none()
+                                                .text_size(sp(11.0))
+                                                .text_color(theme.text_tertiary)
+                                                .child(label),
+                                        )
+                                    },
+                                ),
+                        )
+                        .tooltip(Tooltip::text(tooltip))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.accept_status_suggestion(turn_id, &action, cx);
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.accept_status_suggestion(turn_id, &keyboard_action, cx);
+                                cx.stop_propagation();
+                            }
+                        }))
+                }))
+                // A pending plan approval and a voicing
+                // briefing's pause/resume trail the row —
+                // same slot, same chip shell.
+                .children(self.plan_approval_chip(window, &theme, cx)),
         )
     }
 
@@ -1163,6 +1141,9 @@ impl Waku {
         action: &StatusSuggestedAction,
         cx: &mut Context<Self>,
     ) {
+        if !self.composer_is_empty(cx) {
+            return;
+        }
         let Some(session) = self.composer_session() else {
             return;
         };
@@ -1526,7 +1507,7 @@ impl Waku {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.action_suggestion_row_visible() {
+        if self.action_suggestion_row_visible(cx) {
             return None;
         }
         let pill = self.floating_status_marker_pill(transcript_rows, theme, cx)?;

@@ -1059,7 +1059,6 @@ impl Render for Waku {
                                     .absolute()
                                     .inset_0(),
                                 )
-                                .children(self.render_action_suggestion(window, cx))
                                 .children(self.render_queued_messages(cx))
                                 .child(self.render_composer(window, cx))
                                 .child(self.render_workspace_footer(cx)),

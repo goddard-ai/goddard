@@ -5709,10 +5709,12 @@ impl Waku {
     /// chip only while this holds; the `SubmitSteer` handler runs the same
     /// predicate against the submitted text.
     pub(super) fn composer_is_empty(&self, cx: &App) -> bool {
-        self.composer.read(cx).content(cx).trim().is_empty()
-            && self.composer_attachments.is_empty()
-            && self.composer_inline_atoms.is_empty()
-            && !self.has_annotations()
+        composer_content_is_empty(
+            self.composer.read(cx).content(cx),
+            self.composer_attachments.is_empty(),
+            self.composer_inline_atoms.is_empty(),
+            !self.has_annotations(),
+        )
     }
 
     /// The mutable counterpart of [`Self::composer_session`]: writes land on
@@ -6018,6 +6020,11 @@ impl Waku {
 
     fn render_composer_field(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let save_draft_chip = self.render_save_draft_chip(window, cx);
+        let action_suggestion = if self.big_picture.is_open() {
+            None
+        } else {
+            self.render_action_suggestion(window, cx)
+        };
         // A sealed planning session no longer takes prompts — a muted card
         // in the composer's slot carries the state instead.
         let field = if let Some(session) = self
@@ -6031,15 +6038,33 @@ impl Waku {
                 .px(px(20.0 - COMPOSER_OVERHANG))
                 .child(self.render_composer_card(&ComposerCard::Main, window, cx))
         };
-        let Some(save_draft_chip) = save_draft_chip else {
+        if save_draft_chip.is_none() && action_suggestion.is_none() {
             return field;
-        };
+        }
         div()
             .w_full()
             .flex_none()
             .flex()
             .flex_col()
-            .child(save_draft_chip)
+            .child(
+                div()
+                    .flex_none()
+                    .px(px(20.0 - COMPOSER_OVERHANG))
+                    .pb(px(6.0))
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
+                            .mx_auto()
+                            .pl(px(COMPOSER_CHIP_INSET))
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap(px(6.0))
+                            .children(save_draft_chip)
+                            .children(action_suggestion),
+                    ),
+            )
             .child(field)
     }
 
@@ -6055,68 +6080,52 @@ impl Waku {
         )
         .resolve(window, cx);
         Some(
-            div()
-                .flex_none()
-                .px(px(20.0 - COMPOSER_OVERHANG))
-                .pb(px(6.0))
-                .child(
-                    div()
-                        .w_full()
-                        .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
-                        .mx_auto()
-                        .pl(px(COMPOSER_CHIP_INSET))
-                        .flex()
-                        .child(
-                            div()
-                                .id("composer-save-draft-suggestion")
-                                .track_focus(&focus)
-                                .tab_index(0)
-                                .h(px(24.0))
-                                .px(px(9.0))
-                                .rounded(px(8.0))
-                                .border(hairline())
-                                .border_color(theme.border_subtle)
-                                .bg(theme.raised)
-                                .flex()
-                                .items_center()
-                                .gap(px(5.0))
-                                .cursor_default()
-                                .text_size(sp(12.5))
-                                .text_color(theme.text)
-                                .focus_visible(|style| style.bg(theme.focus_highlight()))
-                                .hover(|element| {
-                                    element.bg(theme.raised.blend(theme.overlay_strong))
-                                })
-                                .child(icon("icons/compose.svg", 11.0, theme.text_secondary))
-                                .child(
+            div().flex_none().child(
+                div()
+                    .id("composer-save-draft-suggestion")
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .h(px(24.0))
+                    .px(px(9.0))
+                    .rounded(px(8.0))
+                    .border(hairline())
+                    .border_color(theme.border_subtle)
+                    .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .cursor_default()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .hover(|element| element.bg(theme.raised.blend(theme.overlay_strong)))
+                    .child(icon("icons/compose.svg", 11.0, theme.text_secondary))
+                    .child(
+                        div()
+                            .flex()
+                            .items_baseline()
+                            .gap(px(5.0))
+                            .child(tr!("drafts.save_action"))
+                            .when_some(shortcut, |row, label| {
+                                row.child(
                                     div()
-                                        .flex()
-                                        .items_baseline()
-                                        .gap(px(5.0))
-                                        .child(tr!("drafts.save_action"))
-                                        .when_some(shortcut, |row, label| {
-                                            row.child(
-                                                div()
-                                                    .flex_none()
-                                                    .text_size(sp(11.0))
-                                                    .text_color(theme.text_tertiary)
-                                                    .child(label),
-                                            )
-                                        }),
+                                        .flex_none()
+                                        .text_size(sp(11.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(label),
                                 )
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.create_saved_draft(window, cx);
-                                }))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                            this.create_saved_draft(window, cx);
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                )),
-                        ),
-                ),
+                            }),
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.create_saved_draft(window, cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.create_saved_draft(window, cx);
+                            cx.stop_propagation();
+                        }
+                    })),
+            ),
         )
     }
 
@@ -10159,5 +10168,28 @@ fn append_message_part(prefix: &str, suffix: &str) -> String {
         (true, false) => suffix.trim_start().to_owned(),
         (false, true) => prefix.trim_end().to_owned(),
         (false, false) => format!("{}\n\n{}", prefix.trim_end(), suffix.trim_start()),
+    }
+}
+
+fn composer_content_is_empty(
+    text: &str,
+    attachments_empty: bool,
+    inline_atoms_empty: bool,
+    annotations_empty: bool,
+) -> bool {
+    text.trim().is_empty() && attachments_empty && inline_atoms_empty && annotations_empty
+}
+
+#[cfg(test)]
+mod composer_content_tests {
+    use super::composer_content_is_empty;
+
+    #[test]
+    fn suggestion_emptiness_includes_all_composer_content() {
+        assert!(composer_content_is_empty(" \n ", true, true, true));
+        assert!(!composer_content_is_empty("draft", true, true, true));
+        assert!(!composer_content_is_empty("", false, true, true));
+        assert!(!composer_content_is_empty("", true, false, true));
+        assert!(!composer_content_is_empty("", true, true, false));
     }
 }

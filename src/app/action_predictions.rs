@@ -1484,9 +1484,12 @@ impl Waku {
     /// or an inbox-event pick claims the slot first. Otherwise, a settled
     /// turn's status row claims
     /// it — even an empty entry suppresses the prediction fallback — and the
-    /// predicted action chip appears only when no entry does. Floats sharing
-    /// the row's slot check this so the two never overlap.
-    pub(super) fn action_suggestion_row_visible(&self) -> bool {
+    /// predicted action chip appears only when no entry does. Floating
+    /// markers and approval controls use this gate to avoid overlapping it.
+    pub(super) fn action_suggestion_row_visible(&self, cx: &App) -> bool {
+        if !self.composer_is_empty(cx) {
+            return false;
+        }
         let Some(session) = self.composer_session() else {
             return false;
         };
@@ -1516,16 +1519,16 @@ impl Waku {
         })
     }
 
-    /// The suggestion row floating above the composer lane. The row itself
-    /// is a zero-height sibling at the lane's top — it takes no layout
-    /// space, so a chip appearing or clearing never moves the composer or
-    /// the transcript. The chip hangs off its bottom edge, painted over the
-    /// transcript's bottom padding.
+    /// Suggested actions sit in the composer's accessory row and wrap before
+    /// the composer controls when the available width is narrow.
     pub(super) fn render_action_suggestion(
         &self,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
+        if !self.composer_is_empty(cx) {
+            return None;
+        }
         // The scratchpad owns the lane's airspace while it is up — its
         // control row anchors where these chips would float. Press to
         // Talk's chrome owns the same slot while an indicator, bubble,
@@ -1571,86 +1574,67 @@ impl Waku {
         let marker_pill =
             self.floating_status_marker_pill(self.active_transcript_rows(), &theme, cx);
         Some(
-            div().w_full().h(px(0.0)).relative().child(
-                div()
-                    .absolute()
-                    .bottom(px(8.0))
-                    .left_0()
-                    .right_0()
-                    // Same insets and content width as the composer card
-                    // below; the extra left inset lands the chip's edge on
-                    // the project chip's icon in the workspace footer.
-                    .px(px(20.0 - COMPOSER_OVERHANG))
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
-                            .mx_auto()
-                            .pl(px(COMPOSER_CHIP_INSET))
-                            .flex()
-                            .gap(px(6.0))
-                            .children(marker_pill)
-                            .child(
-                                div()
-                                    .id("action-suggestion")
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(5.0))
-                                    .h(px(24.0))
-                                    .px(px(9.0))
-                                    .rounded(px(8.0))
-                                    .border(hairline())
-                                    .border_color(theme.border_subtle)
-                                    .bg(theme.raised)
-                                    .cursor_default()
-                                    .track_focus(&self.action_suggestion_focus)
-                                    .tab_index(0)
-                                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                                    // The wash composites over `raised` —
-                                    // painting the translucent token alone
-                                    // would let the transcript ghost through.
-                                    .hover(|element| {
-                                        element.bg(theme.raised.blend(theme.overlay_strong))
-                                    })
-                                    .child(icon(icon_path, 11.0, theme.text_secondary))
-                                    .child(
+            div()
+                .min_w_0()
+                .max_w_full()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(6.0))
+                .children(marker_pill)
+                .child(
+                    div()
+                        .id("action-suggestion")
+                        .flex()
+                        .items_center()
+                        .gap(px(5.0))
+                        .h(px(24.0))
+                        .max_w_full()
+                        .px(px(9.0))
+                        .rounded(px(8.0))
+                        .border(hairline())
+                        .border_color(theme.border_subtle)
+                        .bg(theme.raised)
+                        .cursor_default()
+                        .track_focus(&self.action_suggestion_focus)
+                        .tab_index(0)
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        // The wash composites over `raised` —
+                        // painting the translucent token alone
+                        // would let the transcript ghost through.
+                        .hover(|element| element.bg(theme.raised.blend(theme.overlay_strong)))
+                        .child(icon(icon_path, 11.0, theme.text_secondary))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex()
+                                .items_baseline()
+                                .gap(px(5.0))
+                                .child(div().min_w_0().truncate().child(display_label))
+                                .when_some(shortcut_label, |row, label| {
+                                    row.child(
                                         div()
-                                            .flex()
-                                            .items_baseline()
-                                            .gap(px(5.0))
-                                            .child(display_label)
-                                            .when_some(shortcut_label, |row, label| {
-                                                row.child(
-                                                    div()
-                                                        .flex_none()
-                                                        .text_size(sp(11.0))
-                                                        .text_color(theme.text_tertiary)
-                                                        .child(label),
-                                                )
-                                            }),
+                                            .flex_none()
+                                            .text_size(sp(11.0))
+                                            .text_color(theme.text_tertiary)
+                                            .child(label),
                                     )
-                                    .tooltip(Tooltip::text(tooltip))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.accept_action_suggestion(window, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, window, cx| {
-                                            if matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            ) {
-                                                this.accept_action_suggestion(window, cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
-                            )
-                            // A pending plan approval and a voicing
-                            // briefing's pause/resume trail the row —
-                            // same slot, same chip shell.
-                            .children(self.plan_approval_chip(window, &theme, cx)),
-                    ),
-            ),
+                                }),
+                        )
+                        .tooltip(Tooltip::text(tooltip))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.accept_action_suggestion(window, cx);
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.accept_action_suggestion(window, cx);
+                                cx.stop_propagation();
+                            }
+                        })),
+                )
+                // A pending plan approval and a voicing briefing's
+                // pause/resume trail the row using the same chip shell.
+                .children(self.plan_approval_chip(window, &theme, cx)),
         )
     }
 
@@ -1659,6 +1643,9 @@ impl Waku {
     /// a canned prompt submits through the composer path, a Git action
     /// through the panel's op machinery.
     fn accept_action_suggestion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.composer_is_empty(cx) {
+            return;
+        }
         let Some(suggestion) = self.action_suggestion.clone() else {
             return;
         };
@@ -1751,6 +1738,9 @@ impl Waku {
     /// that already holds this entity mutably, and the accept paths need a
     /// `&mut Window` besides — both resolve once the notification returns.
     pub(super) fn accept_displayed_suggestion(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.composer_is_empty(cx) {
+            return false;
+        }
         enum Displayed {
             PlanApproval(Uuid),
             Status(Uuid, StatusSuggestedAction),

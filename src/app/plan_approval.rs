@@ -232,7 +232,7 @@ impl Waku {
     ) -> Option<Div> {
         if self.voice_scratchpad_visible()
             || self.main_composer_press_to_talk_claimed()
-            || (self.action_suggestion_row_visible() && !self.big_picture.is_open())
+            || (self.action_suggestion_row_visible(cx) && !self.big_picture.is_open())
         {
             return None;
         }

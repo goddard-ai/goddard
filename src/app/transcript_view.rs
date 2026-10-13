@@ -376,7 +376,7 @@ impl Waku {
         let theme = Theme::current(cx);
         let status_marker_float = self.render_floating_status_markers(&transcript_rows, &theme, cx);
         let floating_chip_row_visible =
-            status_marker_float.is_some() || self.action_suggestion_row_visible();
+            status_marker_float.is_some() || self.action_suggestion_row_visible(cx);
         let scroll_to_bottom = scroll_to_bottom_visible.then(|| {
             let focus = self.transcript_control_focus("transcript-scroll-to-bottom", cx);
             div()

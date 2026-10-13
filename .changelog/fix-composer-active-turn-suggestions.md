@@ -1,1 +1,1 @@
-- Hide next-step suggestions while a reply is running; Save draft and preemptive suggestions that still make sense during the reply remain available.
+- Hide suggested actions whenever the composer has draft content, so they do not compete with writing; while a reply is running, keep only preemptive actions available when the composer is empty.
