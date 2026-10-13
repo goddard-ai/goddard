@@ -447,6 +447,28 @@ fn sidebar_recent_deliverables(
     )
 }
 
+fn sidebar_deliverables_have_unread(
+    states: &HashMap<waku_client::DaemonKey, waku_client::boss::BossState>,
+    live: &[(waku_client::DaemonKey, Uuid)],
+    dormant: &[(waku_client::DaemonKey, Uuid)],
+) -> bool {
+    live.iter().chain(dormant).any(|(key, id)| {
+        states
+            .get(key)
+            .and_then(|state| {
+                state
+                    .deliverables
+                    .iter()
+                    .find(|deliverable| deliverable.id == *id)
+            })
+            .is_some_and(|deliverable| {
+                deliverable
+                    .viewed_at
+                    .is_none_or(|viewed| viewed < deliverable.updated_at)
+            })
+    })
+}
+
 fn updater_button_available_content(
     foreground: Hsla,
     label: SharedString,
@@ -4049,9 +4071,10 @@ impl Waku {
             fingerprint = mix_uuid(fingerprint, terminal_id);
         }
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
-            let (rows, collapsed_members) = self.sidebar_rows(today);
+            let (rows, collapsed_members, deliverables_unread) = self.sidebar_rows(today);
             *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(rows);
             *self.sidebar_collapsed_group_members.borrow_mut() = Rc::new(collapsed_members);
+            self.sidebar_deliverables_unread.set(deliverables_unread);
             self.sidebar_rows_fingerprint.set(Some(fingerprint));
         }
         self.sidebar_rows_snapshot.borrow().clone()
@@ -4064,7 +4087,7 @@ impl Waku {
     fn sidebar_rows(
         &self,
         today: NaiveDate,
-    ) -> (Vec<SidebarRow>, HashMap<SidebarGroup, Vec<Uuid>>) {
+    ) -> (Vec<SidebarRow>, HashMap<SidebarGroup, Vec<Uuid>>, bool) {
         let mut sorted_sessions = self
             .state
             .sessions
@@ -4161,6 +4184,11 @@ impl Waku {
         } else {
             (Vec::new(), Vec::new())
         };
+        let deliverables_unread = sidebar_deliverables_have_unread(
+            &self.boss_ui.states,
+            &recent_deliverables,
+            &dormant_deliverables,
+        );
         if !recent_deliverables.is_empty() || !dormant_deliverables.is_empty() {
             rows.push(SidebarRow::Header(SidebarGroup::Deliverables));
             if !self
@@ -4417,7 +4445,7 @@ impl Waku {
             };
             rows.push(SidebarRow::Header(group));
         }
-        (rows, collapsed_members)
+        (rows, collapsed_members, deliverables_unread)
     }
 
     /// Keep the virtualized list in sync with the current row snapshot.
@@ -4745,6 +4773,7 @@ impl Waku {
                             .iter()
                             .any(|session_id| self.boss_ui.attention.contains(session_id))
                     }),
+                SidebarGroup::Deliverables => self.sidebar_deliverables_unread.get(),
                 _ => self
                     .sidebar_collapsed_group_members
                     .borrow()
@@ -8092,6 +8121,60 @@ mod tests {
             chains: Vec::new(),
             revision: 0,
         }
+    }
+
+    #[test]
+    fn collapsed_deliverables_unread_uses_current_sidebar_membership() {
+        let now = 1_000_000_000;
+        let key = waku_client::DaemonKey::Local;
+        let deliverable = |updated_at, viewed_at| BossDeliverable {
+            id: Uuid::new_v4(),
+            name: String::new(),
+            path: String::new(),
+            source_path: None,
+            directory: false,
+            created_at: updated_at,
+            updated_at,
+            pinned_at: None,
+            dormant_at: None,
+            archived_at: None,
+            viewed_at,
+            plan_id: None,
+        };
+        let unread = deliverable(now, None);
+        let read = deliverable(now, Some(now));
+        let stale = deliverable(now - SIDEBAR_DELIVERABLE_RECENT_SECS, None);
+        let mut archived = deliverable(now, None);
+        archived.archived_at = Some(now);
+        let mut plan_document = deliverable(now, None);
+        plan_document.plan_id = Some(Uuid::new_v4());
+        let mut dormant = deliverable(now - SIDEBAR_DELIVERABLE_RECENT_SECS, None);
+        dormant.dormant_at = Some(now);
+        let states = HashMap::from([(
+            key,
+            boss_state_with_deliverables(vec![
+                unread.clone(),
+                read.clone(),
+                stale,
+                archived,
+                plan_document,
+                dormant.clone(),
+            ]),
+        )]);
+
+        let (live, dormant_members) = sidebar_recent_deliverables(&states, now);
+        assert!(sidebar_deliverables_have_unread(&states, &live, &[]));
+        assert!(!sidebar_deliverables_have_unread(
+            &states,
+            &[(key, read.id)],
+            &[]
+        ));
+        assert!(!sidebar_deliverables_have_unread(&states, &[], &[]));
+        assert!(sidebar_deliverables_have_unread(
+            &states,
+            &[],
+            &dormant_members
+        ));
     }
 
     #[test]

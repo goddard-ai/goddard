@@ -4016,6 +4016,9 @@ pub struct Waku {
     /// snapshot so a folded header can aggregate its hidden rows' unread
     /// state without re-running the grouping.
     sidebar_collapsed_group_members: RefCell<Rc<HashMap<SidebarGroup, Vec<Uuid>>>>,
+    /// Whether a Deliverables group member is unread, cached with the sidebar
+    /// row snapshot so the header stays proportional to visible rows.
+    sidebar_deliverables_unread: Cell<bool>,
     /// Branch labels for ordinary local project paths, resolved together on a
     /// background executor so sidebar rows only read memory.
     sidebar_branch_labels: RefCell<HashMap<PathBuf, SharedString>>,
@@ -7840,6 +7843,7 @@ impl Waku {
                 sidebar_rows_fingerprint: Cell::new(None),
                 sidebar_rows_snapshot: RefCell::new(Rc::new(Vec::new())),
                 sidebar_collapsed_group_members: RefCell::new(Rc::new(HashMap::new())),
+                sidebar_deliverables_unread: Cell::new(false),
                 sidebar_branch_labels: RefCell::new(HashMap::new()),
                 sidebar_branch_scan_fingerprint: Cell::new(None),
                 sidebar_branch_scan_generation: Cell::new(0),
