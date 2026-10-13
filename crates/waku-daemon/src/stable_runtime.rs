@@ -21,6 +21,7 @@
 //! - Uncertain, never resent: effects the daemon cannot confirm stay
 //!   `Uncertain` — no automatic resend on either side.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -34,7 +35,7 @@ use waku_protocol::model::RuntimeEventCursor;
 use crate::{Command, Request};
 use waku_runtime::client::{ClientError, RuntimeClient};
 use waku_runtime::contract::{
-    ActionEnvelope, CanonicalAction, ClientHello, EventCursor, EventEnvelope, ForwardedOutcome,
+    ActionEnvelope, CanonicalAction, ClientHello, ControlGrant, EventCursor, EventEnvelope, ForwardedOutcome,
     ForwardedRequest, Inventory, ProviderEvent, RequestClass, SessionRef, SessionStatus,
 };
 use waku_runtime::host::load_credentials;
@@ -154,9 +155,30 @@ impl IngressService for BackendIngress {
 #[derive(Clone)]
 pub(crate) struct StableLink {
     shared: Arc<LinkShared>,
+    // Workers retain LinkShared but never this lifetime token. A temporary
+    // forwarder clone must not detach the owning driver and registry entry.
+    _lifetime: Arc<LinkLifetime>,
+}
+
+struct LinkLifetime(Arc<AtomicBool>);
+impl Drop for LinkLifetime {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+pub(crate) struct ControllerLease {
+    instance: Uuid,
+    grant: ControlGrant,
+    routes: Mutex<HashMap<Uuid, Weak<LinkShared>>>,
+    /// All service connections share dispatch serialization.
+    service_gate: Mutex<()>,
 }
 
 struct LinkShared {
+    controller: Arc<ControllerLease>,
+    provider: ProviderKind,
+    mode: crate::model::RuntimeMode,
     /// The daemon task this session serves.
     task_id: Uuid,
     /// The daemon's runtime-attempt id — also the forwarder's owner tag.
@@ -209,16 +231,33 @@ pub(super) fn start_link(
     service_override: Option<Arc<dyn IngressService>>,
 ) -> anyhow::Result<(DriverHandle, StableLink)> {
     waku_runtime::ipc::private_root(root).context("could not verify the private runtime namespace root")?;
+    let verified_root = root.canonicalize().context("could not resolve the runtime namespace")?;
+    let root = verified_root.as_path();
     ensure_host(root)?;
     let creds = load_credentials(root).context("the runtime host's identity is unreadable")?;
     let (mut client, hello) = RuntimeClient::controller(root, &creds.controller, &ClientHello::current())
         .map_err(link_error)
         .context("could not attach to the runtime host")?;
     let instance = hello.runtime_instance;
-    let grant = client
-        .acquire_control(&ClientHello::current())
-        .map_err(link_error)
-        .context("the runtime host refused control")?;
+    let controller = {
+        let mut leases = backend.stable_controllers.lock().unwrap();
+        if let Some(lease) = leases.get(root) {
+            anyhow::ensure!(lease.instance == instance, "the runtime instance changed; reconciliation is required before admission");
+            lease.clone()
+        } else {
+            let grant = client.acquire_control(&ClientHello::current())
+                .map_err(link_error).context("the runtime host refused control")?;
+            let lease = Arc::new(ControllerLease {
+                instance,
+                grant,
+                routes: Mutex::new(HashMap::new()),
+                service_gate: Mutex::new(()),
+            });
+            leases.insert(root.to_path_buf(), lease.clone());
+            lease
+        }
+    };
+    let grant = &controller.grant;
     // Reconciliation precedes admission: the inventory names live sessions,
     // open commands, pending requests, surviving claims — a replacement
     // daemon acts on recorded truth, never on what it hoped was running.
@@ -240,7 +279,7 @@ pub(super) fn start_link(
     let prior = task_store
         .stable_link(session_id)
         .context("could not read the task's runtime link state")?;
-    let attach = resolve_attachment(prior.as_ref(), &inventory);
+    let attach = resolve_attachment(prior.as_ref(), &inventory, provider)?;
     let (sref, mut row) = match attach {
         Attachment::Reattach { sref, row } => {
             // The host's session is still live under the same identity —
@@ -256,8 +295,8 @@ pub(super) fn start_link(
             let action = CanonicalAction::AdmitSession {
                 session_id: runtime_id,
                 adapter,
-                launch: launch_payload(options),
-                requested: requested_config(options),
+                launch: launch_payload(provider, options)?,
+                requested: requested_config(provider, options),
             };
             let receipt = execute_safe(
                 &mut client,
@@ -300,6 +339,9 @@ pub(super) fn start_link(
         })
     });
     let shared = Arc::new(LinkShared {
+        controller: controller.clone(),
+        provider,
+        mode: options.mode,
         task_id: session_id,
         runtime_id,
         sref,
@@ -314,7 +356,7 @@ pub(super) fn start_link(
         store: task_store.clone(),
         sender,
         service,
-        active_turn: Mutex::new(None),
+        active_turn: Mutex::new(inventory.sessions.iter().find(|inv| inv.session == sref).and_then(|inv| inv.open_turns.first().copied())),
         config_revision: Mutex::new(inventory_config_revision(&inventory, &sref)),
         stop: Arc::new(AtomicBool::new(false)),
         threads: Mutex::new(Vec::new()),
@@ -328,7 +370,9 @@ pub(super) fn start_link(
     }
     let link = StableLink {
         shared: shared.clone(),
+        _lifetime: Arc::new(LinkLifetime(shared.stop.clone())),
     };
+    controller.routes.lock().unwrap().insert(sref.session_id, Arc::downgrade(&shared));
     spawn_pump(&shared);
     spawn_service(&shared);
     Ok((DriverHandle::from_control(Arc::new(link.clone())), link))
@@ -336,8 +380,8 @@ pub(super) fn start_link(
 
 /// Whether the task reattaches to a surviving host session or admits a new
 /// one. A recorded row that still names a live host session under the same
-/// instance is an attach; anything else — fenced, interrupted, replaced —
-/// is a fresh admission.
+/// instance is an attach. Interrupted/replaced owners require explicit
+/// recovery; only an unbound task can make a fresh admission.
 enum Attachment {
     Reattach { sref: SessionRef, row: StableLinkRow },
     Admit { row: StableLinkRow },
@@ -346,7 +390,8 @@ enum Attachment {
 fn resolve_attachment(
     prior: Option<&StableLinkRow>,
     inventory: &Inventory,
-) -> Attachment {
+    provider: ProviderKind,
+) -> anyhow::Result<Attachment> {
     if let Some(row) = prior {
         if row.runtime_instance == inventory.runtime_instance
             && let Some(inv) = inventory
@@ -355,53 +400,96 @@ fn resolve_attachment(
                 .find(|inv| inv.session.session_id == row.runtime_session_id)
             && matches!(inv.status, SessionStatus::Live | SessionStatus::Stopping)
         {
+            anyhow::ensure!(
+                inv.adapter == provider.id(),
+                "the live runtime belongs to another provider; stop confirmation is required before replacement"
+            );
             let mut row = row.clone();
             row.generation = inv.session.generation;
-            return Attachment::Reattach {
+            return Ok(Attachment::Reattach {
                 sref: inv.session,
                 row,
-            };
+            });
         }
-        // The host fenced or ended the recorded generation — the link
-        // describes a dead attachment. Keep its cursor for the record
-        // but the new attempt is a new admission.
-        let mut row = row.clone();
-        row.runtime_instance = inventory.runtime_instance;
-        return Attachment::Admit { row };
+        bail!(
+            "the recorded runtime generation is interrupted or unavailable; explicit recovery is required"
+        );
     }
-    Attachment::Admit {
+    Ok(Attachment::Admit {
         row: StableLinkRow::admit(
             STABLE_NAMESPACE,
-            // `session_id` is filled by the caller — the row is about the
-            // task, not the attempt.
             Uuid::nil(),
             Uuid::nil(),
             inventory.runtime_instance,
         ),
-    }
-}
-
-/// Launch material the adapter interprets. Stage 2C carries the driver
-/// options verbatim; real adapters own the field semantics when they land.
-fn launch_payload(options: &DriverStartOptions) -> Value {
-    json!({
-        "binary": options.binary,
-        "cwd": options.cwd,
-        "mode": format!("{:?}", options.mode),
-        "model": options.model,
-        "reasoningEffort": options.reasoning_effort,
-        "serviceTier": options.service_tier,
-        "contextWindow": options.context_window,
-        "agentPreset": options.agent_preset,
-        "computerUseEnabled": options.computer_use_enabled,
-        "mcpServers": options.mcp_servers.len(),
-        "providerCursor": options.provider_cursor,
     })
 }
 
-fn requested_config(options: &DriverStartOptions) -> waku_runtime::contract::RequestedConfig {
+/// Match the strict, independently versioned adapter schemas. Unsupported
+/// product options fail before admission instead of silently losing policy.
+fn launch_payload(provider: ProviderKind, options: &DriverStartOptions) -> anyhow::Result<Value> {
+    anyhow::ensure!(
+        options.provider_cursor.is_none(),
+        "the stable runtime cannot resume a legacy provider session"
+    );
+    anyhow::ensure!(
+        options.agent.is_none(),
+        "stable runtime product CLI credentials are not qualified"
+    );
+    anyhow::ensure!(
+        options.sandbox.is_none(),
+        "stable runtime sandbox ownership is not qualified"
+    );
+    anyhow::ensure!(
+        !options.computer_use_enabled && options.computer_use_runtime.is_none(),
+        "stable runtime Computer Use is not qualified"
+    );
+    anyhow::ensure!(
+        options.mcp_servers.is_empty(),
+        "stable runtime MCP routing is not qualified"
+    );
+    anyhow::ensure!(
+        options
+            .subagents
+            .as_ref()
+            .is_none_or(|spec| spec.agents.is_empty())
+            && options.agent_preset.is_none(),
+        "stable runtime provider presets are not supported"
+    );
+    anyhow::ensure!(
+        options.service_tier.is_none() && options.context_window.is_none(),
+        "stable runtime service tier/context window options are not supported"
+    );
+    match provider {
+        ProviderKind::Codex => {
+            let (approval, sandbox) = match options.mode {
+                crate::model::RuntimeMode::Ask => ("untrusted", "read-only"),
+                crate::model::RuntimeMode::AutoAcceptEdits => ("on-request", "workspace-write"),
+                crate::model::RuntimeMode::FullAccess => ("never", "danger-full-access"),
+                crate::model::RuntimeMode::Auto => {
+                    bail!("stable Codex automated approval review is not qualified")
+                }
+            };
+            Ok(json!({"binary": options.binary, "cwd": options.cwd,
+                "approvalPolicy": approval, "sandbox": sandbox}))
+        }
+        ProviderKind::Devin => {
+            anyhow::ensure!(
+                options.mode == crate::model::RuntimeMode::Ask,
+                "stable Devin automatic permissions are not qualified; use supervised mode"
+            );
+            Ok(json!({"cwd": options.cwd}))
+        }
+        _ => bail!("no qualified stable launch schema for {}", provider.id()),
+    }
+}
+
+fn requested_config(
+    provider: ProviderKind,
+    options: &DriverStartOptions,
+) -> waku_runtime::contract::RequestedConfig {
     waku_runtime::contract::RequestedConfig {
-        provider: None,
+        provider: Some(provider.id().into()),
         model: options.model.clone(),
         effort: options.reasoning_effort.clone(),
         options: Value::Null,
@@ -413,8 +501,7 @@ fn inventory_config_revision(inventory: &Inventory, sref: &SessionRef) -> u64 {
         .sessions
         .iter()
         .find(|inv| inv.session == *sref)
-        .and_then(|inv| inv.effective.as_ref())
-        .map(|config| config.revision)
+        .map(|inv| inv.requested_revision.max(inv.effective.as_ref().map_or(0, |config| config.revision)))
         .unwrap_or(0)
 }
 
@@ -473,13 +560,14 @@ fn translate(env: &EventEnvelope) -> Option<DriverEvent> {
             let _ = turn_id;
             DriverEvent::TurnStarted
         }
-        ProviderEvent::TurnDelta { delta, .. } => DriverEvent::TextDelta(match delta {
-            Value::String(text) => text.clone(),
-            other => other.to_string(),
-        }),
+        ProviderEvent::TurnDelta { delta, .. } => DriverEvent::TextDelta(delta.as_str()?.to_owned()),
         ProviderEvent::TurnCompleted { result, .. } => DriverEvent::TurnFinished {
-            success: true,
-            summary: result.as_str().map(str::to_owned),
+            success: result.as_str().is_some()
+                || result.pointer("/turn/status").and_then(Value::as_str) == Some("completed")
+                || result.get("stopReason").and_then(Value::as_str) == Some("end_turn")
+                || result.get("status").and_then(Value::as_str) == Some("done"),
+            summary: result.pointer("/turn/error/message").and_then(Value::as_str)
+                .or_else(|| result.as_str()).map(str::to_owned),
             summary_i18n: None,
         },
         ProviderEvent::TurnCancelled { .. } => DriverEvent::TurnFinished {
@@ -540,8 +628,7 @@ fn translate(env: &EventEnvelope) -> Option<DriverEvent> {
         ProviderEvent::RequestAnswered { request_id } => DriverEvent::RequestSettled {
             request_id: request_id.clone(),
         },
-        // Effective-config truth is the link's reconfigure fencing, not a
-        // client-visible event.
+        // Configuration is projected separately from transcript content.
         ProviderEvent::ConfigActivated { .. } => return None,
         ProviderEvent::ProviderFailed { detail } => DriverEvent::Error(detail.clone()),
         ProviderEvent::Terminated { .. } => DriverEvent::ProcessExited,
@@ -602,11 +689,23 @@ impl LinkShared {
     fn command(&self, command_id: Uuid, action: CanonicalAction) {
         let mut client = self.client.lock().unwrap();
         match execute_safe(&mut client, &self.envelope(command_id, action)) {
-            Ok(_receipt) => {}
+            Ok(receipt) => {
+                match receipt.disposition {
+                    waku_runtime::contract::CommandDisposition::Rejected { code, detail } => {
+                        let _ = self.sender.send(DriverEvent::Error(format!(
+                            "runtime command rejected ({code:?}): {detail}"
+                        )));
+                    }
+                    waku_runtime::contract::CommandDisposition::Uncertain { stage, detail } => {
+                        let _ = self.sender.send(DriverEvent::Error(format!("runtime command acceptance or outcome is uncertain ({stage:?}): {detail}")));
+                    }
+                    _ => {}
+                }
+            }
             Err(error) => {
-                let _ = self
-                    .sender
-                    .send(DriverEvent::Error(format!("runtime command failed: {error}")));
+                let _ = self.sender.send(DriverEvent::Error(format!(
+                    "runtime command failed: {error}"
+                )));
             }
         }
     }
@@ -630,12 +729,21 @@ impl LinkShared {
         if cursor.epoch != self.marker_epoch || cursor.runtime_id != self.runtime_id {
             return;
         }
-        if let Ok(Some(mut row)) = self.store.stable_link(self.task_id)
-            && cursor.sequence > row.applied_seq
+        let Ok(Some(mut row)) = self.store.stable_link(self.task_id) else {
+            return;
+        };
+        if row.runtime_instance != self.instance
+            || row.runtime_session_id != self.sref.session_id
+            || row.generation != self.sref.generation
         {
+            return;
+        }
+        if cursor.sequence > row.applied_seq {
             row.applied_seq = cursor.sequence;
             row.updated_at = crate::model::unix_time();
-            let _ = self.store.stable_link_save(&row);
+            if self.store.stable_link_save(&row).is_err() {
+                return;
+            }
         }
         let mut client = self.client.lock().unwrap();
         let _ = client.acknowledge(
@@ -651,14 +759,26 @@ impl LinkShared {
     /// A forwarded agent request arrives on the service connection. The
     /// receipt dedups by request identity before the effect runs.
     fn serve_request(&self, request: &ForwardedRequest) -> ForwardedOutcome {
+        if request.session != self.sref {
+            return ForwardedOutcome::Failed {
+                detail: "ingress session binding mismatch".into(),
+            };
+        }
         match self.store.stable_receipt(request.request_id) {
             Ok(Some(receipt)) => {
-                // Already executed — replay the recorded outcome, never
+                if receipt.session_id != self.task_id || receipt.generation != self.sref.generation
+                {
+                    return ForwardedOutcome::Failed {
+                        detail: "ingress receipt belongs to another owner".into(),
+                    };
+                }
+                // Already attempted — replay the recorded outcome, never
                 // the effect.
-                return serde_json::from_value(receipt.outcome.clone())
-                    .unwrap_or(ForwardedOutcome::Uncertain {
+                return serde_json::from_value(receipt.outcome.clone()).unwrap_or(
+                    ForwardedOutcome::Uncertain {
                         detail: "a recorded receipt could not be decoded".into(),
-                    });
+                    },
+                );
             }
             Ok(None) => {}
             Err(error) => {
@@ -667,20 +787,37 @@ impl LinkShared {
                 };
             }
         }
-        let outcome = self.service.execute(request);
-        // The outcome is durable before delivery — a crash between the
-        // write and `service_result` answers from the receipt on retry.
-        if let Err(error) = self.store.stable_receipt_record(&StableReceipt {
+        // Persist acceptance BEFORE executing. A crash after an external
+        // effect but before its result leaves uncertainty, never a new retry.
+        let pending = ForwardedOutcome::Uncertain {
+            detail: "daemon execution accepted; outcome requires reconciliation".into(),
+        };
+        let receipt = StableReceipt {
             request_id: request.request_id,
             session_id: self.task_id,
             generation: self.sref.generation,
             class: format!("{:?}", request.class).to_lowercase(),
-            outcome: serde_json::to_value(&outcome).unwrap_or(Value::Null),
+            outcome: serde_json::to_value(&pending).unwrap_or(Value::Null),
             recorded_at: crate::model::unix_time(),
-        }) {
-            return ForwardedOutcome::Uncertain {
-                detail: format!("the outcome could not be recorded durably: {error}"),
-            };
+        };
+        match self.store.stable_receipt_begin(&receipt) {
+            Ok(true) => {}
+            Ok(false) => return self.serve_request(request),
+            Err(_) => {
+                return ForwardedOutcome::Uncertain {
+                    detail: "execution acceptance could not be persisted".into(),
+                };
+            }
+        }
+        let outcome = self.service.execute(request);
+        let mut completed = receipt.clone();
+        completed.outcome = serde_json::to_value(&outcome).unwrap_or(Value::Null);
+        if self
+            .store
+            .stable_receipt_finish(&receipt, &completed)
+            .is_err()
+        {
+            return pending;
         }
         outcome
     }
@@ -699,6 +836,24 @@ fn spawn_pump(shared: &Arc<LinkShared>) {
 
 fn pump_loop(shared: Arc<LinkShared>) {
     let mut cursor = shared.cursor();
+    let mut native = crate::driver::NativeEventProjection::default();
+    if let Ok(inventory) = shared.client.lock().unwrap().reconcile(shared.epoch) {
+        if let Some(config) = inventory
+            .sessions
+            .iter()
+            .find(|inv| inv.session == shared.sref)
+            .and_then(|inv| inv.effective.as_ref())
+        {
+            native.set_codex_thread(
+                config
+                    .config
+                    .options
+                    .get("codexThreadId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            );
+        }
+    }
     let mut conn: Option<RuntimeClient> = None;
     while !shared.stop.load(Ordering::Acquire) {
         if conn.is_none() {
@@ -722,8 +877,66 @@ fn pump_loop(shared: Arc<LinkShared>) {
                     if env.sequence <= shared_cursor_applied(&shared) {
                         continue;
                     }
-                    if let Some(event) = translate(&env) {
-                        let _ = shared.sender.send(event);
+                    match &env.event {
+                        ProviderEvent::TurnStarted { turn_id, .. } => {
+                            *shared.active_turn.lock().unwrap() = Some(*turn_id);
+                        }
+                        ProviderEvent::TurnCompleted { turn_id, .. }
+                        | ProviderEvent::TurnCancelled { turn_id } => {
+                            let mut active = shared.active_turn.lock().unwrap();
+                            if *active == Some(*turn_id) {
+                                *active = None;
+                            }
+                        }
+                        _ => {}
+                    }
+                    match &env.event {
+                        ProviderEvent::ConfigActivated {
+                            revision,
+                            effective,
+                            ..
+                        } => {
+                            let mut current = shared.config_revision.lock().unwrap();
+                            *current = (*current).max(*revision);
+                            native.set_codex_thread(
+                                effective
+                                    .options
+                                    .get("codexThreadId")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_owned),
+                            );
+                        }
+                        ProviderEvent::RequestOpened {
+                            request_id,
+                            subject,
+                            class,
+                            ..
+                        } => {
+                            let event = native.request(shared.provider, request_id, subject).or_else(|| {
+                                if *class == RequestClass::Tool {
+                                    Some(DriverEvent::Error("provider tool is waiting for the unqualified product bridge".into()))
+                                } else { translate(&env) }
+                            });
+                            if let Some(event) = event {
+                                if shared.sender.send(event).is_err() {
+                                    return;
+                                }
+                            }
+                        }
+                        ProviderEvent::TurnDelta { delta, .. } if !delta.is_string() => {
+                            for event in native.project(shared.provider, delta) {
+                                if shared.sender.send(event).is_err() {
+                                    return;
+                                }
+                            }
+                        }
+                        _ => {
+                            if let Some(event) = translate(&env) {
+                                if shared.sender.send(event).is_err() {
+                                    return;
+                                }
+                            }
+                        }
                     }
                     last = Some(env.sequence);
                 }
@@ -807,15 +1020,39 @@ fn service_loop(shared: Arc<LinkShared>) {
         match client.service_drain(shared.epoch, POLL_WAIT_MS) {
             Ok(requests) => {
                 for request in requests {
-                    let outcome = shared.serve_request(&request);
+                    let _service_guard = shared.controller.service_gate.lock().unwrap();
+                    // A second connection can already have drained this request.
+                    // Verify current control before starting any new execution.
+                    if shared
+                        .client
+                        .lock()
+                        .unwrap()
+                        .reconcile(shared.epoch)
+                        .is_err()
+                    {
+                        return;
+                    }
+                    let target = shared
+                        .controller
+                        .routes
+                        .lock()
+                        .unwrap()
+                        .get(&request.session.session_id)
+                        .and_then(Weak::upgrade);
+                    let Some(target) = target.filter(|target| {
+                        target.sref == request.session && !target.stop.load(Ordering::Acquire)
+                    }) else {
+                        // A survivor not yet attached must wait, not execute as
+                        // an unrelated task or be marked failed.
+                        continue;
+                    };
+                    let outcome = target.serve_request(&request);
                     if let Err(error) =
                         client.service_result(shared.epoch, request.request_id, outcome)
                     {
                         // The receipt is durable — the next drain answers
                         // from it rather than re-executing.
-                        eprintln!(
-                            "goddard-daemon: could not report an ingress outcome: {error}"
-                        );
+                        eprintln!("goddard-daemon: could not report an ingress outcome: {error}");
                     }
                 }
             }
@@ -865,23 +1102,34 @@ impl StableLink {
 
 impl DriverControl for StableLink {
     fn prompt(&self, prompt: String) {
-        self.shared.submit(json!({ "kind": "prompt", "text": prompt }));
+        self.shared.submit(Value::String(prompt));
     }
 
-    fn prompt_with_attachments(&self, prompt: String, attachments: Vec<crate::model::MessageAttachment>) {
-        self.shared.submit(json!({
-            "kind": "prompt",
-            "text": prompt,
-            "attachments": serde_json::to_value(&attachments).unwrap_or(Value::Null),
-        }));
+    fn prompt_with_attachments(
+        &self,
+        prompt: String,
+        attachments: Vec<crate::model::MessageAttachment>,
+    ) {
+        if attachments.is_empty() {
+            self.prompt(prompt);
+        } else {
+            let _ = self.shared.sender.send(DriverEvent::Error(
+                "attachments are not supported by the stable runtime adapters".into(),
+            ));
+        }
     }
 
     fn supports_steer(&self) -> bool {
-        true
+        false
     }
 
     fn steer(&self, prompt: String) {
-        self.shared.submit(json!({ "kind": "steer", "text": prompt }));
+        let _ = self.shared.sender.send(DriverEvent::SteerRejected {
+            message: prompt,
+            reason: "the stable runtime adapter cannot steer an executing turn".into(),
+            reason_i18n: None,
+            hidden: false,
+        });
     }
 
     fn cancel(&self) {
@@ -902,7 +1150,10 @@ impl DriverControl for StableLink {
             Uuid::new_v4(),
             CanonicalAction::ResolveRequest {
                 request_id,
-                resolution: json!({ "optionId": option_id }),
+                resolution: match self.shared.provider {
+                    ProviderKind::Codex => json!({ "decision": option_id }),
+                    _ => json!({ "optionId": option_id }),
+                },
             },
         );
     }
@@ -912,25 +1163,38 @@ impl DriverControl for StableLink {
             Uuid::new_v4(),
             CanonicalAction::ResolveRequest {
                 request_id,
-                resolution: serde_json::to_value(&answers).unwrap_or(Value::Null),
+                resolution: match self.shared.provider {
+                    ProviderKind::Codex => {
+                        let values: serde_json::Map<String, Value> = answers
+                            .into_iter()
+                            .map(|answer| (answer.question_id, json!({"answers": answer.answers})))
+                            .collect();
+                        json!({"answers": values})
+                    }
+                    _ => serde_json::to_value(&answers).unwrap_or(Value::Null),
+                },
             },
         );
     }
 
     fn apply_options(&self, options: crate::driver::SessionOptions) -> bool {
+        if options.mode != self.shared.mode
+            || options.service_tier.is_some()
+            || options.context_window.is_some()
+        {
+            return false;
+        }
         let mut revision = self.shared.config_revision.lock().unwrap();
-        let next = *revision + 1;
+        let Some(next) = revision.checked_add(1) else {
+            return false;
+        };
         let action = CanonicalAction::Reconfigure {
             revision: next,
             target: waku_runtime::contract::RequestedConfig {
-                provider: None,
+                provider: Some(self.shared.provider.id().into()),
                 model: options.model.clone(),
                 effort: options.reasoning_effort.clone(),
-                options: json!({
-                    "mode": format!("{:?}", options.mode),
-                    "serviceTier": options.service_tier,
-                    "contextWindow": options.context_window,
-                }),
+                options: Value::Null,
             },
         };
         let mut client = self.shared.client.lock().unwrap();
@@ -938,7 +1202,11 @@ impl DriverControl for StableLink {
             .map(|receipt| {
                 matches!(
                     receipt.disposition,
-                    waku_runtime::contract::CommandDisposition::Terminal { .. }
+                    waku_runtime::contract::CommandDisposition::ProviderAccepted
+                        | waku_runtime::contract::CommandDisposition::Terminal {
+                            outcome: waku_runtime::contract::TerminalOutcome::Completed,
+                            ..
+                        }
                 )
             })
             .unwrap_or(false);
@@ -952,9 +1220,29 @@ impl DriverControl for StableLink {
     /// generation, release the link's durable claims, and clear the task's
     /// link row so a later attempt starts clean.
     fn delete_provider_session(&self) {
-        self.shared
-            .command(Uuid::new_v4(), CanonicalAction::StopSession);
-        let _ = self.shared.store.stable_link_clear(self.shared.task_id);
+        let mut client = self.shared.client.lock().unwrap();
+        let receipt = execute_safe(
+            &mut client,
+            &self
+                .shared
+                .envelope(Uuid::new_v4(), CanonicalAction::StopSession),
+        );
+        if matches!(
+            receipt,
+            Ok(waku_runtime::contract::CommandReceipt {
+                disposition: waku_runtime::contract::CommandDisposition::Terminal {
+                    outcome: waku_runtime::contract::TerminalOutcome::Completed,
+                    ..
+                },
+                ..
+            })
+        ) {
+            let _ = self.shared.store.stable_link_clear(self.shared.task_id);
+        } else {
+            let _ = self.shared.sender.send(DriverEvent::Error(
+                "stop pending — provider termination is not confirmed".into(),
+            ));
+        }
     }
 
     fn rollback(
@@ -962,12 +1250,6 @@ impl DriverControl for StableLink {
         _turns: usize,
     ) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
         bail!("rollback is not supported by the stable provider runtime")
-    }
-}
-
-impl Drop for StableLink {
-    fn drop(&mut self) {
-        self.shared.stop.store(true, Ordering::Release);
     }
 }
 
@@ -1423,6 +1705,9 @@ mod tests {
             let settings = crate::DaemonSettingsStore::open(backend_root.join("settings.json"))
                 .unwrap();
             let mut document = settings.get();
+            document.agent_tools_enabled = false;
+            document.agent_settings_enabled = false;
+            document.subagents_enabled = false;
             document.provider_binary_overrides.insert(
                 ProviderKind::Codex,
                 binary.display().to_string(),
@@ -1526,4 +1811,235 @@ mod tests {
             Some(root)
         );
     }
+    #[test]
+    fn stable_links_share_control_and_route_ingress_to_its_owner() {
+        struct OwnerService(Uuid, AtomicUsize);
+        impl IngressService for OwnerService {
+            fn execute(&self, request: &ForwardedRequest) -> ForwardedOutcome {
+                assert_eq!(request.session.session_id, self.0);
+                self.1.fetch_add(1, AtomicOrdering::SeqCst);
+                ForwardedOutcome::Completed { result: json!(self.0) }
+            }
+        }
+        let rig = rig(&["codex"]);
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let first_service = Arc::new(OwnerService(first_id, AtomicUsize::new(0)));
+        let second_service = Arc::new(OwnerService(second_id, AtomicUsize::new(0)));
+        let (first_handle, first, first_rx) = link(&rig, first_id, Some(first_service.clone()));
+        let second_task = Uuid::new_v4();
+        let (sender, second_rx) = crate::driver::test_event_channel();
+        let (second_handle, second) = start_link(&rig.backend, rig.backend.task_store(), second_task,
+            second_id, ProviderKind::Codex, &options(), sender, &rig.runtime_root, Some(second_service.clone())).unwrap();
+        assert_eq!(first.shared.epoch, second.shared.epoch);
+        first_handle.prompt("one".into());
+        second_handle.prompt("two".into());
+        assert_eq!(rig.factory.for_session(first_id).unwrap().dispatched().len(), 1);
+        assert_eq!(rig.factory.for_session(second_id).unwrap().dispatched().len(), 1);
+        for (link, expected) in [(&first, first_id), (&second, second_id)] {
+            let grant = link.issue_agent_grant(120_000).unwrap();
+            let mut agent = RuntimeClient::agent(&rig.runtime_root, &grant).unwrap();
+            let id = Uuid::new_v4();
+            agent.ingress(IngressRequest { request_id: id, class: IngressKind::Cli,
+                subject: json!({"test": true}), deadline_ms: u64::MAX / 2 }).unwrap();
+            let record = agent.ingress_wait(id, 10_000).unwrap();
+            assert!(matches!(record.disposition, IngressDisposition::Completed { result } if result == json!(expected)));
+        }
+        assert_eq!(first_service.1.load(AtomicOrdering::SeqCst), 1);
+        assert_eq!(second_service.1.load(AtomicOrdering::SeqCst), 1);
+        assert!(!first_rx.try_iter().any(|event| matches!(event, DriverEvent::Error(_))));
+        assert!(!second_rx.try_iter().any(|event| matches!(event, DriverEvent::Error(_))));
+    }
+
+    #[test]
+    fn stable_ingress_effect_without_result_receipt_is_not_reexecuted() {
+        struct LostResult { store: Arc<StateStore>, count: AtomicUsize }
+        impl IngressService for LostResult {
+            fn execute(&self, _request: &ForwardedRequest) -> ForwardedOutcome {
+                self.count.fetch_add(1, AtomicOrdering::SeqCst);
+                // Lose persistence after the downstream operation succeeded.
+                rusqlite::Connection::open(self.store.path()).unwrap().execute_batch(
+                    "CREATE TRIGGER fail_runtime_result BEFORE UPDATE ON stable_runtime_receipts
+                     BEGIN SELECT RAISE(FAIL, 'injected receipt write failure'); END;"
+                ).unwrap();
+                ForwardedOutcome::Completed { result: json!("external effect succeeded") }
+            }
+        }
+        let rig = rig(&["codex"]);
+        let service = Arc::new(LostResult { store: rig.backend.task_store().clone(), count: AtomicUsize::new(0) });
+        let (_handle, original, _rx) = link(&rig, Uuid::new_v4(), Some(service.clone()));
+        let request = ForwardedRequest { request_id: Uuid::new_v4(), session: original.sref(), grant_id: Uuid::new_v4(),
+            class: IngressKind::Cli, subject: json!("downstream operation"), deadline_ms: u64::MAX / 2 };
+        assert!(matches!(original.serve_request(&request), ForwardedOutcome::Uncertain { .. }));
+        assert!(matches!(original.serve_request(&request), ForwardedOutcome::Uncertain { .. }));
+        assert_eq!(service.count.load(AtomicOrdering::SeqCst), 1);
+        let mut foreign = request.clone();
+        foreign.session.session_id = Uuid::new_v4();
+        assert!(matches!(original.serve_request(&foreign), ForwardedOutcome::Failed { .. }));
+        assert_eq!(service.count.load(AtomicOrdering::SeqCst), 1);
+    }
+
+    #[test]
+    fn stable_completion_uses_native_verdict() {
+        for (result, success) in [(json!({"turn":{"status":"completed"}}), true),
+            (json!({"turn":{"status":"failed","error":{"message":"provider failed"}}}), false),
+            (json!({"stopReason":"end_turn"}), true), (json!({"stopReason":"max_tokens"}), false), (json!({}), false)] {
+            let env = EventEnvelope { runtime_instance: Uuid::new_v4(), session_id: Uuid::new_v4(), generation: 1, sequence: 1, delivery_id: None, turn_id: None, request_id: None, config_revision: None,
+                event: ProviderEvent::TurnCompleted { turn_id: Uuid::new_v4(), result } };
+            assert!(matches!(translate(&env), Some(DriverEvent::TurnFinished { success: actual, .. }) if actual == success));
+        }
+    }
+
+    #[test]
+    fn stable_temporary_forwarder_clone_does_not_detach_driver() {
+        let rig = rig(&["codex"]);
+        let (handle, owner, _rx) = link(&rig, Uuid::new_v4(), None);
+        drop(owner.clone());
+        assert!(!owner.shared.stop.load(Ordering::Acquire));
+        let shared = owner.shared.clone();
+        drop(owner);
+        assert!(!shared.stop.load(Ordering::Acquire));
+        drop(handle);
+        assert!(shared.stop.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn stable_cursor_write_failure_keeps_host_history_unacknowledged() {
+        let rig = rig(&["codex"]);
+        let (_handle, link, rx) = link(&rig, Uuid::new_v4(), None);
+        let adapter = rig.factory.for_session(link.sref().session_id).unwrap();
+        adapter.emit_live();
+        let marker = loop {
+            if let DriverEvent::RuntimeEventCursorAdvanced(marker) = rx.recv_timeout(Duration::from_secs(10)).unwrap() { break marker; }
+        };
+        rusqlite::Connection::open(rig.backend.task_store().path()).unwrap().execute_batch(
+            "CREATE TRIGGER fail_runtime_cursor BEFORE UPDATE ON stable_runtime_links
+             BEGIN SELECT RAISE(FAIL, 'injected cursor write failure'); END;"
+        ).unwrap();
+        link.note_applied(&marker);
+        let inventory = link.shared.client.lock().unwrap().reconcile(link.shared.epoch).unwrap();
+        let session = inventory.sessions.iter().find(|session| session.session == link.sref()).unwrap();
+        assert_eq!(session.acknowledged, 0);
+        assert_eq!(rig.backend.task_store().stable_link(rig.session_id).unwrap().unwrap().applied_seq, 0);
+    }
+
+    #[test]
+    fn stable_reattachment_cancels_the_original_open_turn() {
+        let rig = rig(&["codex"]);
+        let (handle, original, _rx) = link(&rig, Uuid::new_v4(), None);
+        handle.prompt("original input".into());
+        let turn = original.shared.active_turn.lock().unwrap().unwrap();
+        let adapter = rig.factory.for_session(original.sref().session_id).unwrap();
+        adapter.emit(ProviderEvent::TurnStarted { turn_id: turn, delivery_id: Uuid::new_v4() });
+        // Reconcile drains the deterministic emitted event before replacement.
+        original.shared.client.lock().unwrap().reconcile(original.shared.epoch).unwrap();
+        let (successor, replacement, _rx2) = link(&rig, Uuid::new_v4(), None);
+        assert_eq!(*replacement.shared.active_turn.lock().unwrap(), Some(turn));
+        successor.cancel();
+        assert!(adapter.cancels().contains(&turn));
+    }
+
+    #[test]
+    fn stable_codex_launch_carries_policy_and_refuses_unsupported_features() {
+        let mut opts = options();
+        for (mode, policy, sandbox) in [
+            (crate::model::RuntimeMode::Ask, "untrusted", "read-only"),
+            (crate::model::RuntimeMode::AutoAcceptEdits, "on-request", "workspace-write"),
+            (crate::model::RuntimeMode::FullAccess, "never", "danger-full-access"),
+        ] {
+            opts.mode = mode;
+            let launch: waku_runtime_codex::CodexLaunch = serde_json::from_value(launch_payload(ProviderKind::Codex, &opts).unwrap()).unwrap();
+            assert_eq!(launch.approval_policy, policy);
+            assert_eq!(launch.sandbox, sandbox);
+        }
+        opts.mode = crate::model::RuntimeMode::Auto;
+        assert!(launch_payload(ProviderKind::Codex, &opts).is_err());
+        opts.mode = crate::model::RuntimeMode::Ask;
+        opts.provider_cursor = Some(crate::model::ProviderResumeCursor::Codex { thread_id: "legacy".into() });
+        assert!(launch_payload(ProviderKind::Codex, &opts).is_err());
+    }
+
+    /// Uses the production adapter over a controlled native RPC peer. This
+    /// proves the daemon mapping, not qualification of a hosted provider.
+    #[test]
+    #[cfg(unix)]
+    fn stable_codex_native_protocol_stream_and_approval_round_trip() {
+        let runtime_root = temp_root("native-runtime");
+        let provider_root = temp_root("native-provider");
+        let binary = provider_root.join("controlled-codex");
+        std::fs::write(&binary, r#"#!/usr/bin/env python3
+import json,sys
+def emit(v):
+    print(json.dumps(v),flush=True)
+for line in sys.stdin:
+    v=json.loads(line)
+    method=v.get('method')
+    if method=='initialize':
+        emit({'id':v['id'],'result':{}})
+    elif method=='thread/start':
+        assert v['params']['approvalPolicy']=='untrusted'
+        assert v['params']['sandbox']=='read-only'
+        emit({'id':v['id'],'result':{'thread':{'id':'owned-thread'},'model':'controlled','reasoningEffort':'low'}})
+    elif method=='turn/start':
+        assert v['params']['input']==[{'type':'text','text':'native input'}]
+        emit({'id':v['id'],'result':{'turn':{'id':'owned-turn'}}})
+        emit({'method':'turn/started','params':{'threadId':'owned-thread','turn':{'id':'owned-turn'}}})
+        emit({'method':'item/agentMessage/delta','params':{'threadId':'owned-thread','turnId':'owned-turn','itemId':'message-1','delta':'native text'}})
+        emit({'method':'item/reasoning/textDelta','params':{'threadId':'owned-thread','turnId':'owned-turn','itemId':'reasoning-1','delta':'native reasoning'}})
+        emit({'id':'native-approval','method':'item/commandExecution/requestApproval','params':{'threadId':'owned-thread','turnId':'owned-turn','command':'controlled command'}})
+    elif v.get('id')=='native-approval':
+        assert v['result']=={'decision':'decline'}
+        emit({'method':'turn/completed','params':{'threadId':'owned-thread','turn':{'id':'owned-turn','status':'failed','error':{'message':'controlled failure'}}}})
+"#).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let host = RuntimeHost::open(&runtime_root,
+            HostOptions { namespace: STABLE_NAMESPACE.into(), budgets: Budgets::default(), journal_fault: None },
+            Arc::new(waku_runtime_codex::CodexFactory), Box::new(SystemClock)).unwrap();
+        let server = RuntimeServer::bind(host, &runtime_root, Duration::from_millis(5)).unwrap();
+        let (backend, task) = crate::daemon::tests::surface_test_backend(&temp_root("native-backend"));
+        let backend = Arc::new(backend);
+        backend.install_weak_self();
+        let mut opts = options();
+        opts.binary = binary;
+        opts.cwd = provider_root.clone();
+        opts.mode = crate::model::RuntimeMode::Ask;
+        let (sender, rx) = crate::driver::test_event_channel();
+        let (handle, link) = start_link(&backend, backend.task_store(), task, Uuid::new_v4(),
+            ProviderKind::Codex, &opts, sender, &runtime_root, None).unwrap();
+        handle.prompt("native input".into());
+        let mut text = String::new();
+        let mut reasoning = String::new();
+        let mut approval = false;
+        let mut started = 0;
+        loop {
+            match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
+                DriverEvent::TurnStarted => started += 1,
+                DriverEvent::TextDelta(delta) => text.push_str(&delta),
+                DriverEvent::ReasoningDelta(delta) => reasoning.push_str(&delta),
+                DriverEvent::Permission { request_id, options, .. } => {
+                    assert_eq!(request_id, serde_json::to_string("native-approval").unwrap());
+                    assert!(options.iter().any(|option| option.id == "decline" && !option.allow));
+                    approval = true;
+                    handle.respond(request_id, "decline".into());
+                }
+                DriverEvent::TurnFinished { success, summary, .. } => {
+                    assert!(!success);
+                    assert_eq!(summary.as_deref(), Some("controlled failure"));
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(started, 1);
+        assert_eq!(text, "native text");
+        assert_eq!(reasoning, "native reasoning");
+        assert!(approval);
+        handle.delete_provider_session();
+        drop(handle);
+        drop(link);
+        drop(server);
+        std::fs::remove_dir_all(provider_root).unwrap();
+    }
+
 }

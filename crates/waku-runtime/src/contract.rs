@@ -511,6 +511,14 @@ pub struct EffectiveConfig {
 #[serde(rename_all = "camelCase")]
 pub struct SessionInventory {
     pub session: SessionRef,
+    /// The registered owner and accepted configuration are reconciliation
+    /// truth even before the provider confirms an activation boundary.
+    #[serde(default)]
+    pub adapter: String,
+    #[serde(default)]
+    pub requested: RequestedConfig,
+    #[serde(default)]
+    pub requested_revision: u64,
     pub status: SessionStatus,
     pub high_water: u64,
     pub acknowledged: u64,

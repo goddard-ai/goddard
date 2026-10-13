@@ -3579,9 +3579,15 @@ impl StateStore {
     /// Record an outcome before delivery is confirmed — a replayed request
     /// reads the receipt rather than executing again.
     pub fn stable_receipt_record(&self, receipt: &StableReceipt) -> io::Result<()> {
+        self.stable_receipt_begin(receipt).map(|_| ())
+    }
+
+    /// Atomically reserve a request before execution. Only the insertion
+    /// winner may execute; a retained uncertain receipt inhibits replay.
+    pub fn stable_receipt_begin(&self, receipt: &StableReceipt) -> io::Result<bool> {
         let connection = self.open()?;
         let outcome = serde_json::to_string(&receipt.outcome).map_err(io::Error::other)?;
-        connection
+        let inserted = connection
             .execute(
                 "INSERT OR IGNORE INTO stable_runtime_receipts
                  (request_id, session_id, generation, class, outcome, recorded_at)
@@ -3596,6 +3602,25 @@ impl StateStore {
                 ],
             )
             .map_err(to_io_error)?;
+        Ok(inserted == 1)
+    }
+
+    /// Replace only this execution's acceptance receipt with its outcome.
+    /// A stale executor cannot overwrite a reconciled result or another owner.
+    pub fn stable_receipt_finish(&self, pending: &StableReceipt, completed: &StableReceipt) -> io::Result<()> {
+        if pending.request_id != completed.request_id || pending.session_id != completed.session_id
+            || pending.generation != completed.generation || pending.class != completed.class {
+            return Err(io::Error::other("stable receipt owner mismatch"));
+        }
+        let connection = self.open()?;
+        let changed = connection.execute(
+            "UPDATE stable_runtime_receipts SET outcome = ?1
+             WHERE request_id = ?2 AND session_id = ?3 AND generation = ?4 AND class = ?5 AND outcome = ?6",
+            params![serde_json::to_string(&completed.outcome).map_err(io::Error::other)?,
+                pending.request_id.to_string(), pending.session_id.to_string(), pending.generation as i64,
+                pending.class, serde_json::to_string(&pending.outcome).map_err(io::Error::other)?],
+        ).map_err(to_io_error)?;
+        if changed != 1 { return Err(io::Error::other("stable receipt changed before completion")); }
         Ok(())
     }
 }

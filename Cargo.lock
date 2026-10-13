@@ -11557,6 +11557,7 @@ dependencies = [
  "waku-protocol",
  "waku-repo-map",
  "waku-runtime",
+ "waku-runtime-codex",
  "waku-server",
  "waku-sessions",
  "waku-share",

@@ -110,10 +110,62 @@ over real sockets, loud failure on unregistered adapters, fenced-epoch
 surfacing, wholesale daemon replacement over one `app.db` reattaching to
 the surviving session, and the env opt-in gate.
 
+## Product mapping and controller safety
+
+The opt-in daemon link now shares one controller epoch per canonical host root
+and daemon incarnation. Opening a second task does not fence the first. Each
+namespace service routes requests by their host session/generation, serializes
+execution, and persists an uncertain acceptance receipt before any product
+effect. A result-write failure leaves that receipt in place; retry returns
+uncertainty instead of executing again. Applied cursor writes must succeed
+before host acknowledgement, and the forwarder checks generation ownership
+before accepting an applied marker.
+
+Codex admissions use the strict adapter launch schema: supervised mode maps to
+`untrusted`/`read-only`, automatic edits to `on-request`/`workspace-write`, and
+full access to `never`/`danger-full-access`. Devin admissions carry only `cwd`
+and require supervised mode. Unsupported product options fail before admission:
+CLI credentials, MCP, Computer Use, nonempty presets/subagents, service tiers,
+context windows, sandbox VMs and legacy resume cursors. This is a qualification
+boundary, not a replacement bridge. The default remains the legacy driver.
+
+Provider prompts use the adapters' text input contract. Native notifications
+use the existing Codex and ACP product parsers; they no longer print raw JSON
+as assistant text. Completion reads native status and error evidence rather
+than always reporting success. Codex permission/input replies retain the
+original request identity and native response shape. Steering and attachments
+are refused explicitly because these adapters cannot carry them.
+
+This unit changes the runtime inventory contract as well as daemon code.
+Live pinned hosts are not rebuilt or replaced automatically.
+
+Inventory includes the adapter, requested configuration and its revision in
+addition to effective activation. Reattachment restores the open turn for
+cancellation and the highest accepted configuration revision. A different
+provider or an interrupted/missing recorded generation blocks attachment;
+reconnect does not authorize a replacement. Unconfirmed stop retains the link
+identity. Temporary forwarder clones do not retire the link's workers.
+
+Focused verification commands:
+
+```sh
+mbx test -p waku-daemon --lib stable_runtime
+mbx test -p waku-drivers --lib stable_projection
+mbx test -p waku-runtime
+```
+
+The native protocol test uses a controlled Python peer through the production
+Codex adapter. It is not actual Codex/Devin reload qualification. Effective
+configuration has not yet been published to app/catalog/detail projections;
+pending native cards need reconstructible attachment data, originating
+command/delivery identities must survive app and daemon replacement, and
+event effects still require atomic projection/cursor settlement. These remain Stage 2C gates
+alongside real CLI/MCP ingress and resource/credential lease transfer.
+
 ## Not yet in this stage
 
-Provider replacement (new generation machinery), Codex/Devin adapters,
-real CLI/MCP/callback binaries speaking ingress (the contract and grant
+Provider replacement (new generation machinery), full Codex/Devin product
+qualification, real CLI/MCP/callback binaries speaking ingress (the contract and grant
 machinery are landed; `goddard-agent` still uses daemon-address
 credentials), resource broker/credential lease migration onto claims,
 watcher/updater integration and pinned-artifact isolation, truthful

@@ -16,6 +16,8 @@ mod opencode_computer_use;
 mod pi;
 pub mod session_import;
 mod support;
+mod stable_projection;
+pub use stable_projection::NativeEventProjection;
 mod title_refresh;
 
 pub use computer_use::ComputerUseRuntime;

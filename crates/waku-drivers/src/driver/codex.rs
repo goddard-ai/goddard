@@ -2174,6 +2174,77 @@ fn codex_error_event(message: String) -> DriverEvent {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Native stream parsing only: the host owns all RPCs and lifecycle events.
+#[derive(Default)]
+pub(super) struct StableProjection {
+    thread: Mutex<Option<String>>,
+    turn: Mutex<Option<String>>,
+    stream: CodexStreamState,
+}
+impl StableProjection {
+    pub(super) fn set_thread(&mut self, thread: Option<String>) {
+        *self.thread.lock() = thread;
+    }
+    pub(super) fn request(&self, id: &str, value: &Value) -> Option<DriverEvent> {
+        let method = value.get("method")?.as_str()?;
+        let params = &value["params"];
+        if method == "item/tool/requestUserInput" {
+            return Some(DriverEvent::UserInputRequested {
+                request_id: id.into(),
+                questions: codex_user_input_questions(params),
+            });
+        }
+        if method.contains("requestApproval") {
+            let (title, detail) = approval_copy(method, params);
+            return Some(DriverEvent::Permission {
+                request_id: id.into(),
+                title,
+                detail,
+                title_i18n: None,
+                detail_i18n: None,
+                options: vec![
+                    PermissionOption::keyed("accept", localized!("permission.allow_once"), true),
+                    PermissionOption::keyed(
+                        "acceptForSession",
+                        localized!("permission.allow_for_session"),
+                        true,
+                    ),
+                    PermissionOption::keyed("decline", localized!("common.deny"), false),
+                ],
+            });
+        }
+        None
+    }
+    pub(super) fn project(&mut self, value: &Value, events: &impl DriverEventSink) {
+        // Requests/responses are resolved through the host's retained native
+        // connection; interpreting them here could manufacture a second card.
+        if value.get("id").is_some() || value.get("method").is_none() {
+            return;
+        }
+        if value.pointer("/params/threadId").and_then(Value::as_str)
+            == self.thread.lock().as_deref()
+            && let Some(turn) = value.pointer("/params/turnId").and_then(Value::as_str)
+            && self.turn.lock().is_none()
+        {
+            *self.turn.lock() = Some(turn.into());
+        }
+        let (commands, _discarded) = unbounded();
+        handle_codex_message(
+            value.clone(),
+            &self.thread,
+            &self.turn,
+            &Mutex::new(Vec::new()),
+            &Mutex::new(HashMap::new()),
+            &Mutex::new(HashMap::new()),
+            &Mutex::new(BackgroundRpcState::default()),
+            &Mutex::new(GoalRpcState::default()),
+            &commands,
+            events,
+            &mut self.stream,
+        );
+    }
+}
+
 fn handle_codex_message(
     value: Value,
     thread_id: &Mutex<Option<String>>,

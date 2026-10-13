@@ -251,6 +251,9 @@ impl Session {
     fn inventory(&self) -> SessionInventory {
         let g = self.current();
         SessionInventory {
+            adapter: self.adapter_name.clone(),
+            requested: self.requested.clone(),
+            requested_revision: self.requested_revision,
             session: SessionRef {
                 session_id: self.id,
                 generation: g.number,

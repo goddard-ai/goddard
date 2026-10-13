@@ -115,6 +115,7 @@ impl WakuBackend {
             summon_scheduler_started: std::sync::atomic::AtomicBool::new(false),
             broker_root: Mutex::new(None),
             weak_self: Mutex::new(Weak::new()),
+            stable_controllers: std::sync::Mutex::new(HashMap::new()),
             #[cfg(test)]
             stable_test_root: None,
         };

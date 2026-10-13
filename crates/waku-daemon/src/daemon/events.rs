@@ -475,18 +475,6 @@ pub(super) fn forward_driver_events(
     data_dir: std::path::PathBuf,
 ) {
     while let Ok(event) = event_receiver.recv() {
-        // A stable-runtime applied marker is not a client event: it is the
-        // link's ack boundary — every host event ordered before it has been
-        // applied by this loop, so the runtime's cursor may advance.
-        if let DriverEvent::RuntimeEventCursorAdvanced(cursor) = &event
-            && let Some(link) = sessions
-                .lock()
-                .get(&session_id)
-                .and_then(|entry| entry.stable.clone())
-        {
-            link.note_applied(cursor);
-            continue;
-        }
         #[cfg(test)]
         if let Some(received) = lifecycles.event_received.lock().clone() {
             received(session_id, runtime_id);
@@ -530,6 +518,19 @@ pub(super) fn forward_driver_events(
             continue;
         }
         owner.set(Some(runtime_id));
+        // A stable-runtime applied marker is not a client event: it is the
+        // link's ack boundary — every host event ordered before it has been
+        // applied by this loop, so the runtime's cursor may advance.
+        if let DriverEvent::RuntimeEventCursorAdvanced(cursor) = &event
+            && let Some(link) = sessions
+                .lock()
+                .get(&session_id)
+                .and_then(|entry| entry.stable.clone())
+        {
+            link.note_applied(cursor);
+            continue;
+        }
+
         #[cfg(test)]
         if let Some(applying) = lifecycles.event_applying.lock().clone() {
             applying(session_id, runtime_id);

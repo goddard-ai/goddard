@@ -3023,6 +3023,30 @@ fn note_devin_turn_accepted(
     }
 }
 
+/// Uses the same ACP transcript parser as local sessions, without transport
+/// ownership, permission policy or prompt bookkeeping.
+#[derive(Default)]
+pub(super) struct StableProjection {
+    stream: AcpStreamState,
+}
+impl StableProjection {
+    pub(super) fn project(&mut self, update: &Value, events: &impl DriverEventSink) {
+        let notification = serde_json::from_value::<SessionNotification>(serde_json::json!({
+            "sessionId": "stable-projection", "update": update,
+        }));
+        if let Ok(notification) = notification {
+            let _ = handle_session_update(
+                ProviderKind::Devin,
+                notification,
+                &Mutex::new(PendingPrompts::default()),
+                events,
+                &mut self.stream,
+                None,
+            );
+        }
+    }
+}
+
 fn handle_session_update(
     provider: ProviderKind,
     notification: SessionNotification,
