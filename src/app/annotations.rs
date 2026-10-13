@@ -592,7 +592,7 @@ impl Waku {
             let Some(entry) = registry
                 .entries()
                 .iter()
-                .find(|entry| entry.key == span.key)
+                .find(|entry| span.key.matches_annotation_key(&entry.key))
             else {
                 continue;
             };
@@ -635,30 +635,7 @@ impl Waku {
         viewport: Bounds<Pixels>,
         spans: &[Span],
     ) -> Option<Bounds<Pixels>> {
-        let registry = selection.registry.borrow();
-        let mut union: Option<Bounds<Pixels>> = None;
-        for span in spans {
-            let Some(entry) = registry
-                .entries()
-                .iter()
-                .find(|entry| entry.key == span.key)
-            else {
-                continue;
-            };
-            if entry.geometry.is_missing() || !annotation_span_live(span, &entry.text) {
-                continue;
-            }
-            let end = span.range.end.min(entry.text.len());
-            for rect in text_range_bounds(&entry.geometry, &(span.range.start..end)) {
-                if rect.bottom() > viewport.top() && rect.top() < viewport.bottom() {
-                    union = Some(match union {
-                        Some(u) => u.union(&rect),
-                        None => rect,
-                    });
-                }
-            }
-        }
-        union
+        annotation_spans_anchor_union(selection, viewport, spans)
     }
 
     fn annotation_editor_anchor(&self, annotation_id: u64) -> Option<Bounds<Pixels>> {
@@ -3655,6 +3632,39 @@ fn annotation_editor_provenance(
     }
 }
 
+/// Resolve the editor against the currently painted rows, including the
+/// predecessor's live keys while a successor is still hydrating.
+fn annotation_spans_anchor_union(
+    selection: &TranscriptSelection,
+    viewport: Bounds<Pixels>,
+    spans: &[Span],
+) -> Option<Bounds<Pixels>> {
+    let registry = selection.registry.borrow();
+    let mut union: Option<Bounds<Pixels>> = None;
+    for span in spans {
+        let Some(entry) = registry
+            .entries()
+            .iter()
+            .find(|entry| span.key.matches_annotation_key(&entry.key))
+        else {
+            continue;
+        };
+        if entry.geometry.is_missing() || !annotation_span_live(span, &entry.text) {
+            continue;
+        }
+        let end = span.range.end.min(entry.text.len());
+        for rect in text_range_bounds(&entry.geometry, &(span.range.start..end)) {
+            if rect.bottom() > viewport.top() && rect.top() < viewport.bottom() {
+                union = Some(match union {
+                    Some(u) => u.union(&rect),
+                    None => rect,
+                });
+            }
+        }
+    }
+    union
+}
+
 /// The annotation whose highlight contains `position`, consulting the frame's
 /// painted geometry.
 fn annotation_hit_at(selection: &TranscriptSelection, position: Point<Pixels>) -> Option<u64> {
@@ -3668,7 +3678,7 @@ fn annotation_hit_at(selection: &TranscriptSelection, position: Point<Pixels>) -
             let Some(entry) = registry
                 .entries()
                 .iter()
-                .find(|entry| entry.key == span.key)
+                .find(|entry| span.key.matches_annotation_key(&entry.key))
             else {
                 continue;
             };
@@ -4314,5 +4324,153 @@ mod tests {
         );
         assert_eq!(items[0].history.as_ref().and_then(|h| h.turn), Some(4));
         assert!(items[1].history.is_none());
+    }
+
+    /// Uses the real markdown registry, floating surface, and input entity.
+    /// The controlled key migration is not a live daemon/provider rotation.
+    #[gpui::test]
+    fn boss_rotation_editor_stays_mounted_during_delayed_hydration(cx: &mut gpui::TestAppContext) {
+        use crate::md::render::{Ctx, Metrics, Palette, frame_reset, markdown};
+
+        struct Harness {
+            row: String,
+            markdown: MarkdownView,
+            selection: TranscriptSelection,
+            input: Entity<TextInput>,
+        }
+        impl Render for Harness {
+            fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let palette = Palette::from_theme(&Theme::dark());
+                let ctx = Ctx::new(
+                    self.row.clone(),
+                    &palette,
+                    Metrics::BODY,
+                    self.selection.clone(),
+                );
+                let anchor = {
+                    let annotations = self.selection.annotations.borrow();
+                    annotations.items.first().and_then(|pin| {
+                        annotation_spans_anchor_union(
+                            &self.selection,
+                            Bounds::new(Point::default(), window.viewport_size()),
+                            &pin.spans,
+                        )
+                    })
+                };
+                div()
+                    .w(px(500.0))
+                    .flex()
+                    .flex_col()
+                    .child(frame_reset(self.selection.clone()))
+                    .children(markdown(&self.markdown, &ctx))
+                    .when_some(anchor, |root, anchor| {
+                        root.child(deferred(FloatingSurface::new(
+                            div()
+                                .debug_selector(|| "rotation-editor".into())
+                                .w(px(280.0))
+                                .child(self.input.clone())
+                                .into_any_element(),
+                            anchor,
+                            MenuAlign::BelowLeft,
+                            px(6.0),
+                            px(8.0),
+                        )))
+                    })
+            }
+        }
+        cx.update(crate::input::init);
+        let (retired, message_id) = retired_chat(7);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let mut markdown = MarkdownView::new();
+            markdown.set_text("the quoted answer", false);
+            let input = cx.new(|cx| {
+                let mut input = TextInput::new(window, cx).submit_on_enter();
+                input.set_content("partial draft", cx);
+                input
+            });
+            Harness {
+                row: format!("message-{message_id}"),
+                markdown,
+                selection: TranscriptSelection::default(),
+                input,
+            }
+        });
+        cx.run_until_parked();
+        view.update(cx, |view, cx| {
+            let entry = view.selection.registry.borrow().entries()[0].clone();
+            let mut pin = live_chat_pin(1, message_id, "the quoted answer", "");
+            pin.spans[0].key = entry.key;
+            view.selection.annotations.borrow_mut().items.push(pin);
+            view.selection.annotations.borrow_mut().editing = Some(1);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("rotation-editor").is_some());
+        let input = view.read_with(cx, |view, _| view.input.clone());
+        cx.update(|window, cx| window.focus(&input.read(cx).focus(), cx));
+        view.update(cx, |view, cx| {
+            assert!(retarget_annotations_to_history(
+                &mut view.selection.annotations.borrow_mut().items,
+                &retired,
+                &Some("Boss".into()),
+            ));
+            cx.notify();
+        });
+        // Several predecessor frames while hydration is delayed.
+        for _ in 0..3 {
+            cx.run_until_parked();
+            assert!(cx.debug_bounds("rotation-editor").is_some());
+            cx.update(|window, cx| assert!(input.read(cx).focus().is_focused(window)));
+            view.update(cx, |view, cx| {
+                let registry = view.selection.registry.borrow();
+                let entry = &registry.entries()[0];
+                assert_eq!(
+                    view.selection
+                        .annotations
+                        .borrow()
+                        .wash_spans(&entry.key)
+                        .count(),
+                    1
+                );
+                let rect = text_range_bounds(&entry.geometry, &(0..1))[0];
+                assert_eq!(annotation_hit_at(&view.selection, rect.center()), Some(1));
+                cx.notify();
+            });
+        }
+        cx.simulate_keystrokes("end x");
+        cx.read_entity(&input, |input, _| {
+            assert_eq!(input.content(), "partial draftx")
+        });
+        view.update(cx, |view, cx| {
+            view.row = format!("boss-history-message-{}:{message_id}", retired.id);
+            let pin = &view.selection.annotations.borrow().items[0];
+            assert_eq!(pin.quoted_text(), "the quoted answer");
+            assert_eq!(pin.message_id, message_id);
+            assert_eq!(pin.history.as_ref().unwrap().session_id, retired.id);
+            assert_eq!(pin.history.as_ref().unwrap().turn, Some(4));
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("rotation-editor").is_some());
+        cx.update(|window, cx| assert!(input.read(cx).focus().is_focused(window)));
+        cx.read_entity(&input, |input, _| assert_eq!(input.content(), "partial draftx"));
+        // The alias cannot attach the staged pin to another chat's message
+        // or to a different text element within the same message.
+        view.read_with(cx, |view, _| {
+            let annotations = view.selection.annotations.borrow();
+            let key = &annotations.items[0].spans[0].key;
+            assert!(!key.matches_annotation_key(&TextKey::new(
+                format!("message-{}", Uuid::new_v4()),
+                key.index,
+            )));
+            assert!(!key.matches_annotation_key(&TextKey::new(
+                format!("message-{message_id}"),
+                key.index + 1,
+            )));
+            assert!(!key.matches_annotation_key(&TextKey::new(
+                format!("boss-history-message-{}:{message_id}", Uuid::new_v4()),
+                key.index,
+            )));
+        });
     }
 }

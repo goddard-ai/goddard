@@ -35,6 +35,23 @@ impl TextKey {
             index,
         }
     }
+
+    /// A rotated annotation may already name a history row while the
+    /// predecessor is still mounted awaiting successor hydration. Message
+    /// ids are stable across that splice; element indexes must match too.
+    /// Keep this alias confined to annotations, never ordinary selections.
+    pub fn matches_annotation_key(&self, painted: &Self) -> bool {
+        if self == painted {
+            return true;
+        }
+        self.index == painted.index
+            && self
+                .row
+                .strip_prefix("boss-history-message-")
+                .and_then(|row| row.rsplit_once(':'))
+                .zip(painted.row.strip_prefix("message-"))
+                .is_some_and(|((_, message), live)| message == live)
+    }
 }
 
 /// How one element's flat text maps back to markdown, for copy.
@@ -696,7 +713,7 @@ impl Annotations {
         self.items
             .iter()
             .flat_map(|annotation| annotation.spans.iter().map(move |span| (annotation, span)))
-            .filter(|(_, span)| span.key == *key)
+            .filter(|(_, span)| span.key.matches_annotation_key(key))
             .map(|(annotation, span)| {
                 (
                     span,
