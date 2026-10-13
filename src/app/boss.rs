@@ -3,6 +3,7 @@ use super::annotations::{
     annotation_bubble_content, annotation_display_content, annotation_prompt_prefix,
 };
 use super::boss_moods::AVATAR_SOURCE_SIZE;
+use super::sessions::session_archivable;
 use super::*;
 use crate::ui::ActivationExt;
 use waku_client::DaemonKey;
@@ -5260,8 +5261,54 @@ impl Waku {
         let menu = self.menu_handle(format!("boss-planning-{id}"), cx);
         let row_focus = menu.trigger_focus_handle().clone();
         let keyboard_menu = menu.clone();
+        let group_name = SharedString::from(format!("boss-planning-row-{id}"));
+        let archive_button = session_archivable(session).then(|| {
+            let archive_focus = self
+                .sidebar_session_archive_focuses
+                .borrow_mut()
+                .entry(id)
+                .or_insert_with(|| cx.focus_handle())
+                .clone();
+            div()
+                .id(SharedString::from(format!("boss-planning-archive-{id}")))
+                .track_focus(&archive_focus)
+                .tab_index(0)
+                .flex_none()
+                .w_0()
+                .h(px(18.0))
+                .overflow_hidden()
+                .rounded(px(4.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .opacity(0.0)
+                .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
+                .focus_visible(|style| {
+                    style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight())
+                })
+                .hover(|style| style.bg(theme.overlay))
+                .active(|style| style.bg(theme.overlay_strong))
+                .tooltip(Tooltip::text_with_action(
+                    tr!("session.archive"),
+                    &ArchiveSession,
+                ))
+                .child(icon("icons/archive.svg", 12.0, theme.text_secondary))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.archive_session(id, window, cx);
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.archive_session(id, window, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+        });
         let row = div()
             .id(format!("boss-planning-{id}"))
+            .group(group_name.clone())
             .track_focus(&row_focus)
             .tab_index(0)
             .h(px(42.0))
@@ -5306,7 +5353,16 @@ impl Waku {
                 &theme,
                 None,
             ))
-            .when_some(status_indicator, |row, indicator| row.child(indicator))
+            .when_some(status_indicator, |row, indicator| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .overflow_hidden()
+                        .group_hover(group_name.clone(), |style| style.w_0().opacity(0.0))
+                        .child(indicator),
+                )
+            })
+            .when_some(archive_button, |row, button| row.child(button))
             .when_some(shortcut_index, |row, index| {
                 row.child(
                     div()
