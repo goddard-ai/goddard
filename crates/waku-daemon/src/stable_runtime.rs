@@ -322,6 +322,7 @@ pub(super) fn start_link(
         .stable_link(session_id)
         .context("could not read the task's runtime link state")?;
     let attach = resolve_attachment(prior.as_ref(), &inventory, provider)?;
+    let reattaching = matches!(&attach, Attachment::Reattach { .. });
     let (sref, mut row) = match attach {
         Attachment::Reattach { sref, row } => {
             // The host's session is still live under the same identity —
@@ -379,7 +380,7 @@ pub(super) fn start_link(
     let anchored = reanchor_task_claims(backend, session_id, host_pid);
     #[cfg(unix)]
     if let (Some(env), Some(prepared)) = (&options.agent, &prepared) {
-        provision_agent(&mut client, grant.epoch, root, sref, env, prepared, &anchored)
+        provision_agent(&mut client, grant.epoch, root, sref, env, prepared, &anchored, reattaching)
             .context("could not provision the session's agent ingress")?;
     }
 
@@ -588,7 +589,7 @@ const DESCRIPTOR_NAME: &str = "ingress.json";
 /// product lane rebuild can never invalidate a running session's CLI.
 const HELPERS_DIR: &str = "helpers";
 /// Session grants carry a bounded, immutable expiry. A daemon attachment
-/// restores ingress by issuing a fresh grant — never by extending one.
+/// restores the original grant without extending its authority.
 const GRANT_TTL_MS: u64 = 30 * 24 * 60 * 60 * 1000;
 
 /// What the admit payload and the post-admission provisioning share.
@@ -642,10 +643,9 @@ fn preflight_agent(
 }
 
 /// Restore the session's scoped CLI ingress after the session exists:
-/// issue a fresh grant, publish the private descriptor atomically, and
-/// record the lease as a durable runtime claim. Called on every attach —
-/// a replacement daemon revalidates authority with a new grant; nothing
-/// ever extends a grant's recorded expiry.
+/// preserve the original grant on reattachment, publish the private descriptor
+/// atomically, and record the lease as a durable runtime claim. Missing or
+/// invalid reattachment evidence blocks recovery rather than minting authority.
 #[cfg(unix)]
 fn provision_agent(
     client: &mut RuntimeClient,
@@ -655,11 +655,48 @@ fn provision_agent(
     env: &crate::agent::AgentLaunchEnv,
     prepared: &AgentProvisioning,
     anchored: &[Uuid],
+    reattaching: bool,
 ) -> anyhow::Result<()> {
-    let grant = client
-        .issue_grant(epoch, sref, GRANT_TTL_MS)
-        .map_err(link_error)
-        .context("the runtime host refused a session grant")?;
+    let grant = if reattaching {
+        use std::io::Read;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        let mut file = std::fs::OpenOptions::new().read(true)
+            .custom_flags(libc::O_NOFOLLOW).open(&prepared.descriptor)
+            .context("original ingress grant is unavailable; attachment blocked")?;
+        let metadata = file.metadata()?;
+        // SAFETY: geteuid has no preconditions and reads this process's identity.
+        let current_uid = unsafe { libc::geteuid() };
+        anyhow::ensure!(metadata.is_file() && metadata.uid() == current_uid
+            && metadata.mode() & 0o077 == 0 && metadata.len() <= 64 * 1024,
+            "original ingress evidence is not a bounded private file");
+        let mut bytes = Vec::new();
+        (&mut file).take(64 * 1024 + 1).read_to_end(&mut bytes)?;
+        anyhow::ensure!(bytes.len() <= 64 * 1024, "original ingress evidence is oversized");
+        let descriptor: IngressDescriptor = serde_json::from_slice(&bytes)
+            .context("original ingress grant is invalid; attachment blocked")?;
+        anyhow::ensure!(
+            descriptor.version == INGRESS_DESCRIPTOR_VERSION
+                && descriptor.root == root
+                && descriptor.task_id == env.task_id
+                && descriptor.grant.session_id == sref.session_id
+                && descriptor.grant.generation == sref.generation,
+            "original ingress grant scope disagrees with attachment"
+        );
+        let inventory = client.reconcile(epoch).map_err(link_error)?;
+        let original = inventory.sessions.iter().find(|session| session.session == sref)
+            .and_then(|session| session.claims.iter().find(|claim| claim.claim_id == agent_claim_id(sref)))
+            .and_then(|claim| claim.detail.get("grantId"));
+        anyhow::ensure!(original == Some(&json!(descriptor.grant.grant_id)),
+            "original ingress lease evidence is missing or disagrees with the descriptor");
+        RuntimeClient::agent(root, &descriptor.grant)
+            .map_err(link_error)
+            .context("original ingress authority expired or was revoked; attachment blocked")?;
+        descriptor.grant
+    } else {
+        client.issue_grant(epoch, sref, GRANT_TTL_MS)
+            .map_err(link_error)
+            .context("the runtime host refused a session grant")?
+    };
     write_descriptor(
         &prepared.descriptor,
         &IngressDescriptor {
@@ -826,7 +863,7 @@ pub(crate) fn stable_anchor_pid(
 /// Move this task's live broker reservations onto the surviving host as
 /// their liveness owner. Daemon detachment then cannot silently release
 /// provider-held work; a lease whose owner dies still ends honestly.
-/// Returns the reservation ids that moved.
+/// Returns all live anchored reservation ids, including prior attachments.
 fn reanchor_task_claims(backend: &WakuBackend, task: Uuid, owner_pid: u32) -> Vec<Uuid> {
     use waku_protocol::resources::ResourceOperation;
     let Ok(broker) = backend.resource_broker() else {
@@ -840,8 +877,11 @@ fn reanchor_task_claims(backend: &WakuBackend, task: Uuid, owner_pid: u32) -> Ve
         if reservation.task != task
             || reservation.cancelled
             || reservation.released
-            || reservation.owner_pid == Some(owner_pid)
         {
+            continue;
+        }
+        if reservation.owner_pid == Some(owner_pid) {
+            anchored.push(reservation.id);
             continue;
         }
         match broker.operate(
@@ -1778,6 +1818,10 @@ mod tests {
     /// `adapters` names what the registry can serve — `provider.id()` must
     /// be among them for admissions to land.
     fn rig(adapters: &[&str]) -> Rig {
+        rig_with_clock(adapters, Box::new(SystemClock))
+    }
+
+    fn rig_with_clock(adapters: &[&str], clock: Box<dyn waku_runtime::host::Clock>) -> Rig {
         let runtime_root = temp_root("runtime");
         let factory = FakeFactory::new();
         let mut registry = AdapterRegistry::new();
@@ -1795,7 +1839,7 @@ mod tests {
                 journal_fault: None,
             },
             Arc::new(registry),
-            Box::new(SystemClock),
+            clock,
         )
         .expect("host opens");
         let controller = host.credentials().controller.clone();
@@ -2888,6 +2932,9 @@ for line in sys.stdin:
         let mut opts = options();
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, Some(reservation_id)));
         let (_handle, link, _rx) = link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        // An already reanchored row must remain in reconciliation inventory.
+        assert!(reanchor_task_claims(&rig.backend, rig.session_id, link.shared.controller.host_pid)
+            .contains(&reservation_id));
 
         // The admit payload carried paths, never the daemon credential.
         let launch = rig
@@ -3000,12 +3047,12 @@ for line in sys.stdin:
             .contains(&json!(reservation_id)));
     }
 
-    /// A replacement daemon restores ingress by issuing a fresh grant —
-    /// the old grant is never renewed and both stay valid inside expiry.
+    /// Replacement preserves the original authorization identity and expiry.
     #[test]
     #[cfg(unix)]
     fn stable_link_reattach_reprovisions_descriptor_grant() {
-        let rig = rig(&["codex"]);
+        let clock = waku_runtime::fake::ManualClock::new(1_000_000);
+        let rig = rig_with_clock(&["codex"], Box::new(clock.clone()));
         let agent_dir = temp_root("agent");
         let mut opts = options();
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
@@ -3015,6 +3062,8 @@ for line in sys.stdin:
         let first: IngressDescriptor =
             serde_json::from_slice(&std::fs::read(&descriptor_path).unwrap()).unwrap();
         drop(link1);
+        rig.backend.stable_controllers.lock().unwrap().clear();
+        clock.advance(60_000);
 
         let mut opts = options();
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
@@ -3022,15 +3071,16 @@ for line in sys.stdin:
             link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
         let second: IngressDescriptor =
             serde_json::from_slice(&std::fs::read(&descriptor_path).unwrap()).unwrap();
-        // A fresh grant — never an extension of the old one's expiry.
-        assert_ne!(first.grant.grant_id, second.grant.grant_id);
+        // Reattachment must not create a later authorization window.
+        assert_eq!(first.grant.grant_id, second.grant.grant_id);
+        assert_eq!(first.grant.expires_at_ms, second.grant.expires_at_ms);
+        assert!(first.grant.token == second.grant.token);
         for grant in [&first.grant, &second.grant] {
             RuntimeClient::agent(&rig.runtime_root, grant).unwrap();
         }
         // The claim is one durable lease, not an accumulation.
         let mut daemon = controller(&rig);
-        let grant = daemon.acquire_control(&ClientHello::current()).unwrap();
-        let inventory = daemon.reconcile(grant.epoch).unwrap();
+        let inventory = daemon.reconcile(link2.shared.epoch).unwrap();
         let inv = inventory
             .sessions
             .iter()
@@ -3051,6 +3101,44 @@ for line in sys.stdin:
                 .detail["grantId"],
             json!(second.grant.grant_id)
         );
+        // Even another authentic grant for this session is not the original lease.
+        let replacement_grant = daemon.issue_grant(link2.shared.epoch, link2.sref(), GRANT_TTL_MS).unwrap();
+        let mut substituted = second.clone();
+        substituted.grant = replacement_grant;
+        write_descriptor(&descriptor_path, &substituted).unwrap();
+        let mut opts = options();
+        opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
+        let (sender, _) = crate::driver::test_event_channel();
+        let rejected = start_link(
+            &rig.backend, rig.backend.task_store(), rig.session_id,
+            Uuid::new_v4(), ProviderKind::Codex, &opts, sender,
+            &rig.runtime_root, None,
+        );
+        assert!(format!("{:#}", rejected.err().unwrap()).contains("lease evidence"));
+        write_descriptor(&descriptor_path, &second).unwrap();
+        drop(daemon);
+        // Controller transfer cannot revive the expired original authority.
+        clock.advance(GRANT_TTL_MS);
+        rig.backend.stable_controllers.lock().unwrap().clear();
+        let mut opts = options();
+        opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
+        let (sender, _) = crate::driver::test_event_channel();
+        let result = start_link(
+            &rig.backend, rig.backend.task_store(), rig.session_id,
+            Uuid::new_v4(), ProviderKind::Codex, &opts, sender,
+            &rig.runtime_root, None,
+        );
+        assert!(format!("{:#}", result.err().unwrap()).contains("authority expired"));
+        assert!(RuntimeClient::agent(&rig.runtime_root, &second.grant).is_err());
+        // Lost recovery evidence also fails closed, even if a daemon is live.
+        std::fs::remove_file(&descriptor_path).unwrap();
+        let (sender, _) = crate::driver::test_event_channel();
+        assert!(start_link(
+            &rig.backend, rig.backend.task_store(), rig.session_id,
+            Uuid::new_v4(), ProviderKind::Codex, &opts, sender,
+            &rig.runtime_root, None,
+        ).is_err());
+        assert!(!descriptor_path.exists());
     }
 
     /// Confirmed termination retires the generation's lease claim and its

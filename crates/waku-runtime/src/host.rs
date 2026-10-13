@@ -1054,6 +1054,17 @@ impl RuntimeHost {
     /// generation, and an expired window are indistinguishable to callers,
     /// and authority is never renewed.
     pub fn check_grant(&self, grant: &SessionGrant) -> Result<SessionRef, HostError> {
+        let target = self.check_recorded_grant(grant)?;
+        let session = self.sessions.get(&target.session_id).ok_or(HostError::Unauthorized)?;
+        let generation = session.current();
+        if session.generation() != target.generation || generation.fence.is_some() || generation.ended {
+            return Err(HostError::Unauthorized);
+        }
+        Ok(target)
+    }
+
+    // Historical outcomes remain queryable without authorizing new work.
+    fn check_recorded_grant(&self, grant: &SessionGrant) -> Result<SessionRef, HostError> {
         let target = SessionRef {
             session_id: grant.session_id,
             generation: grant.generation,
@@ -1064,7 +1075,8 @@ impl RuntimeHost {
             .and_then(|s| s.generation_at(grant.generation))
             .and_then(|g| g.grants.get(&grant.grant_id))
             .is_some_and(|issued| {
-                self.now() <= issued.expires_at_ms
+                self.now() < issued.expires_at_ms
+                    && grant.expires_at_ms == issued.expires_at_ms
                     && bool::from(grant.token.as_bytes().ct_eq(issued.token.as_bytes()))
             });
         if ok {
@@ -1147,7 +1159,7 @@ impl RuntimeHost {
         grant: &SessionGrant,
         request_id: Uuid,
     ) -> Result<IngressRecord, HostError> {
-        let target = self.check_grant(grant)?;
+        let target = self.check_recorded_grant(grant)?;
         self.pump();
         let session = self.sessions.get(&target.session_id).unwrap();
         let g = session.generation_at(target.generation).unwrap();
@@ -2608,6 +2620,15 @@ impl RuntimeHost {
         for session in self.sessions.values() {
             for g in &session.gens {
                 for record in g.ingress.values() {
+                    if matches!(record.disposition, IngressDisposition::Pending)
+                        && (session.generation() != g.number || g.fence.is_some() || g.ended
+                            || !g.grants.get(&record.grant_id).is_some_and(|grant| now < grant.expires_at_ms))
+                    {
+                        stale.push((record.request_id, IngressDisposition::Refused {
+                            detail: "original ingress authority expired or was revoked before dispatch".into(),
+                        }));
+                        continue;
+                    }
                     if record.deadline_ms > now {
                         continue;
                     }

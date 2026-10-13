@@ -280,8 +280,10 @@ unqualified product options.
 After the session exists the daemon issues a fresh `SessionGrant` (bounded
 30-day expiry) and atomically rewrites a mode-0600 descriptor at
 `<data>/agent/<task>/ingress.json` — a shared `IngressDescriptor` shape both
-daemon and CLI use. Reattach issues a new grant; no grant is ever renewed or
-extended, and every issued grant stays valid until its recorded expiry. The
+daemon and CLI use. Reattach reuses the original grant identity, token, scope and expiry. Missing,
+invalid, expired or fenced authority blocks attachment rather than minting a
+replacement. The private descriptor must agree with the durable runtime claim;
+controller replacement does not extend authorization. The
 goddard-agent binary is pinned by content under `<runtime-root>/helpers/
 <sha256>/goddard-agent` (mode 0500, atomic staging): a product lane rebuild
 can add new addresses but never substitute a running session's helper. The
@@ -301,7 +303,7 @@ CLI still ends its lease. Attach re-anchors every live task reservation to
 the host pid, and new acquires for stable-linked tasks re-anchor at grant
 time, so daemon detachment can never silently release provider-held work.
 
-`mbx test -p waku-daemon --lib stable_link` covers provisioning, grant
+`mbx test -p waku-daemon --lib stable_link` covers provisioning, original grant
 restoration without renewal, claim release on confirmed stop, the pinned
 helper, reservation anchoring and end-to-end ingress over the provisioned
 grant. `mbx test -p waku-base --lib reanchor` covers lease survival across

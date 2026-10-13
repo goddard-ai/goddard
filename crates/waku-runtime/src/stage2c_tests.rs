@@ -147,7 +147,11 @@ fn grant_verifies_token_scope_and_expiry() {
 
     // Expiry is immutable: the same grant dies at its deadline and is
     // never renewed.
-    rig.clock.advance(61_000);
+    rig.clock.advance(30_000);
+    let _replacement = rig.control();
+    assert!(rig.host.check_grant(&grant).is_ok());
+    rig.clock.advance(31_000);
+    let _replacement = rig.control();
     assert_eq!(rig.host.check_grant(&grant), Err(HostError::Unauthorized));
     let _ = c;
 }
@@ -158,6 +162,7 @@ fn grant_not_issued_for_fenced_generation() {
     let mut rig = open(&root);
     let control = rig.control();
     let session = rig.admit(&control);
+    let original = rig.grant_for(&control, session, 60_000);
 
     // Stop the session, then a grant mint for its generation refuses.
     let receipt = rig
@@ -181,6 +186,8 @@ fn grant_not_issued_for_fenced_generation() {
         60_000,
     );
     assert!(matches!(result, Err(HostError::Malformed(_))));
+    let _replacement = rig.control();
+    assert_eq!(rig.host.check_grant(&original), Err(HostError::Unauthorized));
 }
 
 // -- ingress dedup and forwarding ------------------------------------------
@@ -329,7 +336,7 @@ fn forwarded_but_unresolved_survives_controller_replacement() {
 }
 
 #[test]
-fn runtime_restart_uncertains_forwarded_and_keeps_pending() {
+fn runtime_restart_uncertains_forwarded_and_refuses_pending() {
     let root = TestRoot::new();
     let (grant, request_pending, request_forwarded) = {
         let mut rig = open(&root);
@@ -350,8 +357,8 @@ fn runtime_restart_uncertains_forwarded_and_keeps_pending() {
     };
 
     // Reopen the namespace: crash recovery fences the session, marks the
-    // forwarded request uncertain, and keeps the pending one for a new
-    // service. The grant survives — it was journaled.
+    // forwarded request uncertain, and refuses pending execution. Historical
+    // outcomes remain queryable under the recorded grant.
     let mut rig = open(&root);
     assert!(matches!(
         rig.host.recovery(),
@@ -370,14 +377,15 @@ fn runtime_restart_uncertains_forwarded_and_keeps_pending() {
         record.disposition,
         IngressDisposition::Uncertain { .. }
     ));
-    // The pending (never forwarded) record still drains to the new epoch's
-    // service — same identity, daemon dedups.
+    // Crash fencing revokes pending execution authority. Never dispatch it
+    // automatically under the replacement controller.
     let drained = rig
         .host
         .ingress_drain(&rig.creds().0, control.epoch)
         .unwrap();
-    assert_eq!(drained.len(), 1);
-    assert_eq!(drained[0].request_id, request_pending);
+    assert!(drained.is_empty());
+    assert!(matches!(rig.host.ingress_query(&grant, request_pending).unwrap().disposition,
+        IngressDisposition::Refused { .. }));
 }
 
 // -- claims -----------------------------------------------------------------
@@ -449,7 +457,7 @@ fn claim_on_fenced_generation_is_refused() {
 // -- ingress on fenced sessions ---------------------------------------------
 
 #[test]
-fn ingress_on_fenced_session_records_refusal() {
+fn ingress_on_fenced_session_rejects_revoked_authority() {
     let root = TestRoot::new();
     let mut rig = open(&root);
     let control = rig.control();
@@ -465,11 +473,7 @@ fn ingress_on_fenced_session_records_refusal() {
         )
         .unwrap();
     let request = rig.request(2_000_000);
-    let record = rig.host.ingress_submit(&grant, request.clone()).unwrap();
-    assert!(matches!(
-        record.disposition,
-        IngressDisposition::Refused { .. }
-    ));
+    assert_eq!(rig.host.ingress_submit(&grant, request), Err(HostError::Unauthorized));
     // Nothing fenced reaches a service drain.
     let drained = rig
         .host
@@ -491,4 +495,22 @@ fn journal_fault_blocks_ingress_acceptance() {
         rig.host.ingress_submit(&grant, request),
         Err(HostError::PersistenceUnavailable)
     );
+}
+
+#[test]
+fn pending_ingress_cannot_outlive_original_grant_on_reattach() {
+    let root = TestRoot::new();
+    let mut rig = open(&root);
+    let control = rig.control();
+    let session = rig.admit(&control);
+    let grant = rig.grant_for(&control, session, 60_000);
+    let request = rig.request(2_000_000);
+    rig.host.ingress_submit(&grant, request).unwrap();
+    rig.clock.advance(60_000);
+    let replacement = rig.control();
+    assert_eq!(rig.host.check_grant(&grant), Err(HostError::Unauthorized));
+    assert!(rig.host.ingress_drain(&rig.creds().0, replacement.epoch).unwrap().is_empty());
+    // A later wall-clock rollback cannot renew the original grant.
+    rig.clock.set(1_000_000);
+    assert_eq!(rig.host.check_grant(&grant), Err(HostError::Unauthorized));
 }
