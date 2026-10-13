@@ -1216,9 +1216,8 @@ impl DriverControl for StableLink {
         applied
     }
 
-    /// The only scoped teardown the stable path performs: fence the host
-    /// generation, release the link's durable claims, and clear the task's
-    /// link row so a later attempt starts clean.
+    /// Fence the host generation and forget only its confirmed stopped
+    /// attachment. Resource claims require separate workload reconciliation.
     fn delete_provider_session(&self) {
         let mut client = self.shared.client.lock().unwrap();
         let receipt = execute_safe(
@@ -1237,7 +1236,12 @@ impl DriverControl for StableLink {
                 ..
             })
         ) {
-            let _ = self.shared.store.stable_link_clear(self.shared.task_id);
+            let _ = self.shared.store.stable_link_clear(
+                self.shared.task_id,
+                self.shared.instance,
+                self.shared.sref.session_id,
+                self.shared.sref.generation,
+            );
         } else {
             let _ = self.shared.sender.send(DriverEvent::Error(
                 "stop pending — provider termination is not confirmed".into(),
@@ -2040,6 +2044,23 @@ for line in sys.stdin:
         drop(link);
         drop(server);
         std::fs::remove_dir_all(provider_root).unwrap();
+    }
+
+    #[test]
+    fn stable_link_retirement_preserves_replacement_owner() {
+        let rig = rig(&["codex"]);
+        let (old_handle, original, _rx) = link(&rig, Uuid::new_v4(), None);
+        let mut replacement = rig.backend.task_store().stable_link(rig.session_id).unwrap().unwrap();
+        replacement.runtime_instance = Uuid::new_v4();
+        replacement.runtime_session_id = Uuid::new_v4();
+        replacement.generation += 1;
+        rig.backend.task_store().stable_link_save(&replacement).unwrap();
+        // The old stop is confirmed, but its delayed local cleanup is fenced
+        // at the actual SQLite deletion boundary.
+        old_handle.delete_provider_session();
+        assert_eq!(rig.backend.task_store().stable_link(rig.session_id).unwrap(), Some(replacement));
+        let inventory = original.shared.client.lock().unwrap().reconcile(original.shared.epoch).unwrap();
+        assert!(inventory.sessions.iter().any(|session| session.session == original.sref() && session.status == SessionStatus::Terminated));
     }
 
 }

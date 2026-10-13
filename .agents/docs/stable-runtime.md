@@ -144,7 +144,8 @@ addition to effective activation. Reattachment restores the open turn for
 cancellation and the highest accepted configuration revision. A different
 provider or an interrupted/missing recorded generation blocks attachment;
 reconnect does not authorize a replacement. Unconfirmed stop retains the link
-identity. Temporary forwarder clones do not retire the link's workers.
+identity. Confirmed retirement deletes only that instance/session/generation,
+so delayed cleanup cannot remove a replacement attachment. Temporary forwarder clones do not retire the link's workers.
 
 Focused verification commands:
 

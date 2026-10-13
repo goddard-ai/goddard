@@ -3530,16 +3530,25 @@ impl StateStore {
         Ok(())
     }
 
-    /// Forget a link — the task's runtime attachment is over for good.
-    pub fn stable_link_clear(&self, session_id: Uuid) -> io::Result<()> {
+    /// Forget only the confirmed stopped owner. A delayed retirement must
+    /// not delete a replacement attachment installed for the same task.
+    pub fn stable_link_clear(
+        &self,
+        session_id: Uuid,
+        runtime_instance: Uuid,
+        runtime_session_id: Uuid,
+        generation: u64,
+    ) -> io::Result<bool> {
         let connection = self.open()?;
-        connection
+        let removed = connection
             .execute(
-                "DELETE FROM stable_runtime_links WHERE session_id = ?1",
-                params![session_id.to_string()],
+                "DELETE FROM stable_runtime_links WHERE session_id = ?1
+                 AND runtime_instance = ?2 AND runtime_session_id = ?3 AND generation = ?4",
+                params![session_id.to_string(), runtime_instance.to_string(),
+                    runtime_session_id.to_string(), generation as i64],
             )
             .map_err(to_io_error)?;
-        Ok(())
+        Ok(removed == 1)
     }
 
     /// The recorded outcome for a forwarded request, by identity.
