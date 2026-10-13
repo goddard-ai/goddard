@@ -1536,6 +1536,9 @@ right_panel.hide: 隐藏右侧面板
 right_panel.close_tab: 关闭%{title}
 right_panel.maximize: 最大化面板
 right_panel.restore: 还原面板
+terminal.maximize_restore: 最大化 / 还原
+terminal.maximize: 最大化终端
+terminal.restore: 还原终端
 open_in.open: 用%{app}打开项目
 open_in.choose: 选择打开项目的应用…
 environment.title: 环境

@@ -103,6 +103,7 @@ actions!(
         ToggleBigPicture,
         OpenResumePicker,
         ToggleFpsCounter,
+        ToggleTerminalMaximize,
         NavigateBack,
         NavigateForward,
         GoToNextUnreadCompletion,
@@ -1056,6 +1057,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // Push the landed session's base branch to its upstream — the
         // landed notice's button, without the card. A stronger submit
         // chord: `secondary-enter` already means "send" in the composer.
+        KeyBinding::new(
+            "secondary-shift-enter",
+            ToggleTerminalMaximize,
+            Some("StandaloneTerminal"),
+        ),
         KeyBinding::new("secondary-shift-enter", PushBaseBranch, Some("Workspace")),
         KeyBinding::new("secondary-alt-p", ToggleSessionPin, Some("Workspace")),
         KeyBinding::new("secondary-c", CopySelection, Some("Workspace")),

@@ -3862,6 +3862,12 @@ terminal.moved_to_group:
   en: The task's workspace changed — its terminal moved to the Terminals group.
 terminal.expand:
   en: Expand to full screen
+terminal.maximize_restore:
+  en: Maximize / Restore
+terminal.maximize:
+  en: Maximize terminal
+terminal.restore:
+  en: Restore terminal
 terminal.minimize:
   en: Minimize to floating terminal
 terminal.split:

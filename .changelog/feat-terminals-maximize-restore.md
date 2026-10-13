@@ -1,0 +1,1 @@
+- In a standalone split terminal, press ⌘⇧Enter (Ctrl+Shift+Enter on other platforms) to maximize the focused pane; press it again to restore the split layout.

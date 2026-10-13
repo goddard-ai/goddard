@@ -1568,6 +1568,9 @@ right_panel.hide: 右パネルを隠す
 right_panel.close_tab: "%{title} を閉じる"
 right_panel.maximize: パネルを最大化
 right_panel.restore: パネルを元に戻す
+terminal.maximize_restore: 最大化 / 復元
+terminal.maximize: ターミナルを最大化
+terminal.restore: ターミナルを元に戻す
 
 open_in.open: "プロジェクトを %{app} で開く"
 open_in.choose: プロジェクトを開くアプリを選択…

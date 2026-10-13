@@ -98,6 +98,24 @@ fn terminal_group_ids(records: &HashMap<Uuid, TerminalRecord>, anchor_id: Uuid) 
         .unwrap_or_default()
 }
 
+fn visible_terminal_group_ids(panes: &[Uuid], maximized: Option<Uuid>) -> Vec<Uuid> {
+    match maximized.filter(|terminal_id| panes.contains(terminal_id)) {
+        Some(terminal_id) => vec![terminal_id],
+        None => panes.to_vec(),
+    }
+}
+
+fn toggle_maximized_terminal_pane(
+    current: Option<Uuid>,
+    focused: Uuid,
+    panes: &[Uuid],
+) -> Option<Uuid> {
+    if !panes.contains(&focused) {
+        return current;
+    }
+    (current != Some(focused)).then_some(focused)
+}
+
 fn terminal_group_can_add(record: &TerminalRecord, incoming: usize, limit: usize) -> bool {
     record.pane_of.is_none() && record.panes.len() + 1 + incoming <= limit
 }
@@ -638,6 +656,9 @@ impl Waku {
     /// Drop every trace of a terminal: the view entity, its launch state,
     /// the group record, and any selection pointing at it.
     pub(super) fn drop_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        if self.maximized_terminal_pane == Some(terminal_id) {
+            self.maximized_terminal_pane = None;
+        }
         // Group bookkeeping before anything else: a dropped pane unlinks
         // from its anchor — a group down to its anchor stops being a
         // group — and a dropped anchor takes every pane down with it.
@@ -1697,6 +1718,40 @@ impl Waku {
         {
             self.split_terminal(anchor_id, RIGHT_PANEL_TERMINAL_MAX_PANES, window, cx);
         }
+    }
+
+    pub(super) fn toggle_terminal_maximize_action(
+        &mut self,
+        _: &ToggleTerminalMaximize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(anchor_id) = self.selected_terminal else {
+            return;
+        };
+        let target_id = self
+            .focused_terminal_id(window, cx)
+            .filter(|terminal_id| self.terminal_group_anchor(*terminal_id) == anchor_id)
+            .or_else(|| {
+                self.maximized_terminal_pane.filter(|terminal_id| {
+                    self.terminal_group_panes(anchor_id).contains(terminal_id)
+                })
+            })
+            .unwrap_or(anchor_id);
+        let panes = self.terminal_group_panes(anchor_id);
+        if !panes.contains(&target_id) {
+            return;
+        }
+        self.maximized_terminal_pane =
+            toggle_maximized_terminal_pane(self.maximized_terminal_pane, target_id, &panes);
+        if let Some(focus) = self
+            .right_panel_terminals
+            .get(&target_id)
+            .map(|terminal| terminal.read(cx).focus_handle(cx))
+        {
+            window.focus(&focus, cx);
+        }
+        cx.notify();
     }
 
     /// Any terminal view holding keyboard focus — a pane or an anchor in
@@ -2828,6 +2883,11 @@ impl Waku {
         let Some(terminal) = self.right_panel_terminals.get(&terminal_id).cloned() else {
             return div().into_any_element();
         };
+        let panes = self.terminal_group_panes(terminal_id);
+        let maximized = self.maximized_terminal_pane == Some(terminal_id)
+            || self
+                .maximized_terminal_pane
+                .is_some_and(|pane_id| panes.contains(&pane_id));
         let size_drifted =
             terminal.read_with(cx, |view, _| (view.panel_width() - width).abs() > 0.5);
         if size_drifted {
@@ -2863,6 +2923,57 @@ impl Waku {
                     cx.stop_propagation();
                 }
             }));
+        let maximize_button = (panes.len() > 1).then(|| {
+            let label = if maximized {
+                tr!("terminal.restore")
+            } else {
+                tr!("terminal.maximize")
+            };
+            div()
+                .id(SharedString::from(format!(
+                    "terminal-maximize-{terminal_id}"
+                )))
+                .track_focus(
+                    &self.transcript_control_focus(format!("terminal-maximize-{terminal_id}"), cx),
+                )
+                .tab_index(0)
+                .size(px(26.0))
+                .rounded(px(8.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .hover(|element| element.bg(theme.overlay))
+                .active(|element| element.bg(theme.overlay_strong))
+                .child(icon(
+                    if maximized {
+                        "icons/minimize.svg"
+                    } else {
+                        "icons/maximize.svg"
+                    },
+                    13.0,
+                    theme.text_tertiary,
+                ))
+                .tooltip(move |window, cx| {
+                    Tooltip::new(label.clone())
+                        .shortcut(crate::ui::shortcut::ShortcutHint::action(
+                            &ToggleTerminalMaximize,
+                        ))
+                        .build(window, cx)
+                })
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.toggle_terminal_maximize_action(&ToggleTerminalMaximize, window, cx);
+                }))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.toggle_terminal_maximize_action(&ToggleTerminalMaximize, window, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+        });
         div()
             .flex()
             .flex_col()
@@ -2878,6 +2989,7 @@ impl Waku {
                     .items_center()
                     .child(self.render_terminal_location_for_id(terminal_id, cx))
                     .child(div().flex_1())
+                    .children(maximize_button)
                     .child(minimize_button),
             )
             .child(
@@ -3100,6 +3212,11 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let panes = self.terminal_group_panes(anchor_id);
+        let standalone_maximized = (matches!(layout, TerminalGroupLayout::Grid)
+            && self.selected_terminal == Some(anchor_id))
+        .then_some(self.maximized_terminal_pane)
+        .flatten();
+        let panes = visible_terminal_group_ids(&panes, standalone_maximized);
         let body = match layout {
             TerminalGroupLayout::Stack => div()
                 .flex_1()
@@ -3135,20 +3252,23 @@ impl Waku {
             TerminalGroupLayout::Stack => RIGHT_PANEL_TERMINAL_MAX_PANES,
             TerminalGroupLayout::Grid => STANDALONE_TERMINAL_MAX_PANES,
         };
-        self.terminal_drop_target(
-            div()
-                .id(SharedString::from(format!(
-                    "terminal-group-drop-{anchor_id}"
-                )))
-                .flex_1()
-                .min_h_0()
-                .flex()
-                .child(body),
-            anchor_id,
-            limit,
-            cx,
-        )
-        .into_any_element()
+        let standalone = self.selected_terminal == Some(anchor_id)
+            && matches!(layout, TerminalGroupLayout::Grid);
+        let mut group = div()
+            .id(SharedString::from(format!(
+                "terminal-group-drop-{anchor_id}"
+            )))
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .child(body);
+        if standalone {
+            group = group
+                .key_context("StandaloneTerminal")
+                .on_action(cx.listener(Self::toggle_terminal_maximize_action));
+        }
+        self.terminal_drop_target(group, anchor_id, limit, cx)
+            .into_any_element()
     }
 
     /// One cell of a split group — the terminal's view plus the kill
@@ -3842,6 +3962,30 @@ fn code_run_content_projects(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maximizing_a_standalone_split_keeps_the_group_available_for_restore() {
+        let anchor = Uuid::from_u128(1);
+        let second = Uuid::from_u128(2);
+        let third = Uuid::from_u128(3);
+        let panes = [anchor, second, third];
+
+        assert_eq!(visible_terminal_group_ids(&panes, Some(second)), [second]);
+        assert_eq!(visible_terminal_group_ids(&panes, None), panes);
+        assert_eq!(visible_terminal_group_ids(&panes, Some(Uuid::nil())), panes);
+        assert_eq!(
+            toggle_maximized_terminal_pane(None, second, &panes),
+            Some(second)
+        );
+        assert_eq!(
+            toggle_maximized_terminal_pane(Some(second), second, &panes),
+            None
+        );
+        assert_eq!(
+            toggle_maximized_terminal_pane(Some(second), Uuid::nil(), &panes),
+            Some(second)
+        );
+    }
 
     fn split_record(id: Uuid) -> TerminalRecord {
         TerminalRecord {

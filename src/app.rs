@@ -102,7 +102,7 @@ use crate::{
     ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
     ToggleFpsCounter, ToggleFullScreen, ToggleGitPanel, ToggleInboxPage, ToggleModelPicker,
     ToggleProjectsPage, ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar,
-    ToggleTerminals, ToggleUsagePanel, ToggleWorkspace, Zoom,
+    ToggleTerminalMaximize, ToggleTerminals, ToggleUsagePanel, ToggleWorkspace, Zoom,
 };
 
 #[cfg(target_os = "macos")]
@@ -3757,6 +3757,9 @@ pub struct Waku {
     /// The terminal filling the main area. Set only while no session is
     /// selected; activating a chat clears it and folds the group.
     selected_terminal: Option<Uuid>,
+    /// Pane temporarily filling a standalone split terminal's grid. The
+    /// terminal records keep the complete split group intact for restore.
+    maximized_terminal_pane: Option<Uuid>,
     /// The terminal docked as a card at the top of the main column —
     /// sidebar opens land here instead of taking the main area. The card
     /// is a layer, not a page: the selected chat stays underneath, and
@@ -7720,6 +7723,7 @@ impl Waku {
                 terminal_restore_directories: HashMap::new(),
                 unseen_terminal_completions: HashSet::new(),
                 selected_terminal: None,
+                maximized_terminal_pane: None,
                 docked_terminal: None,
                 last_visible_terminal: None,
                 terminal_drag_preview: None,

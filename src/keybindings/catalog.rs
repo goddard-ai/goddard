@@ -1625,6 +1625,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "terminal.maximize_restore",
+        action: || Box::new(crate::ToggleTerminalMaximize),
+        title_key: "terminal.maximize_restore",
+        title_index: None,
+        category: C::Terminal,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "editor.go_to_line",
         action: || Box::new(crate::OpenGoToLine),
         title_key: "shortcuts.go_to_line",
@@ -2996,6 +3005,12 @@ pub static ENTRIES: &[CatalogEntry] = &[
         Workspace,
     ),
     e(
+        "terminal.maximize_restore",
+        All,
+        "secondary-shift-enter",
+        StandaloneTerminal,
+    ),
+    e(
         "workspace.push_base",
         All,
         "secondary-shift-enter",
@@ -3109,6 +3124,7 @@ mod ctx {
     /// bar or context menu inside keeps its own dismiss first.
     pub const DockedTerminalNotCommandBar: &str =
         "DockedTerminal && !TerminalCommandBar && !Menu";
+    pub const StandaloneTerminal: &str = "StandaloneTerminal";
     pub const NotTerminal: &str = "!Terminal";
     /// The ⌘⌥←/⌘⌥→ session sweep — the experiment flag keeps a disabled Big
     /// Picture from eating the chords; !Terminal and !Menu spare their input.

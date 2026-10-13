@@ -496,6 +496,53 @@ mod tests {
         }
     }
 
+    #[gpui::test]
+    fn maximize_terminal_chord_is_limited_to_standalone_terminal_context(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(|cx| crate::bind_keys(cx));
+
+        let chord = [gpui::Keystroke::parse("secondary-shift-enter").unwrap()];
+        for (context, expected, expected_count) in [
+            (
+                "Workspace StandaloneTerminal Terminal",
+                &crate::ToggleTerminalMaximize as &dyn gpui::Action,
+                2,
+            ),
+            (
+                "Workspace RightPanel Terminal",
+                &crate::PushBaseBranch as &dyn gpui::Action,
+                1,
+            ),
+            (
+                "Workspace ComposerExists TextInput",
+                &crate::PushBaseBranch as &dyn gpui::Action,
+                1,
+            ),
+        ] {
+            let stack = context
+                .split_whitespace()
+                .map(|part| gpui::KeyContext::parse(part).unwrap())
+                .collect::<Vec<_>>();
+            let (bindings, _) = cx.update(|cx| {
+                cx.key_bindings()
+                    .borrow()
+                    .bindings_for_input(&chord, &stack)
+            });
+            assert_eq!(
+                bindings.len(),
+                expected_count,
+                "unexpected active binding count in {context}"
+            );
+            assert!(
+                bindings[0].action().partial_eq(expected),
+                "chord in {context} should resolve to {}, got {}",
+                expected.name(),
+                bindings[0].action().name()
+            );
+        }
+    }
+
     /// Parity gate: the generated keymap must be identical — action,
     /// sequence, platform, predicate, and precedence order — to the
     /// hand-written registrations it replaces. This must pass on every
