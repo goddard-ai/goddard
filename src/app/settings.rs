@@ -7503,6 +7503,13 @@ impl Waku {
     /// viewer reads the flag each frame and falls back to JSON source.
     fn set_wireframes_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.wireframes_experiment_enabled = enabled;
+        // Dropping generations rejects pending replies and re-reads on enable.
+        if self.plan_wireframes.iter().any(|(session_id, preview)| {
+            preview.selected && self.right_panel_live_owner == RightPanelOwner::Session(*session_id)
+        }) {
+            self.right_panel_pending_focus = Some(self.right_panel_focus.clone());
+        }
+        self.plan_wireframes.clear();
         self.save();
         cx.notify();
     }

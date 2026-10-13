@@ -5529,6 +5529,7 @@ impl Waku {
             }
         }
         self.plan_docs.remove(&session_id);
+        self.plan_wireframes.remove(&session_id);
         self.plan_annotations.remove(&session_id);
         self.right_panel_pr_states
             .retain(|(owner, _), _| *owner != session_id);
@@ -10659,6 +10660,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let key = plan_doc_host(&self.boss_ui.states, key, session_id);
+        self.ensure_plan_wireframe(key, session_id, plan_file, cx);
         let revision = self
             .boss_ui
             .states
@@ -10668,7 +10670,7 @@ impl Waku {
         if self
             .plan_docs
             .get(&session_id)
-            .is_some_and(|doc| doc.settled(key, revision, retry_failed))
+            .is_some_and(|doc| doc.path == plan_file && doc.settled(key, revision, retry_failed))
         {
             return;
         }
@@ -10680,6 +10682,7 @@ impl Waku {
             self.plan_docs.insert(
                 session_id,
                 PlanDoc {
+                    path: plan_file.to_owned(),
                     reviewed: None,
                     displayed_reviewed: None,
                     key,
@@ -10695,18 +10698,22 @@ impl Waku {
         let content = self
             .plan_docs
             .get(&session_id)
+            .filter(|doc| doc.key == key && doc.path == plan_file)
             .and_then(|doc| doc.content.clone());
         let reviewed = self
             .plan_docs
             .get(&session_id)
+            .filter(|doc| doc.key == key && doc.path == plan_file)
             .and_then(|doc| doc.reviewed.clone());
         let displayed_reviewed = self
             .plan_docs
             .get(&session_id)
+            .filter(|doc| doc.key == key && doc.path == plan_file)
             .and_then(|doc| doc.displayed_reviewed.clone());
         self.plan_docs.insert(
             session_id,
             PlanDoc {
+                path: plan_file.to_owned(),
                 reviewed,
                 displayed_reviewed,
                 key,
@@ -10716,6 +10723,7 @@ impl Waku {
             },
         );
         let path = plan_file.to_owned();
+        let requested_path = path.clone();
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -10735,7 +10743,7 @@ impl Waku {
                 };
                 // A newer state re-armed the read while this one was in
                 // flight — its own request supersedes this landing.
-                if doc.key != key || doc.revision != revision {
+                if doc.key != key || doc.revision != revision || doc.path != requested_path {
                     return;
                 }
                 doc.requested = false;
@@ -11037,8 +11045,25 @@ impl Waku {
     ) -> Div {
         let key = self.daemons.session_owner(session_id);
         self.ensure_plan_doc(key, session_id, plan_file, false, cx);
+        let companion_visible = self.plan_wireframe_visible(session_id);
+        let header = companion_visible.then(|| self.plan_wireframe_header(session_id, cx));
+        if companion_visible
+            && self
+                .plan_wireframes
+                .get(&session_id)
+                .is_some_and(|preview| preview.selected)
+        {
+            return div()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .children(header)
+                .child(self.render_plan_wireframe(session_id, cx));
+        }
         let doc = self.plan_docs.get(&session_id);
-        match doc.and_then(|doc| doc.content.as_ref()) {
+        let document = match doc.and_then(|doc| doc.content.as_ref()) {
             Some(Ok(text)) => {
                 let text = text.clone();
                 self.plan_document_view(session_id, &text, true, Some(window), cx)
@@ -11063,7 +11088,15 @@ impl Waku {
                             .child(tr!("boss.loading")),
                     )
             }
-        }
+        };
+        div()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .children(header)
+            .child(document)
     }
 
     /// The rendered-markdown alternative to the editor body, shown while the

@@ -6140,6 +6140,7 @@ fn plan_doc_content_gate_waits_for_real_text() {
     // missing fetch, an error, and a created-but-blank file all leave the
     // strip without it.
     let doc = |content: Option<Result<String, String>>| super::PlanDoc {
+        path: "plans/test.md".into(),
         reviewed: None,
         displayed_reviewed: None,
         key: waku_client::DaemonKey::Local,
@@ -6162,6 +6163,7 @@ fn plan_doc_settles_per_state_and_retries_failures_on_events_not_frames() {
     // while event callers get one bounded retry per received state.
     let doc =
         |revision: u64, requested: bool, content: Option<Result<String, String>>| super::PlanDoc {
+            path: "plans/test.md".into(),
             reviewed: None,
             displayed_reviewed: None,
             key: waku_client::DaemonKey::Local,

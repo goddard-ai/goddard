@@ -951,6 +951,7 @@ struct PastedTextBlob {
 /// A planning session's fetched plan document. `revision` is the Boss
 /// document revision the read answered — a newer state re-arms the fetch.
 struct PlanDoc {
+    path: String,
     reviewed: Option<waku_client::boss::PlanReview>,
     /// The preview identity actually rendered, kept across offscreen refreshes.
     displayed_reviewed: Option<waku_client::boss::PlanReview>,
@@ -3659,6 +3660,8 @@ pub struct Waku {
     /// keyed by session id — the rendered tab is read-only, so the cache
     /// holds only text plus the Boss revision it answered.
     plan_docs: HashMap<Uuid, PlanDoc>,
+    plan_wireframes: HashMap<Uuid, plan_wireframe::Preview>,
+    plan_wireframe_scroll_handle: ScrollHandle,
     plan_markdown: RefCell<Option<(Uuid, MarkdownView)>>,
     plan_preview_selection: TranscriptSelection,
     /// Virtualized scroll state for the plan document view — reset whenever
@@ -4443,6 +4446,7 @@ mod notifications;
 mod phases;
 mod piper;
 mod plan_approval;
+mod plan_wireframe;
 mod press_to_talk;
 mod project_switcher;
 mod projects;
@@ -7664,6 +7668,8 @@ impl Waku {
                 wireframe_preview_scroll_handle: ScrollHandle::new(),
                 wireframe_preview_scrollbar: ScrollbarState::new(),
                 plan_docs: HashMap::new(),
+                plan_wireframes: HashMap::new(),
+                plan_wireframe_scroll_handle: ScrollHandle::new(),
                 plan_annotations,
                 plan_markdown: RefCell::new(None),
                 plan_preview_selection: TranscriptSelection::default(),

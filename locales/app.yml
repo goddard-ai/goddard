@@ -7137,3 +7137,16 @@ boss.plan_retry_hint:
 
 boss.plan_admission_not_evaluated:
   en: Admission not evaluated while the required plan is blocked
+
+boss.plan_document:
+  en: Document
+boss.plan_wireframe:
+  en: Wireframe
+boss.plan_wireframe_updating:
+  en: Updating…
+boss.plan_wireframe_previous:
+  en: Previous screen
+boss.plan_wireframe_next:
+  en: Next screen
+boss.plan_wireframe_absent:
+  en: No wireframe in this plan
