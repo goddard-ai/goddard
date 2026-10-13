@@ -1868,12 +1868,13 @@ impl Backend for WakuBackend {
             Command::AgentResources { operation } => {
                 let owner =
                     agent.context("resource reservations require a scoped task credential")?;
-                // Admission tickets are daemon-owned — model slots and the
-                // dispatch order they encode belong to the summon queue,
-                // not to task-scoped callers.
+                // Admission tickets and lease re-anchoring are daemon-owned —
+                // the summon queue and the stable-runtime lease transfer own
+                // them, not task-scoped callers.
                 if matches!(
                     operation,
                     waku_protocol::resources::ResourceOperation::Admission { .. }
+                        | waku_protocol::resources::ResourceOperation::Reanchor { .. }
                 ) {
                     bail!("admission reservations are daemon-internal");
                 }
@@ -1890,6 +1891,27 @@ impl Backend for WakuBackend {
                     );
                 }
                 let status = self.resource_broker()?.operate(owner, operation)?;
+                // A granted lease for a runtime-owned session anchors on the
+                // surviving host, so a later daemon detachment cannot
+                // silently release provider-held work.
+                if let (Some(anchor), Some(id)) =
+                    (self.stable_anchor_pid(owner), status.request_id)
+                    && status.reservations.iter().any(|reservation| {
+                        reservation.id == id
+                            && reservation.granted_at.is_some()
+                            && !reservation.cancelled
+                            && !reservation.released
+                            && reservation.owner_pid != Some(anchor)
+                    })
+                {
+                    let _ = self.resource_broker()?.operate(
+                        owner,
+                        waku_protocol::resources::ResourceOperation::Reanchor {
+                            id,
+                            owner_pid: anchor,
+                        },
+                    );
+                }
                 if let Some(id) = status.request_id {
                     self.agent.note_resource(owner, id);
                     if let Some(reservation) = status.reservations.iter().find(|r| r.id == id) {

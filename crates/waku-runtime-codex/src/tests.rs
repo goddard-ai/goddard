@@ -14,6 +14,9 @@ struct Rig {
 }
 impl Rig {
     fn new(real: bool) -> Self {
+        Self::build(real, None)
+    }
+    fn build(real: bool, agent: Option<AgentIngress>) -> Self {
         let root = std::env::temp_dir().join(format!("runtime-codex-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         let binary = if real {
@@ -46,6 +49,7 @@ impl Rig {
             approval_policy: "on-request".into(),
             sandbox: "read-only".into(),
             developer_instructions: None,
+            agent,
             dynamic_tools: vec![json!({"type":"function","name":"runtime_probe",
                 "description":"Return the stable-runtime probe token. Call exactly once when instructed.",
                 "inputSchema":{"type":"object","properties":{},"additionalProperties":false}})],
@@ -433,4 +437,33 @@ fn effective_configuration_comes_from_native_settings_at_the_next_turn() {
         ),
         CommandDisposition::Rejected { .. }
     ));
+}
+
+#[test]
+fn codex_child_env_carries_only_the_provisioned_ingress_pairs() {
+    let rig = Rig::build(
+        false,
+        Some(AgentIngress {
+            env: [
+                ("GODDARD_RUNTIME_INGRESS", "/private/ingress.json"),
+                ("GODDARD_TASK_ID", "task-1"),
+            ]
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect(),
+            cli_dir: None,
+        }),
+    );
+    // The fixture records every GODDARD_*/WAKU_* name it inherited — the
+    // provisioned pairs are the only ones the child may see.
+    let inherited: Vec<String> =
+        serde_json::from_slice(&fs::read(rig.root.join("provider-environment.json")).unwrap())
+            .unwrap();
+    assert!(inherited.contains(&"GODDARD_RUNTIME_INGRESS".to_string()));
+    assert!(inherited.contains(&"GODDARD_TASK_ID".to_string()));
+    assert!(
+        !inherited.contains(&"GODDARD_AGENT_TOKEN".to_string()),
+        "the daemon token never reaches the provider: {inherited:?}"
+    );
+    assert!(!inherited.contains(&"GODDARD_DAEMON_ADDRESS".to_string()));
 }

@@ -51,6 +51,10 @@ pub const AGENT_PARENT_TASK_ENV: &str = "GODDARD_PARENT_TASK_ID";
 /// a summon admission ticket's granted id. `goddard-agent resource`
 /// attaches to it instead of re-queueing behind its own owner's work.
 pub const AGENT_RESOURCE_RESERVATION_ENV: &str = "GODDARD_RESOURCE_RESERVATION";
+/// Path to the private runtime-ingress descriptor the daemon provisions
+/// for a stable-runtime session. When set, `goddard-agent` routes through
+/// the surviving runtime host instead of a daemon address/token pair.
+pub const RUNTIME_INGRESS_ENV: &str = "GODDARD_RUNTIME_INGRESS";
 /// Markdown-link target prefix for referencing a task in transcript text:
 /// `[title](goddard://task/<task-id>)` renders as a link that opens that
 /// task. Surfaced to agents through `goddard-agent` so a reply can point at

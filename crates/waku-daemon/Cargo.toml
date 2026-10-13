@@ -36,7 +36,7 @@ url = "2"
 smol = "2"
 subtle = "2"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
-uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
+uuid = { version = "1.18", features = ["v4", "v5", "v7", "serde"] }
 waku-drivers = { path = "../waku-drivers" }
 waku-store = { path = "../waku-store" }
 waku-server = { path = "../waku-server" }

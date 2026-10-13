@@ -21,10 +21,10 @@ use std::{
 };
 use uuid::Uuid;
 use waku_runtime::{
-    ActivationBoundary, AdapterFactory, AdapterHandle, CancelOutcome, CancellationLimit,
-    CanonicalAction, DeadlineBound, DispatchOutcome, Enforcement, OfflineMatrix, ProviderEvent,
-    RecoveredOwner, RequestClass, RequestedConfig, SessionContext, SpawnError, TerminateReason,
-    Termination,
+    ActivationBoundary, AdapterFactory, AdapterHandle, AgentIngress, CancelOutcome,
+    CancellationLimit, CanonicalAction, DeadlineBound, DispatchOutcome, Enforcement, OfflineMatrix,
+    ProviderEvent, RecoveredOwner, RequestClass, RequestedConfig, SessionContext, SpawnError,
+    TerminateReason, Termination, agent_ingress_env,
 };
 
 const MAX_MESSAGE: usize = 1024 * 1024;
@@ -47,6 +47,11 @@ pub struct CodexLaunch {
     pub developer_instructions: Option<String>,
     #[serde(default)]
     pub dynamic_tools: Vec<Value>,
+    /// Session-scoped CLI ingress the controller provisioned for this
+    /// launch — env pairs and the pinned helper directory applied to the
+    /// spawned child after the inherited-credential scrub.
+    #[serde(default)]
+    pub agent: Option<AgentIngress>,
 }
 fn default_policy() -> String {
     "untrusted".into()
@@ -175,6 +180,15 @@ impl CodexAdapter {
                 )
             {
                 command.env_remove(key);
+            }
+        }
+        // Only the launch-provisioned ingress pairs may re-enter — never an
+        // inherited daemon token or descriptor a caller smuggled in.
+        if let Some(agent) = &launch.agent {
+            for (name, value) in
+                agent_ingress_env(agent, std::env::var_os("PATH").as_deref())
+            {
+                command.env(name, value);
             }
         }
         let mut child = command

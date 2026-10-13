@@ -79,9 +79,12 @@ impl Rig {
         let descriptor = root.join("cli.json");
         std::fs::write(
             &descriptor,
-            serde_json::to_vec(&json!({
-                "version":1, "root":root, "taskId":task, "grant":agent_grant,
-            }))
+            serde_json::to_vec(&IngressDescriptor {
+                version: INGRESS_DESCRIPTOR_VERSION,
+                root: root.clone(),
+                task_id: task,
+                grant: agent_grant.clone(),
+            })
             .unwrap(),
         )
         .unwrap();

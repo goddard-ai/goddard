@@ -1338,3 +1338,66 @@ fn reconfigure_requires_forward_revisions() {
         }
     ));
 }
+
+#[test]
+fn agent_ingress_env_pins_the_cli_on_path_and_carries_pairs() {
+    let ingress = AgentIngress {
+        env: [(
+            "GODDARD_RUNTIME_INGRESS".to_string(),
+            "/private/ingress.json".to_string(),
+        )]
+        .into_iter()
+        .collect(),
+        cli_dir: Some("/pinned/helpers".into()),
+    };
+    let env = agent_ingress_env(&ingress, Some(std::ffi::OsStr::new("/usr/bin")));
+    assert_eq!(
+        env.iter()
+            .find(|(name, _)| name == "GODDARD_RUNTIME_INGRESS")
+            .map(|(_, value)| value.as_os_str()),
+        Some(std::ffi::OsStr::new("/private/ingress.json"))
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(name, _)| name == "PATH")
+            .map(|(_, value)| value.as_os_str()),
+        Some(std::ffi::OsStr::new("/pinned/helpers:/usr/bin"))
+    );
+    // No inherited PATH — a standard fallback keeps the helper findable.
+    let fallback = agent_ingress_env(&ingress, None);
+    assert_eq!(
+        fallback
+            .iter()
+            .find(|(name, _)| name == "PATH")
+            .map(|(_, value)| value.as_os_str()),
+        Some(std::ffi::OsStr::new("/pinned/helpers:/usr/bin:/bin:/usr/local/bin"))
+    );
+}
+
+#[test]
+fn ingress_descriptor_uses_the_wire_field_names() {
+    let descriptor = IngressDescriptor {
+        version: INGRESS_DESCRIPTOR_VERSION,
+        root: PathBuf::from("/private/goddard"),
+        task_id: Uuid::new_v4(),
+        grant: SessionGrant {
+            grant_id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            generation: 1,
+            token: "secret".into(),
+            expires_at_ms: 1,
+        },
+    };
+    let value = serde_json::to_value(&descriptor).unwrap();
+    assert!(value["taskId"].is_string());
+    assert!(value["grant"].is_object());
+    assert!(value["root"].is_string());
+    assert!(value.get("task_id").is_none());
+    assert!(value.get("runtimeRoot").is_none());
+    let round_trip: IngressDescriptor = serde_json::from_value(value).unwrap();
+    assert_eq!(round_trip, descriptor);
+    // Unknown fields fail closed — a foreign descriptor is never trusted.
+    let mut foreign = serde_json::to_value(&descriptor).unwrap();
+    foreign["extra"] = json!(true);
+    assert!(serde_json::from_value::<IngressDescriptor>(foreign).is_err());
+}

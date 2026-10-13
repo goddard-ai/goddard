@@ -30,13 +30,15 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow, bail};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use waku_protocol::model::RuntimeEventCursor;
 use crate::{Command, Request};
 use waku_runtime::client::{ClientError, RuntimeClient};
 use waku_runtime::contract::{
-    ActionEnvelope, CanonicalAction, ClientHello, ControlGrant, EventCursor, EventEnvelope, ForwardedOutcome,
-    ForwardedRequest, Inventory, ProviderEvent, RequestClass, SessionRef, SessionStatus,
+    ActionEnvelope, AgentIngress, CanonicalAction, ClientHello, ControlGrant, EventCursor,
+    EventEnvelope, ForwardedOutcome, ForwardedRequest, INGRESS_DESCRIPTOR_VERSION, IngressDescriptor,
+    Inventory, ProviderEvent, RequestClass, ResourceClaim, SessionRef, SessionStatus,
 };
 use waku_runtime::host::load_credentials;
 
@@ -170,6 +172,9 @@ impl Drop for LinkLifetime {
 pub(crate) struct ControllerLease {
     instance: Uuid,
     grant: ControlGrant,
+    /// The live host process — the surviving owner resource/credential
+    /// leases anchor to so daemon replacement cannot silently release them.
+    host_pid: u32,
     routes: Mutex<HashMap<Uuid, Weak<LinkShared>>>,
     /// All service connections share dispatch serialization.
     service_gate: Mutex<()>,
@@ -215,6 +220,13 @@ struct LinkShared {
     /// string answers into the declared primitive field types, and evicted
     /// when the request settles.
     input_schemas: Mutex<HashMap<String, Value>>,
+    /// How this session's agent surface reached the provider — announced
+    /// through its native instruction channel, env-only (`Silent`), or
+    /// absent when no surface was provisioned.
+    agent_delivery: crate::driver::AgentSurfaceDelivery,
+    /// The provisioned ingress descriptor — removed when the session is
+    /// confirmed stopped so a stale CLI cannot linger on a dead grant.
+    agent_descriptor: Option<PathBuf>,
     /// Set on drop — pump and service threads retire between polls.
     stop: Arc<AtomicBool>,
     threads: Mutex<Vec<JoinHandle<()>>>,
@@ -244,6 +256,9 @@ pub(super) fn start_link(
         .map_err(link_error)
         .context("could not attach to the runtime host")?;
     let instance = hello.runtime_instance;
+    let host_pid = waku_runtime::ipc::Endpoint::load(root)
+        .map(|endpoint| endpoint.pid)
+        .context("the runtime host's endpoint is unreadable")?;
     let controller = {
         let mut leases = backend.stable_controllers.lock().unwrap();
         if let Some(lease) = leases.get(root) {
@@ -255,6 +270,7 @@ pub(super) fn start_link(
             let lease = Arc::new(ControllerLease {
                 instance,
                 grant,
+                host_pid,
                 routes: Mutex::new(HashMap::new()),
                 service_gate: Mutex::new(()),
             });
@@ -262,6 +278,7 @@ pub(super) fn start_link(
             lease
         }
     };
+    let host_pid = controller.host_pid;
     let grant = &controller.grant;
     // Reconciliation precedes admission: the inventory names live sessions,
     // open commands, pending requests, surviving claims — a replacement
@@ -280,6 +297,26 @@ pub(super) fn start_link(
             );
         }
     }
+
+    // The agent surface is provisioned before admission when the launch
+    // carries one: the pinned helper and descriptor paths ride the admit
+    // payload while the grant is issued only once the session exists.
+    #[cfg(unix)]
+    let prepared = match &options.agent {
+        Some(env) => Some(
+            preflight_agent(root, env)
+                .context("could not provision the session's agent ingress")?,
+        ),
+        None => None,
+    };
+    #[cfg(not(unix))]
+    let prepared: Option<AgentProvisioning> = {
+        anyhow::ensure!(
+            options.agent.is_none(),
+            "stable runtime agent ingress is unsupported on this platform"
+        );
+        None
+    };
 
     let prior = task_store
         .stable_link(session_id)
@@ -300,7 +337,7 @@ pub(super) fn start_link(
             let action = CanonicalAction::AdmitSession {
                 session_id: runtime_id,
                 adapter,
-                launch: launch_payload(provider, options)?,
+                launch: launch_payload(provider, options, prepared.as_ref())?,
                 requested: requested_config(provider, options),
             };
             let receipt = execute_safe(
@@ -336,6 +373,16 @@ pub(super) fn start_link(
         .stable_link_save(&row)
         .context("could not record the runtime link")?;
 
+    // Every task-owned broker lease anchors on the live host so daemon
+    // detachment cannot silently release provider-held work — this covers
+    // summon tickets even for sessions without an agent surface.
+    let anchored = reanchor_task_claims(backend, session_id, host_pid);
+    #[cfg(unix)]
+    if let (Some(env), Some(prepared)) = (&options.agent, &prepared) {
+        provision_agent(&mut client, grant.epoch, root, sref, env, prepared, &anchored)
+            .context("could not provision the session's agent ingress")?;
+    }
+
     let service: Arc<dyn IngressService> = service_override.unwrap_or_else(|| {
         Arc::new(BackendIngress {
             backend: backend.weak_self(),
@@ -364,6 +411,12 @@ pub(super) fn start_link(
         active_turn: Mutex::new(inventory.sessions.iter().find(|inv| inv.session == sref).and_then(|inv| inv.open_turns.first().copied())),
         config_revision: Mutex::new(inventory_config_revision(&inventory, &sref)),
         input_schemas: Mutex::new(HashMap::new()),
+        agent_delivery: match (options.agent.is_some(), provider) {
+            (true, ProviderKind::Codex) => crate::driver::AgentSurfaceDelivery::Announced,
+            (true, _) => crate::driver::AgentSurfaceDelivery::Silent,
+            (false, _) => crate::driver::AgentSurfaceDelivery::Absent,
+        },
+        agent_descriptor: prepared.as_ref().map(|prepared| prepared.descriptor.clone()),
         stop: Arc::new(AtomicBool::new(false)),
         threads: Mutex::new(Vec::new()),
     });
@@ -433,14 +486,17 @@ fn resolve_attachment(
 
 /// Match the strict, independently versioned adapter schemas. Unsupported
 /// product options fail before admission instead of silently losing policy.
-fn launch_payload(provider: ProviderKind, options: &DriverStartOptions) -> anyhow::Result<Value> {
+/// A provisioned [`AgentIngress`] rides the launch verbatim: the adapter
+/// applies its env pairs and pinned CLI directory to the provider child —
+/// the grant itself never enters this payload.
+fn launch_payload(
+    provider: ProviderKind,
+    options: &DriverStartOptions,
+    agent: Option<&AgentProvisioning>,
+) -> anyhow::Result<Value> {
     anyhow::ensure!(
         options.provider_cursor.is_none(),
         "the stable runtime cannot resume a legacy provider session"
-    );
-    anyhow::ensure!(
-        options.agent.is_none(),
-        "stable runtime product CLI credentials are not qualified"
     );
     anyhow::ensure!(
         options.sandbox.is_none(),
@@ -476,15 +532,29 @@ fn launch_payload(provider: ProviderKind, options: &DriverStartOptions) -> anyho
                     bail!("stable Codex automated approval review is not qualified")
                 }
             };
-            Ok(json!({"binary": options.binary, "cwd": options.cwd,
-                "approvalPolicy": approval, "sandbox": sandbox}))
+            let mut payload = json!({"binary": options.binary, "cwd": options.cwd,
+                "approvalPolicy": approval, "sandbox": sandbox});
+            if let Some(prepared) = agent {
+                payload["agent"] = serde_json::to_value(&prepared.ingress)?;
+                // `thread/start`'s developer instructions are this
+                // provider's announcement channel for the CLI surface.
+                if let Some(env) = &options.agent {
+                    payload["developerInstructions"] =
+                        json!(crate::agent::surface_instruction("goddard-agent", &env.scope()));
+                }
+            }
+            Ok(payload)
         }
         ProviderKind::Devin => {
             anyhow::ensure!(
                 options.mode == crate::model::RuntimeMode::Ask,
                 "stable Devin automatic permissions are not qualified; use supervised mode"
             );
-            Ok(json!({"cwd": options.cwd}))
+            let mut payload = json!({"cwd": options.cwd});
+            if let Some(prepared) = agent {
+                payload["agent"] = serde_json::to_value(&prepared.ingress)?;
+            }
+            Ok(payload)
         }
         _ => bail!("no qualified stable launch schema for {}", provider.id()),
     }
@@ -509,6 +579,286 @@ fn inventory_config_revision(inventory: &Inventory, sref: &SessionRef) -> u64 {
         .find(|inv| inv.session == *sref)
         .map(|inv| inv.requested_revision.max(inv.effective.as_ref().map_or(0, |config| config.revision)))
         .unwrap_or(0)
+}
+
+/// The descriptor file inside the session's private agent directory. Its
+/// sibling `ingress.requests` evidence directory is created by the CLI.
+const DESCRIPTOR_NAME: &str = "ingress.json";
+/// Content-addressed helper copies under the runtime namespace root — a
+/// product lane rebuild can never invalidate a running session's CLI.
+const HELPERS_DIR: &str = "helpers";
+/// Session grants carry a bounded, immutable expiry. A daemon attachment
+/// restores ingress by issuing a fresh grant — never by extending one.
+const GRANT_TTL_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+
+/// What the admit payload and the post-admission provisioning share.
+struct AgentProvisioning {
+    /// Env pairs and the pinned CLI directory the adapter applies.
+    ingress: AgentIngress,
+    /// The private descriptor path the CLI reads its grant from.
+    descriptor: PathBuf,
+    /// The SHA256-addressed pinned `goddard-agent` directory.
+    helper_dir: PathBuf,
+}
+
+/// Compose the launch-carried agent surface and pin the CLI helper. Runs
+/// before admission — everything it produces is a path, never a grant.
+#[cfg(unix)]
+fn preflight_agent(
+    root: &Path,
+    env: &crate::agent::AgentLaunchEnv,
+) -> anyhow::Result<AgentProvisioning> {
+    let helper_dir = pin_helper(root, &env.cli_path)?;
+    let descriptor = env.shim_directory.join(DESCRIPTOR_NAME);
+    let mut pairs = std::collections::BTreeMap::new();
+    pairs.insert(
+        waku_protocol::RUNTIME_INGRESS_ENV.to_string(),
+        descriptor.to_string_lossy().into_owned(),
+    );
+    pairs.insert(
+        waku_protocol::AGENT_TASK_ENV.to_string(),
+        env.task_id.to_string(),
+    );
+    if let Some(parent) = env.parent_task_id {
+        pairs.insert(
+            waku_protocol::AGENT_PARENT_TASK_ENV.to_string(),
+            parent.to_string(),
+        );
+    }
+    if let Some(reservation) = env.resource_reservation {
+        pairs.insert(
+            waku_protocol::AGENT_RESOURCE_RESERVATION_ENV.to_string(),
+            reservation.to_string(),
+        );
+    }
+    Ok(AgentProvisioning {
+        ingress: AgentIngress {
+            env: pairs,
+            cli_dir: Some(helper_dir.clone()),
+        },
+        descriptor,
+        helper_dir,
+    })
+}
+
+/// Restore the session's scoped CLI ingress after the session exists:
+/// issue a fresh grant, publish the private descriptor atomically, and
+/// record the lease as a durable runtime claim. Called on every attach —
+/// a replacement daemon revalidates authority with a new grant; nothing
+/// ever extends a grant's recorded expiry.
+#[cfg(unix)]
+fn provision_agent(
+    client: &mut RuntimeClient,
+    epoch: u64,
+    root: &Path,
+    sref: SessionRef,
+    env: &crate::agent::AgentLaunchEnv,
+    prepared: &AgentProvisioning,
+    anchored: &[Uuid],
+) -> anyhow::Result<()> {
+    let grant = client
+        .issue_grant(epoch, sref, GRANT_TTL_MS)
+        .map_err(link_error)
+        .context("the runtime host refused a session grant")?;
+    write_descriptor(
+        &prepared.descriptor,
+        &IngressDescriptor {
+            version: INGRESS_DESCRIPTOR_VERSION,
+            root: root.to_path_buf(),
+            task_id: env.task_id,
+            grant: grant.clone(),
+        },
+    )?;
+    client
+        .register_claim(
+            epoch,
+            ResourceClaim {
+                claim_id: agent_claim_id(sref),
+                session: sref,
+                resources: vec!["agent-ingress".into(), "cli-helper".into()],
+                detail: json!({
+                    "descriptor": prepared.descriptor,
+                    "helperDir": prepared.helper_dir,
+                    "grantId": grant.grant_id,
+                    "reservations": anchored,
+                }),
+            },
+        )
+        .map_err(link_error)
+        .context("the runtime host refused the ingress lease claim")?;
+    Ok(())
+}
+
+/// The durable claim identity for one generation's agent-ingress lease —
+/// deterministic so reattachment replaces rather than accumulates.
+fn agent_claim_id(session: SessionRef) -> Uuid {
+    Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("agent-ingress:{}:{}", session.session_id, session.generation).as_bytes(),
+    )
+}
+
+/// Pin `cli` under the runtime root by content address. An existing entry
+/// must match its hash exactly — a product lane swap can add addresses,
+/// never silently substitute one.
+#[cfg(unix)]
+fn pin_helper(root: &Path, cli: &Path) -> anyhow::Result<PathBuf> {
+    let hash = file_sha256(cli)?;
+    let directory = root.join(HELPERS_DIR).join(&hash);
+    let destination = directory.join("goddard-agent");
+    if destination.exists() {
+        anyhow::ensure!(
+            !destination.is_symlink() && file_sha256(&destination)? == hash,
+            "the pinned agent helper does not match its content address"
+        );
+        return Ok(directory);
+    }
+    crate::fs_ext::create_private_dir_all(&directory)
+        .context("could not create the pinned helper directory")?;
+    let temporary = directory.join(format!("pin-{}", std::process::id()));
+    let staged = (|| -> anyhow::Result<()> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut out = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o500)
+            .open(&temporary)?;
+        let mut input = std::fs::File::open(cli)?;
+        std::io::copy(&mut input, &mut out)?;
+        out.sync_all()?;
+        Ok(())
+    })();
+    if staged.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    staged.context("could not stage the pinned agent helper")?;
+    anyhow::ensure!(
+        file_sha256(&temporary)? == hash,
+        "the agent helper changed while pinning"
+    );
+    std::fs::rename(&temporary, &destination)?;
+    if let Ok(dir) = std::fs::File::open(&directory) {
+        let _ = dir.sync_all();
+    }
+    Ok(directory)
+}
+
+#[cfg(unix)]
+fn file_sha256(path: &Path) -> anyhow::Result<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)
+        .with_context(|| format!("could not open {}", path.display()))?;
+    let mut hash = Sha256::new();
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut chunk)?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&chunk[..count]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+/// Publish the private descriptor atomically — a replacement daemon's
+/// rewrite never leaves a torn grant behind for the CLI to read.
+#[cfg(unix)]
+fn write_descriptor(path: &Path, descriptor: &IngressDescriptor) -> anyhow::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    if let Some(parent) = path.parent() {
+        crate::fs_ext::create_private_dir_all(parent)
+            .context("could not create the agent ingress directory")?;
+    }
+    let bytes = serde_json::to_vec(descriptor)?;
+    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+    let staged = (|| -> anyhow::Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if staged.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    staged.context("could not stage the agent ingress descriptor")?;
+    std::fs::rename(&temporary, path).context("could not publish the agent ingress descriptor")?;
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = std::fs::File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
+    Ok(())
+}
+
+/// The surviving host pid anchoring a recorded runtime session, when its
+/// link is routed under a live controller lease.
+pub(crate) fn stable_anchor_pid(
+    store: &StateStore,
+    controllers: &Mutex<HashMap<PathBuf, Arc<ControllerLease>>>,
+    session_id: Uuid,
+) -> Option<u32> {
+    let row = store.stable_link(session_id).ok().flatten()?;
+    controllers
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|(root, lease)| {
+            lease
+                .routes
+                .lock()
+                .unwrap()
+                .contains_key(&row.runtime_session_id)
+                .then(|| {
+                    // Fresh read — a host restart under the same instance
+                    // moves the surviving owner's pid.
+                    waku_runtime::ipc::Endpoint::load(root)
+                        .map(|endpoint| endpoint.pid)
+                        .unwrap_or(lease.host_pid)
+                })
+        })
+}
+
+/// Move this task's live broker reservations onto the surviving host as
+/// their liveness owner. Daemon detachment then cannot silently release
+/// provider-held work; a lease whose owner dies still ends honestly.
+/// Returns the reservation ids that moved.
+fn reanchor_task_claims(backend: &WakuBackend, task: Uuid, owner_pid: u32) -> Vec<Uuid> {
+    use waku_protocol::resources::ResourceOperation;
+    let Ok(broker) = backend.resource_broker() else {
+        return Vec::new();
+    };
+    let Ok(status) = broker.operate(task, ResourceOperation::Status { id: None }) else {
+        return Vec::new();
+    };
+    let mut anchored = Vec::new();
+    for reservation in status.reservations {
+        if reservation.task != task
+            || reservation.cancelled
+            || reservation.released
+            || reservation.owner_pid == Some(owner_pid)
+        {
+            continue;
+        }
+        match broker.operate(
+            task,
+            ResourceOperation::Reanchor {
+                id: reservation.id,
+                owner_pid,
+            },
+        ) {
+            Ok(_) => anchored.push(reservation.id),
+            Err(error) => eprintln!(
+                "goddard-daemon: could not anchor reservation {} to the runtime host: {error:#}",
+                reservation.id
+            ),
+        }
+    }
+    anchored
 }
 
 /// Spawn or verify the host process for `root`. A live endpoint answers
@@ -1114,6 +1464,13 @@ impl StableLink {
         self.shared.serve_request(request)
     }
 
+    /// The live runtime host process — the surviving owner this session's
+    /// resource and credential leases anchor to.
+    #[cfg(test)]
+    pub(crate) fn host_pid(&self) -> u32 {
+        self.shared.controller.host_pid
+    }
+
     /// The daemon issues scoped agent grants through its own link — the
     /// controller authority that owns the session names which agents may
     /// address it.
@@ -1156,6 +1513,10 @@ impl DriverControl for StableLink {
 
     fn supports_steer(&self) -> bool {
         false
+    }
+
+    fn agent_surface_delivery(&self) -> crate::driver::AgentSurfaceDelivery {
+        self.shared.agent_delivery
     }
 
     fn steer(&self, prompt: String) {
@@ -1333,6 +1694,12 @@ impl DriverControl for StableLink {
                 ..
             })
         ) {
+            // Termination is proven — the generation's lease claim and its
+            // published credential retire with it.
+            let _ = client.release_claim(self.shared.epoch, agent_claim_id(self.shared.sref));
+            if let Some(descriptor) = &self.shared.agent_descriptor {
+                let _ = std::fs::remove_file(descriptor);
+            }
             let _ = self.shared.store.stable_link_clear(
                 self.shared.task_id,
                 self.shared.instance,
@@ -2081,15 +2448,15 @@ mod tests {
             (crate::model::RuntimeMode::FullAccess, "never", "danger-full-access"),
         ] {
             opts.mode = mode;
-            let launch: waku_runtime_codex::CodexLaunch = serde_json::from_value(launch_payload(ProviderKind::Codex, &opts).unwrap()).unwrap();
+            let launch: waku_runtime_codex::CodexLaunch = serde_json::from_value(launch_payload(ProviderKind::Codex, &opts, None).unwrap()).unwrap();
             assert_eq!(launch.approval_policy, policy);
             assert_eq!(launch.sandbox, sandbox);
         }
         opts.mode = crate::model::RuntimeMode::Auto;
-        assert!(launch_payload(ProviderKind::Codex, &opts).is_err());
+        assert!(launch_payload(ProviderKind::Codex, &opts, None).is_err());
         opts.mode = crate::model::RuntimeMode::Ask;
         opts.provider_cursor = Some(crate::model::ProviderResumeCursor::Codex { thread_id: "legacy".into() });
-        assert!(launch_payload(ProviderKind::Codex, &opts).is_err());
+        assert!(launch_payload(ProviderKind::Codex, &opts, None).is_err());
     }
 
     /// Uses the production adapter over a controlled native RPC peer. This
@@ -2377,6 +2744,285 @@ for line in sys.stdin:
         // Provider-private effective options never enter the session record.
         let serialized = serde_json::to_value(&session).unwrap();
         assert!(!serialized.to_string().contains("thr_private"));
+    }
+
+    /// A launch env whose CLI is a pinnable fake executable — the daemon
+    /// token and address exist on the struct but must never reach the
+    /// provider child.
+    #[cfg(unix)]
+    fn agent_env(
+        session_id: Uuid,
+        directory: &Path,
+        reservation: Option<Uuid>,
+    ) -> crate::agent::AgentLaunchEnv {
+        let cli = directory.join("goddard-agent");
+        std::fs::write(&cli, "#!/bin/sh\n# pinned test helper\n").unwrap();
+        crate::agent::AgentLaunchEnv {
+            token: "daemon-token-that-must-never-leak".into(),
+            task_id: session_id,
+            parent_task_id: None,
+            daemon_address: "http://daemon.invalid".into(),
+            cli_path: cli,
+            shim_directory: directory.to_path_buf(),
+            task_tools: true,
+            settings_writes: true,
+            boss: false,
+            memory: false,
+            resource_reservation: reservation,
+        }
+    }
+
+    /// End to end: admission provisions the descriptor, pins the helper,
+    /// anchors the task's broker lease on the live host, records the claim,
+    /// and the provisioned grant serves real CLI ingress.
+    #[test]
+    #[cfg(unix)]
+    fn stable_link_provisions_scoped_agent_ingress() {
+        use std::os::unix::fs::PermissionsExt;
+        use waku_protocol::resources::{ResourceOperation, ResourceSet};
+        let rig = rig(&["codex"]);
+        let broker_root = temp_root("broker");
+        *rig.backend.broker_root.lock() = Some(broker_root.clone());
+        let broker = crate::resource_broker::Broker::at(broker_root);
+        // A summon-style lease the task already holds before the attach.
+        let status = broker
+            .operate(
+                rig.session_id,
+                ResourceOperation::Acquire {
+                    resources: ResourceSet {
+                        native_builds: 1,
+                        ..Default::default()
+                    },
+                    purpose: "test build".into(),
+                    holder_pid: std::process::id(),
+                    wait_seconds: 60,
+                    parent: None,
+                },
+            )
+            .unwrap();
+        let reservation_id = status.request_id.unwrap();
+
+        let agent_dir = temp_root("agent");
+        let mut opts = options();
+        opts.agent = Some(agent_env(rig.session_id, &agent_dir, Some(reservation_id)));
+        let (_handle, link, _rx) = link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+
+        // The admit payload carried paths, never the daemon credential.
+        let launch = rig
+            .factory
+            .for_session(link.sref().session_id)
+            .unwrap()
+            .launch();
+        let env: std::collections::HashMap<String, String> = serde_json::from_value(
+            launch["agent"]["env"].clone(),
+        )
+        .unwrap();
+        assert!(env.contains_key(waku_protocol::RUNTIME_INGRESS_ENV));
+        assert_eq!(
+            env[waku_protocol::AGENT_TASK_ENV],
+            rig.session_id.to_string()
+        );
+        assert_eq!(
+            env[waku_protocol::AGENT_RESOURCE_RESERVATION_ENV],
+            reservation_id.to_string()
+        );
+        assert!(!env.contains_key(waku_protocol::AGENT_TOKEN_ENV));
+        assert!(!env.contains_key(waku_protocol::DAEMON_ADDRESS_ENV));
+        // The announcement channel carries the surface instruction.
+        assert!(launch["developerInstructions"]
+            .as_str()
+            .unwrap()
+            .contains("goddard-agent"));
+
+        // The pinned helper is a mode-0500 copy under the runtime root.
+        let cli_dir = PathBuf::from(launch["agent"]["cliDir"].as_str().unwrap());
+        let pinned = cli_dir.join("goddard-agent");
+        assert_eq!(std::fs::read(&pinned).unwrap(), b"#!/bin/sh\n# pinned test helper\n");
+        assert_eq!(
+            std::fs::metadata(&pinned).unwrap().permissions().mode() & 0o777,
+            0o500
+        );
+
+        // The private descriptor parses through the shared contract and
+        // its grant authenticates an agent connection.
+        let descriptor_path =
+            PathBuf::from(env[waku_protocol::RUNTIME_INGRESS_ENV].clone());
+        assert_eq!(descriptor_path, agent_dir.join(DESCRIPTOR_NAME));
+        assert_eq!(
+            std::fs::metadata(&descriptor_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        let descriptor: IngressDescriptor =
+            serde_json::from_slice(&std::fs::read(&descriptor_path).unwrap()).unwrap();
+        assert_eq!(descriptor.version, INGRESS_DESCRIPTOR_VERSION);
+        assert_eq!(
+            descriptor.root,
+            rig.runtime_root.canonicalize().unwrap()
+        );
+        assert_eq!(descriptor.task_id, rig.session_id);
+        let mut agent_client =
+            RuntimeClient::agent(&rig.runtime_root, &descriptor.grant).unwrap();
+
+        // The pre-existing lease now answers liveness through the host.
+        let status = broker
+            .operate(rig.session_id, ResourceOperation::Status { id: None })
+            .unwrap();
+        let reservation = status
+            .reservations
+            .iter()
+            .find(|r| r.id == reservation_id)
+            .unwrap();
+        assert_eq!(reservation.owner_pid, Some(link.host_pid()));
+
+        // The provisioned grant runs a real forwarded command end to end.
+        let request_id = Uuid::new_v4();
+        agent_client
+            .ingress(IngressRequest {
+                request_id,
+                class: IngressKind::Cli,
+                subject: serde_json::to_value(Command::AgentResources {
+                    operation: ResourceOperation::Status { id: None },
+                })
+                .unwrap(),
+                deadline_ms: u64::MAX / 2,
+            })
+            .unwrap();
+        let record = agent_client.ingress_wait(request_id, 10_000).unwrap();
+        assert!(
+            matches!(record.disposition, IngressDisposition::Completed { .. }),
+            "{record:?}"
+        );
+
+        // The durable claim names the lease for reconcilers.
+        let mut daemon = controller(&rig);
+        let grant = daemon.acquire_control(&ClientHello::current()).unwrap();
+        let inventory = daemon.reconcile(grant.epoch).unwrap();
+        let inv = inventory
+            .sessions
+            .iter()
+            .find(|inv| inv.session == link.sref())
+            .unwrap();
+        let claim = inv
+            .claims
+            .iter()
+            .find(|c| c.claim_id == agent_claim_id(link.sref()))
+            .expect("the ingress lease claim is recorded");
+        assert_eq!(claim.detail["grantId"], json!(descriptor.grant.grant_id));
+        assert!(claim.detail["reservations"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(reservation_id)));
+    }
+
+    /// A replacement daemon restores ingress by issuing a fresh grant —
+    /// the old grant is never renewed and both stay valid inside expiry.
+    #[test]
+    #[cfg(unix)]
+    fn stable_link_reattach_reprovisions_descriptor_grant() {
+        let rig = rig(&["codex"]);
+        let agent_dir = temp_root("agent");
+        let mut opts = options();
+        opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
+        let (_h1, link1, _rx1) =
+            link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        let descriptor_path = agent_dir.join(DESCRIPTOR_NAME);
+        let first: IngressDescriptor =
+            serde_json::from_slice(&std::fs::read(&descriptor_path).unwrap()).unwrap();
+        drop(link1);
+
+        let mut opts = options();
+        opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
+        let (_h2, link2, _rx2) =
+            link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        let second: IngressDescriptor =
+            serde_json::from_slice(&std::fs::read(&descriptor_path).unwrap()).unwrap();
+        // A fresh grant — never an extension of the old one's expiry.
+        assert_ne!(first.grant.grant_id, second.grant.grant_id);
+        for grant in [&first.grant, &second.grant] {
+            RuntimeClient::agent(&rig.runtime_root, grant).unwrap();
+        }
+        // The claim is one durable lease, not an accumulation.
+        let mut daemon = controller(&rig);
+        let grant = daemon.acquire_control(&ClientHello::current()).unwrap();
+        let inventory = daemon.reconcile(grant.epoch).unwrap();
+        let inv = inventory
+            .sessions
+            .iter()
+            .find(|inv| inv.session == link2.sref())
+            .unwrap();
+        assert_eq!(
+            inv.claims
+                .iter()
+                .filter(|c| c.claim_id == agent_claim_id(link2.sref()))
+                .count(),
+            1
+        );
+        assert_eq!(
+            inv.claims
+                .iter()
+                .find(|c| c.claim_id == agent_claim_id(link2.sref()))
+                .unwrap()
+                .detail["grantId"],
+            json!(second.grant.grant_id)
+        );
+    }
+
+    /// Confirmed termination retires the generation's lease claim and its
+    /// published credential; an unconfirmed stop keeps both.
+    #[test]
+    #[cfg(unix)]
+    fn stable_link_confirmed_stop_retires_ingress_lease() {
+        let rig = rig(&["codex"]);
+        let agent_dir = temp_root("agent");
+        let mut opts = options();
+        opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
+        let (handle, link, _rx) =
+            link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        let descriptor_path = agent_dir.join(DESCRIPTOR_NAME);
+        assert!(descriptor_path.is_file());
+
+        handle.delete_provider_session();
+        assert!(
+            !descriptor_path.exists(),
+            "a confirmed stop removes the published descriptor"
+        );
+        let mut daemon = controller(&rig);
+        let grant = daemon.acquire_control(&ClientHello::current()).unwrap();
+        let inventory = daemon.reconcile(grant.epoch).unwrap();
+        assert!(inventory
+            .sessions
+            .iter()
+            .all(|inv| inv
+                .claims
+                .iter()
+                .all(|c| c.claim_id != agent_claim_id(link.sref()))));
+    }
+
+    /// Without an agent surface no descriptor or claim materializes.
+    #[test]
+    #[cfg(unix)]
+    fn stable_link_without_agent_surface_provisions_nothing() {
+        let rig = rig(&["codex"]);
+        let (_handle, link, _rx) = link(&rig, Uuid::new_v4(), None);
+        let launch = rig
+            .factory
+            .for_session(link.sref().session_id)
+            .unwrap()
+            .launch();
+        assert!(launch.get("agent").is_none());
+        let mut daemon = controller(&rig);
+        let grant = daemon.acquire_control(&ClientHello::current()).unwrap();
+        let inventory = daemon.reconcile(grant.epoch).unwrap();
+        let inv = inventory
+            .sessions
+            .iter()
+            .find(|inv| inv.session == link.sref())
+            .unwrap();
+        assert!(inv.claims.is_empty());
     }
 
 }

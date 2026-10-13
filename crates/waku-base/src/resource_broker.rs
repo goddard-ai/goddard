@@ -146,8 +146,17 @@ impl Broker {
         let now = now();
         // Observation failure retains all previously granted resident claims.
         ledger.reservations.retain_mut(|r| {
-            if !waku_protocol::pid::is_alive(r.daemon_pid)
-                || !waku_protocol::pid::is_alive(r.holder_pid)
+            // A reanchored lease answers liveness through its surviving
+            // owner, never the transacting daemon. Holder anchors that were
+            // the daemon itself (admission tickets) move with the owner;
+            // agent-acquired callers keep their own pid's liveness.
+            let daemon_anchor = r.owner_pid.unwrap_or(r.daemon_pid);
+            let holder_anchor = match r.owner_pid {
+                Some(owner) if r.holder_pid == r.daemon_pid => owner,
+                _ => r.holder_pid,
+            };
+            if !waku_protocol::pid::is_alive(daemon_anchor)
+                || !waku_protocol::pid::is_alive(holder_anchor)
             {
                 r.cancelled = true;
             }
@@ -155,7 +164,7 @@ impl Broker {
                 return !r.cancelled
                     && !r.released
                     && r.deadline > now
-                    && waku_protocol::pid::is_alive(r.holder_pid);
+                    && waku_protocol::pid::is_alive(holder_anchor);
             }
             let live_work = r.workload_pid.is_some_and(group_alive);
             let live_device = r
@@ -175,7 +184,7 @@ impl Broker {
             }
             live_work
                 || live_device
-                || (!r.cancelled && !r.released && waku_protocol::pid::is_alive(r.holder_pid))
+                || (!r.cancelled && !r.released && waku_protocol::pid::is_alive(holder_anchor))
         });
         let request_id;
         let mut borrowed = false;
@@ -248,6 +257,7 @@ impl Broker {
                         resources,
                         holder_pid,
                         daemon_pid: std::process::id(),
+                        owner_pid: None,
                         workload_pid: None,
                         requested_at: now,
                         duration_seconds: 0,
@@ -300,6 +310,7 @@ impl Broker {
                             resources,
                             holder_pid: std::process::id(),
                             daemon_pid: std::process::id(),
+                            owner_pid: None,
                             workload_pid: None,
                             requested_at: now,
                             duration_seconds: 0,
@@ -330,6 +341,20 @@ impl Broker {
                     bail!("workload process group is not alive");
                 }
                 r.workload_pid = Some(workload_pid);
+                request_id = Some(id);
+            }
+            ResourceOperation::Reanchor { id, owner_pid } => {
+                let r = owned(&mut ledger, task, id)?;
+                if r.cancelled || r.released {
+                    bail!("reservation is not live");
+                }
+                if owner_pid <= 1
+                    || owner_pid > i32::MAX as u32
+                    || !waku_protocol::pid::is_alive(owner_pid)
+                {
+                    bail!("reservation anchor is not alive");
+                }
+                r.owner_pid = Some(owner_pid);
                 request_id = Some(id);
             }
             ResourceOperation::Release { id } | ResourceOperation::Cancel { id } => {
@@ -2014,6 +2039,158 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn reanchored_lease_survives_daemon_death_and_ends_with_its_owner() {
+        let h = Harness::new();
+        let task = Uuid::new_v4();
+        let first = h.acquire(task, build());
+        let id = id(&first);
+        // The lease moves its liveness anchor onto a surviving owner —
+        // a live helper process stands in for the runtime host.
+        let mut owner = Workload::start();
+        h.op(
+            task,
+            ResourceOperation::Reanchor {
+                id,
+                owner_pid: owner.0.id(),
+            },
+        );
+        // The transacting daemon dies — the lease stays live on its owner.
+        h.mutate(|ledger| {
+            let row = ledger
+                .reservations
+                .iter_mut()
+                .find(|r| r.id == id)
+                .unwrap();
+            assert_eq!(row.owner_pid, Some(owner.0.id()));
+            row.daemon_pid = u32::MAX / 2;
+        });
+        let status = h.op(task, ResourceOperation::Status { id: None });
+        let row = status.reservations.iter().find(|r| r.id == id).unwrap();
+        assert!(row.granted_at.is_some() && !row.cancelled && !row.released);
+
+        // A lease whose owner also dies ends honestly.
+        owner.stop();
+        assert!(h
+            .op(task, ResourceOperation::Status { id: None })
+            .reservations
+            .iter()
+            .all(|r| r.id != id));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn reanchor_moves_daemon_held_rows_but_keeps_agent_holders() {
+        let h = Harness::new();
+        let task = Uuid::new_v4();
+        // A daemon-held (admission-style) row — holder is the daemon itself.
+        let held = h.acquire(task, build());
+        let held_id = id(&held);
+        // An agent-held row whose CLI outlives the daemon.
+        let mut workload = Workload::start();
+        let agent_task = Uuid::new_v4();
+        let agent = h.op(
+            agent_task,
+            ResourceOperation::Acquire {
+                resources: build(),
+                purpose: "simulated test".into(),
+                holder_pid: workload.0.id(),
+                wait_seconds: 60,
+                parent: None,
+            },
+        );
+        let agent_id = id(&agent);
+        h.op(
+            task,
+            ResourceOperation::Reanchor {
+                id: held_id,
+                owner_pid: std::process::id(),
+            },
+        );
+        h.op(
+            agent_task,
+            ResourceOperation::Reanchor {
+                id: agent_id,
+                owner_pid: std::process::id(),
+            },
+        );
+        // Now the transacting daemon dies: the daemon-held row answers
+        // liveness through its surviving owner, and the agent-held row
+        // keeps its own CLI as the anchor.
+        h.mutate(|ledger| {
+            for row in ledger
+                .reservations
+                .iter_mut()
+                .filter(|r| r.id == held_id || r.id == agent_id)
+            {
+                row.daemon_pid = u32::MAX / 2;
+            }
+        });
+        let status = h.op(task, ResourceOperation::Status { id: None });
+        assert!(status
+            .reservations
+            .iter()
+            .any(|r| r.id == held_id && !r.cancelled));
+        assert!(status
+            .reservations
+            .iter()
+            .any(|r| r.id == agent_id && !r.cancelled));
+        // Agent holder death still ends its own row even under a live owner.
+        workload.stop();
+        let status = h.op(task, ResourceOperation::Status { id: None });
+        assert!(status.reservations.iter().all(|r| r.id != agent_id));
+        assert!(status
+            .reservations
+            .iter()
+            .any(|r| r.id == held_id && !r.cancelled));
+    }
+
+    #[test]
+    fn reanchor_refuses_dead_owners_foreign_tasks_and_dead_rows() {
+        let h = Harness::new();
+        let task = Uuid::new_v4();
+        let first = h.acquire(task, build());
+        let id = id(&first);
+        // A dead pid can never become a surviving owner.
+        assert!(h
+            .broker
+            .transaction(
+                task,
+                ResourceOperation::Reanchor {
+                    id,
+                    owner_pid: u32::MAX / 2
+                },
+                Observation::default()
+            )
+            .is_err());
+        // Ownership fencing — no other task may touch the lease.
+        assert!(h
+            .broker
+            .transaction(
+                Uuid::new_v4(),
+                ResourceOperation::Reanchor {
+                    id,
+                    owner_pid: std::process::id()
+                },
+                Observation::default()
+            )
+            .is_err());
+        // Cancelled or released rows stay dead.
+        h.op(task, ResourceOperation::Cancel { id });
+        assert!(h
+            .broker
+            .transaction(
+                task,
+                ResourceOperation::Reanchor {
+                    id,
+                    owner_pid: std::process::id()
+                },
+                Observation::default()
+            )
+            .is_err());
     }
 }
 

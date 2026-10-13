@@ -169,12 +169,12 @@ alongside real CLI/MCP ingress and resource/credential lease transfer.
 ## Not yet in this stage
 
 Provider replacement (new generation machinery), full Codex/Devin product
-qualification, real CLI/MCP/callback binaries speaking ingress (the contract and grant
-machinery are landed; `goddard-agent` still uses daemon-address
-credentials), resource broker/credential lease migration onto claims,
-watcher/updater integration and pinned-artifact isolation, truthful
-reconnect surface states in the app projections, measured native callback
-deadlines, non-Unix crash cleanup qualification.
+qualification, MCP/callback binaries speaking ingress (the contract, grant
+machinery, descriptor provisioning and helper pinning are landed;
+`goddard-agent` inside a stable session uses its provisioned grant),
+watcher/updater integration, truthful reconnect surface states in the app
+projections, measured native callback deadlines, non-Unix crash cleanup
+qualification.
 
 ## Independent executable prerequisite
 
@@ -259,9 +259,49 @@ The legacy transport's wait behavior is unchanged.
 socket host with a fake provider and scripted daemon service. It exercises
 detachment, 25 controller transfers, original-identity/deadline replay, caller
 death after forwarding, uncertainty, changed payload, private file/task binding,
-corrupt intents, expiry and retention refusal. This does not qualify real
-provider-launched product tools. Production descriptor/helper provisioning,
-restoring daemon product grants without renewal, surviving worker/resource leases,
-MCP/callback adaptation and actual rebuilt daemon/provider reload evidence remain
-open. App configuration consumers, pending-card reconstruction and atomic
-event/effect/cursor settlement are separate Stage 2C work.
+corrupt intents, expiry and retention refusal.
+
+## Provisioned CLI ingress and surviving leases
+
+Daemon attachment provisions the surface end to end on Unix. When a stable
+launch carries an agent surface, the admit payload's `agent` field holds a
+shared `AgentIngress` — non-secret env pairs (the descriptor path, task
+binding, inherited reservation) plus `cliDir`, the pinned helper directory.
+Both adapters scrub inherited `GODDARD_*`/`WAKU_*` as before and then apply
+only the launch-carried pairs; the daemon token and daemon address never
+reach the provider child. Codex announces the surface through its
+`thread/start` developer instructions; the launch schema still refuses
+unqualified product options.
+
+After the session exists the daemon issues a fresh `SessionGrant` (bounded
+30-day expiry) and atomically rewrites a mode-0600 descriptor at
+`<data>/agent/<task>/ingress.json` — a shared `IngressDescriptor` shape both
+daemon and CLI use. Reattach issues a new grant; no grant is ever renewed or
+extended, and every issued grant stays valid until its recorded expiry. The
+goddard-agent binary is pinned by content under `<runtime-root>/helpers/
+<sha256>/goddard-agent` (mode 0500, atomic staging): a product lane rebuild
+can add new addresses but never substitute a running session's helper. The
+lease is recorded as a durable runtime `ResourceClaim` whose claim id is a
+deterministic UUIDv5 of `agent-ingress:<session>:<generation>` — reattach
+overwrites the same claim rather than accumulating. Confirmed session stop
+releases the claim and removes the descriptor; an unconfirmed stop keeps
+both for honest reconciliation.
+
+The resource broker's `ResourceOperation::Reanchor { id, owner_pid }` moves
+a reservation's liveness owner to a verified live pid — daemon-internal
+only, fenced to the owning task, refused on dead rows and dead pids, and it
+changes no deadline or authority. `Reservation.owner_pid` is the surviving
+owner anchor: daemon-held rows (admission tickets) answer liveness through
+the owner, while agent-acquired rows keep their own holder pid so a dead
+CLI still ends its lease. Attach re-anchors every live task reservation to
+the host pid, and new acquires for stable-linked tasks re-anchor at grant
+time, so daemon detachment can never silently release provider-held work.
+
+`mbx test -p waku-daemon --lib stable_link` covers provisioning, grant
+restoration without renewal, claim release on confirmed stop, the pinned
+helper, reservation anchoring and end-to-end ingress over the provisioned
+grant. `mbx test -p waku-base --lib reanchor` covers lease survival across
+daemon death, owner death, foreign-owner fencing and dead-row refusal.
+MCP/callback adaptation and actual rebuilt daemon/provider reload evidence
+remain open. App configuration consumers, pending-card reconstruction and
+atomic event/effect/cursor settlement are separate Stage 2C work.

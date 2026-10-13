@@ -78,6 +78,14 @@ pub enum ResourceOperation {
         id: Uuid,
         workload_pid: u32,
     },
+    /// Daemon-internal lease transfer: rebind the reservation's daemon and
+    /// daemon-held liveness anchors to a surviving owner process (the
+    /// stable runtime host) so a daemon reload cannot silently release work
+    /// the runtime still owns. Agent-supplied callers never send this.
+    Reanchor {
+        id: Uuid,
+        owner_pid: u32,
+    },
     Release {
         id: Uuid,
     },
@@ -118,6 +126,12 @@ pub struct Reservation {
     pub resources: ResourceSet,
     pub holder_pid: u32,
     pub daemon_pid: u32,
+    /// When set, the surviving process that owns this reservation's
+    /// liveness instead of the transacting daemon — the runtime host for
+    /// runtime-owned sessions. `holder_pid` anchors that matched the old
+    /// daemon move with it; agent-held callers keep their own pid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_pid: Option<u32>,
     pub workload_pid: Option<u32>,
     pub requested_at: u64,
     #[serde(default)]

@@ -14,7 +14,7 @@ pub enum AgentClient {
 
 impl AgentClient {
     pub fn connect() -> anyhow::Result<Self> {
-        if let Some(path) = std::env::var_os("GODDARD_RUNTIME_INGRESS") {
+        if let Some(path) = std::env::var_os(waku_protocol::RUNTIME_INGRESS_ENV) {
             #[cfg(unix)]
             return stable::Bridge::open(std::path::Path::new(&path)).map(Self::Runtime);
             #[cfg(not(unix))]
@@ -71,20 +71,16 @@ mod stable {
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
     use waku_runtime::client::RuntimeClient;
-    use waku_runtime::contract::{IngressDisposition, IngressKind, IngressRequest, SessionGrant};
+    use waku_runtime::contract::{
+        INGRESS_DESCRIPTOR_VERSION, IngressDescriptor, IngressDisposition, IngressKind,
+        IngressRequest,
+    };
 
     const MAX_RECORD_BYTES: u64 = 1024 * 1024;
     const MAX_RECORDS: usize = 1024;
     const MAX_RETAINED_BYTES: u64 = 16 * 1024 * 1024;
 
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Descriptor {
-        version: u32,
-        root: PathBuf,
-        task_id: Uuid,
-        grant: SessionGrant,
-    }
+    type Descriptor = IngressDescriptor;
 
     #[derive(Serialize, Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -141,7 +137,7 @@ mod stable {
     impl Bridge {
         pub fn open(path: &Path) -> anyhow::Result<Self> {
             let descriptor: Descriptor = read(path)?;
-            if descriptor.version != 1 {
+            if descriptor.version != INGRESS_DESCRIPTOR_VERSION {
                 bail!("unsupported stable ingress descriptor version");
             }
             let records = path.with_extension("requests");

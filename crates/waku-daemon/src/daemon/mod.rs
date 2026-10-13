@@ -643,7 +643,7 @@ pub struct WakuBackend {
     /// Boss activation may both reach it.
     summon_scheduler_started: std::sync::atomic::AtomicBool,
     /// Tests root their own broker ledger rather than the host's.
-    broker_root: Mutex<Option<PathBuf>>,
+    pub(crate) broker_root: Mutex<Option<PathBuf>>,
     /// Set once the backend is inside its `Arc` — the stable-runtime
     /// ingress service upgrades it for scoped command dispatch.
     weak_self: Mutex<Weak<WakuBackend>>,

@@ -1262,3 +1262,72 @@ fn unanswered_configuration_expires_without_activation_or_prompt_dispatch() {
     assert!(!fixture.root.join("prompts").exists());
     assert!(!handle.alive());
 }
+
+#[test]
+#[cfg(unix)]
+fn devin_child_env_carries_only_the_provisioned_ingress_pairs() {
+    use std::time::Instant;
+    let root = std::env::temp_dir().join(format!("runtime-devin-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    // A fixture variant that records its environment instead of asserting
+    // the credential scrub left nothing behind.
+    let binary = root.join("devin-env");
+    let fixture = include_str!("fixture.py").replace(
+        "assert not any(key.startswith((\"GODDARD_\", \"WAKU_\")) for key in os.environ)",
+        "Path(\"agent-env.json\").open(\"w\").write(json.dumps({\"goddard\": sorted(k for k in os.environ if k.startswith(\"GODDARD_\")), \"path\": os.environ.get(\"PATH\", \"\")}))",
+    );
+    assert_ne!(fixture, include_str!("fixture.py"), "replacement applied");
+    std::fs::write(&binary, fixture).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    let cli_dir = root.join("pinned-helpers");
+    let (sink, _rx) = sync_channel(16);
+    let handle = DevinFactory::new(binary)
+        .spawn(SessionContext {
+            session_id: Uuid::new_v4(),
+            generation: 1,
+            namespace: "devin-test".into(),
+            adapter: "devin".into(),
+            launch: json!({
+                "cwd": root,
+                "agent": {
+                    "env": {
+                        "GODDARD_RUNTIME_INGRESS": "/private/ingress.json",
+                        "GODDARD_TASK_ID": "task-1",
+                    },
+                    "cliDir": cli_dir,
+                }
+            }),
+            requested: RequestedConfig::default(),
+            sink,
+        })
+        .unwrap();
+
+    let env_path = root.join("agent-env.json");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !env_path.exists() {
+        assert!(Instant::now() < deadline, "the child never recorded its env");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let dump: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&env_path).unwrap()).unwrap();
+    let goddard = dump["goddard"].as_array().unwrap();
+    assert!(goddard.contains(&json!("GODDARD_RUNTIME_INGRESS")));
+    assert!(goddard.contains(&json!("GODDARD_TASK_ID")));
+    assert!(
+        !goddard.contains(&json!("GODDARD_AGENT_TOKEN"))
+            && !goddard.contains(&json!("GODDARD_DAEMON_ADDRESS")),
+        "the daemon credential never reaches the provider: {goddard:?}"
+    );
+    assert!(
+        dump["path"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("{}:", cli_dir.display())),
+        "the pinned helper directory leads PATH: {}",
+        dump["path"]
+    );
+    drop(handle);
+    let _ = std::fs::remove_dir_all(&root);
+}

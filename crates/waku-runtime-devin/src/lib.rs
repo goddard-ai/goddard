@@ -29,8 +29,8 @@ use std::time::Duration;
 use uuid::Uuid;
 use waku_runtime::adapter::*;
 use waku_runtime::contract::{
-    ActivationBoundary, CanonicalAction, ProviderEvent, RequestClass, RequestedConfig,
-    TerminateReason,
+    ActivationBoundary, AgentIngress, CanonicalAction, ProviderEvent, RequestClass, RequestedConfig,
+    TerminateReason, agent_ingress_env,
 };
 
 /// Trusted executable selection belongs to the pinned runtime, not admission data.
@@ -49,6 +49,11 @@ impl DevinFactory {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Launch {
     cwd: PathBuf,
+    /// Session-scoped CLI ingress the controller provisioned — env pairs
+    /// and the pinned helper directory applied to the spawned child after
+    /// the inherited-credential scrub.
+    #[serde(default)]
+    agent: Option<AgentIngress>,
 }
 
 enum Command {
@@ -183,7 +188,7 @@ impl AdapterFactory for DevinFactory {
         let worker = shared.clone();
         let binary = self.binary.clone();
         std::thread::Builder::new().name("runtime-devin-acp".into()).spawn(move || {
-            let result = smol::block_on(run_owned(binary, launch.cwd, ctx.requested, rx, stop_rx, worker.clone(), ready_tx));
+            let result = smol::block_on(run_owned(binary, launch, ctx.requested, rx, stop_rx, worker.clone(), ready_tx));
             worker.live.store(false, Ordering::Release);
             let mut state = worker.state.lock().unwrap();
             state.permissions.clear();
@@ -503,7 +508,7 @@ impl Drop for GroupGuard {
 
 async fn run_owned(
     binary: PathBuf,
-    cwd: PathBuf,
+    launch: Launch,
     requested: RequestedConfig,
     commands: smol::channel::Receiver<Command>,
     stop: smol::channel::Receiver<()>,
@@ -515,8 +520,8 @@ async fn run_owned(
     normalize_signals().map_err(agent_client_protocol::Error::into_internal_error)?;
     let mut provider_args = Vec::new();
     // A runtime adapter must never lend inherited employee/controller tokens
-    // or the old daemon address to a newly admitted provider session. Stable
-    // session-scoped ingress is supplied by the later reconciliation stage.
+    // or the old daemon address to a newly admitted provider session. Only
+    // the launch-provisioned ingress pairs may re-enter after the scrub.
     for name in std::env::vars_os().map(|(name, _)| name) {
         if let Some(name) = name
             .to_str()
@@ -525,12 +530,19 @@ async fn run_owned(
             provider_args.extend(["-u".to_owned(), name.to_owned()]);
         }
     }
-    provider_args.extend([
-        "-C".into(),
-        cwd.to_string_lossy().into_owned(),
-        binary.to_string_lossy().into_owned(),
-        "acp".into(),
-    ]);
+    provider_args.extend(["-C".into(), launch.cwd.to_string_lossy().into_owned()]);
+    // env(1) takes options first, then name=value assignments, then the
+    // utility — assignments belong between `-C` and the provider binary.
+    if let Some(agent) = &launch.agent {
+        for (name, value) in agent_ingress_env(agent, std::env::var_os("PATH").as_deref()) {
+            provider_args.push(format!(
+                "{}={}",
+                name.to_string_lossy(),
+                value.to_string_lossy()
+            ));
+        }
+    }
+    provider_args.extend([binary.to_string_lossy().into_owned(), "acp".into()]);
     #[cfg(unix)]
     let config = AcpAgentConfig::new("/bin/sh").args(
         [
@@ -572,7 +584,7 @@ async fn run_owned(
     let result = smol::future::race(
         connection(
             agent_client_protocol::Lines::new(Box::pin(outgoing), Box::pin(incoming)),
-            cwd,
+            launch.cwd,
             requested,
             commands,
             shared.clone(),

@@ -646,6 +646,74 @@ pub struct SessionGrant {
     pub expires_at_ms: u64,
 }
 
+/// The descriptor format the provisioned `goddard-agent` reads for scoped
+/// runtime ingress. This is the single serialization both the daemon's
+/// provisioning writer and the CLI's `GODDARD_RUNTIME_INGRESS` reader use —
+/// nobody invents a parallel envelope.
+pub const INGRESS_DESCRIPTOR_VERSION: u32 = 1;
+
+/// A private file binding one task's CLI invocations to a session-scoped
+/// grant. The file carries the grant token, so it must stay owner-only —
+/// it is never journaled, logged, or placed in a launch payload.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IngressDescriptor {
+    pub version: u32,
+    pub root: std::path::PathBuf,
+    pub task_id: Uuid,
+    pub grant: SessionGrant,
+}
+
+/// The agent-ingress surface an adapter applies to its provider child:
+/// explicit environment pairs (descriptor path, task binding, inherited
+/// reservation — never credentials) plus the pinned `goddard-agent`
+/// directory to put on `PATH`. The grant itself travels only through the
+/// descriptor file; this payload is safe to journal.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentIngress {
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub cli_dir: Option<std::path::PathBuf>,
+}
+
+/// Compose the provider child's agent-ingress environment: the explicit
+/// pairs plus `cli_dir` prepended to `PATH`, falling back to a standard
+/// search path when the inherited environment lacks one.
+pub fn agent_ingress_env(
+    agent: &AgentIngress,
+    base_path: Option<&std::ffi::OsStr>,
+) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+    let mut pairs: Vec<(std::ffi::OsString, std::ffi::OsString)> = agent
+        .env
+        .iter()
+        .map(|(name, value)| (name.clone().into(), value.clone().into()))
+        .collect();
+    if let Some(cli_dir) = &agent.cli_dir {
+        let fallback = std::ffi::OsStr::new(if cfg!(windows) {
+            "C:\\Windows\\System32"
+        } else {
+            "/usr/bin:/bin:/usr/local/bin"
+        });
+        let path = std::env::join_paths(
+            std::iter::once(cli_dir.clone()).chain(std::env::split_paths(
+                base_path.unwrap_or(fallback),
+            )),
+        )
+        .unwrap_or_else(|_| cli_dir.clone().into_os_string());
+        if let Some(existing) = pairs
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+        {
+            existing.1 = path;
+        } else {
+            pairs.push(("PATH".into(), path));
+        }
+    }
+    pairs
+}
+
 /// Agent-originated traffic class. CLI, MCP, and provider-callback
 /// requests all ride the same scoped, deduplicated ingress; the runtime
 /// records identity and forwards to the current daemon — it never

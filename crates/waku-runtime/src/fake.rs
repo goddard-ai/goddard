@@ -116,6 +116,9 @@ struct FakeCore {
     session_id: Uuid,
     generation: u64,
     sink: std::sync::mpsc::SyncSender<ProviderEvent>,
+    /// The admission's verbatim launch payload — tests assert what a
+    /// controller asked the provider to run.
+    launch: serde_json::Value,
     /// Every action the host dispatched, verbatim. The exact count is the
     /// proof that accepted work was never duplicated.
     dispatched: Vec<CanonicalAction>,
@@ -135,6 +138,7 @@ impl FakeAdapter {
                 session_id: ctx.session_id,
                 generation: ctx.generation,
                 sink: ctx.sink,
+                launch: ctx.launch,
                 dispatched: Vec::new(),
                 cancels: Vec::new(),
                 terminates: 0,
@@ -154,6 +158,11 @@ impl FakeAdapter {
     /// The generation this adapter owns.
     pub fn generation(&self) -> u64 {
         self.core.lock().unwrap().generation
+    }
+
+    /// The verbatim launch payload this adapter was admitted with.
+    pub fn launch(&self) -> serde_json::Value {
+        self.core.lock().unwrap().launch.clone()
     }
 
     /// Emit a provider event into the session's bounded intake. It becomes

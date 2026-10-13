@@ -106,6 +106,7 @@ impl Daemon {
                                 purpose,
                                 holder_pid,
                                 daemon_pid: std::process::id(),
+                                owner_pid: None,
                                 workload_pid: None,
                                 requested_at: 1,
                                 duration_seconds: 0,
@@ -155,7 +156,8 @@ impl Daemon {
                             }
                         }
                     }
-                    ResourceOperation::Admission { .. } => {
+                    ResourceOperation::Admission { .. }
+                    | ResourceOperation::Reanchor { .. } => {
                         unreachable!("admission reservations are daemon-internal")
                     }
                 }

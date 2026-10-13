@@ -232,11 +232,21 @@ impl WakuBackend {
 
     /// The host resource broker — or the test-rooted ledger a backend was
     /// pointed at.
-    pub(super) fn resource_broker(&self) -> anyhow::Result<crate::resource_broker::Broker> {
+    pub(crate) fn resource_broker(&self) -> anyhow::Result<crate::resource_broker::Broker> {
         match self.broker_root.lock().clone() {
             Some(root) => Ok(crate::resource_broker::Broker::at(root)),
             None => crate::resource_broker::Broker::host(),
         }
+    }
+
+    /// The surviving host pid anchoring this task's resource leases, when
+    /// its recorded runtime link is attached under a live controller.
+    pub(super) fn stable_anchor_pid(&self, session_id: Uuid) -> Option<u32> {
+        crate::stable_runtime::stable_anchor_pid(
+            &self.task_store,
+            &self.stable_controllers,
+            session_id,
+        )
     }
 
     /// Wake the scheduler for one dispatch pass — call after enqueueing a
