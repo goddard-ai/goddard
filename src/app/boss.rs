@@ -6120,7 +6120,7 @@ impl Waku {
     /// fire-and-forget outside `boss_request`'s pending gate — an in-flight
     /// list or save must never drop the view, and the view must never
     /// queue a click behind them.
-    fn mark_deliverable_viewed(&self, key: DaemonKey, id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn mark_deliverable_viewed(&self, key: DaemonKey, id: Uuid, cx: &mut Context<Self>) {
         let Some(client) = self
             .daemons
             .supervisor(key)
@@ -10623,12 +10623,12 @@ impl Waku {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DeliverableActivationAction {
+pub(super) enum DeliverableActivationAction {
     Preview,
     RevealInFileManager,
 }
 
-fn deliverable_activation_action(
+pub(super) fn deliverable_activation_action(
     path: &Path,
     directory: bool,
     is_file: bool,

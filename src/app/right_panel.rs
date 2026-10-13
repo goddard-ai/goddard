@@ -6,6 +6,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::*;
 use crate::ui::ActivationExt;
+use waku_client::DaemonKey;
 
 const TAB_SCROLL_FADE_WIDTH: f32 = 24.0;
 const REVIEW_DIFF_FILE_HEADER_HEIGHT: f32 = 36.0;
@@ -334,6 +335,38 @@ fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLi
     } else {
         TranscriptLinkRoute::Finder(path)
     }
+}
+
+/// Decode file targets in the workspace captured by their producing turn.
+fn transcript_deliverable_link_path(target: &str) -> Option<PathBuf> {
+    let path =
+        if let Some((context, target)) = crate::model::ReferenceContext::decode_reference(target) {
+            context.workspace().join(reference_file_link_path(&target)?)
+        } else {
+            markdown_file_link_path(target)?
+        };
+    Some(normalized_path(&path))
+}
+
+/// Match only recorded deliverables, including source links in older replies.
+/// This is lexical: a published source may already have been cleaned up.
+fn transcript_deliverable<'a>(
+    target: &str,
+    deliverables: &'a [waku_client::boss::BossDeliverable],
+) -> Option<&'a waku_client::boss::BossDeliverable> {
+    let path = transcript_deliverable_link_path(target)?;
+    // The stored copy is authoritative if another publication used it as a source.
+    deliverables
+        .iter()
+        .find(|deliverable| normalized_path(Path::new(&deliverable.path)) == path)
+        .or_else(|| {
+            deliverables.iter().find(|deliverable| {
+                deliverable
+                    .source_path
+                    .as_deref()
+                    .is_some_and(|source| normalized_path(Path::new(source)) == path)
+            })
+        })
 }
 
 /// What a right-clicked transcript link's copy item puts on the clipboard,
@@ -1283,6 +1316,24 @@ pub(super) fn transfer_file_is_previewable(path: &Path) -> bool {
                 | "jsonl"
         )
     )
+}
+
+/// Stored deliverables use their own read root without re-rooting the
+/// conversation's file tree. Workspace requests require a relative file name.
+fn panel_file_read_target(
+    panel_root: Option<&Path>,
+    file_path: &str,
+    published_deliverable: bool,
+) -> Option<(PathBuf, String)> {
+    if published_deliverable {
+        let path = Path::new(file_path);
+        Some((
+            path.parent()?.to_path_buf(),
+            path.file_name()?.to_str()?.to_owned(),
+        ))
+    } else {
+        Some((panel_root?.to_path_buf(), file_path.to_owned()))
+    }
 }
 
 /// Reads a file for the editor, returning its text and whether it can be saved.
@@ -3271,6 +3322,134 @@ mod tests {
         );
     }
 
+    fn published_link_fixture() -> waku_client::boss::BossDeliverable {
+        waku_client::boss::BossDeliverable {
+            id: Uuid::parse_str("6e72122c-db05-47c2-b582-0044fde480e7").unwrap(),
+            name: "Opals review".into(),
+            path: "/Users/alec/dev/worktrees/goddard/dev/temp/boss/deliverables/6e72122c-db05-47c2-b582-0044fde480e7/.xplat-workaround-review.deliverable.md".into(),
+            source_path: Some("/Users/alec/dev/opals/.xplat-workaround-review.deliverable.md".into()),
+            directory: false,
+            created_at: 1,
+            updated_at: 1,
+            pinned_at: None,
+            dormant_at: None,
+            archived_at: Some(2),
+            viewed_at: None,
+            plan_id: None,
+        }
+    }
+
+    #[test]
+    fn transcript_deliverable_links_find_published_copies_in_old_replies() {
+        let deliverables = [published_link_fixture()];
+        let deliverable = &deliverables[0];
+        let stored = &deliverable.path;
+        let source = deliverable.source_path.as_deref().unwrap();
+        let context = crate::model::ReferenceContext {
+            project_root: PathBuf::from("/Users/alec/dev/opals"),
+            worktree: None,
+        };
+        // This exact Boss review link used to take the Finder route.
+        assert_eq!(
+            transcript_link_route(stored, None),
+            TranscriptLinkRoute::Finder(PathBuf::from(stored))
+        );
+        for target in [
+            stored.clone(),
+            source.to_owned(),
+            format!("{stored}:12:4"),
+            format!("{stored}#L12C4"),
+            format!("{source}#review"),
+            url::Url::from_file_path(stored).unwrap().to_string(),
+            context.encode_reference(stored),
+            context.encode_reference(".xplat-workaround-review.deliverable.md:12"),
+            context.encode_reference("./sub/../.xplat-workaround-review.deliverable.md#review"),
+        ] {
+            assert_eq!(
+                transcript_deliverable(&target, &deliverables).map(|d| d.id),
+                Some(deliverable.id),
+                "{target}"
+            );
+        }
+        assert!(transfer_file_is_previewable(Path::new(stored)));
+        // Lookup is metadata-only: neither source nor published file needs
+        // to exist locally, and archived rows still identify old links.
+        assert!(transcript_deliverable(source, &[]).is_none());
+    }
+
+    #[test]
+    fn transcript_deliverable_links_decode_spaces_without_claiming_other_files() {
+        let mut deliverable = published_link_fixture();
+        deliverable.path = "/published/Review Notes.md".into();
+        deliverable.source_path = Some("/work/My Project/Review Notes.md".into());
+        let deliverables = [deliverable];
+        for target in [
+            "/published/./Review Notes.md",
+            "/published/tmp/../Review%20Notes.md:2",
+            "file:///published/Review%20Notes.md#review",
+            "file://localhost/published/Review%20Notes.md#L2",
+            "/work/My%20Project/Review%20Notes.md",
+        ] {
+            assert_eq!(
+                transcript_deliverable(target, &deliverables).map(|d| d.id),
+                Some(deliverables[0].id),
+                "{target}"
+            );
+        }
+        for target in [
+            "/work/My Project/source.md",
+            "/published/Review Notes.md.backup",
+            "Review Notes.md",
+            "https://example.com/published/Review%20Notes.md",
+            "goddard://task/6e72122c-db05-47c2-b582-0044fde480e7",
+        ] {
+            assert!(
+                transcript_deliverable(target, &deliverables).is_none(),
+                "{target}"
+            );
+        }
+        assert_eq!(
+            transcript_link_route(
+                "/work/My Project/source.md",
+                Some(Path::new("/work/My Project"))
+            ),
+            TranscriptLinkRoute::ProjectFile("source.md".into(), None)
+        );
+        assert_eq!(
+            transcript_link_route("https://example.com/review.md", None),
+            TranscriptLinkRoute::External
+        );
+        assert_eq!(
+            transcript_link_route("/unpublished/review.md", None),
+            TranscriptLinkRoute::Finder(PathBuf::from("/unpublished/review.md"))
+        );
+    }
+
+    #[test]
+    fn transcript_deliverable_reads_use_the_stored_copy_without_a_project_root() {
+        let deliverables = [published_link_fixture()];
+        let linked = transcript_deliverable(
+            deliverables[0].source_path.as_deref().unwrap(),
+            &deliverables,
+        )
+        .unwrap();
+        let path = Path::new(&linked.path);
+        let expected = Some((
+            path.parent().unwrap().to_path_buf(),
+            ".xplat-workaround-review.deliverable.md".to_owned(),
+        ));
+        assert_eq!(panel_file_read_target(None, &linked.path, true), expected);
+        assert_eq!(
+            panel_file_read_target(Some(Path::new("/other/employee")), &linked.path, true),
+            expected
+        );
+        assert_eq!(
+            panel_file_read_target(Some(Path::new("/other/employee")), "source.md", false),
+            Some((PathBuf::from("/other/employee"), "source.md".into()))
+        );
+        assert_eq!(panel_file_read_target(None, "source.md", false), None);
+    }
+
     #[test]
     fn contextual_file_references_resolve_relative_paths_without_changing_other_links() {
         let context = crate::model::ReferenceContext {
@@ -4788,6 +4967,60 @@ impl Waku {
     }
 
     pub(super) fn open_transcript_link(&mut self, target: &str, cx: &mut Context<Self>) -> bool {
+        // All transcript surfaces share this callback, including Boss history and
+        // employee replies. Match before resolving a provider reference: its
+        // original worktree may be gone, while the published copy survives.
+        if self.state.boss_experiment_enabled
+            && self
+                .state
+                .selected_session
+                .is_none_or(|id| self.daemons.session_owner(id) == DaemonKey::Local)
+            && let Some(deliverable) = self
+                .boss_ui
+                .states
+                .get(&DaemonKey::Local)
+                .and_then(|state| transcript_deliverable(target, &state.deliverables))
+                .cloned()
+        {
+            let path = PathBuf::from(&deliverable.path);
+            if self.is_quarantined_transfer_path(&path)
+                || transcript_deliverable_link_path(target)
+                    .is_some_and(|linked| self.is_quarantined_transfer_path(&linked))
+            {
+                self.show_toast(tr!("friends.transfer_open_quarantined"));
+                cx.notify();
+                return true;
+            }
+            let action = boss::deliverable_activation_action(
+                &path,
+                deliverable.directory || path.is_dir(),
+                path.is_file(),
+            );
+            if action == boss::DeliverableActivationAction::RevealInFileManager {
+                // Keep the sidebar's directory/unsupported/missing-file fallback.
+                self.open_deliverable_task(DaemonKey::Local, deliverable.id, cx);
+                return true;
+            }
+            self.mark_deliverable_viewed(DaemonKey::Local, deliverable.id, cx);
+            let file_path = path.to_string_lossy().into_owned();
+            self.open_right_panel_file(file_path.clone(), cx);
+            self.set_right_panel_visible(true, cx);
+            let target = crate::model::ReferenceContext::decode_reference(target)
+                .map(|(_, target)| target)
+                .unwrap_or_else(|| target.to_owned());
+            let position =
+                file_link_location(&target).map(|(line, column)| (line, column.unwrap_or(1)));
+            let heading = markdown_file_link_heading(&target);
+            if position.is_some() || heading.is_some() {
+                self.right_panel_pending_file_focus = Some(PendingFileFocus {
+                    path: file_path,
+                    position,
+                    heading,
+                });
+            }
+            cx.notify();
+            return true;
+        }
         if let Some((context, target)) = crate::model::ReferenceContext::decode_reference(target) {
             let Some(path) = reference_file_link_path(&target) else {
                 return true;
@@ -5242,6 +5475,31 @@ impl Waku {
         )
     }
 
+    /// Absolute File tabs are reserved for local published copies. Relative
+    /// source-file tabs continue to use their owner's workspace.
+    fn is_deliverable_panel_file(&self, path: &str) -> bool {
+        if self.file_uses_deliverable_preview(path) {
+            return true;
+        }
+        Path::new(path).is_absolute()
+            && self
+                .boss_ui
+                .states
+                .get(&DaemonKey::Local)
+                .is_some_and(|state| {
+                    state
+                        .deliverables
+                        .iter()
+                        .any(|deliverable| !deliverable.directory && deliverable.path == path)
+                })
+    }
+
+    fn file_uses_deliverable_preview(&self, path: &str) -> bool {
+        self.right_panel_file_editors
+            .get(path)
+            .is_some_and(|editor| editor.published_deliverable)
+    }
+
     /// `commit_review` says the strip's Review tab is pinned to a single
     /// commit — the transcript-SHA target on owners the Git panel cannot
     /// host. Restore passes the parked state's flag, not the live strip's.
@@ -5251,6 +5509,11 @@ impl Waku {
         commit_review: bool,
     ) -> bool {
         let owner = self.active_right_panel_owner();
+        if let RightPanelSurface::File(path) = surface
+            && self.is_deliverable_panel_file(path)
+        {
+            return true;
+        }
         if let RightPanelOwner::Session(id) = owner {
             if self.boss_ui.managed.contains(&id) {
                 return session_panel_surface(surface);
@@ -5809,7 +6072,7 @@ impl Waku {
         });
         markdown_preview_mode(
             self.display_file_language(relative_path) == "markdown",
-            deliverable_page,
+            deliverable_page || self.file_uses_deliverable_preview(relative_path),
             self.right_panel_file_editors
                 .get(relative_path)
                 .is_some_and(|editor| editor.show_source),
@@ -8982,7 +9245,7 @@ impl Waku {
             && !wireframe_mode
             && markdown_preview_mode(
                 is_markdown,
-                deliverable_page,
+                deliverable_page || self.file_uses_deliverable_preview(relative_path),
                 self.right_panel_file_editors
                     .get(relative_path)
                     .is_some_and(|editor| editor.show_source),
@@ -9011,9 +9274,13 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let theme = Theme::current(cx);
-        let deliverable_page = deliverable_title.is_some();
+        let deliverable_page =
+            deliverable_title.is_some() || self.file_uses_deliverable_preview(relative_path);
         let modes = self.file_viewer_modes(relative_path, deliverable_page);
         let github_url = self.right_panel_files_root.clone().and_then(|workspace| {
+            if self.file_uses_deliverable_preview(relative_path) {
+                return None;
+            }
             let snapshot = self.branch_snapshot_for_workspace(&workspace, cx)?;
             match self.remote_file_for(&workspace, relative_path, cx) {
                 // Verified against the remote-tracking refs — the remote
@@ -9208,6 +9475,7 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         let deliverable_page = deliverable_title.is_some();
+        let show_tree = show_tree && !Path::new(&relative_path).is_absolute();
         let fullscreen = self.panel_fullscreen_active();
         let file_tree_width = if !show_tree || fullscreen {
             0.0
@@ -9828,9 +10096,11 @@ impl Waku {
                 .unwrap_or_default(),
             ..Default::default()
         };
+        let published_deliverable = self.is_deliverable_panel_file(relative_path);
         self.right_panel_file_editors.insert(
             relative_path.to_owned(),
             RightPanelFileEditor {
+                published_deliverable,
                 state: state.clone(),
                 disk_content: String::new(),
                 writable: false,
@@ -10034,7 +10304,11 @@ impl Waku {
     /// session switch or a terminal re-root cannot write another directory's
     /// text into the view.
     fn read_right_panel_file_into_editor(&mut self, relative_path: String, cx: &mut Context<Self>) {
-        let Some(project_path) = self.right_panel_files_root.clone() else {
+        let panel_root = self.right_panel_files_root.clone();
+        let published_deliverable = self.file_uses_deliverable_preview(&relative_path);
+        let Some((project_path, read_path)) =
+            panel_file_read_target(panel_root.as_deref(), &relative_path, published_deliverable)
+        else {
             // Nothing to read from. Say so in the editor rather than leaving it
             // looking like an empty file.
             if let Some(editor) = self.right_panel_file_editors.get_mut(&relative_path) {
@@ -10052,7 +10326,14 @@ impl Waku {
             }
             return;
         };
-        let Some(workspace) = self.workspace_client_for_path(&project_path) else {
+        let workspace = if published_deliverable {
+            self.daemons
+                .supervisor(DaemonKey::Local)
+                .map(|daemon| waku_client::WorkspaceClient::new(daemon.client()))
+        } else {
+            self.workspace_client_for_path(&project_path)
+        };
+        let Some(workspace) = workspace else {
             return;
         };
         let Some(editor) = self.right_panel_file_editors.get_mut(&relative_path) else {
@@ -10076,31 +10357,26 @@ impl Waku {
                 .background_executor()
                 .spawn({
                     let project_path = project_path.clone();
-                    let relative_path = relative_path.clone();
                     async move {
                         match image_format {
                             Some(format) => RightPanelFileRead::Image(
-                                read_right_panel_binary_file(
-                                    &workspace,
-                                    &project_path,
-                                    &relative_path,
-                                )
-                                .map(|bytes| Arc::new(gpui::Image::from_bytes(format, bytes))),
+                                read_right_panel_binary_file(&workspace, &project_path, &read_path)
+                                    .map(|bytes| Arc::new(gpui::Image::from_bytes(format, bytes))),
                             ),
                             None => {
-                                let (content, writable) = read_right_panel_file(
-                                    &workspace,
-                                    &project_path,
-                                    &relative_path,
-                                );
-                                RightPanelFileRead::Text(content, writable)
+                                let (content, writable) =
+                                    read_right_panel_file(&workspace, &project_path, &read_path);
+                                RightPanelFileRead::Text(
+                                    content,
+                                    writable && !published_deliverable,
+                                )
                             }
                         }
                     }
                 })
                 .await;
             waku.update(cx, |waku, cx| {
-                if waku.right_panel_files_root.as_deref() != Some(project_path.as_path()) {
+                if waku.right_panel_files_root != panel_root {
                     // The editor moved into another context's stored state, or
                     // the files root changed. Clear the flag so a later reload
                     // can ask again, and drop the text.

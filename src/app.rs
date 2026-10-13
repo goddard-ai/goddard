@@ -1375,6 +1375,8 @@ struct PendingFileFocus {
 }
 
 struct RightPanelFileEditor {
+    /// A transcript link opened a stored deliverable; read-only with its own preview toggle.
+    published_deliverable: bool,
     state: Entity<TextInput>,
     disk_content: String,
     writable: bool,
