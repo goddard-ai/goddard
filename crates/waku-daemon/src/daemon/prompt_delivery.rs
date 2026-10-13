@@ -748,11 +748,14 @@ pub(super) fn record_provider_cursor(
 /// Record the runtime-confirmed effective configuration so a reload
 /// projects what the provider actually activated — not the last requested
 /// pair. `updated_at` advances so a client save snapshotted before the
-/// activation cannot supersede the confirmed fields.
+/// activation cannot supersede the confirmed fields. The activation mark
+/// itself is durable: a redelivery from an older generation, or a lower
+/// revision of the same one, is rejected before any field can move back.
 pub(super) fn record_effective_config(
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
     session_id: Uuid,
+    activation: ConfigActivation,
     provider: Option<&str>,
     model: Option<&str>,
     reasoning_effort: Option<&str>,
@@ -771,10 +774,17 @@ pub(super) fn record_effective_config(
     else {
         return;
     };
+    if session
+        .config_activation
+        .is_some_and(|current| current > activation)
+    {
+        return;
+    }
     if task_store.hydrate(session).is_err() {
         return;
     }
-    let mut changed = false;
+    let mut changed = session.config_activation != Some(activation);
+    session.config_activation = Some(activation);
     if let Some(provider) = provider.filter(|provider| *provider != session.provider) {
         session.provider = provider;
         changed = true;

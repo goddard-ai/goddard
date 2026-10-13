@@ -13,6 +13,10 @@ pub fn decode_enum<T: DeserializeOwned>(value: &str) -> anyhow::Result<T> {
         .with_context(|| format!("invalid protocol enum value {value:?}"))
 }
 
+fn default_activation_boundary() -> crate::model::ConfigActivationBoundary {
+    crate::model::ConfigActivationBoundary::Immediate
+}
+
 pub fn encode_enum<T: Serialize>(value: T) -> anyhow::Result<String> {
     serde_json::to_value(value)?
         .as_str()
@@ -172,12 +176,18 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::ProjectMap(status) => ("projectMap", serde_json::to_value(status)?),
         DriverEvent::SandboxSetup(status) => ("sandboxSetup", serde_json::to_value(status)?),
         DriverEvent::ConfigActivated {
+            generation,
+            revision,
+            boundary,
             provider,
             model,
             reasoning_effort,
         } => (
             "configActivated",
             json!({
+                "generation": generation,
+                "revision": revision,
+                "boundary": boundary,
                 "provider": provider,
                 "model": model,
                 "reasoningEffort": reasoning_effort,
@@ -339,12 +349,21 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]
             struct ActivatedWire {
+                #[serde(default)]
+                generation: u64,
+                #[serde(default)]
+                revision: u64,
+                #[serde(default = "default_activation_boundary")]
+                boundary: crate::model::ConfigActivationBoundary,
                 provider: Option<String>,
                 model: Option<String>,
                 reasoning_effort: Option<String>,
             }
             let activated: ActivatedWire = serde_json::from_value(payload)?;
             DriverEvent::ConfigActivated {
+                generation: activated.generation,
+                revision: activated.revision,
+                boundary: activated.boundary,
                 provider: activated.provider,
                 model: activated.model,
                 reasoning_effort: activated.reasoning_effort,
@@ -564,6 +583,41 @@ mod tests {
             panic!("an empty snapshot failed its wire round trip");
         };
         assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn config_activated_round_trips_through_the_daemon_wire() {
+        let wire = event_to_wire(DriverEvent::ConfigActivated {
+            generation: 2,
+            revision: 7,
+            boundary: crate::model::ConfigActivationBoundary::NextTurn,
+            provider: Some("codex".into()),
+            model: Some("gpt-5.5".into()),
+            reasoning_effort: Some("high".into()),
+        })
+        .unwrap();
+        assert_eq!(wire.kind, "configActivated");
+        assert_eq!(wire.payload["generation"], 2);
+        assert_eq!(wire.payload["revision"], 7);
+        assert_eq!(wire.payload["boundary"], "nextTurn");
+        assert_eq!(wire.payload["reasoningEffort"], "high");
+
+        let DriverEvent::ConfigActivated {
+            generation,
+            revision,
+            boundary,
+            provider,
+            model,
+            reasoning_effort,
+        } = event_from_wire(wire).unwrap()
+        else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!((generation, revision), (2, 7));
+        assert_eq!(boundary, crate::model::ConfigActivationBoundary::NextTurn);
+        assert_eq!(provider.as_deref(), Some("codex"));
+        assert_eq!(model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(reasoning_effort.as_deref(), Some("high"));
     }
 
     #[test]

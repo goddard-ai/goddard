@@ -106,6 +106,13 @@ export const sessions = sqliteTable(
      * session. NULL before the session first streams events.
      */
     runtimeEventCursor: text("runtime_event_cursor"),
+    /**
+     * JSON-serialized ConfigActivation, duplicated from `session_details.data`
+     * so catalog projections and merges carry the confirmed activation mark
+     * without hydrating the session. NULL for sessions no runtime has
+     * confirmed.
+     */
+    configActivation: text("config_activation"),
   },
   (table) => [
     index("sessions_by_project").on(table.projectId, table.updatedAt),

@@ -19,9 +19,10 @@ use crate::automations::AutomationService;
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     AgentAskOutcome, AgentModelOption, AgentProjectMapResult, AgentSession, AgentSessionSearchHit,
-    BackgroundWorkEvent, Checkpoint, CheckpointStatus, DriverEvent, PermissionOption, Project,
-    ProjectKind, ProjectMapIntent, ProjectMapRanking, ProviderKind, ProviderModelOption,
-    ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus, SessionWorkspace,
+    BackgroundWorkEvent, Checkpoint, CheckpointStatus, ConfigActivation, DriverEvent,
+    PermissionOption, Project, ProjectKind, ProjectMapIntent, ProjectMapRanking, ProviderKind,
+    ProviderModelOption, ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus,
+    SessionWorkspace,
     TurnStatus, UserInputQuestion, detail_prefix_signature,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};

@@ -159,9 +159,13 @@ mbx test -p waku-runtime
 ```
 
 The native protocol test uses a controlled Python peer through the production
-Codex adapter. It is not actual Codex/Devin reload qualification. Effective
-configuration has not yet been published to app/catalog/detail projections;
-pending native cards need reconstructible attachment data, originating
+Codex adapter. It is not actual Codex/Devin reload qualification. Confirmed
+configuration now projects to app/catalog/detail through
+`DriverEvent::ConfigActivated`, which carries the host generation, the
+config revision and the activation boundary; each session's durable
+`config_activation` mark rejects stale-revision and foreign-generation
+redeliveries and gates generic client saves that predate the confirmation.
+Pending native cards need reconstructible attachment data, originating
 command/delivery identities must survive app and daemon replacement, and
 event effects still require atomic projection/cursor settlement. These remain Stage 2C gates
 alongside real CLI/MCP ingress and resource/credential lease transfer.

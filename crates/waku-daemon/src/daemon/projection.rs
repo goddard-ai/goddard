@@ -152,9 +152,14 @@ pub(super) fn merge_session_list_columns(
     existing.auto_title = incoming.auto_title;
     existing.agent_rename_allowed = incoming.agent_rename_allowed;
     existing.project_id = incoming.project_id;
-    existing.provider = incoming.provider;
-    existing.model = incoming.model;
-    existing.reasoning_effort = incoming.reasoning_effort;
+    // A client that never applied the confirmed activation cannot own the
+    // effective fields — its copy is pre-activation requested state.
+    if incoming.config_activation >= existing.config_activation {
+        existing.provider = incoming.provider;
+        existing.model = incoming.model;
+        existing.reasoning_effort = incoming.reasoning_effort;
+    }
+    existing.config_activation = existing.config_activation.max(incoming.config_activation);
     if !has_active_runtime {
         existing.status = incoming.status;
     }
@@ -183,10 +188,16 @@ pub(super) fn merge_stale_session_metadata(existing: &mut AgentSession, incoming
         existing.title = incoming.title;
         existing.agent_rename_allowed = incoming.agent_rename_allowed;
         existing.project_id = incoming.project_id;
-        existing.provider = incoming.provider;
-        existing.model = incoming.model;
+        // Same confirmed-activation guard as the list-column merge: a
+        // client whose copy predates the activation cannot overwrite the
+        // effective provider/model/effort, only the mark itself.
+        if incoming.config_activation >= existing.config_activation {
+            existing.provider = incoming.provider;
+            existing.model = incoming.model;
+            existing.reasoning_effort = incoming.reasoning_effort;
+        }
+        existing.config_activation = existing.config_activation.max(incoming.config_activation);
         existing.runtime_mode = incoming.runtime_mode;
-        existing.reasoning_effort = incoming.reasoning_effort;
         existing.service_tier = incoming.service_tier;
         existing.context_window = incoming.context_window;
         existing.agent_preset = incoming.agent_preset;

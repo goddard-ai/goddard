@@ -54,10 +54,10 @@ use super::{
 use crate::git_branch::BranchEntry;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, AtomRefKind, Checkpoint, CheckpointFile,
-    CheckpointStatus, DriverEvent, Message, MessageAttachment, MessageRole, Project, ProviderKind,
-    QueuedMessage, ReasoningBlock, RuntimeEventCursor, SessionStatus, SessionWorkspace,
-    TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus, TurnStatus, UserInputOption,
-    UserInputQuestion, unix_time,
+    CheckpointStatus, ConfigActivation, DriverEvent, Message, MessageAttachment, MessageRole,
+    Project, ProviderKind, QueuedMessage, ReasoningBlock, RuntimeEventCursor, SessionStatus,
+    SessionWorkspace, TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus, TurnStatus,
+    UserInputOption, UserInputQuestion, unix_time,
 };
 
 #[test]
@@ -189,6 +189,59 @@ fn employee_catalog_selection_updates_hydrated_live_and_reconnected_clients() {
         assert_eq!(reflected.messages.len(), session.messages.len());
         assert_eq!(reflected.messages[0].content, session.messages[0].content);
     }
+}
+
+#[test]
+fn catalog_merge_carries_the_confirmed_activation_mark_forward() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.model = Some("gpt-6".into());
+    session.reasoning_effort = Some("low".into());
+    session.config_activation = Some(ConfigActivation {
+        generation: 1,
+        revision: 5,
+    });
+    let mut client = vec![session.clone()];
+
+    // A snapshot built before the activation owns no effective fields and
+    // cannot lower the mark — the stale redeliveries it would unlock stay
+    // rejected.
+    let mut stale_projection = session.list_projection();
+    stale_projection.model = Some("gpt-5.5".into());
+    stale_projection.reasoning_effort = Some("high".into());
+    stale_projection.config_activation = Some(ConfigActivation {
+        generation: 1,
+        revision: 2,
+    });
+    merge_remote_session_catalog(&mut client, vec![stale_projection], |_| true, |_| false, true);
+    assert_eq!(client[0].model.as_deref(), Some("gpt-6"));
+    assert_eq!(client[0].reasoning_effort.as_deref(), Some("low"));
+    assert_eq!(
+        client[0].config_activation,
+        Some(ConfigActivation {
+            generation: 1,
+            revision: 5
+        })
+    );
+
+    // A snapshot carrying a newer activation adopts it together with the
+    // confirmed fields.
+    let mut newer = session.clone();
+    newer.model = Some("gpt-6.1".into());
+    newer.reasoning_effort = Some("high".into());
+    newer.config_activation = Some(ConfigActivation {
+        generation: 1,
+        revision: 6,
+    });
+    merge_remote_session_catalog(&mut client, vec![newer.list_projection()], |_| true, |_| false, true);
+    assert_eq!(client[0].model.as_deref(), Some("gpt-6.1"));
+    assert_eq!(client[0].reasoning_effort.as_deref(), Some("high"));
+    assert_eq!(
+        client[0].config_activation,
+        Some(ConfigActivation {
+            generation: 1,
+            revision: 6
+        })
+    );
 }
 
 #[test]

@@ -293,12 +293,22 @@ impl Waku {
                 }
             }
             DriverEvent::ConfigActivated {
+                generation,
+                revision,
                 provider,
                 model,
                 reasoning_effort,
+                ..
             } => {
                 if let Some(session) = self.state.session_mut(session_id) {
-                    project_effective_config(session, provider.as_deref(), model, reasoning_effort);
+                    project_effective_config(
+                        session,
+                        generation,
+                        revision,
+                        provider.as_deref(),
+                        model,
+                        reasoning_effort,
+                    );
                 }
             }
             DriverEvent::AgentPresetSelected(agent_preset) => {
@@ -1488,13 +1498,29 @@ pub(super) fn push_transcript_activity(
 }
 
 /// Mirror the daemon's confirmed selection. Missing adapter observations do
-/// not clear a pinned selection, and unknown provider ids are not a retarget.
+/// not clear a pinned selection, unknown provider ids are not a retarget,
+/// and a redelivery from an older generation or a lower revision is
+/// rejected by the session's activation mark — a stale event can never
+/// roll back a superseded selection.
 fn project_effective_config(
     session: &mut AgentSession,
+    generation: u64,
+    revision: u64,
     provider: Option<&str>,
     model: Option<String>,
     reasoning_effort: Option<String>,
 ) {
+    let activation = ConfigActivation {
+        generation,
+        revision,
+    };
+    if session
+        .config_activation
+        .is_some_and(|current| current > activation)
+    {
+        return;
+    }
+    session.config_activation = Some(activation);
     if let Some(provider) = provider.and_then(|id| {
         ProviderKind::ALL
             .iter()
@@ -1696,12 +1722,14 @@ mod config_activation_tests {
         let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         session.model = Some("pinned".into());
         session.reasoning_effort = Some("high".into());
-        project_effective_config(&mut session, Some("unknown-provider"), None, None);
+        project_effective_config(&mut session, 1, 0, Some("unknown-provider"), None, None);
         assert_eq!(session.provider, ProviderKind::Codex);
         assert_eq!(session.model.as_deref(), Some("pinned"));
         assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
         project_effective_config(
             &mut session,
+            1,
+            1,
             Some("claude"),
             Some("confirmed".into()),
             Some("low".into()),
@@ -1709,9 +1737,81 @@ mod config_activation_tests {
         assert_eq!(session.provider, ProviderKind::Claude);
         assert_eq!(session.model.as_deref(), Some("confirmed"));
         assert_eq!(session.reasoning_effort.as_deref(), Some("low"));
-        project_effective_config(&mut session, None, Some("next".into()), None);
+        project_effective_config(&mut session, 1, 2, None, Some("next".into()), None);
         assert_eq!(session.provider, ProviderKind::Claude);
         assert_eq!(session.model.as_deref(), Some("next"));
         assert_eq!(session.reasoning_effort.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn config_activation_rejects_stale_revisions_and_older_generations() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        project_effective_config(&mut session, 1, 3, None, Some("new".into()), None);
+        assert_eq!(
+            session.config_activation,
+            Some(ConfigActivation {
+                generation: 1,
+                revision: 3
+            })
+        );
+
+        // A lower revision of the same generation cannot move the mark or
+        // the fields back.
+        project_effective_config(
+            &mut session,
+            1,
+            2,
+            None,
+            Some("old".into()),
+            Some("low".into()),
+        );
+        assert_eq!(session.model.as_deref(), Some("new"));
+        assert_eq!(session.reasoning_effort, None);
+        assert_eq!(
+            session.config_activation,
+            Some(ConfigActivation {
+                generation: 1,
+                revision: 3
+            })
+        );
+
+        // The same revision may redeliver — the provider's correction still
+        // lands without lowering the mark.
+        project_effective_config(&mut session, 1, 3, None, None, Some("high".into()));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+
+        // A replacement generation's first activation supersedes everything
+        // its predecessor could still emit.
+        project_effective_config(&mut session, 2, 0, Some("devin"), Some("v2".into()), None);
+        assert_eq!(session.provider, ProviderKind::Devin);
+        assert_eq!(session.model.as_deref(), Some("v2"));
+        assert_eq!(
+            session.config_activation,
+            Some(ConfigActivation {
+                generation: 2,
+                revision: 0
+            })
+        );
+
+        // An older generation's event is stale no matter its revision — a
+        // late activation from the replaced provider cannot flip the
+        // session back.
+        project_effective_config(
+            &mut session,
+            1,
+            9,
+            Some("codex"),
+            Some("stale".into()),
+            None,
+        );
+        assert_eq!(session.provider, ProviderKind::Devin);
+        assert_eq!(session.model.as_deref(), Some("v2"));
+        assert_eq!(
+            session.config_activation,
+            Some(ConfigActivation {
+                generation: 2,
+                revision: 0
+            })
+        );
     }
 }

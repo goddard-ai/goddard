@@ -14954,6 +14954,61 @@ fn a_stale_client_save_cannot_unfreeze_a_planning_session() {
     assert_eq!(skeleton.planning.unwrap().finalized_at, Some(10));
 }
 
+/// The activation mark is the resurrection fence the `updated_at` order
+/// cannot give: a client whose copy predates the confirmed activation —
+/// e.g. a second desktop that never attached — carries newer timestamps
+/// yet still cannot overwrite the effective provider/model/effort.
+#[test]
+fn a_pre_activation_client_save_cannot_overwrite_confirmed_config() {
+    let activated = ConfigActivation {
+        generation: 1,
+        revision: 3,
+    };
+    let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    existing.model = Some("gpt-6".into());
+    existing.reasoning_effort = Some("low".into());
+    existing.config_activation = Some(activated);
+
+    // A newer save from a client that never saw the activation: its
+    // requested pair loses, the mark stays.
+    let mut incoming = existing.clone();
+    incoming.model = Some("gpt-5.5".into());
+    incoming.reasoning_effort = Some("high".into());
+    incoming.config_activation = Some(ConfigActivation {
+        generation: 1,
+        revision: 1,
+    });
+    incoming.updated_at = existing.updated_at + 1;
+    merge_stale_session_metadata(&mut existing, incoming);
+    assert_eq!(existing.model.as_deref(), Some("gpt-6"));
+    assert_eq!(existing.reasoning_effort.as_deref(), Some("low"));
+    assert_eq!(existing.config_activation, Some(activated));
+
+    let mut skeleton = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    skeleton.model = Some("gpt-6".into());
+    skeleton.reasoning_effort = Some("low".into());
+    skeleton.config_activation = Some(activated);
+    let mut incoming = skeleton.clone();
+    incoming.model = Some("gpt-5.5".into());
+    incoming.reasoning_effort = Some("high".into());
+    incoming.config_activation = None;
+    incoming.updated_at = skeleton.updated_at + 1;
+    assert!(merge_session_list_columns(&mut skeleton, incoming, false));
+    assert_eq!(skeleton.model.as_deref(), Some("gpt-6"));
+    assert_eq!(skeleton.reasoning_effort.as_deref(), Some("low"));
+    assert_eq!(skeleton.config_activation, Some(activated));
+
+    // A client at the current mark owns a newer requested selection —
+    // its save merges normally.
+    let mut incoming = existing.clone();
+    incoming.model = Some("gpt-5.5".into());
+    incoming.config_activation = Some(activated);
+    incoming.updated_at = existing.updated_at + 1;
+    merge_stale_session_metadata(&mut existing, incoming);
+    assert_eq!(existing.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(existing.config_activation, Some(activated));
+}
+
 /// A live employee with no open turn gets a control prompt right away:
 /// the queue's drain is the same kick a fresh prompt sends, and two
 /// sends deliver in submission order.

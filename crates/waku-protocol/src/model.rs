@@ -1712,6 +1712,39 @@ pub struct RuntimeEventCursor {
     pub sequence: u64,
 }
 
+/// The provider generation and configuration revision a session's
+/// provider/model/effort fields were last confirmed under — the durable
+/// high-water mark that rejects a stale or foreign-generation
+/// `ConfigActivated` redelivery. Ordered by generation first, then
+/// revision: a replacement provider's first activation supersedes every
+/// activation its generation could still emit.
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, TS,
+)]
+pub struct ConfigActivation {
+    /// Which provider generation owns the activation — runtime session
+    /// generations advance only on provider replacement, never on a daemon
+    /// or app reload.
+    pub generation: u64,
+    /// The runtime's configuration revision — monotone within a
+    /// generation, so an older revision never overwrites a newer confirmed
+    /// value.
+    pub revision: u64,
+}
+
+/// Where a runtime-confirmed configuration revision took effect — the
+/// stable host's `ActivationBoundary` mirrored across the event boundary
+/// so consumers can tell a mid-turn swap from a next-turn application.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ConfigActivationBoundary {
+    Immediate,
+    NextTurn,
+    /// Applies only through a new provider generation — never a silent
+    /// mid-turn swap.
+    NextGeneration,
+}
+
 /// The planning-session kind marker: present only on managed sessions the
 /// boss opened through `createPlan`. It carries everything a task list
 /// needs to render the row — the idea and plan file — without the Boss
@@ -1810,6 +1843,14 @@ pub struct AgentSession {
     /// Selected context window, when the provider exposes more than one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<String>,
+    /// The runtime-confirmed activation the `provider`/`model`/
+    /// `reasoning_effort` fields reflect, once a stable-runtime
+    /// `ConfigActivated` fact has been applied. Daemon-owned and merged
+    /// forward only: a stale activation or a client save that never saw it
+    /// cannot resurrect a superseded selection or lower the mark.
+    /// `None` for sessions no runtime has confirmed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_activation: Option<ConfigActivation>,
     /// Provider-owned agent composition selected before the first turn.
     /// Currently populated by DeepSeek Harness, which locks this value once
     /// conversation history exists.
@@ -2037,6 +2078,7 @@ impl AgentSession {
             reasoning_effort: None,
             service_tier: None,
             context_window: None,
+            config_activation: None,
             agent_preset: None,
             auto_route: false,
             route_decision: None,
@@ -2103,6 +2145,9 @@ impl AgentSession {
             reasoning_effort: self.reasoning_effort.clone(),
             service_tier: None,
             context_window: None,
+            // A list column, like `runtime_event_cursor`: catalog merges and
+            // replay dedup need the activation mark without hydrating.
+            config_activation: self.config_activation,
             agent_preset: None,
             auto_route: self.auto_route,
             route_decision: self.route_decision.clone(),
@@ -4696,10 +4741,18 @@ pub enum DriverEvent {
     SandboxSetup(SandboxSetupStatus),
     /// The runtime confirmed which provider/model/effort the session is
     /// actually running — the stable host's journaled `ConfigActivated`
-    /// fact. Fields are `None` when the provider did not report them, never
-    /// a signal to clear a stored selection. Adapter-private options (thread
-    /// ids, owner evidence) deliberately do not cross this boundary.
+    /// fact. `generation` names the provider generation the activation
+    /// belongs to, `revision` the configuration revision it activated, so
+    /// consumers can reject a stale or foreign-generation redelivery.
+    /// `boundary` names the turn boundary the revision took effect at.
+    /// `provider`/`model`/`reasoning_effort` are `None` when the provider
+    /// did not report them, never a signal to clear a stored selection.
+    /// Adapter-private options (thread ids, owner evidence) deliberately do
+    /// not cross this boundary.
     ConfigActivated {
+        generation: u64,
+        revision: u64,
+        boundary: ConfigActivationBoundary,
         provider: Option<String>,
         model: Option<String>,
         reasoning_effort: Option<String>,

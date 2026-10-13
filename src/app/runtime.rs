@@ -502,9 +502,17 @@ pub(super) fn merge_remote_session_catalog(
             local.title = remote.title;
             local.auto_title = remote.auto_title;
             local.project_id = remote.project_id;
-            local.provider = remote.provider;
-            local.model = remote.model;
-            local.reasoning_effort = remote.reasoning_effort;
+            // A snapshot that predates the confirmed activation cannot own
+            // the effective fields — its provider/model/effort are
+            // pre-activation requested state. The mark itself merges
+            // forward only, so the snapshot cannot lower the local
+            // high-water and reopen stale redeliveries either.
+            if remote.config_activation >= local.config_activation {
+                local.provider = remote.provider;
+                local.model = remote.model;
+                local.reasoning_effort = remote.reasoning_effort;
+            }
+            local.config_activation = local.config_activation.max(remote.config_activation);
             local.created_at = remote.created_at;
             local.last_reply_at = remote.last_reply_at;
             local.archived_at = remote.archived_at;

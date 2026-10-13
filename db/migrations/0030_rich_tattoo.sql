@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `config_activation` text;

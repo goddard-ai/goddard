@@ -29,9 +29,9 @@ use crate::blob_store::BlobStore;
 use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
-    AgentSession, Checkpoint, CheckpointStatus, FavoriteModel, Message, MessageAtom,
-    MessageAttachment, MessageRole, Project, ProviderKind, ReportTrigger, RuntimeEventCursor,
-    RuntimeMode, SessionPlanning, SessionWorkspace, TranscriptNotice,
+    AgentSession, Checkpoint, CheckpointStatus, ConfigActivation, FavoriteModel, Message,
+    MessageAtom, MessageAttachment, MessageRole, Project, ProviderKind, ReportTrigger,
+    RuntimeEventCursor, RuntimeMode, SessionPlanning, SessionWorkspace, TranscriptNotice,
 };
 use crate::theme::ThemeSettings;
 use waku_protocol::computer_use::ComputerAppGrant;
@@ -1795,7 +1795,7 @@ impl StateStore {
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
                         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
                         agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-                        friend_peer_id, friend_peer_name, reasoning_effort
+                        friend_peer_id, friend_peer_name, reasoning_effort, config_activation
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1827,6 +1827,7 @@ impl StateStore {
                     row.get::<_, Option<String>>(21)?,
                     row.get::<_, Option<String>>(22)?,
                     row.get::<_, Option<String>>(23)?,
+                    row.get::<_, Option<String>>(24)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -2516,6 +2517,7 @@ type SessionColumns = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -2549,6 +2551,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         friend_peer_id,
         friend_peer_name,
         reasoning_effort,
+        config_activation,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
     // it. Rows migrated before the column existed or whose JSON fails to parse
@@ -2616,6 +2619,10 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         thread_goal: None,
         context_usage: None,
         runtime_event_cursor,
+        // Same duplication story as `runtime_event_cursor`: merges and
+        // replay dedup read the confirmed activation mark without a hydrate.
+        config_activation: config_activation
+            .and_then(|mark| serde_json::from_str::<ConfigActivation>(&mark).ok()),
         provider_session_id: None,
         messages: Vec::new(),
         transcript_blocks: Vec::new(),
@@ -2652,6 +2659,10 @@ pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
     session.context_window = stored.context_window;
     session.context_usage = stored.context_usage;
     session.runtime_event_cursor = stored.runtime_event_cursor;
+    // The mark is monotonic like `boss_managed`: a column-only save may be
+    // ahead of the blob — merge forward only so a stale blob cannot lower
+    // it and reopen stale redeliveries.
+    session.config_activation = session.config_activation.max(stored.config_activation);
     // Quarantine is detail, not a list column — the skeleton's flag is a
     // placeholder and the stored blob carries the real value.
     session.quarantined = stored.quarantined;
@@ -3269,8 +3280,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
          dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
          agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-         friend_peer_id, friend_peer_name, reasoning_effort
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
+         friend_peer_id, friend_peer_name, reasoning_effort, config_activation
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -3294,7 +3305,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          runtime_event_cursor = excluded.runtime_event_cursor,
          friend_peer_id = excluded.friend_peer_id,
          friend_peer_name = excluded.friend_peer_name,
-         reasoning_effort = excluded.reasoning_effort";
+         reasoning_effort = excluded.reasoning_effort,
+         config_activation = excluded.config_activation";
 
 const INSERT_PROJECT: &str =
     "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred, submissions_enabled, qa_branch, friend_peer_id, kind)
@@ -3393,6 +3405,14 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
         session
             .reasoning_effort
             .clone()
+            .map_or(Value::Null, Value::Text),
+        // NULL until a runtime confirms an activation, like the cursor
+        // column: duplicated detail so catalog merges and replay dedup
+        // need no hydrate.
+        session
+            .config_activation
+            .as_ref()
+            .and_then(|mark| serde_json::to_string(mark).ok())
             .map_or(Value::Null, Value::Text),
     ]
 }
@@ -4115,6 +4135,33 @@ mod tests {
         let reopened = store_in(&directory);
         reopened.hydrate(&mut restored.sessions[0]).unwrap();
         assert_eq!(restored.sessions[0].runtime_event_cursor, Some(cursor));
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn config_activation_round_trips_on_the_skeleton() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        state.sessions[0].begin_turn("Ask");
+        let activation = ConfigActivation {
+            generation: 2,
+            revision: 7,
+        };
+        state.sessions[0].config_activation = Some(activation);
+        store.save(&mut state).unwrap();
+
+        let mut restored = store_in(&directory).load().unwrap();
+        // Catalog merges read the mark straight off the list row — no hydrate.
+        assert!(!restored.sessions[0].detail_loaded);
+        assert_eq!(restored.sessions[0].config_activation, Some(activation));
+
+        // Hydrating over it keeps the column's value — a blob at or below
+        // the mark cannot lower it.
+        let reopened = store_in(&directory);
+        reopened.hydrate(&mut restored.sessions[0]).unwrap();
+        assert_eq!(restored.sessions[0].config_activation, Some(activation));
 
         fs::remove_dir_all(directory).ok();
     }

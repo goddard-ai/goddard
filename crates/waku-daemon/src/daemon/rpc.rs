@@ -1038,6 +1038,20 @@ impl Backend for WakuBackend {
                             preserve_daemon_checkpoints(existing, &mut session);
                             preserve_daemon_queued_messages(existing, &mut session);
                             honor_details_pruned(existing, &mut session);
+                            // A wholesale client save predating the
+                            // confirmed activation cannot own the effective
+                            // fields — the daemon's stay, and its mark
+                            // merges forward only.
+                            if session.config_activation < existing.config_activation {
+                                session.provider = existing.provider;
+                                session.model.clone_from(&existing.model);
+                                session
+                                    .reasoning_effort
+                                    .clone_from(&existing.reasoning_effort);
+                            }
+                            session.config_activation = existing
+                                .config_activation
+                                .max(session.config_activation);
                             *existing = session;
                             true
                         }

@@ -994,6 +994,21 @@ fn translate(env: &EventEnvelope) -> Option<DriverEvent> {
     })
 }
 
+/// The host's activation boundary mirrored for product consumers — the
+/// daemon's forwarder and attached clients share the protocol enum, not
+/// the runtime contract's.
+fn activation_boundary(
+    boundary: waku_runtime::contract::ActivationBoundary,
+) -> waku_protocol::model::ConfigActivationBoundary {
+    use waku_protocol::model::ConfigActivationBoundary;
+    use waku_runtime::contract::ActivationBoundary;
+    match boundary {
+        ActivationBoundary::Immediate => ConfigActivationBoundary::Immediate,
+        ActivationBoundary::NextTurn => ConfigActivationBoundary::NextTurn,
+        ActivationBoundary::NextGeneration => ConfigActivationBoundary::NextGeneration,
+    }
+}
+
 /// One request/response against the host with transport-loss truth: a lost
 /// answer is recovered from the command's recorded receipt, and a command
 /// that never landed retries once under the same identity.
@@ -1252,8 +1267,8 @@ fn pump_loop(shared: Arc<LinkShared>) {
                     match &env.event {
                         ProviderEvent::ConfigActivated {
                             revision,
+                            boundary,
                             effective,
-                            ..
                         } => {
                             let mut current = shared.config_revision.lock().unwrap();
                             *current = (*current).max(*revision);
@@ -1267,10 +1282,16 @@ fn pump_loop(shared: Arc<LinkShared>) {
                             // The provider-confirmed configuration is a
                             // daemon-recorded fact, ahead of the applied
                             // marker — a later app save cannot resurrect a
-                            // superseded requested pair.
+                            // superseded requested pair. The generation and
+                            // revision ride along so every consumer can
+                            // reject a stale or foreign-generation
+                            // redelivery.
                             if shared
                                 .sender
                                 .send(DriverEvent::ConfigActivated {
+                                    generation: env.generation,
+                                    revision: *revision,
+                                    boundary: activation_boundary(*boundary),
                                     provider: effective.provider.clone(),
                                     model: effective.model.clone(),
                                     reasoning_effort: effective.effort.clone(),
@@ -2741,9 +2762,70 @@ for line in sys.stdin:
             .expect("session detail");
         assert_eq!(session.model.as_deref(), Some("gpt-5.5"));
         assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(
+            session.config_activation,
+            Some(crate::model::ConfigActivation {
+                generation: 1,
+                revision: 1
+            })
+        );
         // Provider-private effective options never enter the session record.
         let serialized = serde_json::to_value(&session).unwrap();
         assert!(!serialized.to_string().contains("thr_private"));
+
+        // A newer activation replaces the confirmed fields and the mark...
+        adapter.emit(ProviderEvent::ConfigActivated {
+            revision: 5,
+            boundary: waku_runtime::contract::ActivationBoundary::NextTurn,
+            effective: waku_runtime::contract::RequestedConfig {
+                provider: Some("codex".into()),
+                model: Some("gpt-6".into()),
+                effort: Some("low".into()),
+                options: json!({"codexThreadId": "thr_private"}),
+            },
+        });
+        until("the newer activation to apply durably", || {
+            backend
+                .task_store()
+                .load_session_detail(session_id)
+                .ok()
+                .flatten()
+                .is_some_and(|session| session.model.as_deref() == Some("gpt-6"))
+        });
+        // ...and a stale revision behind that mark cannot resurrect the
+        // superseded selection, even though it is journaled in order.
+        adapter.emit(ProviderEvent::ConfigActivated {
+            revision: 3,
+            boundary: waku_runtime::contract::ActivationBoundary::NextTurn,
+            effective: waku_runtime::contract::RequestedConfig {
+                provider: Some("codex".into()),
+                model: Some("gpt-5.5".into()),
+                effort: Some("high".into()),
+                options: json!({"codexThreadId": "thr_private"}),
+            },
+        });
+        until("the stale redelivery to be applied and rejected", || {
+            backend
+                .task_store()
+                .stable_link(session_id)
+                .ok()
+                .flatten()
+                .is_some_and(|row| row.applied_seq >= 3)
+        });
+        let session = backend
+            .task_store()
+            .load_session_detail(session_id)
+            .unwrap()
+            .expect("session detail");
+        assert_eq!(session.model.as_deref(), Some("gpt-6"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(
+            session.config_activation,
+            Some(crate::model::ConfigActivation {
+                generation: 1,
+                revision: 5
+            })
+        );
     }
 
     /// A launch env whose CLI is a pinnable fake executable — the daemon
