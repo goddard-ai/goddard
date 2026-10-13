@@ -3360,6 +3360,7 @@ pub struct Waku {
     /// diff rows. Recreating a handle on every row build would drop keyboard
     /// focus whenever GPUI re-renders the list.
     transcript_control_focuses: RefCell<HashMap<String, FocusHandle>>,
+    memory_cards: RefCell<HashMap<String, memory_card::MemoryCardState>>,
     session_navigation: SessionNavigation,
     /// ⌘N's two competing recencies: the daemon whose boss chat last took a
     /// user message and when, against the last time a send started a task
@@ -4436,6 +4437,7 @@ mod issue_dialog;
 mod keybindings_page;
 mod keyboard_options;
 mod memory_annotations;
+mod memory_card;
 mod model_picker;
 mod notifications;
 mod phases;
@@ -7516,6 +7518,7 @@ impl Waku {
                 changed_files_diffs: HashMap::new(),
                 changed_files_diff_generation: 0,
                 transcript_control_focuses: RefCell::new(HashMap::new()),
+                memory_cards: RefCell::new(HashMap::new()),
                 session_navigation,
                 boss_last_message: None,
                 new_task_last_started_at: None,

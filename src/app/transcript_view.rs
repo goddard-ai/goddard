@@ -4162,8 +4162,9 @@ impl Waku {
                     if let Some(card) = boss_summon_card(activity) {
                         Some(self.render_summon_card(session_id, &card, theme, cx))
                     } else {
-                        memory_record_card(activity)
-                            .map(|card| self.render_memory_card(session_id, &card, theme, cx))
+                        memory_record_card(activity).map(|card| {
+                            self.render_memory_card(session_id, block_index, &card, theme, cx)
+                        })
                     }
                 }))
                 .into_any_element();
@@ -4290,9 +4291,9 @@ impl Waku {
                         .map(|card| self.render_summon_card(session_id, card, theme, cx)),
                 )
                 .children(
-                    memories
-                        .iter()
-                        .map(|card| self.render_memory_card(session_id, card, theme, cx)),
+                    memories.iter().map(|card| {
+                        self.render_memory_card(session_id, block_index, card, theme, cx)
+                    }),
                 )
                 .into_any_element();
         }
@@ -4864,7 +4865,7 @@ impl Waku {
             .children(
                 memories
                     .iter()
-                    .map(|card| self.render_memory_card(session_id, card, theme, cx)),
+                    .map(|card| self.render_memory_card(session_id, block_index, card, theme, cx)),
             )
             .into_any_element()
     }
@@ -5090,117 +5091,135 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The compact card a `memory_record` transcript marker becomes: the
-    /// note's text clamped to two lines under its bucket label, recorder,
-    /// and age. The card opens the daemon's Memory page; its Undo button
-    /// retracts the note from the bucket — the daemon-settled marker then
-    /// renders the removed state instead.
+    /// A recorded memory uses the same surface in live, historical, and side-chat transcripts.
     pub(super) fn render_memory_card(
         &self,
         owner_session: Uuid,
+        block_index: usize,
         card: &waku_protocol::model::MemoryRecordCard,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let daemon = self.daemons.session_owner(owner_session);
         let removed = card.retracted || self.memory_card_removed(daemon, card);
-        let age = boss::memory_record_age(unix_time().saturating_sub(card.created_at));
-        let mut provenance = format!("{} · {}", card.bucket, age);
-        if let Some(recorded_by) = card.recorded_by.as_deref().filter(|name| !name.is_empty()) {
-            provenance.push_str(" · ");
-            provenance.push_str(recorded_by);
-        }
-        let card_id = format!("memory-card-{owner_session}-{}", card.note_id);
-        let focus = self.transcript_control_focus(card_id.clone(), cx);
-        let card_surface = theme.surface.blend(theme.overlay.opacity(0.7));
-        let action = if removed {
-            div()
-                .flex_none()
-                .text_size(sp(11.0))
-                .line_height(sp(14.0))
-                .text_color(theme.text_tertiary)
-                .child(tr!("boss.memory_removed"))
-                .into_any_element()
+        let card_id = format!(
+            "memory-card-{owner_session}-{}-{}",
+            card.bucket_id, card.note_id
+        );
+        let selection = if self.state.selected_session == Some(owner_session)
+            || self.boss_history_session(owner_session).is_some()
+        {
+            self.transcript_selection.clone()
         } else {
-            let card = card.clone();
-            boss::boss_button(
-                SharedString::from(format!("{card_id}-undo")),
-                tr!("boss.memory_undo"),
-                theme,
-            )
-            .child(tr!("boss.memory_undo"))
-            .on_activation(cx, move |this, _, cx| {
-                this.retract_memory_record(owner_session, card.clone(), cx);
-            })
-            .into_any_element()
+            self.side_chat_views
+                .get(&owner_session)
+                .map(|view| view.selection.clone())
+                .unwrap_or_default()
         };
-        div()
-            .id(SharedString::from(card_id))
-            .track_focus(&focus)
-            .tab_index(0)
-            .w_full()
-            .min_w_0()
-            .overflow_hidden()
-            .rounded(px(11.0))
-            .border(hairline())
-            .border_color(theme.border_subtle)
-            .bg(card_surface)
-            .px(px(10.0))
-            .py(px(8.0))
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .cursor_pointer()
-            .focus_visible(|style| style.bg(theme.focus_highlight()))
-            .hover(|style| style.bg(theme.surface.blend(theme.overlay)))
-            .aria_label(tr!("boss.memory_card_label", bucket = card.bucket.clone()))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.open_boss_page(daemon, boss::BossTab::Memory, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.open_boss_page(daemon, boss::BossTab::Memory, window, cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(icon("icons/brain.svg", 11.0, theme.text_tertiary))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(sp(11.0))
-                            .line_height(sp(14.0))
-                            .text_color(theme.text_tertiary)
-                            .child(SharedString::from(provenance)),
-                    )
-                    .child(action),
+        let mut palette = MarkdownPalette::from_theme(theme);
+        palette.text = if removed {
+            theme.text_tertiary
+        } else {
+            theme.text_secondary
+        };
+        let metrics = self.scaled_markdown_metrics(MarkdownMetrics {
+            text_size: 12.5,
+            line_height: 15.0,
+            code_text_size: 12.0,
+            code_line_height: 15.0,
+            block_gap: 4.0,
+        });
+        let link_handler = self.markdown_link_handler.clone();
+        let ctx = self
+            .markdown_ctx(
+                card_id.clone(),
+                &palette,
+                metrics,
+                false,
+                Some(owner_session),
+                None,
+                &selection,
+                cx,
             )
-            .child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .text_size(sp(12.5))
-                    .line_height(sp(15.0))
-                    .text_color(if removed {
-                        theme.text_tertiary
-                    } else {
-                        theme.text_secondary
-                    })
-                    .whitespace_normal()
-                    .line_clamp(2)
-                    .text_overflow(gpui::TextOverflow::Truncate("...".into()))
-                    .overflow_hidden()
-                    .child(SharedString::from(card.text.clone())),
+            .with_link_handler(Rc::new(move |url, window, cx| {
+                link_handler(url, window, cx);
+                cx.stop_propagation();
+            }));
+        let (expanded, viewport, body) = {
+            let mut cards = self.memory_cards.borrow_mut();
+            let state = cards.entry(card_id.clone()).or_default();
+            state
+                .markdown
+                .set_text_with_soft_breaks_as_newlines(&card.text, false, true);
+            (
+                state.expanded,
+                state.viewport.clone(),
+                md::render::markdown(&state.markdown, &ctx),
             )
-            .into_any_element()
+        };
+        let toggle_waku = cx.weak_entity();
+        let toggle_id = card_id.clone();
+        let undo_waku = cx.weak_entity();
+        let undo_card = card.clone();
+        memory_card::MemoryCard {
+            focus: self.transcript_control_focus(card_id.clone(), cx),
+            disclosure_focus: self.transcript_control_focus(format!("{card_id}-disclosure"), cx),
+            undo_focus: self.transcript_control_focus(format!("{card_id}-undo"), cx),
+            id: card_id,
+            bucket: card.bucket.clone(),
+            removed,
+            expanded,
+            viewport,
+            body,
+            selection,
+            theme: *theme,
+            owner: cx.entity_id(),
+            toggle: Rc::new(move |_, cx| {
+                let _ = toggle_waku.update(cx, |this, cx| {
+                    if this.state.selected_session == Some(owner_session)
+                        || this.boss_history_session(owner_session).is_some() {
+                        this.pin_transcript_for_disclosure();
+                    }
+                    if let Some(state) = this.memory_cards.borrow_mut().get_mut(&toggle_id) {
+                        state.expanded = !state.expanded;
+                        state.viewport.scroll_handle.set_offset(gpui::Point::default());
+                    }
+                    this.remeasure_memory_card(owner_session, block_index);
+                    cx.notify();
+                });
+            }),
+            undo: Rc::new(move |_, cx| {
+                let _ = undo_waku.update(cx, |this, cx| {
+                    this.retract_memory_record(owner_session, undo_card.clone(), cx);
+                });
+            }),
+        }
+        .into_any_element()
+    }
+
+    fn remeasure_memory_card(&self, session_id: Uuid, block_index: usize) {
+        if self.boss_history_session(session_id).is_some() {
+            if let Some(row) = self.transcript_row_kinds.borrow().iter().position(|row| {
+                *row == TranscriptRowKind::BossHistory(
+                    session_id,
+                    BossHistoryRow::TurnBlock(block_index),
+                )
+            }) {
+                self.remeasure_transcript_rows(row..row + 1);
+            }
+        } else if self.state.selected_session == Some(session_id) {
+            self.remeasure_transcript_block(block_index);
+        } else if let Some(view) = self.side_chat_views.get(&session_id)
+            && let Some(row) = view
+                .kinds
+                .1
+                .iter()
+                .position(|row| *row == TranscriptRowKind::TurnBlock(block_index))
+        {
+            let top = view.rows.logical_scroll_top();
+            view.rows.remeasure_items(row..row + 1);
+            view.rows.scroll_to(top);
+        }
     }
 
     /// The diff for an expanded file-change activity.
