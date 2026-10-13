@@ -813,6 +813,10 @@ impl WakuBackend {
             state.projects.remove(index);
             self.task_store.save(&mut state)?;
         }
+        // Queued tickets under a removed project stop on the roster
+        // record — restart cannot mistake their memory-only shells for
+        // recoverable work the project re-registers into.
+        self.stop_queued_employees(&removed_ids);
         if let Some(path) = removed_workspace {
             let _ = crate::projectless::remove_workspace(&path);
         }
@@ -908,6 +912,10 @@ impl WakuBackend {
             }
             self.task_store.save(&mut state)?;
         }
+        // A queued employee's shell is memory-only — the archived flag a
+        // restart would never see. The roster record carries the stop
+        // instead, so recovery cannot reconstruct work already put away.
+        self.stop_queued_employees(&archived_ids);
         let removed_terminals = self.sweep_orphaned_terminals(&removed_ids, &workspace_roots);
         drop_detached(removed_terminals);
         // An archived task keeps no live runtime — the same outcome as the

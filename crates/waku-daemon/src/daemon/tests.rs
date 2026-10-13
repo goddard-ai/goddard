@@ -9322,6 +9322,287 @@ fn archiving_a_queued_employee_drops_its_ticket() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// An archive flag lives on the memory-only shell — a restart drops it
+/// with the session row. The roster record carries the stop instead, so
+/// recovery expires the ticket rather than reconstructing and launching
+/// work the owner already put away.
+#[test]
+fn an_archived_queued_employee_stays_expired_after_restart() {
+    use waku_protocol::boss::{BossResult, EmployeeLifecycle, ExpiryCause};
+    let root =
+        std::env::temp_dir().join(format!("summon-archived-restart-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "queued job",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .expect("at capacity the summon must still be accepted")
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    // Free the model slot before the restart — capacity is no longer what
+    // keeps this ticket queued; only the recorded stop can be.
+    backend
+        .resource_broker()
+        .unwrap()
+        .release_admission(held_task, held);
+    backend.archive_sessions(&[session_id]).unwrap();
+    drop(backend);
+
+    let backend = reopen_backend(&root);
+    *backend.broker_root.lock() = Some(root.join("broker"));
+    backend.run_summon_scheduler();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert!(employee.expired);
+    assert_eq!(
+        employee.expiry.as_ref().map(|expiry| expiry.cause),
+        Some(ExpiryCause::Stopped)
+    );
+    assert!(backend.boss.queued_heads().is_empty());
+    // Any surviving row stays archived — the stop never reads as a shell
+    // worth dispatching.
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .all(|session| session.id != session_id || session.archived_at.is_some()),
+        "an archived ticket's shell must not be reconstructed live"
+    );
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A supervisor stop is durable intent, not a pass artifact — the queued
+/// ticket expires at the control and a restart replays nothing.
+#[test]
+fn a_stopped_queued_employee_stays_expired_after_restart() {
+    use waku_protocol::boss::{
+        BossOperation, BossResult, EmployeeControl, EmployeeLifecycle, ExpiryCause,
+    };
+    let root =
+        std::env::temp_dir().join(format!("summon-stopped-restart-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "queued job",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .expect("at capacity the summon must still be accepted")
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    backend
+        .resource_broker()
+        .unwrap()
+        .release_admission(held_task, held);
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::Stop,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert!(backend.boss.employee(session_id).unwrap().expired);
+    drop(backend);
+
+    let backend = reopen_backend(&root);
+    *backend.broker_root.lock() = Some(root.join("broker"));
+    backend.run_summon_scheduler();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert!(employee.expired);
+    assert_eq!(
+        employee.expiry.as_ref().map(|expiry| expiry.cause),
+        Some(ExpiryCause::Stopped)
+    );
+    assert!(backend.boss.queued_heads().is_empty());
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Removing a queued employee's task records cancellation before the row
+/// leaves — a restart cannot reconstruct the memory-only shell.
+#[test]
+fn a_removed_queued_employee_stays_expired_after_restart() {
+    use waku_protocol::boss::{BossResult, EmployeeLifecycle, ExpiryCause};
+    let root =
+        std::env::temp_dir().join(format!("summon-removed-restart-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "queued job",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .expect("at capacity the summon must still be accepted")
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    backend
+        .resource_broker()
+        .unwrap()
+        .release_admission(held_task, held);
+    backend.remove_session(session_id).unwrap();
+    assert!(backend.boss.employee(session_id).unwrap().expired);
+    drop(backend);
+
+    let backend = reopen_backend(&root);
+    *backend.broker_root.lock() = Some(root.join("broker"));
+    backend.run_summon_scheduler();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert!(employee.expired);
+    assert_eq!(
+        employee.expiry.as_ref().map(|expiry| expiry.cause),
+        Some(ExpiryCause::Stopped)
+    );
+    assert!(backend.boss.queued_heads().is_empty());
+    assert!(backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .all(|session| session.id != session_id));
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A queued ticket whose project checkout is gone can never launch — the
+/// pass ends it like an explicit removal instead of wedging on the lookup.
+#[test]
+fn a_queued_ticket_expires_when_its_project_checkout_is_gone() {
+    use waku_protocol::boss::{BossOperation, BossResult, EmployeeLifecycle, ExpiryCause};
+    let root =
+        std::env::temp_dir().join(format!("summon-gone-project-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let repo2 = root.join("repo2");
+    std::fs::create_dir_all(&repo2).unwrap();
+    let mut op = summon_op(
+        &backend,
+        &root,
+        "queued job",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon { project, .. } = &mut op {
+        *project = repo2.display().to_string();
+    }
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(Some(boss), op, &EventSink::detached())
+        .expect("at capacity the summon must still be accepted")
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    backend
+        .resource_broker()
+        .unwrap()
+        .release_admission(held_task, held);
+    std::fs::remove_dir_all(&repo2).unwrap();
+    drop(backend);
+
+    let backend = reopen_backend(&root);
+    *backend.broker_root.lock() = Some(root.join("broker"));
+    backend.run_summon_scheduler();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert!(employee.expired);
+    assert_eq!(
+        employee.expiry.as_ref().map(|expiry| expiry.cause),
+        Some(ExpiryCause::Stopped)
+    );
+    assert!(backend.boss.queued_heads().is_empty());
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The mirror of the stop cases: a queued ticket nobody touched replays
+/// its durable identity — the pass reconstructs the memory-only shell and
+/// lands the same Working observation it owed before the restart.
+#[test]
+fn a_queued_ticket_dispatches_after_restart() {
+    use waku_protocol::boss::{BossResult, EmployeeLifecycle};
+    let root =
+        std::env::temp_dir().join(format!("summon-restart-dispatch-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "queued job",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .expect("at capacity the summon must still be accepted")
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    backend
+        .resource_broker()
+        .unwrap()
+        .release_admission(held_task, held);
+    drop(backend);
+
+    let backend = reopen_backend(&root);
+    *backend.broker_root.lock() = Some(root.join("broker"));
+    backend.run_summon_scheduler();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Working);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A queued ticket holds on the unresolved Employee base instead of
 /// dispatching under a guessed persona, and the human's recorded pick
 /// releases it into the normal launch path.
@@ -17979,6 +18260,84 @@ fn chain_restart_recovers_at_admission_and_handoff_boundaries() {
         StepStatus::Working
     );
     assert_eq!(backend.boss.document().employees.len(), 2);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// Archiving a queued chain step's task is the owner's stop — durable on
+/// the roster record, so a restart seals the attempt instead of
+/// reconstructing the shell and dispatching work that was put away.
+#[test]
+fn chain_archived_queued_attempt_stays_stopped_after_restart() {
+    let root = std::env::temp_dir().join(format!("waku-chain-archived-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    let project = backend.task_state.lock().projects[0].id;
+    let personas = backend.boss.document().personas.clone();
+    let outcome = backend
+        .boss
+        .create_outcome(Some(boss), "Investigate then verify", "Evidence verified")
+        .unwrap();
+    let BossResult::State { state } = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Chain {
+                action: ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition: chain_test_definition(
+                        project,
+                        outcome.id,
+                        personas[0].id,
+                        0,
+                        head.clone(),
+                    ),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("chain state expected")
+    };
+    let first = state.employees[0].clone();
+    // The archive stops the ticket through the roster — a restart carries
+    // the sealed pause, never a reconstructed shell.
+    backend.archive_sessions(&[first.session_id]).unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.status, ChainStatus::Paused);
+    assert_eq!(chain.steps[0].attempts[0].status, StepStatus::Failed);
+    drop(backend);
+    let backend = reopen_backend(&root);
+    backend.drive_chains();
+    backend.run_summon_scheduler();
+    let document = backend.boss.document();
+    let chain = &document.chains[0];
+    assert_eq!(chain.status, ChainStatus::Paused);
+    let attempt = &chain.steps[0].attempts[0];
+    assert_eq!(attempt.status, StepStatus::Failed);
+    assert!(
+        attempt
+            .sealed
+            .as_ref()
+            .is_some_and(|sealed| !sealed.accepted)
+    );
+    let employee = document
+        .employees
+        .iter()
+        .find(|employee| employee.session_id == first.session_id)
+        .unwrap();
+    assert!(employee.expired);
+    assert_eq!(
+        document.employees.len(),
+        1,
+        "no successor admission and no resurrected ticket"
+    );
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .all(|session| session.id != first.session_id || session.archived_at.is_some())
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 

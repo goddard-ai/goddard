@@ -459,9 +459,15 @@ impl WakuBackend {
             return Ok(true);
         }
         if shell.is_none() {
-            let project = dunce::canonicalize(Path::new(&ticket.project))?;
-            let registered = self.task_state.lock().projects.iter().any(|entry| {
-                dunce::canonicalize(&entry.path).is_ok_and(|path| path == project)
+            // The ticket's project must still resolve to a registered
+            // checkout: a row another client removed — or a checkout that
+            // no longer exists — ends the admission like an explicit
+            // removal rather than wedging the queue on a lookup error.
+            let project = dunce::canonicalize(Path::new(&ticket.project)).ok();
+            let registered = project.is_some_and(|project| {
+                self.task_state.lock().projects.iter().any(|entry| {
+                    dunce::canonicalize(&entry.path).is_ok_and(|path| path == project)
+                })
             });
             if !registered {
                 self.stop_queued_employee(session_id)?;
@@ -1724,6 +1730,23 @@ impl WakuBackend {
             false,
             waku_protocol::boss::EmployeeSettle::Stopped,
         )
+    }
+
+    /// Stop every queued employee in a batch of session ids — the durable
+    /// half of a task archive or removal. A queued shell is memory-only,
+    /// so a flag on it dies at restart; the roster record's stop is what
+    /// recovery consults before reconstructing anything.
+    pub(super) fn stop_queued_employees(&self, session_ids: &[Uuid]) {
+        for session_id in session_ids {
+            if self.boss.employee_lifecycle(*session_id)
+                != Some(waku_protocol::boss::EmployeeLifecycle::Queued)
+            {
+                continue;
+            }
+            if let Err(error) = self.stop_queued_employee(*session_id) {
+                eprintln!("could not stop queued employee {session_id}: {error:#}");
+            }
+        }
     }
 
     /// Only the authenticated human UI command reaches this lane. Persist the

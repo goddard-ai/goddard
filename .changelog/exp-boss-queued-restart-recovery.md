@@ -1,0 +1,1 @@
+- Queued employees stopped, archived, or removed before a daemon restart now stay stopped — a restart could previously launch them anyway. A queued employee whose project folder was deleted also expires instead of sticking the queue.

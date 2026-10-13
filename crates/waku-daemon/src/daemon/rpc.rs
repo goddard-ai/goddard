@@ -951,6 +951,7 @@ impl Backend for WakuBackend {
                         }
                     }
                 }
+                let mut newly_archived = Vec::new();
                 let mut state = self.task_state.lock();
                 let removed_project_ids = self.removed_project_ids.lock();
                 for mut project in projects {
@@ -1004,7 +1005,15 @@ impl Backend for WakuBackend {
                             || existing.boss_managed
                             || self.boss.is_managed(session_id)
                         {
+                            // A queued employee's shell is memory-only — an
+                            // archive flag a client saves on it dies at
+                            // restart. The roster record carries the stop
+                            // once the merge lock is released.
+                            let was_archived = existing.archived_at.is_some();
                             merge_stale_session_metadata(existing, session);
+                            if !was_archived && existing.archived_at.is_some() {
+                                newly_archived.push(session_id);
+                            }
                             true
                         } else if !session.detail_loaded {
                             merge_session_list_columns(
@@ -1109,6 +1118,7 @@ impl Backend for WakuBackend {
                     }
                     return Err(error.into());
                 }
+                self.stop_queued_employees(&newly_archived);
                 let removed_terminals = self.sweep_orphaned_terminals(&cascaded, &cascaded_roots);
                 drop_detached(removed_terminals);
                 let removed_runtimes = cascaded
