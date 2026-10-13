@@ -7319,6 +7319,14 @@ impl Waku {
             )
             .child(self.render_background_work_summary(cx))
             .children(self.render_reclaim_indicator(window, cx))
+            .when_some(self.selected_terminal, |element, terminal_id| {
+                element.child(self.render_terminal_split_button(
+                    "main-terminal-split",
+                    terminal_id,
+                    STANDALONE_TERMINAL_MAX_PANES,
+                    cx,
+                ))
+            })
             .when(!self.right_panel_slot_visible(), |element| {
                 element
                     .when(self.fps_counter_visible, |element| {

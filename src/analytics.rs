@@ -153,7 +153,7 @@ pub enum Event {
         outcome: &'static str,
     },
     TerminalOpened {
-        /// `session` | `global` | `command` | `panel`
+        /// `session` | `global` | `command` | `panel` | `pane`
         kind: &'static str,
     },
     SkillToggled {

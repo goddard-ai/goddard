@@ -140,6 +140,7 @@ actions!(
         ToggleTerminals,
         NewTerminal,
         DismissDockedTerminal,
+        SplitTerminal,
         RunProjectScript,
         CopySelection,
         CopyWorkingDirectory,
@@ -947,6 +948,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // terminal rooted in the selected terminal's directory, the
         // selected session's workspace, or ~.
         KeyBinding::new("secondary-t", NewTerminal, None),
+        // ⌘⌥D splits the terminal surface on screen — a pane in the
+        // right-panel tab's stack (3 max) or a cell in the standalone
+        // terminal's grid (3x3 max). ⌘D and ⌘⇧D belong to the unread
+        // navigation chords.
+        KeyBinding::new("secondary-alt-d", SplitTerminal, None),
         KeyBinding::new("secondary-/", ToggleModelPicker, None),
         KeyBinding::new("secondary-shift-/", StepModelPickerBackward, None),
         KeyBinding::new("secondary-alt-shift-n", ToggleBranchPicker, None),

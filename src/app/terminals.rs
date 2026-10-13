@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::ActivationExt;
 
 /// One entry in the sidebar's Terminals group. `session` scopes the
 /// terminal to the task whose right-panel surfaces own it; `None` is a
@@ -23,6 +24,122 @@ pub(super) struct TerminalRecord {
     /// A sidebar rename — wins over the view's OSC-set title and is
     /// applied to the view when it spawns.
     pub custom_title: Option<String>,
+    /// The split group's anchor — the terminal id its surface (a
+    /// right-panel tab or the main-area selection) references. `None`
+    /// for standalone terminals and for the anchor itself.
+    pub pane_of: Option<Uuid>,
+    /// Ordered pane ids splitting this terminal beyond the anchor, which
+    /// always lays out first. Empty unless this record anchors a group.
+    pub panes: Vec<Uuid>,
+}
+
+/// A right-panel terminal tab splits into a vertical stack — at most
+/// three panes share the strip's full width.
+pub(super) const RIGHT_PANEL_TERMINAL_MAX_PANES: usize = 3;
+/// A standalone terminal filling the main area splits into a grid at
+/// most three columns wide — a 3x3 layout, nine panes.
+pub(super) const STANDALONE_TERMINAL_MAX_PANES: usize = 9;
+/// Columns the standalone grid lays out across before wrapping rows.
+pub(super) const STANDALONE_TERMINAL_GRID_COLUMNS: usize = 3;
+
+/// How a split group lays its panes out — picked by the surface the
+/// group's anchor renders in.
+#[derive(Clone, Copy)]
+pub(super) enum TerminalGroupLayout {
+    /// The right panel's terminal tab: panes stack vertically, each the
+    /// strip's full width.
+    Stack,
+    /// The standalone main-area terminal: panes tile a grid at most
+    /// `STANDALONE_TERMINAL_GRID_COLUMNS` wide.
+    Grid,
+}
+
+/// A Terminals-group row dragged toward a terminal surface. Hovering
+/// another row mid-drag previews its floating card; dropping on a
+/// surface joins its split group as live panes — the dragged terminal's
+/// own session, not a copy.
+#[derive(Clone)]
+pub(super) struct SidebarTerminalDrag {
+    pub(super) terminal_id: Uuid,
+    pub(super) title: SharedString,
+}
+
+pub(super) struct TerminalDragPreview {
+    docked: Option<Uuid>,
+    last_visible: Option<Uuid>,
+    pub(super) panel_active: Option<RightPanelSurface>,
+    pub(super) fullscreen: Option<(RightPanelSurface, Option<String>)>,
+    focus: Option<FocusHandle>,
+}
+
+impl Render for SidebarTerminalDrag {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = Theme::current(cx);
+        div()
+            .px(px(10.0))
+            .py(px(6.0))
+            .rounded(px(8.0))
+            .bg(theme.composer)
+            .border(hairline())
+            .border_color(theme.border)
+            .text_color(theme.text)
+            .child(self.title.clone())
+    }
+}
+
+fn terminal_group_ids(records: &HashMap<Uuid, TerminalRecord>, anchor_id: Uuid) -> Vec<Uuid> {
+    records
+        .get(&anchor_id)
+        .map(|record| {
+            std::iter::once(anchor_id)
+                .chain(record.panes.iter().copied())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn terminal_group_can_add(record: &TerminalRecord, incoming: usize, limit: usize) -> bool {
+    record.pane_of.is_none() && record.panes.len() + 1 + incoming <= limit
+}
+
+fn terminal_groups_fit(
+    records: &HashMap<Uuid, TerminalRecord>,
+    dragged_id: Uuid,
+    anchor_id: Uuid,
+    limit: usize,
+) -> bool {
+    let incoming = terminal_group_ids(records, dragged_id);
+    let target = terminal_group_ids(records, anchor_id);
+    !incoming.is_empty()
+        && !incoming.iter().any(|id| target.contains(id))
+        && records
+            .get(&dragged_id)
+            .is_some_and(|record| record.pane_of.is_none())
+        && records
+            .get(&anchor_id)
+            .is_some_and(|record| terminal_group_can_add(record, incoming.len(), limit))
+}
+
+fn join_terminal_groups(
+    records: &mut HashMap<Uuid, TerminalRecord>,
+    dragged_id: Uuid,
+    anchor_id: Uuid,
+    limit: usize,
+) -> Vec<Uuid> {
+    if !terminal_groups_fit(records, dragged_id, anchor_id, limit) {
+        return Vec::new();
+    }
+    let incoming = terminal_group_ids(records, dragged_id);
+    for id in &incoming {
+        if let Some(record) = records.get_mut(id) {
+            record.pane_of = Some(anchor_id);
+            record.panes.clear();
+        }
+    }
+    if let Some(record) = records.get_mut(&anchor_id) {
+        record.panes.extend(incoming.iter().copied());
+    }
+    incoming
 }
 
 /// A terminal row is two lines — title and status over location and time —
@@ -200,7 +317,9 @@ fn sidebar_terminal_order<'a>(
         terminal_order.iter().copied().filter(move |id| {
             records
                 .get(id)
-                .is_some_and(|record| record.pinned == pinned)
+                // Split panes render inside their anchor's surface, never as
+                // rows of their own.
+                .is_some_and(|record| record.pinned == pinned && record.pane_of.is_none())
         })
     };
     partition(true).chain(partition(false))
@@ -225,10 +344,7 @@ impl Waku {
                             .map(|name| name.to_owned())
                     })
                     .unwrap_or_else(|| {
-                        settings::abbreviate_home_path(
-                            &cwd,
-                            self.home_directory.as_deref(),
-                        )
+                        settings::abbreviate_home_path(&cwd, self.home_directory.as_deref())
                     })
             })
             .unwrap_or_default();
@@ -511,6 +627,8 @@ impl Waku {
                 working_directory,
                 opened_at: unix_time(),
                 custom_title: None,
+                pane_of: None,
+                panes: Vec::new(),
             },
         );
         self.terminal_order.push(terminal_id);
@@ -520,6 +638,25 @@ impl Waku {
     /// Drop every trace of a terminal: the view entity, its launch state,
     /// the group record, and any selection pointing at it.
     pub(super) fn drop_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        // Group bookkeeping before anything else: a dropped pane unlinks
+        // from its anchor — a group down to its anchor stops being a
+        // group — and a dropped anchor takes every pane down with it.
+        if let Some(record) = self.terminal_records.get(&terminal_id) {
+            let (pane_of, panes) = (record.pane_of, record.panes.clone());
+            if let Some(anchor_id) = pane_of
+                && let Some(anchor) = self.terminal_records.get_mut(&anchor_id)
+            {
+                anchor.panes.retain(|pane| *pane != terminal_id);
+                if anchor.panes.is_empty()
+                    && let Some(view) = self.right_panel_terminals.get(&anchor_id)
+                {
+                    view.update(cx, |view, _| view.set_pane(false));
+                }
+            }
+            for pane in panes {
+                self.drop_terminal(pane, cx);
+            }
+        }
         // A terminal filling the main area hands the view to a neighbor —
         // the row listed before it, else the one after — found before the
         // order entry disappears. No neighbor means the new task page.
@@ -537,6 +674,7 @@ impl Waku {
             .flatten();
         self.right_panel_terminals.remove(&terminal_id);
         self.right_panel_terminal_commands.remove(&terminal_id);
+        self.right_panel_terminal_programs.remove(&terminal_id);
         self.custom_command_runs.remove(&terminal_id);
         self.terminal_records.remove(&terminal_id);
         self.terminal_order.retain(|id| *id != terminal_id);
@@ -593,13 +731,9 @@ impl Waku {
         self.save();
     }
 
-    /// Move a session-scoped terminal out of every session strip and into
-    /// the Terminals group, keeping its PTY. Called when the workspace it
-    /// tracked moved: the running shell can't follow, and respawning would
-    /// kill whatever the user ran — or re-run a launch line — so the record
-    /// drops its session, pins the live directory, and the surface leaves
-    /// every strip that borrowed it.
-    pub(super) fn detach_terminal_to_group(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+    /// The record half of a detach: drop the session binding and pin the
+    /// live directory so the shell keeps running where it is.
+    fn detach_terminal_record(&mut self, terminal_id: Uuid, cx: &App) {
         let Some(record) = self.terminal_records.get_mut(&terminal_id) else {
             return;
         };
@@ -615,6 +749,66 @@ impl Waku {
             .clone()
             .or_else(|| record.last_working_directory.clone());
         record.workspace_directory = None;
+    }
+
+    /// Move a session-scoped terminal out of every session strip and into
+    /// the Terminals group, keeping its PTY. Called when the workspace it
+    /// tracked moved: the running shell can't follow, and respawning would
+    /// kill whatever the user ran — or re-run a launch line — so the record
+    /// drops its session, pins the live directory, and the surface leaves
+    /// every strip that borrowed it.
+    pub(super) fn detach_terminal_to_group(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        // A pane has no surface to strip and no row to reveal — its
+        // record just sheds the session binding where it sits.
+        if self
+            .terminal_records
+            .get(&terminal_id)
+            .is_some_and(|record| record.pane_of.is_some())
+        {
+            self.detach_terminal_record(terminal_id, cx);
+            return;
+        }
+        let Some(record) = self.terminal_records.get(&terminal_id) else {
+            return;
+        };
+        // The group travels as one — the anchor's detach sheds every
+        // member's session binding before the anchor's own strip work.
+        let panes = record.panes.clone();
+        for pane in panes {
+            self.detach_terminal_record(pane, cx);
+        }
+        let Some(record) = self.terminal_records.get_mut(&terminal_id) else {
+            return;
+        };
+        record.session = None;
+        if record.working_directory.is_none() {
+            record.working_directory = self
+                .right_panel_terminals
+                .get(&terminal_id)
+                .map(|terminal| terminal.read(cx).working_directory().to_path_buf());
+        }
+        record.last_working_directory = record
+            .working_directory
+            .clone()
+            .or_else(|| record.last_working_directory.clone());
+        record.workspace_directory = None;
+        self.remove_terminal_surfaces(terminal_id, cx);
+        self.sidebar_rows_fingerprint.set(None);
+        // Reveal the terminal's new home — under a folded group the row
+        // hides and the vanished tab reads as a kill after all.
+        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
+        self.reveal_sidebar_terminal(terminal_id);
+        self.show_toast(tr!("terminal.moved_to_group"));
+        self.save();
+        cx.notify();
+    }
+
+    /// Pull `terminal_id`'s tab out of every strip that borrowed it —
+    /// the live strip, then each parked owner's. The terminal's own
+    /// strip keeps its tab: it belongs there while the terminal fills
+    /// the main area. The record and PTY survive; only surface slots
+    /// leave.
+    fn remove_terminal_surfaces(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
         // The live strip is the terminal's own when it fills the main area —
         // its tab belongs there; anywhere else it sat on a session's loan.
         if self.right_panel_live_owner != RightPanelOwner::Terminal(terminal_id)
@@ -675,14 +869,6 @@ impl Waku {
                 state.last_focused_terminal = None;
             }
         }
-        self.sidebar_rows_fingerprint.set(None);
-        // Reveal the terminal's new home — under a folded group the row
-        // hides and the vanished tab reads as a kill after all.
-        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
-        self.reveal_sidebar_terminal(terminal_id);
-        self.show_toast(tr!("terminal.moved_to_group"));
-        self.save();
-        cx.notify();
     }
 
     /// Spawn the PTY-backed view for a terminal id. Shared by the right
@@ -780,10 +966,14 @@ impl Waku {
                     }
                     this.custom_command_finished(terminal_id, *code, cx);
                     // A clean exit off-screen earns the row an unread dot;
-                    // the terminal the user is watching needs none.
+                    // the terminal the user is watching needs none. A
+                    // pane's completion marks the anchor — the row the
+                    // dot renders on.
                     if *code == Some(0)
                         && !this.terminal_is_active_surface(terminal_id)
-                        && this.unseen_terminal_completions.insert(terminal_id)
+                        && this
+                            .unseen_terminal_completions
+                            .insert(this.terminal_group_anchor(terminal_id))
                     {
                         cx.notify();
                     }
@@ -861,6 +1051,15 @@ impl Waku {
             .and_then(|record| record.custom_title.clone())
         {
             view.update(cx, |view, cx| view.set_custom_title(Some(title), cx));
+        }
+        // A group member's view sizes to its painted cell and carries the
+        // pane toolbar; a respawned view (workspace move) re-derives it here.
+        if self
+            .terminal_records
+            .get(&terminal_id)
+            .is_some_and(|record| record.pane_of.is_some() || !record.panes.is_empty())
+        {
+            view.update(cx, |view, _| view.set_pane(true));
         }
         self.right_panel_terminals.insert(terminal_id, view);
     }
@@ -966,6 +1165,7 @@ impl Waku {
             working_directory,
             session,
             command.map(TerminalLaunch::CustomCommand),
+            None,
             cx,
         )
     }
@@ -985,6 +1185,7 @@ impl Waku {
             working_directory,
             session,
             Some(TerminalLaunch::Program { program, args }),
+            None,
             cx,
         )
     }
@@ -1055,6 +1256,7 @@ impl Waku {
         working_directory: PathBuf,
         session: Option<Uuid>,
         launch: Option<TerminalLaunch>,
+        pane_of: Option<Uuid>,
         cx: &mut Context<Self>,
     ) -> Option<Uuid> {
         // A remote working directory hosts a plain shell on that host's
@@ -1094,21 +1296,34 @@ impl Waku {
             session,
             (!workspace_bound).then(|| working_directory.clone()),
         );
-        let kind = match &launch {
-            Some(TerminalLaunch::CustomCommand(command)) => {
-                self.right_panel_terminal_commands
-                    .insert(terminal_id, command.clone());
-                "command"
+        if pane_of.is_some()
+            && let Some(record) = self.terminal_records.get_mut(&terminal_id)
+        {
+            record.pane_of = pane_of;
+        }
+        let kind = if pane_of.is_some() {
+            "pane"
+        } else {
+            match &launch {
+                Some(TerminalLaunch::CustomCommand(command)) => {
+                    self.right_panel_terminal_commands
+                        .insert(terminal_id, command.clone());
+                    "command"
+                }
+                Some(TerminalLaunch::Program { program, args }) => {
+                    self.right_panel_terminal_programs
+                        .insert(terminal_id, (program.clone(), args.clone()));
+                    "command"
+                }
+                Some(TerminalLaunch::Shell) | None if session.is_some() => "session",
+                _ => "global",
             }
-            Some(TerminalLaunch::Program { program, args }) => {
-                self.right_panel_terminal_programs
-                    .insert(terminal_id, (program.clone(), args.clone()));
-                "command"
-            }
-            Some(TerminalLaunch::Shell) | None if session.is_some() => "session",
-            _ => "global",
         };
-        if let Some(session_id) = session {
+        // A pane renders inside its anchor's surface — it never claims a
+        // tab of its own.
+        if pane_of.is_none()
+            && let Some(session_id) = session
+        {
             let surface = RightPanelSurface::Terminal(terminal_id);
             if self.right_panel_live_owner == RightPanelOwner::Session(session_id) {
                 // Push directly rather than add_right_panel_surface: the tab
@@ -1129,8 +1344,10 @@ impl Waku {
         // one leaves the fold alone — a selected terminal keeps a row under
         // the collapsed header anyway. When the group is open the fresh row
         // still scrolls on screen so a creation lands nowhere the user
-        // cannot see.
-        self.reveal_sidebar_terminal(terminal_id);
+        // cannot see. Panes have no row to reveal.
+        if pane_of.is_none() {
+            self.reveal_sidebar_terminal(terminal_id);
+        }
         self.save();
         cx.notify();
         Some(terminal_id)
@@ -1356,8 +1573,7 @@ impl Waku {
             .map(|project| (project.id, project.path.as_path()))
             .collect();
         for project in self.boss_ui.projects.values() {
-            if !self.is_remote_project(project.id)
-                && roots.iter().all(|(id, _)| *id != project.id)
+            if !self.is_remote_project(project.id) && roots.iter().all(|(id, _)| *id != project.id)
             {
                 roots.push((project.id, project.path.as_path()));
             }
@@ -1365,18 +1581,556 @@ impl Waku {
         roots
     }
 
+    /// The terminal id the surface references — `terminal_id` itself
+    /// unless it's a pane, whose surface is its anchor's.
+    pub(super) fn terminal_group_anchor(&self, terminal_id: Uuid) -> Uuid {
+        self.terminal_records
+            .get(&terminal_id)
+            .and_then(|record| record.pane_of)
+            .unwrap_or(terminal_id)
+    }
+
+    /// A group's members in layout order — the anchor first, then its
+    /// panes in the order they were split. Ungrouped terminals yield
+    /// just themselves; a missing record yields nothing.
+    pub(super) fn terminal_group_panes(&self, anchor_id: Uuid) -> Vec<Uuid> {
+        terminal_group_ids(&self.terminal_records, anchor_id)
+    }
+
     /// Whether the terminal is the surface on screen — the full-width
     /// selection, or the visible right panel's active tab. An inactive tab
     /// or a background session's surface counts as unseen even when its
     /// stored strip still points at it.
     pub(super) fn terminal_is_active_surface(&self, terminal_id: Uuid) -> bool {
-        self.selected_terminal == Some(terminal_id)
-            || self.docked_terminal == Some(terminal_id)
+        // A group stands or falls with its anchor's visibility — a pane
+        // on screen is seen wherever its anchor renders.
+        let anchor_id = self.terminal_group_anchor(terminal_id);
+        self.selected_terminal == Some(anchor_id)
+            || self.docked_terminal == Some(anchor_id)
             || (self.right_panel_visible
                 && self
                     .active_right_panel_surface()
                     .and_then(RightPanelSurface::terminal_id)
-                    == Some(terminal_id))
+                    == Some(anchor_id))
+    }
+
+    /// Split `anchor_id`'s surface, adding a fresh shell rooted in the
+    /// anchor's current directory. The group's size is hard-capped at
+    /// `max_panes` — the right-panel stack or the standalone grid picks
+    /// the limit — and `None` returns at the cap.
+    pub(super) fn split_terminal(
+        &mut self,
+        anchor_id: Uuid,
+        max_panes: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Uuid> {
+        let record = self.terminal_records.get(&anchor_id)?;
+        if !terminal_group_can_add(record, 1, max_panes) {
+            return None;
+        }
+        let session = record.session;
+        let growing_beyond_stack = record.panes.len() + 2 > RIGHT_PANEL_TERMINAL_MAX_PANES;
+        let working_directory = self
+            .terminal_cwd(anchor_id, cx)
+            .or_else(|| self.terminal_spawn_directory(record))
+            .or_else(|| self.selected_workspace_path().map(Path::to_path_buf))
+            .or_else(dirs::home_dir)?;
+        let pane_id = self.create_terminal_with_launch(
+            working_directory,
+            session,
+            Some(TerminalLaunch::Shell),
+            Some(anchor_id),
+            cx,
+        )?;
+        if growing_beyond_stack {
+            self.remove_terminal_surfaces(anchor_id, cx);
+        }
+        if let Some(record) = self.terminal_records.get_mut(&anchor_id) {
+            record.panes.push(pane_id);
+        }
+        if let Some(anchor) = self.right_panel_terminals.get(&anchor_id) {
+            anchor.update(cx, |view, _| view.set_pane(true));
+        }
+        if let Some(view) = self.right_panel_terminals.get(&pane_id) {
+            let focus = view.read(cx).focus_handle(cx);
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        }
+        self.save();
+        cx.notify();
+        Some(pane_id)
+    }
+
+    /// `secondary-alt-d` — split whichever terminal surface the user is
+    /// looking at. A focused member's group decides the surface — its
+    /// anchor as the active right-panel tab stacks (3 max), the
+    /// main-area terminal grids (3x3 max). With no terminal focused the
+    /// main-area selection splits first, then the active panel tab.
+    pub(super) fn split_terminal_action(
+        &mut self,
+        _: &SplitTerminal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_page = None;
+        let focused_anchor = self
+            .focused_terminal_id(window, cx)
+            .map(|terminal_id| self.terminal_group_anchor(terminal_id));
+        if let Some(anchor_id) = focused_anchor {
+            let max_panes = if self.selected_terminal == Some(anchor_id)
+                || self.docked_terminal == Some(anchor_id)
+            {
+                STANDALONE_TERMINAL_MAX_PANES
+            } else {
+                RIGHT_PANEL_TERMINAL_MAX_PANES
+            };
+            self.split_terminal(anchor_id, max_panes, window, cx);
+            return;
+        }
+        if let Some(anchor_id) = self.selected_terminal {
+            self.split_terminal(anchor_id, STANDALONE_TERMINAL_MAX_PANES, window, cx);
+            return;
+        }
+        if let Some(anchor_id) = self
+            .active_right_panel_surface()
+            .and_then(RightPanelSurface::terminal_id)
+        {
+            self.split_terminal(anchor_id, RIGHT_PANEL_TERMINAL_MAX_PANES, window, cx);
+        }
+    }
+
+    /// Any terminal view holding keyboard focus — a pane or an anchor in
+    /// either surface. The scan only walks the two groups that can be on
+    /// screen: the main-area selection and the active panel tab.
+    fn focused_terminal_id(&self, window: &Window, cx: &App) -> Option<Uuid> {
+        let candidates = self
+            .selected_terminal
+            .into_iter()
+            .chain(self.docked_terminal)
+            .flat_map(|anchor_id| self.terminal_group_panes(anchor_id))
+            .chain(
+                self.active_right_panel_surface()
+                    .and_then(RightPanelSurface::terminal_id)
+                    .into_iter()
+                    .flat_map(|anchor_id| self.terminal_group_panes(anchor_id)),
+            );
+        for terminal_id in candidates {
+            if self
+                .right_panel_terminals
+                .get(&terminal_id)
+                .is_some_and(|terminal| terminal.read(cx).focus_handle(cx).is_focused(window))
+            {
+                return Some(terminal_id);
+            }
+        }
+        None
+    }
+
+    /// Close one member of a split group — a pane leaves its anchor, and
+    /// an anchor promotes its next pane so the surface stays. Ungrouped
+    /// terminals close outright.
+    pub(super) fn close_terminal_pane(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        let Some(record) = self.terminal_records.get(&terminal_id) else {
+            return;
+        };
+        if record.pane_of.is_none() && record.panes.is_empty() {
+            self.close_terminal(terminal_id, cx);
+            return;
+        }
+        let closing_focus = self
+            .right_panel_terminals
+            .get(&terminal_id)
+            .map(|view| view.read(cx).focus_handle(cx));
+        let close_focus =
+            self.transcript_control_focus(format!("terminal-pane-close-{terminal_id}"), cx);
+        let anchor_id = self.terminal_group_anchor(terminal_id);
+        let survivor = self
+            .terminal_group_panes(anchor_id)
+            .into_iter()
+            .find(|id| *id != terminal_id);
+        if record.pane_of.is_none() {
+            self.promote_terminal_pane(terminal_id, cx);
+        }
+        self.drop_terminal(terminal_id, cx);
+        if let Some(focus) = survivor
+            .and_then(|id| self.right_panel_terminals.get(&id))
+            .map(|view| view.read(cx).focus_handle(cx))
+        {
+            let handle = self.window_handle;
+            cx.defer(move |cx| {
+                let _ = handle.update(cx, |_, window, cx| {
+                    if window.focused(cx).is_none_or(|current| {
+                        closing_focus.as_ref() == Some(&current) || current == close_focus
+                    }) {
+                        window.focus(&focus, cx);
+                    }
+                });
+            });
+        }
+    }
+
+    /// Move a group's surface identity from a closing anchor to its next
+    /// pane — every reference (tabs, selection, panel owner, history)
+    /// rekeys to the promoted terminal. The old anchor's record empties
+    /// its pane list so `drop_terminal` treats it as ungrouped.
+    fn promote_terminal_pane(&mut self, anchor_id: Uuid, cx: &mut Context<Self>) {
+        let Some(mut panes) = self
+            .terminal_records
+            .get(&anchor_id)
+            .map(|record| record.panes.clone())
+            .filter(|panes| !panes.is_empty())
+        else {
+            return;
+        };
+        let new_anchor = panes.remove(0);
+        if !self.terminal_records.contains_key(&new_anchor) {
+            return;
+        }
+        let pinned = self
+            .terminal_records
+            .get(&anchor_id)
+            .is_some_and(|record| record.pinned);
+        self.terminal_order.retain(|id| *id != new_anchor);
+        if let Some(index) = self.terminal_order.iter().position(|id| *id == anchor_id) {
+            self.terminal_order.insert(index, new_anchor);
+        }
+        if let Some(record) = self.terminal_records.get_mut(&anchor_id) {
+            record.panes.clear();
+        }
+        if let Some(record) = self.terminal_records.get_mut(&new_anchor) {
+            record.pinned |= pinned;
+            record.pane_of = None;
+            record.panes = panes.clone();
+        }
+        for pane in &panes {
+            if let Some(record) = self.terminal_records.get_mut(pane) {
+                record.pane_of = Some(new_anchor);
+            }
+        }
+        // A single survivor stops being a group — its view loses the
+        // pane chrome along with the membership.
+        if panes.is_empty()
+            && let Some(view) = self.right_panel_terminals.get(&new_anchor)
+        {
+            view.update(cx, |view, _| view.set_pane(false));
+        }
+        let retarget = |surface: &mut RightPanelSurface| {
+            if *surface == RightPanelSurface::Terminal(anchor_id) {
+                *surface = RightPanelSurface::Terminal(new_anchor);
+            }
+        };
+        for surface in self.right_panel_surfaces.iter_mut() {
+            retarget(surface);
+        }
+        for state in self.right_panel_states.values_mut() {
+            for surface in state.surfaces.iter_mut() {
+                retarget(surface);
+            }
+            if let Some((surface, _)) = state.fullscreen.as_mut() {
+                retarget(surface);
+            }
+        }
+        if let Some((surface, _)) = self.fullscreen_surface.as_mut() {
+            retarget(surface);
+        }
+        if let Some(state) = self
+            .right_panel_states
+            .remove(&RightPanelOwner::Terminal(anchor_id))
+        {
+            self.right_panel_states
+                .insert(RightPanelOwner::Terminal(new_anchor), state);
+        }
+        if self.right_panel_live_owner == RightPanelOwner::Terminal(anchor_id) {
+            self.right_panel_live_owner = RightPanelOwner::Terminal(new_anchor);
+        }
+        for entry in self
+            .session_navigation
+            .back
+            .iter_mut()
+            .chain(self.session_navigation.forward.iter_mut())
+        {
+            if *entry == NavigationLocation::Terminal(anchor_id) {
+                *entry = NavigationLocation::Terminal(new_anchor);
+            }
+        }
+        if self.selected_terminal == Some(anchor_id) {
+            self.selected_terminal = Some(new_anchor);
+        }
+        if self.docked_terminal == Some(anchor_id) {
+            self.docked_terminal = Some(new_anchor);
+        }
+        if self.last_visible_terminal == Some(anchor_id) {
+            self.last_visible_terminal = Some(new_anchor);
+        }
+        if self.right_panel_last_focused_terminal == Some(anchor_id) {
+            self.right_panel_last_focused_terminal = Some(new_anchor);
+        }
+        if self.right_panel_pending_terminal_focus == Some(anchor_id) {
+            self.right_panel_pending_terminal_focus = Some(new_anchor);
+        }
+        if self.terminal_rename == Some(anchor_id) {
+            self.terminal_rename = None;
+        }
+        self.unseen_terminal_completions.remove(&anchor_id);
+        if let Some(dialog) = self.terminal_close_dialog.as_mut()
+            && dialog.terminal_id == anchor_id
+        {
+            dialog.terminal_id = new_anchor;
+        }
+    }
+
+    /// Hover uses the same floating-card selection as a normal sidebar open.
+    /// Cancellation restores the prior card and panel without a history visit.
+    pub(super) fn preview_terminal_drag(
+        &mut self,
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.docked_terminal == Some(terminal_id) || self.selected_terminal == Some(terminal_id)
+        {
+            return;
+        }
+        if self.terminal_drag_preview.is_none() {
+            self.terminal_drag_preview = Some(TerminalDragPreview {
+                docked: self.docked_terminal,
+                last_visible: self.last_visible_terminal,
+                panel_active: self.active_right_panel_surface().cloned(),
+                fullscreen: self.fullscreen_surface.clone(),
+                focus: window.focused(cx),
+            });
+        }
+        self.open_docked_terminal(terminal_id, window, cx);
+    }
+
+    fn restore_terminal_drag_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(preview) = self.terminal_drag_preview.take() else {
+            return;
+        };
+        self.docked_terminal = preview
+            .docked
+            .filter(|id| self.terminal_records.contains_key(id))
+            .map(|id| self.terminal_group_anchor(id));
+        self.last_visible_terminal = preview
+            .last_visible
+            .filter(|id| self.terminal_records.contains_key(id))
+            .map(|id| self.terminal_group_anchor(id));
+        self.right_panel_active_surface = preview.panel_active.and_then(|surface| {
+            self.right_panel_surfaces
+                .iter()
+                .position(|candidate| *candidate == surface)
+        });
+        self.fullscreen_surface = preview.fullscreen.filter(|(surface, _)| {
+            surface.terminal_id().is_none_or(|id| {
+                self.terminal_group_anchor(id) == id && self.terminal_records.contains_key(&id)
+            })
+        });
+        if let Some(focus) = preview.focus {
+            window.focus(&focus, cx);
+        }
+        self.save();
+        cx.notify();
+    }
+
+    fn watch_terminal_drag(weak: WeakEntity<Self>, window: &mut Window, cx: &mut App) {
+        if !cx.has_active_drag() {
+            let _ = weak.update(cx, |this, cx| {
+                this.terminal_drag_rejected_target = None;
+                this.restore_terminal_drag_preview(window, cx)
+            });
+            return;
+        }
+        window.on_next_frame(move |window, cx| Self::watch_terminal_drag(weak, window, cx));
+        window.refresh();
+    }
+
+    /// Whether `anchor_id`'s group can absorb `dragged_id`'s whole group
+    /// — itself included — and stay under `max_panes`. `can_drop` and
+    /// the hover affordance share the test so a drop that would
+    /// overflow is rejected before it can land.
+    fn terminal_drop_fits(&self, dragged_id: Uuid, anchor_id: Uuid, max_panes: usize) -> bool {
+        terminal_groups_fit(&self.terminal_records, dragged_id, anchor_id, max_panes)
+    }
+
+    /// The drop side of a terminal drag: `dragged_id`'s group members
+    /// leave every strip and join `anchor_id`'s panes as live
+    /// terminals. Returns the moved ids — empty when the drop can't
+    /// fit, so the caller can no-op.
+    fn attach_terminal_pane_group(
+        &mut self,
+        dragged_id: Uuid,
+        anchor_id: Uuid,
+        max_panes: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<Uuid> {
+        if !self.terminal_drop_fits(dragged_id, anchor_id, max_panes) {
+            return Vec::new();
+        }
+        let incoming = self.terminal_group_panes(dragged_id);
+        for terminal_id in &incoming {
+            if !self.right_panel_terminals.contains_key(terminal_id)
+                && let Some(directory) = self
+                    .terminal_records
+                    .get(terminal_id)
+                    .and_then(|record| self.terminal_spawn_directory(record))
+            {
+                self.spawn_terminal_entity(*terminal_id, directory, cx);
+            }
+            self.remove_terminal_surfaces(*terminal_id, cx);
+        }
+        if self
+            .fullscreen_surface
+            .as_ref()
+            .is_some_and(|(surface, _)| {
+                surface
+                    .terminal_id()
+                    .is_some_and(|id| incoming.contains(&id))
+            })
+        {
+            self.fullscreen_surface = None;
+        }
+        if self.terminal_group_panes(anchor_id).len() + incoming.len()
+            > RIGHT_PANEL_TERMINAL_MAX_PANES
+        {
+            self.remove_terminal_surfaces(anchor_id, cx);
+        }
+        let incoming =
+            join_terminal_groups(&mut self.terminal_records, dragged_id, anchor_id, max_panes);
+        for terminal_id in std::iter::once(&anchor_id).chain(&incoming) {
+            if let Some(view) = self.right_panel_terminals.get(terminal_id) {
+                view.update(cx, |view, _| view.set_pane(true));
+            }
+        }
+        // References pointing at the dragged terminal follow it into
+        // the group — a selected terminal's main-area slot hands over
+        // to its new anchor.
+        if self.docked_terminal == Some(dragged_id) {
+            self.docked_terminal = Some(anchor_id);
+        }
+        if self.selected_terminal == Some(dragged_id) {
+            self.selected_terminal = Some(anchor_id);
+        }
+        if self.last_visible_terminal == Some(dragged_id) {
+            self.last_visible_terminal = Some(anchor_id);
+        }
+        if self.right_panel_last_focused_terminal == Some(dragged_id) {
+            self.right_panel_last_focused_terminal = Some(anchor_id);
+        }
+        if self.terminal_rename == Some(dragged_id) {
+            self.terminal_rename = None;
+        }
+        self.sidebar_rows_fingerprint.set(None);
+        if let Some(view) = self.right_panel_terminals.get(&dragged_id) {
+            let focus = view.read(cx).focus_handle(cx);
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        }
+        self.save();
+        cx.notify();
+        incoming
+    }
+
+    /// A terminal drag dropped on a terminal surface: clear the hover
+    /// preview, attach the dragged group, and commit the anchor's
+    /// selection — a previewed anchor's temporary selection becomes
+    /// real now that the group genuinely owns the main area.
+    pub(super) fn accept_terminal_pane_drop(
+        &mut self,
+        dragged_id: Uuid,
+        anchor_id: Uuid,
+        max_panes: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let preview = self.terminal_drag_preview.take();
+        if self
+            .attach_terminal_pane_group(dragged_id, anchor_id, max_panes, window, cx)
+            .is_empty()
+        {
+            self.terminal_drag_preview = preview;
+            self.restore_terminal_drag_preview(window, cx);
+            return;
+        }
+        if max_panes == STANDALONE_TERMINAL_MAX_PANES {
+            if self.selected_terminal == Some(anchor_id) {
+                self.activate_terminal_state(anchor_id, false, cx);
+            } else {
+                self.open_docked_terminal(anchor_id, window, cx);
+            }
+        } else {
+            self.terminal_drag_preview = preview;
+            self.restore_terminal_drag_preview(window, cx);
+        }
+        self.save();
+    }
+
+    /// The drop affordance over a terminal surface: a sidebar terminal
+    /// dropped here joins the surface's split group. `can_drop` turns
+    /// down what wouldn't fit — at the cap, or a group into itself — so
+    /// the highlight never promises a drop that can't land.
+    pub(super) fn terminal_drop_target(
+        &self,
+        element: Stateful<Div>,
+        anchor_id: Uuid,
+        max_panes: usize,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        let weak = cx.entity().downgrade();
+        element
+            .on_drag_move::<SidebarTerminalDrag>(cx.listener(
+                move |this, event: &gpui::DragMoveEvent<SidebarTerminalDrag>, window, cx| {
+                    if event.bounds.contains(&window.mouse_position()) {
+                        let dragged = event.drag(cx).terminal_id;
+                        if dragged != anchor_id
+                            && !this.terminal_drop_fits(dragged, anchor_id, max_panes)
+                            && this.terminal_drag_rejected_target != Some(anchor_id)
+                        {
+                            this.terminal_drag_rejected_target = Some(anchor_id);
+                            this.show_toast(tr!("terminal.split_at_max", max = max_panes));
+                            cx.notify();
+                        }
+                    }
+                },
+            ))
+            .can_drop({
+                let weak = weak.clone();
+                move |dragged, _, app| {
+                    let Some(drag) = dragged.downcast_ref::<SidebarTerminalDrag>() else {
+                        return false;
+                    };
+                    weak.read_with(app, |this, _| {
+                        this.terminal_drop_fits(drag.terminal_id, anchor_id, max_panes)
+                    })
+                    .unwrap_or(false)
+                }
+            })
+            .drag_over::<SidebarTerminalDrag>(move |style, drag, _, app| {
+                let fits = weak
+                    .read_with(app, |this, _| {
+                        this.terminal_drop_fits(drag.terminal_id, anchor_id, max_panes)
+                    })
+                    .unwrap_or(false);
+                if fits {
+                    style
+                        .border(px(2.0))
+                        .border_color(theme.accent)
+                        .bg(theme.accent.opacity(0.08))
+                } else {
+                    style
+                }
+            })
+            .on_drop(
+                cx.listener(move |this, drag: &SidebarTerminalDrag, window, cx| {
+                    this.accept_terminal_pane_drop(
+                        drag.terminal_id,
+                        anchor_id,
+                        max_panes,
+                        window,
+                        cx,
+                    );
+                }),
+            )
     }
 
     /// Swap a sidebar terminal row's title for the shared rename field,
@@ -1481,12 +2235,25 @@ impl Waku {
         record_visit: bool,
         cx: &mut Context<Self>,
     ) -> Option<FocusHandle> {
+        // A pane's surface is its anchor's — selecting a member lands
+        // on the group.
+        let terminal_id = self.terminal_group_anchor(terminal_id);
         let record = self.terminal_records.get(&terminal_id)?;
         if !self.right_panel_terminals.contains_key(&terminal_id) {
             // Remote directories spawn through their host's daemon; a
             // disconnected host surfaces as the view's spawn error.
             let working_directory = self.terminal_spawn_directory(record)?;
             self.spawn_terminal_entity(terminal_id, working_directory, cx);
+        }
+        for pane_id in self.terminal_group_panes(terminal_id).into_iter().skip(1) {
+            if !self.right_panel_terminals.contains_key(&pane_id)
+                && let Some(directory) = self
+                    .terminal_records
+                    .get(&pane_id)
+                    .and_then(|record| self.terminal_spawn_directory(record))
+            {
+                self.spawn_terminal_entity(pane_id, directory, cx);
+            }
         }
         if record_visit {
             self.session_navigation.visit(
@@ -1626,6 +2393,16 @@ impl Waku {
                 self.reveal_right_panel_tab(index);
             }
         }
+        for pane_id in self.terminal_group_panes(terminal_id).into_iter().skip(1) {
+            if !self.right_panel_terminals.contains_key(&pane_id)
+                && let Some(directory) = self
+                    .terminal_records
+                    .get(&pane_id)
+                    .and_then(|record| self.terminal_spawn_directory(record))
+            {
+                self.spawn_terminal_entity(pane_id, directory, cx);
+            }
+        }
         self.docked_terminal = Some(terminal_id);
         self.last_visible_terminal = Some(terminal_id);
         self.unseen_terminal_completions.remove(&terminal_id);
@@ -1643,8 +2420,7 @@ impl Waku {
     /// the terminal's view. Only the active tab's view is painted, so a
     /// parked or background strip holding the same tab is no conflict.
     fn terminal_mounts_in_right_panel(&self, terminal_id: Uuid) -> bool {
-        (self.panel_fullscreen_active()
-            || (self.right_panel_visible && !self.git_panel_visible))
+        (self.panel_fullscreen_active() || (self.right_panel_visible && !self.git_panel_visible))
             && self
                 .active_right_panel_surface()
                 .and_then(RightPanelSurface::terminal_id)
@@ -1663,11 +2439,7 @@ impl Waku {
 
     /// Close the card without killing the terminal — the shell keeps
     /// running under its sidebar row, and focus returns to the composer.
-    pub(super) fn dismiss_docked_terminal(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn dismiss_docked_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.docked_terminal.take().is_none() {
             return;
         }
@@ -1867,7 +2639,17 @@ impl Waku {
 
     /// Close a terminal wherever it lives — the active session's tab
     /// strip, a background session's stored surfaces, or the global list.
+    /// An anchor takes its whole group down; a pane's own close is a
+    /// group edit that leaves the surface standing.
     pub(super) fn close_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
+        if self
+            .terminal_records
+            .get(&terminal_id)
+            .is_some_and(|record| record.pane_of.is_some())
+        {
+            self.close_terminal_pane(terminal_id, cx);
+            return;
+        }
         let filled_main_area = self.selected_terminal == Some(terminal_id);
         // A main-area terminal opened from another surface is a temporary
         // visit. Consume its back entry before dropping the terminal, so
@@ -1943,12 +2725,11 @@ impl Waku {
             match current_project {
                 Some((_, true)) | None => self.create_projectless_session(cx),
                 Some((project_id, false)) => {
-                    if let Some(session_id) = self
-                        .session_navigation
-                        .remembered_new_task(&self.state.sessions, project_id, |session| {
-                            self.session_is_boss_managed(session)
-                        })
-                    {
+                    if let Some(session_id) = self.session_navigation.remembered_new_task(
+                        &self.state.sessions,
+                        project_id,
+                        |session| self.session_is_boss_managed(session),
+                    ) {
                         self.select_session(session_id, cx);
                     } else {
                         self.create_session_for(project_id, self.state.last_provider, cx);
@@ -2018,9 +2799,13 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let busy = self
-            .right_panel_terminals
-            .get(&terminal_id)
-            .is_some_and(|terminal| terminal.read(cx).command_running());
+            .terminal_group_panes(terminal_id)
+            .iter()
+            .any(|pane_id| {
+                self.right_panel_terminals
+                    .get(pane_id)
+                    .is_some_and(|terminal| terminal.read(cx).command_running())
+            });
         if busy {
             let focus = self.open_terminal_close_dialog(terminal_id, cx);
             window.focus(&focus, cx);
@@ -2035,6 +2820,7 @@ impl Waku {
         &self,
         terminal_id: Uuid,
         width: f32,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.ensure_sidebar_terminal_repo_roots(cx);
@@ -2071,14 +2857,12 @@ impl Waku {
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.minimize_terminal_to_card(terminal_id, window, cx);
             }))
-            .on_key_down(cx.listener(
-                move |this, event: &KeyDownEvent, window, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.minimize_terminal_to_card(terminal_id, window, cx);
-                        cx.stop_propagation();
-                    }
-                },
-            ));
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.minimize_terminal_to_card(terminal_id, window, cx);
+                    cx.stop_propagation();
+                }
+            }));
         div()
             .flex()
             .flex_col()
@@ -2096,7 +2880,30 @@ impl Waku {
                     .child(div().flex_1())
                     .child(minimize_button),
             )
-            .child(terminal)
+            .child(
+                if self
+                    .terminal_records
+                    .get(&terminal_id)
+                    .is_some_and(|record| !record.panes.is_empty())
+                {
+                    self.render_terminal_group(terminal_id, TerminalGroupLayout::Grid, window, cx)
+                } else {
+                    self.terminal_drop_target(
+                        div()
+                            .id(SharedString::from(format!(
+                                "terminal-body-drop-{terminal_id}"
+                            )))
+                            .flex_1()
+                            .min_h_0()
+                            .size_full()
+                            .child(terminal),
+                        terminal_id,
+                        STANDALONE_TERMINAL_MAX_PANES,
+                        cx,
+                    )
+                    .into_any_element()
+                },
+            )
             .into_any_element()
     }
 
@@ -2159,14 +2966,12 @@ impl Waku {
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.select_terminal(terminal_id, window, cx);
             }))
-            .on_key_down(cx.listener(
-                move |this, event: &KeyDownEvent, window, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.select_terminal(terminal_id, window, cx);
-                        cx.stop_propagation();
-                    }
-                },
-            ));
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.select_terminal(terminal_id, window, cx);
+                    cx.stop_propagation();
+                }
+            }));
         let close_button = div()
             .id(SharedString::from(format!(
                 "docked-terminal-close-{terminal_id}"
@@ -2189,14 +2994,12 @@ impl Waku {
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.dismiss_docked_terminal(window, cx);
             }))
-            .on_key_down(cx.listener(
-                move |this, event: &KeyDownEvent, window, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.dismiss_docked_terminal(window, cx);
-                        cx.stop_propagation();
-                    }
-                },
-            ));
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.dismiss_docked_terminal(window, cx);
+                    cx.stop_propagation();
+                }
+            }));
         div()
             .flex_none()
             .w_full()
@@ -2207,11 +3010,9 @@ impl Waku {
                 div()
                     .id(SharedString::from(format!("docked-terminal-{terminal_id}")))
                     .key_context("DockedTerminal")
-                    .on_action(
-                        cx.listener(|this, _: &DismissDockedTerminal, window, cx| {
-                            this.dismiss_docked_terminal(window, cx);
-                        }),
-                    )
+                    .on_action(cx.listener(|this, _: &DismissDockedTerminal, window, cx| {
+                        this.dismiss_docked_terminal(window, cx);
+                    }))
                     .w_full()
                     .h(px(card_height))
                     .flex()
@@ -2253,10 +3054,212 @@ impl Waku {
                             .min_h_0()
                             .px(px(DOCKED_TERMINAL_INSET))
                             .pb(px(DOCKED_TERMINAL_INSET))
-                            .child(terminal),
+                            .child(
+                                if self
+                                    .terminal_records
+                                    .get(&terminal_id)
+                                    .is_some_and(|record| !record.panes.is_empty())
+                                {
+                                    self.render_terminal_group(
+                                        terminal_id,
+                                        TerminalGroupLayout::Grid,
+                                        window,
+                                        cx,
+                                    )
+                                } else {
+                                    self.terminal_drop_target(
+                                        div()
+                                            .id(SharedString::from(format!(
+                                                "terminal-body-drop-{terminal_id}"
+                                            )))
+                                            .flex_1()
+                                            .min_h_0()
+                                            .size_full()
+                                            .child(terminal),
+                                        terminal_id,
+                                        STANDALONE_TERMINAL_MAX_PANES,
+                                        cx,
+                                    )
+                                    .into_any_element()
+                                },
+                            ),
                     ),
             )
             .into_any_element()
+    }
+
+    /// A split group's panes laid out for its surface — the right
+    /// panel's tabs stack vertically, the main-area terminal tiles into
+    /// at most three columns. Each cell is a real terminal view with a
+    /// close control overlaid at its toolbar's right edge.
+    pub(super) fn render_terminal_group(
+        &self,
+        anchor_id: Uuid,
+        layout: TerminalGroupLayout,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let panes = self.terminal_group_panes(anchor_id);
+        let body = match layout {
+            TerminalGroupLayout::Stack => div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .flex()
+                .flex_col()
+                .children(
+                    panes
+                        .into_iter()
+                        .map(|pane_id| self.render_terminal_pane(pane_id, window, cx)),
+                )
+                .into_any_element(),
+            TerminalGroupLayout::Grid => {
+                // Balance the cells: rows cap the grid at three tall, so
+                // the column count floats with the pane count — 2 panes
+                // sit side by side, 4 make a 2x2, 9 fill the 3x3.
+                let rows = panes.len().div_ceil(STANDALONE_TERMINAL_GRID_COLUMNS);
+                let columns = panes.len().div_ceil(rows.max(1));
+                let mut grid = div().flex_1().min_h_0().w_full().flex().flex_col();
+                for row in panes.chunks(columns.max(1)) {
+                    grid = grid.child(
+                        div().flex_1().min_h_0().w_full().flex().children(
+                            row.iter()
+                                .map(|pane_id| self.render_terminal_pane(*pane_id, window, cx)),
+                        ),
+                    );
+                }
+                grid.into_any_element()
+            }
+        };
+        let limit = match layout {
+            TerminalGroupLayout::Stack => RIGHT_PANEL_TERMINAL_MAX_PANES,
+            TerminalGroupLayout::Grid => STANDALONE_TERMINAL_MAX_PANES,
+        };
+        self.terminal_drop_target(
+            div()
+                .id(SharedString::from(format!(
+                    "terminal-group-drop-{anchor_id}"
+                )))
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .child(body),
+            anchor_id,
+            limit,
+            cx,
+        )
+        .into_any_element()
+    }
+
+    /// One cell of a split group — the terminal's view plus the kill
+    /// button overlaid at its toolbar's right edge, the convention the
+    /// embedded settings terminal established. The hairline frame
+    /// doubles as the cell separator and, tinted, as the focus marker.
+    fn render_terminal_pane(
+        &self,
+        terminal_id: Uuid,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(view) = self.right_panel_terminals.get(&terminal_id).cloned() else {
+            return div().into_any_element();
+        };
+        let focused = view.read(cx).focus_handle(cx).is_focused(window);
+        let busy = view.read(cx).command_running();
+        let close_focus =
+            self.transcript_control_focus(format!("terminal-pane-close-{terminal_id}"), cx);
+        div()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .relative()
+            .border(hairline())
+            .border_color(if focused { theme.accent } else { theme.border })
+            .child(view)
+            .child(
+                div().absolute().top(px(6.0)).right(px(6.0)).child(
+                    icon_button(
+                        SharedString::from(format!("terminal-pane-close-{terminal_id}")),
+                        "icons/x.svg",
+                        theme,
+                    )
+                    .track_focus(&close_focus)
+                    .tab_index(0)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .tooltip(Tooltip::text(tr!("common.close")))
+                    .on_activation(cx, move |this, window, cx| {
+                        // The same running-command guard a surface close
+                        // gets: a busy pane's shell dies with the cell,
+                        // so it asks first.
+                        if busy {
+                            let focus = this.open_terminal_pane_close_dialog(terminal_id, cx);
+                            window.focus(&focus, cx);
+                        } else {
+                            this.close_terminal_pane(terminal_id, cx);
+                        }
+                    }),
+                ),
+            )
+            .into_any_element()
+    }
+
+    /// The split control shared by the right-panel header's terminal tab
+    /// and the window header in terminal mode. At the surface's cap it
+    /// dims and stops answering — the history buttons' disabled
+    /// convention.
+    pub(super) fn render_terminal_split_button(
+        &self,
+        id: &'static str,
+        anchor_id: Uuid,
+        max_panes: usize,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        let at_cap = self.terminal_group_panes(anchor_id).len() >= max_panes;
+        let label = if at_cap {
+            tr!("terminal.split_at_max", max = max_panes)
+        } else {
+            tr!("terminal.split")
+        };
+        let focus = self.transcript_control_focus(id, cx);
+        div()
+            .id(id)
+            .track_focus(&focus)
+            .when(!at_cap, |element| element.tab_index(0))
+            .size(px(26.0))
+            .rounded(px(8.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .tooltip(move |window, cx| {
+                Tooltip::new(label.clone())
+                    .action(&SplitTerminal)
+                    .build(window, cx)
+            })
+            .when(at_cap, |element| element.opacity(0.35))
+            .when(!at_cap, |element| {
+                element
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .hover(|element| element.bg(theme.overlay))
+                    .active(|element| element.bg(theme.overlay_strong))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.split_terminal(anchor_id, max_panes, window, cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.split_terminal(anchor_id, max_panes, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+            })
+            .child(icon("icons/split.svg", 13.0, theme.text_tertiary))
     }
 
     /// One terminal row in the Terminals group — also what a pinned
@@ -2285,37 +3288,46 @@ impl Waku {
         // The title line's trailing slot is the command's status: spinning
         // while one runs, a failure mark or — for a clean exit the user
         // has not seen — an unread dot after, empty when the shell reports
-        // nothing.
-        let status_icon = terminal.and_then(|terminal| {
-            let terminal = terminal.read(cx);
-            if terminal.command_running() {
-                Some(motion::spin_slow(icon(
-                    "icons/loader-circle.svg",
-                    12.0,
-                    theme.text_tertiary,
-                )))
-            } else {
-                match terminal.last_command_exit() {
-                    Some(0)
-                        if self.unseen_terminal_completions.contains(&terminal_id)
-                            && !self.terminal_is_active_surface(terminal_id) =>
-                    {
-                        Some(
-                            div()
-                                .size(px(7.0))
-                                .rounded_full()
-                                .bg(theme.info)
-                                .into_any_element(),
-                        )
-                    }
-                    Some(0) => None,
-                    Some(_) => {
-                        Some(icon("icons/x-bold.svg", 12.0, theme.danger).into_any_element())
-                    }
-                    None => None,
+        // nothing. A split row reports across the whole group — any pane
+        // busy spins, any pane's failure marks.
+        let group_views = std::iter::once(terminal_id)
+            .chain(record.panes.iter().copied())
+            .filter_map(|id| self.right_panel_terminals.get(&id))
+            .collect::<Vec<_>>();
+        let status_icon = (!group_views.is_empty())
+            .then(|| {
+                if group_views
+                    .iter()
+                    .any(|view| view.read(cx).command_running())
+                {
+                    return Some(
+                        motion::spin_slow(icon(
+                            "icons/loader-circle.svg",
+                            12.0,
+                            theme.text_tertiary,
+                        ))
+                        .into_any_element(),
+                    );
                 }
-            }
-        });
+                if group_views.iter().any(
+                    |view| matches!(view.read(cx).last_command_exit(), Some(code) if code != 0),
+                ) {
+                    return Some(icon("icons/x-bold.svg", 12.0, theme.danger).into_any_element());
+                }
+                (self.unseen_terminal_completions.contains(&terminal_id)
+                    && !self.terminal_is_active_surface(terminal_id)
+                    && group_views
+                        .iter()
+                        .any(|view| matches!(view.read(cx).last_command_exit(), Some(0))))
+                .then(|| {
+                    div()
+                        .size(px(7.0))
+                        .rounded_full()
+                        .bg(theme.info)
+                        .into_any_element()
+                })
+            })
+            .flatten();
         let shell_name = terminal
             .map(|terminal| terminal.read(cx).shell_name().to_owned())
             .filter(|name| !name.is_empty())
@@ -2524,7 +3536,7 @@ impl Waku {
                                     }
                                 },
                             ))
-                            .child(SharedString::from(title))
+                            .child(SharedString::from(title.clone()))
                     })
                     .when_some(status_icon, |element, status_icon| {
                         element.child(
@@ -2578,6 +3590,34 @@ impl Waku {
                             cx.stop_propagation();
                         }
                     }))
+                    .on_drag(
+                        SidebarTerminalDrag {
+                            terminal_id,
+                            title: SharedString::from(title.clone()),
+                        },
+                        {
+                            let weak = cx.entity().downgrade();
+                            move |drag, _, window, cx| {
+                                let weak = weak.clone();
+                                window.on_next_frame(move |window, cx| {
+                                    Self::watch_terminal_drag(weak, window, cx)
+                                });
+                                cx.new(|_| drag.clone())
+                            }
+                        },
+                    )
+                    .on_drag_move::<SidebarTerminalDrag>(cx.listener(
+                        move |this,
+                              event: &gpui::DragMoveEvent<SidebarTerminalDrag>,
+                              window,
+                              cx| {
+                            if event.bounds.contains(&window.mouse_position())
+                                && event.drag(cx).terminal_id != terminal_id
+                            {
+                                this.preview_terminal_drag(terminal_id, window, cx);
+                            }
+                        },
+                    ))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.select_terminal(terminal_id, window, cx);
                     }))
@@ -2695,7 +3735,10 @@ fn code_run_turn_tasks(session: &AgentSession, message: Option<&Message>) -> Vec
     {
         push(
             &mut tasks,
-            prompt.report_trigger.as_ref().map(|trigger| trigger.employee),
+            prompt
+                .report_trigger
+                .as_ref()
+                .map(|trigger| trigger.employee),
         );
         push(&mut tasks, prompt.sent_by_task);
     }
@@ -2736,11 +3779,7 @@ fn code_run_path_tokens(text: &str) -> Vec<String> {
 /// the deepest root it sits under — a nested project beats its parent;
 /// a relative path picks every root it exists under, so `../`, flags,
 /// URLs, and words without a separator match nothing.
-fn code_run_token_projects(
-    roots: &[(Uuid, &Path)],
-    token: &str,
-    home: Option<&Path>,
-) -> Vec<Uuid> {
+fn code_run_token_projects(roots: &[(Uuid, &Path)], token: &str, home: Option<&Path>) -> Vec<Uuid> {
     let expanded;
     let path = if let Some(rest) = token.strip_prefix("~/") {
         let Some(home) = home else {
@@ -2759,9 +3798,7 @@ fn code_run_token_projects(
             .max();
         return roots
             .iter()
-            .filter(|(_, root)| {
-                Some(root.components().count()) == depth && path.starts_with(root)
-            })
+            .filter(|(_, root)| Some(root.components().count()) == depth && path.starts_with(root))
             .map(|(id, _)| *id)
             .collect();
     }
@@ -2805,6 +3842,96 @@ fn code_run_content_projects(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn split_record(id: Uuid) -> TerminalRecord {
+        TerminalRecord {
+            session: Some(id),
+            pinned: false,
+            working_directory: Some(PathBuf::from("/tmp")),
+            last_working_directory: None,
+            workspace_directory: None,
+            opened_at: 42,
+            custom_title: Some(id.to_string()),
+            pane_of: None,
+            panes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn terminal_split_limits_count_anchor_and_reject_without_mutation() {
+        for limit in [
+            RIGHT_PANEL_TERMINAL_MAX_PANES,
+            STANDALONE_TERMINAL_MAX_PANES,
+        ] {
+            let anchor = Uuid::from_u128(1);
+            let mut records = HashMap::from([(anchor, split_record(anchor))]);
+            for n in 2..=limit {
+                let id = Uuid::from_u128(n as u128);
+                records.insert(id, split_record(id));
+                assert!(terminal_group_can_add(&records[&anchor], 1, limit));
+                assert_eq!(
+                    join_terminal_groups(&mut records, id, anchor, limit),
+                    vec![id]
+                );
+            }
+            let overflow = Uuid::from_u128(100);
+            records.insert(overflow, split_record(overflow));
+            assert!(!terminal_group_can_add(&records[&anchor], 1, limit));
+            assert!(join_terminal_groups(&mut records, overflow, anchor, limit).is_empty());
+            assert_eq!(terminal_group_ids(&records, anchor).len(), limit);
+            assert_eq!(records[&overflow].pane_of, None);
+            assert!(join_terminal_groups(&mut records, anchor, anchor, limit).is_empty());
+        }
+    }
+
+    #[test]
+    fn terminal_split_drop_moves_whole_group_preserving_identity_and_launch_metadata() {
+        let ids = (1..=4).map(Uuid::from_u128).collect::<Vec<_>>();
+        let mut records = ids
+            .iter()
+            .map(|id| (*id, split_record(*id)))
+            .collect::<HashMap<_, _>>();
+        join_terminal_groups(&mut records, ids[1], ids[0], 9);
+        join_terminal_groups(&mut records, ids[3], ids[2], 9);
+        assert!(!terminal_groups_fit(&records, ids[2], ids[0], 3));
+        assert!(!terminal_groups_fit(&records, ids[1], ids[2], 9));
+        assert_eq!(
+            join_terminal_groups(&mut records, ids[2], ids[0], 9),
+            ids[2..]
+        );
+        assert_eq!(terminal_group_ids(&records, ids[0]), ids);
+        assert_eq!(records.len(), 4);
+        for id in &ids[1..] {
+            assert_eq!(records[id].pane_of, Some(ids[0]));
+            assert!(records[id].panes.is_empty());
+            assert_eq!(records[id].session, Some(*id));
+            assert_eq!(records[id].custom_title, Some(id.to_string()));
+            assert_eq!(records[id].working_directory, Some(PathBuf::from("/tmp")));
+        }
+    }
+
+    #[test]
+    fn terminal_split_persistence_accepts_legacy_records_and_round_trips_membership() {
+        let id = Uuid::from_u128(1);
+        let pane = Uuid::from_u128(2);
+        let mut record: PersistedTerminal =
+            serde_json::from_value(serde_json::json!({ "id": id, "opened_at": 42 }))
+                .expect("legacy terminal record");
+        assert_eq!(record.pane_of, None);
+        assert!(record.panes.is_empty());
+        record.panes.push(pane);
+        let saved = serde_json::to_value(&record).unwrap();
+        let restored: PersistedTerminal = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.id, id);
+        assert_eq!(restored.panes, vec![pane]);
+        record.id = pane;
+        record.panes.clear();
+        record.pane_of = Some(id);
+        let restored: PersistedTerminal =
+            serde_json::from_value(serde_json::to_value(&record).unwrap()).unwrap();
+        assert_eq!(restored.id, pane);
+        assert_eq!(restored.pane_of, Some(id));
+    }
 
     fn temp_root(tag: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("goddard-code-run-{tag}-{}", Uuid::new_v4()));
@@ -2904,7 +4031,11 @@ mod tests {
         std::fs::create_dir_all(&metadata).unwrap();
         std::fs::write(metadata.join("commondir"), "../..").unwrap();
         for checkout in [&managed, &ordinary] {
-            std::fs::write(checkout.join(".git"), format!("gitdir: {}", metadata.display())).unwrap();
+            std::fs::write(
+                checkout.join(".git"),
+                format!("gitdir: {}", metadata.display()),
+            )
+            .unwrap();
         }
         std::fs::create_dir(main.join(".git")).unwrap();
         assert_eq!(terminal_worktree_name(&managed).as_deref(), Some("feature"));
@@ -2977,7 +4108,8 @@ mod tests {
             [coral_id]
         );
         assert!(
-            code_run_token_projects(&home_roots, "~/elsewhere/f.ts", Some(home.as_path())).is_empty()
+            code_run_token_projects(&home_roots, "~/elsewhere/f.ts", Some(home.as_path()))
+                .is_empty()
         );
         // A relative path matches the root it exists under — and only that.
         assert_eq!(
@@ -3006,10 +4138,8 @@ mod tests {
         let other = temp_root("other");
         let coral_id = Uuid::from_u128(1);
         let other_id = Uuid::from_u128(2);
-        let roots: Vec<(Uuid, &Path)> = vec![
-            (coral_id, coral.as_path()),
-            (other_id, other.as_path()),
-        ];
+        let roots: Vec<(Uuid, &Path)> =
+            vec![(coral_id, coral.as_path()), (other_id, other.as_path())];
         let coral_file = format!("{}/scripts/feed.ts", coral.display());
         let other_file = format!("{}/src/lib.rs", other.display());
         let projects = code_run_content_projects(
@@ -3105,6 +4235,8 @@ mod tests {
             workspace_directory: None,
             opened_at: 0,
             custom_title: None,
+            pane_of: None,
+            panes: Vec::new(),
         };
         let mut records = HashMap::new();
         records.insert(ids[0], record(false));
@@ -3120,6 +4252,31 @@ mod tests {
         records.remove(&ids[3]);
         let listed = sidebar_terminal_order(&ids, &records).collect::<Vec<_>>();
         assert_eq!(listed, vec![ids[1], ids[0], ids[2]]);
+    }
+
+    #[test]
+    fn sidebar_terminal_order_hides_panes() {
+        // A split group's panes live inside their anchor's surface — even
+        // pinned, they never get a row of their own.
+        let ids = (1..=3u128).map(Uuid::from_u128).collect::<Vec<_>>();
+        let record = |pinned, pane_of| TerminalRecord {
+            session: None,
+            pinned,
+            working_directory: None,
+            last_working_directory: None,
+            workspace_directory: None,
+            opened_at: 0,
+            custom_title: None,
+            pane_of,
+            panes: Vec::new(),
+        };
+        let mut records = HashMap::new();
+        records.insert(ids[0], record(false, None));
+        records.insert(ids[1], record(true, Some(ids[0])));
+        records.insert(ids[2], record(false, Some(ids[0])));
+
+        let listed = sidebar_terminal_order(&ids, &records).collect::<Vec<_>>();
+        assert_eq!(listed, vec![ids[0]]);
     }
 
     #[test]

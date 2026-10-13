@@ -1162,6 +1162,14 @@ pub struct PersistedTerminal {
     pub opened_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_title: Option<String>,
+    /// The split group's anchor — the terminal whose surface the pane
+    /// renders inside. Absent for standalone terminals and anchors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_of: Option<Uuid>,
+    /// Ordered pane ids splitting this terminal beyond the anchor —
+    /// empty unless the record anchors a split group.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panes: Vec<Uuid>,
 }
 
 /// A right-panel surface maximized over the window, if one was.

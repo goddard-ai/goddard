@@ -1481,6 +1481,10 @@ pub struct TerminalView {
     /// Terminals rendered inside another surface — the provider setup block
     /// in Settings — keep their own header strip and skip the command bar.
     embedded: bool,
+    /// One cell of a split group — like `embedded` the grid sizes to its
+    /// painted cell and the toolbar strip shows, but a pane stays a user
+    /// shell: the command bar and context menu still work.
+    pane: bool,
     /// Advance width of one grid cell, measured from the terminal font on
     /// first render so grid math matches what `StyledText` actually lays out.
     /// Keyed by family and size so a font change re-measures instead of
@@ -1581,6 +1585,7 @@ impl TerminalView {
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             embedded: false,
+            pane: false,
             measured_cell_width: None,
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
@@ -1671,6 +1676,7 @@ impl TerminalView {
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             embedded: false,
+            pane: false,
             measured_cell_width: None,
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
@@ -1856,6 +1862,12 @@ impl TerminalView {
 
     pub fn set_panel_width(&mut self, width: f32) {
         self.panel_width = width;
+    }
+
+    /// Join or leave a split group: pane mode sizes the grid to the
+    /// painted cell and shows the toolbar strip.
+    pub fn set_pane(&mut self, pane: bool) {
+        self.pane = pane;
     }
 
     pub fn refresh_localized_text(&mut self, cx: &mut Context<Self>) {
@@ -3122,10 +3134,10 @@ impl Render for TerminalView {
 
         let command_bar = self.command_bar_element(window, cx);
 
-        // Only an embedded terminal keeps the header strip. Its trailing
-        // inset clears the kill button the parent overlays at the toolbar's
-        // right edge.
-        let toolbar = self.embedded.then(|| {
+        // Only an embedded terminal or a split pane keeps the header
+        // strip. Its trailing inset clears the kill button the parent
+        // overlays at the toolbar's right edge.
+        let toolbar = (self.embedded || self.pane).then(|| {
             let title = if self.title().trim().is_empty() {
                 tr!("right_panel.terminal")
             } else {
@@ -4159,6 +4171,49 @@ mod tests {
     use alacritty_terminal::event::VoidListener;
     use alacritty_terminal::vte::ansi::Processor;
     use gpui::{Modifiers, point, size};
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_split_sessions_have_independent_ptys_resize_and_cleanup() {
+        let launch = TerminalLaunch::Program {
+            program: PathBuf::from("/bin/sh"),
+            args: vec!["-c".into(), "stty -echo; while IFS= read -r line; do case \"$line\" in ping) printf 'pid:%s\\n' \"$$\";; *) printf '%s\\n' \"$line\";; esac; done".into()],
+        };
+        let mut first =
+            TerminalSession::new(&std::env::temp_dir(), &launch, 80, 24, None).expect("first PTY");
+        let second =
+            TerminalSession::new(&std::env::temp_dir(), &launch, 80, 24, None).expect("second PTY");
+        fn wait_for(session: &TerminalSession, prefix: &str) -> String {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(line) = session
+                    .tail_lines(24)
+                    .into_iter()
+                    .find(|line| line.starts_with(prefix))
+                {
+                    return line;
+                }
+                assert!(Instant::now() < deadline, "PTY did not produce {prefix}");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        first.write(b"ping\n".to_vec());
+        second.write(b"ping\n".to_vec());
+        assert_ne!(wait_for(&first, "pid:"), wait_for(&second, "pid:"));
+        assert!(!Arc::ptr_eq(&first.term, &second.term));
+        first.resize(40, 12, 8.0, 16.0);
+        {
+            let term = first.term.lock();
+            assert_eq!((term.columns(), term.screen_lines()), (40, 12));
+        }
+        {
+            let term = second.term.lock();
+            assert_eq!((term.columns(), term.screen_lines()), (80, 24));
+        }
+        drop(first);
+        second.write(b"survivor-output\n".to_vec());
+        assert_eq!(wait_for(&second, "survivor-output"), "survivor-output");
+    }
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
         Keystroke {

@@ -294,6 +294,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "sigma",
     "slash",
     "sparkle",
+    "split",
     "star",
     "star-filled",
     "square",

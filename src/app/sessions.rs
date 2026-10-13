@@ -1115,20 +1115,34 @@ impl Waku {
         // strip belongs to `right_panel_live_owner`, which a page can hold
         // even while a session stays selected underneath.
         if let RightPanelOwner::Session(session_id) = self.right_panel_live_owner {
+            // Persist the pre-drag panel selection while a floating-card
+            // preview borrows its terminal. Other state continues saving.
+            let active = self.terminal_drag_preview.as_ref().map_or(
+                self.right_panel_active_surface,
+                |preview| {
+                    preview.panel_active.as_ref().and_then(|surface| {
+                        self.right_panel_surfaces.iter().position(|candidate| candidate == surface)
+                    })
+                },
+            );
+            let fullscreen = self.terminal_drag_preview.as_ref().map_or(
+                &self.fullscreen_surface,
+                |preview| &preview.fullscreen,
+            );
             panels.insert(
                 session_id,
                 persist_right_panel_state(
                     self.right_panel_visible,
                     self.git_panel_visible,
                     &self.right_panel_surfaces,
-                    self.right_panel_active_surface,
+                    active,
                     &self.right_panel_expanded_paths,
                     &self.right_panel_files_selected_path,
                     self.right_panel_file_tree_width,
                     self.right_panel_diff_selected_file,
                     &self.right_panel_diff_expanded_paths,
                     self.right_panel_diff_source,
-                    &self.fullscreen_surface,
+                    fullscreen,
                 ),
             );
         }
@@ -1148,6 +1162,8 @@ impl Waku {
                         last_working_directory: record.last_working_directory.clone(),
                         opened_at: record.opened_at,
                         custom_title: record.custom_title.clone(),
+                        pane_of: record.pane_of,
+                        panes: record.panes.clone(),
                     })
             })
             .collect();
@@ -1322,10 +1338,50 @@ impl Waku {
                             .flatten(),
                         opened_at: terminal.opened_at,
                         custom_title: terminal.custom_title.clone(),
+                        pane_of: terminal.pane_of,
+                        panes: terminal.panes.clone(),
                     },
                 )
             })
             .collect();
+        // Restore-time repair in both directions: an anchor's list keeps
+        // only records that still exist and still point back at it, then
+        // a pane the anchor no longer claims stands alone again.
+        let records = &self.terminal_records;
+        let stale_panes = records
+            .iter()
+            .flat_map(|(anchor_id, record)| {
+                record.panes.iter().copied().filter_map(move |pane_id| {
+                    let claimed = records
+                        .get(&pane_id)
+                        .is_some_and(|pane| pane.pane_of == Some(*anchor_id));
+                    (!claimed).then_some((*anchor_id, pane_id))
+                })
+            })
+            .collect::<Vec<_>>();
+        for (anchor_id, pane_id) in stale_panes {
+            if let Some(record) = self.terminal_records.get_mut(&anchor_id) {
+                record.panes.retain(|pane| *pane != pane_id);
+            }
+        }
+        let orphaned_panes = self
+            .terminal_records
+            .iter()
+            .filter_map(|(terminal_id, record)| {
+                record.pane_of.and_then(|anchor_id| {
+                    let claimed = self
+                        .terminal_records
+                        .get(&anchor_id)
+                        .is_some_and(|anchor| anchor.panes.contains(terminal_id));
+                    (!claimed).then_some(*terminal_id)
+                })
+            })
+            .collect::<Vec<_>>();
+        for terminal_id in orphaned_panes {
+            if let Some(record) = self.terminal_records.get_mut(&terminal_id) {
+                record.pane_of = None;
+            }
+        }
         self.terminal_order = terminal_records
             .iter()
             .map(|terminal| terminal.id)

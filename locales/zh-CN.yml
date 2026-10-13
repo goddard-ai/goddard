@@ -1714,6 +1714,8 @@ terminal.transport_failed: 终端传输失败
 terminal.no_workspace_description: 请先选择一个任务，再打开终端。
 terminal.process_exited: 进程已退出
 terminal.moved_to_group: 任务的工作空间已变更 — 其终端已移至“终端”分组。
+terminal.split: 拆分终端
+terminal.split_at_max: 最多 %{max} 个窗格
 browser.back: 后退（%{shortcut}）
 browser.forward: 前进（%{shortcut}）
 browser.stop_loading: 停止加载（Esc）

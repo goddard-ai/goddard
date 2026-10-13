@@ -1752,6 +1752,8 @@ terminal.transport_failed: ターミナル転送に失敗しました
 terminal.no_workspace_description: ターミナルを開く前にタスクを選択してください。
 terminal.process_exited: プロセスが終了しました
 terminal.moved_to_group: タスクのワークスペースが変更されたため、そのターミナルはターミナルグループに移動しました。
+terminal.split: ターミナルを分割
+terminal.split_at_max: ペインは %{max} 個までです
 
 browser.back: 戻る（%{shortcut}）
 browser.forward: 進む（%{shortcut}）

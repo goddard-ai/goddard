@@ -622,6 +622,7 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::open_localhost_url_action))
                 .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
                 .on_action(cx.listener(Self::new_terminal_action))
+                .on_action(cx.listener(Self::split_terminal_action))
                 .on_action(cx.listener(Self::open_created_issue_in_github_action))
                 .on_action(cx.listener(Self::open_toast_session_action))
                 .on_action(cx.listener(Self::toggle_terminals_action))
@@ -810,6 +811,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::open_localhost_url_action))
             .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
             .on_action(cx.listener(Self::new_terminal_action))
+            .on_action(cx.listener(Self::split_terminal_action))
             .on_action(cx.listener(Self::open_created_issue_in_github_action))
             .on_action(cx.listener(Self::open_toast_session_action))
             .on_action(cx.listener(Self::toggle_terminals_action))
@@ -990,6 +992,7 @@ impl Render for Waku {
                             self.render_main_terminal(
                                 terminal_id,
                                 self.chat_viewport_width(window),
+                                window,
                                 cx,
                             )
                         } else if self.state.boss_experiment_enabled && self.boss_ui.page.is_some()

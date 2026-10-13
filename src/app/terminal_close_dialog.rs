@@ -24,6 +24,7 @@ pub fn init(cx: &mut App) {
 pub(super) struct TerminalCloseDialogState {
     pub(super) terminal_id: Uuid,
     title: String,
+    pane_only: bool,
     kill_focus: FocusHandle,
     cancel_focus: FocusHandle,
 }
@@ -36,9 +37,10 @@ impl Waku {
         terminal_id: Uuid,
         cx: &mut Context<Self>,
     ) -> FocusHandle {
-        if let Some(dialog) = &self.terminal_close_dialog
+        if let Some(dialog) = &mut self.terminal_close_dialog
             && dialog.terminal_id == terminal_id
         {
+            dialog.pane_only = false;
             return dialog.kill_focus.clone();
         }
         let title = self
@@ -56,6 +58,7 @@ impl Waku {
         self.terminal_close_dialog = Some(TerminalCloseDialogState {
             terminal_id,
             title,
+            pane_only: false,
             cancel_focus: cx.focus_handle(),
             kill_focus: kill_focus.clone(),
         });
@@ -63,11 +66,36 @@ impl Waku {
         kill_focus
     }
 
+    pub(super) fn open_terminal_pane_close_dialog(
+        &mut self,
+        id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> FocusHandle {
+        let focus = self.open_terminal_close_dialog(id, cx);
+        if let Some(dialog) = self.terminal_close_dialog.as_mut() {
+            dialog.pane_only = true;
+        }
+        focus
+    }
+
     fn confirm_terminal_close_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = self.terminal_close_dialog.take() else {
             return;
         };
-        self.close_terminal(dialog.terminal_id, cx);
+        if dialog.pane_only {
+            let anchor = self.terminal_group_anchor(dialog.terminal_id);
+            let survivor = self
+                .terminal_group_panes(anchor)
+                .into_iter()
+                .find(|id| *id != dialog.terminal_id);
+            self.close_terminal_pane(dialog.terminal_id, cx);
+            if let Some(view) = survivor.and_then(|id| self.right_panel_terminals.get(&id)) {
+                window.focus(&view.read(cx).focus_handle(cx), cx);
+            }
+            return;
+        } else {
+            self.close_terminal(dialog.terminal_id, cx);
+        }
         // drop_terminal already focused the successor terminal; with none
         // left the main area falls back to the task surface's composer.
         if self.selected_terminal.is_none() {

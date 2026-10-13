@@ -3864,6 +3864,10 @@ terminal.expand:
   en: Expand to full screen
 terminal.minimize:
   en: Minimize to floating terminal
+terminal.split:
+  en: Split terminal
+terminal.split_at_max:
+  en: "At most %{max} panes"
 
 project.add_project:
   en: Add project

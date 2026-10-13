@@ -5698,10 +5698,13 @@ impl Waku {
             return None;
         }
         let terminal_id = self.active_right_panel_surface()?.terminal_id()?;
-        self.right_panel_terminals
-            .get(&terminal_id)
-            .is_some_and(|terminal| terminal.read(cx).focus_handle(cx).is_focused(window))
-            .then_some(terminal_id)
+        self.terminal_group_panes(terminal_id)
+            .into_iter()
+            .find(|terminal_id| {
+                self.right_panel_terminals
+                    .get(terminal_id)
+                    .is_some_and(|terminal| terminal.read(cx).focus_handle(cx).is_focused(window))
+            })
     }
 
     pub(super) fn request_active_browser_focus(&mut self) {
@@ -6203,15 +6206,15 @@ impl Waku {
         if let Some(terminal_id) = self.docked_terminal
             && self.docked_terminal_visible(terminal_id)
         {
-            let terminal_focused = self
-                .right_panel_terminals
-                .get(&terminal_id)
-                .is_some_and(|terminal| {
-                    terminal
-                        .read(cx)
-                        .focus_handle(cx)
-                        .contains_focused(window, cx)
-                });
+            let terminal_focused =
+                self.right_panel_terminals
+                    .get(&terminal_id)
+                    .is_some_and(|terminal| {
+                        terminal
+                            .read(cx)
+                            .focus_handle(cx)
+                            .contains_focused(window, cx)
+                    });
             if terminal_focused {
                 self.close_main_terminal(terminal_id, window, cx);
             } else {
@@ -6244,9 +6247,13 @@ impl Waku {
                 .get(active)
                 .and_then(|surface| surface.terminal_id())
                 && self
-                    .right_panel_terminals
-                    .get(&terminal_id)
-                    .is_some_and(|terminal| terminal.read(cx).command_running())
+                    .terminal_group_panes(terminal_id)
+                    .iter()
+                    .any(|pane_id| {
+                        self.right_panel_terminals
+                            .get(pane_id)
+                            .is_some_and(|terminal| terminal.read(cx).command_running())
+                    })
             {
                 let focus = self.open_terminal_close_dialog(terminal_id, cx);
                 window.focus(&focus, cx);
@@ -6364,11 +6371,19 @@ impl Waku {
         }
         // Record whichever terminal actually holds focus — pending requests
         // land here, and so do direct clicks into the grid on a later frame.
+        // A split tab's focus lives on one of its panes; the strip still
+        // remembers the anchor the tab points at.
         if let Some(terminal_id) = active_terminal_id
             && self
-                .right_panel_terminals
-                .get(&terminal_id)
-                .is_some_and(|terminal| terminal.read(cx).focus_handle(cx).is_focused(window))
+                .terminal_group_panes(terminal_id)
+                .iter()
+                .any(|pane_id| {
+                    self.right_panel_terminals
+                        .get(pane_id)
+                        .is_some_and(|terminal| {
+                            terminal.read(cx).focus_handle(cx).is_focused(window)
+                        })
+                })
         {
             self.right_panel_last_focused_terminal = Some(terminal_id);
             // Holding focus is having seen the completion — the sidebar's
@@ -6388,37 +6403,69 @@ impl Waku {
             Some(RightPanelSurface::Diff) => self
                 .render_right_panel_diff(width, window, cx)
                 .into_any_element(),
-            Some(RightPanelSurface::Terminal(terminal_id)) => div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_h_0()
-                .child(
+            Some(RightPanelSurface::Terminal(terminal_id))
+                if self
+                    .terminal_records
+                    .get(&terminal_id)
+                    .is_some_and(|record| !record.panes.is_empty()) =>
+            {
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .px(px(8.0))
+                            .py(px(4.0))
+                            .child(self.render_terminal_location_for_id(terminal_id, cx)),
+                    )
+                    .child(self.render_terminal_group(
+                        terminal_id,
+                        TerminalGroupLayout::Stack,
+                        window,
+                        cx,
+                    ))
+                    .into_any_element()
+            }
+            Some(RightPanelSurface::Terminal(terminal_id)) => {
+                let terminal = self
+                    .right_panel_terminals
+                    .get(&terminal_id)
+                    .cloned()
+                    .inspect(|terminal| {
+                        terminal.update(cx, |terminal, _| terminal.set_panel_width(width));
+                    })
+                    .map(IntoElement::into_any_element)
+                    .unwrap_or_else(|| {
+                        self.render_right_panel_empty_message(
+                            tr!("right_panel.terminal_unavailable"),
+                            tr!("right_panel.terminal_unavailable_description"),
+                            cx,
+                        )
+                        .into_any_element()
+                    });
+                self.terminal_drop_target(
                     div()
-                        .px(px(8.0))
-                        .py(px(4.0))
-                        .child(self.render_terminal_location_for_id(terminal_id, cx)),
+                        .id("right-panel-terminal-drop")
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .px(px(8.0))
+                                .py(px(4.0))
+                                .child(self.render_terminal_location_for_id(terminal_id, cx)),
+                        )
+                        .child(terminal),
+                    terminal_id,
+                    RIGHT_PANEL_TERMINAL_MAX_PANES,
+                    cx,
                 )
-                .child(
-                    self.right_panel_terminals
-                        .get(&terminal_id)
-                        .cloned()
-                        .inspect(|terminal| {
-                            terminal.update(cx, |terminal, _| {
-                                terminal.set_panel_width(width);
-                            });
-                        })
-                        .map(IntoElement::into_any_element)
-                        .unwrap_or_else(|| {
-                            self.render_right_panel_empty_message(
-                                tr!("right_panel.terminal_unavailable"),
-                                tr!("right_panel.terminal_unavailable_description"),
-                                cx,
-                            )
-                            .into_any_element()
-                        }),
-                )
-                .into_any_element(),
+                .into_any_element()
+            }
             Some(RightPanelSurface::File(path)) => self
                 .render_right_panel_file(path, width, true, None, window, cx)
                 .into_any_element(),
@@ -7848,7 +7895,18 @@ impl Waku {
         else {
             return;
         };
-        self.close_terminal(terminal_id, cx);
+        // A group member's exit retires only its cell — an anchor's exit
+        // promotes the next pane rather than closing the surface the
+        // group still fills.
+        if self
+            .terminal_records
+            .get(&terminal_id)
+            .is_some_and(|record| record.pane_of.is_some() || !record.panes.is_empty())
+        {
+            self.close_terminal_pane(terminal_id, cx);
+        } else {
+            self.close_terminal(terminal_id, cx);
+        }
     }
 
     fn ensure_right_panel_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
@@ -7923,6 +7981,8 @@ impl Waku {
             .right_panel_surfaces
             .iter()
             .filter_map(RightPanelSurface::terminal_id)
+            // An active group's panes spawn with their anchor's tab.
+            .flat_map(|terminal_id| self.terminal_group_panes(terminal_id))
             .collect::<Vec<_>>();
         let retained_terminal_ids = active_terminal_ids
             .iter()
@@ -8233,6 +8293,18 @@ impl Waku {
                         theme.surface,
                     )),
             );
+
+        if let Some(terminal_id) = self
+            .active_right_panel_surface()
+            .and_then(RightPanelSurface::terminal_id)
+        {
+            header = header.child(self.render_terminal_split_button(
+                "right-panel-terminal-split",
+                terminal_id,
+                RIGHT_PANEL_TERMINAL_MAX_PANES,
+                cx,
+            ));
+        }
 
         if self.active_right_panel_surface().is_some() {
             let maximized = self.fullscreen_surface.is_some();

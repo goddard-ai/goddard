@@ -95,7 +95,7 @@ use crate::{
     OpenFind, OpenFindReplace, OpenGoToLine, OpenResumePicker, OpenSettings, PushBaseBranch, Quit,
     ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows, SelectAutomationsTab,
     SelectFavoriteModel, SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask,
-    SelectProjectsTab, SelectSidebarSession, StepModelPickerBackward, SwitchProjectBackward,
+    SelectProjectsTab, SelectSidebarSession, SplitTerminal, StepModelPickerBackward, SwitchProjectBackward,
     SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward, SyncBranch, ToggleAutomationsPage,
     ToggleEmployeeAttention,
     ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleEnvironment,
@@ -3765,6 +3765,10 @@ pub struct Waku {
     /// The terminal last shown in the main area. Survives the group's
     /// collapse so re-expanding lands on it again.
     last_visible_terminal: Option<Uuid>,
+    /// The previous floating-card selection while a terminal drag previews
+    /// another sidebar terminal. Cancellation restores this selection.
+    terminal_drag_preview: Option<terminals::TerminalDragPreview>,
+    terminal_drag_rejected_target: Option<Uuid>,
     /// The custom command a terminal surface was opened for, keyed by the
     /// surface's terminal id. Absent for plain shell terminals; the entry
     /// tells `ensure_right_panel_terminal` how to spawn the PTY and carries
@@ -4560,7 +4564,10 @@ pub use shortcuts_dialog::DismissShortcutsDialog;
 pub use sidebar::CancelSessionRename;
 use streaming::*;
 pub use terminal_close_dialog::{ConfirmTerminalClose, DismissTerminalClose};
-use terminals::TerminalRecord;
+use terminals::{
+    RIGHT_PANEL_TERMINAL_MAX_PANES, STANDALONE_TERMINAL_MAX_PANES, TerminalGroupLayout,
+    TerminalRecord,
+};
 use transcript::*;
 use transcript_view::ConversationNavigationRail;
 
@@ -7715,6 +7722,8 @@ impl Waku {
                 selected_terminal: None,
                 docked_terminal: None,
                 last_visible_terminal: None,
+                terminal_drag_preview: None,
+                terminal_drag_rejected_target: None,
                 right_panel_terminal_commands: HashMap::new(),
                 right_panel_terminal_programs: HashMap::new(),
                 sandbox_sign_in_tabs: HashMap::new(),
