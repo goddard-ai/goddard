@@ -415,6 +415,7 @@ impl Waku {
         // Catalog delivery may precede the Boss pointer push. Carry the
         // id-keyed draft state now as well; a later push is idempotent.
         if self.boss_ui.rotated_chat_drafts.get(&from) != Some(&to) {
+            self.migrate_boss_annotations(key, from, to, cx);
             self.migrate_voice_scratchpad(from, to);
             self.migrate_boss_composer_draft(from, to, cx);
             self.migrate_boss_queue_drain(from, to);

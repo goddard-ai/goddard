@@ -1727,6 +1727,7 @@ impl Waku {
             let planning = state.planning.clone();
             self.boss_ui.states.insert(key, state);
             if let Some((from, to)) = rotated_session {
+                self.migrate_boss_annotations(key, from, to, cx);
                 self.migrate_voice_scratchpad(from, to);
                 self.migrate_boss_composer_draft(from, to, cx);
                 self.migrate_boss_queue_drain(from, to);

@@ -48,11 +48,14 @@ use gpui::{
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, canvas, deferred, div, px,
 };
 
+use waku_client::DaemonKey;
+
 use crate::input::Clear;
 use crate::md::render::{MarkdownView, TranscriptSelection, text_range_bounds};
 use crate::md::selection::{
     Annotations, FileAnnotation, HistorySource, Span, TextKey, TranscriptAnnotation,
 };
+use crate::persistence::ComposerDraftAnnotation;
 use crate::ui::ActivationExt;
 use crate::ui::menu::{DismissMenu, FloatingSurface, MenuAlign};
 use crate::ui::shortcut::ShortcutHint;
@@ -342,6 +345,109 @@ pub(super) struct AnnotatableSelection {
     pub history_session: Option<Uuid>,
     pub message_id: Uuid,
     pub spans: Vec<Span>,
+}
+
+/// The provenance snapshot a pin carries once its message's chat has rotated
+/// out — built the same whether the pin started on a history row or a live
+/// row the rotation just retired. `session` is the chat that owns the
+/// message; `None` when it has not loaded, leaving the snapshot to the ids.
+fn boss_history_source(
+    session_id: Uuid,
+    session: Option<&AgentSession>,
+    message_id: Uuid,
+    author: Option<String>,
+) -> HistorySource {
+    let message = session
+        .and_then(|session| session.messages.iter().find(|m| m.id == message_id));
+    HistorySource {
+        session_id,
+        turn: message
+            .and_then(|message| message.turn_id)
+            .and_then(|turn_id| {
+                session.and_then(|session| session.turns.iter().find(|t| t.id == turn_id))
+            })
+            .map(|turn| turn.turn_count),
+        author,
+        created_at: message.map(|message| message.created_at),
+    }
+}
+
+/// Retarget `items`' live-row pins on `retired`'s assistant messages to the
+/// `boss-history-message-{session}:{message}` keys those rows paint under
+/// once the chat rotates, stamping each with its provenance snapshot. Pins
+/// already citing an earlier chat and file pins are untouched. Returns
+/// whether anything moved.
+fn retarget_annotations_to_history(
+    items: &mut [TranscriptAnnotation],
+    retired: &AgentSession,
+    author: &Option<String>,
+) -> bool {
+    let mut moved = false;
+    for annotation in items.iter_mut() {
+        if annotation.history.is_some() || annotation.file.is_some() {
+            continue;
+        }
+        if !retired.messages.iter().any(|message| {
+            message.id == annotation.message_id && message.role == MessageRole::Assistant
+        }) {
+            continue;
+        }
+        let live_row = format!("message-{}", annotation.message_id);
+        let history_row =
+            format!("boss-history-message-{}:{}", retired.id, annotation.message_id);
+        for span in &mut annotation.spans {
+            if *span.key.row == *live_row {
+                span.key.row = history_row.as_str().into();
+            }
+        }
+        annotation.history = Some(boss_history_source(
+            retired.id,
+            Some(retired),
+            annotation.message_id,
+            author.clone(),
+        ));
+        moved = true;
+    }
+    moved
+}
+
+/// [`retarget_annotations_to_history`] over a serialized draft's records —
+/// the parked copy a session restore replays when the chat is reopened.
+fn retarget_draft_annotations_to_history(
+    items: &mut [ComposerDraftAnnotation],
+    retired: &AgentSession,
+    author: &Option<String>,
+) -> bool {
+    let mut moved = false;
+    for annotation in items.iter_mut() {
+        if annotation.history.is_some() || annotation.file.is_some() {
+            continue;
+        }
+        if !retired.messages.iter().any(|message| {
+            message.id == annotation.message_id && message.role == MessageRole::Assistant
+        }) {
+            continue;
+        }
+        let live_row = format!("message-{}", annotation.message_id);
+        let history_row =
+            format!("boss-history-message-{}:{}", retired.id, annotation.message_id);
+        for span in &mut annotation.spans {
+            if span.row == live_row {
+                span.row = history_row.clone();
+            }
+        }
+        annotation.history = Some(
+            (&boss_history_source(
+                retired.id,
+                Some(retired),
+                annotation.message_id,
+                author.clone(),
+            ))
+                .into(),
+        );
+        moved = true;
+    }
+    moved
 }
 
 /// What the sent user bubble shows: each annotated passage as a quote block
@@ -1024,30 +1130,15 @@ impl Waku {
         // A pin on an earlier boss chat snapshots its provenance — the row
         // can unload or the chat can rotate again before the comment ships.
         let history = selection.history_session.map(|session_id| {
-            let entry = self.boss_history_session(session_id);
-            let message = entry.and_then(|entry| {
-                entry
-                    .session
-                    .messages
-                    .iter()
-                    .find(|message| message.id == selection.message_id)
-            });
-            HistorySource {
+            boss_history_source(
                 session_id,
-                turn: message
-                    .and_then(|message| message.turn_id)
-                    .and_then(|turn_id| {
-                        entry.and_then(|entry| {
-                            entry.session.turns.iter().find(|turn| turn.id == turn_id)
-                        })
-                    })
-                    .map(|turn| turn.turn_count),
-                author: self
-                    .boss_chat_key()
+                self.boss_history_session(session_id)
+                    .map(|entry| &entry.session),
+                selection.message_id,
+                self.boss_chat_key()
                     .and_then(|key| self.boss_ui.states.get(&key))
                     .map(|state| state.identity.name.clone()),
-                created_at: message.map(|message| message.created_at),
-            }
+            )
         });
         let message_id = selection.message_id;
         let spans = selection.spans;
@@ -1933,6 +2024,80 @@ impl Waku {
             self.annotation_editor = None;
             self.annotation_comment_input
                 .update(cx, |input, cx| input.set_content("", cx));
+        }
+    }
+
+    /// A Boss rotation re-keyed the chat's session: `from` is retired, `to`
+    /// its replacement, and `from`'s mounted rows repaint under
+    /// `boss-history-message-` keys once the swap splices them in. Retarget
+    /// the rotating chat's live pins to those keys and stamp their
+    /// provenance the way `annotate_selection` does for pins made on
+    /// history rows outright — left alone, the frame's prune reads them as
+    /// foreign messages on the successor, drops them, and closes the
+    /// floating editor mid-draft. The open editor, its in-progress comment
+    /// text, and the pin's never-confirmed state are untouched — only the
+    /// anchor moves. The parked and draft-serialized copies of the retired
+    /// chat's set migrate as well, so a session switch or a restart's
+    /// restore finds the same pins rather than dropping them.
+    pub(super) fn migrate_boss_annotations(
+        &mut self,
+        key: DaemonKey,
+        from: Uuid,
+        to: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(retired) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == from)
+        else {
+            return;
+        };
+        let author = self
+            .boss_ui
+            .states
+            .get(&key)
+            .map(|state| state.identity.name.clone());
+        let mut moved = false;
+        // The live transcript set belongs to the rotating chat only while it
+        // is the one on screen; other surfaces' live sets are untouched.
+        if self.annotation_session == Some(from) {
+            moved |= {
+                let mut annotations = self.transcript_selection.annotations.borrow_mut();
+                retarget_annotations_to_history(&mut annotations.items, retired, &author)
+            };
+            self.annotation_session = Some(to);
+            // A parked set for the successor folds in with the migrated
+            // pins; sorting by id keeps the submission's "Annotation N"
+            // numbering in creation order.
+            if let Some(parked) = self.transcript_annotations.remove(&to) {
+                let mut annotations = self.transcript_selection.annotations.borrow_mut();
+                annotations.items.extend(parked);
+                annotations.items.sort_by_key(|annotation| annotation.id);
+                moved = true;
+            }
+        }
+        if let Some(mut parked) = self.transcript_annotations.remove(&from) {
+            moved |= retarget_annotations_to_history(&mut parked, retired, &author);
+            let merged = self.transcript_annotations.entry(to).or_default();
+            merged.extend(parked);
+            merged.sort_by_key(|annotation| annotation.id);
+        }
+        // The draft slots too: `migrate_boss_composer_draft` re-keys the
+        // `from` draft onto `to`, carrying whatever its serialized
+        // annotations say — they need the same retarget or a later restore
+        // replays pins no row can claim. Check both slots so the order the
+        // two migrations run in cannot matter.
+        for slot in [from, to] {
+            if let Some(draft) = self.composer_drafts.sessions.get_mut(&slot) {
+                moved |=
+                    retarget_draft_annotations_to_history(&mut draft.annotations, retired, &author);
+            }
+        }
+        if moved {
+            self.schedule_composer_draft_save(cx);
+            cx.notify();
         }
     }
 
@@ -4006,5 +4171,148 @@ mod tests {
         // An ordinal past the document's blocks maps nowhere.
         let span = preview_span(9, "Title", 0..5);
         assert_eq!(preview_span_source_range(&view, content, &span), None);
+    }
+
+    /// The retired boss chat as `migrate_boss_annotations` finds it in
+    /// `state.sessions`: archived, still carrying its messages and turns.
+    fn retired_chat(id: u128) -> (AgentSession, Uuid) {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.id = Uuid::from_u128(id);
+        session.boss_managed = true;
+        session.archived_at = Some(1);
+        let turn_id = Uuid::new_v4();
+        session.turns.push(waku_protocol::model::AgentTurn {
+            id: turn_id,
+            turn_count: 4,
+            status: TurnStatus::Completed,
+            provider_turn_started: true,
+            provider_resume_at: None,
+            interruption: None,
+            started_at: 10,
+            completed_at: Some(20),
+            checkpoint: None,
+        });
+        let message_id = session.push_message(MessageRole::Assistant, "the quoted answer");
+        session
+            .messages
+            .last_mut()
+            .expect("pushed message")
+            .turn_id = Some(turn_id);
+        (session, message_id)
+    }
+
+    /// A pin made on the retired chat's live transcript row: the shape an
+    /// open "Add to chat" editor sits over when the rotation lands.
+    fn live_chat_pin(id: u64, message_id: Uuid, text: &str, comment: &str) -> TranscriptAnnotation {
+        let mut pin = annotation(id, text, comment);
+        pin.message_id = message_id;
+        pin.spans[0].key = TextKey::new(format!("message-{message_id}"), 2);
+        pin
+    }
+
+    #[test]
+    fn boss_rotation_retargets_live_pins_onto_history_rows() {
+        let (retired, message_id) = retired_chat(7);
+        let earlier = history_annotation(
+            1,
+            Uuid::from_u128(9),
+            Uuid::new_v4(),
+            Some(1),
+            "old",
+            "settled",
+        );
+        let file = file_annotation(2, "src/main.rs", "run();", 0..6, 1, 1, "");
+        let mut foreign = annotation(4, "elsewhere", "");
+        foreign.message_id = Uuid::new_v4();
+        let mut items = vec![
+            live_chat_pin(3, message_id, "the quoted answer", "half-typed note"),
+            earlier,
+            file,
+            foreign,
+        ];
+
+        assert!(retarget_annotations_to_history(
+            &mut items,
+            &retired,
+            &Some("Boss".into())
+        ));
+        // A second pass — the drain and the refresh can both run the
+        // migration — moves nothing.
+        assert!(!retarget_annotations_to_history(
+            &mut items,
+            &retired,
+            &Some("Boss".into())
+        ));
+
+        let pin = &items[0];
+        assert_eq!(
+            pin.spans[0].key.row.as_ref(),
+            format!("boss-history-message-{}:{message_id}", retired.id)
+        );
+        // The element index, excerpt, and in-progress comment are untouched.
+        assert_eq!(pin.spans[0].key.index, 2);
+        assert_eq!(pin.comment, "half-typed note");
+        let history = pin.history.as_ref().expect("provenance stamped");
+        assert_eq!(history.session_id, retired.id);
+        assert_eq!(history.turn, Some(4));
+        assert_eq!(history.author.as_deref(), Some("Boss"));
+        assert!(history.created_at.is_some());
+        // An earlier-chat pin, a file pin, and a message the retired chat
+        // does not own all stay put.
+        assert_eq!(
+            items[1].history.as_ref().map(|history| history.session_id),
+            Some(Uuid::from_u128(9))
+        );
+        assert!(items[2].history.is_none());
+        assert!(items[3].history.is_none());
+    }
+
+    #[test]
+    fn boss_rotation_retargets_serialized_draft_pins() {
+        use crate::persistence::ComposerDraftAnnotationSpan;
+
+        let (retired, message_id) = retired_chat(7);
+        let mut items = vec![
+            ComposerDraftAnnotation {
+                id: 1,
+                message_id,
+                spans: vec![ComposerDraftAnnotationSpan {
+                    row: format!("message-{message_id}"),
+                    index: 0,
+                    start: 0,
+                    end: 5,
+                    text: "the q".into(),
+                    block_break: false,
+                }],
+                comment: "staged note".into(),
+                file: None,
+                history: None,
+            },
+            // A record for a message the retired chat does not own stays.
+            ComposerDraftAnnotation {
+                id: 2,
+                message_id: Uuid::new_v4(),
+                spans: vec![],
+                comment: String::new(),
+                file: None,
+                history: None,
+            },
+        ];
+        assert!(retarget_draft_annotations_to_history(
+            &mut items,
+            &retired,
+            &None
+        ));
+        assert_eq!(
+            items[0].spans[0].row,
+            format!("boss-history-message-{}:{message_id}", retired.id)
+        );
+        assert_eq!(items[0].comment, "staged note");
+        assert_eq!(
+            items[0].history.as_ref().map(|history| history.session_id),
+            Some(retired.id)
+        );
+        assert_eq!(items[0].history.as_ref().and_then(|h| h.turn), Some(4));
+        assert!(items[1].history.is_none());
     }
 }
