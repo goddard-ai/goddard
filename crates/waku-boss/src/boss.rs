@@ -949,6 +949,39 @@ impl BossService {
         })
     }
 
+    /// Whether `caller` would pass `prepare_employee`'s summon-authority
+    /// gate for `persona_id` right now: an active boss principal or
+    /// boss-authority employee, or a live employee holding the summon
+    /// grant under the same persona. Chain admission consults this so a
+    /// supervisor id stranded by boss rotation or employee retirement
+    /// falls back to the current boss session instead of failing at
+    /// launch.
+    pub fn can_summon_employees(&self, caller: Uuid, persona_id: Option<Uuid>) -> bool {
+        let state = self.document();
+        if self.is_planning(caller)
+            && !self
+                .session_active
+                .lock()
+                .clone()
+                .map(|is_active| is_active(caller))
+                .unwrap_or(true)
+        {
+            return false;
+        }
+        if self.has_boss_authority(caller) {
+            return true;
+        }
+        let Ok(persona_id) = Self::resolve_employee_persona(&state, persona_id) else {
+            return false;
+        };
+        state.employees.iter().any(|entry| {
+            entry.session_id == caller
+                && !entry.expired
+                && entry.permissions.summon_employees
+                && entry.persona_id == persona_id
+        })
+    }
+
     pub fn is_employee(&self, session: Uuid) -> bool {
         self.state
             .lock()

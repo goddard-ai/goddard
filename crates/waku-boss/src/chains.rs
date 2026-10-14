@@ -47,7 +47,10 @@ pub enum ChainObservation {
 pub struct HandoffVerification {
     pub accessible_artifacts: Vec<String>,
     pub clean_committed_workspace: Option<(String, String)>,
-    pub confirmed_landing: Option<(String, String, String)>,
+    // (landed revision, resolved QA branch, reported submission id) — the
+    // submission id is the employee's own claim, echoed for traceability;
+    // the host verifies only revision ancestry on the configured branch.
+    pub confirmed_landing: Option<(String, String, Option<String>)>,
     pub source_revision: Option<String>,
     pub successor_access: bool,
 }
@@ -1241,16 +1244,21 @@ fn gate_reason(
                 }
             }
             HandoffBoundary::Landed => {
-                if !code
+                // The submission id is a claim, never a host product —
+                // `merge submit` mints none — so it rides the confirmed
+                // tuple optional rather than gating it.
+                let reported = code
                     .landed_revision
                     .as_ref()
                     .zip(code.qa_branch.as_ref())
-                    .zip(code.submission_id.as_ref())
-                    .is_some_and(|((revision, branch), submission)| {
-                        verification.confirmed_landing.as_ref()
-                            == Some(&(revision.clone(), branch.clone(), submission.clone()))
-                    })
-                {
+                    .map(|(revision, branch)| {
+                        (
+                            revision.clone(),
+                            branch.clone(),
+                            code.submission_id.clone(),
+                        )
+                    });
+                if reported.is_none() || verification.confirmed_landing != reported {
                     return Some("QA landing unconfirmed".into());
                 }
             }
@@ -2299,10 +2307,27 @@ mod tests {
         let mut verification = verified();
         verification.source_revision = Some("source".into());
         verification.confirmed_landing =
-            Some(("rebased".into(), "dev".into(), "submission".into()));
+            Some(("rebased".into(), "dev".into(), Some("submission".into())));
         assert!(gate_reason(&step, &result, &verification, 1).is_none());
         verification.confirmed_landing =
-            Some(("original".into(), "dev".into(), "submission".into()));
+            Some(("original".into(), "dev".into(), Some("submission".into())));
+        assert!(gate_reason(&step, &result, &verification, 1).is_some());
+        // `merge submit` mints no submission id — the claim stays optional
+        // and a verified landing without it still seals.
+        result.code.as_mut().unwrap().submission_id = None;
+        verification.confirmed_landing = Some(("rebased".into(), "dev".into(), None));
+        assert!(gate_reason(&step, &result, &verification, 1).is_none());
+        // Revision ancestry and the configured branch still gate.
+        verification.confirmed_landing = Some(("original".into(), "dev".into(), None));
+        assert!(gate_reason(&step, &result, &verification, 1).is_some());
+        verification.confirmed_landing = Some(("rebased".into(), "main".into(), None));
+        assert!(gate_reason(&step, &result, &verification, 1).is_some());
+        // A missing revision or branch claim never seals.
+        result.code.as_mut().unwrap().landed_revision = None;
+        assert!(gate_reason(&step, &result, &verification, 1).is_some());
+        let code = result.code.as_mut().unwrap();
+        code.landed_revision = Some("rebased".into());
+        code.qa_branch = None;
         assert!(gate_reason(&step, &result, &verification, 1).is_some());
     }
 }

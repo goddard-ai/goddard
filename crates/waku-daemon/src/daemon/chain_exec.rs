@@ -273,8 +273,17 @@ impl WakuBackend {
         if !self.boss.employee_base_resolved() {
             return;
         }
+        // A supervisor id captured at Create can outlive its authority —
+        // boss rotation swaps the session, retirement drops the employee.
+        // A stale stored id must never strand a chain: fall back to the
+        // live boss session when the recorded supervisor can no longer
+        // summon this step's persona.
         let Some(supervisor) = chain
             .supervisor_id
+            .filter(|supervisor| {
+                self.boss
+                    .can_summon_employees(*supervisor, step.definition.persona_id)
+            })
             .or_else(|| self.boss.document().session_id)
         else {
             return;

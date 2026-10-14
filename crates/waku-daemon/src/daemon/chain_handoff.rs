@@ -319,13 +319,15 @@ fn clean_committed_workspace(
 }
 
 /// The landed gate: the reported revision is reachable on the project's
-/// configured QA branch. The submission id is the employee's claim — the
-/// branch ancestry is what the host confirms.
+/// configured QA branch. The submission id is the employee's claim —
+/// `merge submit` mints none — so it is echoed for traceability when
+/// reported and never required; the branch ancestry is what the host
+/// confirms.
 fn confirmed_landing(
     project: &Project,
     configured_branch: &str,
     code: &ChainCodeEvidence,
-) -> anyhow::Result<(String, String, String)> {
+) -> anyhow::Result<(String, String, Option<String>)> {
     let landed = code
         .landed_revision
         .as_deref()
@@ -339,10 +341,6 @@ fn confirmed_landing(
         claimed_branch == branch,
         "reported QA branch {claimed_branch:?} is not the configured {branch:?}"
     );
-    let submission = code
-        .submission_id
-        .clone()
-        .ok_or_else(|| anyhow!("submission identity is unreported"))?;
     let tip = format!("refs/heads/{branch}");
     ensure!(
         git_revision(&project.path, &tip).is_ok(),
@@ -352,7 +350,7 @@ fn confirmed_landing(
         crate::agent_merge::is_ancestor(&project.path, landed, &tip)?,
         "the reported revision is not reachable on {branch:?}"
     );
-    Ok((landed.to_owned(), branch, submission))
+    Ok((landed.to_owned(), branch, code.submission_id.clone()))
 }
 
 /// The resolved inputs a chain dispatch feeds the next attempt's summon:
@@ -1361,7 +1359,7 @@ mod tests {
         let verification = fixture.verification(&chain);
         assert_eq!(
             verification.confirmed_landing,
-            Some((landed.clone(), "dev".into(), "sub-1".into()))
+            Some((landed.clone(), "dev".into(), Some("sub-1".into())))
         );
         let chain = fixture.seal(&chain);
         assert_eq!(chain.status, ChainStatus::Waiting);
@@ -1382,6 +1380,56 @@ mod tests {
         git(&other, &["config", "user.name", "Goddard Test"]);
         let foreign = fixture.commit(&other, "foreign.txt", "foreign");
         assert!(crate::agent_merge::is_ancestor(&fixture.repo, &foreign, "dev").is_err());
+    }
+
+    /// `merge submit` mints no submission id — the production shape — so a
+    /// verified landing without one seals. Ancestry on the configured QA
+    /// branch and the branch name itself still gate.
+    #[test]
+    fn landed_gate_needs_ancestry_not_a_submission_id() {
+        let fixture = Fixture::new();
+        let base = git(&fixture.repo, &["rev-parse", "HEAD"]);
+        let worktree = fixture.managed_worktree(&base);
+        let landed = fixture.commit(&worktree, "unit.txt", "work");
+        git(&fixture.repo, &["branch", "dev", &landed]);
+        // A real commit the QA branch never contained.
+        let stray = fixture.commit(&fixture.repo, "stray.txt", "stray");
+        let code = |revision: &str, branch: &str| ChainCodeEvidence {
+            workspace: worktree.display().to_string(),
+            source_revision: base.clone(),
+            committed_revision: Some(landed.clone()),
+            landed_revision: Some(revision.to_owned()),
+            qa_branch: Some(branch.to_owned()),
+            submission_id: None,
+        };
+        let attempt = |fixture: &Fixture, code: ChainCodeEvidence| {
+            let mut result = success_result();
+            result.code = Some(code);
+            let chain = fixture.create(vec![
+                fixture.step(HandoffBoundary::Landed),
+                fixture.step(HandoffBoundary::ArtifactsReady),
+            ]);
+            fixture.finish_attempt(&chain, &fixture.repo, result)
+        };
+        let chain = attempt(&fixture, code(&landed, "dev"));
+        assert_eq!(
+            fixture.verification(&chain).confirmed_landing,
+            Some((landed.clone(), "dev".into(), None))
+        );
+        let chain = fixture.seal(&chain);
+        assert_eq!(
+            chain.status,
+            ChainStatus::Waiting,
+            "reason: {:?}",
+            chain.reason
+        );
+        for code in [code(&stray, "dev"), code(&landed, "main")] {
+            let chain = attempt(&fixture, code);
+            assert!(fixture.verification(&chain).confirmed_landing.is_none());
+            let chain = fixture.seal(&chain);
+            assert_eq!(chain.status, ChainStatus::Paused);
+            assert_eq!(chain.reason.as_deref(), Some("QA landing unconfirmed"));
+        }
     }
 
     #[test]

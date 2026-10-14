@@ -19190,6 +19190,90 @@ fn chain_terminal_failure_pauses_once_and_retry_continues() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// The supervisor id recorded at Create goes stale when the boss session
+/// rotates — admission must fall back to the live session rather than
+/// strand the retry summoning under a dead caller.
+#[test]
+fn chain_retry_admission_survives_boss_rotation() {
+    let root = std::env::temp_dir().join(format!("waku-chain-rotate-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    let project = backend.task_state.lock().projects[0].id;
+    let personas = backend.boss.document().personas.clone();
+    let outcome = backend
+        .boss
+        .create_outcome(Some(boss), "Investigate then verify", "Evidence verified")
+        .unwrap();
+    let BossResult::State { state } = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Chain {
+                action: ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition: chain_test_definition(
+                        project,
+                        outcome.id,
+                        personas[0].id,
+                        2,
+                        head.clone(),
+                    ),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("chain state expected")
+    };
+    let chain_id = state.chains[0].id;
+    let first = state.employees[0].clone();
+    backend.run_summon_scheduler();
+    backend
+        .finish_boss_employee(
+            first.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::ProcessExited { mid_turn: true },
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.status, ChainStatus::Paused);
+    assert_eq!(chain.supervisor_id, Some(boss));
+    let reconciled = chain.steps[0].attempts[0]
+        .reconciled_retry_revision
+        .clone()
+        .expect("retry base recorded");
+    // Rotation swaps the boss session — the stored supervisor id is dead
+    // now, but the retry still admits under the live one.
+    let rotated = Uuid::new_v4();
+    backend.boss.replace_session_id(boss, rotated).unwrap();
+    backend
+        .handle_boss_operation(
+            Some(rotated),
+            chain_control_op(
+                chain_id,
+                chain.revision,
+                ChainControl::Retry,
+                Some(reconciled),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let document = backend.boss.document();
+    let chain = &document.chains[0];
+    assert_eq!(chain.steps[0].attempts.len(), 2);
+    let retry = document
+        .employees
+        .iter()
+        .find(|employee| employee.session_id != first.session_id)
+        .unwrap()
+        .clone();
+    assert_eq!(
+        Some(retry.session_id),
+        chain.steps[0].attempts[1].employee_id
+    );
+    assert_eq!(retry.supervisor_id, rotated);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn chain_restart_recovers_at_admission_and_handoff_boundaries() {
     let root = std::env::temp_dir().join(format!("waku-chain-restart-{}", Uuid::new_v4()));
