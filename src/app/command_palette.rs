@@ -246,6 +246,8 @@ enum PaletteAction {
     FocusComposer,
     CreateDraft,
     ViewDrafts,
+    OpenRecentPrompts,
+    RestoreRecentPrompt(usize),
     CopyIdentifier(PaletteIdentifier),
     ChooseModel,
     ToggleWorkspace,
@@ -359,6 +361,7 @@ enum CommandPaletteView {
     /// The "Save as prompt template" step: the query field is the file's
     /// command name, confirmed with Enter.
     SavePrompt,
+    RecentPrompts,
     /// The "Search employee chats" retained-work lookup — the query field
     /// drives the daemon's history search over employee records.
     EmployeeChats,
@@ -1541,6 +1544,52 @@ impl Waku {
         cx.notify();
     }
 
+    fn open_command_palette_recent_prompts_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::RecentPrompts;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("recent_prompts.menu_header"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    fn refresh_command_palette_recent_prompts_results(
+        &mut self,
+        query: &str,
+        preserve_selection: bool,
+    ) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let query = query.trim().to_lowercase();
+        self.command_palette.results = self
+            .state
+            .recent_prompts
+            .iter()
+            .enumerate()
+            .filter_map(|(index, draft)| {
+                if !super::recent_prompts::recent_prompt_matches(draft, &query) {
+                    return None;
+                }
+                let label = super::recent_prompts::recent_prompt_label(draft);
+                Some(CommandPaletteItem::command(
+                    PaletteSection::Prompts,
+                    label,
+                    "icons/rotate-ccw.svg",
+                    None,
+                    PaletteAction::RestoreRecentPrompt(index),
+                    "restore recent prompt submitted history composer",
+                    index,
+                ))
+            })
+            .collect();
+        self.finish_drill_in_refresh(selected_action.flatten(), None);
+    }
+
     /// One row whose label tracks the typed name — the slug the file and the
     /// `/` command will share — so Enter always confirms the visible choice.
     fn refresh_command_palette_save_prompt_results(
@@ -2332,6 +2381,7 @@ impl Waku {
             CommandPaletteView::IssueTemplates => self.open_command_palette_issue_projects_view(cx),
             CommandPaletteView::RebaseBase => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::SavePrompt => self.leave_command_palette_drill_in_view(cx),
+            CommandPaletteView::RecentPrompts => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::EmployeeChats => self.leave_command_palette_drill_in_view(cx),
         }
     }
@@ -2386,6 +2436,7 @@ impl Waku {
                 }
             }
             CommandPaletteView::SavePrompt => tr!("command_palette.save_prompt_placeholder"),
+            CommandPaletteView::RecentPrompts => tr!("recent_prompts.menu_header"),
             CommandPaletteView::EmployeeChats => {
                 tr!("command_palette.employee_search_placeholder")
             }
@@ -2431,6 +2482,7 @@ impl Waku {
                 | CommandPaletteView::IssueTemplates
                 | CommandPaletteView::RebaseBase
                 | CommandPaletteView::SavePrompt
+                | CommandPaletteView::RecentPrompts
         ) {
             self.refresh_command_palette_results(query, false, cx);
             cx.notify();
@@ -3356,6 +3408,17 @@ impl Waku {
             "save create add prompt template composer draft reusable",
             next(),
         ));
+        if !self.state.recent_prompts.is_empty() {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Prompts,
+                tr!("recent_prompts.action"),
+                "icons/rotate-ccw.svg",
+                None,
+                PaletteAction::OpenRecentPrompts,
+                "restore recent prompt submitted history composer",
+                next(),
+            ));
+        }
         if self
             .composer_session()
             .is_some_and(|session| session.has_started() && !session.is_side_chat())
@@ -4973,6 +5036,10 @@ impl Waku {
                 self.refresh_command_palette_save_prompt_results(query, preserve_selection);
                 return;
             }
+            CommandPaletteView::RecentPrompts => {
+                self.refresh_command_palette_recent_prompts_results(query, preserve_selection);
+                return;
+            }
             CommandPaletteView::EmployeeChats => {
                 self.refresh_command_palette_employee_results(preserve_selection);
                 return;
@@ -5525,6 +5592,10 @@ impl Waku {
                 self.open_command_palette_save_prompt_view(cx);
                 return;
             }
+            PaletteAction::OpenRecentPrompts => {
+                self.open_command_palette_recent_prompts_view(cx);
+                return;
+            }
             PaletteAction::OpenEmployeeChats => {
                 self.open_command_palette_employee_search_view(cx);
                 return;
@@ -5544,6 +5615,11 @@ impl Waku {
 
         self.close_command_palette(window, cx);
         match action {
+            PaletteAction::RestoreRecentPrompt(index) => {
+                if let Some(draft) = self.state.recent_prompts.get(index).cloned() {
+                    self.restore_recent_prompt(draft, window, cx);
+                }
+            }
             PaletteAction::NewTask => self.new_session_action(&NewSession, window, cx),
             PaletteAction::NewIncognitoTask => self.new_incognito_session_action(window, cx),
             PaletteAction::NewTerminalIn => {
@@ -5904,6 +5980,7 @@ impl Waku {
             | PaletteAction::CreateGitHubIssue
             | PaletteAction::ChooseIssueProject(_)
             | PaletteAction::OpenSavePrompt
+            | PaletteAction::OpenRecentPrompts
             | PaletteAction::OpenEmployeeChats
             | PaletteAction::ChangeBaseBranch
             | PaletteAction::SavePromptAs(_) => {
@@ -5991,6 +6068,7 @@ impl Waku {
             | CommandPaletteView::SyncBranchProjects
             | CommandPaletteView::CodeBlockProjects
             | CommandPaletteView::SavePrompt => false,
+            CommandPaletteView::RecentPrompts => false,
         };
         let show_empty_state = should_show_command_palette_empty_state(
             if resume_view {

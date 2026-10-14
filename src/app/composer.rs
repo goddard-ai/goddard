@@ -6045,7 +6045,6 @@ impl Waku {
 
     fn render_composer_field(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let save_draft_chip = self.render_save_draft_chip(window, cx);
-        let recent_prompts_chip = self.render_recent_prompts_chip(cx);
         let action_suggestion = if self.big_picture.is_open() {
             None
         } else {
@@ -6064,8 +6063,7 @@ impl Waku {
                 .px(px(20.0 - COMPOSER_OVERHANG))
                 .child(self.render_composer_card(&ComposerCard::Main, window, cx))
         };
-        if save_draft_chip.is_none() && recent_prompts_chip.is_none() && action_suggestion.is_none()
-        {
+        if save_draft_chip.is_none() && action_suggestion.is_none() {
             return field;
         }
         div()
@@ -6089,7 +6087,6 @@ impl Waku {
                             .items_center()
                             .gap(px(6.0))
                             .children(save_draft_chip)
-                            .children(recent_prompts_chip)
                             .children(action_suggestion),
                     ),
             )

@@ -1,4 +1,5 @@
-//! Recently submitted composer prompts and the menu that restores them.
+//! Recently submitted composer prompts and the command palette picker that
+//! restores them.
 //!
 //! Every send path — the session column's composer, a side chat's lane, the
 //! Big Picture overlay's — files its payload here just before the composer
@@ -41,7 +42,7 @@ fn push_recent_prompt(list: &mut Vec<ComposerDraft>, draft: ComposerDraft) -> bo
 /// The single-line label a menu row gets for a stored prompt: whitespace
 /// runs collapsed, then an ellipsis cut at the label budget. A prompt that
 /// was only attachments labels by their file names.
-fn recent_prompt_label(draft: &ComposerDraft) -> String {
+pub(super) fn recent_prompt_label(draft: &ComposerDraft) -> String {
     let text = if draft.text.trim().is_empty() {
         draft
             .attachments
@@ -59,6 +60,13 @@ fn recent_prompt_label(draft: &ComposerDraft) -> String {
     } else {
         label
     }
+}
+
+pub(super) fn recent_prompt_matches(draft: &ComposerDraft, query: &str) -> bool {
+    query.is_empty()
+        || recent_prompt_label(draft)
+            .to_lowercase()
+            .contains(&query.to_lowercase())
 }
 
 impl Waku {
@@ -98,64 +106,6 @@ impl Waku {
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
         cx.notify();
-    }
-
-    /// The chip row's restore affordance: a menu of the prompts submissions
-    /// filed, newest first. It stays visible while the composer holds a
-    /// draft — restoring over existing text is safe because the swap is
-    /// ⌘Z-undoable at the workspace level.
-    pub(super) fn render_recent_prompts_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.state.recent_prompts.is_empty() || self.queued_messages_visible() {
-            return None;
-        }
-        let theme = Theme::current(cx);
-        let handle = self.menu_handle("composer-recent-prompts", cx);
-        let weak = cx.entity().downgrade();
-        Some(
-            dropdown_menu(
-                div()
-                    .h(px(24.0))
-                    .px(px(9.0))
-                    .rounded(px(8.0))
-                    .border(hairline())
-                    .border_color(theme.border_subtle)
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(5.0))
-                    .cursor_default()
-                    .text_size(sp(12.5))
-                    .text_color(theme.text)
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .hover(|element| element.bg(theme.raised.blend(theme.overlay_strong)))
-                    .child(icon("icons/rotate-ccw.svg", 11.0, theme.text_secondary))
-                    .child(tr!("recent_prompts.action")),
-                "composer-recent-prompts-menu",
-                &handle,
-                MenuAlign::AboveLeft,
-                move |cx| {
-                    let Some(prompts) = weak
-                        .update(cx, |this, _| this.state.recent_prompts.clone())
-                        .ok()
-                    else {
-                        return Vec::new();
-                    };
-                    let mut items =
-                        vec![MenuItem::Header(tr!("recent_prompts.menu_header").into())];
-                    items.extend(prompts.into_iter().map(|draft| {
-                        let label = recent_prompt_label(&draft);
-                        let weak = weak.clone();
-                        MenuItem::new(label, move |window, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.restore_recent_prompt(draft.clone(), window, cx);
-                            });
-                        })
-                    }));
-                    items
-                },
-            )
-            .into_any_element(),
-        )
     }
 }
 
@@ -248,5 +198,16 @@ mod tests {
         let mut attachment_only = ComposerDraft::default();
         attachment_only.attachments = vec![attachment("a.rs"), attachment("b.rs")];
         assert_eq!(recent_prompt_label(&attachment_only), "a.rs, b.rs");
+    }
+
+    #[test]
+    fn palette_query_matches_prompt_text_and_attachment_names() {
+        let text = prompt("Explain the workspace");
+        let mut attachment_only = ComposerDraft::default();
+        attachment_only.attachments = vec![attachment("report.pdf")];
+
+        assert!(recent_prompt_matches(&text, "WORKSPACE"));
+        assert!(recent_prompt_matches(&attachment_only, "report"));
+        assert!(!recent_prompt_matches(&text, "missing"));
     }
 }
