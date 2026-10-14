@@ -541,8 +541,16 @@ impl BossService {
                                         "retry requires explicit fresh-workspace source revision"
                                     )
                                 })?;
+                            // A launch failure bound no employee and
+                            // touched no workspace — nothing ran, so the
+                            // explicit revision alone names the retry base.
+                            let effect_free = previous.employee_id.is_none()
+                                && previous.workspace.is_none()
+                                && previous.starting_revision.is_none();
                             ensure!(
-                                previous.reconciled_retry_revision.as_ref() == Some(&revision),
+                                effect_free
+                                    || previous.reconciled_retry_revision.as_ref()
+                                        == Some(&revision),
                                 "uncertain prior effects must be reconciled before retry"
                             );
                             let mut attempt = new_attempt(chain.definition_version);
@@ -1782,7 +1790,11 @@ mod tests {
             ResultDisposition::Success
         );
         assert!(fixture.control(chain.id, ChainControl::Resume).is_err());
-        assert!(fixture.control(chain.id, ChainControl::Retry).is_err());
+        let error = fixture.control(chain.id, ChainControl::Retry).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "uncertain prior effects must be reconciled before retry"
+        );
         fixture.observe(
             &chain,
             ChainObservation::EffectsReconciled {
@@ -1806,6 +1818,38 @@ mod tests {
                     ChainObservation::Idle
                 )
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn launch_failed_attempt_retries_without_prior_effects_to_reconcile() {
+        let fixture = Fixture::new();
+        let chain = fixture.create();
+        // A launch error bound no employee and touched no workspace — the
+        // sealed attempt is provably effect-free, so the explicit retry
+        // base needs no EffectsReconciled reconciliation.
+        fixture.observe(
+            &chain,
+            ChainObservation::LaunchError {
+                reason: "summon failed".into(),
+            },
+        );
+        fixture.release(&chain);
+        fixture.seal(&chain, &verified()).unwrap();
+        let paused = fixture.read(chain.id);
+        assert_eq!(paused.status, ChainStatus::Paused);
+        let attempt = &paused.steps[0].attempts[0];
+        assert!(attempt.employee_id.is_none());
+        assert!(attempt.workspace.is_none());
+        assert!(attempt.starting_revision.is_none());
+        assert!(attempt.reconciled_retry_revision.is_none());
+        assert!(!attempt.sealed.as_ref().unwrap().accepted);
+        let retry = fixture.control(chain.id, ChainControl::Retry).unwrap();
+        assert_eq!(retry.status, ChainStatus::Waiting);
+        assert_eq!(retry.steps[0].attempts.len(), 2);
+        assert_eq!(
+            retry.steps[0].attempts[1].starting_revision.as_deref(),
+            Some("verified-source")
         );
     }
 
