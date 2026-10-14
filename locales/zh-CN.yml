@@ -683,6 +683,8 @@ dormant.confirm_description: 该检出中仍有进行中的工作。移至休眠
 dormant.confirm_description_busy: 该任务仍有进行中的回合。移至休眠会停止该回合；恢复可将其取回。
 dormant.confirm_description_busy_worktree: 该任务仍有进行中的回合，且检出中还有未完成的工作。移至休眠会停止回合、快照检出并移除工作树；恢复可将其取回。
 
+recent_prompts.action: 恢复最近的提示…
+recent_prompts.menu_header: 最近发送的提示
 reclaim.title: 回收磁盘空间
 reclaim.description: 空闲任务各自保留依赖和构建产物的副本。删除它们可以释放磁盘空间——下次安装或构建时会重新生成。源代码更改和任务本身不受影响。
 reclaim.scanning: 正在扫描工作树…

@@ -1950,6 +1950,10 @@ struct AppState {
     /// Drafts parked from a composer via "Create draft", newest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     saved_drafts: Vec<SavedDraft>,
+    /// Payloads a composer submitted, newest first, capped by the app — the
+    /// "Restore recent prompt" menu's source.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recent_prompts: Vec<ComposerDraft>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2430,6 +2434,10 @@ pub struct PersistedState {
     /// App-local — they persist through `AppState`, not the daemon.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub saved_drafts: Vec<SavedDraft>,
+    /// Payloads a composer submitted, newest first — the "Restore recent
+    /// prompt" menu's source. App-local like `saved_drafts`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_prompts: Vec<ComposerDraft>,
     #[serde(default = "default_computer_use_enabled")]
     pub computer_use_enabled: bool,
     /// Experimental opt-in gating Computer Use entirely. Daemon-owned;
@@ -2796,6 +2804,7 @@ impl PersistedState {
             last_visible_terminal: None,
             right_panel_terminals: HashMap::new(),
             saved_drafts: Vec::new(),
+            recent_prompts: Vec::new(),
             computer_use_enabled: false,
             computer_use_experiment_enabled: default_experiment_enabled(),
             computer_use_allowed_apps: Vec::new(),
@@ -3325,6 +3334,7 @@ impl PersistedState {
             right_panel_terminals: self.right_panel_terminals.clone(),
             fullscreen_surface: None,
             saved_drafts: self.saved_drafts.clone(),
+            recent_prompts: self.recent_prompts.clone(),
         }
     }
 
@@ -3544,6 +3554,7 @@ impl PersistedState {
                 .get_or_insert(fullscreen);
         }
         self.saved_drafts = app_state.saved_drafts;
+        self.recent_prompts = app_state.recent_prompts;
     }
 
     fn persistable_selected_session(&self) -> Option<Uuid> {

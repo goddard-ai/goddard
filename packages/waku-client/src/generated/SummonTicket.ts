@@ -81,8 +81,9 @@ pendingPrompts?: Array<string>,
  */
 groupId?: string,
 /**
- * Optional dispatch priority — reserved for the same phase; dispatch
- * remains strict FIFO today.
+ * Optional dispatch priority — higher values attempt admission
+ * first and sequence breaks ties. A committed `force_start`
+ * outranks every declared priority.
  */
 priority?: number,
 /**

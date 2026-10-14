@@ -3749,6 +3749,13 @@ impl Waku {
         bare_rename: bool,
         cx: &mut Context<Self>,
     ) -> Option<ComposerSubmission> {
+        // The recent-prompt history reads the live composer before the
+        // drains below consume it. Incognito slots file nothing — their
+        // text must never persist.
+        let history_draft = match self.composer_draft_key() {
+            Some(key) if self.draft_key_incognito(key) => None,
+            key => Some(self.current_composer_draft(key, cx)),
+        };
         for attachment in &self.composer_attachments {
             if let (Some(reference), Some(image)) = (
                 attachment.blob_reference.as_ref(),
@@ -3832,6 +3839,9 @@ impl Waku {
                     annotation_bubble_content(&annotations, &typed)
                 }
             });
+        if let Some(draft) = history_draft {
+            self.record_recent_prompt(draft);
+        }
         self.discard_current_composer_draft(cx);
         // The session column's field becomes the composer later typing and
         // outside-Enter aim at — the last place a message actually went out.
@@ -4084,9 +4094,21 @@ impl Waku {
         else {
             return None;
         };
+        let incognito = session.incognito;
         let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
             return None;
         };
+        // File the lane's prompt into the recent-prompt history before the
+        // atoms move out — incognito chats file nothing.
+        let history_draft = (!incognito).then(|| {
+            let (text, inline_atoms) = composer_draft_content(&prompt, &chat.atoms);
+            crate::persistence::ComposerDraft {
+                text,
+                attachments: Vec::new(),
+                annotations: Vec::new(),
+                inline_atoms,
+            }
+        });
         let atoms = std::mem::take(&mut chat.atoms);
         let commands = chat.commands.clone();
         chat.composer
@@ -4145,6 +4167,9 @@ impl Waku {
                 annotation_bubble_content(&annotations, &typed)
             }
         });
+        if let Some(draft) = history_draft {
+            self.record_recent_prompt(draft);
+        }
         // The lane becomes the composer later typing and outside-Enter aim
         // at — the last place a message actually went out.
         self.last_sent_composer = Some(session_id);
@@ -5321,7 +5346,7 @@ impl Waku {
         )
     }
 
-    fn queued_messages_visible(&self) -> bool {
+    pub(super) fn queued_messages_visible(&self) -> bool {
         if self.live_deliverable_page().is_some() || self.voice_scratchpad_visible() {
             return false;
         }
@@ -6020,6 +6045,7 @@ impl Waku {
 
     fn render_composer_field(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let save_draft_chip = self.render_save_draft_chip(window, cx);
+        let recent_prompts_chip = self.render_recent_prompts_chip(cx);
         let action_suggestion = if self.big_picture.is_open() {
             None
         } else {
@@ -6038,7 +6064,8 @@ impl Waku {
                 .px(px(20.0 - COMPOSER_OVERHANG))
                 .child(self.render_composer_card(&ComposerCard::Main, window, cx))
         };
-        if save_draft_chip.is_none() && action_suggestion.is_none() {
+        if save_draft_chip.is_none() && recent_prompts_chip.is_none() && action_suggestion.is_none()
+        {
             return field;
         }
         div()
@@ -6062,6 +6089,7 @@ impl Waku {
                             .items_center()
                             .gap(px(6.0))
                             .children(save_draft_chip)
+                            .children(recent_prompts_chip)
                             .children(action_suggestion),
                     ),
             )

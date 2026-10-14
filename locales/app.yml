@@ -461,6 +461,10 @@ drafts.no_match:
   en: No matching drafts
 drafts.no_match_hint:
   en: Try a different search
+recent_prompts.action:
+  en: Restore recent prompt…
+recent_prompts.menu_header:
+  en: Recently sent prompts
 command_palette.no_results_hint:
   en: Try a task title, message, project, setting, or command
 command_palette.no_matching_providers:

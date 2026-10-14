@@ -16,7 +16,7 @@ use crate::persistence::{ComposerDraft, ComposerDraftKey, ComposerDraftTarget, S
 /// Key context the page declares; Escape peels it one layer at a time.
 const DRAFTS_PAGE_CONTEXT: &str = "DraftsPage";
 /// Cap on kept undo records — each holds a full draft payload.
-const DRAFT_USE_UNDO_CAP: usize = 16;
+pub(super) const DRAFT_USE_UNDO_CAP: usize = 16;
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -28,12 +28,18 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-/// What one "Use" consumed, kept so ⌘Z can hand it all back: the draft and
-/// its slot in the list, plus what the target composer's draft slot held
-/// before the payload landed.
+/// What one draft-landing operation staged, kept so ⌘Z can hand it all
+/// back: the payload applied to the composer's slot, the Drafts-page entry
+/// when one was consumed or parked, and what the slot held before.
 pub(super) struct DraftUseUndo {
     kind: DraftUndoKind,
-    saved: SavedDraft,
+    /// What `key`'s slot holds right after the operation — the draft a Use
+    /// staged, the text a Create parked, or the prompt a restore loaded.
+    /// ⌘Z acts only while the slot still holds exactly this.
+    applied: ComposerDraft,
+    /// The list entry a Use consumed or a Create parked. A recent-prompt
+    /// restore owns no Drafts-page row, so it carries none.
+    saved: Option<SavedDraft>,
     index: usize,
     key: ComposerDraftKey,
     previous: Option<ComposerDraft>,
@@ -42,6 +48,28 @@ pub(super) struct DraftUseUndo {
 enum DraftUndoKind {
     Use,
     Create,
+    /// "Restore recent prompt" staged its pick into the slot — nothing
+    /// returns to a list; ⌘Z just hands the previous payload back.
+    RestorePrompt,
+}
+
+impl DraftUseUndo {
+    /// The record a recent-prompt restore leaves: no list row, just the
+    /// applied payload and what the slot held before it.
+    pub(super) fn prompt_restore(
+        key: ComposerDraftKey,
+        applied: ComposerDraft,
+        previous: Option<ComposerDraft>,
+    ) -> Self {
+        Self {
+            kind: DraftUndoKind::RestorePrompt,
+            applied,
+            saved: None,
+            index: 0,
+            key,
+            previous,
+        }
+    }
 }
 
 impl Waku {
@@ -85,16 +113,14 @@ impl Waku {
             cx.notify();
             return;
         }
-        self.draft_use_undos.push(DraftUseUndo {
+        self.push_draft_use_undo(DraftUseUndo {
             kind: DraftUndoKind::Create,
-            saved,
+            applied: draft.clone(),
+            saved: Some(saved),
             index: 0,
             key,
             previous: Some(draft),
         });
-        if self.draft_use_undos.len() > DRAFT_USE_UNDO_CAP {
-            self.draft_use_undos.remove(0);
-        }
         // Clear the slot before the composer so the debounced autosave can't
         // file the payload back under the composer key on its next pass.
         self.composer_drafts.remove(key);
@@ -157,6 +183,15 @@ impl Waku {
             .count()
     }
 
+    /// Push a draft-landing record onto the ⌘Z stack, dropping the oldest
+    /// once the cap is reached.
+    pub(super) fn push_draft_use_undo(&mut self, undo: DraftUseUndo) {
+        self.draft_use_undos.push(undo);
+        if self.draft_use_undos.len() > DRAFT_USE_UNDO_CAP {
+            self.draft_use_undos.remove(0);
+        }
+    }
+
     /// Keep ⌘Z records pointing at a moved payload: a draft carry
     /// relocates the slot the content lives in, so records staged under
     /// `source` follow it to `destination`.
@@ -183,8 +218,11 @@ impl Waku {
             }
             keep
         });
-        self.draft_use_undos
-            .retain(|undo| undo.saved.project_id != project_id);
+        self.draft_use_undos.retain(|undo| {
+            undo.saved
+                .as_ref()
+                .is_none_or(|saved| saved.project_id != project_id)
+        });
         if self.drafts_editing.is_some_and(|id| removed.contains(&id)) {
             self.drafts_editing = None;
         }
@@ -327,7 +365,7 @@ impl Waku {
         }
         // A consumed-then-deleted draft has nothing left for ⌘Z to return.
         self.draft_use_undos
-            .retain(|undo| undo.saved.id != draft_id);
+            .retain(|undo| undo.saved.as_ref().is_none_or(|saved| saved.id != draft_id));
         self.save();
         cx.notify();
     }
@@ -386,16 +424,14 @@ impl Waku {
         if self.drafts_editing == Some(draft_id) {
             self.drafts_editing = None;
         }
-        self.draft_use_undos.push(DraftUseUndo {
+        self.push_draft_use_undo(DraftUseUndo {
             kind: DraftUndoKind::Use,
+            applied: saved.draft.clone(),
             previous: self.composer_drafts.get(key).cloned(),
-            saved: saved.clone(),
+            saved: Some(saved.clone()),
             index,
             key,
         });
-        if self.draft_use_undos.len() > DRAFT_USE_UNDO_CAP {
-            self.draft_use_undos.remove(0);
-        }
         self.composer_drafts.set(key, saved.draft.clone());
         match landing {
             Some(session_id) => self.select_session(session_id, cx),
@@ -440,7 +476,30 @@ impl Waku {
         let Some(undo) = self.draft_use_undos.pop() else {
             return;
         };
+        if matches!(undo.kind, DraftUndoKind::RestorePrompt) {
+            // The prompt stays in the history — nothing re-enters a list.
+            // Hand the slot back only while it still holds exactly what the
+            // restore put there; text typed since is the user's, not ours
+            // to move.
+            if self.composer_drafts.get(undo.key) == Some(&undo.applied) {
+                match undo.previous {
+                    Some(previous) => {
+                        self.composer_drafts.set(undo.key, previous);
+                    }
+                    None => {
+                        self.composer_drafts.remove(undo.key);
+                    }
+                }
+                if self.composer_draft_key() == Some(undo.key) {
+                    self.restore_selected_composer_draft(cx);
+                }
+                self.schedule_composer_draft_save(cx);
+            }
+            cx.notify();
+            return;
+        }
         if matches!(undo.kind, DraftUndoKind::Create) {
+            let Some(saved) = undo.saved else { return };
             // Restore only if the composer slot is still empty; later typing
             // belongs to the user and must not be overwritten by Undo.
             if self
@@ -448,19 +507,17 @@ impl Waku {
                 .get(undo.key)
                 .is_none_or(ComposerDraft::is_empty)
             {
-                self.state
-                    .saved_drafts
-                    .retain(|draft| draft.id != undo.saved.id);
-                self.composer_drafts.set(undo.key, undo.saved.draft.clone());
+                self.state.saved_drafts.retain(|draft| draft.id != saved.id);
+                self.composer_drafts.set(undo.key, saved.draft.clone());
                 if self.composer_draft_key() == Some(undo.key) {
-                    self.apply_composer_draft(Some(undo.key), undo.saved.draft, cx);
+                    self.apply_composer_draft(Some(undo.key), saved.draft, cx);
                     let focus = self.composer_focus(cx);
                     window.focus(&focus, cx);
                 }
             } else {
                 // The slot has newer content, so leave the saved copy intact.
                 let index = undo.index.min(self.state.saved_drafts.len());
-                self.state.saved_drafts.insert(index, undo.saved);
+                self.state.saved_drafts.insert(index, saved);
             }
             self.schedule_composer_draft_save(cx);
             self.save();
@@ -468,8 +525,10 @@ impl Waku {
             return;
         }
         let index = undo.index.min(self.state.saved_drafts.len());
-        let applied = undo.saved.draft.clone();
-        self.state.saved_drafts.insert(index, undo.saved);
+        let applied = undo.applied.clone();
+        if let Some(saved) = undo.saved {
+            self.state.saved_drafts.insert(index, saved);
+        }
         // Hand the slot back only while it still holds exactly what Use put
         // there — text the user has typed since is theirs, not ours to move.
         if self.composer_drafts.get(undo.key) == Some(&applied) {

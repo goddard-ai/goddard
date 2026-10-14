@@ -12335,6 +12335,7 @@ mod tests {
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
             human_interaction: false,
+            force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: None,

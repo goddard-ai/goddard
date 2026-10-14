@@ -4465,6 +4465,7 @@ mod projects;
 mod provider_switch;
 mod provider_switch_dialog;
 mod push_base;
+mod recent_prompts;
 mod reclaim_dialog;
 mod relocate;
 mod render;

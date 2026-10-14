@@ -693,6 +693,8 @@ dormant.confirm_description: チェックアウトに作業中の内容が残っ
 dormant.confirm_description_busy: 進行中のターンがあります。休眠に移動するとターンを停止します。復元でタスクを元に戻せます。
 dormant.confirm_description_busy_worktree: 進行中のターンがあり、チェックアウトにも作業中の内容が残っています。休眠に移動するとターンを停止し、チェックアウトをスナップショットに保存してワークツリーを削除します。復元で元に戻せます。
 
+recent_prompts.action: 最近のプロンプトを復元…
+recent_prompts.menu_header: 最近送信したプロンプト
 reclaim.title: ディスク容量を解放
 reclaim.description: 使っていないタスクは依存関係やビルド成果物をそれぞれ保持しています。削除しても次回のインストールやビルドで再生成されます。ソースの変更やタスク自体はそのまま残ります。
 reclaim.scanning: ワークツリーをスキャン中…
