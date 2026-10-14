@@ -5601,7 +5601,6 @@ impl Waku {
             if self.right_panel_width == DEFAULT_RIGHT_PANEL_WIDTH {
                 self.right_panel_width = RIGHT_PANEL_MIN_WIDTH;
             }
-            self.set_right_panel_visible(true, cx);
         }
         cx.notify();
     }
