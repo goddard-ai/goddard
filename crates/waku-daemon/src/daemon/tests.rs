@@ -19121,6 +19121,217 @@ fn chains_execute_in_order_sealing_handoffs_quietly() {
 }
 
 #[test]
+fn chain_successor_launch_error_reconciles_only_effect_free_attempts() {
+    use waku_boss::chains::ChainObservation;
+    use waku_protocol::chains::ChainTerminal;
+
+    for bound_workspace in [false, true] {
+        let root =
+            std::env::temp_dir().join(format!("waku-chain-successor-fail-{}", Uuid::new_v4()));
+        let (backend, boss, head) = chain_backend(&root);
+        let project = backend.task_state.lock().projects[0].clone();
+        let persona = backend.boss.document().personas[0].id;
+        let outcome = backend
+            .boss
+            .create_outcome(Some(boss), "Retry successor", "verified")
+            .unwrap();
+        let mut definition =
+            chain_test_definition(project.id, outcome.id, persona, 1, head.clone());
+        definition.steps[0].boundary = HandoffBoundary::Landed;
+        let mut settings = backend.settings.get();
+        settings.qa_branch = "main".into();
+        backend.settings.replace(settings).unwrap();
+        definition.steps[1].workspace = waku_protocol::AgentWorkspace::Worktree;
+        definition.steps[1].max_retries = 1;
+        let chain = backend
+            .boss
+            .chain_operation(
+                Some(boss),
+                ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition,
+                },
+            )
+            .unwrap();
+        let first = &chain.steps[0].attempts[0];
+        for observation in [
+            ChainObservation::Admitted {
+                employee_id: Uuid::new_v4(),
+            },
+            ChainObservation::Terminal {
+                terminal: ChainTerminal {
+                    disposition: ResultDisposition::Success,
+                    message: "first step complete".into(),
+                },
+            },
+            ChainObservation::Released {
+                execution: true,
+                workspace: true,
+            },
+        ] {
+            backend
+                .boss
+                .observe_chain(
+                    chain.id,
+                    first.id,
+                    first.definition_version,
+                    Uuid::new_v4(),
+                    observation,
+                )
+                .unwrap();
+        }
+        let BossOperation::Chain { mut action } =
+            chain_result_op(chain.id, first, ResultDisposition::Success)
+        else {
+            unreachable!()
+        };
+        if let ChainOperation::RecordResult { result, .. } = &mut action {
+            result.code = Some(waku_protocol::chains::ChainCodeEvidence {
+                workspace: project.path.display().to_string(),
+                source_revision: head.clone(),
+                committed_revision: Some(head.clone()),
+                landed_revision: Some(head.clone()),
+                qa_branch: Some("main".into()),
+                submission_id: None,
+            });
+        }
+        backend.boss.chain_operation(Some(boss), action).unwrap();
+        let verification = backend
+            .verify_chain_handoff(chain.id, first.id, first.definition_version)
+            .unwrap();
+        backend
+            .boss
+            .seal_chain_handoff(chain.id, first.id, first.definition_version, &verification)
+            .unwrap();
+        let chain = backend.boss.document().chains[0].clone();
+        assert_eq!(chain.current_step, 1);
+        let attempt = &chain.steps[1].attempts[0];
+        assert!(attempt.starting_revision.is_none());
+        assert!(chain.steps[1].definition.base_revision.is_none());
+
+        if bound_workspace {
+            std::fs::write(
+                project.path.join("unreconciled.txt"),
+                "uncommitted employee effect",
+            )
+            .unwrap();
+            // An employee may have touched a workspace before Working was
+            // observed; absence of a revision alone cannot prove no effects.
+            backend
+                .boss
+                .observe_chain(
+                    chain.id,
+                    attempt.id,
+                    attempt.definition_version,
+                    Uuid::new_v4(),
+                    ChainObservation::Admitted {
+                        employee_id: Uuid::new_v4(),
+                    },
+                )
+                .unwrap();
+            for observation in [
+                ChainObservation::LaunchError {
+                    reason: "launch failed after admission".into(),
+                },
+                ChainObservation::Released {
+                    execution: true,
+                    workspace: true,
+                },
+            ] {
+                backend
+                    .boss
+                    .observe_chain(
+                        chain.id,
+                        attempt.id,
+                        attempt.definition_version,
+                        Uuid::new_v4(),
+                        observation,
+                    )
+                    .unwrap();
+            }
+            let verification = backend
+                .verify_chain_handoff(chain.id, attempt.id, attempt.definition_version)
+                .unwrap();
+            backend
+                .boss
+                .seal_chain_handoff(
+                    chain.id,
+                    attempt.id,
+                    attempt.definition_version,
+                    &verification,
+                )
+                .unwrap();
+        } else {
+            // A real daemon admission failure at step 1. HEAD is unavailable
+            // at sealing; repairing the project must reconcile the old seal.
+            let parked = root.join("parked-repo");
+            std::fs::rename(&project.path, &parked).unwrap();
+            backend.drive_chains();
+            let failed = backend.boss.document().chains[0].clone();
+            assert_eq!(failed.status, ChainStatus::Paused);
+            assert!(failed.steps[1].attempts[0].sealed.is_some());
+            assert!(failed.steps[1].attempts[0].employee_id.is_none());
+            assert!(
+                failed.steps[1].attempts[0]
+                    .reconciled_retry_revision
+                    .is_none()
+            );
+            std::fs::rename(&parked, &project.path).unwrap();
+        }
+        backend.drive_chains();
+        backend.drive_chains();
+        let chain = backend.boss.document().chains[0].clone();
+        let failed = &chain.steps[1].attempts[0];
+        assert_eq!(
+            chain
+                .history
+                .iter()
+                .filter(|entry| entry.event == "prior effects reconciled")
+                .count(),
+            usize::from(!bound_workspace)
+        );
+        let result = backend.handle_boss_operation(
+            Some(boss),
+            chain_control_op(
+                chain.id,
+                chain.revision,
+                ChainControl::Retry,
+                Some(head.clone()),
+            ),
+            &EventSink::detached(),
+        );
+        if bound_workspace {
+            assert!(failed.reconciled_retry_revision.is_none());
+            assert_eq!(
+                std::fs::read_to_string(project.path.join("unreconciled.txt")).unwrap(),
+                "uncommitted employee effect"
+            );
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("uncertain prior effects must be reconciled before retry")
+            );
+        } else {
+            assert_eq!(
+                failed.reconciled_retry_revision.as_deref(),
+                Some(head.as_str())
+            );
+            result.unwrap();
+            backend.run_summon_scheduler();
+            let retried = backend.boss.document().chains[0].clone();
+            assert_eq!(retried.steps[1].attempts.len(), 2);
+            assert_eq!(retried.steps[1].attempts[1].status, StepStatus::Working);
+            assert_eq!(
+                retried.steps[1].attempts[1].starting_revision.as_deref(),
+                Some(head.as_str())
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
 fn chain_terminal_failure_pauses_once_and_retry_continues() {
     let root = std::env::temp_dir().join(format!("waku-chain-fail-{}", Uuid::new_v4()));
     let (backend, boss, head) = chain_backend(&root);

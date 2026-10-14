@@ -650,16 +650,14 @@ impl WakuBackend {
 
     /// A restart can land between a released attempt's terminal write and
     /// its seal — reconcile paused on the uncertain binding; complete the
-    /// deferred seal now that durable facts prove both releases. Nothing is
-    /// invented: an attempt still missing its terminal or a release stays
+    /// deferred seal and retry reconciliation when durable facts prove both
+    /// releases. An attempt still missing its terminal or a release stays
     /// paused for the owner.
     fn finish_interrupted_seal(&self, chain: &EmployeeChain) {
         let Some(attempt) = chain.steps[chain.current_step].attempts.last() else {
             return;
         };
-        if attempt.sealed.is_some()
-            || attempt.terminal.is_none()
-            || !(attempt.execution_released && attempt.workspace_released)
+        if attempt.terminal.is_none() || !(attempt.execution_released && attempt.workspace_released)
         {
             return;
         }
@@ -770,29 +768,31 @@ impl WakuBackend {
         let Some(attempt) = chain.steps[chain.current_step].attempts.last() else {
             return;
         };
-        if attempt.id != attempt_id || attempt.sealed.is_some() {
+        if attempt.id != attempt_id {
             return;
         }
         // The handoff seam performs the real filesystem and Git checks —
         // unverifiable inputs fail the gate and pause rather than widen
         // access.
-        let verification = match self.verify_chain_handoff(chain_id, attempt_id, version) {
-            Ok(verification) => verification,
-            Err(error) => {
-                eprintln!("chain handoff verification failed for {chain_id}: {error:#}");
+        if attempt.sealed.is_none() {
+            let verification = match self.verify_chain_handoff(chain_id, attempt_id, version) {
+                Ok(verification) => verification,
+                Err(error) => {
+                    eprintln!("chain handoff verification failed for {chain_id}: {error:#}");
+                    return;
+                }
+            };
+            if let Err(error) =
+                self.boss
+                    .seal_chain_handoff(chain_id, attempt_id, version, &verification)
+            {
+                eprintln!("chain handoff seal rejected for {chain_id}: {error:#}");
                 return;
             }
-        };
-        if let Err(error) =
-            self.boss
-                .seal_chain_handoff(chain_id, attempt_id, version, &verification)
-        {
-            eprintln!("chain handoff seal rejected for {chain_id}: {error:#}");
-            return;
         }
-        // Fix the retry base on an unsuccessful seal: a fresh-workspace
-        // retry may name this attempt's own base and no other — the owner
-        // echoes it back through the retry control.
+        // Record the fresh-workspace retry base after an unsuccessful seal.
+        // Preserve the attempt's base when effects may exist; only an
+        // unbound attempt can fall back to the project's verified HEAD.
         let Some(chain) = self
             .boss
             .document()
@@ -812,6 +812,22 @@ impl WakuBackend {
                 .starting_revision
                 .clone()
                 .or_else(|| step.definition.base_revision.clone())
+                .or_else(|| {
+                    // An unbound launch failure has no workspace effects.
+                    // Successors need not declare a base: verify the project
+                    // HEAD before recording a fresh-worktree retry source.
+                    if attempt.employee_id.is_some() || attempt.workspace.is_some() {
+                        return None;
+                    }
+                    let project_path = self
+                        .task_state
+                        .lock()
+                        .projects
+                        .iter()
+                        .find(|project| project.id == step.definition.project_id)
+                        .map(|project| project.path.clone())?;
+                    git_head(&project_path)
+                })
         {
             let _ = observe_quiet(
                 &self.boss,
