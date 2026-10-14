@@ -1,1 +1,1 @@
-- Fixed a resumed employee's sidebar row showing its previous turn's failed marker while it rejoins the summon queue and starts up — the row now reads as connecting until the new turn begins.
+- Resumed employees return to the sidebar immediately, even when waiting for capacity after being archived; queued groups show an hourglass, and admitted employees show their new startup status.

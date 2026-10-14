@@ -12977,6 +12977,13 @@ fn a_resumed_employee_reads_connecting_once_dispatched() {
         )
         .unwrap();
     let employee = backend.boss.employee(employee_id).unwrap();
+    // Before dispatch, clients must already see this employee as live,
+    // with queued presentation rather than its previous terminal verdict.
+    assert_eq!(
+        employee.lifecycle(),
+        waku_protocol::boss::EmployeeLifecycle::Queued
+    );
+    assert!(!employee.expired);
     let mut ticket = employee.ticket.clone().unwrap();
     // The prompt envelope needs the daemon's bound agent surface, which a
     // test backend does not have — the shell-status write happens before

@@ -355,22 +355,20 @@ fn append_sidebar_planning_group(rows: &mut Vec<SidebarRow>, sessions: &[Uuid], 
     rows.push(SidebarRow::CollapsibleGroupSpacer { collapsed });
 }
 
-/// Whether a rostered employee lists on the sidebar. Rows the user archived
-/// off the sidebar stay on the boss's roster — they still list on the brain
-/// page's employee history — so the dismissal filter lives at the listing,
-/// and a session-archived employee hides the same way: the roster owns the
-/// record, and a resume unarchives the session before re-admission reopens
-/// the row.
+/// Live roster entries override dismissals from their previous admission,
+/// including while queued and before the unarchived session snapshot arrives.
+/// Expired employees still honor the user's archive choices.
 fn sidebar_employee_shown(
     id: &Uuid,
     sessions: &[AgentSession],
     dismissed: &std::collections::BTreeSet<Uuid>,
+    live: bool,
 ) -> bool {
-    !dismissed.contains(id)
+    live || (!dismissed.contains(id)
         && sessions
             .iter()
             .find(|session| session.id == *id)
-            .is_none_or(|session| session.archived_at.is_none())
+            .is_none_or(|session| session.archived_at.is_none()))
 }
 
 fn append_sidebar_group_rows(
@@ -4333,6 +4331,7 @@ impl Waku {
                                 id,
                                 &self.state.sessions,
                                 &self.state.sidebar_archived_employees,
+                                self.boss_ui.working.contains(id),
                             )
                     };
                     let active: Vec<_> = self
@@ -4873,7 +4872,8 @@ impl Waku {
         // A folded employee or planning group whose hidden members include
         // work in flight wears the spinner those rows would carry. Employee
         // progress lives on the boss roster; a planning session's lives on
-        // the session itself.
+        // the session itself. The live roster includes queued employees,
+        // whose header uses the hourglass instead of the running spinner.
         let has_working = collapsed
             && match group {
                 SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees => self
@@ -4883,7 +4883,10 @@ impl Waku {
                     .is_some_and(|members| {
                         members
                             .iter()
-                            .any(|session_id| self.boss_ui.working.contains(session_id))
+                            .any(|session_id| {
+                                self.boss_ui.working.contains(session_id)
+                                    && !self.boss_ui.queued.contains_key(session_id)
+                            })
                     }),
                 SidebarGroup::Planning => self
                     .sidebar_collapsed_group_members
@@ -5553,6 +5556,7 @@ impl Waku {
                             id,
                             &self.state.sessions,
                             &self.state.sidebar_archived_employees,
+                            self.boss_ui.working.contains(id),
                         )
                 });
             let shown = sidebar_employee_idle_shown(visible, no_active);
@@ -5569,6 +5573,7 @@ impl Waku {
                         id,
                         &self.state.sessions,
                         &self.state.sidebar_archived_employees,
+                        self.boss_ui.working.contains(id),
                     )
                 });
             let next = idle.nth(shown);
@@ -8753,10 +8758,50 @@ mod tests {
         let sessions = [listed_session, archived_session];
         let dismissed_set = std::collections::BTreeSet::from([dismissed]);
 
-        assert!(sidebar_employee_shown(&listed, &sessions, &dismissed_set));
-        assert!(!sidebar_employee_shown(&archived, &sessions, &dismissed_set));
-        assert!(!sidebar_employee_shown(&dismissed, &sessions, &dismissed_set));
-        assert!(sidebar_employee_shown(&missing, &sessions, &dismissed_set));
+        assert!(sidebar_employee_shown(&listed, &sessions, &dismissed_set, false));
+        assert!(!sidebar_employee_shown(&archived, &sessions, &dismissed_set, false));
+        assert!(!sidebar_employee_shown(&dismissed, &sessions, &dismissed_set, false));
+        assert!(sidebar_employee_shown(&missing, &sessions, &dismissed_set, false));
+    }
+
+    #[test]
+    fn resumed_employees_reappear_while_queued_and_after_admission() {
+        use waku_client::boss::EmployeeLifecycle;
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("previous assignment");
+        session.archived_at = Some(1);
+        let id = session.id;
+        let sessions = [session];
+        let dismissed = std::collections::BTreeSet::from([id]);
+        for lifecycle in [
+            EmployeeLifecycle::Queued,
+            EmployeeLifecycle::Dispatching,
+            EmployeeLifecycle::Working,
+            EmployeeLifecycle::Expired,
+        ] {
+            let live = lifecycle != EmployeeLifecycle::Expired;
+            assert_eq!(
+                sidebar_employee_shown(&id, &sessions, &dismissed, live),
+                live,
+                "{lifecycle:?}"
+            );
+            let mut rows = Vec::new();
+            let active = if live { vec![id] } else { vec![] };
+            append_sidebar_employee_group(
+                &mut rows,
+                SidebarGroup::Employees,
+                waku_client::DaemonKey::Local,
+                &active,
+                &[],
+                false,
+                0,
+            );
+            assert_eq!(
+                rows.iter()
+                    .any(|row| matches!(row, SidebarRow::Employee(member) if *member == id)),
+                live
+            );
+        }
     }
 
     #[test]
