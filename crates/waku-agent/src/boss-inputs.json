@@ -1540,6 +1540,18 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "startNow"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "stop"
             }
           },

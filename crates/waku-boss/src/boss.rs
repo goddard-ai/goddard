@@ -3278,9 +3278,10 @@ impl BossService {
         queued
     }
 
-    /// All queued tickets in admission order. Priority chooses which ticket
-    /// is attempted first; sequence breaks ties. A blocked ticket does not
-    /// prevent later tickets from being considered in the same pass.
+    /// All queued tickets in admission order. A committed force-start
+    /// leads, then declared priority chooses which ticket is attempted
+    /// first; sequence breaks ties. A blocked ticket does not prevent
+    /// later tickets from being considered in the same pass.
     pub fn queued_heads(&self) -> Vec<BossEmployee> {
         let state = self.state.lock();
         let mut queued: Vec<&BossEmployee> = state
@@ -3292,9 +3293,14 @@ impl BossService {
             let left_ticket = left.ticket.as_ref();
             let right_ticket = right.ticket.as_ref();
             right_ticket
-                .and_then(|ticket| ticket.priority)
-                .unwrap_or(0)
-                .cmp(&left_ticket.and_then(|ticket| ticket.priority).unwrap_or(0))
+                .is_some_and(|ticket| ticket.force_start)
+                .cmp(&left_ticket.is_some_and(|ticket| ticket.force_start))
+                .then_with(|| {
+                    right_ticket
+                        .and_then(|ticket| ticket.priority)
+                        .unwrap_or(0)
+                        .cmp(&left_ticket.and_then(|ticket| ticket.priority).unwrap_or(0))
+                })
                 .then_with(|| {
                     left_ticket
                         .map(|ticket| ticket.sequence)
@@ -3395,6 +3401,32 @@ impl BossService {
             Ok(())
         })?;
         Ok(appended)
+    }
+
+    /// Commit a human force-start on a queued ticket — the durable flag
+    /// the scheduler reads as burst claim plus queue head. Idempotent:
+    /// repeats and a ticket that already left the queue report `false`
+    /// without writing, and the caller resolves the settled state.
+    pub fn force_start_employee(&self, session: Uuid) -> anyhow::Result<bool> {
+        let mut flagged = false;
+        self.update(|state| {
+            let Some(entry) = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+            else {
+                return Ok(());
+            };
+            if entry.lifecycle() != EmployeeLifecycle::Queued {
+                return Ok(());
+            }
+            if let Some(ticket) = &mut entry.ticket {
+                ticket.force_start = true;
+                flagged = true;
+            }
+            Ok(())
+        })?;
+        Ok(flagged)
     }
 
     /// Rewrite a queued ticket's resolved selection — `setModel` keeps
@@ -3689,6 +3721,9 @@ impl BossService {
             ticket.blocked_by.clear();
             ticket.dispatch_event = None;
             ticket.human_interaction = false;
+            // A requeue is a new admission, not a retry of the one the
+            // human forced — the spent intent does not transfer.
+            ticket.force_start = false;
             adjust(&mut ticket);
             state.next_sequence = state.next_sequence.saturating_add(1);
             ticket.sequence = state.next_sequence;
@@ -11478,6 +11513,7 @@ mod memory_op_tests {
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
             human_interaction: false,
+            force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: Some("wave".into()),
@@ -11593,6 +11629,7 @@ mod memory_op_tests {
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
             human_interaction: false,
+            force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: None,
@@ -11859,6 +11896,7 @@ mod memory_op_tests {
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
             human_interaction: false,
+            force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: None,
@@ -13286,6 +13324,7 @@ mod memory_op_tests {
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
             human_interaction: false,
+            force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: None,
@@ -14418,6 +14457,7 @@ mod memory_op_tests {
             resources: waku_protocol::resources::ResourceSet::default(),
             allow_burst: false,
             human_interaction: false,
+            force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id: None,

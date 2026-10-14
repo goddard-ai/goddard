@@ -676,7 +676,7 @@ fn admission_blockers(
         blockers.push(AdmissionBlocker::HostResources {
             detail: "host capacity is occupied".into(),
         });
-    } else if starves_earlier_waiter(request, ledger) {
+    } else if !claim.skip_wait_order && starves_earlier_waiter(request, ledger) {
         blockers.push(AdmissionBlocker::HostResources {
             detail: "an earlier resource request is waiting for the same capacity".into(),
         });
@@ -1810,6 +1810,7 @@ mod tests {
             live_limit: u32::MAX,
             hard_cap: u32::MAX,
             allow_burst: false,
+            skip_wait_order: false,
         };
         let ticket = h
             .broker
@@ -1896,6 +1897,7 @@ mod tests {
             live_limit: 1,
             hard_cap: 1,
             allow_burst: false,
+            skip_wait_order: false,
         };
         let task = Uuid::new_v4();
         let first = h
@@ -1932,6 +1934,80 @@ mod tests {
             .unwrap();
         assert!(!other.granted);
         h.broker.release_admission(task, swap_id);
+    }
+
+    /// A force-start claim leapfrogs a parked waiter's fairness hold —
+    /// the waiter loses only its place in line, never a resource it
+    /// holds — while an ordinary admission still honors the FIFO shield.
+    #[test]
+    fn skip_wait_order_admission_leapfrogs_a_parked_waiter() {
+        let h = Harness::new();
+        // Desktop input is held elsewhere, so a wider request parks with
+        // a claim on the still-free build pool.
+        let held = h.acquire(
+            Uuid::new_v4(),
+            ResourceSet {
+                desktop_input: 1,
+                ..Default::default()
+            },
+        );
+        assert!(granted(&held, id(&held)));
+        let waiter = h.acquire(
+            Uuid::new_v4(),
+            ResourceSet {
+                native_builds: 1,
+                desktop_input: 1,
+                ..Default::default()
+            },
+        );
+        let waiter_id = id(&waiter);
+        assert!(!granted(&waiter, waiter_id));
+
+        let claim = |skip_wait_order| AdmissionClaim {
+            daemon: Uuid::new_v4(),
+            provider: "codex".into(),
+            model: "gpt-5.5".into(),
+            live_limit: u32::MAX,
+            hard_cap: u32::MAX,
+            allow_burst: false,
+            skip_wait_order,
+        };
+        // An ordinary admission honors the waiter's place in line.
+        let queued = h
+            .broker
+            .try_admission(Uuid::new_v4(), Uuid::new_v4(), build(), "queued".into(), claim(false))
+            .unwrap();
+        assert!(!queued.granted);
+        assert!(
+            queued.blockers.iter().any(|blocker| matches!(
+                blocker,
+                AdmissionBlocker::HostResources { detail }
+                    if detail.contains("earlier resource request")
+            )),
+            "expected the FIFO shield as the reason: {:?}",
+            queued.blockers
+        );
+        // The force claim takes the free build slot over the waiter's
+        // order; the waiter stays parked, its held set untouched.
+        let forced = h
+            .broker
+            .try_admission(Uuid::new_v4(), Uuid::new_v4(), build(), "forced".into(), claim(true))
+            .unwrap();
+        assert!(
+            forced.granted,
+            "a force claim leapfrogs the waiter: {:?}",
+            forced.blockers
+        );
+        let status = h
+            .broker
+            .operate(Uuid::new_v4(), ResourceOperation::Status { id: None })
+            .unwrap();
+        let parked = status
+            .reservations
+            .iter()
+            .find(|r| r.id == waiter_id)
+            .unwrap();
+        assert!(parked.granted_at.is_none() && !parked.released);
     }
 
     #[test]

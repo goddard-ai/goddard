@@ -85,7 +85,7 @@ exist only during this script invocation; use named memory buckets for durable s
                                             setPurpose classifies them; never infer from titles,
                                             workGoal, finisher status or access defaults.
   control(sessionId, \"stop\")               shorthand for a bare action
-  control(sessionId, #{type:prompt|steer|stop|setModel|setPermissions|
+  control(sessionId, #{type:prompt|steer|stop|startNow|setModel|setPermissions|
                         setWorkspace|setResources|setPlan|setPurpose,...})
                                             setWorkspace takes workspace:
                                             \"local\"|\"worktree\" plus baseBranch

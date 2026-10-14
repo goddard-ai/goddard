@@ -8575,6 +8575,7 @@ fn hold_model_slot(backend: &WakuBackend, provider: ProviderKind, model: &str) -
                 live_limit: u32::MAX,
                 hard_cap: u32::MAX,
                 allow_burst: false,
+                skip_wait_order: false,
             },
         )
         .unwrap();
@@ -9899,6 +9900,394 @@ fn queued_tickets_dispatch_fifo_once_capacity_frees() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// `startNow` on a queued ticket is a flag plus an ordinary dispatch
+/// attempt: the ticket spends the pool's burst headroom and a prompt
+/// parked while queued still rides the same launch envelope — never a
+/// parallel spawn. A stale press afterward resolves the settled state
+/// instead of erroring or dispatching again.
+#[test]
+fn start_now_dispatches_a_queued_ticket_through_burst_headroom() {
+    use waku_protocol::boss::{
+        AdmissionBlocker, BossOperation, BossResult, EmployeeControl, EmployeeLifecycle,
+    };
+    let root = std::env::temp_dir().join(format!("summon-startnow-{}", Uuid::new_v4()));
+    let (mut backend, boss) = summon_test_backend(&root);
+    // live 1 of hard 2 with one slot held — ordinary admission reads
+    // full while the burst half still has room.
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 2);
+    let (_held_task, _held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let BossResult::Summoned {
+        session_id,
+        state,
+        admission,
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "queued job",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    assert!(
+        admission
+            .as_ref()
+            .is_some_and(|admission| admission.blocked_by.iter().any(|blocker| matches!(
+                blocker,
+                AdmissionBlocker::ModelLimit { used: 1, limit: 1 }
+            ))),
+        "the ticket should report the full live pool: {:?}",
+        admission
+    );
+
+    // A prompt parked while queued survives the force flag untouched.
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::Prompt {
+                    prompt: "parked follow-up".into(),
+                    delivery: None,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let ticket = backend.boss.employee(session_id).unwrap().ticket.unwrap();
+    assert_eq!(ticket.pending_prompts, ["parked follow-up".to_string()]);
+
+    // A working launch: the hook counts dispatches so a duplicate spawn
+    // would show up as a second entry.
+    let launches = Arc::new(Mutex::new(0usize));
+    let counting = launches.clone();
+    backend.set_daemon_address("http://127.0.0.1:1".into());
+    backend.runtime_test_cli = Some("/usr/bin/true".into());
+    backend.runtime_test_start = Some(Arc::new(move |_, _, _| {
+        *counting.lock() += 1;
+        Ok(DriverHandle::from_control(Arc::new(CaptureDriver::default())))
+    }));
+    let mut daemon_settings = backend.settings.get();
+    daemon_settings
+        .provider_binary_overrides
+        .insert(ProviderKind::Codex, "/usr/bin/true".into());
+    backend.settings.replace(daemon_settings).unwrap();
+
+    let result = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::StartNow,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    // Dispatch ran on the burst claim — one launch, settled working.
+    let BossResult::Summoned { state, .. } = result else {
+        panic!("startNow answers with the employee's settled state")
+    };
+    assert_eq!(state, EmployeeLifecycle::Working);
+    assert_eq!(*launches.lock(), 1);
+
+    // A stale press resolves the settled state — no error, and no second
+    // dispatch: the generation CAS already settled this ticket.
+    let result = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::StartNow,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let BossResult::Summoned { state, .. } = result else {
+        panic!("startNow answers with the employee's settled state")
+    };
+    assert_eq!(state, EmployeeLifecycle::Working);
+    assert_eq!(
+        *launches.lock(),
+        1,
+        "repeat presses cannot double-dispatch"
+    );
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A committed force flag orders its ticket ahead of every other queued
+/// ticket, yet the hard cap still binds: at a saturated lane the press
+/// reports the truthful wait reason, and a second press is the same
+/// committed intent rather than a second dispatch.
+#[test]
+fn start_now_takes_the_queue_head_but_never_crosses_the_hard_cap() {
+    use waku_protocol::boss::{
+        AdmissionBlocker, BossOperation, BossResult, EmployeeControl, EmployeeLifecycle,
+    };
+    let root = std::env::temp_dir().join(format!("summon-startnow-cap-{}", Uuid::new_v4()));
+    let (mut backend, boss) = summon_test_backend(&root);
+    // One slot total, and it is held — no headroom for burst either.
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    // Launches succeed, so a dispatched ticket lands Working instead of
+    // expiring on the fixture's missing binary.
+    backend.set_daemon_address("http://127.0.0.1:1".into());
+    backend.runtime_test_cli = Some("/usr/bin/true".into());
+    backend.runtime_test_start = Some(Arc::new(|_, _, _| {
+        Ok(DriverHandle::from_control(Arc::new(CaptureDriver::default())))
+    }));
+    let mut daemon_settings = backend.settings.get();
+    daemon_settings
+        .provider_binary_overrides
+        .insert(ProviderKind::Codex, "/usr/bin/true".into());
+    backend.settings.replace(daemon_settings).unwrap();
+    let summon = |job: &str| {
+        let BossResult::Summoned {
+            session_id, state, ..
+        } = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(&backend, &root, job, ProviderKind::Codex, Some("gpt-5.5")),
+                &EventSink::detached(),
+            )
+            .unwrap()
+        else {
+            panic!("expected a summoned result")
+        };
+        assert_eq!(state, EmployeeLifecycle::Queued);
+        session_id
+    };
+    let first = summon("first");
+    let second = summon("second");
+
+    let start_now = |session_id| {
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Control {
+                    session_id,
+                    action: EmployeeControl::StartNow,
+                },
+                &EventSink::detached(),
+            )
+            .unwrap()
+    };
+
+    // The force flag commits and the ticket jumps to the head, but the
+    // saturated lane keeps it queued with the truthful reason.
+    let result = start_now(second);
+    let BossResult::Summoned {
+        state, admission, ..
+    } = result
+    else {
+        panic!("startNow answers with the employee's settled state")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    let admission = admission.expect("a queued result carries its admission");
+    assert!(admission.force_start, "the committed flag reports to clients");
+    assert!(
+        admission
+            .blocked_by
+            .iter()
+            .any(|blocker| matches!(blocker, AdmissionBlocker::ModelLimit { used: 1, limit: 1 })),
+        "hard cap still reports as the wait reason: {:?}",
+        admission.blocked_by
+    );
+    let heads: Vec<Uuid> = backend
+        .boss
+        .queued_heads()
+        .iter()
+        .map(|entry| entry.session_id)
+        .collect();
+    assert_eq!(heads, vec![second, first], "the flag takes the head");
+
+    // Repeats re-commit the same flag — harmless, no error, no dispatch.
+    let result = start_now(second);
+    assert!(matches!(
+        result,
+        BossResult::Summoned {
+            state: EmployeeLifecycle::Queued,
+            ..
+        }
+    ));
+
+    // Capacity frees: the flagged ticket dispatches first even though it
+    // queued second — and with its grant filling the lane, the unforced
+    // ticket stays queued on the truthful reason.
+    backend
+        .resource_broker()
+        .unwrap()
+        .release_admission(held_task, held);
+    backend.run_summon_scheduler();
+    assert_eq!(
+        backend.boss.employee(second).unwrap().lifecycle(),
+        EmployeeLifecycle::Working,
+        "the forced ticket won the freed slot"
+    );
+    let first_employee = backend.boss.employee(first).unwrap();
+    assert_eq!(first_employee.lifecycle(), EmployeeLifecycle::Queued);
+    assert!(
+        first_employee
+            .ticket
+            .as_ref()
+            .is_some_and(|ticket| ticket.blocked_by.iter().any(|blocker| matches!(
+                blocker,
+                AdmissionBlocker::ModelLimit { used: 1, limit: 1 }
+            ))),
+        "the unforced ticket reports the saturated lane: {:?}",
+        first_employee.ticket.as_ref().map(|ticket| &ticket.blocked_by)
+    );
+
+    // The forced press on the still-blocked sibling keeps it waiting —
+    // the flag asks, the cap decides.
+    let result = start_now(first);
+    assert!(matches!(
+        result,
+        BossResult::Summoned {
+            state: EmployeeLifecycle::Queued,
+            ..
+        }
+    ));
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Held host resources are never stolen: a forced ticket claiming an
+/// occupied set stays queued on the physical-capacity reason, the flag
+/// persists through a daemon restart, and once the hold lifts the flag
+/// still drives the burst admission the restart owed it.
+#[test]
+fn start_now_flag_survives_restart_and_never_steals_held_resources() {
+    use waku_protocol::boss::{
+        AdmissionBlocker, BossOperation, BossResult, EmployeeControl, EmployeeLifecycle,
+    };
+    use waku_protocol::resources::{ResourceOperation, ResourceSet};
+    let root =
+        std::env::temp_dir().join(format!("summon-startnow-restart-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    // The model lane reads full at live but has burst headroom, and the
+    // one native-build slot is held — two independent holds to clear.
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 2);
+    let (_held_task, _held_slot) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let build_holder = Uuid::new_v4();
+    let held_build = backend
+        .resource_broker()
+        .unwrap()
+        .operate(
+            build_holder,
+            ResourceOperation::Acquire {
+                resources: ResourceSet {
+                    native_builds: 1,
+                    ..Default::default()
+                },
+                purpose: "fixture build".into(),
+                holder_pid: std::process::id(),
+                wait_seconds: 60,
+                parent: None,
+            },
+        )
+        .unwrap()
+        .request_id
+        .unwrap();
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "resourced job",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::SetResources {
+                    resources: ResourceSet {
+                        native_builds: 1,
+                        ..Default::default()
+                    },
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+
+    // Force commits the flag but the held build slot keeps the ticket
+    // queued — occupied capacity is a physical fact, not queue order.
+    let result = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::StartNow,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let BossResult::Summoned {
+        state, admission, ..
+    } = result
+    else {
+        panic!("startNow answers with the employee's settled state")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    let admission = admission.expect("a queued result carries its admission");
+    assert!(admission.force_start);
+    assert!(
+        admission
+            .blocked_by
+            .iter()
+            .any(|blocker| matches!(blocker, AdmissionBlocker::HostResources { .. })),
+        "the held build slot stays the wait reason: {:?}",
+        admission.blocked_by
+    );
+    drop(backend);
+
+    // Restart: the ticket — flag included — is durable state.
+    let backend = reopen_backend(&root);
+    *backend.broker_root.lock() = Some(root.join("broker"));
+    backend.run_summon_scheduler();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
+    assert!(
+        employee.ticket.as_ref().is_some_and(|ticket| ticket.force_start),
+        "the restart must not drop the committed force intent"
+    );
+
+    // Freeing the build slot dispatches through the flag's burst claim —
+    // the model lane still reads full for an unforced ticket.
+    backend
+        .resource_broker()
+        .unwrap()
+        .operate(build_holder, ResourceOperation::Release { id: held_build })
+        .unwrap();
+    backend.run_summon_scheduler();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Working);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// `setResources` rewrites a queued ticket in place: the next
 /// admission attempt must satisfy the declared host set, so a ticket
 /// that would have dispatched on the freed model slot keeps waiting
@@ -10070,6 +10459,7 @@ fn set_resources_on_a_working_employee_swaps_in_place() {
                 live_limit: 1,
                 hard_cap: 2,
                 allow_burst: true,
+                skip_wait_order: false,
             },
         )
         .unwrap();
@@ -10971,6 +11361,7 @@ fn setmodel_on_a_working_employee_interrupts_and_requeues() {
                 live_limit: 1,
                 hard_cap: 2,
                 allow_burst: true,
+                skip_wait_order: false,
             },
         )
         .unwrap();
@@ -11112,6 +11503,7 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
                 live_limit: 1,
                 hard_cap: 2,
                 allow_burst: true,
+                skip_wait_order: false,
             },
         )
         .unwrap();
@@ -11523,6 +11915,7 @@ fn setmodel_requeue_relaunches_on_the_new_provider() {
                 live_limit: 1,
                 hard_cap: 2,
                 allow_burst: true,
+                skip_wait_order: false,
             },
         )
         .unwrap();
@@ -11712,6 +12105,7 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
                 live_limit: 1,
                 hard_cap: 2,
                 allow_burst: true,
+                skip_wait_order: false,
             },
         )
         .unwrap();
@@ -12002,6 +12396,7 @@ fn setmodel_retune_resets_to_the_models_default_effort() {
                 live_limit: 1,
                 hard_cap: 2,
                 allow_burst: true,
+                skip_wait_order: false,
             },
         )
         .unwrap();
@@ -13462,6 +13857,7 @@ fn legacy_dispatch_notifications_are_retired_without_delivery() {
                 live_limit: 1,
                 hard_cap: 2,
                 allow_burst: true,
+                skip_wait_order: false,
             },
         )
         .unwrap();

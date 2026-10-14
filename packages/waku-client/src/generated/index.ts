@@ -103,6 +103,7 @@ export type { ComputerAppGrant } from "./ComputerAppGrant";
 export type { ComputerPermissions } from "./ComputerPermissions";
 export type { ComputerUseRunRequest } from "./ComputerUseRunRequest";
 export type { ComputerUseVerification } from "./ComputerUseVerification";
+export type { ConfigActivation } from "./ConfigActivation";
 export type { ContextUsage } from "./ContextUsage";
 export type { CostQuality } from "./CostQuality";
 export type { CreateIssueInput } from "./CreateIssueInput";

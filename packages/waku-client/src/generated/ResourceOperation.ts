@@ -2,4 +2,4 @@
 import type { AdmissionClaim } from "./AdmissionClaim";
 import type { ResourceSet } from "./ResourceSet";
 
-export type ResourceOperation = { "action": "acquire", resources: ResourceSet, purpose: string, holder_pid: number, wait_seconds: number, parent: string | null, } | { "action": "admission", id: string, resources: ResourceSet, purpose: string, claim: AdmissionClaim, } | { "action": "attach", id: string, workload_pid: number, } | { "action": "release", id: string, } | { "action": "cancel", id: string, } | { "action": "status", id: string | null, };
+export type ResourceOperation = { "action": "acquire", resources: ResourceSet, purpose: string, holder_pid: number, wait_seconds: number, parent: string | null, } | { "action": "admission", id: string, resources: ResourceSet, purpose: string, claim: AdmissionClaim, } | { "action": "attach", id: string, workload_pid: number, } | { "action": "reanchor", id: string, owner_pid: number, } | { "action": "release", id: string, } | { "action": "cancel", id: string, } | { "action": "status", id: string | null, };

@@ -2,7 +2,14 @@
 import type { AdmissionClaim } from "./AdmissionClaim";
 import type { ResourceSet } from "./ResourceSet";
 
-export type Reservation = { id: string, task: string, purpose: string, resources: ResourceSet, holder_pid: number, daemon_pid: number, workload_pid: number | null, requested_at: number, duration_seconds: number, deadline: number, granted_at: number | null, cancelled: boolean, released: boolean,
+export type Reservation = { id: string, task: string, purpose: string, resources: ResourceSet, holder_pid: number, daemon_pid: number,
+/**
+ * When set, the surviving process that owns this reservation's
+ * liveness instead of the transacting daemon — the runtime host for
+ * runtime-owned sessions. `holder_pid` anchors that matched the old
+ * daemon move with it; agent-held callers keep their own pid.
+ */
+owner_pid?: number | null, workload_pid: number | null, requested_at: number, duration_seconds: number, deadline: number, granted_at: number | null, cancelled: boolean, released: boolean,
 /**
  * The model-slot claim this reservation holds, when it came through
  * `Admission`. Ledger entries written before admission tickets

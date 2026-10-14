@@ -211,6 +211,7 @@ fn employee_composer_keeps_hardware_wait_and_durable_receipt_on_restart() {
             live_limit: u32::MAX,
             hard_cap: u32::MAX,
             allow_burst: false,
+            skip_wait_order: false,
         };
         assert!(
             backend

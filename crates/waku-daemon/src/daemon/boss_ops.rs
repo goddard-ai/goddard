@@ -730,6 +730,12 @@ impl WakuBackend {
                          is required to proceed; otherwise report results at turn end"
                     );
                 }
+                // `startNow` owns its locking: the flag commits under the
+                // operation lock while the dispatch attempt runs after it
+                // — a provider launch must never stall other operations.
+                if matches!(&action, EmployeeControl::StartNow) {
+                    return self.control_employee_start_now(caller, session_id);
+                }
                 self.boss.with_operation_lock(|| {
                     self.boss.require_control(caller, session_id)?;
                     if let EmployeeControl::SetPurpose { purpose } = &action {
@@ -991,7 +997,8 @@ impl WakuBackend {
                         | EmployeeControl::SetWorkspace { .. }
                         | EmployeeControl::SetResources { .. }
                         | EmployeeControl::SetPlan { .. }
-                        | EmployeeControl::SetPurpose { .. } => {
+                        | EmployeeControl::SetPurpose { .. }
+                        | EmployeeControl::StartNow => {
                             unreachable!("handled above")
                         }
                     }

@@ -21,4 +21,10 @@ live_limit: number,
 /**
  * Absolute cap reachable only when `allow_burst` is set.
  */
-hard_cap: number, allow_burst: boolean, };
+hard_cap: number, allow_burst: boolean,
+/**
+ * A human force-start may leapfrog parked `Acquire` waiters sharing
+ * its capacity — they keep waiting rather than lose anything held.
+ * Granted reservations and policy capacity are never bypassed.
+ */
+skip_wait_order: boolean, };

@@ -57,6 +57,14 @@ allowBurst: boolean,
  */
 humanInteraction: boolean,
 /**
+ * A human's "start now" on the queued ticket: admission claims burst
+ * slots up to the model's hard cap and the ticket orders ahead of
+ * every declared priority, while held reservations and launch
+ * validation still bind. Persisted so a daemon restart keeps the
+ * committed intent; cleared when the ticket re-enters admission.
+ */
+forceStart: boolean,
+/**
  * Kept across generations so a lost-response retry cannot start a
  * second turn, including after expiry or daemon replacement.
  */

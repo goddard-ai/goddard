@@ -1132,6 +1132,13 @@ pub struct SummonTicket {
     /// hardware claims and all launch validation remain enforced.
     #[serde(default)]
     pub human_interaction: bool,
+    /// A human's "start now" on the queued ticket: admission claims burst
+    /// slots up to the model's hard cap and the ticket orders ahead of
+    /// every declared priority, while held reservations and launch
+    /// validation still bind. Persisted so a daemon restart keeps the
+    /// committed intent; cleared when the ticket re-enters admission.
+    #[serde(default)]
+    pub force_start: bool,
     /// Kept across generations so a lost-response retry cannot start a
     /// second turn, including after expiry or daemon replacement.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1146,8 +1153,9 @@ pub struct SummonTicket {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub group_id: Option<String>,
-    /// Optional dispatch priority — reserved for the same phase; dispatch
-    /// remains strict FIFO today.
+    /// Optional dispatch priority — higher values attempt admission
+    /// first and sequence breaks ties. A committed `force_start`
+    /// outranks every declared priority.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub priority: Option<i64>,
@@ -1245,6 +1253,10 @@ pub struct SummonAdmission {
     pub queue_position: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocked_by: Vec<AdmissionBlocker>,
+    /// A committed `startNow` request on a still-queued ticket — the
+    /// client reads this as "starting", since dispatch is already owed.
+    #[serde(default)]
+    pub force_start: bool,
 }
 
 /// One provider+model rule in the boss-set resource policy. `liveLimit`
@@ -3869,6 +3881,13 @@ pub enum EmployeeControl {
         #[serde(default)]
         persona_id: Option<Uuid>,
     },
+    /// Force a queued employee's admission now: the ticket takes the
+    /// queue head and claims burst slots up to the model's hard cap —
+    /// never past it — and parked resource waiters lose their wait-order
+    /// protection while held reservations and physical capacity still
+    /// bind. Idempotent and state-resolving: on an employee already past
+    /// the queue the op is a no-op that reports the settled lifecycle.
+    StartNow,
     Stop,
 }
 

@@ -483,7 +483,11 @@ impl WakuBackend {
                 .map(|rule| rule.live_limit)
                 .unwrap_or(u32::MAX),
             hard_cap: rule.as_ref().map(|rule| rule.hard_cap).unwrap_or(u32::MAX),
-            allow_burst: ticket.allow_burst,
+            // A committed "start now" is the summon-time `allow_burst`
+            // applied post-hoc — burst slots up to `hard_cap`, never past
+            // it — plus leave to jump ahead of parked resource waiters.
+            allow_burst: ticket.allow_burst || ticket.force_start,
+            skip_wait_order: ticket.force_start,
         }
     }
 
@@ -1524,6 +1528,7 @@ impl WakuBackend {
             resources,
             allow_burst,
             human_interaction: false,
+            force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
             group_id,
@@ -1694,7 +1699,8 @@ impl WakuBackend {
 
     /// The `Summoned` payload for the employee's current state —
     /// `queued` carries position and wait reasons; dispatched states
-    /// carry the resolved selection.
+    /// carry the resolved selection. A retired record resolves too, so
+    /// state-resolving ops can report an expired employee truthfully.
     pub(super) fn summoned_result(
         &self,
         session_id: Uuid,
@@ -1703,6 +1709,11 @@ impl WakuBackend {
         let employee = self
             .boss
             .employee_with_queue_position(session_id)
+            .or_else(|| {
+                self.boss
+                    .employee_including_retired(session_id)
+                    .map(|employee| (employee, None))
+            })
             .ok_or_else(|| anyhow!("employee record is missing"))?;
         let (employee, queue_position) = employee;
         Ok(BossResult::Summoned {
@@ -1714,6 +1725,7 @@ impl WakuBackend {
                 reasoning_effort: ticket.reasoning_effort.clone(),
                 queue_position,
                 blocked_by: ticket.blocked_by.clone(),
+                force_start: ticket.force_start,
             }),
         })
     }
@@ -1940,6 +1952,37 @@ impl WakuBackend {
         Ok(BossResult::Saved)
     }
 
+    /// The human's `startNow` on an employee — commit the durable force
+    /// flag under the operation lock, then attempt the ticket through the
+    /// one dispatch path: the broker grant and `mark_dispatching`'s
+    /// generation CAS stay the single winner, so double-presses and a
+    /// racing automatic admission can never launch twice. The launch
+    /// runs after the lock so other operations never stall behind a
+    /// provider spawn. An employee already past the queue resolves to
+    /// its settled lifecycle — the no-op a stale card needs, not an
+    /// error — and a still-blocked ticket keeps its truthful wait reason.
+    pub(super) fn control_employee_start_now(
+        &self,
+        caller: Option<Uuid>,
+        session_id: Uuid,
+    ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        use waku_protocol::boss::EmployeeLifecycle;
+        let queued = self.boss.with_operation_lock(|| -> anyhow::Result<bool> {
+            let lifecycle = self.runtime_lifecycles.session(session_id);
+            let _owner = lifecycle.lock();
+            self.boss.require_control(caller, session_id)?;
+            Ok(self.boss.employee_lifecycle(session_id) == Some(EmployeeLifecycle::Queued)
+                && self.boss.force_start_employee(session_id)?)
+        })?;
+        if queued {
+            if let Some(employee) = self.boss.employee(session_id) {
+                self.dispatch_queued_head(&employee)?;
+            }
+            self.wake_summon_queue();
+        }
+        self.summoned_result(session_id)
+    }
+
     /// Controls a queued employee's ticket. `prompt` appends durable
     /// instructions to the dispatch envelope; `steer` cannot steer a turn
     /// that does not exist; `stop` cancels the pending work; model and
@@ -2048,6 +2091,9 @@ impl WakuBackend {
             EmployeeControl::SetPlan { plan, item } => {
                 self.boss.set_employee_plan(session_id, plan, item)?;
                 Ok(BossResult::Saved)
+            }
+            EmployeeControl::StartNow => {
+                unreachable!("startNow resolves ahead of queued-state routing")
             }
         }
     }
@@ -2473,6 +2519,7 @@ impl WakuBackend {
                 resources: waku_protocol::resources::ResourceSet::default(),
                 allow_burst: false,
                 human_interaction: false,
+                force_start: false,
                 composer_receipts: Vec::new(),
                 pending_prompts: Vec::new(),
                 group_id: None,

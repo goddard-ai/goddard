@@ -47,6 +47,11 @@ pub struct AdmissionClaim {
     pub hard_cap: u32,
     #[serde(default)]
     pub allow_burst: bool,
+    /// A human force-start may leapfrog parked `Acquire` waiters sharing
+    /// its capacity — they keep waiting rather than lose anything held.
+    /// Granted reservations and policy capacity are never bypassed.
+    #[serde(default)]
+    pub skip_wait_order: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
