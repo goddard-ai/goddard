@@ -1,0 +1,1 @@
+- Archive pending employees from the sidebar using the archive button shown on hover or keyboard focus; their queued work is cancelled.

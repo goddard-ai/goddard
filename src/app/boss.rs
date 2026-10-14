@@ -5324,13 +5324,13 @@ impl Waku {
                 None,
             )
         };
-        // An expired row's archive control borrows the status slot the way
-        // a task row's does — zero-width until the row is hovered or the
-        // button takes keyboard focus. Archiving drops only the sidebar
-        // listing; the brain page's employee history keeps the record.
-        let expired = self.boss_ui.expired.contains(&id);
+        // Expired and queued rows lend their status slot to the archive
+        // control on hover or keyboard focus. Queued work is cancelled;
+        // employee history keeps the record.
+        let archivable =
+            self.boss_ui.expired.contains(&id) || self.boss_ui.queued.contains_key(&id);
         let group_name = SharedString::from(format!("boss-employee-row-{id}"));
-        let archive_button = expired.then(|| {
+        let archive_button = archivable.then(|| {
             let focus = self
                 .sidebar_employee_archive_focuses
                 .borrow_mut()
@@ -5346,20 +5346,20 @@ impl Waku {
                 cx,
             )
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
-                this.archive_sidebar_employee(id, cx);
+                this.archive_pending_sidebar_employee(id, window, cx);
             }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.archive_sidebar_employee(id, cx);
+                    this.archive_pending_sidebar_employee(id, window, cx);
                     cx.stop_propagation();
                 }
             }))
         });
         div()
             .id(format!("boss-employee-{id}"))
-            .when(expired, |row| row.group(group_name.clone()))
+            .when(archivable, |row| row.group(group_name.clone()))
             .tab_index(0)
             .h(px(42.0))
             .w_full()
@@ -5424,11 +5424,11 @@ impl Waku {
                 )
             })
             .when_some(status_indicator, |row, indicator| {
-                // On an expired row the status yields its slot to the
+                // On an archivable row the status yields its slot to the
                 // hover-revealed archive control — it collapses out of the
                 // flow rather than just hiding so the button lands where
                 // the indicator stood.
-                if expired {
+                if archivable {
                     row.child(
                         div()
                             .flex_none()
@@ -5442,6 +5442,81 @@ impl Waku {
             })
             .when_some(archive_button, |row, button| row.child(button))
             .into_any_element()
+    }
+
+    /// Cancel queued admission before dismissing the row. The daemon stop
+    /// persists cancellation even when no session shell exists.
+    fn archive_pending_sidebar_employee(
+        &mut self,
+        session_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.boss_ui.queued.contains_key(&session_id) {
+            if self.boss_ui.expired.contains(&session_id) {
+                self.archive_sidebar_employee(session_id, cx);
+            }
+            return;
+        }
+        let key = self.boss_ui.states.iter().find_map(|(key, state)| {
+            state
+                .employees
+                .iter()
+                .any(|employee| employee.session_id == session_id)
+                .then_some(*key)
+        });
+        let Some(client) =
+            key.and_then(|key| self.daemons.supervisor(key).map(|daemon| daemon.client()))
+        else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            return;
+        };
+        let window_handle = window.window_handle();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::Boss {
+                            operation: BossOperation::Control {
+                                session_id,
+                                action: waku_client::boss::EmployeeControl::Stop,
+                            },
+                        },
+                    )
+                })
+                .await;
+            let _ = window_handle.update(cx, |_, window, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    match result {
+                        Ok(waku_client::ResponsePayload::Boss {
+                            result: BossResult::Saved,
+                        }) => {
+                            this.archive_sidebar_employee(session_id, cx);
+                            if let Some(session) = this.state.session_mut(session_id)
+                                && !session.has_started()
+                            {
+                                // Unstarted shells cannot enter the ordinary task
+                                // archive path. Persist their archive flag directly.
+                                let now = unix_time();
+                                session.archived_at = Some(now);
+                                session.updated_at = now;
+                                this.save();
+                            } else {
+                                // A requeued session keeps the ordinary workspace
+                                // safety checks and navigation when archived.
+                                this.archive_session(session_id, window, cx);
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(error) => this.show_toast(error.to_string()),
+                    }
+                });
+            });
+        })
+        .detach();
     }
 
     /// An expired employee row's archive control: drops the row from the

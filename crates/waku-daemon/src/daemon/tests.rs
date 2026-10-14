@@ -9377,7 +9377,45 @@ fn archiving_a_queued_employee_drops_its_ticket() {
     };
     assert_eq!(state, EmployeeLifecycle::Queued);
 
-    backend.archive_sessions(&[session_id]).unwrap();
+    let mut shell = backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .unwrap()
+        .clone();
+    assert!(!shell.has_started());
+    shell.updated_at += 1;
+    shell.archived_at = Some(shell.updated_at);
+    backend
+        .handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command: Command::SaveTaskState {
+                    projects: Vec::new(),
+                    live_session_ids: vec![session_id],
+                    sessions: vec![shell],
+                    session_tails: Vec::new(),
+                },
+            },
+            EventSink::detached(),
+            None,
+        )
+        .unwrap();
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap()
+            .archived_at
+            .is_some()
+    );
     backend.run_summon_scheduler();
     let employee = backend.boss.employee(session_id).unwrap();
     assert!(employee.expired);
@@ -9490,6 +9528,17 @@ fn a_stopped_queued_employee_stays_expired_after_restart() {
         .resource_broker()
         .unwrap()
         .release_admission(held_task, held);
+    // The sidebar can list a pending employee without a session shell.
+    // Cancellation must still remove its durable admission ticket.
+    backend.remove_session_shell(session_id);
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .all(|session| session.id != session_id)
+    );
     backend
         .handle_boss_operation(
             Some(boss),
