@@ -319,10 +319,10 @@ fn clean_committed_workspace(
 }
 
 /// The landed gate: the reported revision is reachable on the project's
-/// configured QA branch. The submission id is the employee's claim —
-/// `merge submit` mints none — so it is echoed for traceability when
-/// reported and never required; the branch ancestry is what the host
-/// confirms.
+/// configured QA branch. The submission id and QA branch are the
+/// employee's claims — `merge submit` reports neither — so each is
+/// echoed for traceability when present and never required; the branch
+/// ancestry is what the host confirms.
 fn confirmed_landing(
     project: &Project,
     configured_branch: &str,
@@ -332,15 +332,13 @@ fn confirmed_landing(
         .landed_revision
         .as_deref()
         .ok_or_else(|| anyhow!("landed revision is unreported"))?;
-    let claimed_branch = code
-        .qa_branch
-        .as_deref()
-        .ok_or_else(|| anyhow!("QA branch is unreported"))?;
     let branch = crate::review::qa_branch_name(configured_branch);
-    ensure!(
-        claimed_branch == branch,
-        "reported QA branch {claimed_branch:?} is not the configured {branch:?}"
-    );
+    if let Some(claimed_branch) = code.qa_branch.as_deref() {
+        ensure!(
+            claimed_branch == branch,
+            "reported QA branch {claimed_branch:?} is not the configured {branch:?}"
+        );
+    }
     let tip = format!("refs/heads/{branch}");
     ensure!(
         git_revision(&project.path, &tip).is_ok(),
@@ -1499,6 +1497,124 @@ mod tests {
             assert_eq!(chain.status, ChainStatus::Paused);
             assert_eq!(chain.reason.as_deref(), Some("QA landing unconfirmed"));
         }
+    }
+
+    /// `merge submit` reports no QA branch either — the daemon resolves the
+    /// verification target itself — so an unreported branch claims the
+    /// resolved one and a verified landing seals. A misreported branch, a
+    /// non-ancestor revision, and a missing revision all still gate.
+    #[test]
+    fn landed_gate_resolves_an_unreported_qa_branch() {
+        let fixture = Fixture::new();
+        let base = git(&fixture.repo, &["rev-parse", "HEAD"]);
+        let worktree = fixture.managed_worktree(&base);
+        let landed = fixture.commit(&worktree, "unit.txt", "work");
+        git(&fixture.repo, &["branch", "dev", &landed]);
+        // A real commit the QA branch never contained.
+        let stray = fixture.commit(&fixture.repo, "stray.txt", "stray");
+        let code = |revision: Option<&str>, branch: Option<&str>| ChainCodeEvidence {
+            workspace: worktree.display().to_string(),
+            source_revision: base.clone(),
+            committed_revision: Some(landed.clone()),
+            landed_revision: revision.map(str::to_owned),
+            qa_branch: branch.map(str::to_owned),
+            submission_id: None,
+        };
+        let attempt = |fixture: &Fixture, code: ChainCodeEvidence| {
+            let mut result = success_result();
+            result.code = Some(code);
+            let chain = fixture.create(vec![
+                fixture.step(HandoffBoundary::Landed),
+                fixture.step(HandoffBoundary::ArtifactsReady),
+            ]);
+            fixture.finish_attempt(&chain, &fixture.repo, result)
+        };
+        let chain = attempt(&fixture, code(Some(&landed), None));
+        assert_eq!(
+            fixture.verification(&chain).confirmed_landing,
+            Some((landed.clone(), "dev".into(), None))
+        );
+        let chain = fixture.seal(&chain);
+        assert_eq!(
+            chain.status,
+            ChainStatus::Waiting,
+            "reason: {:?}",
+            chain.reason
+        );
+        for code in [
+            code(Some(&landed), Some("release")),
+            code(Some(&stray), None),
+            code(None, None),
+        ] {
+            let chain = attempt(&fixture, code);
+            assert!(fixture.verification(&chain).confirmed_landing.is_none());
+            let chain = fixture.seal(&chain);
+            assert_eq!(chain.status, ChainStatus::Paused);
+            assert_eq!(chain.reason.as_deref(), Some("QA landing unconfirmed"));
+        }
+    }
+
+    /// A per-project QA override is the branch an unreported claim resolves
+    /// to — ancestry on it, not the global fallback, is what seals.
+    #[test]
+    fn landed_gate_resolves_the_project_qa_override() {
+        let fixture = Fixture::new();
+        {
+            let mut state = fixture.backend.task_state.lock();
+            state.projects[0].qa_branch = Some("release".into());
+        }
+        let base = git(&fixture.repo, &["rev-parse", "HEAD"]);
+        let worktree = fixture.managed_worktree(&base);
+        let landed = fixture.commit(&worktree, "unit.txt", "work");
+        // The override carries the unit; the global fallback never did, so
+        // resolving "dev" would fail where "release" seals.
+        git(&fixture.repo, &["branch", "release", &landed]);
+        git(&fixture.repo, &["branch", "dev", &base]);
+        let mut result = success_result();
+        result.code = Some(ChainCodeEvidence {
+            workspace: worktree.display().to_string(),
+            source_revision: base.clone(),
+            committed_revision: Some(landed.clone()),
+            landed_revision: Some(landed.clone()),
+            qa_branch: None,
+            submission_id: None,
+        });
+        let chain = fixture.create(vec![
+            fixture.step(HandoffBoundary::Landed),
+            fixture.step(HandoffBoundary::ArtifactsReady),
+        ]);
+        let chain = fixture.finish_attempt(&chain, &fixture.repo, result);
+        assert_eq!(
+            fixture.verification(&chain).confirmed_landing,
+            Some((landed.clone(), "release".into(), None))
+        );
+        let chain = fixture.seal(&chain);
+        assert_eq!(
+            chain.status,
+            ChainStatus::Waiting,
+            "reason: {:?}",
+            chain.reason
+        );
+        // The claim still binds: reporting the global fallback contradicts
+        // the override and rejects.
+        let mut result = success_result();
+        result.code = Some(ChainCodeEvidence {
+            workspace: worktree.display().to_string(),
+            source_revision: base.clone(),
+            committed_revision: Some(landed.clone()),
+            landed_revision: Some(landed.clone()),
+            qa_branch: Some("dev".into()),
+            submission_id: None,
+        });
+        let chain = fixture.create(vec![
+            fixture.step(HandoffBoundary::Landed),
+            fixture.step(HandoffBoundary::ArtifactsReady),
+        ]);
+        let chain = fixture.finish_attempt(&chain, &fixture.repo, result);
+        assert!(fixture.verification(&chain).confirmed_landing.is_none());
+        let chain = fixture.seal(&chain);
+        assert_eq!(chain.status, ChainStatus::Paused);
+        assert_eq!(chain.reason.as_deref(), Some("QA landing unconfirmed"));
     }
 
     #[test]

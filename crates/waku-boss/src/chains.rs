@@ -1252,21 +1252,21 @@ fn gate_reason(
                 }
             }
             HandoffBoundary::Landed => {
-                // The submission id is a claim, never a host product —
-                // `merge submit` mints none — so it rides the confirmed
-                // tuple optional rather than gating it.
-                let reported = code
-                    .landed_revision
-                    .as_ref()
-                    .zip(code.qa_branch.as_ref())
-                    .map(|(revision, branch)| {
-                        (
-                            revision.clone(),
-                            branch.clone(),
-                            code.submission_id.clone(),
-                        )
-                    });
-                if reported.is_none() || verification.confirmed_landing != reported {
+                // The submission id and QA branch are claims, never host
+                // products — `merge submit` reports neither — so each
+                // rides the confirmed tuple optional rather than gating
+                // it; a reported branch must still match the resolved one.
+                let confirmed = verification.confirmed_landing.as_ref().is_some_and(
+                    |(revision, branch, submission)| {
+                        code.landed_revision.as_ref() == Some(revision)
+                            && code
+                                .qa_branch
+                                .as_ref()
+                                .is_none_or(|claimed| claimed == branch)
+                            && &code.submission_id == submission
+                    },
+                );
+                if !confirmed {
                     return Some("QA landing unconfirmed".into());
                 }
             }
@@ -2366,12 +2366,19 @@ mod tests {
         assert!(gate_reason(&step, &result, &verification, 1).is_some());
         verification.confirmed_landing = Some(("rebased".into(), "main".into(), None));
         assert!(gate_reason(&step, &result, &verification, 1).is_some());
-        // A missing revision or branch claim never seals.
+        // A missing revision never seals.
         result.code.as_mut().unwrap().landed_revision = None;
         assert!(gate_reason(&step, &result, &verification, 1).is_some());
+        // `merge submit` reports no QA branch either — the claim rides
+        // optional and the host-resolved branch stands in for it.
         let code = result.code.as_mut().unwrap();
         code.landed_revision = Some("rebased".into());
         code.qa_branch = None;
+        assert!(gate_reason(&step, &result, &verification, 1).is_none());
+        verification.confirmed_landing = Some(("rebased".into(), "dev".into(), None));
+        assert!(gate_reason(&step, &result, &verification, 1).is_none());
+        // A reported branch contradicting the resolved one still rejects.
+        result.code.as_mut().unwrap().qa_branch = Some("release".into());
         assert!(gate_reason(&step, &result, &verification, 1).is_some());
     }
 }
