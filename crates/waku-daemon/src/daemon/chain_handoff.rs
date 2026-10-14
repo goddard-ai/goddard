@@ -735,10 +735,13 @@ impl WakuBackend {
             .attempts
             .last()
             .ok_or_else(|| anyhow!("the previous step has no attempt"))?;
+        // Acceptance is the live verdict, not the seal-time packet — a
+        // gate recheck grants it and a rejected approval revokes it after
+        // sealing, while `sealed.accepted` keeps the original record.
         let handoff = producer_attempt
             .sealed
             .as_ref()
-            .filter(|handoff| handoff.accepted)
+            .filter(|_| producer_attempt.handoff_accepted)
             .ok_or_else(|| anyhow!("the previous handoff is not accepted"))?;
         let verification =
             self.verify_attempt(&document, chain, producer_index, producer_attempt)?;
@@ -1215,6 +1218,72 @@ mod tests {
         fs::write(files.join("docs/nowhere.md"), "recovered").unwrap();
         let verification = fixture.verification(&chain);
         assert!(verification.accessible_artifacts.is_empty());
+    }
+
+    /// A seal rejected on a repairable gate and accepted on recheck must
+    /// let the successor launch — dispatch reads the live acceptance
+    /// verdict, never the immutable seal-time packet.
+    #[test]
+    fn recheck_accepted_handoff_launches_the_successor() {
+        let fixture = Fixture::new();
+        let mut result = success_result();
+        result.artifacts = vec![ChainArtifact {
+            name: "report".into(),
+            reference: "plans/report.md".into(),
+        }];
+        let chain = fixture.create(vec![
+            fixture.step(HandoffBoundary::ArtifactsReady),
+            fixture.step(HandoffBoundary::ArtifactsReady),
+        ]);
+        let chain = fixture.finish_attempt(&chain, &fixture.repo, result);
+        let chain = fixture.seal(&chain);
+        assert_eq!(chain.status, ChainStatus::Paused);
+        let attempt = &chain.steps[0].attempts[0];
+        assert!(!attempt.handoff_accepted);
+        assert!(!attempt.sealed.as_ref().unwrap().accepted);
+        // Repair the gate — the referenced artifact now exists under the
+        // granted plans root — and recheck accepts the same sealed packet.
+        let files = fixture.backend.boss.files_root();
+        fs::create_dir_all(files.join("plans")).unwrap();
+        fs::write(files.join("plans/report.md"), "recovered").unwrap();
+        let attempt = chain.steps[0].attempts[0].clone();
+        let verification = fixture.verification(&chain);
+        fixture
+            .backend
+            .boss
+            .recheck_chain_handoff(
+                chain.id,
+                attempt.id,
+                attempt.definition_version,
+                &verification,
+            )
+            .unwrap();
+        let chain = fixture.show(chain.id);
+        let attempt = &chain.steps[0].attempts[0];
+        assert!(attempt.handoff_accepted);
+        assert!(!attempt.sealed.as_ref().unwrap().accepted);
+        assert_eq!(chain.steps[0].status, StepStatus::Succeeded);
+        assert_eq!(chain.status, ChainStatus::Paused);
+        // Resume advances — and the successor's dispatch inputs resolve
+        // rather than refusing the seal-time rejection.
+        let chain = fixture
+            .backend
+            .boss
+            .chain_operation(
+                None,
+                ChainOperation::Control {
+                    chain_id: chain.id,
+                    expected_revision: chain.revision,
+                    control: ChainControl::Resume,
+                    source_revision: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(chain.status, ChainStatus::Waiting);
+        assert_eq!(chain.current_step, 1);
+        let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
+        assert_eq!(inputs.step, 1);
+        assert!(inputs.brief.unwrap().contains("Exact final"));
     }
 
     #[test]
