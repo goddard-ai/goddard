@@ -32,6 +32,12 @@ const EVAL_CANCEL_GRACE: Duration = Duration::from_secs(2);
 const MAX_EVAL_OPERATIONS: u64 = 1_000_000;
 const MAX_EVAL_STRING: usize = 4 * 1024 * 1024;
 const MAX_EVAL_ARRAY: usize = 100_000;
+// Host replies are bounded before entering Rhai, including aggregate strings
+// and nested arrays. Exceeding these limits is a successful omission, never a
+// post-dispatch error that could encourage replaying an accepted mutation.
+const MAX_REPLY_STRING_BYTES: usize = 64 * 1024;
+const MAX_REPLY_NODES: usize = 32_768;
+const MAX_REPLY_DEPTH: usize = 32;
 const MAX_EVAL_CALL_LEVELS: usize = 32;
 const MAX_EVAL_EXPR_DEPTH: usize = 64;
 const MAX_EVAL_EXPR_DEPTH_IN_FUNCTION: usize = 32;
@@ -40,14 +46,14 @@ const MAX_EVAL_OUTPUT_CHARS: usize = 64 * 1024;
 
 const HELP: &str = "\
 Boss script bindings — every call runs one BossOperation and returns its
-payload (state maps, strings, ids); Saved operations return (). Variables
+payload (compact acknowledgements, bounded data, ids); Saved operations return (). Variables
 exist only during this script invocation; use named memory buckets for durable state.
 
-  view()                                    boss state map
+  view()                                    state digest: revision, sessionId, counts
   roster()                                  compact employee status digest
   context()                                 work digest string
   automation(#{type:list|create|update|delete|pause|resume,...})
-                                            automation document with schedules and run history
+                                            bounded list document; mutations return accepted + automationId
   summon(#{personaId?,jobTitle,prompt,project,provider?,model?,reasoningEffort?,workspace?,baseBranch?,adoptWorktree?,workGoal?,icon?,resources?,allowBurst?,groupId?,priority?,outcomeId?,newOutcome?,afterSuccess?,finishesOutcome?,prerequisites?,plan?,assignmentKind?,purpose?,item?,requestId?})
                                             employee session id — icon overrides the
                                             persona icon for this employee; resources
@@ -140,11 +146,22 @@ exist only during this script invocation; use named memory buckets for durable s
                                             record/submitSummary/scan/zoomBucket; every
                                             content op names its bucket explicitly
   op(#{type,...})                           advanced escape hatch for supported
-                                            Boss operations, result returned whole —
+                                            Boss operations, tagged script result —
                                             covers createOutcome / setOutcomeState /
                                             resolveHandoff / setOutcomeWaiting /
                                             attachPlan for outcome bookkeeping
-  help()                                    this text";
+  help()                                    this text
+
+State mutations return #{accepted:true,revision,...ids}; chain create includes
+chainId/requestId, and chain show returns only that chain. view() returns counts
+for chains/personas/employees/retiredEmployees/outcomes/planning/deliverables/waves.
+Other host replies exceeding 64 KiB aggregate string bytes, 32768 JSON nodes or
+32 nesting levels return #{dispatched:true,resultOmitted:true,...limits}.
+Inspect omitted data with direct CLI commands; do not replay the mutation.
+Scripts are sequential, not transactions: an error stops later calls but does
+not roll back earlier accepted operations. Print acknowledgements as you go;
+on failure inspect their ids/revisions before retrying. Reuse the identical
+chain requestId and definition under the same supervisor for safe create retries.";
 
 /// The result of one `run` call: the script's scope when it could be
 /// recovered, the JSON value it returned (or its error), and the bounded
@@ -221,9 +238,9 @@ pub fn run(
                         ) {
                             bail!("sidebar presentation state is client-owned and unavailable to scripts");
                         }
-                        dispatch(operation)
+                        let result = dispatch(operation.clone())?;
+                        Ok(script_reply(&operation, result))
                     })
-                    .and_then(|result| serde_json::to_value(&result).map_err(Into::into))
                     .map_err(|error| format!("{error:#}"));
                 // A vanished worker means the script already failed.
                 let _ = reply.send(answer);
@@ -259,6 +276,183 @@ pub fn run(
     }
 }
 
+/// Script-only projection: direct commands and clients retain their wire
+/// results. Never turn a successful dispatch into a response-size error.
+fn script_reply(operation: &BossOperation, result: BossResult) -> serde_json::Value {
+    use serde_json::json;
+    use waku_protocol::boss::AutomationOperation;
+    use waku_protocol::chains::ChainOperation;
+
+    let mut reply = match result {
+        BossResult::State { state } => match operation {
+            BossOperation::View => json!({
+                "type": "stateDigest",
+                "digest": {
+                    "revision": state.revision,
+                    "sessionId": state.session_id,
+                    "counts": {
+                        "chains": state.chains.len(),
+                        "personas": state.personas.len(),
+                        "employees": state.employees.len(),
+                        "retiredEmployees": state.retired_employees.len(),
+                        "outcomes": state.outcomes.len(),
+                        "planning": state.planning.len(),
+                        "deliverables": state.deliverables.len(),
+                        "waves": state.waves.len(),
+                    },
+                },
+            }),
+            BossOperation::Chain { action } => {
+                let chain = state.chains.iter().find(|chain| match action {
+                    ChainOperation::Create { request_id, .. } => chain.request_id == *request_id,
+                    ChainOperation::Show { chain_id }
+                    | ChainOperation::Control { chain_id, .. }
+                    | ChainOperation::Revise { chain_id, .. }
+                    | ChainOperation::Approve { chain_id, .. }
+                    | ChainOperation::RecordResult { chain_id, .. } => chain.id == *chain_id,
+                });
+                if matches!(action, ChainOperation::Show { .. }) {
+                    json!({"type": "chain", "chain": chain})
+                } else {
+                    json!({
+                        "type": "accepted", "accepted": true,
+                        "chainId": chain.map(|chain| chain.id),
+                        "requestId": chain.map(|chain| chain.request_id),
+                        "revision": chain.map(|chain| chain.revision),
+                        "definitionVersion": chain.map(|chain| chain.definition_version),
+                        "status": chain.map(|chain| chain.status),
+                    })
+                }
+            }
+            _ => {
+                let mut ack =
+                    json!({"type": "accepted", "accepted": true, "revision": state.revision});
+                match operation {
+                    BossOperation::CreateOutcome { outcome, .. } => {
+                        ack["outcomeId"] = json!(
+                            state
+                                .outcomes
+                                .iter()
+                                .rev()
+                                .find(|entry| entry.outcome == outcome.trim())
+                                .map(|entry| entry.id)
+                        );
+                    }
+                    BossOperation::SetOutcomeState { outcome, .. }
+                    | BossOperation::ResolveHandoff { outcome, .. }
+                    | BossOperation::SetOutcomeWaiting { outcome, .. }
+                    | BossOperation::AttachPlan { outcome, .. } => {
+                        ack["outcomeId"] = json!(outcome)
+                    }
+                    BossOperation::UpsertPersona { persona } => {
+                        ack["personaId"] = json!(
+                            state
+                                .personas
+                                .iter()
+                                .find(|entry| if persona.id.is_nil() {
+                                    entry.name == persona.name.trim()
+                                } else {
+                                    entry.id == persona.id
+                                })
+                                .map(|entry| entry.id)
+                        );
+                    }
+                    BossOperation::DeletePersona { persona_id } => {
+                        ack["personaId"] = json!(persona_id)
+                    }
+                    BossOperation::RenameEmployee { session_id, .. }
+                    | BossOperation::SetEmployeeIcon { session_id, .. } => {
+                        ack["sessionId"] = json!(session_id)
+                    }
+                    BossOperation::UpdatePlanItems { plan, .. }
+                    | BossOperation::SetPlanItemState { plan, .. }
+                    | BossOperation::SetPlanOutcome { plan, .. } => ack["planId"] = json!(plan),
+                    _ => {}
+                }
+                ack
+            }
+        },
+        BossResult::Automations { state }
+            if !matches!(
+                operation,
+                BossOperation::Automation {
+                    action: AutomationOperation::List
+                }
+            ) =>
+        {
+            let id = match operation {
+                BossOperation::Automation { action } => match action {
+                    AutomationOperation::Create { input } => state
+                        .automations
+                        .iter()
+                        .rev()
+                        .find(|entry| entry.name == input.name)
+                        .map(|entry| entry.id),
+                    AutomationOperation::Update { input } => input.id,
+                    AutomationOperation::Delete { automation_id }
+                    | AutomationOperation::Pause { automation_id }
+                    | AutomationOperation::Resume { automation_id } => Some(*automation_id),
+                    AutomationOperation::List => None,
+                },
+                _ => None,
+            };
+            json!({"type": "accepted", "accepted": true, "automationId": id})
+        }
+        other => serde_json::to_value(other).unwrap_or_else(|_| {
+            json!({
+                "type": "resultOmitted", "dispatched": true, "resultOmitted": true,
+            })
+        }),
+    };
+    let mut bytes = MAX_REPLY_STRING_BYTES;
+    let mut nodes = MAX_REPLY_NODES;
+    if !reply_fits(&reply, 0, &mut bytes, &mut nodes) {
+        // Do not truncate silently or throw after a committed effect. The
+        // caller can inspect through a direct command instead of replaying.
+        reply = json!({
+            "type": "resultOmitted", "dispatched": true, "resultOmitted": true,
+            "resultType": reply.get("type"),
+            "maxStringBytes": MAX_REPLY_STRING_BYTES,
+            "maxNodes": MAX_REPLY_NODES,
+            "maxDepth": MAX_REPLY_DEPTH,
+        });
+    }
+    reply
+}
+
+fn reply_fits(
+    value: &serde_json::Value,
+    depth: usize,
+    bytes: &mut usize,
+    nodes: &mut usize,
+) -> bool {
+    if depth > MAX_REPLY_DEPTH || *nodes == 0 {
+        return false;
+    }
+    *nodes -= 1;
+    let mut take_bytes = |length| match bytes.checked_sub(length) {
+        Some(remaining) => {
+            *bytes = remaining;
+            true
+        }
+        None => false,
+    };
+    match value {
+        serde_json::Value::String(text) => take_bytes(text.len()),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .all(|item| reply_fits(item, depth + 1, bytes, nodes)),
+        serde_json::Value::Object(fields) => fields.iter().all(|(key, value)| {
+            let Some(remaining) = bytes.checked_sub(key.len()) else {
+                return false;
+            };
+            *bytes = remaining;
+            reply_fits(value, depth + 1, bytes, nodes)
+        }),
+        _ => true,
+    }
+}
+
 fn run_script(
     mut scope: Scope<'static>,
     script: String,
@@ -272,12 +466,8 @@ fn run_script(
             .set_max_operations(MAX_EVAL_OPERATIONS)
             .set_max_string_size(MAX_EVAL_STRING)
             .set_max_array_size(MAX_EVAL_ARRAY)
-            // No map bound: rhai checks the property count of every value a
-            // bound call returns, and bound calls answer with whole
-            // serialized documents (BossResult::State) whose size grows with
-            // daemon history — a fixed cap only ever rejected legitimate
-            // results. Script-built maps stay bounded by MAX_EVAL_OPERATIONS
-            // and EVAL_WALL_CLOCK.
+            // Host replies have their own aggregate budget in script_reply.
+            // Script-built maps stay bounded by operations and wall clock.
             .set_max_map_size(0)
             .set_max_call_levels(MAX_EVAL_CALL_LEVELS)
             .set_max_expr_depths(MAX_EVAL_EXPR_DEPTH, MAX_EVAL_EXPR_DEPTH_IN_FUNCTION)
@@ -911,7 +1101,7 @@ mod tests {
     }
 
     #[test]
-    fn op_maps_reach_dispatch_and_whole_documents_cross_back() {
+    fn op_maps_reach_dispatch_and_oversized_documents_are_omitted() {
         // The documented minimal attachPlan/resolveHandoff forms carry two
         // UUIDs (and a nested decision map); building the map field by field
         // reaches the same boundary. A size rejection is the regression —
@@ -929,20 +1119,23 @@ mod tests {
             );
         }
 
-        // Outcome bookkeeping ops answer with the whole state document,
-        // which outgrows any fixed property budget as the daemon
-        // accumulates employees, outcomes, and personas.
-        let outcome = eval_with(r#"op(#{type: "view"}).files.len()"#, Scope::new(), &|_| {
-            Ok(BossResult::Files {
-                files: (0..6_000)
-                    .map(|index| waku_protocol::boss::BossFile {
-                        path: format!("f{index}.md"),
-                        directory: false,
-                    })
-                    .collect(),
-            })
-        });
-        assert_eq!(outcome.value.as_ref(), Ok(&serde_json::json!(6_000)));
+        // A large listing is explicitly omitted instead of being rejected
+        // by Rhai after dispatch.
+        let outcome = eval_with(
+            r#"op(#{type: "view"}).resultOmitted"#,
+            Scope::new(),
+            &|_| {
+                Ok(BossResult::Files {
+                    files: (0..6_000)
+                        .map(|index| waku_protocol::boss::BossFile {
+                            path: format!("f{index}.md"),
+                            directory: false,
+                        })
+                        .collect(),
+                })
+            },
+        );
+        assert_eq!(outcome.value.as_ref(), Ok(&serde_json::json!(true)));
     }
 
     #[test]
@@ -968,6 +1161,128 @@ mod tests {
             outcome.value.as_ref(),
             Ok(&serde_json::json!({ "title": "Dev server", "cwd": "/work/app" }))
         );
+    }
+
+    #[test]
+    fn oversized_reply_after_committed_effect_does_not_abort_later_operations() {
+        use std::cell::Cell;
+        let committed = Cell::new(0);
+        // Reproduce the old boundary: Rhai rejects a native callback's
+        // aggregate strings only after its effect has already happened.
+        let mut engine = Engine::new();
+        engine.set_max_string_size(MAX_EVAL_STRING);
+        let raw_committed = Arc::new(AtomicBool::new(false));
+        engine.register_fn("commit", {
+            let raw_committed = raw_committed.clone();
+            move || {
+                raw_committed.store(true, Ordering::Relaxed);
+                json_to_dynamic(serde_json::json!({
+                    "first": "x".repeat(MAX_EVAL_STRING / 2 + 1),
+                    "second": "y".repeat(MAX_EVAL_STRING / 2 + 1),
+                }))
+            }
+        });
+        let error = engine.eval::<Dynamic>("commit()").unwrap_err();
+        assert!(error.to_string().contains("Length of string too large"));
+        assert!(raw_committed.load(Ordering::Relaxed));
+
+        let outcome = eval_with(
+            r#"let a = op(#{type:"rename", name:"first"});
+               let b = op(#{type:"rename", name:"second"});
+               #{first:a, second:b}"#,
+            Scope::new(),
+            &|_| {
+                committed.set(committed.get() + 1);
+                Ok(BossResult::File {
+                    path: "large.md".into(),
+                    content: "x".repeat(MAX_EVAL_STRING + 1),
+                })
+            },
+        );
+        assert_eq!(committed.get(), 2);
+        let value = outcome.value.unwrap();
+        for key in ["first", "second"] {
+            assert_eq!(value[key]["dispatched"], true);
+            assert_eq!(value[key]["resultOmitted"], true);
+            assert_eq!(value[key]["resultType"], "file");
+        }
+    }
+
+    #[test]
+    fn oversized_arrays_and_deep_host_data_are_omitted_without_aborting_the_script() {
+        let mut deep = serde_json::Value::Null;
+        for _ in 0..MAX_REPLY_DEPTH + 1 {
+            deep = serde_json::json!({"nested": deep});
+        }
+        for data in [serde_json::json!(vec![0; MAX_EVAL_ARRAY + 1]), deep] {
+            let outcome = eval_with(
+                r#"let response = readFile("large.json");
+                   let later = op(#{type:"view"});
+                   #{omitted:response.resultOmitted,later:later.type}"#,
+                Scope::new(),
+                &|operation| match operation {
+                    BossOperation::ReadFile { .. } => Ok(BossResult::Eval {
+                        value: data.clone(),
+                        output: String::new(),
+                    }),
+                    BossOperation::View => Ok(BossResult::Saved),
+                    other => bail!("unexpected operation {other:?}"),
+                },
+            );
+            assert_eq!(
+                outcome.value.unwrap(),
+                serde_json::json!({"omitted":true,"later":"saved"})
+            );
+        }
+    }
+
+    #[test]
+    fn state_mutations_return_ids_and_view_digest_even_after_state_outgrows_rhai() {
+        let root = std::env::temp_dir().join(format!("boss-eval-{}", uuid::Uuid::new_v4()));
+        let service = crate::boss::BossService::open(root.clone()).unwrap();
+        service.activate().unwrap();
+        service
+            .create_outcome(None, &"x".repeat(MAX_EVAL_STRING + 1), "seed")
+            .unwrap();
+        let outcome = eval_with(
+            r#"let a = op(#{type:"createOutcome", outcome:"first", successCriteria:"done"});
+               let b = op(#{type:"createOutcome", outcome:"second", successCriteria:"done"});
+               #{first:a, second:b, digest:view()}"#,
+            Scope::new(),
+            &|operation| service.handle(None, operation),
+        );
+        let value = outcome.value.unwrap();
+        assert_eq!(value["first"]["accepted"], true);
+        assert_eq!(value["second"]["accepted"], true);
+        assert_ne!(value["first"]["outcomeId"], value["second"]["outcomeId"]);
+        assert!(value["first"]["outcomeId"].as_str().is_some());
+        assert_eq!(value["digest"]["counts"]["outcomes"], 3);
+        assert!(serde_json::to_vec(&value).unwrap().len() < 1024);
+        assert_eq!(service.document().outcomes.len(), 3);
+        drop(service);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn later_failure_keeps_earlier_acknowledgements_and_effects() {
+        use std::cell::Cell;
+        let committed = Cell::new(0);
+        let outcome = eval_with(
+            r#"print(op(#{type:"rename",name:"first"}));
+               op(#{type:"rename",name:"reject"});
+               op(#{type:"rename",name:"unreachable"})"#,
+            Scope::new(),
+            &|operation| {
+                if matches!(operation, BossOperation::Rename { ref name } if name == "reject") {
+                    bail!("validation rejected");
+                }
+                committed.set(committed.get() + 1);
+                Ok(BossResult::Saved)
+            },
+        );
+        assert_eq!(committed.get(), 1);
+        assert!(outcome.value.unwrap_err().contains("validation rejected"));
+        assert!(outcome.output.contains("saved"));
     }
 
     #[test]

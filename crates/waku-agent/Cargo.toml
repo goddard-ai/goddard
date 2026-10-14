@@ -22,4 +22,5 @@ libc = "0.2"
 waku-runtime = { path = "../waku-runtime" }
 
 [dev-dependencies]
+waku-boss = { path = "../waku-boss" }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }

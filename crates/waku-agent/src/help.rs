@@ -32,7 +32,9 @@ documentation; publish Boss-facing reports as deliverables. On errors, correct t
 consult that command's --help or --schema, and retry only when safe; do not automatically
 replay a mutation after losing its response."#;
 
-const SCRIPTING: &str = r#"Boss-only composition: goddard-agent boss script (--text SOURCE | --file PATH|-). Rhai scopes are fresh per call; variables are not durable. Direct commands are preferred when available. In Rhai, #{...} is a map, () is null, and UUIDs are strings. Each binding performs the corresponding authorized operation and returns its result (Saved returns ()).
+const SCRIPTING: &str = r#"Boss-only composition: goddard-agent boss script (--text SOURCE | --file PATH|-). Rhai scopes are fresh per call; variables are not durable. Direct commands are preferred when available. In Rhai, #{...} is a map, () is null, and UUIDs are strings. Each binding performs the corresponding authorized operation. State mutations return compact acknowledgements (accepted, revision, entity ids); Saved returns (). view() returns a digest with revision, sessionId and counts for chains, personas, employees, retiredEmployees, outcomes, planning, deliverables and waves. Direct boss view retains full state. Chain create returns chainId/requestId; chain show returns only the requested chain.
+
+Host replies exceeding 64 KiB aggregate string bytes, 32768 JSON nodes or 32 nesting levels return a successful resultOmitted marker with dispatched:true and the limits; inspect via direct commands rather than replaying a mutation. Scripts run sequentially without rollback: an error stops later ops, while earlier accepted ops remain committed. Print acknowledgements as you go and inspect their ids/revisions after an error before retrying. Identical chain create retries must reuse the same requestId, definition and supervisor.
 
 Bindings with direct-command counterparts:
   view(), roster(), context(), resume(sessionId), transcript(sessionId[, turn])

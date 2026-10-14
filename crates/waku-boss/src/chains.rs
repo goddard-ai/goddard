@@ -1627,6 +1627,53 @@ mod tests {
     }
 
     #[test]
+    fn scripts_acknowledge_chain_create_and_deduplicate_before_showing_only_that_chain() {
+        let fixture = Fixture::new();
+        fixture
+            .service
+            .create_outcome(None, &"x".repeat(4 * 1024 * 1024 + 1), "seed")
+            .unwrap();
+        // A second chain must never leak into the requested Show response.
+        fixture.create();
+        let request_id = Uuid::new_v4();
+        let mut scope = rhai::Scope::new();
+        scope.push(
+            "definitionJson",
+            serde_json::to_string(&fixture.definition).unwrap(),
+        );
+        scope.push("request", request_id.to_string());
+        let outcome = crate::boss_eval::run(
+            scope,
+            r#"
+            let definition = parse_json(definitionJson);
+            let request = #{type:"chain",action:#{type:"create",requestId:request,definition:definition}};
+            let first = op(request);
+            let retry = op(request);
+            let shown = op(#{type:"chain",action:#{type:"show",chainId:first.chainId}});
+            #{first:first,retry:retry,shown:shown}
+        "#,
+            &|operation| {
+                let BossOperation::Chain { action } = operation else {
+                    bail!("unexpected operation");
+                };
+                fixture.service.chain_operation(None, action)?;
+                Ok(BossResult::State {
+                    state: fixture.service.document(),
+                })
+            },
+        );
+        let value = outcome.value.unwrap();
+        assert_eq!(value["first"]["accepted"], true);
+        assert_eq!(value["first"]["requestId"], request_id.to_string());
+        assert_eq!(value["first"], value["retry"]);
+        assert_eq!(value["shown"]["type"], "chain");
+        assert_eq!(value["shown"]["chain"]["id"], value["first"]["chainId"]);
+        assert!(value["shown"].get("state").is_none());
+        assert_eq!(fixture.service.document().chains.len(), 2);
+        assert!(serde_json::to_vec(&value["first"]).unwrap().len() < 512);
+    }
+
+    #[test]
     fn creation_is_atomic_idempotent_and_linear() {
         let fixture = Fixture::new();
         let id = Uuid::new_v4();

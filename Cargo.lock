@@ -11435,6 +11435,7 @@ dependencies = [
  "serde_json",
  "tungstenite 0.30.0",
  "uuid",
+ "waku-boss",
  "waku-client",
  "waku-protocol",
  "waku-runtime",
