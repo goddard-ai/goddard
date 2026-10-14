@@ -307,6 +307,7 @@ pub(super) fn deliver_agent_prompt(
     })?)?;
     send_agent_queue_changed(task_state, sink, session_id);
     let boss_chat = boss.is_boss(session_id);
+    let handoff_accepted = boss_chat && boss_handoff_accepted(boss, session_id);
     let handoff = {
         let mut state = task_state.lock();
         state
@@ -319,7 +320,11 @@ pub(super) fn deliver_agent_prompt(
                 // (`TurnStarted` in the event forwarder). A rejected or
                 // unconfirmed send retries with the same delivery identity.
                 if boss_chat {
-                    session.pending_provider_context.clone()
+                    if handoff_accepted {
+                        None
+                    } else {
+                        session.pending_provider_context.clone()
+                    }
                 } else {
                     session.pending_provider_context.take()
                 }
@@ -334,6 +339,9 @@ pub(super) fn deliver_agent_prompt(
             provider_context_block(&context)
         )
     });
+    if boss_chat && carried_handoff {
+        mark_boss_delivery_submitted(boss, session_id);
+    }
     driver.prompt(wrap_boss_outbound_prompt(
         task_state,
         &automations.document(),
@@ -341,9 +349,6 @@ pub(super) fn deliver_agent_prompt(
         session_id,
         prompt,
     ));
-    if boss_chat && carried_handoff {
-        mark_boss_delivery_submitted(boss, session_id);
-    }
     Ok(())
 }
 
@@ -353,14 +358,31 @@ pub(super) fn provider_context_block(context: &str) -> String {
     format!("<goddard-provider-context>\n{context}\n</goddard-provider-context>")
 }
 
+/// A durable acceptance receipt wins over a stale task-store copy of the
+/// handoff after a crash between receipt commit and context cleanup.
+pub(super) fn boss_handoff_accepted(boss: &crate::boss::BossService, session_id: Uuid) -> bool {
+    use waku_boss::rotation_continuity::{ContinuityDeliveryStatus, ContinuityLedger};
+    ContinuityLedger::load(&boss.root().join("continuity.json"))
+        .ok()
+        .and_then(|ledger| {
+            ledger
+                .deliveries
+                .into_iter()
+                .rev()
+                .find(|delivery| delivery.session_id == session_id)
+        })
+        .is_some_and(|delivery| delivery.status == ContinuityDeliveryStatus::Accepted)
+}
+
 /// Whether the continuity ledger fences this session. An incident-fenced
 /// Boss chat must hold parked deliveries — anything sent now drops at the
 /// ownership fence after opening a turn the provider never confirms.
 pub(super) fn boss_incident_fenced(boss: &crate::boss::BossService, session_id: Uuid) -> bool {
     use waku_boss::rotation_continuity::ContinuityLedger;
-    ContinuityLedger::load(&boss.root().join("continuity.json"))
-        .map(|ledger| ledger.has_incident(session_id))
-        .unwrap_or(false)
+    boss.is_boss(session_id)
+        && ContinuityLedger::load(&boss.root().join("continuity.json"))
+            .map(|ledger| ledger.has_incident(session_id))
+            .unwrap_or(true)
 }
 
 /// The bound package just went out over provider transport. Submission is
@@ -369,17 +391,14 @@ pub(super) fn boss_incident_fenced(boss: &crate::boss::BossService, session_id: 
 pub(super) fn mark_boss_delivery_submitted(boss: &crate::boss::BossService, session_id: Uuid) {
     use waku_boss::rotation_continuity::ContinuityLedger;
     let path = boss.root().join("continuity.json");
-    let Ok(mut ledger) = ContinuityLedger::load(&path) else {
-        return;
-    };
-    let Some(delivery_id) = ledger
-        .pending_for_session(session_id)
-        .map(|delivery| delivery.delivery_id.clone())
-    else {
-        return;
-    };
-    ledger.mark_submitted(&delivery_id, crate::model::unix_time());
-    if let Err(error) = ledger.persist(&path) {
+    if let Err(error) = ContinuityLedger::update(&path, |ledger| {
+        if let Some(delivery_id) = ledger
+            .pending_for_session(session_id)
+            .map(|delivery| delivery.delivery_id.clone())
+        {
+            ledger.mark_submitted(&delivery_id, crate::model::unix_time());
+        }
+    }) {
         eprintln!("could not record a Boss continuity submission: {error:#}");
     }
 }

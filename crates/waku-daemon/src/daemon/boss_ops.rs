@@ -41,7 +41,9 @@ impl WakuBackend {
         // handoff as the daemon's queued-prompt path. It stays pending
         // until provider transport acceptance — a `TurnStarted` — is
         // recorded; submissions only mark the delivery attempted.
-        let handoff = if self.boss.is_boss(session_id) {
+        let handoff = if self.boss.is_boss(session_id)
+            && !super::prompt_delivery::boss_handoff_accepted(&self.boss, session_id)
+        {
             self.task_state
                 .lock()
                 .sessions

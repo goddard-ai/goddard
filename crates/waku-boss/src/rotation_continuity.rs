@@ -160,7 +160,7 @@ pub struct RotationRequest {
 
 /// Durable continuity state for one Boss. Persisted beside the rotation
 /// journal so ownership and delivery reconcile from the same directory.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ContinuityLedger {
     pub deliveries: Vec<ContinuityDelivery>,
@@ -216,32 +216,34 @@ impl ContinuityLedger {
         }
     }
 
-    /// Transport acceptance for the session's pending delivery.
-    pub fn mark_accepted(&mut self, session_id: Uuid, now: u64) {
-        if let Some(delivery) = self
+    /// Transport acceptance can settle only a submitted delivery. A turn
+    /// event before submission cannot acknowledge a prepared or rejected
+    /// package. Return whether acceptance was recorded.
+    pub fn mark_accepted(&mut self, session_id: Uuid, now: u64) -> bool {
+        let Some(delivery) = self
             .deliveries
             .iter_mut()
             .rev()
             .find(|delivery| delivery.session_id == session_id && delivery.status.pending())
-        {
-            delivery.status = ContinuityDeliveryStatus::Accepted;
-            delivery.updated_at = now;
+        else {
+            return false;
+        };
+        if delivery.status != ContinuityDeliveryStatus::Submitted {
+            return false;
         }
+        delivery.status = ContinuityDeliveryStatus::Accepted;
+        delivery.updated_at = now;
         self.prune_terminal();
+        true
     }
 
     /// A transport rejection or unconfirmed submission for the session's
     /// pending delivery. The delivery stays pending under its identifier.
     pub fn mark_rejected(&mut self, session_id: Uuid, now: u64) {
-        if let Some(delivery) = self
-            .deliveries
-            .iter_mut()
-            .rev()
-            .find(|delivery| {
-                delivery.session_id == session_id
-                    && delivery.status == ContinuityDeliveryStatus::Submitted
-            })
-        {
+        if let Some(delivery) = self.deliveries.iter_mut().rev().find(|delivery| {
+            delivery.session_id == session_id
+                && delivery.status == ContinuityDeliveryStatus::Submitted
+        }) {
             delivery.status = ContinuityDeliveryStatus::Rejected;
             delivery.updated_at = now;
         }
@@ -331,6 +333,30 @@ impl ContinuityLedger {
         Ok(())
     }
 
+    /// Serialize read/modify/write across event pumps, rotation and manual
+    /// requests. Return the result only after its changes are committed.
+    /// The lock file survives rename of the ledger. Callers must not hold
+    /// this lock while acquiring task or Boss state leases.
+    pub fn update<T>(path: &Path, change: impl FnOnce(&mut Self) -> T) -> anyhow::Result<T> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path.with_extension("lock"))?;
+        lock.lock()?;
+        let mut ledger = Self::load(path)?;
+        let before = ledger.clone();
+        let result = change(&mut ledger);
+        if ledger != before {
+            ledger.persist(path)?;
+        }
+        Ok(result)
+    }
+
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         match fs::read(path) {
             Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
@@ -400,25 +426,76 @@ mod tests {
             ContinuityDeliveryKind::SessionHandoff,
             10,
         );
+        assert!(!ledger.mark_accepted(session, 10));
+        assert_eq!(
+            ledger.pending_for_session(session).unwrap().status,
+            ContinuityDeliveryStatus::Prepared
+        );
         ledger.mark_submitted("boss-handoff:s", 11);
         // Submission alone never consumes the package.
         assert!(ledger.pending_for_session(session).is_some());
         ledger.mark_rejected(session, 12);
         assert!(ledger.pending_for_session(session).is_some());
+        assert!(!ledger.mark_accepted(session, 12));
         // The retry reconciles the same delivery identifier.
         ledger.mark_submitted("boss-handoff:s", 13);
         let delivery = ledger.pending_for_session(session).unwrap();
         assert_eq!(delivery.attempts, 2);
         assert_eq!(delivery.status, ContinuityDeliveryStatus::Submitted);
-        ledger.mark_accepted(session, 14);
-        assert!(ledger.pending_for_session(session).is_none());
         ledger.persist(&root).unwrap();
+        assert!(
+            ContinuityLedger::update(&root, |ledger| ledger.mark_accepted(session, 14)).unwrap()
+        );
         let recovered = ContinuityLedger::load(&root).unwrap();
         assert_eq!(
             recovered.deliveries[0].status,
             ContinuityDeliveryStatus::Accepted
         );
         fs::remove_file(root).ok();
+    }
+
+    #[test]
+    fn failed_acceptance_write_retains_the_submitted_package() {
+        let root = std::env::temp_dir().join(format!("boss-receipt-{}", Uuid::new_v4()));
+        let path = root.join("continuity.json");
+        let session = Uuid::new_v4();
+        let mut ledger = ContinuityLedger::default();
+        ledger.prepare(
+            "handoff",
+            session,
+            4,
+            ContinuityDeliveryKind::SessionHandoff,
+            10,
+        );
+        ledger.mark_submitted("handoff", 11);
+        ledger.persist(&path).unwrap();
+        // Obstruct the atomic rename after loading the submitted record.
+        // The caller receives an error, never an acceptance receipt.
+        let retained = root.join("retained.json");
+        let failed = ContinuityLedger::update(&path, |ledger| {
+            fs::rename(&path, &retained).unwrap();
+            fs::create_dir(&path).unwrap();
+            ledger.mark_accepted(session, 12)
+        });
+        assert!(failed.is_err());
+        fs::remove_dir(&path).unwrap();
+        fs::rename(&retained, &path).unwrap();
+        let reopened = ContinuityLedger::load(&path).unwrap();
+        assert_eq!(
+            reopened.pending_for_session(session).unwrap().status,
+            ContinuityDeliveryStatus::Submitted
+        );
+        assert_eq!(reopened.pending_for_session(session).unwrap().attempts, 1);
+        assert!(
+            ContinuityLedger::update(&path, |ledger| ledger.mark_accepted(session, 13)).unwrap()
+        );
+        assert!(
+            ContinuityLedger::load(&path)
+                .unwrap()
+                .pending_for_session(session)
+                .is_none()
+        );
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]
@@ -434,5 +511,41 @@ mod tests {
         ledger.resolve_rotation_request();
         assert!(ledger.rotation_request.is_none());
         assert!(ledger.has_incident(session));
+    }
+
+    #[test]
+    fn concurrent_delivery_and_incident_updates_survive_restart() {
+        let root = std::env::temp_dir().join(format!("boss-ledger-race-{}", Uuid::new_v4()));
+        let path = root.join("continuity.json");
+        let session = Uuid::new_v4();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(9));
+        std::thread::scope(|scope| {
+            for index in 0..8 {
+                let path = &path;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    ContinuityLedger::update(path, |ledger| {
+                        let id = format!("handoff-{index}");
+                        ledger.prepare(&id, session, 1, ContinuityDeliveryKind::SessionHandoff, 10);
+                        ledger.mark_submitted(&id, 11);
+                    })
+                    .unwrap();
+                });
+            }
+            barrier.wait();
+            ContinuityLedger::update(&path, |ledger| {
+                ledger.record_compaction_incident(session, 12, "controlled incident");
+            })
+            .unwrap();
+        });
+        let reopened = ContinuityLedger::load(&path).unwrap();
+        assert_eq!(reopened.deliveries.len(), 8);
+        assert!(reopened.deliveries.iter().all(|delivery| delivery.status
+            == ContinuityDeliveryStatus::Submitted
+            && delivery.attempts == 1));
+        assert!(reopened.has_incident(session));
+        assert!(reopened.rotation_request.is_some());
+        fs::remove_dir_all(root).ok();
     }
 }

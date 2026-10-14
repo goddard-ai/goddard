@@ -272,23 +272,27 @@ pub(super) fn boss_continuity_note_event(
     let now = crate::model::unix_time();
     match event {
         DriverEvent::TurnStarted => {
-            let Ok(mut ledger) = ContinuityLedger::load(&path) else {
-                return;
-            };
-            let had_pending = ledger.pending_for_session(session_id).is_some();
-            ledger.mark_accepted(session_id, now);
-            if had_pending && let Err(error) = ledger.persist(&path) {
-                eprintln!("could not record Boss transport acceptance: {error:#}");
+            match ContinuityLedger::update(&path, |ledger| ledger.mark_accepted(session_id, now)) {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(error) => {
+                    eprintln!("could not record Boss transport acceptance: {error:#}");
+                    return;
+                }
             }
             let mut state = task_state.lock();
-            if let Some(session) = state
+            let context = state
                 .sessions
                 .iter_mut()
                 .find(|session| session.id == session_id)
-                && session.pending_provider_context.take().is_some()
-            {
+                .and_then(|session| session.pending_provider_context.take());
+            if let Some(context) = context {
                 state.mark_session_dirty(session_id);
                 if let Err(error) = task_store.save(&mut state) {
+                    if let Some(session) = state.session_mut(session_id) {
+                        session.pending_provider_context = Some(context);
+                    }
+                    state.mark_session_dirty(session_id);
                     eprintln!("could not consume the delivered Boss context: {error:#}");
                 }
             }
@@ -299,33 +303,26 @@ pub(super) fn boss_continuity_note_event(
         | DriverEvent::Error(_)
         | DriverEvent::LocalizedError { .. }
         | DriverEvent::ProcessExited => {
-            let Ok(mut ledger) = ContinuityLedger::load(&path) else {
-                return;
-            };
-            if ledger.pending_for_session(session_id).is_some() {
+            if let Err(error) = ContinuityLedger::update(&path, |ledger| {
                 ledger.mark_rejected(session_id, now);
-                if let Err(error) = ledger.persist(&path) {
-                    eprintln!("could not record Boss transport rejection: {error:#}");
-                }
+            }) {
+                eprintln!("could not record Boss transport rejection: {error:#}");
             }
         }
         DriverEvent::RichActivity(item) if crate::model::is_context_compaction(item) => {
-            let Ok(mut ledger) = ContinuityLedger::load(&path) else {
-                return;
-            };
-            if ledger.has_incident(session_id) {
-                return;
-            }
             eprintln!(
                 "Boss compaction incident on session {session_id}: {}; the generation is fenced and a safe refresh was requested",
                 item.title,
             );
-            ledger.record_compaction_incident(
-                session_id,
-                now,
-                format!("provider compaction activity: {}", item.title),
-            );
-            if let Err(error) = ledger.persist(&path) {
+            if let Err(error) = ContinuityLedger::update(&path, |ledger| {
+                if !ledger.has_incident(session_id) {
+                    ledger.record_compaction_incident(
+                        session_id,
+                        now,
+                        format!("provider compaction activity: {}", item.title),
+                    );
+                }
+            }) {
                 eprintln!("could not record the Boss compaction incident: {error:#}");
             }
         }

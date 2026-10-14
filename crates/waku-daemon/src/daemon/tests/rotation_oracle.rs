@@ -162,6 +162,63 @@ fn boss_manual_compact_translates_to_a_durable_safe_refresh() {
 }
 
 #[test]
+fn unreadable_continuity_holds_boss_growth_and_preserves_the_handoff() {
+    let root = std::env::temp_dir().join(format!("boss-ledger-fence-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let boss = rotation_boss(&backend);
+    let runtime = Uuid::new_v4();
+    let capture = boss_runtime(&backend, boss, runtime);
+    let path = root.join("boss/continuity.json");
+    std::fs::write(&path, b"not a continuity ledger").unwrap();
+    {
+        let mut state = backend.task_state.lock();
+        state.session_mut(boss).unwrap().pending_provider_context = Some("retained handoff".into());
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let driver = backend.sessions.lock().get(&boss).unwrap().driver.clone();
+    driver.prompt("denied growth".into());
+    driver.steer("denied continuation".into());
+    assert!(capture.prompts.lock().is_empty());
+    assert!(capture.steers.lock().is_empty());
+    assert!(backend.boss_incident_fenced(boss));
+    assert!(super::super::prompt_delivery::boss_incident_fenced(
+        &backend.boss,
+        boss
+    ));
+    // Ledger corruption must not hold unrelated employees' deliveries.
+    assert!(!super::super::prompt_delivery::boss_incident_fenced(
+        &backend.boss,
+        Uuid::new_v4()
+    ));
+    super::super::events::boss_continuity_note_event(
+        &backend.boss,
+        &backend.task_state,
+        &backend.task_store,
+        boss,
+        &DriverEvent::TurnStarted,
+    );
+    assert_eq!(
+        backend
+            .task_state
+            .lock()
+            .session_mut(boss)
+            .unwrap()
+            .pending_provider_context
+            .as_deref(),
+        Some("retained handoff"),
+    );
+    std::fs::write(&path, b"{}").unwrap();
+    backend
+        .task_state
+        .lock()
+        .sessions
+        .retain(|session| session.id != boss);
+    driver.prompt("missing session cannot coordinate".into());
+    assert!(capture.prompts.lock().is_empty());
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
 fn provider_events_feed_context_transport_and_compaction_observations() {
     let root = std::env::temp_dir().join(format!("boss-event-oracle-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
@@ -365,18 +422,19 @@ fn retired_boss_generation_is_fenced_at_the_driver_boundary() {
     );
     stale_driver.prompt("stale generation still tries to coordinate".into());
     stale_driver.steer("steer is denied too".into());
+    stale_driver.compact();
     assert!(stale_capture.prompts.lock().is_empty());
     assert!(stale_capture.steers.lock().is_empty());
+    assert!(
+        waku_boss::rotation_continuity::ContinuityLedger::load(&root.join("boss/continuity.json"))
+            .unwrap()
+            .rotation_request
+            .is_none()
+    );
 
     let fresh_runtime = Uuid::new_v4();
     let fresh_capture = boss_runtime(&backend, next, fresh_runtime);
-    let fresh_driver = backend
-        .sessions
-        .lock()
-        .get(&next)
-        .unwrap()
-        .driver
-        .clone();
+    let fresh_driver = backend.sessions.lock().get(&next).unwrap().driver.clone();
     fresh_driver.prompt("the committed owner coordinates".into());
     assert_eq!(fresh_capture.prompts.lock().len(), 1);
 
@@ -393,8 +451,7 @@ fn retired_boss_generation_is_fenced_at_the_driver_boundary() {
             && matches!(&admission.decision, AdmissionDecision::Blocked { .. })
     }));
     assert!(admissions.iter().any(|admission| {
-        admission.session_id == next
-            && matches!(&admission.decision, AdmissionDecision::Unguarded)
+        admission.session_id == next && matches!(&admission.decision, AdmissionDecision::Unguarded)
     }));
     std::fs::remove_dir_all(root).ok();
 }
@@ -454,9 +511,7 @@ fn stale_boss_credential_is_denied_after_rotation() {
 
 #[test]
 fn boss_handoff_stays_pending_until_transport_acceptance() {
-    use waku_boss::rotation_continuity::{
-        ContinuityDeliveryStatus, ContinuityLedger,
-    };
+    use waku_boss::rotation_continuity::{ContinuityDeliveryStatus, ContinuityLedger};
     let root = std::env::temp_dir().join(format!("boss-handoff-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let old = rotation_boss(&backend);
@@ -476,9 +531,12 @@ fn boss_handoff_stays_pending_until_transport_acceptance() {
     let ledger_path = root.join("boss/continuity.json");
 
     // The bound package is prepared on the successor before any transport.
-    let pending = backend.task_state.lock().sessions.iter().any(|session| {
-        session.id == next && session.pending_provider_context.is_some()
-    });
+    let pending = backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .any(|session| session.id == next && session.pending_provider_context.is_some());
     assert!(pending, "the successor carries the durable handoff");
     let ledger = ContinuityLedger::load(&ledger_path).unwrap();
     let delivery = ledger
@@ -486,17 +544,58 @@ fn boss_handoff_stays_pending_until_transport_acceptance() {
         .expect("a prepared handoff delivery is recorded");
     assert_eq!(delivery.status, ContinuityDeliveryStatus::Prepared);
 
+    // An unrelated turn-start cannot consume a package that was never
+    // submitted to this provider.
+    super::super::events::boss_continuity_note_event(
+        &backend.boss,
+        &backend.task_state,
+        &backend.task_store,
+        next,
+        &DriverEvent::TurnStarted,
+    );
+    assert_eq!(
+        ContinuityLedger::load(&ledger_path)
+            .unwrap()
+            .pending_for_session(next)
+            .unwrap()
+            .status,
+        ContinuityDeliveryStatus::Prepared,
+    );
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .session_mut(next)
+            .unwrap()
+            .pending_provider_context
+            .is_some()
+    );
+
     // Submission wraps the package into the outbound prompt — and leaves
     // the pending state untouched.
+    let retained_handoff = backend
+        .task_state
+        .lock()
+        .session_mut(next)
+        .unwrap()
+        .pending_provider_context
+        .clone()
+        .unwrap();
     let wrapped = backend.boss_outbound_prompt(next, "continue".into());
     assert!(wrapped.contains("<boss-session-rotation>"));
     let ledger = ContinuityLedger::load(&ledger_path).unwrap();
     let delivery = ledger.pending_for_session(next).unwrap();
     assert_eq!(delivery.status, ContinuityDeliveryStatus::Submitted);
-    let still_pending = backend.task_state.lock().sessions.iter().any(|session| {
-        session.id == next && session.pending_provider_context.is_some()
-    });
-    assert!(still_pending, "submission must not consume the bound package");
+    let still_pending = backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .any(|session| session.id == next && session.pending_provider_context.is_some());
+    assert!(
+        still_pending,
+        "submission must not consume the bound package"
+    );
 
     // Recorded transport acceptance is what consumes it.
     super::super::events::boss_continuity_note_event(
@@ -508,11 +607,36 @@ fn boss_handoff_stays_pending_until_transport_acceptance() {
     );
     let ledger = ContinuityLedger::load(&ledger_path).unwrap();
     assert!(ledger.pending_for_session(next).is_none());
-    assert!(!backend.task_state.lock().sessions.iter().any(|session| {
-        session.id == next && session.pending_provider_context.is_some()
-    }));
+    assert!(
+        !backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .any(|session| { session.id == next && session.pending_provider_context.is_some() })
+    );
     let plain = backend.boss_outbound_prompt(next, "follow up".into());
     assert!(!plain.contains("<boss-session-rotation>"));
+    // Model restart after acceptance persisted but before the task store
+    // consumed its copy. Neither input path may replay that handoff.
+    {
+        let mut state = backend.task_state.lock();
+        state.session_mut(next).unwrap().pending_provider_context = Some(retained_handoff);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let recovered = backend.boss_outbound_prompt(next, "recovered input".into());
+    assert!(!recovered.contains("<boss-session-rotation>"));
+    let capture = boss_runtime(&backend, next, Uuid::new_v4());
+    backend
+        .queue_agent_prompt(
+            next,
+            "recovered report".into(),
+            None,
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert_eq!(capture.prompts.lock().len(), 1);
+    assert!(!capture.prompts.lock()[0].contains("<boss-session-rotation>"));
     std::fs::remove_dir_all(root).ok();
 }
 
@@ -571,6 +695,103 @@ fn rejected_delivery_keeps_boss_continuity_pending() {
     let delivery = ledger.pending_for_session(next).unwrap();
     assert_eq!(delivery.status, ContinuityDeliveryStatus::Submitted);
     assert_eq!(delivery.attempts, 2);
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn durable_handoff_preparation_precedes_publication_and_inline_acceptance() {
+    use waku_boss::rotation_continuity::{ContinuityDeliveryStatus, ContinuityLedger};
+    struct InlineAcceptance(Box<dyn Fn(String) + Send + Sync>);
+    impl crate::driver::DriverControl for InlineAcceptance {
+        fn prompt(&self, prompt: String) {
+            (self.0)(prompt);
+        }
+        fn cancel(&self) {}
+        fn respond(&self, _: String, _: String) {}
+        fn rollback(&self, _: usize) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
+            Ok(None)
+        }
+    }
+    let root = std::env::temp_dir().join(format!("boss-handoff-order-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let old = rotation_boss(&backend);
+    {
+        let mut state = backend.task_state.lock();
+        state.session_mut(old).unwrap().context_usage = Some(crate::model::ContextUsage {
+            tokens: 76,
+            window: Some(100),
+        });
+        backend.task_store.save(&mut state).unwrap();
+    }
+    // Deny the continuity transaction after the successor is staged.
+    // Its durable delivery must exist before ownership can publish.
+    let obstruction = root.join("boss/continuity.lock");
+    std::fs::create_dir(&obstruction).unwrap();
+    assert!(
+        backend
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
+    );
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    std::fs::remove_dir(obstruction).unwrap();
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time())
+        .unwrap();
+    let next = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(old, next);
+    let runtime = Uuid::new_v4();
+    let capture = boss_runtime(&backend, next, runtime);
+    let boss = backend.boss.clone();
+    let state = backend.task_state.clone();
+    let store = backend.task_store.clone();
+    let ledger_path = root.join("boss/continuity.json");
+    let inline_path = ledger_path.clone();
+    let captured = capture.clone();
+    let inner = DriverHandle::from_control(Arc::new(InlineAcceptance(Box::new(move |prompt| {
+        assert!(prompt.contains("<boss-session-rotation>"));
+        assert_eq!(
+            ContinuityLedger::load(&inline_path)
+                .unwrap()
+                .pending_for_session(next)
+                .unwrap()
+                .status,
+            ContinuityDeliveryStatus::Submitted
+        );
+        captured.prompts.lock().push(prompt);
+        super::super::events::boss_continuity_note_event(
+            &boss,
+            &state,
+            &store,
+            next,
+            &DriverEvent::TurnStarted,
+        );
+    }))));
+    let driver = backend.boss_driver_boundary(next, runtime, inner);
+    backend.sessions.lock().get_mut(&next).unwrap().driver = driver;
+    backend
+        .queue_agent_prompt(
+            next,
+            "resume preserved work".into(),
+            None,
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert_eq!(capture.prompts.lock().len(), 1);
+    assert!(
+        ContinuityLedger::load(&ledger_path)
+            .unwrap()
+            .pending_for_session(next)
+            .is_none()
+    );
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .session_mut(next)
+            .unwrap()
+            .pending_provider_context
+            .is_none()
+    );
     std::fs::remove_dir_all(root).ok();
 }
 

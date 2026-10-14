@@ -16,15 +16,27 @@ session, the session is unarchived, and no compaction incident fenced it.
 `compact` is never forwarded: a manual compact writes a durable refresh
 request that the reconciler settles as a rotation, and a detected
 provider-side compaction records an incident that fences the generation
-and requests the same refresh. Unqualified provider configurations fail
-closed through the same path.
+and requests the same refresh. An unreadable continuity ledger or a missing
+session record denies context growth. This ownership fence does not yet
+enforce provider qualification or deny provider-native shell execution.
 
 `boss/continuity.json` is the durable ledger beside the journal: bound
 handoff deliveries move `Prepared → Submitted → Accepted`, where only a
-recorded `TurnStarted` consumes `pending_provider_context`. A rejected or
+recorded `TurnStarted` for a submitted delivery consumes
+`pending_provider_context`, after acceptance is persisted. An unrelated
+turn-start cannot accept a prepared or rejected package. A rejected or
 unconfirmed submission stays pending under the same delivery identifier
 and reconciles on retry. The ledger also holds compaction incidents and
 the rotation request queue.
+
+All production ledger mutations use `ContinuityLedger::update`, which locks
+a stable companion file through read/modify/write. This preserves concurrent
+handoff, receipt, refresh and incident updates. Successor publication stops
+when preparing its durable delivery fails. These changes do not establish
+power-loss durability, acceptance of an exact payload, or activation gating:
+the legacy turn-start signal has no bound delivery receipt and the existing
+rotation still publishes ownership before provider startup. Those adapter
+and lifecycle contracts remain required for the full guarantee.
 
 ## Test-only daemon seams
 

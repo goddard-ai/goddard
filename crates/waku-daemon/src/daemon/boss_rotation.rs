@@ -125,9 +125,10 @@ impl WakuBackend {
     /// visible — until the refresh commits, rather than delivering it to
     /// a provider boundary that can no longer be trusted.
     pub(super) fn boss_incident_fenced(&self, session_id: Uuid) -> bool {
-        ContinuityLedger::load(&self.boss_continuity_path())
-            .map(|ledger| ledger.has_incident(session_id))
-            .unwrap_or(false)
+        self.boss.is_boss(session_id)
+            && ContinuityLedger::load(&self.boss_continuity_path())
+                .map(|ledger| ledger.has_incident(session_id))
+                .unwrap_or(true)
     }
 
     /// The session a message addressed to the Boss should reach now. A
@@ -507,7 +508,7 @@ impl WakuBackend {
         let path = self.boss_journal_path();
         let continuity_path = self.boss_continuity_path();
         let mut journal = RotationJournal::load(&path)?;
-        let mut ledger = ContinuityLedger::load(&continuity_path)?;
+        let ledger = ContinuityLedger::load(&continuity_path)?;
         // A requested refresh (manual compact or a compaction incident)
         // triggers independently of the occupancy opt-out — both are
         // prevention requests, not threshold preferences.
@@ -704,16 +705,15 @@ impl WakuBackend {
             // pending until provider transport acceptance is recorded.
             {
                 let delivery_id = handoff_delivery_id(intent.new_session_id);
-                ledger.prepare(
-                    &delivery_id,
-                    intent.new_session_id,
-                    intent.old_generation.saturating_add(1),
-                    ContinuityDeliveryKind::SessionHandoff,
-                    now,
-                );
-                if let Err(error) = ledger.persist(&continuity_path) {
-                    eprintln!("could not record Boss continuity delivery: {error:#}");
-                }
+                ContinuityLedger::update(&continuity_path, |ledger| {
+                    ledger.prepare(
+                        &delivery_id,
+                        intent.new_session_id,
+                        intent.old_generation.saturating_add(1),
+                        ContinuityDeliveryKind::SessionHandoff,
+                        now,
+                    );
+                })?;
             }
             // Revalidate the bound revision before the pointer switch: a
             // persona, grant or provider change during staging means this
@@ -752,12 +752,11 @@ impl WakuBackend {
                     // The staged delivery belongs to the discarded successor —
                     // drop it so the ledger holds no pending package for a
                     // session that never existed.
-                    ledger
-                        .deliveries
-                        .retain(|delivery| delivery.session_id != intent.new_session_id);
-                    if let Err(error) = ledger.persist(&continuity_path) {
-                        eprintln!("could not unwind the Boss continuity record: {error:#}");
-                    }
+                    ContinuityLedger::update(&continuity_path, |ledger| {
+                        ledger.deliveries.retain(|delivery| {
+                            delivery.session_id != intent.new_session_id
+                        });
+                    })?;
                     journal.abort();
                     journal.persist(&path)?;
                     return Ok(());
@@ -878,8 +877,13 @@ impl WakuBackend {
         // The refresh request — manual compact or incident — is consumed
         // by the committed swap. Incidents stay as evidence.
         if ledger.rotation_request.is_some() {
-            ledger.resolve_rotation_request();
-            if let Err(error) = ledger.persist(&continuity_path) {
+            if let Err(error) = ContinuityLedger::update(&continuity_path, |latest| {
+                if latest.rotation_request == ledger.rotation_request
+                    && !latest.has_incident(intent.new_session_id)
+                {
+                    latest.resolve_rotation_request();
+                }
+            }) {
                 eprintln!("could not resolve the Boss rotation request: {error:#}");
             }
         }
@@ -957,13 +961,10 @@ impl WakuBackend {
         // A rotation staged but uncommitted dies with the clear — its
         // successor was never published, so it joins the retired rows.
         journal.abort();
-        let mut ledger = ContinuityLedger::load(&continuity_path)?;
+        let ledger = ContinuityLedger::load(&continuity_path)?;
         // A durable refresh request — manual compact or incident — is
         // answered by the clear itself: the fresh chat must not inherit
         // the request and immediately rotate again.
-        if ledger.rotation_request.is_some() {
-            ledger.resolve_rotation_request();
-        }
         // Repoint before staging: a pointer divergence fails the compare-
         // and-swap while nothing has changed, and a later failure leaves a
         // missing session `Open` repairs rather than a stray live chat.
@@ -1049,12 +1050,16 @@ impl WakuBackend {
                 .map(|session| session.id)
                 .collect()
         };
-        if !retired.is_empty() {
-            ledger
-                .deliveries
-                .retain(|delivery| !retired.contains(&delivery.session_id));
-        }
-        if let Err(error) = ledger.persist(&continuity_path) {
+        if let Err(error) = ContinuityLedger::update(&continuity_path, |latest| {
+            latest.deliveries.retain(|delivery| {
+                !retired.contains(&delivery.session_id)
+            });
+            if latest.rotation_request == ledger.rotation_request
+                && !latest.has_incident(new_id)
+            {
+                latest.resolve_rotation_request();
+            }
+        }) {
             eprintln!("could not record the Boss clear in the continuity ledger: {error:#}");
         }
         for id in &retired {
@@ -1357,12 +1362,12 @@ impl BossOwnershipDriver {
     /// no authority exists before ownership commits.
     fn admit(&self, boundary: &str) -> bool {
         let active = self.boss.is_boss(self.session_id);
-        let archived = self.task_state.lock().sessions.iter().any(|session| {
-            session.id == self.session_id && session.archived_at.is_some()
-        });
+        let archived = self.task_state.lock().sessions.iter()
+            .find(|session| session.id == self.session_id)
+            .is_none_or(|session| session.archived_at.is_some());
         let incident = ContinuityLedger::load(&self.continuity_path)
             .map(|ledger| ledger.has_incident(self.session_id))
-            .unwrap_or(false);
+            .unwrap_or(true);
         let allowed = active && !archived && !incident;
         if !allowed {
             eprintln!(
@@ -1529,14 +1534,17 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
         // compact becomes a durable safe-refresh request the reconciler
         // settles as a fresh session. This is the fail-closed path for
         // every provider, qualified or not.
-        if let Ok(mut ledger) = ContinuityLedger::load(&self.continuity_path) {
+        if !self.boss.is_boss(self.session_id) {
+            return;
+        }
+        if let Err(error) = ContinuityLedger::update(&self.continuity_path, |ledger| {
             ledger.request_rotation(
                 crate::model::unix_time(),
                 "manual compact request translated to a safe session refresh",
             );
-            if let Err(error) = ledger.persist(&self.continuity_path) {
-                eprintln!("could not record the Boss refresh request: {error:#}");
-            }
+        }) {
+            eprintln!("could not record the Boss refresh request: {error:#}");
+            return;
         }
         eprintln!(
             "Boss compaction request on session {} translated to a rotation request",
