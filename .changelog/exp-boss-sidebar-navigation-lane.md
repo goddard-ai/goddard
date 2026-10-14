@@ -1,0 +1,1 @@
+- Sidebar task and Boss deliverable navigation now gets priority over background daemon requests and transcript traffic.

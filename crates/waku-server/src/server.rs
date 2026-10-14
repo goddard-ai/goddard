@@ -32,6 +32,11 @@ use waku_protocol::{
 
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(25);
+// Yield to inbound clicks even when producers keep the outbound FIFO full.
+const BUSY_SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(1);
+const SOCKET_WRITE_BATCH: usize = 32;
+const SOCKET_WRITE_BUDGET: Duration = Duration::from_millis(2);
+const NAVIGATION_REPLY_BURST: usize = 8;
 const DESCRIPTOR_RECOVERY_INTERVAL: Duration = Duration::from_millis(250);
 const DESCRIPTOR_WARNING_INTERVAL: Duration = Duration::from_secs(30);
 /// A socket write that makes no progress for this long means the client is
@@ -55,6 +60,8 @@ const CONTROL_REQUEST_WORKERS: usize = 4;
 const CONTROL_REQUEST_QUEUE: usize = 64;
 const HEALTH_REQUEST_WORKERS: usize = 2;
 const HEALTH_REQUEST_QUEUE: usize = 16;
+const NAVIGATION_REQUEST_WORKERS: usize = 2;
+const NAVIGATION_REQUEST_QUEUE: usize = 64;
 /// A pooled request job. The label is the command's wire `type` tag —
 /// `workspace` jobs add their operation tag (`workspace:listTree`) — so a
 /// full or slow pool names what it holds instead of just counting it.
@@ -793,6 +800,7 @@ struct RequestDispatcher {
     heavy_requests: IndependentRequestPool,
     control_requests: IndependentRequestPool,
     health_requests: IndependentRequestPool,
+    navigation_requests: IndependentRequestPool,
     /// The runtime-controlled non-loopback listener, installed by `serve`
     /// once this dispatcher is shared so an exposure request arriving on
     /// any listener can rebind it.
@@ -1357,6 +1365,11 @@ impl RequestDispatcher {
                 HEALTH_REQUEST_WORKERS,
                 HEALTH_REQUEST_QUEUE,
             ),
+            navigation_requests: IndependentRequestPool::new(
+                "navigation",
+                NAVIGATION_REQUEST_WORKERS,
+                NAVIGATION_REQUEST_QUEUE,
+            ),
             exposure: OnceLock::new(),
         }
     }
@@ -1531,9 +1544,12 @@ impl RequestDispatcher {
             }
             return;
         }
-        let heavy = is_subprocess_heavy(&request.command);
+        let navigation = is_navigation_request(&request.command);
+        let heavy = !navigation && is_subprocess_heavy(&request.command);
         let health = is_health_check(&request.command);
-        let pool = if heavy {
+        let pool = if navigation {
+            &self.navigation_requests
+        } else if heavy {
             &self.heavy_requests
         } else if health {
             &self.health_requests
@@ -2116,6 +2132,9 @@ fn handle_connection(
         .set_write_timeout(Some(SOCKET_WRITE_STALL_TIMEOUT))?;
 
     let (outgoing, outgoing_rx) = bounded(MAX_QUEUED_MESSAGES_PER_SUBSCRIBER);
+    // Navigation replies never queue behind event fan-out or bulk RPC results.
+    // Both lanes stay bounded; the hub's slow-subscriber/replay policy is intact.
+    let (navigation_outgoing, navigation_rx) = bounded(NAVIGATION_REQUEST_QUEUE);
     let (subscriber, kicked) = Subscriber::new(outgoing.clone());
     // Agent connections receive no event stream, so they never join the hub.
     // The sentinel id can only ever be their own: real ids count up from 0.
@@ -2125,14 +2144,48 @@ fn handle_connection(
         hub.subscribe(&resume_from, subscriber)
     };
 
+    let mut read_timeout = SOCKET_POLL_INTERVAL;
+    let mut navigation_burst = 0;
     'connection: while !shutdown.load(Ordering::Acquire) {
         if kicked.try_recv().is_ok() {
             break;
         }
-        while let Ok(message) = outgoing_rx.try_recv() {
+        let started = Instant::now();
+        for _ in 0..SOCKET_WRITE_BATCH {
+            // Let bulk traffic make progress even during repeated navigation.
+            let message = if navigation_burst < NAVIGATION_REPLY_BURST {
+                navigation_rx.try_recv().ok().map(|message| {
+                    navigation_burst += 1;
+                    message
+                })
+            } else {
+                None
+            };
+            let message = message
+                .or_else(|| {
+                    outgoing_rx.try_recv().ok().map(|message| {
+                        navigation_burst = 0;
+                        message
+                    })
+                })
+                .or_else(|| navigation_rx.try_recv().ok());
+            let Some(message) = message else { break };
             if write_json(&mut socket, &message).is_err() {
                 break 'connection;
             }
+            if started.elapsed() >= SOCKET_WRITE_BUDGET {
+                break;
+            }
+        }
+        // A busy connection must not pay a 25ms idle poll after each batch.
+        let timeout = if outgoing_rx.is_empty() && navigation_rx.is_empty() {
+            SOCKET_POLL_INTERVAL
+        } else {
+            BUSY_SOCKET_POLL_INTERVAL
+        };
+        if timeout != read_timeout {
+            socket.get_mut().set_read_timeout(Some(timeout))?;
+            read_timeout = timeout;
         }
         match socket.read() {
             Ok(Message::Text(text)) => match serde_json::from_str(text.as_ref()) {
@@ -2174,7 +2227,12 @@ fn handle_connection(
                             });
                         }
                     } else {
-                        dispatcher.dispatch(request, outgoing.clone(), subscriber_id, agent);
+                        let replies = if is_navigation_request(&request.command) {
+                            navigation_outgoing.clone()
+                        } else {
+                            outgoing.clone()
+                        };
+                        dispatcher.dispatch(request, replies, subscriber_id, agent);
                     }
                 }
                 Ok(ClientMessage::Shutdown) => {
@@ -2446,6 +2504,23 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::AgentProjectMap { .. }
             | Command::StartIntegrationAuth { .. }
             | Command::ConnectIntegration { .. }
+    )
+}
+
+/// Only the requests needed to mount a task or deliverable use this lane.
+/// Attach stays in the runtime mailbox and its original outbound FIFO: its
+/// replay events must still arrive before the attach response.
+fn is_navigation_request(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::HydrateSession { .. }
+            | Command::Boss {
+                operation: waku_protocol::boss::BossOperation::Open { .. }
+            }
+            | Command::Workspace {
+                operation: WorkspaceOperation::ReadTextFile { .. }
+                    | WorkspaceOperation::ReadBinaryFile { .. }
+            }
     )
 }
 
@@ -4409,6 +4484,250 @@ mod tests {
         );
         assert!(hub.cached_response(kept_id).is_some());
         assert!(hub.cached_response(oversized_id).is_none());
+    }
+
+    #[test]
+    fn navigation_reply_outruns_bulk_replay_without_losing_events() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let hub = Arc::new(Hub::default());
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        hub.begin_runtime(session_id, runtime_id);
+        let event_count = MAX_REPLAY_EVENTS_PER_SESSION;
+        let text = "x".repeat(8192);
+        for _ in 0..event_count {
+            hub.emit(
+                session_id,
+                runtime_id,
+                WireDriverEvent::new("textDelta", serde_json::json!({ "text": text })),
+                true,
+            );
+        }
+        let dispatcher = Arc::new(RequestDispatcher::new(
+            Arc::new(TestBackend::default()),
+            hub.clone(),
+        ));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            handle_connection(
+                stream,
+                "secret",
+                dispatcher,
+                hub,
+                server_shutdown.clone(),
+                server_shutdown,
+                &ServerOptions::default(),
+            )
+            .unwrap();
+        });
+        let stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let (mut socket, _) = tungstenite::client(format!("ws://{address}/v1"), stream).unwrap();
+        write_json(
+            &mut socket,
+            &ClientMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                token: "secret".into(),
+                client_id: Uuid::new_v4(),
+                resume_from: Vec::new(),
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            serde_json::from_str::<ServerMessage>(
+                socket.read().unwrap().into_text().unwrap().as_ref()
+            )
+            .unwrap(),
+            ServerMessage::Hello { .. }
+        ));
+        let request_id = Uuid::new_v4();
+        let start = Instant::now();
+        write_json(
+            &mut socket,
+            &ClientMessage::Request(Request {
+                request_id,
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command: Command::HydrateSession { session_id },
+            }),
+        )
+        .unwrap();
+        let mut received = 0;
+        let mut response_at = None;
+        while received < event_count || response_at.is_none() {
+            let message: ServerMessage =
+                serde_json::from_str(socket.read().unwrap().into_text().unwrap().as_ref()).unwrap();
+            match message {
+                ServerMessage::Event(event) => {
+                    received += 1;
+                    assert_eq!(event.sequence, received as u64, "bulk FIFO order changed");
+                }
+                ServerMessage::Response {
+                    request_id: got, ..
+                } => {
+                    assert_eq!(got, request_id);
+                    response_at = Some((received, start.elapsed()));
+                }
+                other => panic!("unexpected message: {other:?}"),
+            }
+        }
+        let (before_reply, elapsed) = response_at.unwrap();
+        socket.close(None).unwrap();
+        shutdown.store(true, Ordering::Release);
+        server.join().unwrap();
+        eprintln!(
+            "navigation with {event_count} queued 8KiB events: {elapsed:?}, {before_reply} events before reply; all {received} delivered in order"
+        );
+        assert!(
+            before_reply < event_count,
+            "navigation was queued behind the entire replay"
+        );
+        assert!(
+            elapsed < Duration::from_millis(300),
+            "navigation exceeded 300ms under bulk replay"
+        );
+    }
+
+    /// Opening a task or deliverable must not need a free bulk worker.
+    #[test]
+    fn navigation_outruns_saturated_bulk_workers() {
+        struct BulkBackend {
+            started: Sender<()>,
+            release: Receiver<()>,
+        }
+        impl Backend for BulkBackend {
+            fn handle(
+                &self,
+                request: Request,
+                _: EventSink,
+                _: Option<Uuid>,
+            ) -> anyhow::Result<ResponsePayload> {
+                if matches!(
+                    request.command,
+                    Command::LoadTaskState | Command::ProbeProvider { .. }
+                ) {
+                    self.started.send(()).unwrap();
+                    self.release.recv().unwrap();
+                }
+                Ok(ResponsePayload::Ack)
+            }
+        }
+        struct Release(Sender<()>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                for _ in 0..CONTROL_REQUEST_WORKERS + HEAVY_REQUEST_WORKERS {
+                    let _ = self.0.send(());
+                }
+            }
+        }
+        let (started, started_rx) = unbounded();
+        let (release, release_rx) = unbounded();
+        let release = Release(release);
+        let dispatcher = RequestDispatcher::new(
+            Arc::new(BulkBackend {
+                started,
+                release: release_rx,
+            }),
+            Arc::new(Hub::default()),
+        );
+        let (outgoing, responses) = unbounded();
+        let mut bulk_ids = HashSet::new();
+        for index in 0..CONTROL_REQUEST_WORKERS + HEAVY_REQUEST_WORKERS {
+            let request_id = Uuid::new_v4();
+            bulk_ids.insert(request_id);
+            let command = if index < CONTROL_REQUEST_WORKERS {
+                Command::LoadTaskState
+            } else {
+                Command::ProbeProvider {
+                    provider: ProviderKind::Codex,
+                    binary_override: None,
+                    discover_models: false,
+                    probe_version: false,
+                }
+            };
+            dispatcher.dispatch(
+                Request {
+                    request_id,
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command,
+                },
+                outgoing.clone(),
+                0,
+                None,
+            );
+        }
+        for _ in 0..bulk_ids.len() {
+            started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        let commands = [
+            Command::HydrateSession {
+                session_id: Uuid::new_v4(),
+            },
+            Command::Boss {
+                operation: waku_protocol::boss::BossOperation::Open {
+                    provider: ProviderKind::Codex,
+                    model: None,
+                    mode: Default::default(),
+                },
+            },
+            Command::Workspace {
+                operation: WorkspaceOperation::ReadTextFile {
+                    root: PathBuf::from("."),
+                    relative_path: PathBuf::from("report.md"),
+                },
+            },
+            Command::Workspace {
+                operation: WorkspaceOperation::ReadBinaryFile {
+                    root: PathBuf::from("."),
+                    relative_path: PathBuf::from("report.pdf"),
+                },
+            },
+        ];
+        for command in commands {
+            let label = pool_job_label(&command);
+            let request_id = Uuid::new_v4();
+            let start = Instant::now();
+            dispatcher.dispatch(
+                Request {
+                    request_id,
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command,
+                },
+                outgoing.clone(),
+                0,
+                None,
+            );
+            let response = responses.recv_timeout(Duration::from_millis(300));
+            eprintln!(
+                "{label} under 4 blocked control + 4 blocked heavy workers: {:?}",
+                start.elapsed()
+            );
+            assert!(
+                matches!(response, Ok(ServerMessage::Response { request_id: got, .. })
+                if got == request_id),
+                "navigation waited behind bulk work"
+            );
+        }
+        drop(release);
+        // Every admitted bulk request still completes after its own work unblocks.
+        while !bulk_ids.is_empty() {
+            let ServerMessage::Response {
+                request_id,
+                outcome,
+            } = responses.recv_timeout(Duration::from_secs(2)).unwrap()
+            else {
+                panic!("expected a bulk reply")
+            };
+            assert!(bulk_ids.remove(&request_id));
+            assert!(matches!(outcome, ResponseOutcome::Ok { .. }));
+        }
     }
 
     struct BlockingProbeBackend {
