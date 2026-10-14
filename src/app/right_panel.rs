@@ -7850,7 +7850,11 @@ impl Waku {
             TranscriptRowKind::TurnFold(turn_id) => {
                 self.render_side_chat_turn_fold_row(session_id, session, turn_id, &theme, cx)
             }
-            TranscriptRowKind::BossHistory(..) | TranscriptRowKind::BossHistoryBoundary(_) => {
+            TranscriptRowKind::BossHistory(..)
+            | TranscriptRowKind::BossHistoryBoundary(_)
+            // The queued card lives only on the selected employee's own
+            // transcript — the fold for a side chat never emits it.
+            | TranscriptRowKind::QueuedEmployee => {
                 div().into_any_element()
             }
             TranscriptRowKind::WorkingIndicator => {

@@ -78,16 +78,23 @@ impl Waku {
             .boss_chat_key()
             .and_then(|key| self.boss_ui.chat_history.get(&key))
             .map_or(0, |history| history.revision);
+        // The queued card's presence lives in `boss_ui`, not the session —
+        // a ticket entering or leaving `Queued` must move the fingerprint
+        // or the tail row would appear and drop without a refold.
+        let queued_card = self.selected_queued_employee().is_some() as u64;
         mix(
-            self.selected_session()
-                .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
-                    transcript_rows_fingerprint(
-                        session,
-                        &self.expanded_turns,
-                        self.blocked_checkpoint_turn(session.id),
-                    )
-                }),
-            revision,
+            mix(
+                self.selected_session()
+                    .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
+                        transcript_rows_fingerprint(
+                            session,
+                            &self.expanded_turns,
+                            self.blocked_checkpoint_turn(session.id),
+                        )
+                    }),
+                revision,
+            ),
+            queued_card,
         )
     }
 
@@ -149,6 +156,19 @@ impl Waku {
                     .map(|session| session.id)
                     .filter(|_| next_kinds.contains(&TranscriptRowKind::WorkingIndicator)),
             );
+            let queued_fade = retain_fading_queued_card(
+                &mut next_kinds,
+                session.map(|session| session.id),
+                self.queued_card_session.get(),
+                self.queued_card_fade.get(),
+                Instant::now(),
+            );
+            self.queued_card_fade.set(queued_fade);
+            self.queued_card_session.set(
+                session
+                    .map(|session| session.id)
+                    .filter(|_| next_kinds.contains(&TranscriptRowKind::QueuedEmployee)),
+            );
             *self.transcript_row_kinds.borrow_mut() = next_kinds;
             self.transcript_row_kinds_fingerprint.set(Some(fingerprint));
         }
@@ -172,7 +192,13 @@ impl Waku {
                 |history| history.transcript_rows(session, &self.expanded_turns, pending),
             );
         }
-        folded_transcript_row_kinds(session, &self.expanded_turns, pending)
+        let mut rows = folded_transcript_row_kinds(session, &self.expanded_turns, pending);
+        // The queued card is the transcript's live tail — below the last row,
+        // and the only row on an employee shell that has no turns yet.
+        if self.selected_queued_employee().is_some() {
+            rows.push(TranscriptRowKind::QueuedEmployee);
+        }
+        rows
     }
 
     /// The response footer's copy content and timestamp for `message_index`,
@@ -793,6 +819,11 @@ pub(super) enum TranscriptRowKind {
     /// anchor report's message id: the first opening report of a turn, or
     /// the first of an adjacent run accepted into an open turn.
     BossTrigger(Uuid),
+    /// A queued employee's live status card — the tail row while the ticket
+    /// waits on admission or a committed `startNow` works through dispatch.
+    /// It reads `boss_ui`, not the session, so it is never history content
+    /// and never journals.
+    QueuedEmployee,
 }
 
 /// Session-local content keys keep disclosure anchors stable as historical
@@ -818,7 +849,9 @@ impl BossHistoryRow {
             TranscriptRowKind::ChangedFiles(a) => Self::ChangedFiles(a),
             TranscriptRowKind::WorkingIndicator => Self::WorkingIndicator,
             TranscriptRowKind::BossTrigger(a) => Self::BossTrigger(a),
-            TranscriptRowKind::BossHistory(..) | TranscriptRowKind::BossHistoryBoundary(_) => {
+            TranscriptRowKind::BossHistory(..)
+            | TranscriptRowKind::BossHistoryBoundary(_)
+            | TranscriptRowKind::QueuedEmployee => {
                 return None;
             }
         })
@@ -907,6 +940,67 @@ pub(super) struct WorkingIndicatorFade {
     /// Keys the row's `with_animation`, so a re-armed fade starts a fresh
     /// animation clock instead of inheriting a finished one.
     pub turn_id: Uuid,
+    pub started: Instant,
+    /// The retiring splice is scheduled — repainting the row must not stack
+    /// timers.
+    pub removal_scheduled: bool,
+}
+
+/// The queued card's exit transition, mirroring
+/// [`retain_fading_working_indicator`]: when a dispatch drops the card from
+/// the fold, the same session's ghost row stays mounted for one
+/// [`WORKING_INDICATOR_FADE_OUT`] window so the list removes it with an
+/// exact splice instead of the scroll-resetting shrink. The ghost keeps the
+/// card's tail seat — a working indicator that arrived with the dispatch
+/// stays below it.
+pub(super) fn retain_fading_queued_card(
+    next_kinds: &mut Vec<TranscriptRowKind>,
+    session_id: Option<Uuid>,
+    card_session: Option<Uuid>,
+    fade: Option<QueuedCardFade>,
+    now: Instant,
+) -> Option<QueuedCardFade> {
+    let live = next_kinds.contains(&TranscriptRowKind::QueuedEmployee);
+    if let Some(fade) = fade {
+        let fading = !live
+            && Some(fade.session_id) == session_id
+            && now.saturating_duration_since(fade.started) < WORKING_INDICATOR_FADE_OUT;
+        if fading {
+            let index = next_kinds
+                .iter()
+                .rposition(|kind| *kind == TranscriptRowKind::WorkingIndicator)
+                .filter(|index| *index == next_kinds.len() - 1)
+                .unwrap_or(next_kinds.len());
+            next_kinds.insert(index, TranscriptRowKind::QueuedEmployee);
+            return Some(fade);
+        }
+        return None;
+    }
+    let session_id = session_id?;
+    if live || card_session != Some(session_id) {
+        return None;
+    }
+    let index = next_kinds
+        .iter()
+        .rposition(|kind| *kind == TranscriptRowKind::WorkingIndicator)
+        .filter(|index| *index == next_kinds.len() - 1)
+        .unwrap_or(next_kinds.len());
+    next_kinds.insert(index, TranscriptRowKind::QueuedEmployee);
+    Some(QueuedCardFade {
+        session_id,
+        started: now,
+        removal_scheduled: false,
+    })
+}
+
+/// A queued card outliving its `Queued` lifecycle — the row stays in the
+/// fold for the fade window while the renderer eases it out, then a
+/// scheduled splice retires it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct QueuedCardFade {
+    /// The fade belongs to one session's transcript; a session switch
+    /// discards it rather than trailing a ghost row into the next view.
+    pub session_id: Uuid,
     pub started: Instant,
     /// The retiring splice is scheduled — repainting the row must not stack
     /// timers.
@@ -1173,7 +1267,8 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::WorkingIndicator
                 | TranscriptRowKind::BossTrigger(_)
                 | TranscriptRowKind::BossHistory(..)
-                | TranscriptRowKind::BossHistoryBoundary(_) => None,
+                | TranscriptRowKind::BossHistoryBoundary(_)
+                | TranscriptRowKind::QueuedEmployee => None,
             })
             .filter(|part| !part.content.trim().is_empty())
             .map(|part| part.content.as_str())
@@ -1778,7 +1873,8 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::WorkingIndicator
         | TranscriptRowKind::BossTrigger(_)
         | TranscriptRowKind::BossHistory(..)
-        | TranscriptRowKind::BossHistoryBoundary(_) => None,
+        | TranscriptRowKind::BossHistoryBoundary(_)
+        | TranscriptRowKind::QueuedEmployee => None,
     })?;
     let message = session.messages.get(message_index)?;
     if message.streaming {
@@ -1795,7 +1891,8 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::WorkingIndicator
             | TranscriptRowKind::BossTrigger(_)
             | TranscriptRowKind::BossHistory(..)
-            | TranscriptRowKind::BossHistoryBoundary(_) => None,
+            | TranscriptRowKind::BossHistoryBoundary(_)
+            | TranscriptRowKind::QueuedEmployee => None,
         })
         .any(|message| !message.content.trim().is_empty())
         .then_some(message_index)
@@ -1821,7 +1918,8 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::WorkingIndicator
         | TranscriptRowKind::BossTrigger(_)
         | TranscriptRowKind::BossHistory(..)
-        | TranscriptRowKind::BossHistoryBoundary(_) => false,
+        | TranscriptRowKind::BossHistoryBoundary(_)
+        | TranscriptRowKind::QueuedEmployee => false,
     };
     let Some(last_text) = turn_rows.iter().rposition(is_answer_text) else {
         return turn_rows.len();
@@ -1862,7 +1960,8 @@ pub(super) fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Opt
         }
         TranscriptRowKind::WorkingIndicator
         | TranscriptRowKind::BossHistory(..)
-        | TranscriptRowKind::BossHistoryBoundary(_) => None,
+        | TranscriptRowKind::BossHistoryBoundary(_)
+        | TranscriptRowKind::QueuedEmployee => None,
     }
 }
 
@@ -1880,7 +1979,8 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
         }
         TranscriptRowKind::WorkingIndicator
         | TranscriptRowKind::BossHistory(..)
-        | TranscriptRowKind::BossHistoryBoundary(_) => None,
+        | TranscriptRowKind::BossHistoryBoundary(_)
+        | TranscriptRowKind::QueuedEmployee => None,
         // The marker precedes the response it woke — like the prompt it
         // stands in for, it is not part of the response's hover group.
         TranscriptRowKind::BossTrigger(_) => None,

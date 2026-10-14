@@ -1,3 +1,4 @@
+use super::boss::QueuedCardPhase;
 use super::right_panel::{DiffRowStyle, render_diff_code_row};
 use super::*;
 use crate::ui::ActivationExt;
@@ -229,6 +230,7 @@ impl Waku {
         self.sync_transcript_rows();
         self.load_boss_history_at_top(cx);
         self.retire_fading_working_indicator(cx);
+        self.retire_fading_queued_card(cx);
         self.sync_transcript_layout_width(window);
         self.apply_pending_transcript_search_reveal(window, cx);
         self.apply_pending_transcript_match_reveal(window, cx);
@@ -241,7 +243,6 @@ impl Waku {
         let commit_popover = self.render_transcript_commit_popover(cx);
         let boss_lifecycle = self.render_boss_lifecycle_status(cx);
         let daemon_request = self.render_daemon_request(cx);
-        let queued_employee = self.render_queued_employee_prompt(cx);
         let transcript_rows = self.active_transcript_rows().clone();
         // A scrollbar drag owns the position for as long as it lasts, and the
         // bar writes offsets straight into the list rather than through its
@@ -462,9 +463,8 @@ impl Waku {
             .children(navigation_rail)
             .children({
                 // Transcript-top cards stack in one strip — never overlap:
-                // the lifecycle banner, a daemon request, and a queued
-                // employee's assignment card can all coexist.
-                let strip = [boss_lifecycle, daemon_request, queued_employee]
+                // the lifecycle banner and a daemon request can coexist.
+                let strip = [boss_lifecycle, daemon_request]
                     .into_iter()
                     .flatten()
                     .collect::<Vec<_>>();
@@ -501,167 +501,6 @@ impl Waku {
             .children(annotation_ref_tooltip)
             .children(commit_popover)
             .into_any_element()
-    }
-
-    /// The pre-launch shell has no provider transcript yet. Keep the
-    /// ticket's immutable assignment visible above it — brief, wait reason
-    /// or launch state, resolved model, and resource claims — until
-    /// dispatch replaces this surface with the live employee transcript.
-    fn render_queued_employee_prompt(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session_id = self.state.selected_session?;
-        let employee = self
-            .boss_ui
-            .states
-            .values()
-            .flat_map(|state| &state.employees)
-            .find(|employee| {
-                employee.session_id == session_id
-                    && matches!(
-                        employee.lifecycle(),
-                        waku_protocol::boss::EmployeeLifecycle::Queued
-                            | waku_protocol::boss::EmployeeLifecycle::Dispatching
-                    )
-            })?;
-        let ticket = employee.ticket.as_ref()?;
-        let queued = employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued;
-        let detail = if queued {
-            self.boss_ui
-                .queued
-                .get(&session_id)
-                .cloned()
-                .unwrap_or_else(|| tr!("boss.goals_queue_admission"))
-        } else {
-            tr!("boss.dispatching_detail")
-        };
-        let theme = Theme::current(cx);
-        let model_detail = self.boss_ui.queued_model_targets.get(&session_id).map(
-            |(key, provider, model, effort)| {
-                let name = self.model_display_name_on(*key, *provider, Some(model));
-                match effort.as_deref() {
-                    Some(effort) => format!(
-                        "{name} · {}",
-                        self.reasoning_effort_label_on(*key, *provider, Some(model), effort)
-                    ),
-                    None => name,
-                }
-            },
-        );
-        let resources = (!ticket.resources.is_empty()).then(|| {
-            let mut parts = Vec::new();
-            if !ticket.resources.exclusive.is_empty() {
-                parts.push(tr!(
-                    "boss.resource_exclusive",
-                    count = ticket.resources.exclusive.len()
-                ));
-            }
-            if ticket.resources.resident_devices > 0 {
-                parts.push(tr!(
-                    "boss.resource_devices",
-                    count = ticket.resources.resident_devices
-                ));
-            }
-            if ticket.resources.native_builds > 0 {
-                parts.push(tr!(
-                    "boss.resource_builds",
-                    count = ticket.resources.native_builds
-                ));
-            }
-            if ticket.resources.desktop_input > 0 {
-                parts.push(tr!("boss.resource_desktop"));
-            }
-            if ticket.reservation.is_some() {
-                tr!(
-                    "boss.assignment_resources_reserved",
-                    detail = parts.join(" · ")
-                )
-            } else {
-                tr!(
-                    "boss.assignment_resources_requested",
-                    detail = parts.join(" · ")
-                )
-            }
-        });
-        Some(
-            div()
-                .id("queued-employee-prompt-layer")
-                .child(
-                    div()
-                        .w_full()
-                        .max_w(px(CONTENT_MAX_WIDTH))
-                        .mx_auto()
-                        .p(px(12.0))
-                        .rounded(px(15.0))
-                        .border(hairline())
-                        .border_color(theme.border_subtle)
-                        .bg(theme.raised)
-                        .shadow_md()
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.0))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(7.0))
-                                .child(icon(
-                                    if queued {
-                                        "icons/hourglass.svg"
-                                    } else {
-                                        "icons/loader-circle.svg"
-                                    },
-                                    13.0,
-                                    theme.text_secondary,
-                                ))
-                                .child(
-                                    div()
-                                        .text_size(sp(12.5))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(theme.text)
-                                        .child(if queued {
-                                            tr!("boss.goals_status_queued")
-                                        } else {
-                                            tr!("boss.goals_status_starting")
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .text_size(sp(12.0))
-                                        .text_color(theme.text_secondary)
-                                        .child(detail),
-                                )
-                                .when_some(model_detail, |row, model| {
-                                    row.child(
-                                        div()
-                                            .flex_none()
-                                            .text_size(sp(12.0))
-                                            .text_color(theme.text_tertiary)
-                                            .child(model),
-                                    )
-                                }),
-                        )
-                        .when_some(resources, |card, resources| {
-                            card.child(
-                                div()
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_tertiary)
-                                    .child(resources),
-                            )
-                        })
-                        .child(
-                            div()
-                                .id("queued-employee-prompt-content")
-                                .max_h(px(220.0))
-                                .overflow_y_scroll()
-                                .text_size(sp(13.0))
-                                .line_height(sp(19.0))
-                                .text_color(theme.text)
-                                .child(ticket.prompt.clone()),
-                        ),
-                )
-                .into_any_element(),
-        )
     }
 
     /// The daemon-owned `agentRenameSelf`/`agentProposeArchive` request,
@@ -2470,6 +2309,7 @@ impl Waku {
                 .render_changed_files_row(turn_id, &theme, window, cx)
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::WorkingIndicator => self.render_working_indicator_row(&theme),
+            TranscriptRowKind::QueuedEmployee => self.render_queued_employee_row(&theme, cx),
             TranscriptRowKind::BossTrigger(anchor) => {
                 self.render_boss_trigger_row(anchor, &theme, cx)
             }
@@ -3977,6 +3817,150 @@ impl Waku {
         .into_any_element()
     }
 
+    /// A queued employee's live status card — the transcript's tail row while
+    /// the ticket waits on admission. Summon-card density: one leading glyph,
+    /// a terse reason, and the human's `Start now`, which commits through the
+    /// summon scheduler rather than a parallel spawn. Once the ticket leaves
+    /// `Queued` the model is gone and the row only exists to fade out — it
+    /// reads `Starting` for that window, the state dispatch already implies.
+    fn render_queued_employee_row(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let fade = self
+            .queued_card_fade
+            .get()
+            .filter(|fade| Some(fade.session_id) == self.state.selected_session);
+        let card = self.queued_employee_card();
+        let (phase, headline, secondary, session_id, key) = match (card, fade) {
+            (Some(card), _) => (
+                card.phase,
+                card.headline,
+                card.secondary,
+                card.session_id,
+                Some(card.key),
+            ),
+            (None, Some(fade)) => (
+                QueuedCardPhase::Starting,
+                tr!("boss.goals_status_starting"),
+                None,
+                fade.session_id,
+                None,
+            ),
+            (None, None) => return div().into_any_element(),
+        };
+        let glyph = match phase {
+            QueuedCardPhase::Waiting => {
+                icon("icons/hourglass.svg", 12.0, theme.text_secondary).into_any_element()
+            }
+            QueuedCardPhase::Starting => {
+                motion::spin_slow(icon("icons/loader-circle.svg", 12.0, theme.text_secondary))
+            }
+            QueuedCardPhase::Declined => {
+                icon("icons/circle-alert.svg", 12.0, theme.warning).into_any_element()
+            }
+        };
+        let start_now = {
+            let focus =
+                self.transcript_control_focus(format!("queued-card-start-now-{session_id}"), cx);
+            let enabled = phase != QueuedCardPhase::Starting;
+            let button = div()
+                .id(SharedString::from(format!(
+                    "queued-card-start-now-{session_id}"
+                )))
+                .track_focus(&focus)
+                .tab_index(0)
+                .h(px(26.0))
+                .px(px(11.0))
+                .rounded(px(8.0))
+                .border(hairline())
+                .border_color(theme.inverse)
+                .bg(theme.inverse)
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .cursor_default()
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.on_inverse)
+                .child(icon("icons/play.svg", 10.0, theme.on_inverse))
+                .child(tr!("boss.queue_card_start_now"));
+            if enabled {
+                button
+                    .hover(|element| element.opacity(0.9))
+                    .active(|element| element.opacity(0.8))
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .on_activation(cx, move |this, _, cx| {
+                        if let Some(key) = key {
+                            this.start_queued_employee_now(key, session_id, cx);
+                        }
+                    })
+            } else {
+                // Committed, awaiting dispatch — the `Starting` headline
+                // carries the state, so the button only dims.
+                button
+                    .opacity(0.6)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+            }
+        };
+        let card_surface = theme.surface.blend(theme.overlay.opacity(0.7));
+        let row = div()
+            .id("queued-employee-card")
+            .w_full()
+            .min_w_0()
+            .rounded(px(11.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(card_surface)
+            .px(px(10.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .size(px(12.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(glyph),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text)
+                            .child(headline),
+                    )
+                    .when_some(secondary, |row, secondary| {
+                        row.child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(sp(11.5))
+                                .text_color(theme.text_tertiary)
+                                .child(secondary),
+                        )
+                    }),
+            )
+            .child(start_now);
+        let Some(fade) = fade else {
+            return row.into_any_element();
+        };
+        row.with_animation(
+            SharedString::from(format!("queued-card-fade-{}", fade.session_id)),
+            Animation::new(WORKING_INDICATOR_FADE_OUT),
+            |element, delta| element.opacity(1.0 - delta),
+        )
+        .into_any_element()
+    }
+
     /// The changed-files card while its capture is still running — the same
     /// shell the landed card uses, so the snapshot reads as the card arriving
     /// rather than as separate background work.
@@ -4082,6 +4066,47 @@ impl Waku {
                     this.working_indicator_session.set(None);
                     // The transcript itself did not change, so the fold cache
                     // must be forced to drop the ghost row.
+                    this.transcript_row_kinds_fingerprint.set(None);
+                    this.splice_active_transcript_rows_after_visibility_change(&previous_kinds);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Schedule the splice that retires a fading queued card. Like the
+    /// working indicator's, it runs from `render_transcript` rather than the
+    /// row — the list is virtualized, so a reader parked mid-transcript
+    /// never paints the tail row and its timer must not wait for one.
+    fn retire_fading_queued_card(&self, cx: &mut Context<Self>) {
+        let Some(fade) = self.queued_card_fade.get() else {
+            return;
+        };
+        if fade.removal_scheduled {
+            return;
+        }
+        self.queued_card_fade.set(Some(QueuedCardFade {
+            removal_scheduled: true,
+            ..fade
+        }));
+        let session_id = fade.session_id;
+        let delay = if cx.reduce_motion() {
+            Duration::ZERO
+        } else {
+            WORKING_INDICATOR_FADE_OUT.saturating_sub(fade.started.elapsed())
+        };
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            let _ = this.update(cx, |this, cx| {
+                if this
+                    .queued_card_fade
+                    .get()
+                    .is_some_and(|fade| fade.session_id == session_id)
+                {
+                    let previous_kinds = this.transcript_row_kinds.borrow().clone();
+                    this.queued_card_fade.set(None);
+                    this.queued_card_session.set(None);
                     this.transcript_row_kinds_fingerprint.set(None);
                     this.splice_active_transcript_rows_after_visibility_change(&previous_kinds);
                     cx.notify();

@@ -28,7 +28,7 @@ use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     CONTINUE_PROMPT, ComposerSubmission, ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation,
     EscapeStopPress, EscapeStopTarget, NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT,
-    NavigationLocation, PendingUserInput, SessionNavigation, SettingsHistoryEntry,
+    NavigationLocation, PendingUserInput, QueuedCardFade, SessionNavigation, SettingsHistoryEntry,
     SettingsNavigation, StreamDeltaKind, TranscriptLanding, TranscriptRowKind::*,
     TranscriptScrollPosition, WORKING_INDICATOR_FADE_OUT, WorkingIndicatorFade,
     active_navigation_turn_index, activity_group_is_live, activity_header_title,
@@ -41,15 +41,15 @@ use super::{
     navigation_rail_height, navigation_rail_scale, next_navigation_turn_index,
     paused_toast_duration, pop_stream_batch, previous_navigation_turn_index, prompt_answer_index,
     push_reasoning_delta, push_transcript_activity, response_footer_message_index,
-    response_row_turn_id, retain_fading_working_indicator, row_starts_followup_turn,
-    send_holds_transcript_position, session_accepts_turn_output, session_is_reapable,
-    settle_stream_segment, should_refresh_branch_after_activity, should_show_navigation_rail,
-    should_show_scroll_to_bottom, sidebar_slide_right_panel_widths, still_archived_sessions,
-    tail_rejoin_follows_anchor, task_id_from_notification_tag, task_notification_tag,
-    transcript_anchor_end_space, transcript_navigation_turns, transcript_position_landing,
-    transcript_rests_at_tail, transcript_row_kinds, transcript_row_splice,
-    transcript_rows_fingerprint, update_transcript_activity, widened_panel_width_for_file_editor,
-    widened_panel_width_for_review,
+    response_row_turn_id, retain_fading_queued_card, retain_fading_working_indicator,
+    row_starts_followup_turn, send_holds_transcript_position, session_accepts_turn_output,
+    session_is_reapable, settle_stream_segment, should_refresh_branch_after_activity,
+    should_show_navigation_rail, should_show_scroll_to_bottom, sidebar_slide_right_panel_widths,
+    still_archived_sessions, tail_rejoin_follows_anchor, task_id_from_notification_tag,
+    task_notification_tag, transcript_anchor_end_space, transcript_navigation_turns,
+    transcript_position_landing, transcript_rests_at_tail, transcript_row_kinds,
+    transcript_row_splice, transcript_rows_fingerprint, update_transcript_activity,
+    widened_panel_width_for_file_editor, widened_panel_width_for_review,
 };
 use crate::git_branch::BranchEntry;
 use crate::model::{
@@ -5827,6 +5827,112 @@ fn a_new_turn_cancels_the_working_indicator_fade() {
         None,
     );
     assert_eq!(rows, vec![Message(0), WorkingIndicator]);
+}
+
+/// `retain_fading_queued_card` holds a dispatched ticket's card row for one
+/// fade window — same session only, no re-arm after it retires — so the
+/// tail removal splices instead of resetting the scroll.
+#[test]
+fn the_queued_card_fades_out_once_then_retires() {
+    let session_id = Uuid::new_v4();
+    let armed_at = Instant::now();
+
+    // Dispatch dropped the card the same session was showing: the fade
+    // arms and the ghost row keeps its tail seat.
+    let mut dispatched_rows = vec![Message(0)];
+    let fade = retain_fading_queued_card(
+        &mut dispatched_rows,
+        Some(session_id),
+        Some(session_id),
+        None,
+        armed_at,
+    )
+    .expect("dispatch arms the card's fade");
+    assert_eq!(dispatched_rows, vec![Message(0), QueuedEmployee]);
+    assert!(!fade.removal_scheduled);
+
+    // A working indicator arriving with the dispatch stays below the ghost.
+    let mut with_indicator = vec![Message(0), WorkingIndicator];
+    let kept = retain_fading_queued_card(
+        &mut with_indicator,
+        Some(session_id),
+        Some(session_id),
+        Some(fade),
+        armed_at + WORKING_INDICATOR_FADE_OUT / 2,
+    );
+    assert_eq!(kept, Some(fade));
+    assert_eq!(
+        with_indicator,
+        vec![Message(0), QueuedEmployee, WorkingIndicator]
+    );
+
+    // Past the window the row retires for real, and with the card marked
+    // gone the next refold cannot arm a second fade.
+    let mut expired = vec![Message(0), WorkingIndicator];
+    assert_eq!(
+        retain_fading_queued_card(
+            &mut expired,
+            Some(session_id),
+            Some(session_id),
+            Some(fade),
+            armed_at + WORKING_INDICATOR_FADE_OUT,
+        ),
+        None,
+    );
+    assert_eq!(expired, vec![Message(0), WorkingIndicator]);
+    let mut after_retire = vec![Message(0), WorkingIndicator];
+    assert_eq!(
+        retain_fading_queued_card(
+            &mut after_retire,
+            Some(session_id),
+            None,
+            None,
+            armed_at + WORKING_INDICATOR_FADE_OUT,
+        ),
+        None,
+    );
+    assert_eq!(after_retire, vec![Message(0), WorkingIndicator]);
+
+    // The tail splice this exists for: removing the ghost is an exact edit,
+    // never a list reset.
+    assert_eq!(
+        transcript_row_splice(&[Message(0), QueuedEmployee], &[Message(0)]),
+        Some((1..2, 0)),
+    );
+}
+
+#[test]
+fn the_queued_card_fade_does_not_follow_a_session_switch() {
+    let queued_session = Uuid::new_v4();
+    let other_session = Uuid::new_v4();
+    let now = Instant::now();
+
+    // The previous fold showed the card — but for another session.
+    let mut rows = vec![Message(0)];
+    assert_eq!(
+        retain_fading_queued_card(
+            &mut rows,
+            Some(other_session),
+            Some(queued_session),
+            None,
+            now
+        ),
+        None,
+    );
+    assert_eq!(rows, vec![Message(0)]);
+
+    // A fade armed in one session is dropped, not kept, in another.
+    let fade = QueuedCardFade {
+        session_id: queued_session,
+        started: now,
+        removal_scheduled: false,
+    };
+    let mut rows = vec![Message(0)];
+    assert_eq!(
+        retain_fading_queued_card(&mut rows, Some(other_session), None, Some(fade), now),
+        None,
+    );
+    assert_eq!(rows, vec![Message(0)]);
 }
 
 #[test]

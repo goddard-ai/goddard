@@ -6420,6 +6420,18 @@ boss.goals_queue_earlier:
   en: Waiting for earlier work
 boss.goals_queue_model:
   en: "Waiting for %{model} · %{used}/%{limit} slots"
+boss.queue_card_waiting_slot:
+  en: Queued — waiting for a slot
+boss.queue_card_waiting_resources:
+  en: Queued — waiting for resources
+boss.queue_card_still_waiting:
+  en: "Still waiting — %{reason}"
+boss.queue_card_position:
+  en: "Position %{position} of %{total}"
+boss.queue_card_slots_in_use:
+  en: "%{used}/%{limit} slots in use"
+boss.queue_card_start_now:
+  en: Start now
 boss.goals_worktree:
   en: worktree
 boss.goals_open_task:

@@ -3136,6 +3136,12 @@ boss.goals_project_unavailable: 项目不可用
 boss.goals_queue_admission: 等待准入
 boss.goals_queue_earlier: 等待更早的工作
 boss.goals_queue_model: "等待 %{model} · %{used}/%{limit} 个槽位"
+boss.queue_card_waiting_slot: 已排队——等待空闲槽位
+boss.queue_card_waiting_resources: 已排队——等待资源
+boss.queue_card_still_waiting: "仍在等待——%{reason}"
+boss.queue_card_position: "第 %{position} 位，共 %{total} 位"
+boss.queue_card_slots_in_use: "%{used}/%{limit} 个槽位使用中"
+boss.queue_card_start_now: 立即开始
 boss.goals_worktree: 工作树
 boss.goals_open_task: "打开任务：%{title}，%{employee}，%{status}"
 boss.goals_status_follow_up: 需要跟进

@@ -4158,6 +4158,13 @@ pub struct Waku {
     /// [`WORKING_INDICATOR_FADE_OUT`] while the row renderer fades it out and
     /// schedules the splice that retires it.
     working_indicator_fade: Cell<Option<WorkingIndicatorFade>>,
+    /// The session whose last fold included the queued card — dispatch
+    /// dropping it from the same session's transcript arms the exit fade.
+    queued_card_session: Cell<Option<Uuid>>,
+    /// The queued card's outro: after dispatch removes it from the fold the
+    /// row stays for one fade window, then a scheduled splice retires it so
+    /// the list's scroll position survives the shrink.
+    queued_card_fade: Cell<Option<QueuedCardFade>>,
     /// The navigation rail's turn list, shared by `Rc` so a frame hands the
     /// rail a pointer instead of re-extracting every turn's snippets. Rebuilt
     /// by `navigation_turns` when the row-kinds fingerprint moves.
@@ -7910,6 +7917,8 @@ impl Waku {
                 transcript_frame_scan: Cell::new(None),
                 working_indicator_session: Cell::new(None),
                 working_indicator_fade: Cell::new(None),
+                queued_card_session: Cell::new(None),
+                queued_card_fade: Cell::new(None),
                 transcript_navigation_turns: RefCell::new(Rc::new(Vec::new())),
                 transcript_navigation_turns_fingerprint: Cell::new(None),
                 assistant_footer_cache: RefCell::new(HashMap::new()),

@@ -3185,6 +3185,12 @@ boss.goals_project_unavailable: プロジェクトを利用できません
 boss.goals_queue_admission: 割り当て待ち
 boss.goals_queue_earlier: 前の作業を待機中
 boss.goals_queue_model: "%{model} を待機中 · %{used}/%{limit} スロット"
+boss.queue_card_waiting_slot: キュー中——スロットを待機中
+boss.queue_card_waiting_resources: キュー中——リソースを待機中
+boss.queue_card_still_waiting: "まだ待機中——%{reason}"
+boss.queue_card_position: "%{total} 件中 %{position} 番目"
+boss.queue_card_slots_in_use: "%{used}/%{limit} スロット使用中"
+boss.queue_card_start_now: 今すぐ開始
 boss.goals_worktree: ワークツリー
 boss.goals_open_task: "タスクを開く: %{title}、%{employee}、%{status}"
 boss.goals_status_follow_up: フォローアップが必要

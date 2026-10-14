@@ -683,6 +683,11 @@ pub(super) struct BossUi {
     /// every Boss snapshot while rendering.
     pub(super) queued_model_targets:
         HashMap<Uuid, (DaemonKey, ProviderKind, String, Option<String>)>,
+    /// A `startNow` press the daemon has not answered or broadcast yet — the
+    /// queued card commits to "Starting" on this alone so a second click can
+    /// never double-send. Entries retire on the reply and on the next state
+    /// that either carries the force flag or drops the ticket's queue seat.
+    pub(super) start_now_pending: HashSet<Uuid>,
     pub recent: HashMap<DaemonKey, Vec<Uuid>>,
     pub sidebar_idle_visible: HashMap<DaemonKey, usize>,
     /// The Errands group's own finished-employee reveal count — the same
@@ -858,6 +863,7 @@ impl Default for BossUi {
             queued: HashMap::new(),
             dispatching: HashSet::new(),
             queued_model_targets: HashMap::new(),
+            start_now_pending: HashSet::new(),
             recent: HashMap::new(),
             sidebar_idle_visible: HashMap::new(),
             sidebar_errand_idle_visible: HashMap::new(),
@@ -1910,6 +1916,23 @@ impl Waku {
                         .or_insert_with(|| employee.identity.clone());
                 }
             }
+            // A ticket now carrying the force flag — or no longer queued at
+            // all — has caught up with the press; the card reads the ticket.
+            self.boss_ui.start_now_pending.retain(|id| {
+                self.boss_ui
+                    .states
+                    .values()
+                    .flat_map(|state| state.employees.iter())
+                    .any(|employee| {
+                        employee.session_id == *id
+                            && employee.lifecycle()
+                                == waku_protocol::boss::EmployeeLifecycle::Queued
+                            && !employee
+                                .ticket
+                                .as_ref()
+                                .is_some_and(|ticket| ticket.force_start)
+                    })
+            });
             self.boss_ui.revision = self.boss_ui.revision.wrapping_add(1);
             self.sync_boss_page_rows();
             // A boss chat opening or an employee expiring can arm or
@@ -5043,6 +5066,123 @@ impl Waku {
             )
             .when_some(status_indicator, |row, indicator| row.child(indicator))
             .into_any_element()
+    }
+
+    /// The selected session's queued-employee record and the daemon that
+    /// owns it. The tail card exists exactly while this resolves — a ticket
+    /// leaving `Queued` (dispatch, stop, expiry) drops the row, and the
+    /// fold's fade retention handles the exit.
+    pub(super) fn selected_queued_employee(
+        &self,
+    ) -> Option<(DaemonKey, &waku_protocol::boss::BossEmployee)> {
+        let session_id = self.state.selected_session?;
+        self.boss_ui.states.iter().find_map(|(key, state)| {
+            state
+                .employees
+                .iter()
+                .find(|employee| {
+                    employee.session_id == session_id
+                        && employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
+                })
+                .map(|employee| (*key, employee))
+        })
+    }
+
+    /// The queued card's display model for the selected session — `None`
+    /// once the ticket is past the queue (the fading ghost renders from
+    /// `QueuedCardFade` instead).
+    pub(super) fn queued_employee_card(&self) -> Option<QueuedEmployeeCard> {
+        let (key, employee) = self.selected_queued_employee()?;
+        let state = self.boss_ui.states.get(&key)?;
+        let position = boss_queue_position(state, employee.session_id);
+        let (phase, headline, secondary) = queued_card_copy(
+            employee,
+            position,
+            self.boss_ui
+                .start_now_pending
+                .contains(&employee.session_id),
+        );
+        Some(QueuedEmployeeCard {
+            key,
+            session_id: employee.session_id,
+            phase,
+            headline,
+            secondary,
+        })
+    }
+
+    /// The card's direct "Start now" — the human's `startNow` control op,
+    /// not a prompt: the daemon commits the force flag on the ticket and
+    /// the summon scheduler stays the single dispatch winner. The press is
+    /// committed locally at once so the button settles into `Starting`
+    /// before the ticket's flag or the reply lands; a request failure
+    /// restores the waiting card with the error surfaced.
+    pub(super) fn start_queued_employee_now(
+        &mut self,
+        key: DaemonKey,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(client) = self.daemons.supervisor(key).map(|daemon| daemon.client()) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            return;
+        };
+        self.boss_ui.start_now_pending.insert(session_id);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        waku_client::Command::Boss {
+                            operation: BossOperation::Control {
+                                session_id,
+                                action: waku_client::boss::EmployeeControl::StartNow,
+                            },
+                        },
+                    )
+                })
+                .await;
+            let _ = this.update(cx, move |this, cx| {
+                this.boss_ui.start_now_pending.remove(&session_id);
+                match result {
+                    Ok(waku_client::ResponsePayload::Boss {
+                        result:
+                            BossResult::Summoned {
+                                state, admission, ..
+                            },
+                    }) => {
+                        // Apply the settled admission now rather than waiting
+                        // on the next Boss snapshot — a still-blocked ticket
+                        // reads declined immediately and a dispatching one
+                        // drops the card without broadcast lag.
+                        if let Some(employee) = this
+                            .boss_ui
+                            .states
+                            .values_mut()
+                            .flat_map(|boss_state| boss_state.employees.iter_mut())
+                            .find(|employee| employee.session_id == session_id)
+                        {
+                            employee.state = state;
+                            if let (Some(ticket), Some(admission)) =
+                                (&mut employee.ticket, admission)
+                            {
+                                ticket.force_start = admission.force_start;
+                                ticket.blocked_by = admission.blocked_by;
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        this.show_toast(error.to_string());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// The pending marker a queued employee's row and summon card wear
@@ -10862,6 +11002,143 @@ fn boss_queue_ranks(state: &BossState) -> HashMap<Uuid, usize> {
         .collect()
 }
 
+/// The queue group a ticket's position counts in — the daemon's
+/// `queue_root`: walk `supervisor_id` up the employee chain until the
+/// parent is not an employee. Subordinates queue under the same root as
+/// their supervisor's summon.
+fn boss_queue_root(state: &BossState, employee: &BossEmployee) -> Uuid {
+    let mut current = employee.supervisor_id;
+    for _ in 0..state.employees.len() {
+        let Some(parent) = state
+            .employees
+            .iter()
+            .find(|entry| entry.session_id == current)
+        else {
+            return current;
+        };
+        current = parent.supervisor_id;
+    }
+    current
+}
+
+/// The employee's 1-based position inside its own queue root and the root's
+/// queued count — the card's "Position N of M". Mirrors the daemon's
+/// `queue_position`: sequence order within the group, `None` when the
+/// employee is not waiting.
+fn boss_queue_position(state: &BossState, session_id: Uuid) -> Option<(usize, usize)> {
+    let employee = state
+        .employees
+        .iter()
+        .find(|entry| entry.session_id == session_id)?;
+    if employee.lifecycle() != waku_protocol::boss::EmployeeLifecycle::Queued {
+        return None;
+    }
+    let root = boss_queue_root(state, employee);
+    let sequence = employee.ticket.as_ref()?.sequence;
+    let mut position = 0;
+    let mut total = 0;
+    for entry in &state.employees {
+        if entry.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
+            && boss_queue_root(state, entry) == root
+        {
+            total += 1;
+            if entry
+                .ticket
+                .as_ref()
+                .is_some_and(|ticket| ticket.sequence <= sequence)
+            {
+                position += 1;
+            }
+        }
+    }
+    (position > 0).then_some((position, total))
+}
+
+/// The truthful state the queued card renders — the plan's
+/// `Queued → Starting → gone, or back to Queued` cycle. `Waiting` waits on
+/// admission; `Starting` carries a committed `startNow` that dispatch has
+/// not settled; `Declined` is a committed start the broker still cannot
+/// grant — the card re-arms the action rather than pretending success.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum QueuedCardPhase {
+    Waiting,
+    Starting,
+    Declined,
+}
+
+/// Everything the tail row paints, derived in one place so the renderer
+/// stays a stencil. `key` routes the control op to the owning daemon.
+pub(super) struct QueuedEmployeeCard {
+    pub key: DaemonKey,
+    pub session_id: Uuid,
+    pub phase: QueuedCardPhase,
+    pub headline: String,
+    pub secondary: Option<String>,
+}
+
+/// The card's phase and copy for a queued ticket — blocker kind chooses
+/// the headline; position and slot counts land on the secondary line only
+/// when they help the reader act.
+fn queued_card_copy(
+    employee: &BossEmployee,
+    position: Option<(usize, usize)>,
+    start_pending: bool,
+) -> (QueuedCardPhase, String, Option<String>) {
+    use waku_protocol::boss::AdmissionBlocker;
+    let ticket = employee.ticket.as_ref();
+    let blocker = ticket.and_then(|ticket| {
+        ticket
+            .blocked_by
+            .iter()
+            .find(|blocker| !matches!(blocker, AdmissionBlocker::Plan { .. }))
+            .or_else(|| ticket.blocked_by.first())
+    });
+    let reason = || match blocker {
+        Some(AdmissionBlocker::ModelLimit { used, limit }) => {
+            tr!("boss.queue_card_slots_in_use", used = used, limit = limit)
+        }
+        Some(
+            AdmissionBlocker::HostResources { detail }
+            | AdmissionBlocker::OutcomeWait { detail }
+            | AdmissionBlocker::EmployeeBase { detail },
+        ) => detail.clone(),
+        Some(AdmissionBlocker::Plan { error }) => error.detail.clone(),
+        None => tr!("boss.goals_queue_admission"),
+    };
+    let forced = ticket.is_some_and(|ticket| ticket.force_start) || start_pending;
+    if forced && blocker.is_some() {
+        return (
+            QueuedCardPhase::Declined,
+            tr!("boss.queue_card_still_waiting", reason = reason()),
+            None,
+        );
+    }
+    if forced {
+        return (
+            QueuedCardPhase::Starting,
+            tr!("boss.goals_status_starting"),
+            None,
+        );
+    }
+    let position = position
+        .filter(|(rank, _)| *rank > 1)
+        .map(|(rank, total)| tr!("boss.queue_card_position", position = rank, total = total));
+    let (headline, secondary) = match blocker {
+        Some(AdmissionBlocker::ModelLimit { used, limit }) => (
+            tr!("boss.queue_card_waiting_slot"),
+            Some(position.unwrap_or_else(|| {
+                tr!("boss.queue_card_slots_in_use", used = used, limit = limit)
+            })),
+        ),
+        Some(AdmissionBlocker::HostResources { .. }) => {
+            (tr!("boss.queue_card_waiting_resources"), Some(reason()))
+        }
+        Some(_) => (tr!("boss.goals_status_queued"), Some(reason())),
+        None => (tr!("boss.goals_status_queued"), position),
+    };
+    (QueuedCardPhase::Waiting, headline, secondary)
+}
+
 /// The shared employee card's geometry — the Employees tab's 42px row,
 /// plus a line per own-line reason and its 24px face.
 const BOSS_EMPLOYEE_ROW_HEIGHT: f32 = 42.0;
@@ -12721,6 +12998,150 @@ mod tests {
             boss_queue_detail(&resources, Some(1)),
             Some("waiting for a build slot".to_owned())
         );
+    }
+
+    #[test]
+    fn queue_position_counts_within_the_ticket_queue_root() {
+        use waku_protocol::boss::EmployeeLifecycle;
+        let mut state = boss_state_for_queue_test();
+        // `employee()` puts every ticket under the same supervisor root.
+        let head = employee(1, EmployeeLifecycle::Queued, Some(ticket(3, Vec::new())));
+        let tail = employee(2, EmployeeLifecycle::Queued, Some(ticket(7, Vec::new())));
+        // A queued ticket under another root is not a queue-mate.
+        let mut foreign = employee(9, EmployeeLifecycle::Queued, Some(ticket(1, Vec::new())));
+        foreign.supervisor_id = Uuid::from_u128(42);
+        // A chain resolves to its top supervisor's root, matching the
+        // daemon's `queue_root` walk.
+        let mut subordinate = employee(4, EmployeeLifecycle::Queued, Some(ticket(5, Vec::new())));
+        subordinate.supervisor_id = head.session_id;
+        state.employees = vec![
+            head.clone(),
+            tail.clone(),
+            foreign.clone(),
+            subordinate.clone(),
+        ];
+
+        assert_eq!(boss_queue_position(&state, head.session_id), Some((1, 3)));
+        assert_eq!(
+            boss_queue_position(&state, subordinate.session_id),
+            Some((2, 3))
+        );
+        assert_eq!(boss_queue_position(&state, tail.session_id), Some((3, 3)));
+        // The foreign-root ticket is alone in its group.
+        assert_eq!(
+            boss_queue_position(&state, foreign.session_id),
+            Some((1, 1))
+        );
+        // A dispatched ticket reports no position.
+        let mut working = employee(6, EmployeeLifecycle::Working, None);
+        working.supervisor_id = head.supervisor_id;
+        state.employees.push(working.clone());
+        assert_eq!(boss_queue_position(&state, working.session_id), None);
+        // The settled ticket no longer counts as a queue-mate either.
+        assert_eq!(boss_queue_position(&state, tail.session_id), Some((3, 3)));
+    }
+
+    #[test]
+    fn queued_card_copy_tracks_the_ticket_state() {
+        use waku_protocol::boss::{AdmissionBlocker, EmployeeLifecycle};
+
+        // Waiting on a model slot names the wait; position calibrates when
+        // the ticket is not at the head, else the slot count explains it.
+        let limited = employee(
+            1,
+            EmployeeLifecycle::Queued,
+            Some(ticket(
+                1,
+                vec![AdmissionBlocker::ModelLimit { used: 6, limit: 6 }],
+            )),
+        );
+        let (phase, headline, secondary) = queued_card_copy(&limited, Some((1, 1)), false);
+        assert_eq!(phase, QueuedCardPhase::Waiting);
+        assert_eq!(headline, tr!("boss.queue_card_waiting_slot"));
+        assert_eq!(
+            secondary,
+            Some(tr!(
+                "boss.queue_card_slots_in_use",
+                used = 6u32,
+                limit = 6u32
+            ))
+        );
+        let (_, _, secondary) = queued_card_copy(&limited, Some((2, 4)), false);
+        assert_eq!(
+            secondary,
+            Some(tr!(
+                "boss.queue_card_position",
+                position = 2usize,
+                total = 4usize
+            ))
+        );
+
+        // A resource wait carries the broker's detail string through.
+        let resources = employee(
+            2,
+            EmployeeLifecycle::Queued,
+            Some(ticket(
+                1,
+                vec![AdmissionBlocker::HostResources {
+                    detail: "waiting for a build slot".into(),
+                }],
+            )),
+        );
+        let (phase, headline, secondary) = queued_card_copy(&resources, Some((1, 2)), false);
+        assert_eq!(phase, QueuedCardPhase::Waiting);
+        assert_eq!(headline, tr!("boss.queue_card_waiting_resources"));
+        assert_eq!(secondary.as_deref(), Some("waiting for a build slot"));
+
+        // No blocker yet — the plain Queued headline, and a mid-queue seat
+        // still reports its position.
+        let plain = employee(3, EmployeeLifecycle::Queued, Some(ticket(1, Vec::new())));
+        let (phase, headline, secondary) = queued_card_copy(&plain, None, false);
+        assert_eq!(phase, QueuedCardPhase::Waiting);
+        assert_eq!(headline, tr!("boss.goals_status_queued"));
+        assert_eq!(secondary, None);
+        let (_, _, secondary) = queued_card_copy(&plain, Some((2, 3)), false);
+        assert_eq!(
+            secondary,
+            Some(tr!(
+                "boss.queue_card_position",
+                position = 2usize,
+                total = 3usize
+            ))
+        );
+
+        // A committed startNow — flagged on the ticket or still in flight —
+        // reads Starting while admission has not reported a blocker.
+        let mut forced = plain.clone();
+        forced.ticket.as_mut().unwrap().force_start = true;
+        let (phase, headline, secondary) = queued_card_copy(&forced, None, false);
+        assert_eq!(phase, QueuedCardPhase::Starting);
+        assert_eq!(headline, tr!("boss.goals_status_starting"));
+        assert_eq!(secondary, None);
+        let (phase, ..) = queued_card_copy(&plain, None, true);
+        assert_eq!(phase, QueuedCardPhase::Starting);
+
+        // A committed start the broker still cannot grant declines with the
+        // truthful reason — the card re-arms rather than faking dispatch.
+        let mut declined = limited.clone();
+        declined.ticket.as_mut().unwrap().force_start = true;
+        let (phase, headline, secondary) = queued_card_copy(&declined, None, false);
+        assert_eq!(phase, QueuedCardPhase::Declined);
+        assert_eq!(
+            headline,
+            tr!(
+                "boss.queue_card_still_waiting",
+                reason = tr!("boss.queue_card_slots_in_use", used = 6u32, limit = 6u32)
+            )
+        );
+        assert_eq!(secondary, None);
+    }
+
+    #[test]
+    fn the_queued_cards_button_sends_the_start_now_control() {
+        // The card wires to the daemon's force-start control op — the wire
+        // token is what the scheduler's single dispatch path recognizes.
+        let action = serde_json::to_value(waku_protocol::boss::EmployeeControl::StartNow).unwrap();
+        assert_eq!(action, serde_json::json!({ "type": "startNow" }));
     }
 
     fn boss_chat_session(project: Uuid, id: Uuid, archived: bool) -> AgentSession {

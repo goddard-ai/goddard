@@ -1578,7 +1578,11 @@ impl Waku {
             TranscriptRowKind::TurnFold(turn_id) => {
                 self.render_card_turn_fold_row(session, turn_id, &theme)
             }
-            TranscriptRowKind::BossHistory(..) | TranscriptRowKind::BossHistoryBoundary(_) => {
+            TranscriptRowKind::BossHistory(..)
+            | TranscriptRowKind::BossHistoryBoundary(_)
+            // Card previews fold straight from the session — the queued
+            // card is a live tail row on the employee's page only.
+            | TranscriptRowKind::QueuedEmployee => {
                 div().into_any_element()
             }
             TranscriptRowKind::WorkingIndicator => {

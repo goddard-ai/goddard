@@ -1,0 +1,1 @@
+- A queued employee's transcript now ends with a live status card — the wait reason, its queue position, and a **Start now** button that starts it immediately without waiting for capacity.
