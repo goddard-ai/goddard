@@ -2102,6 +2102,7 @@ fn boss_state(
         goals_viewed_at: None,
         planning: Vec::new(),
         outcomes: Vec::new(),
+        instruction_pins: Vec::new(),
         resource_policy: waku_client::boss::BossResourcePolicy::default(),
         next_sequence: 0,
         next_event_id: 0,

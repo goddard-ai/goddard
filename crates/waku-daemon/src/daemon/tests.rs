@@ -20737,6 +20737,7 @@ fn plan_blocker_receipt_replays_once_without_employee_cli_authentication() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+mod instruction_pins;
 mod plan_acceptance;
 mod rotation_oracle;
 mod rotation_status;

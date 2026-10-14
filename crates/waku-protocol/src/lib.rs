@@ -49,6 +49,7 @@ pub mod git;
 pub mod i18n;
 pub mod identity;
 pub mod inference;
+pub mod instruction_pins;
 pub mod integrations;
 pub mod migration;
 pub mod model;

@@ -2060,6 +2060,10 @@ pub struct BossRotationStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossState {
+    /// Temporary user obligations and their retirement evidence, independent
+    /// of provider sessions, personas, and append-only memory buckets.
+    #[serde(default)]
+    pub instruction_pins: Vec<crate::instruction_pins::InstructionPin>,
     /// Opt-in linear chain safety state. Older documents have no chains.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chains: Vec<crate::chains::EmployeeChain>,
@@ -2933,6 +2937,9 @@ pub struct BossFile {
     deny_unknown_fields
 )]
 pub enum BossOperation {
+    InstructionPin {
+        action: crate::instruction_pins::InstructionPinOperation,
+    },
     /// Phase 1 stores safety contracts; provider dispatch remains disabled.
     Chain { action: crate::chains::ChainOperation },
     View,
@@ -3642,6 +3649,9 @@ fn default_true() -> bool {
     rename_all_fields = "camelCase"
 )]
 pub enum BossResult {
+    InstructionPins {
+        pins: Vec<crate::instruction_pins::InstructionPin>,
+    },
     /// Recoverable approval/binding rejection; does not authorize execution.
     PlanRejected {
         error: PlanContractError,

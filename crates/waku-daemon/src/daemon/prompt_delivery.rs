@@ -419,13 +419,19 @@ pub(super) fn wrap_boss_outbound_prompt(
     if !boss.is_boss(session_id) {
         return prompt;
     }
+    let pins = boss.instruction_pin_context(&task_state.lock().projects);
+    let prompt = if pins.is_empty() {
+        prompt
+    } else {
+        format!("{}\n\n{prompt}", provider_context_block(&pins))
+    };
     let pending = boss.router_take_pending(session_id);
     let work = crate::boss_context::work_context(&task_state.lock(), &boss.document(), automations);
     // The deferred verdict's full digest supersedes the header it contains.
     let block = if pending && !work.digest.is_empty() {
         work.digest
     } else {
-        work.header
+        format!("{}\n{}", work.header, work.brief)
     };
     if block.is_empty() {
         return prompt;

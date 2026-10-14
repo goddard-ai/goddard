@@ -15,6 +15,7 @@ that every concept has a dedicated editor in your installed build.
 | Plan | A reviewed design and organized course of work. | The approach, its rationale, and work items linked to assignments. |
 | Persona | Reusable instructions for how an agent approaches a kind of work. | Methods, boundaries, and defaults that apply across assignments. |
 | Memory | Durable, scoped knowledge available across sessions. | Prior decisions, facts, and lessons worth retrieving again. |
+| Instruction pin | A user obligation that remains active across Boss chat refreshes. | The instruction, its scope, original source, and the condition for releasing it. |
 
 An employee's name identifies the agent. Its job title describes the work it
 has been given. Its persona supplies reusable guidance. Changing the assignment
@@ -105,6 +106,10 @@ assignment's state, report it instead.
 Memory is supplementary. Keep the original transcripts for what was said and
 done, and plans for what was reviewed. A memory summary does not replace their
 detail or establish that an outcome's acceptance criteria were met.
+
+Temporary obligations belong in [Boss instruction pins](boss-instructions.md).
+They stay in Boss's working context until released, while memory and personas
+continue to supply durable knowledge and standing guidance.
 
 Current memory access uses named buckets. Employees can access their assigned
 project's shared bucket and additional explicitly granted buckets. Personal

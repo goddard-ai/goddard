@@ -16678,6 +16678,7 @@ fn eval_feature_label(feature: &str) -> String {
         "voice-briefing-gate" => tr!("routing.feature_voice_briefing_gate"),
         "boss-speech" => tr!("routing.feature_boss_speech"),
         "boss-context-router" => tr!("routing.feature_boss_context_router"),
+        "boss-instruction-pins" => tr!("boss.pinned_instructions"),
         _ => return feature.to_owned(),
     }
 }
@@ -16713,6 +16714,7 @@ fn eval_feature_description(feature: &str) -> Option<String> {
         "voice-briefing-gate" => tr!("routing.feature_voice_briefing_gate_description"),
         "boss-speech" => tr!("routing.feature_boss_speech_description"),
         "boss-context-router" => tr!("routing.feature_boss_context_router_description"),
+        "boss-instruction-pins" => tr!("boss.instruction_capture_description"),
         _ => return None,
     })
 }

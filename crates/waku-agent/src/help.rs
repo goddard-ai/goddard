@@ -77,6 +77,9 @@ fn group(path: &str) -> &str {
 
 fn authority(path: &str) -> &str {
     match path {
+        p if p.starts_with("boss instructions ") => {
+            "Only the live Boss chat or a human; employees and planning sessions cannot modify user obligations"
+        }
         "steer-supervisor" | "merge submit" | "boss report-blocker" => {
             "Employee-only; assigned scope and grants apply"
         }
@@ -124,6 +127,21 @@ fn authority(path: &str) -> &str {
 
 fn purpose(path: &str) -> &str {
     match path {
+        "boss instructions list" => {
+            "Inspect active instructions, review candidates, sources and retirement evidence."
+        }
+        "boss instructions show" => {
+            "Read one instruction and its saved original user excerpt without loading other pins."
+        }
+        "boss instructions pin" => {
+            "Preserve a user obligation until its release condition has evidence; complements memory and personas."
+        }
+        "boss instructions edit" => {
+            "Correct or activate a pin using its current revision, scope and release condition."
+        }
+        "boss instructions retire" => {
+            "Retire or supersede a user obligation with recorded evidence."
+        }
         "boss summon" => "Assign a new employee job; acceptance can queue before execution.",
         "boss prompt" | "prompt" => "Send work or a correction with explicit delivery semantics.",
         "boss transcript" | "read" => "Read retained transcript turns without starting work.",

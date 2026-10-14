@@ -643,6 +643,10 @@ pub(super) fn forward_driver_events(
             };
             if let Err(error) = recorded {
                 eprintln!("could not record task settlement {session_id}: {error:#}");
+            } else if !stale {
+                let _ = super::instruction_pins::capture_boss_instruction_event(
+                    &boss, &task_state, &task_store, session_id, &event,
+                );
             }
         }
         // A chain attempt whose session stopped for input — a permission

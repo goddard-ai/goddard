@@ -746,6 +746,7 @@ mod chain_handoff;
 mod driver_commands;
 mod events;
 mod idle;
+mod instruction_pins;
 mod lifecycle;
 mod plan_delivery;
 mod projection;

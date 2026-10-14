@@ -66,6 +66,7 @@ carry the information the judgment actually needs.
 | `route-class-suggest` | `src/app/settings.rs` | Jev page "suggest defaults" for the class map |
 | `turn-status` | `src/app/status_markers.rs` | Settled turn → ending Choice + flag Nouls (unverified, drifted, needs-review, thrash, assumed, failed, blocked) |
 | `title-quality` | `src/app/title_quality.rs` | Settled turn → Noul judging whether its automatic title needs a rewrite |
+| `boss-instruction-pins` | `crates/waku-daemon/src/daemon/instruction_pins.rs` | Visible main Boss human prompt → nonbinding ongoing-instruction review candidate at Noul ≥ 0.85; conservative wording checks run without a backend. No generated text or automatic activation. |
 | `next-action` | `src/app/action_predictions.rs` | Settled turn → `taskType` + `nextAction` over a feasibility-gated candidate set |
 | `paste-classification` | `src/app/composer/paste_classification.rs` | Pasted composer text → content-category Choice for the block's label |
 | `provider-switch` | `src/app/provider_switch.rs` | One Noul per transcript item/span: keep verbatim for the new provider? |

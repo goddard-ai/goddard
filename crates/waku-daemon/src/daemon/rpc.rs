@@ -2083,6 +2083,7 @@ impl Backend for WakuBackend {
                         }
                     }
                     if !*hidden && self.boss.is_boss(session_id) {
+                        self.capture_boss_instruction(session_id, submitted_message_id, prompt);
                         self.route_boss_prompt(session_id, prompt);
                     }
                 }

@@ -10,12 +10,18 @@ import type { BossRotationStatus } from "./BossRotationStatus";
 import type { BossWave } from "./BossWave";
 import type { DispatchNotification } from "./DispatchNotification";
 import type { EmployeeChain } from "./EmployeeChain";
+import type { InstructionPin } from "./InstructionPin";
 import type { PersonaDefaultNotice } from "./PersonaDefaultNotice";
 import type { PersonaDefaultRole } from "./PersonaDefaultRole";
 import type { PersonaDefaultsState } from "./PersonaDefaultsState";
 import type { WaveNotification } from "./WaveNotification";
 
 export type BossState = {
+/**
+ * Temporary user obligations and their retirement evidence, independent
+ * of provider sessions, personas, and append-only memory buckets.
+ */
+instructionPins: Array<InstructionPin>,
 /**
  * Opt-in linear chain safety state. Older documents have no chains.
  */

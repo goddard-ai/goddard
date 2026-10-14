@@ -89,6 +89,7 @@ function bossState(overrides: Partial<BossState> = {}): BossState {
     deliverables: [],
     planning: [],
     outcomes: [],
+    instructionPins: [],
     goalsViewedAt: null,
     resourcePolicy: { revision: 0, modelLimits: [] },
     nextSequence: 1,

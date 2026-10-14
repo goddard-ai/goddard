@@ -1617,15 +1617,17 @@ fn boss_chat_settled(
 /// previous task remains the authoritative source for details and tool output.
 fn boss_rotation_handoff(old: &AgentSession, marker: &str) -> String {
     let mut recent = Vec::new();
-    let mut remaining = 12_000;
+    // Durable pins and the current work brief carry continuity. This tail
+    // only orients the conversation; detailed history is pulled on demand.
+    let mut remaining = 2_000;
     for message in old.messages.iter().rev().filter(|message| !message.hidden) {
         if remaining == 0 {
             break;
         }
-        let text: String = message.content.chars().take(remaining.min(4_000)).collect();
+        let text: String = message.content.chars().take(remaining.min(1_000)).collect();
         remaining -= text.chars().count();
         recent.push(format!("{:?}: {text}", message.role));
-        if recent.len() == 6 {
+        if recent.len() == 2 {
             break;
         }
     }

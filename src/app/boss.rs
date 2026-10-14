@@ -15,6 +15,7 @@ use waku_client::boss::{
 };
 use waku_protocol::boss::AvatarStyle;
 use waku_protocol::custom_commands::CustomCommandIcon;
+mod instruction_pins;
 
 fn global_avatar_style_operation(avatar_style: AvatarStyle) -> BossOperation {
     BossOperation::SetAvatarStyle {
@@ -278,6 +279,7 @@ pub(super) enum BossTab {
     Employees,
     Plans,
     Deliverables,
+    Instructions,
 }
 
 /// One original note in the unified Memory Records feed — the daemon's
@@ -608,6 +610,10 @@ enum BossDeliverablesFilter {
 
 pub(super) struct BossUi {
     pub states: HashMap<DaemonKey, BossState>,
+    pin_rows: HashMap<(DaemonKey, Uuid), waku_protocol::instruction_pins::InstructionPin>,
+    pin_scope_labels: HashMap<(DaemonKey, Uuid), String>,
+    pin_history: HashSet<DaemonKey>,
+    pin_editor: Option<instruction_pins::InstructionPinEditor>,
     pub chat_history: HashMap<DaemonKey, super::boss_history::BossChatHistory>,
     /// Scoped to building one archived row; composer and callbacks keep the live owner.
     pub history_render_session: Cell<Option<Uuid>>,
@@ -836,6 +842,10 @@ impl Default for BossUi {
     fn default() -> Self {
         Self {
             states: HashMap::new(),
+            pin_rows: HashMap::new(),
+            pin_scope_labels: HashMap::new(),
+            pin_history: HashSet::new(),
+            pin_editor: None,
             chat_history: HashMap::new(),
             history_render_session: Cell::new(None),
             outcome_rows: HashMap::new(),
@@ -1237,6 +1247,10 @@ fn boss_deliverable_rows(state: &BossState, filter: BossDeliverablesFilter) -> V
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum BossItem {
+    InstructionPin {
+        id: Uuid,
+        revision: u64,
+    },
     Employee(Uuid),
     Persona(Uuid),
     /// A `BossState.planning` record's session — Plans tab rows.
@@ -1446,6 +1460,8 @@ struct BossEditor {
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) enum BossReply {
+    Instructions,
+    InstructionsSaved,
     Open,
     List,
     /// The unified `Feed` page for the Memory section's record list.
@@ -1797,6 +1813,23 @@ impl Waku {
             // planning session's read so a waiting strip mounts its plan tab
             // once the file holds real contents.
             let planning = state.planning.clone();
+            self.boss_ui.pin_rows.retain(|(host, _), _| *host != key);
+            self.boss_ui
+                .pin_scope_labels
+                .retain(|(host, _), _| *host != key);
+            for pin in &state.instruction_pins {
+                self.boss_ui.pin_rows.insert((key, pin.id), pin.clone());
+                if let Some(project_id) = pin.project_id {
+                    let label = self
+                        .state
+                        .projects
+                        .iter()
+                        .find(|project| project.id == project_id)
+                        .map(|project| project.name.clone())
+                        .unwrap_or_else(|| tr!("boss.instruction_unknown_project"));
+                    self.boss_ui.pin_scope_labels.insert((key, pin.id), label);
+                }
+            }
             self.boss_ui.states.insert(key, state);
             if let Some((from, to)) = rotated_session {
                 self.migrate_boss_annotations(key, from, to, cx);
@@ -2193,6 +2226,33 @@ impl Waku {
         };
         match tab {
             BossTab::Memory => unreachable!(),
+            BossTab::Instructions => {
+                use waku_protocol::instruction_pins::InstructionPinState;
+                let history = self.boss_ui.pin_history.contains(&key);
+                let mut pins: Vec<_> = state
+                    .instruction_pins
+                    .iter()
+                    .filter(|pin| {
+                        let live = matches!(
+                            pin.state,
+                            InstructionPinState::Active | InstructionPinState::Candidate
+                        );
+                        live != history
+                    })
+                    .collect();
+                pins.sort_by_key(|pin| {
+                    (
+                        pin.state != InstructionPinState::Candidate,
+                        std::cmp::Reverse(pin.updated_at),
+                    )
+                });
+                pins.into_iter()
+                    .map(|pin| BossItem::InstructionPin {
+                        id: pin.id,
+                        revision: pin.revision,
+                    })
+                    .collect()
+            }
             BossTab::Employees => {
                 let history = self
                     .boss_ui
@@ -2527,6 +2587,19 @@ impl Waku {
             cx.notify();
             return;
         };
+        let pin_saved = matches!(reply, BossReply::InstructionsSaved)
+            .then(|| {
+                self.boss_ui.pin_editor.as_ref().map(|editor| {
+                    (
+                        editor.id,
+                        editor.instruction.read(cx).content().to_owned(),
+                        editor.condition.read(cx).content().to_owned(),
+                        editor.project_id,
+                        editor.retire_on,
+                    )
+                })
+            })
+            .flatten();
         let saved = matches!(reply, BossReply::Saved)
             .then(|| {
                 self.boss_ui.editor.as_ref().map(|editor| {
@@ -2612,6 +2685,35 @@ impl Waku {
                 match result {
                     Ok(waku_client::ResponsePayload::Boss { result }) => {
                         match result {
+                            BossResult::InstructionPins { pins } => {
+                                if let (
+                                    Some(editor),
+                                    Some((id, instruction, condition, project_id, retire_on)),
+                                ) = (&mut this.boss_ui.pin_editor, &pin_saved)
+                                {
+                                    if editor.id == *id {
+                                        let accepted = pins.iter().find(|pin| {
+                                            id.is_none_or(|id| pin.id == id)
+                                                && pin.instruction == instruction.trim()
+                                                && pin.retire_when == condition.trim()
+                                                && pin.project_id == *project_id
+                                                && pin.retire_on == *retire_on
+                                        });
+                                        if let Some(pin) = accepted {
+                                            let unchanged = editor.instruction.read(cx).content()
+                                                == instruction
+                                                && editor.condition.read(cx).content() == condition
+                                                && editor.project_id == *project_id
+                                                && editor.retire_on == *retire_on;
+                                            editor.id = Some(pin.id);
+                                            editor.revision = pin.revision;
+                                            if unchanged {
+                                                this.boss_ui.pin_editor = None;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             BossResult::PlanRejected { error } => {
                                 this.show_toast(tr!("boss.failed", error = error.detail));
                                 if let BossReply::Finalize(session_id) = reply {
@@ -2797,6 +2899,12 @@ impl Waku {
                             }
                             this.show_toast(tr!("boss.saved"));
                             this.boss_request(key, BossOperation::View, BossReply::List, cx);
+                        }
+                        if matches!(
+                            reply,
+                            BossReply::Instructions | BossReply::InstructionsSaved
+                        ) {
+                            this.refresh_boss_state_on(key, cx);
                         }
                         if matches!(reply, BossReply::PersonaDefault) {
                             this.show_toast(tr!("boss.default_saved"));
@@ -6693,14 +6801,17 @@ impl Waku {
             .get_or_insert_with(|| cx.focus_handle())
             .clone();
         let theme = Theme::current(cx);
-        let rows = self.boss_page_rows(key, tab);
-        self.sync_boss_rows(rows);
+        if tab != BossTab::Instructions {
+            let rows = self.boss_page_rows(key, tab);
+            self.sync_boss_rows(rows);
+        }
         let content = match tab {
             BossTab::Memory => self.render_boss_memory_section(key, window, cx),
             BossTab::Personas => self.render_boss_personas_section(key, window, cx),
             BossTab::Employees => self.render_boss_employees_section(key, cx),
             BossTab::Plans => self.render_boss_plans_section(key, cx),
             BossTab::Deliverables => self.render_boss_deliverables_section(key, cx),
+            BossTab::Instructions => self.render_instruction_pins(key, cx),
         };
         div()
             .track_focus(&focus)
@@ -6874,6 +6985,11 @@ impl Waku {
                     (BossTab::Personas, "boss.personas", "icons/user-round.svg"),
                     (BossTab::Employees, "boss.history", "icons/folder-clock.svg"),
                     (BossTab::Plans, "boss.plans", "icons/map.svg"),
+                    (
+                        BossTab::Instructions,
+                        "boss.pinned_instructions",
+                        "icons/file-text.svg",
+                    ),
                     (
                         BossTab::Deliverables,
                         "boss.deliverables",
@@ -10398,6 +10514,7 @@ impl Waku {
         };
         let theme = Theme::current(cx);
         match item {
+            BossItem::InstructionPin { id, .. } => self.render_instruction_pin_row(key, id, cx),
             BossItem::Employee(id) => self.render_boss_employee_page_row(id, key, cx),
             BossItem::Deliverable(id) => self.render_boss_deliverable_row(key, id, cx),
             BossItem::HistoryHit(index) => self.render_boss_history_hit(key, index, cx),
@@ -12123,6 +12240,7 @@ mod tests {
             goals_viewed_at: None,
             planning: Vec::new(),
             outcomes: Vec::new(),
+            instruction_pins: Vec::new(),
             resource_policy: BossResourcePolicy::default(),
             next_sequence: 0,
             next_event_id: 0,
@@ -13736,6 +13854,7 @@ mod tests {
             goals_viewed_at: None,
             planning: Vec::new(),
             outcomes: Vec::new(),
+            instruction_pins: Vec::new(),
             resource_policy: waku_protocol::boss::BossResourcePolicy::default(),
             next_sequence: 0,
             next_event_id: 0,

@@ -33,7 +33,7 @@ impl WakuBackend {
     }
 
     /// The boss-facing wrap for an outbound prompt: the persona injection
-    /// first, then the always-on work header — replaced by the deferred
+    /// first, then the always-on work header and brief — replaced by the deferred
     /// full digest when the context router asked for one a steer-less or
     /// already-settled turn could not take.
     pub(super) fn boss_outbound_prompt(&self, session_id: Uuid, prompt: String) -> String {
@@ -73,7 +73,7 @@ impl WakuBackend {
     }
 
     /// Evaluate whether a user prompt should carry the full work digest.
-    /// Failed or unconfigured evaluations keep only the always-on header.
+    /// Failed or unconfigured evaluations keep the always-on brief and header.
     pub(super) fn route_boss_prompt(&self, session_id: Uuid, prompt: &str) {
         let recent_prompts = self.boss.router_snapshot(session_id);
         self.boss.router_note_prompt(session_id, prompt);
@@ -188,6 +188,14 @@ impl WakuBackend {
                     Err(error)
                 }
             })
+            .map(|mut result| {
+                if caller.is_some_and(|id| !self.boss.is_boss(id))
+                    && let waku_protocol::boss::BossResult::State { state } = &mut result
+                {
+                    state.instruction_pins.clear();
+                }
+                result
+            })
     }
 
     fn handle_boss_operation_inner(
@@ -212,6 +220,7 @@ impl WakuBackend {
             self.drive_chains();
         }
         match operation {
+            BossOperation::InstructionPin { action } => self.handle_instruction_pin(caller, action),
             BossOperation::Chain { action } => {
                 use waku_protocol::chains::{ChainControl, ChainOperation};
                 // Resume on a gate-paused chain re-verifies the sealed

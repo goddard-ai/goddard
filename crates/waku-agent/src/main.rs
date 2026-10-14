@@ -20,6 +20,7 @@
 
 mod boss_contract;
 mod help;
+mod instruction_pins;
 mod resources;
 mod transport;
 
@@ -146,6 +147,7 @@ const BOSS_ACTIONS: &[&str] = &[
     "file",
     "persona",
     "memory",
+    "instructions",
     "plan",
     "deliverable",
     "speak",
@@ -326,6 +328,26 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         .filter_map(|icon| serde_json::to_value(icon).ok()?.as_str().map(str::to_owned))
         .collect::<Vec<_>>();
     let (inputs, output, example) = match path {
+        "boss instructions list" => (
+            json!({"--all":{"optional":true,"type":"boolean flag","notes":"include retired and superseded pins"}}),
+            json!({"json":{"type":"instructionPins","pins":"source-backed instruction records, states and revisions"}}),
+            "goddard-agent boss instructions list".to_owned(),
+        ),
+        "boss instructions show" => (
+            json!({"ID":{"positional":true,"required":true,"type":"pin UUID"}}),
+            json!({"json":{"type":"instructionPins","pins":"one instruction with its saved source excerpt and retirement evidence; quoteTruncated identifies a shortened source"}}),
+            "goddard-agent boss instructions show PIN_ID".to_owned(),
+        ),
+        "boss instructions pin" | "boss instructions edit" => (
+            json!({"ID":{"positional":true,"requiredWhen":"editing","type":"pin UUID"},"--revision":{"requiredWhen":"editing","type":"current pin revision"},"--text|--file":{"required":true,"exactlyOne":true,"type":"instruction text (up to 2000 characters)"},"--retire-when":{"required":true,"type":"release condition (up to 1000 characters)"},"--project-id":{"optional":true,"type":"registered project UUID; omission applies to all projects"},"--retire-outcome":{"optional":true,"type":"outcome UUID","notes":"completed status is the entire automatic release condition; cancellation does not retire the pin; use manual evidence for compound conditions"},"--source-session":{"requiredWhen":"Boss creates a new pin","type":"Boss chat UUID"},"--source-message":{"requiredWhen":"Boss creates a new pin","type":"visible human message UUID"}}),
+            json!({"json":{"type":"instructionPins","pins":"the saved instruction, state and revision"}}),
+            "goddard-agent boss instructions edit PIN_ID --revision 1 --text 'Hold the paused chains' --retire-when 'The user confirms the daemon restart'".to_owned(),
+        ),
+        "boss instructions retire" => (
+            json!({"ID":{"positional":true,"required":true,"type":"pin UUID"},"--revision":{"required":true,"type":"current pin revision"},"--evidence":{"required":true,"type":"evidence that the condition was met, the user released it, or the candidate is inapplicable"},"--superseded-by":{"optional":true,"type":"replacement active pin UUID"}}),
+            json!({"json":{"type":"instructionPins","pins":"the retired instruction and recorded evidence"}}),
+            "goddard-agent boss instructions retire PIN_ID --revision 2 --evidence 'The user confirmed the restart'".to_owned(),
+        ),
         "create" => (
             json!({"--project":{"required":true,"type":"absolute project path"},"--text|--file":{"required":true,"exactlyOne":true,"type":"raw UTF-8 prompt"},"--workspace":{"enum":["local","worktree"],"default":"local"},"--base-branch":{"requiredWhen":"workspace=worktree"},"--provider":{"enum":providers,"default":"inherits current provider"},"--model":"optional; inherits current model","--effort":"optional; inherits current effort","--title":"optional task title","--service-tier":"optional provider service tier","--context-window":"optional context window"}),
             json!({"json":{"task_id":"UUID of the created task"}}),
@@ -832,6 +854,11 @@ fn schema() -> serde_json::Value {
         "boss chain",
         "boss view",
         "boss context",
+        "boss instructions list",
+        "boss instructions show",
+        "boss instructions pin",
+        "boss instructions edit",
+        "boss instructions retire",
         "boss stop",
         "boss resume",
         "boss employee rename",
@@ -1586,7 +1613,7 @@ fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
             print_boss(boss_request(op)?)
         }
         "summon" => boss_summon(args),
-        "file" | "persona" | "memory" | "plan" | "deliverable" | "speak" | "automation"
+        "instructions" | "file" | "persona" | "memory" | "plan" | "deliverable" | "speak" | "automation"
         | "resource-policy" | "open" | "browse" | "terminal" | "rename" | "avatar"
         | "report-blocker" | "employee" | "stop" | "resume" => boss_admin(action, args),
         _ => unreachable!(),
@@ -1608,6 +1635,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
     }
     args.remove(0);
     match (group, operation.as_str()) {
+        ("instructions", action) => instruction_pins::run(action, args),
         ("avatar", "regenerate") => {
             args.insert(0, "regenerate".to_owned());
             boss_avatar(&args)

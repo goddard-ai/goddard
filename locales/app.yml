@@ -6248,6 +6248,68 @@ boss.history:
   en: Employees
 boss.memory:
   en: Memory
+boss.pinned_instructions:
+  en: Pinned instructions
+boss.instructions_hint:
+  en: Temporary user obligations survive chat refreshes and provider changes. They complement personas and memory. Review candidates before activating them; retire active instructions with evidence or an explicit release.
+boss.instructions_active:
+  en: Active and candidates
+boss.instructions_history:
+  en: Retired
+boss.instructions_empty:
+  en: No instructions here
+boss.instructions_empty_hint:
+  en: Ongoing user instructions appear as review candidates. Add a pin with a scope and retirement condition when it needs to survive a chat refresh.
+boss.instruction_new:
+  en: Add instruction
+boss.instruction_candidate:
+  en: Candidate — needs review
+boss.instruction_active:
+  en: Active instruction
+boss.instruction_retired:
+  en: Retired
+boss.instruction_superseded:
+  en: Superseded
+boss.instruction_review:
+  en: Review and activate
+boss.instruction_edit:
+  en: Edit
+boss.instruction_retire:
+  en: Release instruction
+boss.instruction_dismiss:
+  en: Dismiss candidate
+boss.instruction_text:
+  en: Instruction
+boss.instruction_condition:
+  en: Retire when
+boss.instruction_scope:
+  en: Applies to
+boss.instruction_evidence:
+  en: Retirement evidence
+boss.instruction_source:
+  en: Original user message
+boss.instruction_source_excerpt:
+  en: Original user message excerpt — the source was shortened
+boss.instruction_all_projects:
+  en: All projects
+boss.instruction_unknown_project:
+  en: Project no longer available
+boss.instruction_manual_release:
+  en: Boss reviews the evidence or the user releases it
+boss.instruction_auto_release:
+  en: Automatic release on outcome completion
+boss.instruction_release_hint:
+  en: Outcome completion must satisfy the entire release condition. Choose manual review when other conditions must also hold.
+boss.instruction_save:
+  en: Save and activate
+boss.instruction_saving:
+  en: Wait for the current Boss request to finish, then save the instruction.
+boss.instruction_cancel:
+  en: Cancel
+boss.instruction_finish_edit:
+  en: Save or cancel the current instruction edit first.
+boss.instruction_capture_description:
+  en: Detect ongoing user obligations for review as temporary instruction pins.
 boss.memory_search:
   en: Search memories
 boss.memory_search_placeholder:

@@ -12,6 +12,9 @@ pub(super) fn inputs() -> Value {
 
 pub(super) fn availability(path: &str) -> Value {
     match path {
+        path if path.starts_with("boss instructions ") => {
+            json!({"roles":["boss","human"],"conditions":["Only the live Boss chat can use scoped credentials","Employee and planning credentials cannot read or modify user obligations","Boss-created pins must cite a visible original human message"]})
+        }
         "boss open" | "boss plan finalize" | "boss persona keep" | "boss persona adopt" => {
             json!({"roles":["human"],"scopedAgentCallable":false,"humanRoute":if path == "boss plan finalize" {"Approve control in the app"} else if path == "boss open" {"Open Boss in the app"} else {"Settings > Boss > Personas"},"notes":"Every scoped agent credential is rejected; listing this contract grants no authority."})
         }
@@ -150,6 +153,13 @@ pub(super) fn aggregate() -> Value {
             .as_str()
             .expect("operation type tag");
         let paths: &[&str] = match name {
+            "instructionPin" => &[
+                "boss instructions list",
+                "boss instructions show",
+                "boss instructions pin",
+                "boss instructions edit",
+                "boss instructions retire",
+            ],
             "view" => &[
                 "boss view",
                 "boss persona list",

@@ -2795,6 +2795,11 @@ impl BossService {
                 self.root.join("files").display()
             )
         };
+        let pin_guidance = if self.is_boss(session) {
+            "\nTemporary user obligations: `goddard-agent boss instructions list` shows brief pins and review candidates; `show ID` reads one source-backed record. Capture instructions governing future turns before acknowledging them, with a scope and a retirement condition. Activate a candidate with `edit ID --revision N --text INSTRUCTION --retire-when CONDITION`, or create a pin with `pin --text INSTRUCTION --retire-when CONDITION --source-session SESSION --source-message MESSAGE`. Retire with `retire ID --revision N --evidence EVIDENCE`; unknown conditions stay active. Only `--retire-outcome ID` opts into automatic release when that outcome completes with evidence, and must represent the entire release condition. Pins complement personas and memory buckets; do not copy all transcript history or use pins as task status bookkeeping.\n"
+        } else {
+            ""
+        };
         let project_context = self.projects.lock().get(&session)
             .map(|path| format!("Project context: {}. For a job in another project, supply its absolute path when summoning. If this path is unavailable inside a sandbox, the guest's current working directory is the assigned project.", path.display()))
             .unwrap_or_default();
@@ -2819,7 +2824,7 @@ impl BossService {
         format!(
             "<boss-persona>\n{}\n\n{}{}\nPinned documents: {}. Read them selectively with `goddard-agent boss file read PATH`.\n{project_context}\n</boss-persona>\n\n{prompt}",
             instructions,
-            format!("{role}{authority}"),
+            format!("{role}{authority}{pin_guidance}"),
             planning,
             pinned_paths(
                 employee
@@ -4318,6 +4323,7 @@ impl BossService {
     ) -> anyhow::Result<BossResult> {
         match operation {
             BossOperation::Chain { .. }
+            | BossOperation::InstructionPin { .. }
             | BossOperation::Context
             | BossOperation::Roster
             | BossOperation::Open { .. }
@@ -4407,6 +4413,11 @@ impl BossService {
             }
             BossOperation::View => {
                 let mut state = self.document();
+                if caller.is_some_and(|id| !self.is_boss(id)) {
+                    // User obligations are private to the main Boss chat,
+                    // including when an employee has coordination authority.
+                    state.instruction_pins.clear();
+                }
                 if let Some(caller) = caller.filter(|id| !self.has_boss_authority(*id)) {
                     let employee = state
                         .employees
@@ -5415,6 +5426,7 @@ impl BossService {
         let state = self.state.lock();
         let mut next = state.clone();
         change(&mut next)?;
+        crate::instruction_pins::reconcile(&mut next, waku_protocol::model::unix_time());
         // A change that lands nothing — e.g. a scheduler pass over an
         // already-settled ticket — pays no revision bump and none of the
         // write set `save` performs under this lock.
@@ -7552,6 +7564,7 @@ fn fresh_state() -> BossState {
         deliverables: Vec::new(),
         planning: Vec::new(),
         outcomes: Vec::new(),
+        instruction_pins: Vec::new(),
         goals_viewed_at: None,
         resource_policy: BossResourcePolicy::default(),
         next_sequence: 0,
@@ -7586,6 +7599,7 @@ fn disabled_state() -> BossState {
         deliverables: Vec::new(),
         planning: Vec::new(),
         outcomes: Vec::new(),
+        instruction_pins: Vec::new(),
         goals_viewed_at: None,
         resource_policy: BossResourcePolicy::default(),
         next_sequence: 0,

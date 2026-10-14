@@ -1,6 +1,6 @@
-//! The boss context router: a two-tier digest of the user's projects, tasks,
-//! and automations. Every outbound boss prompt carries the compact header —
-//! project names plus live counts — so orientation is never gated. Jev still
+//! The Boss context router: a compact brief and a fuller work digest.
+//! Every outbound Boss prompt carries current work, pending decisions, and
+//! project counts so essential continuity is never gated. Jev still
 //! decides per user prompt whether the full digest rides along; a gate miss
 //! only withholds bulk detail, and the boss can pull it on demand through
 //! the `context` operation.
@@ -31,6 +31,7 @@ const SESSIONS_PER_PROJECT: usize = 10;
 /// Total digest budget — large enough to cover a busy project catalog,
 /// small enough to attach to a prompt without crowding it.
 const DIGEST_CAP: usize = 12_000;
+const BRIEF_CAP: usize = 6_000;
 /// Header budget — the always-on block stays near 200 tokens. Over-cap
 /// projects fold into a count rather than dropping silently.
 const HEADER_CAP: usize = 1_000;
@@ -41,11 +42,13 @@ const AUTOMATION_PROMPT_CAP: usize = 100;
 /// The user prompt's budget inside eval `state`.
 const PROMPT_CAP: usize = 4_000;
 
-/// The work snapshot: the always-on header and the rendered digest.
+/// The work snapshot: an always-on header and brief, plus an optional digest.
 pub struct WorkContext {
     /// Compact per-project live counts — attaches to every boss prompt,
     /// never gated.
     pub header: String,
+    /// Current work and pending decisions, always available to the Boss.
+    pub brief: String,
     /// The full digest Jev gates per prompt.
     pub digest: String,
 }
@@ -348,6 +351,10 @@ pub fn work_context(
             automations.automations.len()
         ));
     }
+    // Put actionable outcomes before the project inventory so truncation
+    // keeps pending decisions visible rather than spending the brief on rows.
+    let project_digest = std::mem::take(&mut digest);
+    let mut task_digest = String::new();
     if !boss.employees.is_empty() {
         digest.push_str("## Employees\n");
         let extra = boss.employees.len().saturating_sub(EMPLOYEES_LISTED);
@@ -377,8 +384,26 @@ pub fn work_context(
         // Durable task records ride the digest so a rotated boss session
         // still discovers the handoffs it owes decisions on — the record
         // outlives whichever chat delivered the result.
-        digest.push_str("## Tasks\n");
-        for task in &boss.outcomes {
+        let mut tasks: Vec<_> = boss
+            .outcomes
+            .iter()
+            .filter(|task| {
+                !task.terminal()
+                    || task.pending_handoffs().next().is_some()
+                    || task.completion_conflict.is_some()
+            })
+            .collect();
+        tasks.sort_by_key(|task| {
+            (
+                !task.needs_attention(&boss.employees),
+                std::cmp::Reverse(task.created_at),
+            )
+        });
+        let employee_digest = std::mem::take(&mut digest);
+        if !tasks.is_empty() {
+            digest.push_str("## Tasks\n");
+        }
+        for task in tasks {
             let status = if task.terminal() {
                 task.state.label()
             } else if task.needs_attention(&boss.employees) {
@@ -392,6 +417,21 @@ pub fn work_context(
                 truncate_chars(&task.outcome, TITLE_CAP),
                 task.id
             ));
+            if !task.success_criteria.trim().is_empty() {
+                digest.push_str(&format!(
+                    "    done when: {}\n",
+                    truncate_chars(&task.success_criteria.replace('\n', " "), 200)
+                ));
+            }
+            if let Some(waiting) = &task.waiting {
+                let reason = match waiting {
+                    waku_protocol::boss::OutcomeWait::Until { at } => format!("until {at}"),
+                    waku_protocol::boss::OutcomeWait::Dependency { note } => {
+                        truncate_chars(note, 200)
+                    }
+                };
+                digest.push_str(&format!("    waiting: {reason}\n"));
+            }
             for handoff in task.handoffs.iter().filter(|handoff| handoff.pending()) {
                 let assignment = boss
                     .employees
@@ -417,7 +457,10 @@ pub fn work_context(
                 ));
             }
         }
+        task_digest = std::mem::take(&mut digest);
+        digest = employee_digest;
     }
+    let brief = bounded_brief(format!("{task_digest}{digest}{project_digest}"), BRIEF_CAP);
     if !automations.automations.is_empty() {
         digest.push_str("## Automations\n");
         for automation in &automations.automations {
@@ -438,7 +481,25 @@ pub fn work_context(
             digest.push_str(&line);
         }
     }
-    WorkContext { header, digest }
+    digest = format!("{task_digest}{digest}{project_digest}");
+    digest = bounded_brief(digest, DIGEST_CAP);
+    WorkContext {
+        header,
+        brief,
+        digest,
+    }
+}
+
+fn bounded_brief(mut brief: String, cap: usize) -> String {
+    if brief.chars().count() > cap {
+        let tail = "\n…Work brief shortened. Use `goddard-agent boss context` or `boss roster` and targeted transcript reads for details.\n";
+        brief = truncate_chars(&brief, cap - tail.chars().count());
+        if let Some(line_end) = brief.rfind('\n') {
+            brief.truncate(line_end);
+        }
+        brief.push_str(tail);
+    }
+    brief
 }
 
 /// One header line — `name: N tasks (M active, …), K employees` — names
@@ -647,6 +708,7 @@ mod tests {
             deliverables: Vec::new(),
             planning: Vec::new(),
             outcomes: Vec::new(),
+            instruction_pins: Vec::new(),
             goals_viewed_at: None,
             resource_policy: BossResourcePolicy::default(),
             next_sequence: 0,
@@ -782,6 +844,112 @@ mod tests {
         assert!(digest.find("Ada (Engineer)").unwrap() < digest.find("Zed (Engineer)").unwrap());
         assert!(digest.contains("claude/auto, working"));
         assert!(digest.contains("workspace"));
+    }
+
+    #[test]
+    fn work_brief_preserves_current_criteria_and_bounds_large_histories() {
+        let root = std::env::temp_dir().join(format!("boss-work-brief-{}", Uuid::new_v4()));
+        let service = crate::BossService::open(root.clone()).unwrap();
+        let urgent = service
+            .create_outcome(
+                None,
+                "Repair the daemon",
+                "Fix landed and the user confirms a restart",
+            )
+            .unwrap();
+        let mut boss = boss_state();
+        let mut urgent = urgent;
+        urgent.created_at = u64::MAX;
+        urgent.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
+            note: "User restart confirmation".into(),
+        });
+        boss.outcomes.push(urgent.clone());
+        for index in 0..100 {
+            let mut outcome = urgent.clone();
+            outcome.id = Uuid::new_v4();
+            outcome.outcome = format!("Other current outcome {index}");
+            outcome.created_at = index;
+            boss.outcomes.push(outcome);
+        }
+        let mut completed = urgent;
+        completed.id = Uuid::new_v4();
+        completed.outcome = "Old completed outcome".into();
+        completed.state = waku_protocol::boss::OutcomeState::Completed;
+        boss.outcomes.push(completed);
+        let projects: Vec<_> = (0..40)
+            .map(|index| project(&format!("project-{index}")))
+            .collect();
+        let work = work_context(&projects, &[], &boss, &AutomationsState::default());
+        assert!(work.brief.starts_with("## Tasks"));
+        assert!(work.brief.contains("Repair the daemon"));
+        assert!(
+            work.brief
+                .contains("Fix landed and the user confirms a restart")
+        );
+        assert!(work.brief.contains("User restart confirmation"));
+        assert!(!work.brief.contains("Old completed outcome"));
+        assert!(work.brief.chars().count() <= BRIEF_CAP);
+        assert!(work.digest.chars().count() <= DIGEST_CAP);
+        assert!(work.brief.contains("Work brief shortened"));
+        drop(service);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn instruction_pins_are_private_even_to_an_employee_with_boss_authority() {
+        use waku_protocol::boss::{BossOperation, BossResult};
+        use waku_protocol::instruction_pins::InstructionPinOperation;
+        let root = std::env::temp_dir().join(format!("boss-private-pins-{}", Uuid::new_v4()));
+        let service = crate::BossService::open(root.clone()).unwrap();
+        let main = Uuid::new_v4();
+        service.set_session_id(main).unwrap();
+        let mut deputy = employee(Uuid::new_v4(), "Deputy", false, main);
+        deputy.boss_authority = true;
+        service
+            .update(|state| {
+                state.employees.push(deputy.clone());
+                Ok(())
+            })
+            .unwrap();
+        service
+            .instruction_pin_operation(
+                None,
+                InstructionPinOperation::Pin {
+                    instruction: "A private user obligation".into(),
+                    retire_when: "User releases it".into(),
+                    project_id: None,
+                    retire_on: None,
+                    source_session_id: None,
+                    source_message_id: None,
+                },
+                None,
+            )
+            .unwrap();
+        let BossResult::State { state } = service
+            .handle(Some(deputy.session_id), BossOperation::View)
+            .unwrap()
+        else {
+            panic!("expected state");
+        };
+        assert!(state.instruction_pins.is_empty());
+        let BossResult::State { state } = service.handle(Some(main), BossOperation::View).unwrap()
+        else {
+            panic!("expected state");
+        };
+        assert_eq!(state.instruction_pins.len(), 1);
+        assert!(
+            service
+                .instruction_pin_operation(
+                    Some(deputy.session_id),
+                    InstructionPinOperation::List {
+                        include_retired: true
+                    },
+                    None
+                )
+                .is_err()
+        );
+        drop(service);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

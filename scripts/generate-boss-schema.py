@@ -85,7 +85,7 @@ def patch_obj(schema, fragment):
     fragment = re.sub('///[^\\n]*', '', fragment)
     for k, v in schema.get('properties', {}).items():
         snake = re.sub('([A-Z])', lambda m: '_' + m[1].lower(), k)
-        m = re.search('((?:#\\[[^\\]]*\\]\\s*)*)\\s*(?:pub\\s+)?' + snake + '\\s*:\\s*([^,]+),', fragment)
+        m = re.search('((?:#\\[[^\\]]*\\]\\s*)*)\\s*(?:pub\\s+)?' + snake + '\\s*:\\s*([^,]+)(?:,|$)', fragment)
         if m:
             ty = m[2].strip()
             if 'Uuid' in ty:
@@ -115,10 +115,11 @@ def patch_obj(schema, fragment):
                     v['default'] = 0
             if m[2].strip().startswith('u') and v.get('type') == 'integer':
                 v['minimum'] = 0
-for name in ['BossOperation', 'EmployeeControl', 'MemoryOperation', 'PersonaDefaultAction', 'ChainOperation']:
-    enum_source = pathlib.Path('crates/waku-protocol/src/chains.rs').read_text() if name == 'ChainOperation' else source
+for name in ['BossOperation', 'EmployeeControl', 'MemoryOperation', 'PersonaDefaultAction', 'ChainOperation', 'InstructionPinOperation', 'InstructionPinRetirement']:
+    file = 'chains.rs' if name == 'ChainOperation' else 'instruction_pins.rs' if name.startswith('InstructionPin') else 'boss.rs'
+    enum_source = pathlib.Path('crates/waku-protocol/src', file).read_text()
     schema = defs[name]
-    for variant in schema.get('anyOf', []):
+    for variant in schema.get('anyOf', [schema]):
         tag = variant.get('properties', {}).get('type', {}).get('const')
         if not tag:
             continue

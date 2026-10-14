@@ -6,6 +6,22 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "instructionPin"
+            },
+            "action": {
+              "$ref": "#/definitions/InstructionPinOperation"
+            }
+          },
+          "required": [
+            "type",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "chain"
             },
             "action": {
@@ -2109,7 +2125,8 @@
               "const": "chooseEmployeeBase"
             },
             "personaId": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           },
           "required": [
@@ -3273,6 +3290,213 @@
         }
       ]
     },
+    "InstructionPinOperation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "show"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "list"
+            },
+            "includeRetired": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pin"
+            },
+            "instruction": {
+              "type": "string"
+            },
+            "retireWhen": {
+              "type": "string"
+            },
+            "projectId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "retireOn": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/InstructionPinRetirement"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceSessionId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceMessageId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "instruction",
+            "retireWhen"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "edit"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "instruction": {
+              "type": "string"
+            },
+            "retireWhen": {
+              "type": "string"
+            },
+            "projectId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "retireOn": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/InstructionPinRetirement"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "expectedRevision",
+            "instruction",
+            "retireWhen"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "retire"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "supersededBy": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "expectedRevision",
+            "evidence"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "InstructionPinRetirement": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "outcomeCompleted"
+        },
+        "outcomeId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "type",
+        "outcomeId"
+      ],
+      "additionalProperties": false
+    },
     "MemoryNoteKind": {
       "anyOf": [
         {
@@ -3705,6 +3929,25 @@
     },
     "BossResult": {
       "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "instructionPins"
+            },
+            "pins": {
+              "type": "array",
+              "items": {
+                "protocolType": "InstructionPin"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "pins"
+          ],
+          "additionalProperties": false
+        },
         {
           "type": "object",
           "properties": {
