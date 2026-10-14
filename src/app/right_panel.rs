@@ -1751,7 +1751,6 @@ const GOALS_PANEL_RECENT_LIMIT: usize = 5;
 /// A section's rows older than this fold behind its history toggle —
 /// the panel leads with what moved in the last day.
 const GOALS_PANEL_STALE_AGE_SECS: u64 = 24 * 60 * 60;
-const GOALS_PANEL_AVATAR: f32 = 16.0;
 const GOALS_PANEL_SECTION_GAP: f32 = 12.0;
 
 fn boss_goal_row_height(font_size: f32) -> f32 {
@@ -2036,7 +2035,7 @@ fn boss_outcome_speaker_session(row: &boss::BossOutcomeRow) -> Option<Uuid> {
 }
 
 /// A member's visible blocker or admission wait, kept separate from the
-/// project/assignee detail so it cannot be lost to that line's truncation.
+/// project detail so it cannot be lost to that line's truncation.
 fn boss_outcome_row_reason(
     member: Option<&boss::BossOutcomeMember>,
     queued: &HashMap<Uuid, String>,
@@ -2307,15 +2306,13 @@ struct BossOutcomePanelRow {
     /// row's "with any queued work also indicated" detail.
     queued_extra: usize,
     title: String,
-    /// The member the detail line speaks for — the running or queued
-    /// assignee when one exists, else the latest recorded attempt.
-    member_name: Option<String>,
-    avatar: Option<Arc<gpui::RenderImage>>,
     project_label: Option<String>,
-    /// The state detail a member-less row shows instead — the recorded
-    /// wait, an owed decision, or the unresolved cause.
+    /// The row's state detail — a flagged cause or an owed decision.
+    /// Pending rows carry no detail: their wait or queue explanation
+    /// stays off the row.
     detail: Option<String>,
-    /// A blocked or queued member's reason, rendered on its own third line.
+    /// A live member's blocker, rendered on its own third line — never
+    /// populated for pending rows.
     reason: Option<String>,
     updated_label: Option<String>,
     attention: bool,
@@ -2363,7 +2360,7 @@ enum BossOutcomeItem {
     },
     Row(Arc<BossOutcomePanelRow>),
     /// An expanded outcome's current assignment — one per session,
-    /// painted with the shared employee card the Employees tab uses.
+    /// painted with the sidebar employee row's look.
     Employee(Arc<boss::BossEmployeeRow>),
     /// A line nested under an expanded outcome — an earlier attempt's
     /// history, the conflict, handoff, wait, or empty marker — the
@@ -2522,10 +2519,10 @@ fn boss_goal_section_header(
 }
 
 /// The compact two-line outcome row: status icon and outcome title with
-/// a disclosure chevron, then an indented identity line — project folder
-/// and employee avatar and name at the left, with the relative update time
-/// at the far right. A row
-/// with no members shows its recorded wait or follow-up detail instead.
+/// a disclosure chevron, then an indented context line — the project
+/// folder and label with any flagged cause or owed decision beside it,
+/// and the relative update time at the far right. A live member's
+/// blocker or extra queued work earns its own third line.
 /// Activation toggles the assignment detail; the expanded entries carry
 /// the conversation navigation.
 /// Activation defers to `on_activation_app` so the list item builder never
@@ -2649,68 +2646,16 @@ fn boss_goal_panel_row_element(
                                 .child(project),
                         )
                 })
-                .when_some(
-                    row.member_name.clone().map(|name| {
-                        let avatar = row.avatar.clone().map_or_else(
-                            || {
-                                div()
-                                    .size(px(GOALS_PANEL_AVATAR))
-                                    .rounded(px(6.0))
-                                    .bg(theme.overlay)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_size(sp(10.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(name.chars().next().unwrap_or('B').to_string())
-                                    .into_any_element()
-                            },
-                            |image| {
-                                img(image)
-                                    .size(px(GOALS_PANEL_AVATAR))
-                                    .rounded(px(6.0))
-                                    .into_any_element()
-                            },
-                        );
-                        (name, avatar)
-                    }),
-                    |element, (name, avatar)| {
-                        element
-                            .when(row.project_label.is_some(), |element| {
-                                element.child(
-                                    div()
-                                        .flex_none()
-                                        .text_size(sp(11.0))
-                                        .line_height(sp(15.0))
-                                        .text_color(theme.text_tertiary)
-                                        .child("·"),
-                                )
-                            })
-                            .child(div().flex_none().child(avatar))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .max_w(px(112.0))
-                                    .truncate()
-                                    .text_size(sp(11.5))
-                                    .line_height(sp(15.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(name),
-                            )
-                    },
-                )
-                .when(row.member_name.is_none(), |element| {
-                    element.when_some(row.detail.clone(), |element, detail| {
-                        element.child(
-                            div()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(sp(11.0))
-                                .line_height(sp(15.0))
-                                .text_color(theme.text_tertiary)
-                                .child(detail),
-                        )
-                    })
+                .when_some(row.detail.clone(), |element, detail| {
+                    element.child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(11.0))
+                            .line_height(sp(15.0))
+                            .text_color(theme.text_tertiary)
+                            .child(detail),
+                    )
                 })
                 .child(div().flex_1().min_w_0())
                 .when_some(row.updated_label.clone(), |element, label| {
@@ -2725,8 +2670,7 @@ fn boss_goal_panel_row_element(
                 }),
         )
         .when(
-            row.reason.is_some()
-                || (row.member_name.is_some() && (row.detail.is_some() || row.queued_extra > 0)),
+            row.reason.is_some() || row.queued_extra > 0,
             |element| {
                 element.child(
                     div()
@@ -2746,20 +2690,6 @@ fn boss_goal_panel_row_element(
                                     .child(tr!("boss.goals_more_queued", count = row.queued_extra)),
                             )
                         })
-                        .when_some(
-                            row.member_name.as_ref().and(row.detail.clone()),
-                            |element, detail| {
-                                element.child(
-                                    div()
-                                        .min_w_0()
-                                        .flex_1()
-                                        .truncate()
-                                        .text_size(sp(11.0))
-                                        .text_color(theme.text_tertiary)
-                                        .child(detail),
-                                )
-                            },
-                        )
                         .when_some(row.reason.clone(), |element, reason| {
                             element.child(
                                 div()
@@ -2872,6 +2802,116 @@ fn boss_goal_entry_element(
         })
 }
 
+/// An expanded outcome's employee — the sidebar employee row's anatomy:
+/// the 24px face, the shared sidebar label's name-over-job identity, the
+/// boss-flagged attention dot, and the status marker at the far right.
+/// Activation opens the attempt's session. Activation defers to
+/// `on_activation_app` so the list item builder never re-leases Waku.
+#[track_caller]
+fn boss_goal_employee_element(
+    employee: &Arc<boss::BossEmployeeRow>,
+    waku: &WeakEntity<Waku>,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = Theme::current(cx);
+    let session_id = employee.session_id;
+    let activate_waku = waku.clone();
+    let status_marker = employee.status_marker.map(|(icon_path, spin)| {
+        let color = employee
+            .status
+            .as_ref()
+            .map(|(_, color)| *color)
+            .unwrap_or(theme.text_secondary);
+        let marker = if spin {
+            motion::spin_slow(icon(icon_path, 12.0, color))
+        } else {
+            icon(icon_path, 12.0, color).into_any_element()
+        };
+        div()
+            .id(SharedString::from(format!(
+                "boss-employee-status-{}-{session_id}",
+                employee.slot
+            )))
+            .flex_none()
+            .size(px(12.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .when_some(employee.status.as_ref().map(|(label, _)| label.clone()), |element, label| {
+                element.tooltip(Tooltip::text(label))
+            })
+            .child(marker)
+            .into_any_element()
+    });
+    div()
+        .id(SharedString::from(format!(
+            "boss-employee-row-{}-{session_id}",
+            employee.slot
+        )))
+        .when_some(employee.focus.clone(), |element, focus| {
+            element.track_focus(&focus)
+        })
+        .when(employee.focus.is_none() && employee.navigable, |element| {
+            element.tab_index(0)
+        })
+        .h(px(boss::BOSS_EMPLOYEE_ROW_HEIGHT))
+        .w_full()
+        .pl(px(if employee.nested { 26.0 } else { 8.0 }))
+        .pr(px(8.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .rounded(px(6.0))
+        .when_some(employee.aria.clone(), |element, aria| {
+            element.aria_label(aria)
+        })
+        .when(employee.navigable, |element| {
+            element
+                .cursor_pointer()
+                .hover(|style| style.bg(theme.overlay))
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .on_activation_app(move |_, cx| {
+                    let _ = activate_waku.update(cx, |this, cx| {
+                        this.request_session_activation(
+                            session_id,
+                            SessionActivationTransition::Visit,
+                            cx,
+                        );
+                    });
+                })
+        })
+        .child(boss::boss_employee_avatar_element(&employee.avatar, &theme))
+        .child(boss::boss_sidebar_label(
+            employee.name.clone(),
+            employee.detail.clone(),
+            None,
+            Some(employee.job_icon),
+            true,
+            &theme,
+            None,
+        ))
+        // The flagged employee wears the same unread dot the sidebar row
+        // carries — boss-flagged attention is the only "unread" an
+        // employee row shows.
+        .when(employee.attention, |element| {
+            element.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "boss-employee-attention-{}-{session_id}",
+                        employee.slot
+                    )))
+                    .flex_none()
+                    .size(px(12.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .tooltip(Tooltip::text(tr!("boss.employee_needs_attention")))
+                    .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
+            )
+        })
+        .when_some(status_marker, |element, marker| element.child(marker))
+}
+
 #[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
@@ -2906,8 +2946,6 @@ mod tests {
                 status: BossGoalStatus::Open,
                 queued_extra: 0,
                 title: "Outcome".into(),
-                member_name: None,
-                avatar: None,
                 project_label: None,
                 detail: None,
                 reason: None,
@@ -2980,8 +3018,6 @@ mod tests {
                                     status: BossGoalStatus::Attention,
                                     queued_extra: 0,
                                     title: "A completed goal with a long task title".into(),
-                                    member_name: Some("Dinah".into()),
-                                    avatar: None,
                                     project_label: Some("Goddard".into()),
                                     detail: None,
                                     reason: None,
@@ -3137,8 +3173,6 @@ mod tests {
                             status: BossGoalStatus::Open,
                             queued_extra: 0,
                             title: format!("Outcome {id}"),
-                            member_name: None,
-                            avatar: None,
                             project_label: None,
                             detail: None,
                             reason: None,
@@ -12775,25 +12809,17 @@ impl Waku {
                 outcome.to_owned()
             }
         };
-        // The member the detail line speaks for: a live assignee first,
-        // then the next queued admission, then the latest recorded
-        // attempt — a finished row still names its last assignee.
+        // The member the status speaks for: a live assignee first, then
+        // the next queued admission — its blocker earns the row's third
+        // line, but pending rows carry no reason text at all.
         let queued: Vec<&boss::BossOutcomeMember> =
             row.members.iter().filter(|member| boss_outcome_queued(member)).collect();
         let speaker_member = boss_outcome_speaker_member(row);
-        let reason = boss_outcome_row_reason(speaker_member, &self.boss_ui.queued);
-        let last_assignment = row.outcome.assignments.last();
+        let pending = bucket == BossGoalBucket::Pending;
+        let reason = (!pending)
+            .then(|| boss_outcome_row_reason(speaker_member, &self.boss_ui.queued))
+            .flatten();
         let speaker_session = boss_outcome_speaker_session(row);
-        let speaker_name = speaker_member
-            .map(|member| member.employee.identity.name.clone())
-            .or_else(|| {
-                last_assignment.and_then(|assignment| {
-                    assignment
-                        .identity
-                        .as_ref()
-                        .map(|identity| identity.name.clone())
-                })
-            });
         let speaker_session_ref = speaker_session.and_then(|id| sessions.get(&id).copied());
         let project = speaker_session_ref.and_then(|session| {
             self.state
@@ -12844,33 +12870,31 @@ impl Waku {
             .saturating_sub(usize::from(speaker_member.is_some_and(|member| {
                 member.employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
             })));
-        // The member-less row's honest detail: a flagged row names its
-        // cause first — an open conflict's reason or the unresolved
-        // blocker/failure — then the recorded pause and an owed
-        // decision's count.
+        // The row's honest detail: a flagged row names its cause first —
+        // an open conflict's reason or the unresolved blocker/failure —
+        // then the recorded pause and an owed decision's count. A pending
+        // row keeps none of this: its wait or queue explanation never
+        // reaches the row.
         let pending_handoffs = row.outcome.pending_handoffs().count();
-        let detail = row
-            .attention
+        let detail = (!pending)
             .then(|| {
-                row.outcome
-                    .completion_conflict
-                    .as_ref()
-                    .map(|conflict| conflict.reason.clone())
-                    .or_else(|| boss_outcome_attention_cause(row))
+                row.attention
+                    .then(|| {
+                        row.outcome
+                            .completion_conflict
+                            .as_ref()
+                            .map(|conflict| conflict.reason.clone())
+                            .or_else(|| boss_outcome_attention_cause(row))
+                    })
+                    .flatten()
+                    .or_else(|| boss_outcome_wait_label(&row.outcome, now))
+                    .or_else(|| {
+                        (pending_handoffs > 0).then(|| {
+                            tr!("boss.goals_handoffs_owed", count = pending_handoffs)
+                        })
+                    })
             })
-            .flatten()
-            .or_else(|| boss_outcome_wait_label(&row.outcome, now))
-            .or_else(|| {
-                (pending_handoffs > 0).then(|| {
-                    tr!("boss.goals_handoffs_owed", count = pending_handoffs)
-                })
-            });
-        let avatar = speaker_member
-            .map(|member| &member.employee.identity)
-            .or_else(|| {
-                last_assignment.and_then(|assignment| assignment.identity.as_ref())
-            })
-            .and_then(|identity| self.boss_avatar_image(identity, GOALS_PANEL_AVATAR));
+            .flatten();
         let expanded = self
             .boss_ui
             .goals_row_expanded
@@ -12880,8 +12904,7 @@ impl Waku {
             focus,
             height: {
                 let height = boss_goal_row_height(self.state.ui_font_size);
-                let has_status_detail = reason.is_some()
-                    || (speaker_member.is_some() && (detail.is_some() || queued_extra > 0));
+                let has_status_detail = reason.is_some() || queued_extra > 0;
                 height
                     + if has_status_detail {
                         (height * 0.3).ceil()
@@ -12892,8 +12915,6 @@ impl Waku {
             bucket,
             status,
             queued_extra,
-            member_name: speaker_name,
-            avatar,
             project_label,
             detail,
             reason,
@@ -12921,8 +12942,8 @@ impl Waku {
 
     /// An expanded outcome's assignment rows — `boss_outcome_employee_fields`
     /// supplies the derivable parts; this adds what only the view knows:
-    /// the face, project, plan chips, and the status slot's color. Only
-    /// each session's current attempt keeps the shared employee card;
+    /// the face, project, and the status marker's color. Only each
+    /// session's current attempt keeps the sidebar-styled employee row;
     /// every earlier attempt compresses into a one-line history entry so
     /// a retried outcome cannot fill the panel with repeating cards.
     fn prepare_boss_outcome_assignments(
@@ -12972,14 +12993,20 @@ impl Waku {
                         .map(|ticket| ticket.project.trim().to_owned())
                 })
                 .filter(|project| !project.is_empty());
-            let (_, tone, _) = fields.status.marker();
+            let (icon_path, tone, spin) = fields.status.marker();
             employees.push(boss::BossEmployeeRow {
                 slot: fields.key,
                 session_id: fields.session_id,
                 key,
                 avatar,
                 name: fields.name,
-                detail: fields.detail,
+                // The sidebar-style detail line: the employee's job title
+                // first, then the attempt context the outcome adds.
+                detail: [fields.job.as_str(), fields.detail.as_str()]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" · "),
                 job_icon: employee
                     .and_then(|employee| {
                         self.boss_ui
@@ -12996,6 +13023,8 @@ impl Waku {
                 reasons: fields.reasons,
                 readiness: fields.readiness,
                 status: Some((fields.status.label(), tone.color(&theme))),
+                status_marker: Some((icon_path, spin)),
+                attention: self.boss_ui.attention.contains(&fields.session_id),
                 plan_recovery: employee
                     .and_then(|employee| self.employee_plan_recovery(key, employee)),
                 focus: None,
@@ -13021,11 +13050,11 @@ struct BossOutcomeEmployeeFields {
     /// identity is the fallback.
     identity: Option<waku_client::boss::BossIdentity>,
     name: String,
-    /// The employee job title, retained for the row's icon lookup but
-    /// omitted from the outcome row's visible detail.
+    /// The employee job title — the sidebar-styled row's detail line
+    /// leads with it, and it feeds the icon lookup.
     job: String,
     /// Outcome-specific context such as attempt number or finisher,
-    /// joined with " · "; employee job titles stay out of this row.
+    /// joined with " · " after the job title on the detail line.
     detail: String,
     status: BossGoalStatus,
     /// Blocked/queued/cause text — each on the card's own line.
@@ -13647,12 +13676,11 @@ impl Waku {
                 entry.key.hash(hasher);
             }
             BossOutcomeItem::Employee(employee) => {
-                // Interactivity and reason-line count change the item's
-                // focus record and height, so both ride the signature.
+                // Interactivity changes the item's focus record, so it
+                // rides the signature.
                 4u8.hash(hasher);
                 employee.slot.hash(hasher);
                 employee.navigable.hash(hasher);
-                employee.reasons.len().hash(hasher);
             }
             BossOutcomeItem::HistoryToggle {
                 section,
@@ -13739,7 +13767,8 @@ impl Waku {
                                         .into_any_element()
                                 }
                                 BossOutcomeItem::Employee(employee) => {
-                                    boss::boss_employee_row_element(employee, &weak, cx)
+                                    boss_goal_employee_element(employee, &weak, cx)
+                                        .into_any_element()
                                 }
                                 BossOutcomeItem::Entry(entry) => {
                                     boss_goal_entry_element(entry, &weak, cx).into_any_element()

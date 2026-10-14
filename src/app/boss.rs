@@ -1110,9 +1110,10 @@ pub(super) struct BossEmployeePlanRecovery {
     pub retry: bool,
 }
 
-/// One employee row's prepared paint data — the Employees tab and an
-/// expanded outcome's member list render through the same
-/// `boss_employee_row_element`, so the two surfaces cannot drift.
+/// One employee row's prepared paint data — the Employees tab paints it
+/// through `boss_employee_row_element` while an expanded outcome's member
+/// list paints the sidebar-styled `boss_goal_employee_element` in the
+/// right panel, so both surfaces resolve the same record the same way.
 pub(super) struct BossEmployeeRow {
     /// Element-id slot — "page" on the Employees tab, the outcome's
     /// `outcome:session:generation` entry key inside an expanded row —
@@ -1124,8 +1125,8 @@ pub(super) struct BossEmployeeRow {
     pub key: DaemonKey,
     pub avatar: BossEmployeeAvatar,
     pub name: String,
-    /// Employee rows keep the job title here; outcome rows use this for
-    /// attempt and finisher context without repeating the job title.
+    /// Employee rows keep the job title here; outcome rows lead with it
+    /// and append their attempt and finisher context.
     pub detail: String,
     pub job_icon: &'static str,
     pub project: Option<String>,
@@ -1137,6 +1138,12 @@ pub(super) struct BossEmployeeRow {
     pub reasons: Vec<BossEmployeeReason>,
     pub readiness: Option<String>,
     pub status: Option<(String, Hsla)>,
+    /// The sidebar-style status marker — icon path and whether it spins,
+    /// colored by `status`. `None` on surfaces that print the status word.
+    pub status_marker: Option<(&'static str, bool)>,
+    /// Boss-flagged attention — the sidebar row's unread dot beside the
+    /// status marker.
+    pub attention: bool,
     /// The bound plan's recovery chips — `None` for unbound employees.
     pub plan_recovery: Option<BossEmployeePlanRecovery>,
     /// Virtualized rows keep a persistent focus handle so a remount
@@ -8125,6 +8132,8 @@ impl Waku {
             reasons,
             readiness,
             status,
+            status_marker: None,
+            attention: self.boss_ui.attention.contains(&id),
             plan_recovery: employee.and_then(|employee| self.employee_plan_recovery(key, employee)),
             focus: None,
             navigable: true,
@@ -11141,13 +11150,16 @@ fn queued_card_copy(
 
 /// The shared employee card's geometry — the Employees tab's 42px row,
 /// plus a line per own-line reason and its 24px face.
-const BOSS_EMPLOYEE_ROW_HEIGHT: f32 = 42.0;
+pub(super) const BOSS_EMPLOYEE_ROW_HEIGHT: f32 = 42.0;
 const BOSS_EMPLOYEE_ROW_REASON_HEIGHT: f32 = 18.0;
 pub(super) const BOSS_EMPLOYEE_AVATAR: f32 = 24.0;
 
 /// The card's face — the same Gaze/still/placeholder `boss_avatar` and
 /// `boss_avatar_animated` produce, painted from prepared rasters.
-fn boss_employee_avatar_element(avatar: &BossEmployeeAvatar, theme: &Theme) -> AnyElement {
+pub(super) fn boss_employee_avatar_element(
+    avatar: &BossEmployeeAvatar,
+    theme: &Theme,
+) -> AnyElement {
     match avatar {
         BossEmployeeAvatar::Gaze { faces, shift } => {
             let faces = faces.clone();
@@ -11268,12 +11280,11 @@ fn boss_employee_plan_chips(
     controls.into_any_element()
 }
 
-/// The employee card the Employees tab and an expanded outcome's member
-/// list share — avatar, name over the row detail with its project and
-/// stamp, each blocked/queued reason on its own line, the status, and the
-/// action chips the caller resolved. `waku` backs activation
-/// and chip dispatch; callers holding `Context<Waku>` hand over
-/// `&cx.entity().downgrade()`.
+/// The employee card the Employees tab uses — avatar, name over the row
+/// detail with its project and stamp, each blocked/queued reason on its
+/// own line, the status, and the action chips the caller resolved.
+/// `waku` backs activation and chip dispatch; callers holding
+/// `Context<Waku>` hand over `&cx.entity().downgrade()`.
 #[track_caller]
 pub(super) fn boss_employee_row_element(
     row: &BossEmployeeRow,
@@ -11515,7 +11526,7 @@ fn boss_queue_detail(
 }
 
 #[track_caller]
-fn boss_sidebar_label(
+pub(super) fn boss_sidebar_label(
     name: String,
     job_title: String,
     revealed_project: Option<String>,

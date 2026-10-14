@@ -1,0 +1,1 @@
+- In the Boss chat's Tasks tab, outcome rows no longer show the assignee's name and avatar or why a pending outcome is waiting, and expanded employee entries now match the sidebar's employee rows.
