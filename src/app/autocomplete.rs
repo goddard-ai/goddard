@@ -92,12 +92,26 @@ const REF_MENTION_CAP: usize = 8;
 pub(super) fn rank_reference_mentions(
     projects: &[composer::ComposerRef],
     references: &[composer::ComposerRef],
+    recent_project_targets: &[String],
     query: &str,
     matcher: &mut Matcher,
 ) -> (
     Vec<Scored<composer::ComposerRef>>,
     Vec<Scored<composer::ComposerRef>>,
 ) {
+    // Fuzzy score stays primary; recency only breaks equal-score ties.
+    let mut projects = projects.iter().collect::<Vec<_>>();
+    projects.sort_by_cached_key(|item| {
+        let recent_rank = recent_project_targets
+            .iter()
+            .position(|target| target == item.target.as_ref())
+            .unwrap_or(usize::MAX);
+        (
+            recent_rank,
+            item.name.to_lowercase(),
+            item.target.to_string(),
+        )
+    });
     let project_names = projects
         .iter()
         .map(|item| item.name.as_str())
@@ -106,7 +120,7 @@ pub(super) fn rank_reference_mentions(
         composer_complete::filter_scored(&project_names, query, matcher, REF_MENTION_CAP)
             .into_iter()
             .map(|(index, positions)| Scored {
-                item: projects[index].clone(),
+                item: (*projects[index]).clone(),
                 positions,
             })
             .collect::<Vec<_>>();
@@ -128,6 +142,28 @@ pub(super) fn rank_reference_mentions(
         );
     }
     (ranked, other_ranked)
+}
+
+/// Read the stable path from the exact project-reference token emitted by a chip.
+pub(super) fn project_reference_target(payload: &str) -> Option<&str> {
+    let token = payload.strip_prefix("[project \"")?.strip_suffix(")]")?;
+    let (_, target) = token.rsplit_once("\" (path: ")?;
+    (!target.is_empty()).then_some(target)
+}
+
+pub(super) fn recent_project_targets_in_messages(messages: &[Message]) -> Vec<String> {
+    let mut targets = Vec::new();
+    let mut seen = HashSet::new();
+    for message in messages.iter().rev().filter(|message| message.role == MessageRole::User) {
+        for atom in message.atoms.iter().rev() {
+            if let Some(target) = project_reference_target(&atom.payload)
+                && seen.insert(target.to_owned())
+            {
+                targets.push(target.to_owned());
+            }
+        }
+    }
+    targets
 }
 
 pub(super) fn is_boss_reference_candidate(kind: AtomRefKind) -> bool {
@@ -886,6 +922,40 @@ impl Waku {
         })
     }
 
+    /// Actual project-reference chips in this Boss conversation, newest first.
+    /// Only already-loaded rotations are considered; autocomplete never fetches history.
+    fn recent_boss_project_targets(&self, surface: &composer::ComposerCard) -> Vec<String> {
+        if !matches!(surface, composer::ComposerCard::Main)
+            || self.surface_boss_key(surface).is_none()
+        {
+            return Vec::new();
+        }
+        let mut targets = Vec::new();
+        let mut seen = HashSet::new();
+        let mut collect = |session: &AgentSession| {
+            for target in recent_project_targets_in_messages(&session.messages) {
+                if seen.insert(target.clone()) {
+                    targets.push(target);
+                }
+            }
+        };
+        if let Some(live) = self.selected_session() {
+            collect(live);
+            let (history_ids, _) = self.boss_history_chain();
+            if let Some(history) = self
+                .surface_boss_key(surface)
+                .and_then(|key| self.boss_ui.chat_history.get(&key))
+            {
+                for id in history_ids {
+                    if let Some(entry) = history.sessions.get(&id) {
+                        collect(&entry.session);
+                    }
+                }
+            }
+        }
+        targets
+    }
+
     /// The `@` pool's project references — registered, durable projects the
     /// boss's `summon` takes by path — minus the surface's own and the
     /// boss-minted workspaces (a boss chat is not a summon target).
@@ -1036,6 +1106,14 @@ impl Waku {
             project.name.hash(&mut hasher);
             project.resolved_name.hash(&mut hasher);
         }
+        if let Some(session) = self.selected_session() {
+            session.id.hash(&mut hasher);
+            session.updated_at.hash(&mut hasher);
+            session.messages.len().hash(&mut hasher);
+        }
+        if let Some(history) = boss.and_then(|key| self.boss_ui.chat_history.get(&key)) {
+            history.revision.hash(&mut hasher);
+        }
         if let Some(state) = boss.and_then(|key| self.boss_ui.states.get(&key)) {
             for persona in &state.personas {
                 persona.id.hash(&mut hasher);
@@ -1144,10 +1222,12 @@ impl Waku {
                     .map(|session| session.title.as_str())
                     .collect::<Vec<_>>();
                 let projects = self.mentionable_projects(surface);
+                let recent_project_targets = self.recent_boss_project_targets(surface);
                 let references = self.mentionable_boss_refs(surface);
                 let (project_rows, reference_rows) = rank_reference_mentions(
                     &projects,
                     &references,
+                    &recent_project_targets,
                     &trigger.query,
                     &mut matcher,
                 );

@@ -1,5 +1,6 @@
 use super::autocomplete::{
-    is_boss_reference_candidate, rank_reference_mentions, session_mention_candidate,
+    is_boss_reference_candidate, project_reference_target, rank_reference_mentions,
+    recent_project_targets_in_messages, session_mention_candidate,
 };
 use super::close_dialog::busy_owned_session_counts;
 use super::composer::{
@@ -1278,6 +1279,7 @@ fn project_mentions_rank_before_other_references_and_memory_files_are_excluded()
     let (projects, references) = rank_reference_mentions(
         &[project],
         &[persona],
+        &[],
         "matching",
         &mut nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT),
     );
@@ -1286,6 +1288,90 @@ fn project_mentions_rank_before_other_references_and_memory_files_are_excluded()
     assert_eq!(references[0].item.kind, AtomRefKind::Persona);
     assert!(is_boss_reference_candidate(AtomRefKind::MemoryBucket));
     assert!(!is_boss_reference_candidate(AtomRefKind::MemoryFile));
+}
+
+#[test]
+fn recent_project_references_break_equal_matches_but_not_stronger_matches() {
+    let project = |name: &str, target: &str| ComposerRef {
+        kind: AtomRefKind::Project,
+        name: name.into(),
+        target: target.into(),
+        detail: "".into(),
+    };
+    let projects = [
+        project("Polly", "/projects/a-polly"),
+        project("POLLY", "/projects/z-polly"),
+        project("xPolly", "/projects/x-polly"),
+    ];
+    let recent = vec!["/projects/z-polly".to_owned()];
+
+    let (equal_matches, _) = rank_reference_mentions(
+        &projects,
+        &[],
+        &recent,
+        "polly",
+        &mut nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT),
+    );
+    assert_eq!(equal_matches[0].item.target, "/projects/z-polly");
+
+    let recent = vec!["/projects/x-polly".to_owned()];
+
+    let (strong_match, _) = rank_reference_mentions(
+        &projects,
+        &[],
+        &recent,
+        "polly",
+        &mut nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT),
+    );
+    assert_eq!(strong_match[0].item.target, "/projects/a-polly");
+}
+
+#[test]
+fn project_reference_target_reads_only_the_project_path_token() {
+    assert_eq!(
+        project_reference_target("[project \"Polly\" (path: /projects/polly)]"),
+        Some("/projects/polly")
+    );
+    assert_eq!(project_reference_target("project /projects/polly"), None);
+    assert_eq!(
+        project_reference_target("[persona \"Polly\" (persona_id: abc)]"),
+        None
+    );
+}
+
+#[test]
+fn recent_project_targets_follow_user_reference_atoms_only() {
+    use waku_protocol::model::{Message, MessageAtom, MessageRole};
+
+    let mut older = Message::new(MessageRole::User, "older project");
+    older.atoms.push(MessageAtom {
+        label: "Polly".into(),
+        payload: "[project \"Polly\" (path: /projects/polly)]".into(),
+        session_id: None,
+    });
+    let mut newer = Message::new(MessageRole::User, "newer project");
+    newer.atoms.push(MessageAtom {
+        label: "Atlas".into(),
+        payload: "[project \"Atlas\" (path: /projects/atlas)]".into(),
+        session_id: None,
+    });
+    let mut assistant = Message::new(MessageRole::Assistant, "mentioned in a reply");
+    assistant.atoms.push(MessageAtom {
+        label: "Other".into(),
+        payload: "[project \"Other\" (path: /projects/other)]".into(),
+        session_id: None,
+    });
+    let mut repeated = Message::new(MessageRole::User, "again");
+    repeated.atoms.push(MessageAtom {
+        label: "Polly".into(),
+        payload: "[project \"Polly\" (path: /projects/polly)]".into(),
+        session_id: None,
+    });
+
+    assert_eq!(
+        recent_project_targets_in_messages(&[older, newer, assistant, repeated]),
+        ["/projects/polly", "/projects/atlas"]
+    );
 }
 
 #[test]
