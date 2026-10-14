@@ -9724,7 +9724,7 @@ impl Waku {
                         if modes.image_mode {
                             None
                         } else if modes.preview {
-                            self.preview_list_state(&relative_path)
+                            self.mounted_preview_list(&relative_path)
                                 .map(|state| -> Box<dyn scrollbar::Scrollable> { Box::new(state) })
                         } else {
                             Some(Box::new(self.right_panel_editor_scroll_handle.clone())
@@ -10405,6 +10405,30 @@ impl Waku {
             .map(|editor| editor.preview_list.clone())
     }
 
+    /// The list the file's preview is actually scrolling on right now. A
+    /// live deliverable page renders `relative_path` through its own
+    /// per-page scroll state, leaving the editor's `preview_list` unlaid-out
+    /// — callers anchoring to or scrolling the preview must read the mounted
+    /// list or they act on an empty, off-screen viewport.
+    pub(super) fn mounted_preview_list(&self, relative_path: &str) -> Option<ListState> {
+        if let Some(page @ (key, id)) = self.live_deliverable_page() {
+            let on_page = self.boss_ui.states.get(&key).is_some_and(|state| {
+                state.deliverables.iter().any(|deliverable| {
+                    deliverable.id == id
+                        && !deliverable.directory
+                        && Path::new(&deliverable.path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            == Some(relative_path)
+                })
+            });
+            if on_page {
+                return self.boss_ui.deliverable_page_scroll.get(&page).cloned();
+            }
+        }
+        self.preview_list_state(relative_path)
+    }
+
     fn reveal_markdown_heading(
         &mut self,
         relative_path: &str,
@@ -10416,7 +10440,7 @@ impl Waku {
         if !self.file_markdown_preview_active(relative_path) {
             return;
         }
-        let Some(list) = self.preview_list_state(relative_path) else {
+        let Some(list) = self.mounted_preview_list(relative_path) else {
             return;
         };
         let target_block = {

@@ -745,7 +745,7 @@ impl Waku {
             .iter()
             .find(|annotation| annotation.id == annotation_id)?;
         let viewport = self
-            .preview_list_state(relative_path)
+            .mounted_preview_list(relative_path)
             .map_or_else(Bounds::default, |list| list.viewport_bounds());
         self.spans_anchor_in(&self.file_preview_selection, viewport, &annotation.spans)
     }
@@ -768,7 +768,7 @@ impl Waku {
             .iter()
             .find(|annotation| annotation.id == annotation_id)?;
         let viewport = self
-            .preview_list_state(relative_path)
+            .mounted_preview_list(relative_path)
             .map_or_else(Bounds::default, |list| list.viewport_bounds());
         self.spans_anchor_union_in(&self.file_preview_selection, viewport, &annotation.spans)
     }
@@ -2213,7 +2213,7 @@ impl Waku {
     ) -> Option<AnyElement> {
         let spans = self.annotatable_preview_selection(relative_path)?;
         let viewport = self
-            .preview_list_state(relative_path)
+            .mounted_preview_list(relative_path)
             .map_or_else(Bounds::default, |list| list.viewport_bounds());
         let anchor = self.spans_anchor_in(&self.file_preview_selection, viewport, &spans)?;
         // Resolve the chord as if the preview were focused — the same

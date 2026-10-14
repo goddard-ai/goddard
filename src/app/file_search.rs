@@ -696,7 +696,7 @@ impl Waku {
         let viewport_top = self
             .file_search
             .as_ref()
-            .and_then(|search| self.preview_list_state(&search.path))
+            .and_then(|search| self.mounted_preview_list(&search.path))
             .map_or_else(|| px(0.), |list| list.viewport_bounds().top());
         let mut cursor = 0;
         let mut last: Option<(usize, Pixels)> = None;
@@ -797,7 +797,7 @@ impl Waku {
             // reveal the item, then retry so the pixel-accurate pass below
             // can finish the reveal.
             if attempt < 4 {
-                if let Some(list) = self.preview_list_state(relative_path) {
+                if let Some(list) = self.mounted_preview_list(relative_path) {
                     list.scroll_to_reveal_item(md::render::block_index_of_ordinal(target.ordinal));
                     cx.notify();
                 }
@@ -814,7 +814,7 @@ impl Waku {
             }
             return;
         };
-        let Some(list) = self.preview_list_state(relative_path) else {
+        let Some(list) = self.mounted_preview_list(relative_path) else {
             return;
         };
         let viewport = list.viewport_bounds();
