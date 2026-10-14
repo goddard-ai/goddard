@@ -7502,6 +7502,56 @@ impl Waku {
             self.submit_expired_employee_submission(session_id, submission, cx);
             return;
         }
+        // A queued employee is only an unstarted shell. Sending through the
+        // ordinary composer path would issue `Start` and create a provider
+        // runtime without going through summon admission. Park the prompt on
+        // its ticket instead; dispatch will deliver it with the assignment.
+        if !submission.hidden
+            && let Some(key) = self.boss_ui.states.iter().find_map(|(key, state)| {
+                state
+                    .employees
+                    .iter()
+                    .any(|employee| {
+                        employee.session_id == session_id
+                            && employee.lifecycle()
+                                == waku_protocol::boss::EmployeeLifecycle::Queued
+                    })
+                    .then_some(*key)
+            })
+        {
+            let Some(client) = self.daemons.supervisor(key).map(|daemon| daemon.client()) else {
+                self.restore_composer_submission(session_id, submission, cx);
+                self.show_toast(tr!("errors.daemon_disconnected"));
+                return;
+            };
+            let operation = waku_client::boss::BossOperation::Control {
+                session_id,
+                action: waku_client::boss::EmployeeControl::Prompt {
+                    prompt: submission.prompt.clone(),
+                    delivery: Some(waku_client::AgentPromptDelivery::Queue),
+                },
+            };
+            cx.spawn(async move |waku, cx| {
+                let result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        client.request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::Boss { operation },
+                        )
+                    })
+                    .await;
+                let _ = waku.update(cx, move |waku, cx| {
+                    if let Err(error) = result {
+                        waku.restore_composer_submission(session_id, submission, cx);
+                        waku.show_toast(error.to_string());
+                    }
+                });
+            })
+            .detach();
+            return;
+        }
         if self.ending_checkpoint_pending(session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
