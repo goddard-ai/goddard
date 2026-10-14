@@ -1,0 +1,1 @@
+- **Boss:** Employees and chain steps no longer fail when a provider reports a transient error it flags as retryable — a Devin rate-limit wave, for example — the turn retries in place on a short backoff instead of expiring the employee or pausing the chain. A provider that keeps failing still reports the turn failed after the bounded retries run out.

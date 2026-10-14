@@ -607,6 +607,34 @@ impl PendingPrompts {
         self.take_settle()
     }
 
+    /// Moves a superseded request's batch entry onto the resent request, so
+    /// in-flight stop signals and the final settle keep tracking the batch.
+    /// `false` when the entry is gone — the batch already settled and the
+    /// resend must not run under it.
+    fn rekey_request(&mut self, previous: &RequestId, next: RequestId) -> bool {
+        let Some(entry) = self
+            .requests
+            .iter_mut()
+            .find(|prompt| &prompt.request_id == previous)
+        else {
+            return false;
+        };
+        entry.request_id = next;
+        true
+    }
+
+    fn has_request(&self, request_id: &RequestId) -> bool {
+        self.requests
+            .iter()
+            .any(|prompt| &prompt.request_id == request_id)
+    }
+
+    /// A superseded request's provider-side stop verdict belongs to its
+    /// failed flight — the resend's settle must not inherit it.
+    fn clear_stop_cause(&mut self) {
+        self.stop_cause = None;
+    }
+
     fn settle_extension(
         &mut self,
         session_id: &str,
@@ -1246,6 +1274,25 @@ fn acp_mcp_servers(servers: &[super::McpServerSpec], http_supported: bool) -> Ve
 
 const ACP_SESSION_LOAD_RETRIES: usize = 6;
 const ACP_SESSION_LOAD_RETRY_DELAY: Duration = Duration::from_millis(400);
+
+/// A `session/prompt` failure the provider itself flags as transient —
+/// Devin stamps `cognition.ai/retryable` on its rate-limit errors — resends
+/// in place on a bounded backoff instead of settling the turn failed, so a
+/// rate-limit wave neither expires employees nor burns a chain's retry
+/// budget on an error the provider called recoverable. Exhausting the
+/// budget leaves the ordinary failed settle in place, so a provider that
+/// never recovers cannot loop the retry forever.
+const ACP_PROMPT_RETRIES: usize = 6;
+#[cfg(not(test))]
+const ACP_PROMPT_RETRY_DELAY: Duration = Duration::from_secs(1);
+#[cfg(test)]
+const ACP_PROMPT_RETRY_DELAY: Duration = Duration::from_millis(10);
+const ACP_PROMPT_RETRY_DELAY_CAP: Duration = Duration::from_secs(16);
+
+fn prompt_retry_delay(attempt: usize) -> Duration {
+    let shift = (attempt.saturating_sub(1) as u32).min(4);
+    (ACP_PROMPT_RETRY_DELAY * 2_u32.pow(shift)).min(ACP_PROMPT_RETRY_DELAY_CAP)
+}
 
 /// Agents flag transient resume failures in the JSON-RPC error `data` — e.g.
 /// Devin's `session_locked`, while a replaced runtime's process still holds
@@ -2170,7 +2217,6 @@ fn send_prompt(
     title_refresh: super::title_refresh::NativeTitleRefresh,
     stream_state: Arc<Mutex<AcpStreamState>>,
 ) -> agent_client_protocol::Result<()> {
-    stream_state.lock().produced_content = false;
     // Read before the turn runs, so the failure lookup cannot mistake an
     // earlier turn's record for this one's.
     let wire_offset = (provider == ProviderKind::Kimi)
@@ -2178,25 +2224,104 @@ fn send_prompt(
     let extension_id =
         (provider == ProviderKind::Grok).then(|| format!("waku-{}", uuid::Uuid::new_v4()));
     let prompt = vec![ContentBlock::Text(TextContent::new(text))];
-    let mut request = PromptRequest::new(session_id.clone(), prompt);
-    if let Some(extension_id) = extension_id.as_ref() {
+    dispatch_prompt(
+        PromptDispatch {
+            connection: connection.clone(),
+            session_id: session_id.clone(),
+            prompt,
+            extension_id,
+            prompt_requests: prompt_requests.clone(),
+            events: events.clone(),
+            provider,
+            native_session_id: native_session_id.to_owned(),
+            title_placeholder,
+            title_refresh,
+            stream_state,
+            wire_offset,
+        },
+        None,
+        ACP_PROMPT_RETRIES,
+    )
+}
+
+/// Everything a single `session/prompt` flight needs — the request payload
+/// the provider sees, the pending-batch bookkeeping that scores its settle,
+/// and the fields a bounded retry resends unchanged.
+#[derive(Clone)]
+struct PromptDispatch {
+    connection: ConnectionTo<Agent>,
+    session_id: SessionId,
+    prompt: Vec<ContentBlock>,
+    extension_id: Option<String>,
+    prompt_requests: PendingPromptRequests,
+    events: DriverEventSender,
+    provider: ProviderKind,
+    native_session_id: String,
+    title_placeholder: Option<String>,
+    title_refresh: super::title_refresh::NativeTitleRefresh,
+    stream_state: Arc<Mutex<AcpStreamState>>,
+    wire_offset: Option<u64>,
+}
+
+/// Sends one `session/prompt` flight and registers its settle. `supersedes`
+/// names the request a bounded retry replaces: the batch entry rekeys onto
+/// the new request id so in-flight stop signals and the final settle keep
+/// tracking the batch — and the resend aborts when the batch already closed.
+fn dispatch_prompt(
+    dispatch: PromptDispatch,
+    supersedes: Option<RequestId>,
+    retries_left: usize,
+) -> agent_client_protocol::Result<()> {
+    dispatch.stream_state.lock().produced_content = false;
+    let mut request =
+        PromptRequest::new(dispatch.session_id.clone(), dispatch.prompt.clone());
+    if let Some(extension_id) = dispatch.extension_id.as_ref() {
         let mut meta = serde_json::Map::new();
         meta.insert("promptId".into(), Value::String(extension_id.clone()));
         meta.insert("requestId".into(), Value::String(extension_id.clone()));
         request = request.meta(meta);
     }
-    let sent = connection.send_request(request);
+    let sent = dispatch.connection.send_request(request);
     let request_id = sent.id().clone();
-    prompt_requests.lock().insert(
-        request_id.clone(),
-        extension_id,
-        native_session_id.to_owned(),
-    );
+    {
+        let mut pending = dispatch.prompt_requests.lock();
+        match supersedes {
+            Some(previous) => {
+                if !pending.rekey_request(&previous, request_id.clone()) {
+                    // The batch settled while the resend waited — dropping the
+                    // request asks the peer to cancel it rather than letting
+                    // it run under bookkeeping that already closed.
+                    drop(pending);
+                    drop(sent);
+                    return Ok(());
+                }
+            }
+            None => pending.insert(
+                request_id.clone(),
+                dispatch.extension_id.clone(),
+                dispatch.native_session_id.clone(),
+            ),
+        }
+    }
     let callback_request_id = request_id.clone();
-    let callback_requests = prompt_requests.clone();
-    let callback_events = events.clone();
-    let native_session_id = native_session_id.to_owned();
+    let callback = dispatch.clone();
     let registered = sent.on_receiving_result(async move |result| {
+        // A failure the provider itself flags retryable — Devin stamps
+        // `cognition.ai/retryable` on its rate-limit errors — resends in
+        // place on a bounded backoff rather than settling the turn failed,
+        // so a transient wave neither expires employees nor burns a chain's
+        // retry budget. A requested cancel always outranks the retry.
+        if retries_left > 0
+            && matches!(&result, Err(error) if session_error_retryable(error))
+            && !callback.prompt_requests.lock().cancel_requested
+            && schedule_prompt_retry(
+                callback.clone(),
+                callback_request_id.clone(),
+                retries_left,
+            )
+        {
+            return Ok(());
+        }
         let clean = matches!(
             &result,
             Ok(response) if response.stop_reason != StopReason::Cancelled
@@ -2205,33 +2330,121 @@ fn send_prompt(
         // evidence: an agent answering the request received the input, even
         // when the turn it ran then failed. A rejected request is not.
         if result.is_ok() {
-            note_devin_turn_accepted(provider, &callback_requests, &callback_events);
+            note_devin_turn_accepted(
+                callback.provider,
+                &callback.prompt_requests,
+                &callback.events,
+            );
         }
-        if let Some(settle) = settle_prompt_request(&callback_requests, &callback_request_id, clean)
+        if let Some(settle) =
+            settle_prompt_request(&callback.prompt_requests, &callback_request_id, clean)
         {
             // Only an empty turn pays for this lookup, so a healthy turn never
             // waits on Kimi's records.
-            let native_failure = wire_offset
-                .filter(|_| !stream_state.lock().produced_content)
-                .and_then(|offset| crate::kimi_session::turn_failure(&native_session_id, offset));
-            let success = finish_prompt(result, native_failure, settle, &callback_events);
-            if success && provider == ProviderKind::Grok {
-                start_grok_title_refresh(&native_session_id, &title_refresh, callback_events);
-            } else if success && provider == ProviderKind::Devin {
+            let native_failure = callback
+                .wire_offset
+                .filter(|_| !callback.stream_state.lock().produced_content)
+                .and_then(|offset| {
+                    crate::kimi_session::turn_failure(&callback.native_session_id, offset)
+                });
+            let success = finish_prompt(result, native_failure, settle, &callback.events);
+            if success && callback.provider == ProviderKind::Grok {
+                start_grok_title_refresh(
+                    &callback.native_session_id,
+                    &callback.title_refresh,
+                    callback.events.clone(),
+                );
+            } else if success && callback.provider == ProviderKind::Devin {
                 start_devin_title_refresh(
-                    &native_session_id,
-                    title_placeholder,
-                    &title_refresh,
-                    callback_events,
+                    &callback.native_session_id,
+                    callback.title_placeholder.clone(),
+                    &callback.title_refresh,
+                    callback.events.clone(),
                 );
             }
         }
         Ok(())
     });
     if registered.is_err() {
-        prompt_requests.lock().settle_request(&request_id, false);
+        dispatch
+            .prompt_requests
+            .lock()
+            .settle_request(&request_id, false);
     }
     registered
+}
+
+/// Holds the turn open across a provider-flagged transient failure: after a
+/// short backoff the same request resends in place. The pending batch entry
+/// stays through the wait so a `session/cancel` still lands — a cancel that
+/// arrived first, or one that lands during the wait, settles the turn as the
+/// user's own stop rather than resending. `false` when the connection can no
+/// longer spawn, leaving the caller on the ordinary failed-settle path.
+fn schedule_prompt_retry(
+    dispatch: PromptDispatch,
+    request_id: RequestId,
+    retries_left: usize,
+) -> bool {
+    let attempt = ACP_PROMPT_RETRIES - retries_left + 1;
+    let delay = prompt_retry_delay(attempt);
+    eprintln!(
+        "{} prompt failed with a retryable provider error; resending in {delay:?} (retry {attempt} of {ACP_PROMPT_RETRIES})",
+        dispatch.provider.display_name(),
+    );
+    let prompt_requests = dispatch.prompt_requests.clone();
+    let events = dispatch.events.clone();
+    let connection = dispatch.connection.clone();
+    connection
+        .spawn(async move {
+            smol::Timer::after(delay).await;
+            enum Resend {
+                Retry,
+                Cancelled(PromptSettle),
+                Gone,
+            }
+            let resend = {
+                let mut pending = prompt_requests.lock();
+                if pending.cancel_requested {
+                    match pending.settle_request(&request_id, false) {
+                        Some(settle) => Resend::Cancelled(settle),
+                        // Siblings are still in flight — the removed request
+                        // emits nothing and the batch settle waits on them.
+                        None => Resend::Gone,
+                    }
+                } else if pending.has_request(&request_id) {
+                    pending.clear_stop_cause();
+                    Resend::Retry
+                } else {
+                    // The batch settled while the retry waited.
+                    Resend::Gone
+                }
+            };
+            match resend {
+                Resend::Retry => {
+                    if let Err(error) =
+                        dispatch_prompt(dispatch, Some(request_id), retries_left - 1)
+                    {
+                        let _ = events.send(DriverEvent::Error(error.to_string()));
+                        let _ = events.send(DriverEvent::TurnFinished {
+                            success: false,
+                            summary: None,
+                            summary_i18n: None,
+                        });
+                    }
+                }
+                Resend::Cancelled(settle) => {
+                    finish_prompt(
+                        Ok(PromptResponse::new(StopReason::Cancelled)),
+                        None,
+                        settle,
+                        &events,
+                    );
+                }
+                Resend::Gone => {}
+            }
+            Ok(())
+        })
+        .is_ok()
 }
 
 fn settle_prompt_request(
@@ -3775,6 +3988,238 @@ mod tests {
         assert!(!session_error_retryable(
             &agent_client_protocol::Error::invalid_params()
         ));
+    }
+
+    type ScriptedTransport = agent_client_protocol::Lines<
+        std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send + 'static>>,
+        std::pin::Pin<
+            Box<dyn futures::Stream<Item = std::io::Result<String>> + Send + 'static>,
+        >,
+    >;
+
+    /// A line-level ACP peer the test scripts: every `session/prompt`
+    /// request consumes the next canned response body (`"error"` or
+    /// `"result"`), and each request lands on the returned counter so the
+    /// test can count resends. `gate_first_reply` holds the first response
+    /// until the returned sender fires — the deterministic window for a
+    /// cancel. No `initialize` handshake: `send_prompt` is the unit under
+    /// test and needs only a live connection.
+    fn scripted_prompt_peer(
+        script: Vec<Value>,
+        gate_first_reply: bool,
+    ) -> (
+        ScriptedTransport,
+        Arc<std::sync::atomic::AtomicUsize>,
+        Option<smol::channel::Sender<()>>,
+    ) {
+        use futures::{SinkExt, StreamExt};
+        let (request_tx, request_rx) = futures::channel::mpsc::channel::<String>(16);
+        let (response_tx, response_rx) = futures::channel::mpsc::channel::<String>(16);
+        let outgoing: std::pin::Pin<
+            Box<dyn futures::Sink<String, Error = std::io::Error> + Send>,
+        > = Box::pin(request_tx.sink_map_err(std::io::Error::other));
+        let incoming: std::pin::Pin<
+            Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>,
+        > = Box::pin(response_rx.map(Ok::<String, std::io::Error>));
+        let transport = agent_client_protocol::Lines::new(outgoing, incoming);
+        let prompts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = prompts.clone();
+        let mut requests = request_rx;
+        let mut responses = response_tx;
+        let mut script = script.into_iter();
+        let (gate_tx, gate_rx) = smol::channel::bounded::<()>(1);
+        let mut gate = gate_first_reply.then_some(gate_rx);
+        thread::Builder::new()
+            .name("acp-scripted-peer".into())
+            .spawn(move || {
+                while let Some(line) = smol::block_on(requests.next()) {
+                    let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                        continue;
+                    };
+                    if message.get("method").and_then(Value::as_str) != Some("session/prompt") {
+                        continue;
+                    }
+                    seen.fetch_add(1, Ordering::Relaxed);
+                    if let Some(gate) = gate.take()
+                        && smol::block_on(gate.recv()).is_err()
+                    {
+                        return;
+                    }
+                    let Some(mut reply) = script.next() else {
+                        continue;
+                    };
+                    {
+                        let reply = reply.as_object_mut().unwrap();
+                        reply.insert(
+                            "id".into(),
+                            message.get("id").cloned().unwrap_or(Value::Null),
+                        );
+                        reply.insert("jsonrpc".into(), Value::String("2.0".into()));
+                    }
+                    if smol::block_on(responses.send(reply.to_string())).is_err() {
+                        return;
+                    }
+                }
+            })
+            .unwrap();
+        (transport, prompts, gate_first_reply.then_some(gate_tx))
+    }
+
+    /// Runs one `send_prompt` against the scripted peer and returns the
+    /// driver events through the first `TurnFinished`. `before_first_reply`
+    /// fires after the request is registered but before the peer answers —
+    /// the deterministic window a cancel needs.
+    fn prompt_events_against(
+        transport: ScriptedTransport,
+        open_first_reply: Option<smol::channel::Sender<()>>,
+        before_first_reply: Option<Box<dyn FnOnce(&PendingPromptRequests) + Send>>,
+    ) -> Vec<DriverEvent> {
+        let prompt_requests = PendingPromptRequests::default();
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let (done_tx, done_rx) = smol::channel::bounded::<Vec<DriverEvent>>(1);
+        thread::Builder::new()
+            .name("acp-test-events".into())
+            .spawn(move || {
+                let mut seen = Vec::new();
+                while let Ok(event) = event_rx.recv_timeout(Duration::from_secs(15)) {
+                    let settled = matches!(event, DriverEvent::TurnFinished { .. });
+                    seen.push(event);
+                    if settled {
+                        break;
+                    }
+                }
+                let _ = done_tx.send_blocking(seen);
+            })
+            .unwrap();
+        let run = Client
+            .builder()
+            .name("waku-test")
+            .connect_with(transport, async move |connection: ConnectionTo<Agent>| {
+                send_prompt(
+                    &connection,
+                    &SessionId::new("session"),
+                    "the brief".to_owned(),
+                    &prompt_requests,
+                    &events,
+                    ProviderKind::Devin,
+                    "native-session",
+                    None,
+                    Default::default(),
+                    Arc::new(Mutex::new(AcpStreamState::default())),
+                )?;
+                if let Some(before) = before_first_reply {
+                    before(&prompt_requests);
+                }
+                if let Some(gate) = open_first_reply {
+                    let _ = gate.send(()).await;
+                }
+                let seen = done_rx.recv().await.unwrap_or_default();
+                Ok(seen)
+            });
+        smol::block_on(run).expect("the scripted connection runs")
+    }
+
+    /// The canned response for Devin's rate-limit shape: an `unavailable`
+    /// error the provider itself flags retryable.
+    fn retryable_unavailable() -> Value {
+        json!({
+            "error": {
+                "code": -32000,
+                "message": "rate limited",
+                "data": {
+                    "cognition.ai/errorKind": "unavailable",
+                    "cognition.ai/retryable": true,
+                },
+            }
+        })
+    }
+
+    fn turn_finished(events: &[DriverEvent]) -> Vec<bool> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                DriverEvent::TurnFinished { success, .. } => Some(*success),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn retryable_prompt_error_resends_instead_of_failing_the_turn() {
+        let (transport, prompts, _) = scripted_prompt_peer(
+            vec![
+                retryable_unavailable(),
+                json!({"result": {"stopReason": "end_turn"}}),
+            ],
+            false,
+        );
+        let events = prompt_events_against(transport, None, None);
+        assert_eq!(
+            prompts.load(Ordering::Relaxed),
+            2,
+            "a retryable failure resends the same prompt"
+        );
+        assert_eq!(turn_finished(&events), [true]);
+        assert!(
+            !events.iter().any(|event| matches!(event, DriverEvent::Error(_))),
+            "a settled-after-retry turn reports no failure: {events:?}"
+        );
+    }
+
+    #[test]
+    fn non_retryable_prompt_error_fails_the_turn_immediately() {
+        let (transport, prompts, _) = scripted_prompt_peer(
+            vec![json!({
+                "error": {
+                    "code": -32000,
+                    "message": "session is gone",
+                    "data": {"cognition.ai/errorKind": "session_not_found"},
+                }
+            })],
+            false,
+        );
+        let events = prompt_events_against(transport, None, None);
+        assert_eq!(prompts.load(Ordering::Relaxed), 1);
+        assert_eq!(turn_finished(&events), [false]);
+    }
+
+    #[test]
+    fn retryable_prompt_errors_settle_failed_once_the_retry_budget_ends() {
+        let (transport, prompts, _) = scripted_prompt_peer(
+            vec![retryable_unavailable(); ACP_PROMPT_RETRIES + 1],
+            false,
+        );
+        let events = prompt_events_against(transport, None, None);
+        assert_eq!(
+            prompts.load(Ordering::Relaxed),
+            ACP_PROMPT_RETRIES + 1,
+            "the retry budget bounds the resends"
+        );
+        assert_eq!(turn_finished(&events), [false]);
+    }
+
+    #[test]
+    fn a_requested_cancel_suppresses_the_prompt_retry() {
+        let (transport, prompts, gate) = scripted_prompt_peer(
+            vec![
+                retryable_unavailable(),
+                json!({"result": {"stopReason": "end_turn"}}),
+            ],
+            true,
+        );
+        let events = prompt_events_against(
+            transport,
+            gate,
+            Some(Box::new(|prompt_requests| {
+                prompt_requests.lock().note_cancel_requested();
+            })),
+        );
+        assert_eq!(
+            prompts.load(Ordering::Relaxed),
+            1,
+            "a cancelled turn must not resend"
+        );
+        assert_eq!(turn_finished(&events), [false]);
     }
 
     #[test]
