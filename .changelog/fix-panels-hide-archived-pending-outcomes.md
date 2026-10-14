@@ -1,0 +1,1 @@
+- Hide pending or blocked outcome rows in the Tasks panel when their employee session is archived.

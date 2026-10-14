@@ -2011,6 +2011,30 @@ fn boss_outcome_queued(member: &boss::BossOutcomeMember) -> bool {
         && member.employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
 }
 
+/// The member whose session the collapsed outcome row names — the active
+/// member, then the next queued admission, then the latest recorded attempt.
+fn boss_outcome_speaker_member(
+    row: &boss::BossOutcomeRow,
+) -> Option<&boss::BossOutcomeMember> {
+    boss_outcome_live_member(row).or_else(|| {
+        row.members
+            .iter()
+            .filter(|member| boss_outcome_queued(member))
+            .min_by_key(|member| member.queue_rank.unwrap_or(usize::MAX))
+    })
+}
+
+fn boss_outcome_speaker_session(row: &boss::BossOutcomeRow) -> Option<Uuid> {
+    boss_outcome_speaker_member(row)
+        .map(|member| member.employee.session_id)
+        .or_else(|| {
+            row.outcome
+                .assignments
+                .last()
+                .map(|assignment| assignment.session)
+        })
+}
+
 /// A member's visible blocker or admission wait, kept separate from the
 /// project/assignee detail so it cannot be lost to that line's truncation.
 fn boss_outcome_row_reason(
@@ -2137,6 +2161,21 @@ fn boss_outcome_status(
         return (BossGoalBucket::Pending, BossGoalStatus::NotStarted);
     }
     (BossGoalBucket::Pending, BossGoalStatus::Open)
+}
+
+fn hide_archived_outcome_row(
+    row: &boss::BossOutcomeRow,
+    sessions: &HashMap<Uuid, &AgentSession>,
+    now: u64,
+) -> bool {
+    let (bucket, _) = boss_outcome_status(row, sessions, now);
+    if !matches!(bucket, BossGoalBucket::Pending | BossGoalBucket::Blocked) {
+        return false;
+    }
+
+    boss_outcome_speaker_session(row)
+        .and_then(|session_id| sessions.get(&session_id).copied())
+        .is_some_and(|session| session.archived_at.is_some())
 }
 
 /// One expanded assignment entry's status — the durable settle verdict
@@ -4258,6 +4297,46 @@ mod tests {
                 .collect(),
             attention: false,
         }
+    }
+
+    #[test]
+    fn archived_outcome_rows_hide_pending_and_blocked_but_keep_live_or_finished() {
+        use waku_protocol::boss::{EmployeeLifecycle, OutcomeState};
+
+        let now = 1_000;
+        let make_row = |state, attention| {
+            let employee = boss_employee(EmployeeLifecycle::Queued, None);
+            let session_id = employee.session_id;
+            let mut row = outcome_row(state, vec![employee]);
+            row.attention = attention;
+            (row, session_id)
+        };
+        let make_session = |id, archived_at| {
+            let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+            session.id = id;
+            session.archived_at = archived_at;
+            session
+        };
+
+        let (pending, pending_session) = make_row(OutcomeState::Open, false);
+        let archived_pending_session = make_session(pending_session, Some(10));
+        let archived_sessions = HashMap::from([(pending_session, &archived_pending_session)]);
+        assert!(hide_archived_outcome_row(&pending, &archived_sessions, now));
+
+        let (blocked, blocked_session) = make_row(OutcomeState::Open, true);
+        let archived_blocked_session = make_session(blocked_session, Some(10));
+        let archived_sessions = HashMap::from([(blocked_session, &archived_blocked_session)]);
+        assert!(hide_archived_outcome_row(&blocked, &archived_sessions, now));
+
+        let live_pending_session = make_session(pending_session, None);
+        let live_sessions = HashMap::from([(pending_session, &live_pending_session)]);
+        assert!(!hide_archived_outcome_row(&pending, &live_sessions, now));
+        assert!(!hide_archived_outcome_row(&pending, &HashMap::new(), now));
+
+        let (finished, finished_session) = make_row(OutcomeState::Completed, false);
+        let archived_finished_session = make_session(finished_session, Some(10));
+        let archived_sessions = HashMap::from([(finished_session, &archived_finished_session)]);
+        assert!(!hide_archived_outcome_row(&finished, &archived_sessions, now));
     }
 
     #[test]
@@ -12696,18 +12775,11 @@ impl Waku {
         // then the next queued admission, then the latest recorded
         // attempt — a finished row still names its last assignee.
         let queued: Vec<&boss::BossOutcomeMember> =
-            row.members.iter().filter(|m| boss_outcome_queued(m)).collect();
-        let speaker_member = boss_outcome_live_member(row).or_else(|| {
-            queued
-                .iter()
-                .min_by_key(|member| member.queue_rank.unwrap_or(usize::MAX))
-                .copied()
-        });
+            row.members.iter().filter(|member| boss_outcome_queued(member)).collect();
+        let speaker_member = boss_outcome_speaker_member(row);
         let reason = boss_outcome_row_reason(speaker_member, &self.boss_ui.queued);
         let last_assignment = row.outcome.assignments.last();
-        let speaker_session = speaker_member
-            .map(|member| member.employee.session_id)
-            .or_else(|| last_assignment.map(|assignment| assignment.session));
+        let speaker_session = boss_outcome_speaker_session(row);
         let speaker_name = speaker_member
             .map(|member| member.employee.identity.name.clone())
             .or_else(|| {
@@ -13370,6 +13442,9 @@ impl Waku {
         // sections keeps its expansion and its focus-friendly outcome id.
         let mut entries: HashMap<Uuid, Vec<BossOutcomeItem>> = HashMap::new();
         for row in rows.iter() {
+            if hide_archived_outcome_row(row, &sessions, now) {
+                continue;
+            }
             let focus = self
                 .boss_ui
                 .goals_focus_handles
