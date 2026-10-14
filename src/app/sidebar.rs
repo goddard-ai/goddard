@@ -876,6 +876,47 @@ fn visible_group_rows<Row: Copy>(
     (visible, fold)
 }
 
+/// Deliverables have two exceptions to the ordinary group cap: unread rows
+/// stay visible, and pinned rows do not consume a slot from that cap.
+fn visible_deliverable_rows(
+    live: &[(waku_client::DaemonKey, Uuid)],
+    dormant: &[(waku_client::DaemonKey, Uuid)],
+    states: &HashMap<waku_client::DaemonKey, waku_client::boss::BossState>,
+    default_visible: usize,
+    revealed_extra_rows: usize,
+    revealed_dormant_rows: usize,
+) -> (Vec<(waku_client::DaemonKey, Uuid)>, Option<SidebarFold>) {
+    let live_limit = default_visible.saturating_add(revealed_extra_rows);
+    let mut visible = Vec::with_capacity(live.len().min(live_limit) + dormant.len());
+    let mut counted = 0;
+    let mut has_hidden_live = false;
+    for &(key, id) in live {
+        let deliverable = states
+            .get(&key)
+            .and_then(|state| state.deliverables.iter().find(|item| item.id == id));
+        let pinned = deliverable.is_some_and(|item| item.pinned_at.is_some());
+        let unread = deliverable
+            .is_some_and(|item| item.viewed_at.is_none_or(|viewed| viewed < item.updated_at));
+        if pinned || unread || counted < live_limit {
+            visible.push((key, id));
+            if !pinned {
+                counted += 1;
+            }
+        } else {
+            has_hidden_live = true;
+        }
+    }
+    visible.extend(dormant.iter().take(revealed_dormant_rows).copied());
+    let fold = if has_hidden_live {
+        Some(SidebarFold::More)
+    } else if dormant.len() > revealed_dormant_rows {
+        Some(SidebarFold::Dormant)
+    } else {
+        None
+    };
+    (visible, fold)
+}
+
 fn sidebar_project_is_projectless(project: &Project, projectless_root: Option<&Path>) -> bool {
     projectless_root.is_some_and(|root| project.path.starts_with(root))
 }
@@ -4233,9 +4274,10 @@ impl Waku {
                     .get(&SidebarGroup::Deliverables)
                     .copied()
                     .unwrap_or_default();
-                let (visible, fold) = visible_group_rows(
+                let (visible, fold) = visible_deliverable_rows(
                     &recent_deliverables,
                     &dormant_deliverables,
+                    &self.boss_ui.states,
                     SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE,
                     revealed_live,
                     revealed_dormant,
@@ -8891,14 +8933,29 @@ mod tests {
             viewed_at: None,
             plan_id: None,
         };
-        // Six live deliverables — the oldest pinned — plus one swept.
+        // Five read live deliverables, a pinned row, one read overflow row,
+        // one unread overflow row, and one swept row.
         let mut pinned = deliverable(6);
         pinned.pinned_at = Some(now);
+        pinned.viewed_at = Some(pinned.updated_at);
+        let mut read_overflow = deliverable(7);
+        read_overflow.viewed_at = Some(read_overflow.updated_at);
+        let unread_overflow = deliverable(8);
         let mut swept = deliverable(1);
         swept.id = Uuid::new_v4();
         swept.dormant_at = Some(now);
-        let mut deliverables = (1..=5).map(deliverable).collect::<Vec<_>>();
+        let mut deliverables = (1..=5)
+            .map(|age| {
+                let mut item = deliverable(age);
+                if age != 5 {
+                    item.viewed_at = Some(item.updated_at);
+                }
+                item
+            })
+            .collect::<Vec<_>>();
         deliverables.push(pinned.clone());
+        deliverables.push(read_overflow.clone());
+        deliverables.push(unread_overflow.clone());
         deliverables.push(swept.clone());
         let mut states = HashMap::new();
         states.insert(
@@ -8907,18 +8964,28 @@ mod tests {
         );
 
         let (live, dormant) = sidebar_recent_deliverables(&states, now);
-        let (visible, fold) =
-            visible_group_rows(&live, &dormant, SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE, 0, 0);
-        // The pin leads the list and eats a visible slot — the sixth live
-        // row folds behind "Show more" ahead of the swept tail.
-        assert_eq!(visible, live[..SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE]);
+        let (visible, fold) = visible_deliverable_rows(
+            &live,
+            &dormant,
+            &states,
+            SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE,
+            0,
+            0,
+        );
+        // The pin is exempt from the five-row cap, and unread overflow stays
+        // visible while the read overflow remains behind "Show more".
+        assert_eq!(visible.len(), SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE + 2);
         assert_eq!(visible[0], (waku_client::DaemonKey::Local, pinned.id));
+        assert!(visible.contains(&(waku_client::DaemonKey::Local, live[5].1)));
+        assert!(visible.contains(&(waku_client::DaemonKey::Local, unread_overflow.id)));
+        assert!(!visible.contains(&(waku_client::DaemonKey::Local, read_overflow.id)));
         assert_eq!(fold, Some(SidebarFold::More));
 
         // Once every live row shows, the fold flips to the swept tail.
-        let (all_live, fold) = visible_group_rows(
+        let (all_live, fold) = visible_deliverable_rows(
             &live,
             &dormant,
+            &states,
             SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE,
             SIDEBAR_PROJECT_REVEAL_BATCH,
             0,
@@ -8926,9 +8993,10 @@ mod tests {
         assert_eq!(all_live, live);
         assert_eq!(fold, Some(SidebarFold::Dormant));
 
-        let (all_rows, fold) = visible_group_rows(
+        let (all_rows, fold) = visible_deliverable_rows(
             &live,
             &dormant,
+            &states,
             SIDEBAR_DELIVERABLE_DEFAULT_VISIBLE,
             SIDEBAR_PROJECT_REVEAL_BATCH,
             SIDEBAR_PROJECT_REVEAL_BATCH,
