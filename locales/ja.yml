@@ -3301,7 +3301,9 @@ boss.base_choice_action: Employee ベースにする
 boss.base_choice_hint: 共有 Employee ベースにする保存済みの役割を選んでください
 boss.base_choice_short: ベース？
 boss.base_choice_saved: Employee ベースを設定しました。
-boss.persona_base_section: 継承されるEmployeeベース — すべての従業員に適用されます
+boss.layer_inherited: "継承 — %{name}"
+boss.layer_shipped: "付属 — %{name}"
+boss.layer_custom: カスタム
 boss.persona_scope_base_hint: この既定を編集すると、すべての従業員が次のターンで受け取る指示が変わります。
 boss.assignment_persona_layered: "%{base} + %{role}"
 boss.assignment_persona_missing: "%{base} — 割り当てられた役割は利用できません"

@@ -786,6 +786,48 @@ pub struct PersonaDefaultInfo {
     pub proposal_stale: bool,
 }
 
+/// One layer of a persona's effective instructions, in the order an
+/// assigned agent reads them inside the composed persona block — see
+/// [`BossState::persona_instruction_layers`]. Read surfaces render each
+/// layer distinctly instead of re-deriving the composition: the
+/// inherited Employee base first, then the role's shipped default, then
+/// the appended customization.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PersonaInstructionLayer {
+    /// The canonical Employee base's saved instructions — every
+    /// employee role inherits them except the base itself and the Boss
+    /// persona.
+    Inherited {
+        /// The base persona record — identity survives renames.
+        persona_id: Uuid,
+        /// The base record's current name, for the layer's label.
+        name: String,
+        markdown: String,
+    },
+    /// The shipped default instructions a canonical role's saved text
+    /// begins with — the catalog revision it actually carries, which
+    /// may lag the latest on a document the reconciler has not
+    /// normalized yet.
+    Shipped {
+        role: PersonaDefaultRole,
+        markdown: String,
+    },
+    /// User-authored instructions: the customization appended beneath a
+    /// canonical role's shipped base, or a custom role's whole text.
+    Custom { markdown: String },
+}
+
+impl PersonaInstructionLayer {
+    /// The instruction text this layer contributes.
+    pub fn markdown(&self) -> &str {
+        match self {
+            Self::Inherited { markdown, .. }
+            | Self::Shipped { markdown, .. }
+            | Self::Custom { markdown } => markdown,
+        }
+    }
+}
+
 /// The kind of bounded work a summon fixes. The boss picks it in the
 /// summon payload and it never changes afterward — it decides what a
 /// finish does, not the employee's persona or live state.
@@ -2158,6 +2200,63 @@ impl BossState {
                 .find(|(_, id)| **id == persona_id)
                 .map(|(role, _)| *role)
         }
+    }
+
+    /// The persona's effective instructions as ordered layers — the same
+    /// sequence an assigned employee reads them in the daemon's composed
+    /// persona block. Every employee role other than the canonical base
+    /// inherits the Employee base first; a canonical role's saved text
+    /// then splits into its shipped base and the appended customization,
+    /// while a custom role's whole text is the custom layer. Empty
+    /// layers drop out exactly like empty text does in the composed
+    /// prompt, so an unresolved base means no inherited layer.
+    pub fn persona_instruction_layers(
+        &self,
+        persona_id: Uuid,
+    ) -> Vec<PersonaInstructionLayer> {
+        let Some(persona) = self.personas.iter().find(|entry| entry.id == persona_id) else {
+            return Vec::new();
+        };
+        let role = self.persona_default_role(persona_id);
+        let mut layers = Vec::new();
+        if role != Some(PersonaDefaultRole::Boss) && self.employee_persona_id != Some(persona_id)
+            && let Some(base) = self
+                .employee_persona_id
+                .and_then(|id| self.personas.iter().find(|entry| entry.id == id))
+                .filter(|base| !base.markdown.trim().is_empty())
+        {
+            layers.push(PersonaInstructionLayer::Inherited {
+                persona_id: base.id,
+                name: base.name.clone(),
+                markdown: base.markdown.clone(),
+            });
+        }
+        // Canonical text is append-only over a shipped base: a
+        // recognized prefix splits into the shipped layer it carries and
+        // the customization beneath it; anything else is all custom.
+        let custom = match role.and_then(|role| {
+            shipped_persona_prefix(role, &persona.markdown).map(|matched| (role, matched))
+        }) {
+            Some((role, (revision, customization))) => {
+                let shipped = shipped_persona_revisions(role)
+                    .iter()
+                    .find(|entry| entry.revision == revision)
+                    .map(|entry| entry.markdown)
+                    .unwrap_or_else(|| shipped_persona_default(role).markdown);
+                layers.push(PersonaInstructionLayer::Shipped {
+                    role,
+                    markdown: shipped.to_owned(),
+                });
+                customization
+            }
+            None => persona.markdown.as_str(),
+        };
+        if !custom.trim().is_empty() {
+            layers.push(PersonaInstructionLayer::Custom {
+                markdown: custom.to_owned(),
+            });
+        }
+        layers
     }
 
     /// Plan groups for the Goals ongoing area: every open plan that is

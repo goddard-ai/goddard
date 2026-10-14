@@ -3252,7 +3252,9 @@ boss.base_choice_action: 设为 Employee 基础角色
 boss.base_choice_hint: 请选择一个已保存角色作为共享 Employee 基础角色
 boss.base_choice_short: 基础？
 boss.base_choice_saved: 已设置 Employee 基础角色。
-boss.persona_base_section: 继承的 Employee 基础 — 应用于所有员工
+boss.layer_inherited: "继承 — %{name}"
+boss.layer_shipped: "随附 — %{name}"
+boss.layer_custom: 自定义
 boss.persona_scope_base_hint: 编辑此默认值会更改每个员工在下一轮收到的指令。
 boss.assignment_persona_layered: "%{base} + %{role}"
 boss.assignment_persona_missing: "%{base} — 分配的角色不可用"

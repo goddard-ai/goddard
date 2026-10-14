@@ -10,7 +10,7 @@ use waku_client::DaemonKey;
 use waku_client::boss::{
     BossEmployee, BossFile, BossIdentity, BossOperation, BossPersona, BossPersonaUpsert,
     BossResult, BossState, MemoryOperation, PersonaDefaultAction, PersonaDefaultRole,
-    PersonaPermissions,
+    PersonaInstructionLayer, PersonaPermissions,
     instruction_diff, shipped_persona_default, shipped_persona_prefix, shipped_persona_revision,
 };
 use waku_protocol::boss::AvatarStyle;
@@ -31,6 +31,42 @@ fn employee_attention_is_unread(employee: &BossEmployee) -> bool {
                 .expired_at
                 .is_some_and(|expired_at| viewed_at < expired_at)
         })
+}
+
+/// The source label heading one instruction layer — "Inherited —
+/// Employee", "Shipped — Researcher", or "Custom".
+fn persona_layer_label(layer: &PersonaInstructionLayer) -> String {
+    match layer {
+        PersonaInstructionLayer::Inherited { name, .. } => {
+            tr!("boss.layer_inherited", name = name.clone())
+        }
+        PersonaInstructionLayer::Shipped { role, .. } => {
+            tr!("boss.layer_shipped", name = role.label())
+        }
+        PersonaInstructionLayer::Custom { .. } => tr!("boss.layer_custom"),
+    }
+}
+
+/// The persona detail's instruction document: one bullet per effective
+/// layer in the agent's composed order — inherited Employee base, the
+/// shipped default, the appended customization — each labeled by source
+/// with its text nested beneath the bullet so the layering is scannable.
+fn persona_layers_document(layers: &[PersonaInstructionLayer]) -> String {
+    let mut document = String::new();
+    for layer in layers {
+        document.push_str("- **");
+        document.push_str(&persona_layer_label(layer));
+        document.push_str("**\n");
+        for line in layer.markdown().lines() {
+            document.push('\n');
+            if !line.trim().is_empty() {
+                document.push_str("  ");
+                document.push_str(line);
+            }
+        }
+        document.push('\n');
+    }
+    document
 }
 
 fn sidebar_deliverable_action_slot(group_name: SharedString) -> Div {
@@ -709,10 +745,6 @@ pub(super) struct BossUi {
     /// Read-only persona instructions — the detail pane's markdown cache,
     /// selection, and scroll position, keyed to the selected persona.
     persona_markdown: RefCell<Option<(Uuid, MarkdownView)>>,
-    /// The read-only inherited Employee base shown under a custom role's
-    /// detail — a second cache because the role's own text owns
-    /// `persona_markdown`.
-    persona_base_markdown: RefCell<Option<(Uuid, MarkdownView)>>,
     persona_selection: TranscriptSelection,
     persona_scroll: ScrollHandle,
     persona_scrollbar: Rc<ScrollbarState>,
@@ -848,7 +880,6 @@ impl Default for BossUi {
             persona_query: String::new(),
             persona_search: None,
             persona_markdown: RefCell::new(None),
-            persona_base_markdown: RefCell::new(None),
             persona_selection: TranscriptSelection::default(),
             persona_scroll: ScrollHandle::new(),
             persona_scrollbar: ScrollbarState::new(),
@@ -8812,13 +8843,14 @@ impl Waku {
             info = info.child(boss_info_row(&theme, label, value, index + 1 == count));
         }
         let palette = MarkdownPalette::from_theme(&theme);
-        let document: Option<AnyElement> = (!persona.markdown.trim().is_empty()).then(|| {
+        let layers = state.persona_instruction_layers(persona.id);
+        let document: Option<AnyElement> = (!layers.is_empty()).then(|| {
             let mut cache = self.boss_ui.persona_markdown.borrow_mut();
             if !matches!(cache.as_ref(), Some((cached, _)) if *cached == persona.id) {
                 *cache = Some((persona.id, MarkdownView::document()));
             }
             let (_, view) = cache.as_mut().expect("entry ensured above");
-            view.set_text(&persona.markdown, false);
+            view.set_text(&persona_layers_document(&layers), false);
             let ctx = MarkdownCtx::new(
                 format!("persona-md-{}", persona.id),
                 &palette,
@@ -8872,60 +8904,6 @@ impl Waku {
         // the marker write keeps the record's content and grants intact.
         let base_choice_card = (state.employee_persona_id.is_none() && default_role.is_none())
             .then(|| self.render_employee_base_choice_card(key, persona, cx));
-        // A custom or specialist role composes over the canonical
-        // Employee base — the detail shows the inherited text read-only
-        // so the layering is visible without pretending it is editable
-        // here.
-        let base_document: Option<AnyElement> = (!matches!(
-            default_role,
-            Some(PersonaDefaultRole::Boss | PersonaDefaultRole::Employee)
-        ))
-            .then(|| {
-                state
-                    .personas
-                    .iter()
-                    .find(|persona| Some(persona.id) == state.employee_persona_id)
-            })
-            .flatten()
-            .filter(|base| !base.markdown.trim().is_empty())
-            .map(|base| {
-                let mut cache = self.boss_ui.persona_base_markdown.borrow_mut();
-                if !matches!(cache.as_ref(), Some((cached, _)) if *cached == persona.id) {
-                    *cache = Some((persona.id, MarkdownView::document()));
-                }
-                let (_, view) = cache.as_mut().expect("entry ensured above");
-                view.set_text(&base.markdown, false);
-                let ctx = MarkdownCtx::new(
-                    format!("persona-base-md-{}", persona.id),
-                    &palette,
-                    MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size),
-                    self.boss_ui.persona_selection.clone(),
-                )
-                .with_families(crate::fonts::current(cx))
-                .with_math_enabled(self.state.render_math)
-                .with_guided_reading(self.guided_reading())
-                .with_link_items(self.markdown_link_menu_items.clone())
-                .with_link_handler(self.markdown_link_handler.clone())
-                .with_standalone_context_menu(self.menu_handle("persona-base-math", cx));
-                div()
-                    .mt(px(16.0))
-                    .pt(px(14.0))
-                    .border_t_1()
-                    .border_color(theme.separator)
-                    .child(
-                        div()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_ghost)
-                            .child(tr!("boss.persona_base_section")),
-                    )
-                    .child(
-                        div()
-                            .mt(px(10.0))
-                            .text_color(theme.text_secondary)
-                            .children(md::render::markdown(view, &ctx)),
-                    )
-                    .into_any_element()
-            });
         div()
             .flex_1()
             .min_h_0()
@@ -9049,8 +9027,7 @@ impl Waku {
                     .child(info)
                     .children(default_card)
                     .children(base_choice_card)
-                    .children(document)
-                    .children(base_document),
+                    .children(document),
             )
             .child(scrollbar::vertical(
                 &self.boss_ui.persona_scroll,
@@ -13590,5 +13567,43 @@ mod tests {
             ),
             ComposerTargetPick::Stale(id) if id == coworker
         ));
+    }
+
+    /// The detail pane's instruction document lists each effective layer
+    /// as a labeled bullet in the agent's composed order — inherited
+    /// base, shipped default, appended customization — with the layer's
+    /// text nested beneath the bullet.
+    #[test]
+    fn persona_layers_document_lists_layers_in_composed_order() {
+        let layers = vec![
+            PersonaInstructionLayer::Inherited {
+                persona_id: Uuid::new_v4(),
+                name: "Employee".into(),
+                markdown: "Complete the bounded assignment.\n\nReport useful results.".into(),
+            },
+            PersonaInstructionLayer::Shipped {
+                role: PersonaDefaultRole::Researcher,
+                markdown: "Research only; report findings.".into(),
+            },
+            PersonaInstructionLayer::Custom {
+                markdown: "Prefer primary sources.".into(),
+            },
+        ];
+        let document = persona_layers_document(&layers);
+        let inherited = document.find("- **Inherited — Employee**").unwrap();
+        let shipped = document.find("- **Shipped — Researcher**").unwrap();
+        let custom = document.find("- **Custom**").unwrap();
+        assert!(inherited < shipped && shipped < custom);
+        // Layer text nests beneath its bullet, paragraph breaks intact.
+        assert!(
+            document.contains(
+                "- **Inherited — Employee**\n\n  Complete the bounded assignment.\n\n  Report useful results.\n"
+            )
+        );
+        // An unmodified shipped role renders base + shipped only.
+        let document = persona_layers_document(&layers[..2]);
+        assert!(document.contains("- **Inherited — Employee**"));
+        assert!(document.contains("- **Shipped — Researcher**"));
+        assert!(!document.contains("**Custom**"));
     }
 }

@@ -10396,7 +10396,7 @@ mod tests {
 #[cfg(test)]
 mod memory_op_tests {
     use super::*;
-    use waku_protocol::boss::MemoryOperation;
+    use waku_protocol::boss::{MemoryOperation, PersonaInstructionLayer};
 
     #[test]
     fn project_bucket_is_automatic_and_other_buckets_require_an_explicit_grant() {
@@ -15175,6 +15175,220 @@ mod memory_op_tests {
                 )
                 .is_err()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The layered read model a settings surface renders: a customized
+    /// shipped specialist decomposes into the inherited Employee base,
+    /// the role's shipped default, and the appended customization — the
+    /// same sequence the employee's composed prompt carries.
+    #[test]
+    fn persona_instruction_layers_match_the_composed_prompt_order() {
+        let root = std::env::temp_dir().join(format!("boss-layers-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service.set_session_id(boss).unwrap();
+        let researcher = service.document().specialist_persona_ids
+            [&PersonaDefaultRole::Researcher];
+        service
+            .update(|state| {
+                let record = state
+                    .personas
+                    .iter_mut()
+                    .find(|persona| persona.id == researcher)
+                    .unwrap();
+                record.markdown =
+                    format!("{}\n\nAlways cite the exact file path.", record.markdown);
+                Ok(())
+            })
+            .unwrap();
+        let state = service.document();
+        let base_id = state.employee_persona_id.unwrap();
+        let base = state
+            .personas
+            .iter()
+            .find(|persona| persona.id == base_id)
+            .unwrap();
+        let record = state
+            .personas
+            .iter()
+            .find(|persona| persona.id == researcher)
+            .unwrap();
+        let layers = state.persona_instruction_layers(researcher);
+        assert_eq!(
+            layers,
+            vec![
+                PersonaInstructionLayer::Inherited {
+                    persona_id: base_id,
+                    name: base.name.clone(),
+                    markdown: base.markdown.clone(),
+                },
+                PersonaInstructionLayer::Shipped {
+                    role: PersonaDefaultRole::Researcher,
+                    markdown: shipped_persona_default(PersonaDefaultRole::Researcher)
+                        .markdown
+                        .to_owned(),
+                },
+                PersonaInstructionLayer::Custom {
+                    markdown: "Always cite the exact file path.".into(),
+                },
+            ]
+        );
+        // The composed prompt carries the same sequence — the base, then
+        // the role block holding shipped text before the customization.
+        let employee = service
+            .prepare_employee(
+                boss,
+                Some(researcher),
+                "Cite".into(),
+                None,
+                false,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        let session = employee.session_id;
+        service
+            .update(|state| {
+                state.employees.push(employee);
+                Ok(())
+            })
+            .unwrap();
+        let prompt = service.prompt_with_context(session, "Go".into());
+        let base_at = prompt.find(base.markdown.as_str()).unwrap();
+        let role_at = prompt
+            .find(&format!("Additional role — {}:", record.name))
+            .unwrap();
+        let custom_at = prompt.find("Always cite the exact file path.").unwrap();
+        assert!(base_at < role_at && role_at < custom_at);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Each persona kind contributes the layers its role implies: an
+    /// unmodified shipped role is inherited + shipped only, a custom
+    /// role is inherited + custom, and the base itself carries no
+    /// inherited layer — nor does the Boss persona.
+    #[test]
+    fn persona_instruction_layers_cover_each_persona_kind() {
+        let root = std::env::temp_dir().join(format!("boss-layers-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let custom_id = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.personas.push(BossPersona {
+                    default_purpose: None,
+                    id: custom_id,
+                    name: "Reviewer".into(),
+                    markdown: "Review the diff before touching code.".into(),
+                    pinned_files: Vec::new(),
+                    permissions: PersonaPermissions::default(),
+                    icon: None,
+                });
+                Ok(())
+            })
+            .unwrap();
+        let state = service.document();
+        let base_id = state.employee_persona_id.unwrap();
+        let researcher = state.specialist_persona_ids[&PersonaDefaultRole::Researcher];
+        // An untouched shipped role: the base and the default, nothing custom.
+        let layers = state.persona_instruction_layers(researcher);
+        assert!(matches!(
+            layers.as_slice(),
+            [
+                PersonaInstructionLayer::Inherited { persona_id, .. },
+                PersonaInstructionLayer::Shipped { role, .. },
+            ] if *persona_id == base_id && *role == PersonaDefaultRole::Researcher
+        ));
+        // A custom role: the base, then its whole text as the custom layer.
+        let layers = state.persona_instruction_layers(custom_id);
+        assert_eq!(layers.len(), 2);
+        assert!(matches!(
+            &layers[0],
+            PersonaInstructionLayer::Inherited { persona_id, .. } if *persona_id == base_id
+        ));
+        assert_eq!(
+            layers[1],
+            PersonaInstructionLayer::Custom {
+                markdown: "Review the diff before touching code.".into(),
+            }
+        );
+        // The Employee base is the root — its own text splits shipped +
+        // custom with nothing inherited.
+        let layers = state.persona_instruction_layers(base_id);
+        assert_eq!(
+            layers,
+            vec![PersonaInstructionLayer::Shipped {
+                role: PersonaDefaultRole::Employee,
+                markdown: shipped_persona_default(PersonaDefaultRole::Employee)
+                    .markdown
+                    .to_owned(),
+            }]
+        );
+        // The Boss persona never inherits the employee base.
+        let layers = state.persona_instruction_layers(state.persona_id);
+        assert_eq!(
+            layers,
+            vec![PersonaInstructionLayer::Shipped {
+                role: PersonaDefaultRole::Boss,
+                markdown: shipped_persona_default(PersonaDefaultRole::Boss)
+                    .markdown
+                    .to_owned(),
+            }]
+        );
+        // While the base is unresolved nothing inherits it — the human's
+        // choose-base card owns that state instead.
+        let state = {
+            service
+                .update(|state| {
+                    state.employee_persona_id = None;
+                    Ok(())
+                })
+                .unwrap();
+            service.document()
+        };
+        let layers = state.persona_instruction_layers(researcher);
+        assert!(matches!(
+            layers.as_slice(),
+            [PersonaInstructionLayer::Shipped { role, .. }]
+                if *role == PersonaDefaultRole::Researcher
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Saving a customization through the normal upsert path lands the
+    /// edit in the custom layer — the shipped base stays the shipped
+    /// layer rather than merging into the user's text.
+    #[test]
+    fn persona_upsert_customization_lands_in_the_custom_layer() {
+        let root = std::env::temp_dir().join(format!("boss-layers-{}", Uuid::new_v4()));
+        let service = BossService::open(root.clone()).unwrap();
+        let researcher = service.document().specialist_persona_ids
+            [&PersonaDefaultRole::Researcher];
+        service
+            .handle(
+                None,
+                BossOperation::UpsertPersona {
+                    persona: BossPersonaUpsert {
+                        default_purpose: None,
+                        id: researcher,
+                        name: "Researcher".into(),
+                        markdown: "Prefer primary sources.".into(),
+                        pinned_files: Vec::new(),
+                        permissions: PersonaPermissions::default(),
+                        icon: None,
+                    },
+                },
+            )
+            .unwrap();
+        let layers = service.document().persona_instruction_layers(researcher);
+        assert!(matches!(
+            layers.as_slice(),
+            [
+                PersonaInstructionLayer::Inherited { .. },
+                PersonaInstructionLayer::Shipped { role, .. },
+                PersonaInstructionLayer::Custom { markdown },
+            ] if *role == PersonaDefaultRole::Researcher && markdown == "Prefer primary sources."
+        ));
         fs::remove_dir_all(root).unwrap();
     }
 }
