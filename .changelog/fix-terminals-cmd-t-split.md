@@ -1,0 +1,1 @@
+- Pressing ⌘T on a floating terminal now splits it into a sibling pane in the same group instead of replacing the card, so the running shell stays visible; at the pane limit the chord shows an "at most N panes" hint, and on a maximized standalone terminal it adds the pane and restores the grid.

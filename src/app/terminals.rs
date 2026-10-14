@@ -120,6 +120,24 @@ fn terminal_group_can_add(record: &TerminalRecord, incoming: usize, limit: usize
     record.pane_of.is_none() && record.panes.len() + 1 + incoming <= limit
 }
 
+/// Which group `secondary-t` grows — a focused floating card's anchor,
+/// or the maximized standalone's even when focus sits outside its panes
+/// (a fresh card there would float over the maximized surface and bury
+/// it). Focus in any other surface's terminal yields `None` so the chord
+/// keeps that surface's own meaning.
+fn new_terminal_split_target(
+    focused_anchor: Option<Uuid>,
+    docked_terminal: Option<Uuid>,
+    maximized_anchor: Option<Uuid>,
+) -> Option<Uuid> {
+    match focused_anchor {
+        Some(anchor) if docked_terminal == Some(anchor) => Some(anchor),
+        Some(anchor) if maximized_anchor == Some(anchor) => Some(anchor),
+        Some(_) => None,
+        None => maximized_anchor,
+    }
+}
+
 fn terminal_groups_fit(
     records: &HashMap<Uuid, TerminalRecord>,
     dragged_id: Uuid,
@@ -1720,6 +1738,31 @@ impl Waku {
         }
     }
 
+    /// `secondary-t`'s in-place split for a focused floating card or a
+    /// maximized standalone — a fresh pane joins the group rooted in the
+    /// anchor's directory and takes focus. At the group's cap nothing is
+    /// created, hidden, or replaced: the chord reports the limit the same
+    /// way the drop affordance does and returns `false`.
+    fn new_terminal_split(
+        &mut self,
+        anchor_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(record) = self.terminal_records.get(&anchor_id) else {
+            return false;
+        };
+        if !terminal_group_can_add(record, 1, STANDALONE_TERMINAL_MAX_PANES) {
+            self.show_toast(tr!(
+                "terminal.split_at_max",
+                max = STANDALONE_TERMINAL_MAX_PANES
+            ));
+            return false;
+        }
+        self.split_terminal(anchor_id, STANDALONE_TERMINAL_MAX_PANES, window, cx)
+            .is_some()
+    }
+
     pub(super) fn toggle_terminal_maximize_action(
         &mut self,
         _: &ToggleTerminalMaximize,
@@ -1779,6 +1822,36 @@ impl Waku {
             }
         }
         None
+    }
+
+    /// The group anchor of the terminal surface the keyboard is on — a
+    /// focused member's anchor, or the floating card's while focus sits
+    /// on its chrome (the split/expand/close and pane-close buttons are
+    /// siblings of the views, so `focused_terminal_id` alone misses
+    /// them). ⌘T reads the card's chrome focus as "a floating terminal
+    /// is focused" so the chord still splits instead of replacing it.
+    fn focused_terminal_anchor(&self, window: &Window, cx: &App) -> Option<Uuid> {
+        if let Some(terminal_id) = self.focused_terminal_id(window, cx) {
+            return Some(self.terminal_group_anchor(terminal_id));
+        }
+        let anchor_id = self
+            .docked_terminal
+            .filter(|id| self.docked_terminal_visible(*id))?;
+        let chrome = [
+            "docked-terminal-split".to_owned(),
+            format!("docked-terminal-expand-{anchor_id}"),
+            format!("docked-terminal-close-{anchor_id}"),
+        ]
+        .into_iter()
+        .chain(
+            self.terminal_group_panes(anchor_id)
+                .into_iter()
+                .map(|pane_id| format!("terminal-pane-close-{pane_id}")),
+        );
+        chrome
+            .filter_map(|key| self.transcript_control_focuses.borrow().get(&key).cloned())
+            .any(|handle| handle.is_focused(window))
+            .then_some(anchor_id)
     }
 
     /// Close one member of a split group — a pane leaves its anchor, and
@@ -2551,14 +2624,19 @@ impl Waku {
         cx.notify();
     }
 
-    /// `secondary-t` — always a fresh terminal, rooted where the user is,
-    /// opened focused in the floating card. A focused right-panel terminal
-    /// keeps the chord in the panel: the new terminal joins its strip in
-    /// the same directory. Over the boss chat the chord first asks which
-    /// project the terminal belongs to. Everywhere else the terminal
-    /// lands in the Terminals group — rooted in the selected terminal's
-    /// directory, the selected session's workspace, or ~ when the main
-    /// area shows neither — and floats over the current surface.
+    /// `secondary-t` — always a fresh terminal, rooted where the user is.
+    /// The chord never strands the terminal it was pressed on: a focused
+    /// floating card splits its own group in place instead of being
+    /// replaced, and a maximized standalone grows its underlying grid and
+    /// restores it rather than taking a floating overlay that buries the
+    /// maximized pane. At the group's cap nothing is created — the chord
+    /// only reports the limit. A focused right-panel terminal keeps the
+    /// chord in the panel: the new terminal joins its strip in the same
+    /// directory. Over the boss chat the chord first asks which project
+    /// the terminal belongs to. Everywhere else the terminal lands in the
+    /// Terminals group — rooted in the selected terminal's directory, the
+    /// selected session's workspace, or ~ when the main area shows neither
+    /// — and floats over the current surface.
     pub(super) fn new_terminal_action(
         &mut self,
         _: &NewTerminal,
@@ -2566,6 +2644,23 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.settings_page = None;
+        let focused_anchor = self.focused_terminal_anchor(window, cx);
+        let maximized_anchor = self.selected_terminal.filter(|anchor_id| {
+            self.maximized_terminal_pane
+                .is_some_and(|pane| self.terminal_group_panes(*anchor_id).contains(&pane))
+        });
+        if let Some(anchor_id) =
+            new_terminal_split_target(focused_anchor, self.docked_terminal, maximized_anchor)
+        {
+            if self.new_terminal_split(anchor_id, window, cx) && maximized_anchor == Some(anchor_id)
+            {
+                // The new pane joins the grid — keeping the old pane
+                // maximized would hide it, so the maximize restores.
+                self.maximized_terminal_pane = None;
+            }
+            cx.notify();
+            return;
+        }
         if let Some(terminal_id) = self.focused_right_panel_terminal(window, cx)
             && let Some(session_id) = self.state.selected_session
             && let Some(working_directory) = self.terminal_cwd(terminal_id, cx)
@@ -3157,6 +3252,12 @@ impl Waku {
                             )
                             .child(location)
                             .child(div().flex_1())
+                            .child(self.render_terminal_split_button(
+                                "docked-terminal-split",
+                                terminal_id,
+                                STANDALONE_TERMINAL_MAX_PANES,
+                                cx,
+                            ))
                             .child(expand_button)
                             .child(close_button),
                     )
@@ -3985,6 +4086,45 @@ mod tests {
             toggle_maximized_terminal_pane(Some(second), Uuid::nil(), &panes),
             Some(second)
         );
+    }
+
+    #[test]
+    fn new_terminal_splits_the_focused_floating_group_and_the_maximized_standalone() {
+        let floating = Uuid::from_u128(1);
+        let standalone = Uuid::from_u128(2);
+        let panel = Uuid::from_u128(3);
+        // ⌘T on a focused floating card splits its own group in place —
+        // even while a maximized standalone sits underneath.
+        assert_eq!(
+            new_terminal_split_target(Some(floating), Some(floating), None),
+            Some(floating)
+        );
+        assert_eq!(
+            new_terminal_split_target(Some(floating), Some(floating), Some(standalone)),
+            Some(floating)
+        );
+        // A focused member of the maximized standalone grows that grid.
+        assert_eq!(
+            new_terminal_split_target(Some(standalone), None, Some(standalone)),
+            Some(standalone)
+        );
+        // Focus in any other surface's terminal — a panel tab, or an
+        // unmaximized standalone — keeps the chord's usual placement.
+        assert_eq!(
+            new_terminal_split_target(Some(panel), Some(floating), Some(standalone)),
+            None
+        );
+        assert_eq!(
+            new_terminal_split_target(Some(standalone), Some(floating), None),
+            None
+        );
+        // With no terminal focused a maximized standalone still takes the
+        // split; anything else falls through to the floating card.
+        assert_eq!(
+            new_terminal_split_target(None, None, Some(standalone)),
+            Some(standalone)
+        );
+        assert_eq!(new_terminal_split_target(None, Some(floating), None), None);
     }
 
     fn split_record(id: Uuid) -> TerminalRecord {
