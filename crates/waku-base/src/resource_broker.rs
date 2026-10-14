@@ -2011,6 +2011,45 @@ mod tests {
     }
 
     #[test]
+    fn admission_state_ignores_unknown_claim_fields() {
+        let h = Harness::new();
+        let task = Uuid::new_v4();
+        let reservation = Uuid::new_v4();
+        let claim = AdmissionClaim {
+            daemon: Uuid::new_v4(),
+            provider: "codex".into(),
+            model: "gpt-5.5".into(),
+            live_limit: 2,
+            hard_cap: 2,
+            allow_burst: false,
+            skip_wait_order: false,
+        };
+        let admitted = h
+            .broker
+            .try_admission(task, reservation, build(), "test".into(), claim)
+            .unwrap();
+        assert!(admitted.granted);
+
+        let path = h.broker.root.join("state.json");
+        let mut state: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        state["reservations"][0]["admission"]["newer_admission_field"] =
+            serde_json::json!("ignored by older daemons");
+        fs::write(&path, serde_json::to_vec(&state).unwrap()).unwrap();
+
+        let loaded = h
+            .broker
+            .transaction(
+                task,
+                ResourceOperation::Status { id: None },
+                Observation::default(),
+            )
+            .unwrap();
+        let loaded_claim = loaded.reservations[0].admission.as_ref().unwrap();
+        assert_eq!(loaded_claim.provider, "codex");
+        assert!(!loaded_claim.skip_wait_order);
+    }
+
+    #[test]
     fn invalid_policy_or_ledger_fails_closed_and_unknown_inventory_blocks_resident_only() {
         let h = Harness::new();
         let a = Uuid::new_v4();

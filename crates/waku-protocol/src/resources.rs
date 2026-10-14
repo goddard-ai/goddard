@@ -34,7 +34,6 @@ impl ResourceSet {
 /// so a policy change takes effect on the next try without re-writing the
 /// ledger.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
-#[serde(deny_unknown_fields)]
 pub struct AdmissionClaim {
     /// Stable daemon identity the claim is namespaced under — the Boss
     /// document's identity id, not a process id.
