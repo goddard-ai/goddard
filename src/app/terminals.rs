@@ -3238,6 +3238,9 @@ impl Waku {
                 div()
                     .id(SharedString::from(format!("docked-terminal-{terminal_id}")))
                     .key_context("DockedTerminal")
+                    .on_action(cx.listener(move |this, _: &CloseDockedTerminal, window, cx| {
+                        this.close_main_terminal(terminal_id, window, cx);
+                    }))
                     .on_action(cx.listener(|this, _: &DismissDockedTerminal, window, cx| {
                         this.dismiss_docked_terminal(window, cx);
                     }))

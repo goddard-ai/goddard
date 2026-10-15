@@ -140,6 +140,7 @@ actions!(
         ToggleSessionPin,
         ToggleTerminals,
         NewTerminal,
+        CloseDockedTerminal,
         DismissDockedTerminal,
         SplitTerminal,
         RunProjectScript,
@@ -826,6 +827,10 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-f", FocusProjectsFilter, Some("GitSettingsPage")),
         KeyBinding::new("escape", DismissProjectsLayer, Some("GitSettingsPage")),
         KeyBinding::new("escape", DismissInbox, Some("InboxPage")),
+        // ⌘W closes the floating terminal from anywhere in its card,
+        // including when a header control has focus. Open command bars
+        // and context menus keep their own shortcuts.
+        KeyBinding::new("secondary-w", CloseDockedTerminal, Some("DockedTerminal")),
         // Escape hides the floating terminal card — the shell keeps
         // running under its sidebar row. An open command bar or context
         // menu inside the card keeps its own Escape.

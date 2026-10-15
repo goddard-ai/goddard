@@ -1,0 +1,1 @@
+- In a floating terminal, press ⌘W to close the terminal and its shell; press Escape to hide the card while keeping the shell running.

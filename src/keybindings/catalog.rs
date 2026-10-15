@@ -1085,6 +1085,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "terminal.close_docked",
+        action: || Box::new(crate::CloseDockedTerminal),
+        title_key: "common.close",
+        title_index: None,
+        category: C::Terminal,
+        editability: MODAL_NAV,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "terminal.dismiss_docked",
         action: || Box::new(crate::DismissDockedTerminal),
         title_key: "shortcuts.dismiss",
@@ -2868,6 +2877,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("projects.focus_filter", All, "secondary-f", GitSettingsPage),
     e("projects.dismiss_layer", All, "escape", GitSettingsPage),
     e("inbox.dismiss", All, "escape", InboxPage),
+    e("terminal.close_docked", All, "secondary-w", DockedTerminal),
     e(
         "terminal.dismiss_docked",
         All,
