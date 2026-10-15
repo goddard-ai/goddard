@@ -5093,7 +5093,9 @@ impl Waku {
                     })
                     .child(icon("icons/brain.svg", 14.0, theme.text_secondary)),
             )
-            .when_some(status_indicator, |row, indicator| row.child(indicator))
+            .when_some(status_indicator, |row, indicator| {
+                row.child(Waku::sidebar_status_slot(indicator))
+            })
             .into_any_element()
     }
 

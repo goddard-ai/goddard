@@ -6609,6 +6609,21 @@ impl Waku {
         }
     }
 
+    /// The trailing sidebar control slot is 20 px wide, matching the
+    /// hover-revealed archive button. Status glyphs stay centered in that
+    /// same slot so changing status does not move their horizontal position.
+    pub(super) fn sidebar_status_slot(indicator: AnyElement) -> AnyElement {
+        div()
+            .flex_none()
+            .w(px(20.0))
+            .h(px(18.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(indicator)
+            .into_any_element()
+    }
+
     /// The body a session row shares between the sidebar and a Big Picture
     /// card header: title plus status/archive on top, project or branch
     /// detail below, and — while the composer-drafts setting is on, the task
@@ -6715,10 +6730,13 @@ impl Waku {
         };
         let status_indicator = self.session_status_indicator(session, &theme);
         let has_indicator = status_indicator.is_some() || session.incognito;
-        // The pinned right-edge cluster holds the status indicator and the
-        // incognito glyph — reserve room for both when a task shows each.
+        // The pinned right-edge cluster holds the 20 px status slot and the
+        // 12 px incognito glyph. Reserve room for each so neither overlaps
+        // the title when both are present.
         let indicator_margin = if status_indicator.is_some() && session.incognito {
-            px(22.0)
+            px(30.0)
+        } else if status_indicator.is_some() {
+            px(14.0)
         } else {
             px(6.0)
         };
@@ -6986,14 +7004,7 @@ impl Waku {
                                     )
                                 })
                                 .when_some(status_indicator, |element, indicator| {
-                                    element.child(
-                                        div()
-                                            .w(px(12.0))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .child(indicator),
-                                    )
+                                    element.child(Self::sidebar_status_slot(indicator))
                                 }),
                         )
                     }),
@@ -9608,7 +9619,7 @@ mod tests {
                     .flex()
                     .items_center()
                     .text_size(sp(13.5))
-                    .mr(px(6.0))
+                    .mr(px(14.0))
                     .child(self.input.clone())
                     .into_any_element()
             } else {
@@ -9622,7 +9633,7 @@ mod tests {
                     .text_overflow(gpui::TextOverflow::Truncate("...".into()))
                     .text_size(sp(13.5))
                     .on_click(|_, _, _| {})
-                    .mr(px(6.0))
+                    .mr(px(14.0))
                     .child(self.title.clone())
                     .into_any_element()
             };
@@ -9666,6 +9677,7 @@ mod tests {
                                 )
                                 .child(
                                     div()
+                                        .debug_selector(|| "session-archive".into())
                                         .id("session-archive")
                                         .flex_none()
                                         .w_0()
@@ -9683,7 +9695,12 @@ mod tests {
                                         .top_0()
                                         .bottom_0()
                                         .right_0()
-                                        .w(px(12.0))
+                                        .flex_none()
+                                        .w(px(20.0))
+                                        .h(px(18.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
                                         .group_hover("session-row", |style| style.invisible())
                                         .child(div().size(px(7.0)).rounded_full()),
                                 ),
@@ -9726,6 +9743,20 @@ mod tests {
         let before = cx
             .debug_bounds("status-indicator")
             .expect("status indicator should paint");
+
+        cx.simulate_mouse_move(before.center(), None, Modifiers::none());
+        cx.run_until_parked();
+        let status_slot = cx
+            .debug_bounds("status-indicator")
+            .expect("status slot should remain laid out while hovered");
+        let archive = cx
+            .debug_bounds("session-archive")
+            .expect("archive button should paint on hover");
+        assert_eq!(status_slot.size.width, px(20.0));
+        assert_eq!(archive.size.width, px(20.0));
+        assert_eq!(status_slot.center().x, archive.center().x);
+        cx.simulate_mouse_move(point(px(400.0), px(300.0)), None, Modifiers::none());
+        cx.run_until_parked();
 
         // Right-click the row, release in place, then activate Rename from
         // the card — the same path the context menu takes in production.
