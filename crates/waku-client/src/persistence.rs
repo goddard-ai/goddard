@@ -19,6 +19,7 @@ use crate::{
     Command, DaemonExposureSettings, DaemonSettings, DaemonSupervisor, ResponsePayload,
     SessionDetailTail,
 };
+use waku_protocol::MAX_WIRE_MESSAGE_BYTES;
 use waku_protocol::computer_use::ComputerAppGrant;
 use waku_protocol::i18n::AppLanguage;
 use waku_protocol::identity::DATA_DIRECTORY_NAME;
@@ -3892,6 +3893,79 @@ fn wire_session(
     (wire, Some(sent))
 }
 
+/// The session payload one `SaveTaskState` frame may carry. The daemon
+/// closes the connection on any message over `MAX_WIRE_MESSAGE_BYTES`
+/// before the request decodes, so a save batching more detail than this
+/// ends the socket — and every session in the batch stays dirty, wedging
+/// each later save the same way. Headroom covers the request envelope,
+/// projects, `live_session_ids`, and tails.
+const MAX_SAVE_FRAME_BYTES: usize = MAX_WIRE_MESSAGE_BYTES - 8 * 1024 * 1024;
+
+/// Serialized JSON size of a value without materializing the string.
+fn serialized_len(value: &impl Serialize) -> Option<usize> {
+    struct ByteCount(usize);
+    impl io::Write for ByteCount {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0 += buf.len();
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = ByteCount(0);
+    serde_json::to_writer(&mut count, value).ok()?;
+    Some(count.0)
+}
+
+/// One session's wire form plus the bookkeeping a successful send earns.
+struct SizedSaveSession {
+    wire: AgentSession,
+    /// The splice entry pairing a truncated wire detail with the daemon's
+    /// stored prefix — `None` when the wire form is the whole session.
+    tail: Option<SessionDetailTail>,
+    /// The baseline to install once the frame is accepted — `None` for
+    /// skeletons and for details a frame could not carry.
+    cursor: Option<SaveCursor>,
+    /// `wire`'s serialized JSON size in bytes.
+    bytes: usize,
+}
+
+/// Splits one save's sessions into frames that each serialize under
+/// `MAX_SAVE_FRAME_BYTES` — see the constant for why a single oversized
+/// frame is unrecoverable. A session too large for any frame degrades to
+/// its list columns: the daemon merges those and keeps the detail it
+/// already stores, and its cursor stays put so a later, smaller save can
+/// still splice a tail. An empty save still yields one frame — projects
+/// and `live_session_ids` ride it as before.
+fn pack_save_frames(prepared: Vec<SizedSaveSession>) -> Vec<Vec<SizedSaveSession>> {
+    let mut frames = vec![Vec::new()];
+    let mut frame_bytes = 0usize;
+    for mut item in prepared {
+        if item.bytes > MAX_SAVE_FRAME_BYTES {
+            eprintln!(
+                "goddard: session {} detail exceeds the save frame budget ({} bytes); \
+                 saving list columns only",
+                item.wire.id, item.bytes
+            );
+            item.wire = item.wire.list_projection();
+            item.tail = None;
+            item.cursor = None;
+            item.bytes = serialized_len(&item.wire).unwrap_or(0);
+        }
+        if frame_bytes + item.bytes > MAX_SAVE_FRAME_BYTES {
+            frames.push(Vec::new());
+            frame_bytes = 0;
+        }
+        frame_bytes += item.bytes;
+        frames
+            .last_mut()
+            .expect("one frame always exists")
+            .push(item);
+    }
+    frames
+}
+
 pub struct StateStore {
     path: PathBuf,
     app_state_path: PathBuf,
@@ -4288,7 +4362,7 @@ impl StateStore {
                 DaemonKey::Local => !self.daemons.is_remote_session(*id),
                 DaemonKey::Remote(_) => self.daemons.session_owner(*id) == key,
             };
-            let projects = state
+            let projects: Vec<Project> = state
                 .projects
                 .iter()
                 .filter(|project| match key {
@@ -4297,7 +4371,7 @@ impl StateStore {
                 })
                 .cloned()
                 .collect();
-            let live_session_ids = state
+            let live_session_ids: Vec<Uuid> = state
                 .sessions
                 .iter()
                 .filter(|session| owned(&session.id))
@@ -4308,49 +4382,65 @@ impl StateStore {
             // catalogue it as a phantom "New task" skeleton in every client's
             // next load. Archived employee shells are daemon-owned even before
             // their first turn, so their archive flag must still be sent.
-            let mut session_tails = Vec::new();
-            let mut sent_cursors = Vec::new();
-            let sessions: Vec<AgentSession> = state
-                .sessions
-                .iter()
-                .filter(|session| {
-                    dirty_ids.contains(&session.id)
-                        && (session.has_started()
-                            || (session.boss_managed && session.archived_at.is_some()))
-                        && owned(&session.id)
-                })
-                .map(|session| {
-                    let cursor = self.save_cursors.lock().get(&session.id).copied();
-                    let (wire, sent) = wire_session(session, cursor, &mut session_tails);
-                    if let Some(sent) = sent {
-                        sent_cursors.push((session.id, sent));
+            let mut prepared = Vec::new();
+            for session in state.sessions.iter().filter(|session| {
+                dirty_ids.contains(&session.id)
+                    && (session.has_started()
+                        || (session.boss_managed && session.archived_at.is_some()))
+                    && owned(&session.id)
+            }) {
+                let cursor = self.save_cursors.lock().get(&session.id).copied();
+                let mut tails = Vec::new();
+                let (wire, sent) = wire_session(session, cursor, &mut tails);
+                prepared.push(SizedSaveSession {
+                    bytes: serialized_len(&wire).unwrap_or(usize::MAX),
+                    wire,
+                    tail: tails.into_iter().next(),
+                    cursor: sent,
+                });
+            }
+            for frame in pack_save_frames(prepared) {
+                let frame_ids: Vec<Uuid> = frame.iter().map(|item| item.wire.id).collect();
+                let mut session_tails = Vec::new();
+                let mut frame_cursors = Vec::new();
+                let sessions = frame
+                    .into_iter()
+                    .map(|item| {
+                        if let Some(tail) = item.tail {
+                            session_tails.push(tail);
+                        }
+                        if let Some(cursor) = item.cursor {
+                            frame_cursors.push((item.wire.id, cursor));
+                        }
+                        item.wire
+                    })
+                    .collect();
+                match daemon.client().notify(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    Command::SaveTaskState {
+                        projects: projects.clone(),
+                        live_session_ids: live_session_ids.clone(),
+                        sessions,
+                        session_tails,
+                    },
+                ) {
+                    Ok(()) => {
+                        saved_ids.extend(frame_ids);
+                        let mut cursors = self.save_cursors.lock();
+                        for (session_id, cursor) in frame_cursors {
+                            cursors.insert(session_id, cursor);
+                        }
                     }
-                    wire
-                })
-                .collect();
-            let dirty_for_daemon: HashSet<Uuid> =
-                sessions.iter().map(|session| session.id).collect();
-            match daemon.client().notify(
-                Uuid::nil(),
-                Uuid::nil(),
-                Command::SaveTaskState {
-                    projects,
-                    live_session_ids,
-                    sessions,
-                    session_tails,
-                },
-            ) {
-                Ok(()) => {
-                    saved_ids.extend(dirty_for_daemon);
-                    let mut cursors = self.save_cursors.lock();
-                    for (session_id, cursor) in sent_cursors {
-                        cursors.insert(session_id, cursor);
+                    Err(error) => {
+                        if first_error.is_none() {
+                            first_error = Some(to_io_error(error));
+                        }
+                        // A closed connection cannot take the remaining
+                        // frames; their sessions stay dirty for the next save.
+                        break;
                     }
                 }
-                Err(error) if first_error.is_none() => {
-                    first_error = Some(to_io_error(error));
-                }
-                Err(_) => {}
             }
         }
         // Skipped drafts remain dirty so the save after their first prompt
@@ -4625,6 +4715,59 @@ mod tests {
         assert!(tails.is_empty());
         assert!(!wire.detail_loaded);
         assert!(sent.is_none());
+    }
+
+    fn sized(session: &AgentSession) -> SizedSaveSession {
+        SizedSaveSession {
+            bytes: serialized_len(session).unwrap(),
+            wire: session.clone(),
+            tail: None,
+            cursor: Some(SaveCursor {
+                messages: 0,
+                blocks: 0,
+                signature: 0,
+                tail_sends: 0,
+            }),
+        }
+    }
+
+    #[test]
+    fn pack_save_frames_shares_a_frame_under_the_budget() {
+        let frames = pack_save_frames(vec![sized(&detailed_session()), sized(&detailed_session())]);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].len(), 2);
+    }
+
+    #[test]
+    fn pack_save_frames_splits_sessions_over_the_budget() {
+        let mut large = detailed_session();
+        large.push_message(MessageRole::Assistant, "x".repeat(MAX_SAVE_FRAME_BYTES / 2));
+        let frames = pack_save_frames(vec![sized(&large), sized(&large)]);
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].len() + frames[1].len(), 2);
+    }
+
+    #[test]
+    fn pack_save_frames_degrades_an_oversized_session_to_its_list_columns() {
+        let mut huge = detailed_session();
+        huge.push_message(
+            MessageRole::Assistant,
+            "x".repeat(MAX_SAVE_FRAME_BYTES + 1024),
+        );
+        let frames = pack_save_frames(vec![sized(&huge)]);
+        assert_eq!(frames.len(), 1);
+        let item = &frames[0][0];
+        assert!(!item.wire.detail_loaded);
+        assert!(item.wire.messages.is_empty());
+        assert!(item.tail.is_none());
+        assert!(item.cursor.is_none());
+    }
+
+    #[test]
+    fn pack_save_frames_still_sends_an_empty_save() {
+        let frames = pack_save_frames(Vec::new());
+        assert_eq!(frames.len(), 1);
+        assert!(frames[0].is_empty());
     }
 
     #[test]
