@@ -2883,6 +2883,7 @@ fn boss_goal_employee_element(
             true,
             &theme,
             None,
+            None,
         ))
         // The flagged employee wears the same unread dot the sidebar row
         // carries — boss-flagged attention is the only "unread" an

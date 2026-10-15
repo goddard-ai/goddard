@@ -5131,6 +5131,7 @@ impl Waku {
                 false,
                 &theme,
                 None,
+                None,
             ))
             .when(speech_visible, |row| {
                 let label = if speech_playing {
@@ -5467,6 +5468,46 @@ impl Waku {
                 }
             }))
         });
+        let status_slot = |indicator| {
+            div()
+                .flex_none()
+                .w(px(20.0))
+                .h(px(18.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(indicator)
+        };
+        let title_accessory = if status_indicator.is_some() || archive_button.is_some() {
+            Some(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .when_some(status_indicator, |row, indicator| {
+                        // The status and archive control share a title-line
+                        // slot, matching the task row's status placement.
+                        if archivable {
+                            row.child(
+                                div()
+                                    .flex_none()
+                                    .overflow_hidden()
+                                    .group_hover(group_name.clone(), |style| {
+                                        style.w_0().opacity(0.0)
+                                    })
+                                    .child(status_slot(indicator)),
+                            )
+                        } else {
+                            row.child(status_slot(indicator))
+                        }
+                    })
+                    .when_some(archive_button, |row, button| row.child(button))
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
         div()
             .id(format!("boss-employee-{id}"))
             .when(archivable, |row| row.group(group_name.clone()))
@@ -5516,6 +5557,7 @@ impl Waku {
                 true,
                 &theme,
                 detail_provider,
+                title_accessory,
             ))
             // The flagged employee wears the same unread dot its folded
             // group header does — boss-flagged attention is the only
@@ -5533,24 +5575,6 @@ impl Waku {
                         .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
                 )
             })
-            .when_some(status_indicator, |row, indicator| {
-                // On an archivable row the status yields its slot to the
-                // hover-revealed archive control — it collapses out of the
-                // flow rather than just hiding so the button lands where
-                // the indicator stood.
-                if archivable {
-                    row.child(
-                        div()
-                            .flex_none()
-                            .overflow_hidden()
-                            .group_hover(group_name.clone(), |style| style.w_0().opacity(0.0))
-                            .child(indicator),
-                    )
-                } else {
-                    row.child(indicator)
-                }
-            })
-            .when_some(archive_button, |row, button| row.child(button))
             .into_any_element()
     }
 
@@ -5781,6 +5805,7 @@ impl Waku {
                 Some(planning_project_icon),
                 true,
                 &theme,
+                None,
                 None,
             ))
             .when_some(status_indicator, |row, indicator| {
@@ -11750,6 +11775,7 @@ pub(super) fn boss_sidebar_label(
     show_job_icon: bool,
     theme: &Theme,
     provider: Option<ProviderKind>,
+    title_accessory: Option<AnyElement>,
 ) -> Div {
     div()
         .flex_1()
@@ -11783,7 +11809,8 @@ pub(super) fn boss_sidebar_label(
                             .text_color(theme.text_tertiary)
                             .child(project),
                     )
-                }),
+                })
+                .when_some(title_accessory, |line, accessory| line.child(accessory)),
         )
         .child(
             div()
