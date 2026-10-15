@@ -633,6 +633,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // `secondary` is Command on macOS and Control elsewhere.
         KeyBinding::new("secondary-q", Quit, None),
         KeyBinding::new("secondary-w", CloseWindow, None),
+        // A focused floating terminal hands ⌘N to the task composer; the
+        // NewSession action already creates/selects the draft and focuses it.
+        KeyBinding::new("secondary-n", NewSession, Some("DockedTerminal")),
         KeyBinding::new("secondary-n", NewSession, None),
         // ⌘⇧N is "New task in…" — the palette's directory picker — on every
         // surface. Only an already-open project switcher takes it first,

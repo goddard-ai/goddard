@@ -2788,6 +2788,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     // === crate::bind_keys =====================================================================
     e("app.quit", All, "secondary-q", ""),
     e("app.close_window", All, "secondary-w", ""),
+    e("app.new_task", All, "secondary-n", DockedTerminal),
     e("app.new_task", All, "secondary-n", ""),
     e("app.new_task_in", All, "secondary-shift-n", ""),
     e("app.new_project", All, "secondary-o", ""),
@@ -3120,6 +3121,7 @@ mod ctx {
     pub const ShortcutsDialog: &str = "ShortcutsDialog";
     pub const TerminalBarInput: &str = "TerminalCommandBar > TextInput";
     pub const TerminalCommandBar: &str = "TerminalCommandBar";
+    pub const DockedTerminal: &str = "DockedTerminal";
     /// The floating terminal card — Escape hides it, but an open command
     /// bar or context menu inside keeps its own dismiss first.
     pub const DockedTerminalNotCommandBar: &str =

@@ -1,0 +1,1 @@
+- Pressing ⌘N from a focused floating terminal opens a task and focuses its composer for immediate typing.
