@@ -47,6 +47,10 @@ pub struct AgentPrompt {
     /// prompt is confirmed delivered. `None` for prompts that never parked —
     /// steer-mode requests and queue prompts delivered immediately.
     pub queued_id: Option<Uuid>,
+    /// Stable id for a user steer persisted in a Boss chat's follow-up queue
+    /// before it is sent. Acceptance settles this exact queue entry;
+    /// rejection leaves it parked for the successor generation.
+    pub submission_id: Option<Uuid>,
     /// Set when the steer is a daemon-injected context block rather than
     /// user or agent text: its `steerAccepted` echo stays out of the
     /// transcript and, for [`ContextSteer::Memory`], marks the session's
@@ -651,12 +655,19 @@ impl AgentState {
     /// be attributed to its sender. A mirrored queue entry may be in flight
     /// only once — a drain that re-seeded its parked chip folds onto the
     /// in-flight steer rather than issuing a duplicate. Returns whether the
-    /// steer was recorded; `false` means an identical `queued_id` already
-    /// awaits its echo, so the caller drops the extra entry instead of
-    /// steering the provider twice.
+    /// steer was recorded; `false` means an identical queue or submission id
+    /// already awaits its echo, so the caller drops the extra entry instead
+    /// of steering the provider twice.
     pub fn record_pending_steer(&self, session_id: Uuid, prompt: AgentPrompt) -> bool {
         let mut steers = self.pending_steers.lock();
         let pending = steers.entry(session_id).or_default();
+        if let Some(submission_id) = prompt.submission_id
+            && pending
+                .iter()
+                .any(|steer| steer.submission_id == Some(submission_id))
+        {
+            return false;
+        }
         if let Some(queued_id) = prompt.queued_id
             && pending
                 .iter()
@@ -1105,6 +1116,7 @@ mod tests {
             transport: None,
             sender,
             queued_id: Some(Uuid::new_v4()),
+            submission_id: None,
             context: None,
             hidden: false,
             report_trigger: None,
@@ -1193,6 +1205,7 @@ mod tests {
                     transport: None,
                     sender: None,
                     queued_id: Some(restored_id),
+                    submission_id: None,
                     context: None,
                     hidden: false,
                     report_trigger: None,
@@ -1227,6 +1240,7 @@ mod tests {
                 transport: None,
                 sender: None,
                 queued_id: None,
+                submission_id: None,
                 context: None,
                 hidden: false,
                 report_trigger: None,
@@ -1271,6 +1285,7 @@ mod tests {
                 transport: None,
                 sender: None,
                 queued_id: None,
+                submission_id: None,
                 context: Some(ContextSteer::Memory),
                 hidden: false,
                 report_trigger: None,

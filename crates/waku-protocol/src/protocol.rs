@@ -230,6 +230,12 @@ pub enum Command {
         /// provider-facing message no client renders as a transcript row.
         #[serde(default, skip_serializing_if = "crate::model::is_false")]
         hidden: bool,
+        /// A human Boss steer is mirrored into the session's durable queue
+        /// before provider delivery. Its id then follows the request through
+        /// rotation or acceptance, so a lost provider acknowledgement cannot
+        /// drop the user's instruction.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        queued_message: Option<crate::model::QueuedMessage>,
     },
     /// Ask the live provider runtime to compact the session's context.
     /// Fire-and-forget like [`Self::Goal`]: admission, progress, and the

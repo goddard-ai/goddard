@@ -2657,6 +2657,7 @@ impl WakuBackend {
                     sender: Some(sender),
                     // A direct steer never parks — no chip to mirror.
                     queued_id: None,
+                    submission_id: None,
                     context: None,
                     hidden: true,
                     report_trigger: report_trigger.map(|mut trigger| {

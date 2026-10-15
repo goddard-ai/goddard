@@ -343,7 +343,23 @@ impl DriverControl for RemoteDriverControl {
     }
 
     fn steer(&self, prompt: String, hidden: bool) {
-        self.notify(waku_client::Command::Steer { prompt, hidden });
+        self.notify(waku_client::Command::Steer {
+            prompt,
+            hidden,
+            queued_message: None,
+        });
+    }
+
+    fn steer_with_submission(
+        &self,
+        prompt: String,
+        queued_message: waku_protocol::model::QueuedMessage,
+    ) {
+        self.notify(waku_client::Command::Steer {
+            prompt,
+            hidden: false,
+            queued_message: Some(queued_message),
+        });
     }
 
     fn cancel(&self) {

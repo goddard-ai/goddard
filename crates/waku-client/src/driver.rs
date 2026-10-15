@@ -8,7 +8,7 @@ use uuid::Uuid;
 use waku_protocol::computer_use::ComputerToolRequest;
 use waku_protocol::model::{
     BackgroundWorkKey, DriverEvent, GoalOperation, MessageAttachment, ProviderResumeCursor,
-    RuntimeMode, UserInputAnswer,
+    QueuedMessage, RuntimeMode, UserInputAnswer,
 };
 
 #[derive(Clone)]
@@ -71,6 +71,11 @@ impl DriverHandle {
     /// row for it.
     pub fn steer(&self, prompt: String, hidden: bool) {
         self.inner.steer(prompt, hidden);
+    }
+
+    /// Deliver a visible steer with its durable Boss queue mirror.
+    pub fn steer_with_submission(&self, prompt: String, queued_message: QueuedMessage) {
+        self.inner.steer_with_submission(prompt, queued_message);
     }
 
     pub fn cancel(&self) {
@@ -163,6 +168,9 @@ pub trait DriverControl: Send + Sync {
         false
     }
     fn steer(&self, _prompt: String, _hidden: bool) {}
+    fn steer_with_submission(&self, prompt: String, _queued_message: QueuedMessage) {
+        self.steer(prompt, false);
+    }
     fn cancel(&self);
     fn cancel_computer_use(&self) {}
     fn refresh_background_work(&self) {}

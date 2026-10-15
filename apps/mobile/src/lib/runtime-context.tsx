@@ -10,6 +10,7 @@ import type {
   UserInputAnswer,
 } from '@waku/client';
 import {
+  acceptQueuedSteerPreview,
   continuationPrompt,
   dropQueuedMessage,
   managedGoalDecision,
@@ -90,6 +91,7 @@ interface PendingSubmission {
   providerPrompt: string;
   displayContent: string;
   attachments: MessageAttachment[];
+  queuedId?: string;
 }
 
 /** Stream deltas commit at ≤ ~8.3 Hz, the desktop stream pump's cadence: the
@@ -391,6 +393,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       current: AgentSession;
       mutated: boolean;
       settled: boolean;
+      drainQueue: boolean;
       removeRuntime: boolean;
     }
     const reduceOne = (state: FlushState, event: SequencedEvent) => {
@@ -410,38 +413,67 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         const pending = pendingSteers.current.get(session.id)?.shift();
         const content = payload.message ?? pending?.providerPrompt;
         if (content) {
-          state.current = {
-            ...state.current,
-            messages: [
-              ...state.current.messages,
-              {
-                id: clock.randomUUID(),
-                turn_id: state.current.turns.at(-1)?.id ?? null,
-                role: 'user',
+          const queuedId = pending?.queuedId ?? (state.current.boss_managed
+            ? state.current.queued_messages?.find((message) => message.content === content)?.id
+            : undefined);
+          state.current = queuedId
+            ? acceptQueuedSteerPreview(
+                state.current,
+                queuedId,
                 content,
-                display_content: pending && (
-                  pending.attachments.length || pending.providerPrompt !== pending.displayContent
-                ) ? pending.displayContent : null,
-                attachments: pending?.attachments ?? [],
-                created_at: clock.nowSeconds(),
-                streaming: false,
-              },
-            ],
-          };
+                state.current.turns.at(-1)?.id ?? null,
+              )
+            : {
+                ...state.current,
+                messages: [
+                  ...state.current.messages,
+                  {
+                    id: clock.randomUUID(),
+                    turn_id: state.current.turns.at(-1)?.id ?? null,
+                    role: 'user',
+                    content,
+                    display_content: pending && (
+                      pending.attachments.length || pending.providerPrompt !== pending.displayContent
+                    ) ? pending.displayContent : null,
+                    attachments: pending?.attachments ?? [],
+                    created_at: clock.nowSeconds(),
+                    streaming: false,
+                  },
+                ],
+              };
         }
       } else if (event.event.kind === 'steerRejected') {
         const pending = pendingSteers.current.get(session.id)?.shift();
         if (pending) {
           // A rejection behind a live turn parks behind a transcript
           // preview; one landing after settle keeps the queue chip.
-          state.current = (sessionBusy(state.current) ? queueSteerSubmission : queueSubmission)(
-            state.current,
-            pending.displayContent,
-            clock,
-            pending.attachments,
-            pending.providerPrompt,
-          );
-          void persistOrdered(state.current).catch(() => {});
+          const alreadyQueued = pending.queuedId !== undefined
+            && state.current.queued_messages?.some((message) => message.id === pending.queuedId);
+          const settledCleanly = !sessionBusy(state.current)
+            && state.current.archived_at == null
+            && state.current.turns.at(-1)?.status === 'completed';
+          if (!alreadyQueued) {
+            state.current = sessionBusy(state.current)
+              ? queueSteerSubmission(
+                  state.current,
+                  pending.displayContent,
+                  clock,
+                  pending.attachments,
+                  pending.providerPrompt,
+                  pending.queuedId,
+                )
+              : queueSubmission(
+                  state.current,
+                  pending.displayContent,
+                  clock,
+                  pending.attachments,
+                  pending.providerPrompt,
+                  false,
+                  pending.queuedId,
+                );
+            if (!settledCleanly) void persistOrdered(state.current).catch(() => {});
+          }
+          state.drainQueue = settledCleanly;
           setErrors((values) => ({
             ...values,
             [session.id]: 'The agent couldn’t take that mid-turn, so it was queued for the next turn.',
@@ -490,6 +522,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         current: queryClient.getQueryData<AgentSession>(key) ?? entry.session,
         mutated: false,
         settled: false,
+        drainQueue: false,
         removeRuntime: false,
       };
       let run: { kind: 'textDelta' | 'reasoningDelta'; text: string; envelope: SequencedEvent } | null = null;
@@ -517,7 +550,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       flushRun();
       if (!state.mutated) return;
       cacheSession(state.current);
-      if (state.settled) {
+      if (state.settled || state.drainQueue) {
         const timer = persistTimers.current.get(session.id);
         if (timer) clearTimeout(timer);
         persistTimers.current.delete(session.id);
@@ -823,9 +856,28 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       return;
     }
     const pending = pendingSteers.current.get(session.id) ?? [];
-    pending.push({ providerPrompt, displayContent: prompt, attachments });
+    const queuedId = latest.boss_managed ? clock.randomUUID() : undefined;
+    const queued = queuedId
+      ? queueSteerSubmission(latest, prompt, clock, attachments, providerPrompt, queuedId)
+      : undefined;
+    if (queued) cacheSession(queued);
+    const submission = { providerPrompt, displayContent: prompt, attachments, queuedId };
+    pending.push(submission);
     pendingSteers.current.set(session.id, pending);
-    await client.request({ type: 'steer', prompt: providerPrompt }, session.id, runtime.runtimeId);
+    try {
+      await client.request({
+        type: 'steer',
+        prompt: providerPrompt,
+        ...(queuedId
+          ? { queuedMessage: queued?.queued_messages?.find((message) => message.id === queuedId) }
+          : {}),
+      }, session.id, runtime.runtimeId);
+    } catch (error) {
+      const waiting = pendingSteers.current.get(session.id);
+      const index = waiting?.indexOf(submission) ?? -1;
+      if (waiting && index >= 0) waiting.splice(index, 1);
+      throw error;
+    }
   }, [cacheSession, daemon.activeProfile?.id, daemon.client, daemon.phase, persistOrdered, queryClient, sendPrompt]);
 
   const createTask = useCallback(async (

@@ -3509,6 +3509,7 @@ fn runtime_generation_stale_events(managed: bool) {
             transport: None,
             sender: None,
             queued_id: Some(Uuid::new_v4()),
+            submission_id: None,
             context: None,
             hidden: false,
             report_trigger: None,
@@ -3636,6 +3637,7 @@ fn runtime_generation_prompt(prompt: &str) -> crate::agent::AgentPrompt {
         transport: None,
         sender: None,
         queued_id: Some(Uuid::new_v4()),
+        submission_id: None,
         context: None,
         hidden: false,
         report_trigger: None,
@@ -4887,6 +4889,7 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
             transport: None,
             sender: None,
             queued_id: Some(Uuid::new_v4()),
+            submission_id: None,
             context: None,
             hidden: false,
             report_trigger: None,
@@ -16443,6 +16446,58 @@ fn rotation_boss(backend: &WakuBackend) -> Uuid {
         panic!("expected boss chat")
     };
     session.id
+}
+
+#[test]
+fn a_boss_steer_arriving_for_a_rotated_chat_is_queued_on_the_successor() {
+    let root = std::env::temp_dir().join(format!("boss-steer-rotation-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let predecessor = rotation_boss(&backend);
+    {
+        let mut state = backend.task_state.lock();
+        state.session_mut(predecessor).unwrap().context_usage =
+            Some(crate::model::ContextUsage {
+                tokens: 76,
+                window: Some(100),
+            });
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time())
+        .unwrap();
+    let successor = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(successor, predecessor);
+
+    let queued = crate::model::QueuedMessage::new("Keep the release plan focused on QA");
+    let queued_id = queued.id;
+    let response = backend
+        .handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: predecessor,
+                runtime_id: Uuid::new_v4(),
+                command: Command::Steer {
+                    prompt: queued.content.clone(),
+                    hidden: false,
+                    queued_message: Some(queued),
+                },
+            },
+            EventSink::detached(),
+            None,
+        )
+        .unwrap();
+    assert!(matches!(response, ResponsePayload::Ack));
+
+    let active = backend
+        .task_store
+        .load_session_detail(successor)
+        .unwrap()
+        .unwrap();
+    assert!(active.queued_messages.iter().any(|message| {
+        message.id == queued_id && message.content == "Keep the release plan focused on QA"
+    }));
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

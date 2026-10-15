@@ -219,6 +219,91 @@ pub(super) fn record_boss_event(
     Ok(())
 }
 
+/// Settle a durable Boss steer into the active turn under the same message id
+/// that identified its queued submission. A rotation that happens before the
+/// provider acknowledgement therefore carries the queue row; one that happens
+/// after acceptance carries the transcript message instead.
+fn record_accepted_boss_steer(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    submission_id: Uuid,
+    message: &str,
+) -> anyhow::Result<()> {
+    use crate::model::MessageRole;
+    let mut state = task_state.lock();
+    let Some(session) = state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+    else {
+        return Ok(());
+    };
+    task_store.hydrate(session)?;
+    let Some(turn_id) = session.active_turn_id() else {
+        // A provider can acknowledge after its turn has already settled. Keep
+        // the durable queue entry so the next Boss generation can deliver it.
+        return Ok(());
+    };
+    if session.messages.iter().any(|stored| {
+        stored.id == submission_id
+            && stored.turn_id == Some(turn_id)
+            && stored.content == message
+    }) {
+        session
+            .queued_messages
+            .retain(|queued| queued.id != submission_id);
+        state.mark_session_dirty(session_id);
+        task_store.save(&mut state)?;
+        return Ok(());
+    }
+    let queued = session
+        .queued_messages
+        .iter()
+        .find(|queued| queued.id == submission_id)
+        .cloned();
+    session
+        .queued_messages
+        .retain(|queued| queued.id != submission_id);
+
+    if let Some(preview) = session
+        .messages
+        .iter_mut()
+        .find(|stored| stored.id == submission_id)
+    {
+        preview.role = MessageRole::User;
+        preview.content = message.to_owned();
+        preview.turn_id = Some(turn_id);
+        preview.streaming = false;
+        if let Some(queued) = queued {
+            preview.display_content = queued.display_content;
+            preview.attachments = queued.attachments;
+            preview.atoms = queued.atoms;
+        }
+    } else {
+        let queued = queued.unwrap_or_else(|| crate::model::QueuedMessage::new(message));
+        let appended = session.push_user_message_with_presentation(
+            message,
+            queued.display_content,
+            queued.attachments,
+            queued.atoms,
+            None,
+        );
+        if let Some(stored) = session
+            .messages
+            .iter_mut()
+            .find(|stored| stored.id == appended)
+        {
+            stored.id = submission_id;
+            stored.turn_id = Some(turn_id);
+        }
+    }
+    session.updated_at = crate::model::unix_time();
+    state.mark_session_dirty(session_id);
+    task_store.save(&mut state)?;
+    Ok(())
+}
+
 /// The generation the rotation journal currently assigns a session, for
 /// binding transport and continuity observations to durable ownership.
 #[cfg(test)]
@@ -771,10 +856,24 @@ pub(super) fn forward_driver_events(
                     agent.mark_parent_index_delivered(session_id);
                     agent.mark_memory_delivered(session_id);
                 }
+                if let Some(submission_id) =
+                    steer.as_ref().and_then(|steer| steer.submission_id)
+                    && let Err(error) = record_accepted_boss_steer(
+                        &task_state,
+                        &task_store,
+                        session_id,
+                        submission_id,
+                        &message,
+                    )
+                {
+                    eprintln!(
+                        "could not settle Boss steer submission {submission_id} for {session_id}: {error:#}"
+                    );
+                }
                 // A queue-drained prompt folded into the parked turn: its
                 // mirrored chip's wait is over even when the steer carried
                 // no sender (an automation run) to attribute.
-                if let Some(queued_id) = steer.and_then(|steer| steer.queued_id)
+                if let Some(queued_id) = steer.as_ref().and_then(|steer| steer.queued_id)
                     && unmirror_agent_queued_prompt(&task_state, &task_store, session_id, queued_id)
                         .is_ok()
                 {

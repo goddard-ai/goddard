@@ -1,0 +1,1 @@
+- Boss steering prompts stay queued if their chat rotates before the provider acknowledges them.

@@ -56,6 +56,37 @@ export function appendQueuedSteerPreview(
   }
 }
 
+/** Move a durable queued steer's preview into its provider-accepted turn
+ * without changing its id or losing attachment presentation. */
+export function acceptQueuedSteerPreview(
+  session: AgentSession,
+  queuedId: string,
+  content: string,
+  turnId: string | null,
+): AgentSession {
+  const queued = session.queued_messages?.find((message) => message.id === queuedId)
+  const index = session.messages.findIndex((message) => message.id === queuedId)
+  const preview = index >= 0 ? session.messages[index] : undefined
+  const accepted = {
+    id: queuedId,
+    turn_id: turnId,
+    role: 'user' as const,
+    content,
+    display_content: queued?.display_content ?? preview?.display_content ?? null,
+    atoms: queued?.atoms ?? preview?.atoms ?? [],
+    attachments: queued?.attachments ?? preview?.attachments ?? [],
+    created_at: preview?.created_at ?? queued?.created_at ?? Math.floor(Date.now() / 1_000),
+    streaming: false,
+  }
+  return {
+    ...session,
+    messages: index >= 0
+      ? session.messages.map((message, current) => current === index ? accepted : message)
+      : [...session.messages, accepted],
+    queued_messages: (session.queued_messages ?? []).filter((message) => message.id !== queuedId),
+  }
+}
+
 /** Drop a follow-up queue entry together with its parked-steer preview —
  * the preview message exists only while the entry is parked, so removal,
  * edit pull-back, and drain all clear both lists. Mirrors the paired

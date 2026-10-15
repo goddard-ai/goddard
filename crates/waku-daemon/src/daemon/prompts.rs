@@ -30,6 +30,7 @@ impl WakuBackend {
                 sender,
                 // A direct steer never parks — no chip to mirror.
                 queued_id: None,
+                submission_id: None,
                 context: None,
                 hidden: false,
                 report_trigger: None,
@@ -97,6 +98,7 @@ impl WakuBackend {
                     transport: None,
                     sender,
                     queued_id: Some(queued_id),
+                    submission_id: None,
                     context: None,
                     hidden: false,
                     report_trigger: None,
@@ -303,6 +305,7 @@ impl WakuBackend {
                 transport: None,
                 sender,
                 queued_id: Some(queued_id),
+                submission_id: None,
                 context: None,
                 hidden,
                 report_trigger: report_trigger.clone(),

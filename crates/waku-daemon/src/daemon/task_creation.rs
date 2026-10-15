@@ -562,6 +562,7 @@ impl WakuBackend {
                 transport: None,
                 sender: None,
                 queued_id: None,
+                submission_id: None,
                 context: Some(if memory.is_some() {
                     crate::agent::ContextSteer::Memory
                 } else {

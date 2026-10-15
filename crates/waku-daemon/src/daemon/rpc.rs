@@ -1,5 +1,69 @@
 use super::*;
 
+impl WakuBackend {
+    fn persist_boss_steer_submission(
+        &self,
+        session_id: Uuid,
+        prompt: &str,
+        queued_message: Option<crate::model::QueuedMessage>,
+    ) -> anyhow::Result<(Uuid, bool)> {
+        let queued = queued_message.unwrap_or_else(|| crate::model::QueuedMessage::new(prompt));
+        anyhow::ensure!(
+            matches!(queued.source, crate::model::QueuedMessageSource::User)
+                && !queued.hidden
+                && !queued.id.is_nil()
+                && queued.content == prompt,
+            "a Boss steer must carry a visible user submission"
+        );
+
+        let mut state = self.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .ok_or_else(|| anyhow!("Boss chat {session_id} is unknown to the daemon"))?;
+        self.task_store.hydrate(session)?;
+        anyhow::ensure!(
+            session.boss_managed && session.planning.is_none(),
+            "steer submission target is not a Boss chat"
+        );
+        anyhow::ensure!(
+            session.archived_at.is_none(),
+            "Boss chat is archived; reopen the active Boss chat"
+        );
+
+        if let Some(existing) = session.messages.iter().find(|message| message.id == queued.id) {
+            anyhow::ensure!(
+                existing.role == crate::model::MessageRole::User
+                    && existing.content == queued.content,
+                "Boss steer submission id was reused with different content"
+            );
+            return Ok((queued.id, false));
+        }
+        if let Some(existing) = session
+            .queued_messages
+            .iter()
+            .find(|message| message.id == queued.id)
+        {
+            anyhow::ensure!(
+                existing.content == queued.content
+                    && existing.display_content == queued.display_content
+                    && existing.attachments == queued.attachments
+                    && existing.atoms == queued.atoms,
+                "Boss steer submission id was reused with different content"
+            );
+            return Ok((queued.id, true));
+        }
+
+        session.queued_messages.push(queued.clone());
+        session.queued_messages.sort_by_key(|message| message.created_at);
+        session.updated_at = crate::model::unix_time();
+        state.mark_session_dirty(session_id);
+        self.task_store.save(&mut state)?;
+        Ok((queued.id, true))
+    }
+}
+
 impl Backend for WakuBackend {
     fn authenticate_agent(&self, token: &str) -> Option<Uuid> {
         self.agent.resolve(token)
@@ -230,9 +294,14 @@ impl Backend for WakuBackend {
                 "plan approval belongs to a different or stopped runtime"
             );
         }
+        let boss_steer_command = matches!(
+            &request.command,
+            Command::Steer { hidden: false, .. }
+        );
         let boss_chat_command = matches!(
             &request.command,
             Command::Start { .. } | Command::Prompt { .. }
+                | Command::Steer { hidden: false, .. }
         ) && {
             let identity = self.boss.identity_and_session().0.id;
             self.task_state.lock().sessions.iter().any(|session| {
@@ -260,14 +329,16 @@ impl Backend for WakuBackend {
         };
         if boss_chat_command {
             self.recover_archived_active_boss_chat()?;
-            anyhow::ensure!(
-                self.task_state
-                    .lock()
-                    .sessions
-                    .iter()
-                    .any(|session| { session.id == session_id && session.archived_at.is_none() }),
-                "Boss chat is archived; reopen the active Boss chat"
-            );
+            if !boss_steer_command {
+                anyhow::ensure!(
+                    self.task_state
+                        .lock()
+                        .sessions
+                        .iter()
+                        .any(|session| { session.id == session_id && session.archived_at.is_none() }),
+                    "Boss chat is archived; reopen the active Boss chat"
+                );
+            }
         }
         match request.command {
             Command::Boss { operation } => Ok(ResponsePayload::Boss {
@@ -1985,6 +2056,68 @@ impl Backend for WakuBackend {
                 if matches!(command, Command::Prompt { .. } | Command::Steer { .. }) {
                     self.agent.clear_user_stop(session_id);
                 }
+                if boss_chat_command
+                    && let Command::Steer {
+                        prompt,
+                        hidden: false,
+                        queued_message,
+                    } = &command
+                {
+                    let active_session = self
+                        .boss
+                        .identity_and_session()
+                        .1
+                        .ok_or_else(|| anyhow!("there is no active Boss chat"))?;
+                    let target_session = active_session;
+                    let (submission_id, pending) = self.persist_boss_steer_submission(
+                        target_session,
+                        prompt,
+                        queued_message.clone(),
+                    )?;
+                    self.notify_task_state();
+
+                    // A steer can reach the daemon after its original chat
+                    // was archived, or while a continuity incident fences
+                    // provider calls. Keep the durable submission on the
+                    // current Boss chat and tell the originating client that
+                    // it was parked instead of silently dropping it.
+                    let routed = target_session != session_id;
+                    let fenced = self.boss_incident_fenced(target_session);
+                    if routed || fenced {
+                        let reason = if routed {
+                            "The Boss chat rotated; the prompt is queued on the active chat."
+                        } else {
+                            "The Boss chat is fenced while its provider context is refreshed. The prompt is queued."
+                        };
+                        events.send(event_to_wire(DriverEvent::SteerRejected {
+                            message: prompt.clone(),
+                            reason: reason.into(),
+                            reason_i18n: None,
+                            hidden: false,
+                        })?)?;
+                        return Ok(ResponsePayload::Ack);
+                    }
+                    // A repeated request with the same id is idempotent. A
+                    // pending request already owns the provider call; a
+                    // settled id is already represented in the transcript.
+                    if !pending
+                        || !self.agent.record_pending_steer(
+                            target_session,
+                            crate::agent::AgentPrompt {
+                                prompt: prompt.clone(),
+                                transport: None,
+                                sender: None,
+                                queued_id: None,
+                                submission_id: Some(submission_id),
+                                context: None,
+                                hidden: false,
+                                report_trigger: None,
+                            },
+                        )
+                    {
+                        return Ok(ResponsePayload::Ack);
+                    }
+                }
                 // Daemon-owned `agentAsk`/`agentRenameSelf` requests resolve
                 // here — their request ids never reached the provider, so
                 // the driver has nothing parked under them. Every attached
@@ -2128,6 +2261,7 @@ impl Backend for WakuBackend {
                 if let Command::Steer {
                     prompt,
                     hidden: true,
+                    ..
                 } = &command
                 {
                     // A client asked for a hidden injection: record it so the
@@ -2140,6 +2274,7 @@ impl Backend for WakuBackend {
                             transport: None,
                             sender: None,
                             queued_id: None,
+                            submission_id: None,
                             context: None,
                             hidden: true,
                             report_trigger: None,

@@ -147,6 +147,7 @@ export function queueSubmission(
   attachments: MessageAttachment[] = [],
   providerPromptOverride?: string,
   hidden = false,
+  queuedId?: string,
 ): AgentSession {
   const now = clock.nowSeconds();
   const visiblePrompt = prompt.trim();
@@ -164,7 +165,7 @@ export function queueSubmission(
         (message) => hidden || !queuedMessageIsManagedGoal(message),
       ),
       {
-        id: clock.randomUUID(),
+        id: queuedId ?? clock.randomUUID(),
         content: providerPrompt,
         display_content:
           attachments.length || providerPrompt !== visiblePrompt ? visiblePrompt : null,
@@ -186,8 +187,9 @@ export function queueSteerSubmission(
   clock: MobileRuntimeClock,
   attachments: MessageAttachment[] = [],
   providerPromptOverride?: string,
+  queuedId?: string,
 ): AgentSession {
-  const queued = queueSubmission(session, prompt, clock, attachments, providerPromptOverride);
+  const queued = queueSubmission(session, prompt, clock, attachments, providerPromptOverride, false, queuedId);
   const entry = queued.queued_messages?.at(-1);
   return entry ? appendQueuedSteerPreview(queued, entry) : queued;
 }

@@ -660,6 +660,19 @@ impl Waku {
                 if !accepts {
                     return true;
                 }
+                let queued_submission = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id && session.boss_managed)
+                    .and_then(|session| {
+                        session
+                            .queued_messages
+                            .iter()
+                            .find(|queued| !queued.is_agent_owned() && queued.content == message)
+                            .cloned()
+                    })
+                    .map(ComposerSubmission::from_queued_message);
                 if hidden {
                     // The daemon's context steer — provider-facing text, so
                     // it lands in the turn's record without a transcript row
@@ -704,6 +717,7 @@ impl Waku {
                     // normalized echo still acknowledges the oldest pending
                     // steer. Preserve its attachment presentation metadata.
                     .or_else(|| runtime.pending_steers.pop_front())
+                    .or(queued_submission)
                     .unwrap_or_else(|| ComposerSubmission::plain(message.clone()));
                 // The provider folded the message into the live turn. Append
                 // it to the same turn so the transcript mirrors the provider
@@ -752,6 +766,11 @@ impl Waku {
                         }
                         queued_id.unwrap_or(message_id)
                     };
+                    if let Some(queued_id) = queued_id {
+                        session
+                            .queued_messages
+                            .retain(|queued| queued.id != queued_id);
+                    }
                     session.updated_at = unix_time();
                     Some(message_id)
                 } else {
@@ -787,15 +806,30 @@ impl Waku {
                     .iter()
                     .find(|session| session.id == session_id)
                     .map(|session| {
-                        let settled_cleanly = session
-                            .turns
-                            .last()
-                            .is_some_and(|turn| turn.status == TurnStatus::Completed);
+                        let settled_cleanly = session.archived_at.is_none()
+                            && session
+                                .turns
+                                .last()
+                                .is_some_and(|turn| turn.status == TurnStatus::Completed);
                         (session.is_busy(), settled_cleanly)
                     })
                     .unwrap_or((false, false));
+                let already_queued = submission.queued_id.is_some_and(|queued_id| {
+                    self.state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .is_some_and(|session| {
+                            session
+                                .queued_messages
+                                .iter()
+                                .any(|queued| queued.id == queued_id)
+                        })
+                });
                 if busy {
-                    self.enqueue_steer_follow_up_submission(session_id, submission, cx);
+                    if !already_queued {
+                        self.enqueue_steer_follow_up_submission(session_id, submission, cx);
+                    }
                     if self.state.selected_session == Some(session_id) {
                         self.show_toast(tr!(
                             "session.steer_rejected",
@@ -810,7 +844,11 @@ impl Waku {
                     // events are handled — an inline submit would spawn a
                     // second driver process only to have it clobbered when the
                     // drain re-inserts the detached runtime.
-                    if let Some(session) = self.state.session_mut(session_id) {
+                    if already_queued {
+                        if allow_queue_drain {
+                            self.pending_queue_drains.push(session_id);
+                        }
+                    } else if let Some(session) = self.state.session_mut(session_id) {
                         let annotations = std::mem::take(&mut submission.annotations);
                         let queued = submission.into_queued_message();
                         if !annotations.is_empty() {
@@ -825,7 +863,9 @@ impl Waku {
                     // The user stopped the turn (or the provider died) before
                     // the steer landed. Keep the message visible and
                     // user-controlled instead of auto-running it.
-                    self.enqueue_follow_up_submission(session_id, submission, cx);
+                    if !already_queued {
+                        self.enqueue_follow_up_submission(session_id, submission, cx);
+                    }
                 }
             }
             DriverEvent::PlanUsageUpdated(usage) => {

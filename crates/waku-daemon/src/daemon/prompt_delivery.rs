@@ -646,6 +646,7 @@ pub(super) fn rehydrate_agent_queue(
                         transport: None,
                         sender: sent_by,
                         queued_id: Some(queued.id),
+                        submission_id: None,
                         context: None,
                         hidden: queued.hidden,
                         report_trigger: queued.report_trigger.clone(),
