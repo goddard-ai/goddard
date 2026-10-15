@@ -2034,21 +2034,15 @@ fn boss_outcome_speaker_session(row: &boss::BossOutcomeRow) -> Option<Uuid> {
         })
 }
 
-/// A member's visible blocker or admission wait, kept separate from the
-/// project detail so it cannot be lost to that line's truncation.
+/// A member's admission wait, kept separate from the project detail so it
+/// cannot be lost to that line's truncation. Blockers stay in expanded
+/// assignment details rather than the collapsed outcome row.
 fn boss_outcome_row_reason(
     member: Option<&boss::BossOutcomeMember>,
     queued: &HashMap<Uuid, String>,
 ) -> Option<String> {
     let member = member?;
-    member
-        .employee
-        .blocker
-        .as_deref()
-        .map(str::trim)
-        .filter(|reason| !reason.is_empty())
-        .map(str::to_owned)
-        .or_else(|| queued.get(&member.employee.session_id).cloned())
+    queued.get(&member.employee.session_id).cloned()
 }
 
 /// A defer-until's local timestamp — "Oct 9, 14:32" — for the recorded
@@ -4390,8 +4384,8 @@ mod tests {
         let waits = HashMap::from([(queued_id, "Waiting for an available slot".to_owned())]);
 
         assert_eq!(
-            boss_outcome_row_reason(Some(&blocked), &waits).as_deref(),
-            Some("Needs a signing key")
+            boss_outcome_row_reason(Some(&blocked), &waits),
+            None
         );
         assert_eq!(
             boss_outcome_row_reason(Some(&queued), &waits).as_deref(),
@@ -12833,8 +12827,8 @@ impl Waku {
             }
         };
         // The member the status speaks for: a live assignee first, then
-        // the next queued admission — its blocker earns the row's third
-        // line, but pending rows carry no reason text at all.
+        // the next queued admission. Only queued wait text earns the row's
+        // third line; blockers remain available in expanded details.
         let queued: Vec<&boss::BossOutcomeMember> =
             row.members.iter().filter(|member| boss_outcome_queued(member)).collect();
         let speaker_member = boss_outcome_speaker_member(row);
@@ -12907,7 +12901,20 @@ impl Waku {
                             .completion_conflict
                             .as_ref()
                             .map(|conflict| conflict.reason.clone())
-                            .or_else(|| boss_outcome_attention_cause(row))
+                            .or_else(|| {
+                                let has_blocker = row.members.iter().any(|member| {
+                                    let employee = &member.employee;
+                                    waku_protocol::boss::BossOutcome::assignment_unresolved(
+                                        employee,
+                                    ) && employee
+                                        .blocker
+                                        .as_deref()
+                                        .is_some_and(|text| !text.trim().is_empty())
+                                });
+                                (!has_blocker)
+                                    .then(|| boss_outcome_attention_cause(row))
+                                    .flatten()
+                            })
                     })
                     .flatten()
                     .or_else(|| boss_outcome_wait_label(&row.outcome, now))
