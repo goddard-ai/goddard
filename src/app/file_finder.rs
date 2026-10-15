@@ -15,6 +15,9 @@
 
 use gpui::{Font, KeyBinding, deferred};
 use nucleo_matcher::Matcher;
+use std::collections::BTreeSet;
+use std::ops::Range;
+use std::path::Component;
 
 use crate::composer_complete::{self, Scored, highlight_byte_ranges};
 
@@ -36,6 +39,10 @@ const EMPTY_RESULTS_HEIGHT: f32 = 180.0;
 const RESULTS_BOTTOM_PADDING: f32 = 8.0;
 const MAX_CARD_HEIGHT: f32 = 440.0;
 const PAGE_STEP: isize = 7;
+static TRANSCRIPT_FILE_MENTION: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?:^|[^\w@])(@\S+)").expect("valid transcript file mention regex")
+    });
 
 /// Bind the finder's keys. Registered with the other picker `init`s, after
 /// the input's own bindings.
@@ -72,6 +79,10 @@ pub(super) struct FileFinderUi {
     /// files-only projection is rebuilt once per index swap rather than per
     /// keystroke.
     index: usize,
+    /// Paths linked by the selected task's transcript, prepared once per
+    /// finder open rather than rescanned as the query changes.
+    transcript_link_key: Option<(Uuid, PathBuf)>,
+    transcript_link_paths: Vec<String>,
     /// A listing for `root` is in flight — the placeholder draws its spinner.
     loading: bool,
     files: Rc<Vec<FileEntry>>,
@@ -90,6 +101,8 @@ impl FileFinderUi {
             previous_focus: None,
             root: None,
             index: 0,
+            transcript_link_key: None,
+            transcript_link_paths: Vec::new(),
             loading: false,
             files: Rc::new(Vec::new()),
             results: Vec::new(),
@@ -101,6 +114,148 @@ impl FileFinderUi {
 
     pub(super) fn is_open(&self) -> bool {
         self.open
+    }
+}
+
+fn transcript_file_link_paths(session: &AgentSession, root: &Path) -> Vec<String> {
+    let mut paths = BTreeSet::new();
+    for message in &session.messages {
+        let content = super::transcript::display_message_content(message);
+        let tree = md::parser::parse(&content);
+        for block in &tree.blocks {
+            collect_transcript_link_block(&block.block, root, &mut paths);
+        }
+    }
+    for activity in session
+        .transcript_blocks
+        .iter()
+        .flat_map(|block| &block.activities)
+    {
+        if let Some(target) = super::components::activity_file_link_path(activity) {
+            let path = super::right_panel::markdown_file_link_path(&target)
+                .unwrap_or_else(|| PathBuf::from(target));
+            insert_transcript_file_path(root, &path, &mut paths);
+        }
+    }
+    paths.into_iter().collect()
+}
+
+fn collect_transcript_link_block(
+    block: &md::parser::Block,
+    root: &Path,
+    paths: &mut BTreeSet<String>,
+) {
+    use md::parser::Block;
+
+    match block {
+        Block::Paragraph { runs } | Block::Heading { runs, .. } => {
+            collect_transcript_link_runs(runs, root, paths)
+        }
+        Block::BlockQuote { children } => {
+            for child in children {
+                collect_transcript_link_block(child, root, paths);
+            }
+        }
+        Block::List { items, .. } => {
+            for item in items {
+                for child in &item.blocks {
+                    collect_transcript_link_block(child, root, paths);
+                }
+            }
+        }
+        Block::Table { header, rows, .. } => {
+            for cell in header.iter().chain(rows.iter().flat_map(|row| row.iter())) {
+                collect_transcript_link_runs(cell, root, paths);
+            }
+        }
+        Block::Image { .. }
+        | Block::CodeBlock { .. }
+        | Block::DisplayMath { .. }
+        | Block::Frontmatter { .. }
+        | Block::Rule => {}
+    }
+}
+
+fn collect_transcript_link_runs(
+    runs: &[md::parser::InlineRun],
+    root: &Path,
+    paths: &mut BTreeSet<String>,
+) {
+    let mut text = String::new();
+    let mut excluded = Vec::<Range<usize>>::new();
+    for run in runs {
+        if let Some(target) = run.style.link.as_deref()
+            && let Some(path) = super::right_panel::markdown_file_link_path(target)
+        {
+            insert_transcript_file_path(root, &path, paths);
+        }
+        let start = text.len();
+        text.push_str(&run.text);
+        if run.style.code || run.style.link.is_some() {
+            excluded.push(start..text.len());
+        }
+    }
+    for capture in TRANSCRIPT_FILE_MENTION.captures_iter(&text) {
+        let Some(found) = capture.get(1) else {
+            continue;
+        };
+        let token = found.as_str().trim_end_matches(|character| {
+            matches!(
+                character,
+                '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\'' | '"' | '`'
+            )
+        });
+        let range = found.start()..found.start() + token.len();
+        if token.len() <= 1
+            || excluded
+                .iter()
+                .any(|excluded| excluded.start < range.end && range.start < excluded.end)
+        {
+            continue;
+        }
+        let Some(mention) = token.strip_prefix('@') else {
+            continue;
+        };
+        insert_transcript_file_path(root, Path::new(mention), paths);
+    }
+}
+
+fn insert_transcript_file_path(root: &Path, path: &Path, paths: &mut BTreeSet<String>) {
+    fn normalize(path: &Path) -> Option<PathBuf> {
+        let mut normalized = PathBuf::new();
+        for component in path.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if !normalized.pop() {
+                        return None;
+                    }
+                }
+                component => normalized.push(component.as_os_str()),
+            }
+        }
+        Some(normalized)
+    }
+
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let Some(absolute) = normalize(&absolute) else {
+        return;
+    };
+    let Some(root) = normalize(root) else {
+        return;
+    };
+    let Ok(relative) = absolute.strip_prefix(&root) else {
+        return;
+    };
+    let relative = relative
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    if !relative.is_empty() && relative != "." {
+        paths.insert(relative);
     }
 }
 
@@ -182,6 +337,8 @@ impl Waku {
 
         self.file_finder.open = true;
         self.file_finder.focus_generation = self.file_finder.focus_generation.wrapping_add(1);
+        self.file_finder.transcript_link_key = None;
+        self.file_finder.transcript_link_paths.clear();
         self.file_finder.selected = 0;
         self.file_finder.scroll.scroll_to_item(0);
         self.file_finder
@@ -260,16 +417,78 @@ impl Waku {
         if !self.file_finder.open {
             return;
         }
-        let root = self.resolve_right_panel_files_root(cx).map(|path| {
-            let listing = match self.active_right_panel_owner() {
-                RightPanelOwner::Session(_) => self
-                    .selected_session()
-                    .map(|session| Self::workspace_files_listing(&session.workspace))
-                    .unwrap_or_default(),
-                _ => waku_protocol::workspace::ProjectFilesListing::WorkingTree,
-            };
-            (path, listing)
-        });
+        let root = match self.resolve_right_panel_files_root(cx) {
+            Some(path) => {
+                let listing = if matches!(
+                    self.active_right_panel_owner(),
+                    RightPanelOwner::Session(_)
+                ) {
+                    let session_listing = self.selected_session().map(|session| {
+                        let listing = Self::workspace_files_listing(&session.workspace);
+                        let cache_key = (session.id, path.clone());
+                        let linked_paths = if matches!(
+                            &listing,
+                            waku_protocol::workspace::ProjectFilesListing::BaseRef { .. }
+                        ) && self.file_finder.transcript_link_key.as_ref()
+                            != Some(&cache_key)
+                        {
+                            Some(transcript_file_link_paths(session, &path))
+                        } else {
+                            None
+                        };
+                        (listing, cache_key, linked_paths)
+                    });
+                    match session_listing {
+                        Some((listing, cache_key, linked_paths)) => {
+                            if let Some(linked_paths) = linked_paths {
+                                self.file_finder.transcript_link_key = Some(cache_key.clone());
+                                self.file_finder.transcript_link_paths = linked_paths;
+                            }
+                            match listing {
+                                waku_protocol::workspace::ProjectFilesListing::BaseRef {
+                                    base_ref,
+                                } if self.file_finder.transcript_link_key.as_ref()
+                                    == Some(&cache_key)
+                                    && !self.file_finder.transcript_link_paths.is_empty() =>
+                                {
+                                    waku_protocol::workspace::ProjectFilesListing::BaseRefWithUntracked {
+                                        base_ref,
+                                        paths: self.file_finder.transcript_link_paths.clone(),
+                                    }
+                                }
+                                waku_protocol::workspace::ProjectFilesListing::BaseRef {
+                                    base_ref,
+                                } => {
+                                    waku_protocol::workspace::ProjectFilesListing::BaseRef {
+                                        base_ref,
+                                    }
+                                }
+                                listing => {
+                                    self.file_finder.transcript_link_key = None;
+                                    self.file_finder.transcript_link_paths.clear();
+                                    listing
+                                }
+                            }
+                        }
+                        None => {
+                            self.file_finder.transcript_link_key = None;
+                            self.file_finder.transcript_link_paths.clear();
+                            waku_protocol::workspace::ProjectFilesListing::default()
+                        }
+                    }
+                } else {
+                    self.file_finder.transcript_link_key = None;
+                    self.file_finder.transcript_link_paths.clear();
+                    waku_protocol::workspace::ProjectFilesListing::WorkingTree
+                };
+                Some((path, listing))
+            }
+            None => {
+                self.file_finder.transcript_link_key = None;
+                self.file_finder.transcript_link_paths.clear();
+                None
+            }
+        };
         if root != self.file_finder.root {
             self.file_finder.root = root;
             self.file_finder.index = 0;

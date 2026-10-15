@@ -1,0 +1,1 @@
+- When a task uses a new worktree, Cmd+P can find untracked files linked in that task's transcript.

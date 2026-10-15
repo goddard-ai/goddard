@@ -792,10 +792,26 @@ pub fn resolved_skill_submission(
 /// `ProjectFilesListing::BaseRef` swaps it for `git ls-tree` at the ref a
 /// planned worktree starts from, since that worktree's files are the ref's
 /// committed ones. A plain directory gets a bounded walk instead.
-pub fn list_project_files(root: &Path, cap: usize, listing: &ProjectFilesListing) -> Vec<FileEntry> {
+pub fn list_project_files(
+    root: &Path,
+    cap: usize,
+    listing: &ProjectFilesListing,
+) -> Vec<FileEntry> {
+    let mut linked_paths = BTreeSet::<String>::new();
     let files = match listing {
         ProjectFilesListing::BaseRef { base_ref } => {
             git_ref_listed_files(root, base_ref.as_deref(), cap)
+        }
+        ProjectFilesListing::BaseRefWithUntracked { base_ref, paths } => {
+            let linked = git_untracked_linked_files(root, paths, cap).unwrap_or_default();
+            linked_paths.extend(linked.iter().cloned());
+            let base_cap = cap.saturating_sub(linked.len());
+            let mut base = git_ref_listed_files(root, base_ref.as_deref(), base_cap)
+                .or_else(|| git_listed_files(root, base_cap))
+                .unwrap_or_else(|| walked_files(root, base_cap));
+            base.retain(|path| !linked_paths.contains(path.as_str()));
+            base.extend(linked);
+            Some(base)
         }
         ProjectFilesListing::WorkingTree => None,
     }
@@ -823,13 +839,59 @@ pub fn list_project_files(root: &Path, cap: usize, listing: &ProjectFilesListing
         }))
         .collect::<Vec<_>>();
     // Shallow entries first, so an empty query opens on the project's own
-    // top level rather than deep generated paths.
+    // top level rather than deep generated paths. Transcript-linked files
+    // take priority within the cap so folder rows cannot hide them.
     entries.sort_by(|a, b| {
         let depth = |entry: &FileEntry| entry.path.matches('/').count() - usize::from(entry.is_dir);
-        (depth(a), &a.path).cmp(&(depth(b), &b.path))
+        let linked_priority = |entry: &FileEntry| {
+            usize::from(entry.is_dir || !linked_paths.contains(entry.path.as_str()))
+        };
+        (linked_priority(a), depth(a), &a.path).cmp(&(linked_priority(b), depth(b), &b.path))
     });
     entries.truncate(cap);
     entries
+}
+
+/// Keep only transcript-linked paths that Git reports as untracked and not
+/// ignored. Literal pathspecs prevent names containing glob characters from
+/// expanding to other files; exact matching avoids including a directory's
+/// untracked descendants.
+fn git_untracked_linked_files(root: &Path, paths: &[String], cap: usize) -> Option<Vec<String>> {
+    const PATHSPEC_BATCH: usize = 128;
+
+    let mut files = BTreeSet::new();
+    for batch in paths.chunks(PATHSPEC_BATCH) {
+        if files.len() >= cap {
+            break;
+        }
+        let candidates = batch.iter().map(String::as_str).collect::<BTreeSet<_>>();
+        let mut command = crate::command_env::search_path_command("git");
+        command.arg("-C").arg(root).args([
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "--full-name",
+            "-z",
+            "--",
+        ]);
+        for path in batch {
+            if !path.is_empty() && !path.contains('\0') {
+                command.arg(format!(":(literal){path}"));
+            }
+        }
+        let output = command.output().ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let listing = String::from_utf8(output.stdout).ok()?;
+        for path in listing.split('\0').filter(|path| candidates.contains(path)) {
+            files.insert(path.to_owned());
+            if files.len() >= cap {
+                break;
+            }
+        }
+    }
+    Some(files.into_iter().take(cap).collect())
 }
 
 fn git_listed_files(root: &Path, cap: usize) -> Option<Vec<String>> {

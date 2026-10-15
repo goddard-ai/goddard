@@ -604,6 +604,13 @@ pub enum ProjectFilesListing {
     /// from that base would hold. `None` resolves the repository's default
     /// branch, the same base `CreateWorktree` picks.
     BaseRef { base_ref: Option<String> },
+    /// The base-ref tree plus the named paths that are currently untracked in
+    /// the checkout. Used by task file search to surface files linked in its
+    /// transcript without listing every working-tree-only file.
+    BaseRefWithUntracked {
+        base_ref: Option<String>,
+        paths: Vec<String>,
+    },
 }
 
 impl ProjectFilesListing {

@@ -186,7 +186,7 @@ fn percent_decode_file_path(path: &str) -> String {
     String::from_utf8(decoded).unwrap_or_else(|_| path.to_owned())
 }
 
-fn markdown_file_link_path(target: &str) -> Option<PathBuf> {
+pub(super) fn markdown_file_link_path(target: &str) -> Option<PathBuf> {
     let path = markdown_file_link_path_inner(target)?;
     path.is_absolute().then_some(path)
 }
