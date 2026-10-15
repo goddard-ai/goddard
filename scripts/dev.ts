@@ -1000,7 +1000,10 @@ function writeDaemonInfo(): void {
   }
 }
 
-async function spawnDaemon(bind: string): Promise<void> {
+async function spawnDaemon(
+  bind: string,
+  preserveProtocolDirty = false,
+): Promise<void> {
   const lane = laned ? latestLane : undefined;
   if (laned && lane === undefined) {
     throw new Error("No completed runtime to start the daemon from.");
@@ -1042,9 +1045,9 @@ async function spawnDaemon(bind: string): Promise<void> {
   daemonBind = bind;
   daemonAddress = ready.address;
   writeDaemonInfo();
-  // A freshly spawned daemon runs the just-built binary, so its protocol is
-  // never behind the sources on disk.
-  protocolDirty = false;
+  // Launching the current runtime clears this warning. An in-progress build
+  // can restart an older lane, so that path preserves it.
+  if (!preserveProtocolDirty) protocolDirty = false;
   controlClient = undefined;
   lastDaemonSpawnAt = Date.now();
   void watchDaemonExit(child);
@@ -1162,7 +1165,7 @@ function readDaemonReady(
 
 // A pre-set GODDARD_DAEMON_ADDRESS keeps working: the watcher adopts that daemon
 // instead of spawning its own, and never restarts it.
-async function ensureDaemon(): Promise<void> {
+async function ensureDaemon(preserveProtocolDirty = false): Promise<void> {
   if (externalDaemonAddress) {
     daemonAddress = externalDaemonAddress;
     writeDaemonInfo();
@@ -1174,7 +1177,10 @@ async function ensureDaemon(): Promise<void> {
   let lastError: unknown;
   for (let offset = 0; offset < daemonPortScanLimit; offset++) {
     try {
-      await spawnDaemon(`${daemonBindHost}:${daemonPortBase + offset}`);
+      await spawnDaemon(
+        `${daemonBindHost}:${daemonPortBase + offset}`,
+        preserveProtocolDirty,
+      );
       console.log(
         `[goddard-dev] Daemon listening on ${daemonAddress}; it stays up across app relaunches.`,
       );
@@ -1253,8 +1259,11 @@ async function liveSessionCount(): Promise<number | undefined> {
   }
 }
 
-async function restartDaemon(reason: string): Promise<void> {
-  if (daemonRestarting || stopping) return;
+async function restartDaemon(
+  reason: string,
+  preserveProtocolDirty = false,
+): Promise<boolean> {
+  if (daemonRestarting || stopping) return false;
   if (daemonBind === undefined) {
     if (daemonAddress === undefined) {
       // The daemon never came up — e.g. a serve run whose initial build
@@ -1262,21 +1271,26 @@ async function restartDaemon(reason: string): Promise<void> {
       // daemon.
       daemonRestarting = true;
       try {
-        await ensureDaemon();
+        await ensureDaemon(preserveProtocolDirty);
         daemonRestartPending = false;
+        return (
+          externalDaemonAddress === undefined &&
+          process.env.GODDARD_DAEMON_PATH === undefined &&
+          runningDaemonLane !== undefined
+        );
       } catch (error) {
         console.error("[goddard-dev] Daemon start failed:", error);
         daemonRestartPending = true;
+        return false;
       } finally {
         daemonRestarting = false;
       }
-      return;
     }
     console.log(
       "[goddard-dev] The daemon is externally managed; restart it yourself.",
     );
     daemonRestartPending = false;
-    return;
+    return false;
   }
   daemonRestarting = true;
   try {
@@ -1284,15 +1298,20 @@ async function restartDaemon(reason: string): Promise<void> {
       `[goddard-dev] Restarting the daemon (${reason}); the app will reconnect on its own.`,
     );
     await stopDaemon();
-    if (stopping) return;
+    if (stopping) return false;
     try {
-      await spawnDaemon(daemonBind);
+      await spawnDaemon(daemonBind, preserveProtocolDirty);
       daemonRestartPending = false;
       daemonRestartWhenIdle = false;
       console.log(`[goddard-dev] Daemon restarted on ${daemonAddress}.`);
+      return (
+        process.env.GODDARD_DAEMON_PATH === undefined &&
+        runningDaemonLane !== undefined
+      );
     } catch (error) {
       console.error("[goddard-dev] Daemon restart failed:", error);
       daemonRestartPending = true;
+      return false;
     }
   } finally {
     daemonRestarting = false;
@@ -1503,12 +1522,25 @@ async function handleCommand(command: string): Promise<void> {
         // The queued flags then swap onto the build's fresh lane and relaunch
         // the app once it lands.
         if (laned) {
-          await restartDaemon("requested");
-          console.log(
-            daemonBind === undefined
-              ? "[goddard-dev] Will relaunch the app once the current build finishes."
-              : "[goddard-dev] Will restart the daemon on the new build and relaunch the app once it finishes.",
-          );
+          const restartedImmediately = await restartDaemon("requested", true);
+          if (restartedImmediately) forceDaemonRestart = false;
+          if (restartedImmediately && protocolDirty) {
+            console.log(
+              "[goddard-dev] Restarted the daemon from the last completed build; press b + enter after this build to restart on the new protocol and relaunch.",
+            );
+          } else if (restartedImmediately) {
+            console.log(
+              "[goddard-dev] Restarted the daemon from the last completed build; will relaunch the app once the current build finishes.",
+            );
+          } else if (daemonBind === undefined && daemonAddress !== undefined) {
+            console.log(
+              "[goddard-dev] The daemon is externally managed; will relaunch the app once the current build finishes.",
+            );
+          } else {
+            console.log(
+              "[goddard-dev] Will restart the daemon on the new build and relaunch the app once it finishes.",
+            );
+          }
         } else {
           console.log(
             "[goddard-dev] Will restart the daemon and relaunch the app once the current build finishes.",
