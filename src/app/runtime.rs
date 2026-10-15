@@ -7412,8 +7412,22 @@ impl Waku {
             .iter()
             .find(|session| session.id == session_id)
         else {
+            // An armed drain can fire before the catalog push that carries
+            // the session — a rotated Boss chat's drain is armed by the
+            // state swap while its successor's row is still in flight.
+            // Keep the arm for the row's arrival instead of dropping it.
+            self.defer_queue_drain(session_id);
             return;
         };
+        // A catalog skeleton's queue reads empty whether or not follow-ups
+        // are parked — they land with the session detail (a rotation's
+        // carried chips only exist there). Fetch it and stay armed; the
+        // hydration completion re-runs this drain.
+        if !session.detail_loaded {
+            self.ensure_session_loaded(session_id, cx);
+            self.defer_queue_drain(session_id);
+            return;
+        }
         if session.is_busy()
             || session.queued_messages.is_empty()
             || self.ending_checkpoint_pending(session_id)

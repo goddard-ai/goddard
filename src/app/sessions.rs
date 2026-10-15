@@ -766,6 +766,13 @@ impl Waku {
                         let selected_before_refresh = waku.state.selected_session;
                         waku.reconcile_boss_chat_refresh(cx);
                         let refreshed = selected_before_refresh != waku.state.selected_session;
+                        // A drain armed before this detail landed — a Boss
+                        // rotation's carried follow-ups — parked on the
+                        // skeleton. Run it now that the queue is visible.
+                        if waku.pending_queue_drains.contains(&session_id) {
+                            waku.pending_queue_drains.retain(|id| *id != session_id);
+                            waku.drain_queued_message(session_id, cx);
+                        }
                         let pending = waku
                             .pending_session_activation
                             .filter(|pending| pending.session_id == session_id);
