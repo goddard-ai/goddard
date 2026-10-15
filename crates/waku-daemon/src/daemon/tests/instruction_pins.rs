@@ -31,7 +31,10 @@ fn instruction_pins_preserve_human_provenance_and_survive_rotation() {
     .unwrap()
     .join()
     .unwrap();
-    backend.capture_boss_instruction(old, message_id, human);
+    {
+        let operation = backend.boss.operation_guard();
+        backend.capture_boss_instruction(&operation, old, message_id, human);
+    }
     let pin = backend.boss.document().instruction_pins[0].clone();
     assert_eq!(backend.boss.document().instruction_pins.len(), 1);
     assert_eq!(pin.state, InstructionPinState::Candidate);
@@ -196,4 +199,69 @@ fn instruction_pins_preserve_human_provenance_and_survive_rotation() {
     assert!(!released.contains(human));
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A prompt that reads like a durable instruction must still deliver —
+/// `handle` already holds the Boss operation guard, so the pin capture
+/// must ride it rather than re-lock the non-reentrant mutex. The request
+/// runs on a worker so a regression fails instead of hanging the suite.
+#[test]
+fn a_hinted_boss_prompt_delivers_under_the_operation_guard() {
+    let root = std::env::temp_dir().join(format!("daemon-boss-prompt-guard-{}", Uuid::new_v4()));
+    let (backend, _ordinary) = surface_test_backend(&root);
+    let mut settings = backend.settings.get();
+    settings.boss_experiment_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    let boss = rotation_boss(&backend);
+    let runtime = Uuid::new_v4();
+    let capture = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        boss,
+        RuntimeEntry {
+            plan_gate: None,
+            runtime_id: runtime,
+            driver: DriverHandle::from_control(capture.clone()),
+            stable: None,
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: backend.default_cwd.clone(),
+        },
+    );
+    let (done, finished) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let result = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: boss,
+                    runtime_id: runtime,
+                    command: Command::Prompt {
+                        prompt: "Keep the release hold while I confirm the restart".into(),
+                        turn_id: None,
+                        message_id: None,
+                        hidden: false,
+                        attachments: Vec::new(),
+                    },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .map(|_| ());
+        let _ = done.send((result, backend));
+    });
+    let (result, backend) = finished
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("a boss prompt deadlocked on the operation lock");
+    worker.join().unwrap();
+    result.unwrap();
+    assert!(!capture.prompts.lock().is_empty());
+    assert_eq!(
+        backend.boss.document().instruction_pins.len(),
+        1,
+        "the hinted prompt recorded a review candidate"
+    );
+    drop(backend);
+    std::fs::remove_dir_all(root).ok();
 }

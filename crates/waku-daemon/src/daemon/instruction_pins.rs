@@ -153,8 +153,13 @@ impl WakuBackend {
         })
     }
 
+    /// `handle` holds the Boss operation guard for the whole chat command,
+    /// so the mutation rides that serialization — re-locking the
+    /// non-reentrant mutex on the same thread would wedge the session's
+    /// runtime mailbox and every operation queued behind it.
     pub(super) fn capture_boss_instruction(
         &self,
+        _operation: &parking_lot::MutexGuard<'_, ()>,
         session_id: Uuid,
         message_id: Uuid,
         prompt: &str,
@@ -173,10 +178,9 @@ impl WakuBackend {
         // This fallback cannot impose an obligation: a candidate requires
         // review and a retirement condition before it can become active.
         if waku_boss::instruction_pins::candidate_hint(prompt) {
-            let result = self.boss.with_operation_lock(|| {
-                let source = self.instruction_pin_source(session_id, message_id)?;
-                self.boss.capture_instruction_candidate(source)
-            });
+            let result = self
+                .instruction_pin_source(session_id, message_id)
+                .and_then(|source| self.boss.capture_instruction_candidate(source));
             if let Err(error) = result {
                 eprintln!("could not capture an instruction candidate: {error:#}");
             }

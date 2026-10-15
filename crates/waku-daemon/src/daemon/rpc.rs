@@ -2216,7 +2216,17 @@ impl Backend for WakuBackend {
                         }
                     }
                     if !*hidden && self.boss.is_boss(session_id) {
-                        self.capture_boss_instruction(session_id, submitted_message_id, prompt);
+                        // The chat command guard above already holds the
+                        // Boss operation lock — pass it down rather than
+                        // re-locking the non-reentrant mutex.
+                        if let Some(operation) = _boss_chat_guard.as_ref() {
+                            self.capture_boss_instruction(
+                                operation,
+                                session_id,
+                                submitted_message_id,
+                                prompt,
+                            );
+                        }
                         self.route_boss_prompt(session_id, prompt);
                     }
                 }
