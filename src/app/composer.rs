@@ -4871,8 +4871,8 @@ impl Waku {
     }
 
     /// The staged-attachment chips above the input: a thumbnail tile per
-    /// image, a file-type icon and basename for everything else, each with a
-    /// floating remove button — T3 Code's attachment row in graphite.
+    /// image and a one-line file chip for everything else, each with a remove
+    /// button — T3 Code's attachment row in graphite.
     pub(super) fn render_composer_attachments(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let mut row = div()
@@ -4902,8 +4902,6 @@ impl Waku {
             let mut tile = div()
                 .id(SharedString::from(format!("composer-attachment-{index}")))
                 .relative()
-                .w(px(64.0))
-                .h(px(64.0))
                 .rounded(px(10.0))
                 .overflow_hidden()
                 .border(hairline())
@@ -4913,6 +4911,18 @@ impl Waku {
                 .tab_index(0)
                 .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .tooltip(Tooltip::text(format!("@{}", attachment.mention)));
+            if attachment.is_image {
+                tile = tile.w(px(64.0)).h(px(64.0));
+            } else {
+                tile = tile
+                    .h(px(28.0))
+                    .max_w(px(400.0))
+                    .pl(px(8.0))
+                    .pr(px(26.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0));
+            }
             let attachment_image = attachment.client_preview_image.clone().or_else(|| {
                 attachment
                     .is_image
@@ -4975,24 +4985,22 @@ impl Waku {
                     .cursor_pointer()
                     .child(
                         div()
-                            .size_full()
-                            .px(px(5.0))
+                            .w(px(16.0))
+                            .h(px(16.0))
+                            .flex_none()
                             .flex()
-                            .flex_col()
                             .items_center()
                             .justify_center()
-                            .gap(px(5.0))
-                            .child(icon(icon_path, 16.0, theme.text_tertiary))
-                            .child(
-                                div().w_full().flex().justify_center().child(
-                                    div()
-                                        .max_w_full()
-                                        .truncate()
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text_tertiary)
-                                        .child(attachment.name.clone()),
-                                ),
-                            ),
+                            .child(icon(icon_path, 16.0, theme.text_tertiary)),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(attachment.name.clone()),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_path_in_default_app(&click_path, cx);
@@ -5033,7 +5041,8 @@ impl Waku {
                         "composer-attachment-remove-{index}"
                     )))
                     .absolute()
-                    .top(px(3.0))
+                    .when(attachment.is_image, |button| button.top(px(3.0)))
+                    .when(!attachment.is_image, |button| button.top(px(6.0)))
                     .right(px(3.0))
                     .w(px(16.0))
                     .h(px(16.0))
