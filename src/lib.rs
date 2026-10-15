@@ -1065,7 +1065,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
             ToggleTerminalMaximize,
             Some("StandaloneTerminal"),
         ),
-        KeyBinding::new("secondary-shift-enter", PushBaseBranch, Some("Workspace")),
+        KeyBinding::new(
+            "secondary-shift-enter",
+            PushBaseBranch,
+            Some("Workspace && !StandaloneTerminal"),
+        ),
         KeyBinding::new("secondary-alt-p", ToggleSessionPin, Some("Workspace")),
         KeyBinding::new("secondary-c", CopySelection, Some("Workspace")),
         KeyBinding::new("secondary-shift-c", CopyWorkingDirectory, Some("Workspace")),

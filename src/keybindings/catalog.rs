@@ -3015,7 +3015,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "workspace.push_base",
         All,
         "secondary-shift-enter",
-        Workspace,
+        WorkspaceNotStandaloneTerminal,
     ),
     e("workspace.pin_task", All, "secondary-alt-p", Workspace),
     e("workspace.copy_selection", All, "secondary-c", Workspace),
@@ -3140,6 +3140,7 @@ mod ctx {
     pub const InboxPage: &str = "InboxPage";
     pub const DraftsPage: &str = "DraftsPage";
     pub const WorkspaceNotTerminal: &str = "Workspace && !Terminal";
+    pub const WorkspaceNotStandaloneTerminal: &str = "Workspace && !StandaloneTerminal";
     /// Where the composer exists — the session surface mounts its lane, and
     /// Big Picture remounts it. Pages and terminal views never carry the
     /// context, so their own chords (tab switching, pty input) can't lose to

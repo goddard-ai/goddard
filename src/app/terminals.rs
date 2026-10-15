@@ -1769,6 +1769,23 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let focused_terminal = self.focused_terminal_id(window, cx);
+        if let Some(terminal_id) = self.selected_terminal {
+            if self.terminal_group_panes(terminal_id).len() == 1
+                && focused_terminal
+                    .is_some_and(|focused| self.terminal_group_anchor(focused) == terminal_id)
+            {
+                self.minimize_terminal_to_card(terminal_id, window, cx);
+                return;
+            }
+        }
+        if let Some(terminal_id) = self.docked_terminal
+            && focused_terminal
+                .is_some_and(|focused| self.terminal_group_anchor(focused) == terminal_id)
+        {
+            self.activate_terminal(terminal_id, true, window, cx);
+            return;
+        }
         let Some(anchor_id) = self.selected_terminal else {
             return;
         };
@@ -3070,6 +3087,8 @@ impl Waku {
                 }))
         });
         div()
+            .key_context("StandaloneTerminal")
+            .on_action(cx.listener(Self::toggle_terminal_maximize_action))
             .flex()
             .flex_col()
             .flex_1()
@@ -3213,6 +3232,8 @@ impl Waku {
             .px(px(DOCKED_TERMINAL_MARGIN))
             .pt(px(DOCKED_TERMINAL_MARGIN))
             .pb(px(DOCKED_TERMINAL_MARGIN / 2.0))
+            .key_context("StandaloneTerminal")
+            .on_action(cx.listener(Self::toggle_terminal_maximize_action))
             .child(
                 div()
                     .id(SharedString::from(format!("docked-terminal-{terminal_id}")))
@@ -3364,9 +3385,7 @@ impl Waku {
             .flex()
             .child(body);
         if standalone {
-            group = group
-                .key_context("StandaloneTerminal")
-                .on_action(cx.listener(Self::toggle_terminal_maximize_action));
+            group = group.key_context("StandaloneTerminal");
         }
         self.terminal_drop_target(group, anchor_id, limit, cx)
             .into_any_element()

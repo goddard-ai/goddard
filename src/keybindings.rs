@@ -507,7 +507,7 @@ mod tests {
             (
                 "Workspace StandaloneTerminal Terminal",
                 &crate::ToggleTerminalMaximize as &dyn gpui::Action,
-                2,
+                1,
             ),
             (
                 "Workspace RightPanel Terminal",
