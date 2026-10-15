@@ -683,13 +683,7 @@ impl Waku {
                 tr!("boss.rotation_paused_detail"),
                 status.cause.clone(),
             ),
-            BossRotationPhase::CompactionIncident => (
-                "icons/alert.svg",
-                theme.warning,
-                tr!("boss.rotation_incident_title"),
-                tr!("boss.rotation_incident_detail"),
-                status.cause.clone(),
-            ),
+            BossRotationPhase::CompactionIncident => return None,
             BossRotationPhase::Refreshing => return None,
         };
         let retry = (status.phase == BossRotationPhase::Paused).then(|| {

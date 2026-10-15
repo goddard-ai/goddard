@@ -1,0 +1,1 @@
+- The Boss session no longer displays a context-compaction warning while its existing refresh process continues.
