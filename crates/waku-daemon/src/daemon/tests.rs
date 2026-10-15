@@ -12857,7 +12857,7 @@ fn a_resume_requeues_the_expired_employee_with_its_cause() {
     assert_eq!(ticket.resume_count, 1);
     assert_eq!(ticket.last_resumed_cause, Some(ExpiryCause::Failed));
     assert_eq!(ticket.interruptions.len(), 1);
-    let prompt = ticket.pending_prompts.last().unwrap();
+    let prompt = ticket.pending_prompts.first().unwrap();
     assert!(prompt.contains("interrupted"), "{prompt}");
     assert!(prompt.contains("failed turn"), "{prompt}");
     drop(backend);
@@ -13088,13 +13088,15 @@ fn a_resume_refuses_an_adopted_worktree() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// A resume keeps prompts parked at expiry ahead of its continuation
-/// note — the ordinary ticket merge does the ordering.
+/// A restart resume leads with its synthesized "verify and continue"
+/// note — prompts parked in the session queue at expiry survive behind
+/// it in order, none lost or duplicated, so the employee re-establishes
+/// the state of its partial work before any queued instruction runs.
 #[test]
-fn a_resume_drains_parked_prompts_first() {
-    use waku_protocol::boss::{BossOperation, EmployeeLifecycle, EmployeeSettle};
+fn a_restart_resume_leads_with_the_continuation_note() {
+    use waku_protocol::boss::{BossOperation, EmployeeLifecycle, ExpiryCause};
     let root = std::env::temp_dir().join(format!("boss-resume-parked-{}", Uuid::new_v4()));
-    let (backend, supervisor, employee_id, _parent, _child) = employee_finish_fixture(&root);
+    let (mut backend, supervisor, employee_id, _parent, _child) = employee_finish_fixture(&root);
     // Pin a model so the synthesized ticket takes a pool the test
     // can close.
     {
@@ -13111,20 +13113,38 @@ fn a_resume_drains_parked_prompts_first() {
     backend
         .agent
         .note_driver_event(employee_id, &DriverEvent::TurnStarted);
-    // Seed a legacy persisted queue entry without applying new Boss routing.
-    backend
-        .queue_agent_prompt(
-            employee_id,
-            "queued while working".into(),
-            Some(supervisor),
-            &EventSink::detached(),
-        )
-        .unwrap();
-    backend
-        .finish_boss_employee(employee_id, false, EmployeeSettle::Restarted)
-        .unwrap();
+    // Seed legacy persisted queue entries without applying new Boss routing.
+    for prompt in ["queued while working", "second follow-up"] {
+        backend
+            .queue_agent_prompt(
+                employee_id,
+                prompt.into(),
+                Some(supervisor),
+                &EventSink::detached(),
+            )
+            .unwrap();
+    }
+    // Reopen the persisted Boss document, as daemon startup does — the
+    // working employee is restart-interrupted and recovery expires it.
+    backend.boss = Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap());
+    let (recover, pending) = crossbeam_channel::bounded(1);
+    backend.boss.set_recover_employee(Arc::new(move |id| {
+        recover.send(id).unwrap();
+        Ok(())
+    }));
+    backend.boss.recover_interrupted();
+    assert_eq!(
+        pending
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap(),
+        employee_id
+    );
+    backend.recover_boss_employee(employee_id).unwrap();
+    let employee = backend.boss.employee(employee_id).unwrap();
+    assert!(employee.expired);
+    assert_eq!(employee.expiry.unwrap().cause, ExpiryCause::Restarted);
     // Close the pool so the resume queues instead of dispatching —
-    // the parked prompt and the resume note read off the ticket.
+    // the parked prompts and the resume note read off the ticket.
     set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
     backend
         .handle_boss_operation(
@@ -13138,9 +13158,11 @@ fn a_resume_drains_parked_prompts_first() {
     let employee = backend.boss.employee(employee_id).unwrap();
     assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
     let pending = &employee.ticket.as_ref().unwrap().pending_prompts;
-    assert_eq!(pending.len(), 2, "{pending:?}");
-    assert_eq!(pending[0], "queued while working");
-    assert!(pending[1].contains("interrupted"), "{}", pending[1]);
+    assert_eq!(pending.len(), 3, "{pending:?}");
+    assert!(pending[0].contains("interrupted"), "{}", pending[0]);
+    assert!(pending[0].contains("daemon restart"), "{}", pending[0]);
+    assert_eq!(pending[1], "queued while working");
+    assert_eq!(pending[2], "second follow-up");
     let _ = std::fs::remove_dir_all(root);
 }
 

@@ -1027,7 +1027,8 @@ pub struct EmployeeExpiry {
     /// copied onto the wire so clients never re-derive it.
     pub resumable: bool,
     /// Agent-owned prompts still parked in the mirrored queue at expiry
-    /// — they ride the ticket's pending list ahead of a revive prompt.
+    /// — they ride the ticket's pending list ahead of a revive prompt and
+    /// behind the continuation note a `resume` synthesizes.
     #[serde(default)]
     pub parked_prompts: u32,
     /// The `agentAsk` text still unanswered when the job expired.

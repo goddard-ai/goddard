@@ -2322,7 +2322,7 @@ impl WakuBackend {
     /// runtime and releases the previous generation's claims, so a crash
     /// leaves a queued ticket rather than a silently dead slot. Prompts
     /// parked for the old lifetime move onto the ticket's pending list —
-    /// ahead of whatever this requeue adds — and their mirrored chips
+    /// ahead of whatever this requeue appends — and their mirrored chips
     /// leave the document so dispatch does not deliver them twice.
     pub(super) fn requeue_employee(
         &self,
@@ -2398,9 +2398,13 @@ impl WakuBackend {
     /// `resume`: re-admit an interrupted employee in place. The resume is
     /// the ordinary requeue — same capacity admission, same parked-prompt
     /// merge, same adopted-worktree refusal — with the ticket adjusting
-    /// to carry a synthesized "verify and continue" prompt behind
+    /// to carry a synthesized "verify and continue" prompt ahead of
     /// whatever parked at expiry, plus the resume count and the cause it
-    /// answered. A live record refuses: prompts reach it directly.
+    /// answered. The note leads because the queued prompts were written
+    /// for a context the interruption severed: the employee verifies its
+    /// partial work before any parked instruction runs, and the parked
+    /// set drains behind it in order. A live record refuses: prompts
+    /// reach it directly.
     pub(super) fn resume_employee(&self, session_id: Uuid) -> anyhow::Result<()> {
         let employee = self
             .boss
@@ -2426,7 +2430,7 @@ impl WakuBackend {
             prompt.push_str(&format!(" Your unanswered question was: \"{question}\""));
         }
         self.requeue_employee(session_id, |ticket, _started| {
-            ticket.pending_prompts.push(prompt.clone());
+            ticket.pending_prompts.insert(0, prompt.clone());
             ticket.resume_count = ticket.resume_count.saturating_add(1);
             ticket.last_resumed_cause = Some(cause);
         })

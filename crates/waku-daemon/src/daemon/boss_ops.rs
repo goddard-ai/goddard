@@ -1975,7 +1975,7 @@ impl WakuBackend {
                 }
                 if expiry.parked_prompts > 0 && expiry.cause != ExpiryCause::ParkedWork {
                     prompt.push_str(&format!(
-                        " {} parked prompt{} survived the expiry and drain first if it resumes.",
+                        " {} parked prompt{} survived the expiry and drain behind the continuation note if it resumes.",
                         expiry.parked_prompts,
                         if expiry.parked_prompts == 1 { "" } else { "s" }
                     ));

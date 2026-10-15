@@ -121,7 +121,7 @@ exist only during this script invocation; use named memory buckets for durable s
                                             assignment — label only, no prompt
   resume(sessionId)                         revive an expired employee in place —
                                             queues a synthesized \"verify and
-                                            continue\" prompt behind whatever
+                                            continue\" prompt ahead of whatever
                                             parked at expiry; transcript,
                                             workspace, and cursor survive
   transcript(sessionId[, turn])             transcript map
