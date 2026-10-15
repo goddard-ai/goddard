@@ -1503,8 +1503,13 @@ impl TextInput {
         // must not coalesce with the typing around it.
         self.history.seal();
         self.record_edit_history(&range, text, false);
-        self.content =
+        let content: SharedString =
             (self.content[..range.start].to_owned() + text + &self.content[range.end..]).into();
+        let changed = self.content != content;
+        self.content = content;
+        if changed {
+            self.clear_content_overlays();
+        }
         let offset = range.start + text.len();
         self.selected_range = offset..offset;
         self.selection_reversed = false;
@@ -1544,6 +1549,12 @@ impl TextInput {
         self.search_matches = matches;
         self.active_search_match = active;
         cx.notify();
+    }
+
+    fn clear_content_overlays(&mut self) {
+        self.search_matches.clear();
+        self.active_search_match = None;
+        self.annotation_ranges.clear();
     }
 
     /// Replace the painted annotation washes — `(byte range, emphasised)`
@@ -1738,6 +1749,7 @@ impl TextInput {
         // A programmatic clear is a new baseline, not an edit to step back
         // over — a submitted prompt should not resurface via the undo shortcut.
         if changed {
+            self.clear_content_overlays();
             self.history = EditHistory::default();
         }
         self.pause_blink_cursor(cx);
@@ -1765,6 +1777,7 @@ impl TextInput {
         // from before an external change would silently revert that change.
         // An unchanged reload keeps the history alive.
         if changed {
+            self.clear_content_overlays();
             self.history = EditHistory::default();
         }
         self.refresh_highlight();
@@ -2744,6 +2757,7 @@ impl TextInput {
         self.refresh_highlight();
         self.pause_blink_cursor(cx);
         if previous != self.content {
+            self.clear_content_overlays();
             cx.emit(ContentSplice {
                 removed: range,
                 inserted: new_text.len(),
@@ -2813,7 +2827,11 @@ impl TextInput {
         cx: &mut Context<Self>,
     ) {
         let removed = 0..self.content.len();
-        self.content = content.into();
+        let content: SharedString = content.into();
+        if self.content != content {
+            self.clear_content_overlays();
+        }
+        self.content = content;
         self.selected_range = selection;
         self.selection_reversed = selection_reversed;
         self.marked_range = None;
@@ -3176,6 +3194,7 @@ impl EntityInputHandler for TextInput {
         self.vertical_navigation = None;
         self.pause_blink_cursor(cx);
         if previous != self.content {
+            self.clear_content_overlays();
             cx.emit(ContentSplice {
                 removed: range,
                 inserted: new_text.len(),
@@ -3635,7 +3654,7 @@ impl AnnotationPaint<'static> {
 
 #[allow(clippy::too_many_arguments)]
 fn input_text_runs(
-    display_len: usize,
+    display_text: &str,
     base_run: TextRun,
     selected_range: Option<&Range<usize>>,
     marked_range: Option<&Range<usize>>,
@@ -3646,30 +3665,31 @@ fn input_text_runs(
     annotations: AnnotationPaint,
     atoms: AtomPaint,
 ) -> Vec<TextRun> {
+    let display_len = display_text.len();
     let mut boundaries = vec![0, display_len];
     for range in [selected_range, marked_range].into_iter().flatten() {
-        boundaries.push(range.start.min(display_len));
-        boundaries.push(range.end.min(display_len));
+        push_text_run_boundary(display_text, &mut boundaries, range.start);
+        push_text_run_boundary(display_text, &mut boundaries, range.end);
     }
     for (range, _) in highlight {
-        boundaries.push(range.start.min(display_len));
-        boundaries.push(range.end.min(display_len));
+        push_text_run_boundary(display_text, &mut boundaries, range.start);
+        push_text_run_boundary(display_text, &mut boundaries, range.end);
     }
     for range in search.matches {
-        boundaries.push(range.start.min(display_len));
-        boundaries.push(range.end.min(display_len));
+        push_text_run_boundary(display_text, &mut boundaries, range.start);
+        push_text_run_boundary(display_text, &mut boundaries, range.end);
     }
     for (range, _) in annotations.ranges {
-        boundaries.push(range.start.min(display_len));
-        boundaries.push(range.end.min(display_len));
+        push_text_run_boundary(display_text, &mut boundaries, range.start);
+        push_text_run_boundary(display_text, &mut boundaries, range.end);
     }
     for range in atoms.ranges {
-        boundaries.push(range.start.min(display_len));
-        boundaries.push(range.end.min(display_len));
+        push_text_run_boundary(display_text, &mut boundaries, range.start);
+        push_text_run_boundary(display_text, &mut boundaries, range.end);
     }
     for range in atoms.slots {
-        boundaries.push(range.start.min(display_len));
-        boundaries.push(range.end.min(display_len));
+        push_text_run_boundary(display_text, &mut boundaries, range.start);
+        push_text_run_boundary(display_text, &mut boundaries, range.end);
     }
     boundaries.sort_unstable();
     boundaries.dedup();
@@ -3755,6 +3775,13 @@ fn input_text_runs(
             })
         })
         .collect()
+}
+
+fn push_text_run_boundary(text: &str, boundaries: &mut Vec<usize>, offset: usize) {
+    let offset = offset.min(text.len());
+    if text.is_char_boundary(offset) {
+        boundaries.push(offset);
+    }
 }
 
 impl IntoElement for InputElement {
@@ -3910,7 +3937,7 @@ impl Element for InputElement {
             AtomPaint::none()
         };
         let runs = input_text_runs(
-            display_text.len(),
+            &display_text,
             base_run,
             selected_range.as_ref(),
             marked_range.as_ref(),
@@ -6394,7 +6421,7 @@ mod tests {
         // "let" at 0..3 and "true" at 8..12, with a selection cutting across.
         let highlight = vec![(0..3, TokenClass::Keyword), (8..12, TokenClass::Literal)];
         let runs = input_text_runs(
-            12,
+            "012345678901",
             TextRun {
                 len: 12,
                 font: font(".SystemUIFont"),
@@ -6439,7 +6466,7 @@ mod tests {
         let selection = 2..8;
         let marked = 4..6;
         let runs = input_text_runs(
-            10,
+            "0123456789",
             TextRun {
                 len: 10,
                 font: font(".SystemUIFont"),
@@ -6491,7 +6518,7 @@ mod tests {
         // Selection covers the active match exactly, as after find-next.
         let selection = 8..10;
         let runs = input_text_runs(
-            20,
+            "01234567890123456789",
             TextRun {
                 len: 20,
                 font: font(".SystemUIFont"),
@@ -6543,7 +6570,7 @@ mod tests {
         let ranges = [slot.clone()];
         let slots = [slot];
         let runs = input_text_runs(
-            22,
+            "0123456789012345678901",
             TextRun {
                 len: 22,
                 font: font("Test Sans"),
