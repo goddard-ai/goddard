@@ -1104,14 +1104,6 @@ impl BossEmployeeReason {
             Self::Blocked(text) | Self::Queued(text) | Self::Detail(text) => text,
         }
     }
-
-    fn color(&self, theme: &Theme) -> Hsla {
-        match self {
-            Self::Blocked(_) => theme.warning,
-            Self::Queued(_) => theme.text_secondary,
-            Self::Detail(_) => theme.text_tertiary,
-        }
-    }
 }
 
 /// A required-plan chip's resolved state — the bound plan's open target
@@ -1135,10 +1127,8 @@ pub(super) struct BossEmployeeRow {
     /// `outcome:session:generation` entry key inside an expanded row —
     /// keeps the id unique when one employee shows on both surfaces.
     pub slot: String,
-    /// The row's activation destination and chip target.
+    /// The row's activation destination.
     pub session_id: Uuid,
-    /// The daemon whose boss owns the record — chip dispatches go here.
-    pub key: DaemonKey,
     pub avatar: BossEmployeeAvatar,
     pub name: String,
     /// Employee rows keep the job title here; outcome rows lead with it
@@ -1149,19 +1139,13 @@ pub(super) struct BossEmployeeRow {
     /// The right-aligned relative stamp, resolved against `now`.
     pub stamp: Option<u64>,
     pub now: u64,
-    /// The blocked/queued/cause lines under the job detail — one line
-    /// each so the full text reads instead of truncating inline.
-    pub reasons: Vec<BossEmployeeReason>,
-    pub readiness: Option<String>,
     pub status: Option<(String, Hsla)>,
     /// The sidebar-style status marker — icon path and whether it spins,
-    /// colored by `status`. `None` on surfaces that print the status word.
+    /// colored by `status`.
     pub status_marker: Option<(&'static str, bool)>,
     /// Boss-flagged attention — the sidebar row's unread dot beside the
     /// status marker.
     pub attention: bool,
-    /// The bound plan's recovery chips — `None` for unbound employees.
-    pub plan_recovery: Option<BossEmployeePlanRecovery>,
     /// Virtualized rows keep a persistent focus handle so a remount
     /// across sections holds focus; the page list's tab stop is `None`.
     pub focus: Option<FocusHandle>,
@@ -8234,10 +8218,8 @@ impl Waku {
         )
     }
 
-    /// A full-width Employees row — the shared employee card painted from
-    /// `boss_employee_row_data`; avatar and name over the employee detail, with
-    /// a readable status and the summon or finish age on
-    /// the right. Blocked and queued reasons get their own line.
+    /// A fixed-height Employees row with aligned identity, job, project,
+    /// last update, and icon-only status columns.
     fn render_boss_employee_page_row(
         &self,
         id: Uuid,
@@ -8250,8 +8232,7 @@ impl Waku {
     }
 
     /// The Employees-tab row's prepared paint data — roster record joined
-    /// with the cached session, identity, job, and queue lookups, plus
-    /// the plan chip's resolved state.
+    /// with the cached session, identity, and job lookups.
     fn boss_employee_row_data(
         &self,
         id: Uuid,
@@ -8290,31 +8271,21 @@ impl Waku {
                     .filter(|project| !project.is_empty())
             });
         let project = project.filter(|project| !project.is_empty());
-        let mut reasons = Vec::new();
-        if let Some(employee) = employee {
-            if let Some(blocker) = employee
-                .blocker
-                .as_deref()
-                .map(str::trim)
-                .filter(|text| !text.is_empty())
-            {
-                reasons.push(BossEmployeeReason::Blocked(blocker.to_owned()));
-            }
-            if let Some(wait) = self.boss_ui.queued.get(&id) {
-                reasons.push(BossEmployeeReason::Queued(wait.clone()));
-            }
-        }
-        let readiness = employee.and_then(boss_plan_readiness_label);
-        let status =
-            employee.map(|employee| self.boss_employee_status_label(employee, session, &theme));
-        let stamp = employee.and_then(|employee| {
-            if employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued {
-                employee.queued_at.or(employee.created_at)
-            } else if self.boss_ui.expired.contains(&id) {
-                employee.expired_at.or(employee.created_at)
-            } else {
-                employee.created_at
-            }
+        let (status, status_marker) = employee
+            .map(|employee| self.boss_employee_status_label(employee, session, &theme))
+            .unwrap_or_else(|| {
+                (
+                    (tr!("boss.goals_status_unavailable"), theme.text_tertiary),
+                    ("icons/hourglass.svg", false),
+                )
+            });
+        let stamp = session.map(|session| session.updated_at).or_else(|| {
+            employee.and_then(|employee| {
+                [employee.created_at, employee.queued_at, employee.expired_at]
+                    .into_iter()
+                    .flatten()
+                    .max()
+            })
         });
         let job_icon = self
             .boss_ui
@@ -8327,7 +8298,6 @@ impl Waku {
         Some(BossEmployeeRow {
             slot: "page".to_owned(),
             session_id: id,
-            key,
             avatar: self.prepare_boss_employee_avatar(&identity, BOSS_EMPLOYEE_AVATAR, cx),
             name: identity.name.clone(),
             detail,
@@ -8335,12 +8305,9 @@ impl Waku {
             project,
             stamp,
             now: unix_time(),
-            reasons,
-            readiness,
-            status,
-            status_marker: None,
+            status: Some(status),
+            status_marker: Some(status_marker),
             attention: self.boss_ui.attention.contains(&id),
-            plan_recovery: employee.and_then(|employee| self.employee_plan_recovery(key, employee)),
             focus: None,
             navigable: true,
             nested: false,
@@ -8348,7 +8315,7 @@ impl Waku {
         })
     }
 
-    /// The Employees row's readable status — lifecycle first, then the
+    /// The Employees row's status tooltip and icon — lifecycle first, then the
     /// live session's verdict. Finished, failed, cancelled, and expired
     /// stay distinct: expiry describes the roster record, not the outcome.
     fn boss_employee_status_label(
@@ -8356,57 +8323,97 @@ impl Waku {
         employee: &waku_protocol::boss::BossEmployee,
         session: Option<&AgentSession>,
         theme: &Theme,
-    ) -> (String, Hsla) {
+    ) -> ((String, Hsla), (&'static str, bool)) {
         use waku_protocol::boss::EmployeeLifecycle;
         if employee.workspace_transition && !employee.expired {
-            return (tr!("boss.status_switching_workspace"), theme.text_secondary);
+            return (
+                (tr!("boss.status_switching_workspace"), theme.text_secondary),
+                ("icons/loader-circle.svg", true),
+            );
         }
         match employee.lifecycle() {
-            EmployeeLifecycle::Queued => {
-                // The admission wait itself is the row's own-line reason —
-                // the status word stays bare so it does not duplicate it.
-                (tr!("boss.goals_status_queued"), theme.text_secondary)
-            }
-            EmployeeLifecycle::Dispatching => {
-                (tr!("boss.goals_status_starting"), theme.text_secondary)
-            }
-            EmployeeLifecycle::Finishing => {
-                (tr!("boss.goals_status_finishing"), theme.text_secondary)
-            }
+            EmployeeLifecycle::Queued => (
+                (tr!("boss.goals_status_queued"), theme.text_secondary),
+                ("icons/hourglass.svg", false),
+            ),
+            EmployeeLifecycle::Dispatching => (
+                (tr!("boss.goals_status_starting"), theme.text_secondary),
+                ("icons/loader-circle.svg", true),
+            ),
+            EmployeeLifecycle::Finishing => (
+                (tr!("boss.goals_status_finishing"), theme.text_secondary),
+                ("icons/loader-circle.svg", true),
+            ),
             EmployeeLifecycle::Working => {
                 if employee.blocker.is_some() {
-                    (tr!("boss.goals_status_blocked"), theme.warning)
+                    (
+                        (tr!("boss.goals_status_blocked"), theme.warning),
+                        ("icons/alert.svg", false),
+                    )
                 } else {
                     match session.map(|session| session.status) {
                         Some(SessionStatus::Working | SessionStatus::Connecting) => (
-                            tr!("sidebar.status_working"),
-                            status_color(theme, SessionStatus::Working),
+                            (
+                                tr!("sidebar.status_working"),
+                                status_color(theme, SessionStatus::Working),
+                            ),
+                            ("icons/loader-circle.svg", true),
                         ),
                         Some(SessionStatus::Waiting) => (
-                            tr!("sidebar.status_waiting"),
-                            status_color(theme, SessionStatus::Waiting),
+                            (
+                                tr!("sidebar.status_waiting"),
+                                status_color(theme, SessionStatus::Waiting),
+                            ),
+                            ("icons/alert.svg", false),
                         ),
                         Some(SessionStatus::Background) => (
-                            tr!("sidebar.status_background"),
-                            status_color(theme, SessionStatus::Background),
+                            (
+                                tr!("sidebar.status_background"),
+                                status_color(theme, SessionStatus::Background),
+                            ),
+                            ("icons/hourglass.svg", false),
                         ),
-                        Some(SessionStatus::Failed) => (tr!("sidebar.status_failed"), theme.danger),
-                        Some(SessionStatus::Idle) => (tr!("boss.status_idle"), theme.text_tertiary),
-                        None => (tr!("boss.goals_status_starting"), theme.text_secondary),
+                        Some(SessionStatus::Failed) => (
+                            (tr!("sidebar.status_failed"), theme.danger),
+                            ("icons/x-bold.svg", false),
+                        ),
+                        Some(SessionStatus::Idle) => (
+                            (tr!("boss.status_idle"), theme.text_tertiary),
+                            ("icons/pause.svg", false),
+                        ),
+                        None => (
+                            (tr!("boss.goals_status_starting"), theme.text_secondary),
+                            ("icons/loader-circle.svg", true),
+                        ),
                     }
                 }
             }
             EmployeeLifecycle::Expired => {
                 if employee.cancelled {
-                    (tr!("boss.status_cancelled"), theme.text_tertiary)
+                    (
+                        (tr!("boss.status_cancelled"), theme.text_tertiary),
+                        ("icons/ban.svg", false),
+                    )
                 } else if session.is_some_and(|session| session.status == SessionStatus::Failed) {
-                    (tr!("sidebar.status_failed"), theme.danger)
+                    (
+                        (tr!("sidebar.status_failed"), theme.danger),
+                        ("icons/x-bold.svg", false),
+                    )
                 } else if employee.blocker.is_some() {
-                    (tr!("boss.goals_status_blocked"), theme.warning)
+                    (
+                        (tr!("boss.goals_status_blocked"), theme.warning),
+                        ("icons/alert.svg", false),
+                    )
                 } else if session.is_none() {
-                    (tr!("boss.status_expired"), theme.text_tertiary)
+                    (
+                        (tr!("boss.status_expired"), theme.text_tertiary),
+                        ("icons/hourglass.svg", false),
+                    )
                 } else {
-                    (tr!("boss.employee_finished"), theme.text_tertiary)
+                    (
+                        (tr!("boss.employee_finished"), theme.text_tertiary),
+                        ("icons/check.svg", false),
+                    )
                 }
             }
         }
@@ -11355,10 +11362,8 @@ fn queued_card_copy(
     (QueuedCardPhase::Waiting, headline, secondary)
 }
 
-/// The shared employee card's geometry — the Employees tab's 42px row,
-/// plus a line per own-line reason and its 24px face.
+/// The shared employee row geometry: a 42px row and a 24px avatar.
 pub(super) const BOSS_EMPLOYEE_ROW_HEIGHT: f32 = 42.0;
-const BOSS_EMPLOYEE_ROW_REASON_HEIGHT: f32 = 18.0;
 pub(super) const BOSS_EMPLOYEE_AVATAR: f32 = 24.0;
 
 /// The card's face — the same Gaze/still/placeholder `boss_avatar` and
@@ -11487,11 +11492,8 @@ fn boss_employee_plan_chips(
     controls.into_any_element()
 }
 
-/// The employee card the Employees tab uses — avatar, name over the row
-/// detail with its project and stamp, each blocked/queued reason on its
-/// own line, the status, and the action chips the caller resolved.
-/// `waku` backs activation and chip dispatch; callers holding
-/// `Context<Waku>` hand over `&cx.entity().downgrade()`.
+/// The Brain employee list keeps the same columns for every lifecycle.
+/// Reasons, plan details, and recovery actions belong to other surfaces.
 #[track_caller]
 pub(super) fn boss_employee_row_element(
     row: &BossEmployeeRow,
@@ -11500,9 +11502,16 @@ pub(super) fn boss_employee_row_element(
 ) -> AnyElement {
     let theme = Theme::current(cx);
     let session_id = row.session_id;
-    let key = row.key;
-    let height =
-        BOSS_EMPLOYEE_ROW_HEIGHT + row.reasons.len() as f32 * BOSS_EMPLOYEE_ROW_REASON_HEIGHT;
+    let (status_label, status_color) = row
+        .status
+        .clone()
+        .unwrap_or_else(|| (tr!("boss.goals_status_unavailable"), theme.text_tertiary));
+    let (status_icon, spin) = row.status_marker.unwrap_or(("icons/hourglass.svg", false));
+    let marker = if spin {
+        motion::spin_slow(icon(status_icon, 12.0, status_color))
+    } else {
+        icon(status_icon, 12.0, status_color).into_any_element()
+    };
     div()
         .id(SharedString::from(format!(
             "boss-employee-row-{}-{session_id}",
@@ -11514,13 +11523,12 @@ pub(super) fn boss_employee_row_element(
         .when(row.focus.is_none() && row.navigable, |element| {
             element.tab_index(0)
         })
-        .h(px(height))
+        .h(px(BOSS_EMPLOYEE_ROW_HEIGHT))
         .w_full()
-        .pl(px(if row.nested { 26.0 } else { 8.0 }))
-        .pr(px(8.0))
+        .px(px(8.0))
         .flex()
         .items_center()
-        .gap(px(8.0))
+        .gap(px(12.0))
         .rounded(px(6.0))
         .when_some(row.aria.clone(), |element, aria| element.aria_label(aria))
         .when(row.navigable, |element| {
@@ -11539,107 +11547,72 @@ pub(super) fn boss_employee_row_element(
                     });
                 })
         })
-        .child(boss_employee_avatar_element(&row.avatar, &theme))
+        .child(
+            div()
+                .flex_none()
+                .size(px(BOSS_EMPLOYEE_AVATAR))
+                .child(boss_employee_avatar_element(&row.avatar, &theme)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(sp(14.0))
+                .text_color(theme.text)
+                .child(row.name.clone()),
+        )
         .child(
             div()
                 .flex_1()
                 .min_w_0()
                 .flex()
-                .flex_col()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(sp(13.0))
+                .text_color(theme.text_secondary)
                 .child(
                     div()
-                        .flex()
-                        .items_center()
-                        .min_w_0()
-                        .gap(px(6.0))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .text_size(sp(14.0))
-                                .line_height(sp(17.0))
-                                .text_color(theme.text)
-                                .truncate()
-                                .child(row.name.clone()),
-                        )
-                        .when_some(row.project.clone(), |line, project| {
-                            line.child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .min_w_0()
-                                    .gap(px(4.0))
-                                    .text_size(sp(12.0))
-                                    .line_height(sp(15.0))
-                                    .text_color(theme.text_tertiary)
-                                    .child(icon("icons/folder.svg", 12.0, theme.text_tertiary))
-                                    .child(div().min_w_0().truncate().child(project)),
-                            )
-                        })
-                        .when_some(row.stamp, |line, stamp| {
-                            line.child(
-                                div()
-                                    .flex_none()
-                                    .ml_auto()
-                                    .w(px(72.0))
-                                    .text_right()
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_ghost)
-                                    .child(sidebar::format_time_ago(row.now.saturating_sub(stamp))),
-                            )
-                        }),
+                        .flex_none()
+                        .child(icon(row.job_icon, 12.0, theme.text_tertiary)),
                 )
-                .when(!row.detail.is_empty(), |text| {
-                    text.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .min_w_0()
-                            .text_size(sp(13.0))
-                            .line_height(sp(15.0))
-                            .text_color(theme.text_tertiary)
-                            .child(icon(row.job_icon, 12.0, theme.text_tertiary))
-                            .child(div().min_w_0().truncate().child(row.detail.clone())),
-                    )
-                })
-                .children(row.reasons.iter().map(|reason| {
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(sp(12.0))
-                        .line_height(sp(15.0))
-                        .text_color(reason.color(&theme))
-                        .child(reason.text().to_owned())
-                })),
+                .child(div().min_w_0().truncate().child(row.detail.clone())),
         )
-        .when_some(row.readiness.clone(), |element, readiness| {
-            element.child(
-                div()
-                    .max_w(px(280.0))
-                    .truncate()
-                    .text_size(sp(12.0))
-                    .text_color(theme.text_secondary)
-                    .child(readiness),
-            )
-        })
-        .when_some(
-            row.plan_recovery.as_ref().map(|recovery| {
-                boss_employee_plan_chips(waku, key, session_id, recovery, &row.slot, &theme)
-            }),
-            |element, chips| element.child(chips),
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(sp(12.0))
+                .text_color(theme.text_tertiary)
+                .child(row.project.clone().unwrap_or_default()),
         )
-        .when_some(row.status.clone(), |element, (label, color)| {
-            element.child(
-                div()
-                    .flex_none()
-                    .max_w(px(280.0))
-                    .truncate()
-                    .text_size(sp(12.0))
-                    .text_color(color)
-                    .child(label),
-            )
-        })
+        .child(
+            div()
+                .flex_none()
+                .w(px(72.0))
+                .text_right()
+                .text_size(sp(12.0))
+                .text_color(theme.text_ghost)
+                .children(
+                    row.stamp
+                        .map(|stamp| sidebar::format_time_ago(row.now.saturating_sub(stamp))),
+                ),
+        )
+        .child(
+            div()
+                .id(SharedString::from(format!(
+                    "boss-employee-status-{}-{session_id}",
+                    row.slot
+                )))
+                .flex_none()
+                .size(px(16.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .tooltip(Tooltip::text(status_label))
+                .child(marker),
+        )
         .into_any_element()
 }
 

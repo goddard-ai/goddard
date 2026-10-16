@@ -12982,7 +12982,6 @@ impl Waku {
     fn prepare_boss_outcome_assignments(
         &self,
         row: &boss::BossOutcomeRow,
-        key: waku_client::DaemonKey,
         sessions: &HashMap<Uuid, &AgentSession>,
         now: u64,
         cx: &App,
@@ -13030,7 +13029,6 @@ impl Waku {
             employees.push(boss::BossEmployeeRow {
                 slot: fields.key,
                 session_id: fields.session_id,
-                key,
                 avatar,
                 name: fields.name,
                 // The sidebar-style detail line: the employee's job title
@@ -13053,13 +13051,9 @@ impl Waku {
                 project,
                 stamp: fields.stamp,
                 now,
-                reasons: fields.reasons,
-                readiness: fields.readiness,
                 status: Some((fields.status.label(), tone.color(&theme))),
                 status_marker: Some((icon_path, spin)),
                 attention: self.boss_ui.attention.contains(&fields.session_id),
-                plan_recovery: employee
-                    .and_then(|employee| self.employee_plan_recovery(key, employee)),
                 focus: None,
                 navigable: fields.navigable,
                 nested: true,
@@ -13092,7 +13086,6 @@ struct BossOutcomeEmployeeFields {
     status: BossGoalStatus,
     /// Blocked/queued/cause text — each on the card's own line.
     reasons: Vec<boss::BossEmployeeReason>,
-    readiness: Option<String>,
     /// Still in flight or the session's newest recorded attempt — the
     /// only rows painted with the full employee card. Older attempts
     /// compress into history lines.
@@ -13254,8 +13247,6 @@ fn boss_outcome_employee_fields(
                 detail,
                 status,
                 reasons,
-                readiness: member
-                    .and_then(|member| boss::boss_plan_readiness_label(&member.employee)),
                 current: assignment.settled.is_none()
                     || latest_generation.get(&assignment.session)
                         == Some(&assignment.generation),
@@ -13526,7 +13517,7 @@ impl Waku {
                 // that name a conversation the session snapshot knows get
                 // the list's persistent focus handle; the rest stay inert.
                 let (employees, attempt_history) =
-                    self.prepare_boss_outcome_assignments(row, key, &sessions, now, cx);
+                    self.prepare_boss_outcome_assignments(row, &sessions, now, cx);
                 let mut detail_items: Vec<BossOutcomeItem> = employees
                     .into_iter()
                     .map(|mut employee| {
