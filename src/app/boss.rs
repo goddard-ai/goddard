@@ -6842,31 +6842,46 @@ impl Waku {
             .track_focus(&focus)
             .flex_1()
             .min_h_0()
+            .min_w_0()
             .flex()
-            .flex_col()
-            .child(self.render_boss_page_header(key, cx))
-            .child(self.render_boss_section_strip(key, tab, &theme, cx))
-            .when(
-                boss_loading_label_visible(self.boss_ui.pending),
-                |element| {
-                    element.child(
-                        div()
-                            .px(px(20.0))
-                            .py(px(4.0))
-                            .text_size(sp(12.0))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("boss.loading")),
-                    )
-                },
+            .child(
+                div()
+                    .w(px(220.0))
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .bg(theme.sidebar)
+                    .border_r_1()
+                    .border_color(theme.separator)
+                    .child(self.render_boss_page_header(key, cx))
+                    .child(self.render_boss_section_navigation(key, tab, &theme, cx)),
             )
-            .child(content)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .when(
+                        boss_loading_label_visible(self.boss_ui.pending),
+                        |element| {
+                            element.child(
+                                div()
+                                    .px(px(20.0))
+                                    .py(px(4.0))
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(tr!("boss.loading")),
+                            )
+                        },
+                    )
+                    .child(content),
+            )
             .into_any_element()
     }
 
-    /// The shared Brain header: the boss's face, name, and host on the
-    /// left — the name swaps to the shared rename field while a rename is
-    /// open — and the labeled Identity menu plus the Chat action on the
-    /// right.
+    /// The Boss identity at the top of the Brain navigation sidebar.
     fn render_boss_page_header(&self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let state = self.boss_ui.states.get(&key);
@@ -6891,7 +6906,8 @@ impl Waku {
                     }),
                 )
                 .h(px(22.0))
-                .w(px(220.0))
+                .w_full()
+                .min_w_0()
                 .px(px(4.0))
                 .rounded(px(4.0))
                 .border(hairline())
@@ -6913,44 +6929,6 @@ impl Waku {
                 .child(name)
                 .into_any_element()
         };
-        let identity_handle = self.menu_handle("boss-identity", cx);
-        let weak = cx.entity().downgrade();
-        let identity_menu = dropdown_menu(
-            MenuChip::new("boss-identity-trigger")
-                .icon("icons/user-round.svg", theme.text_tertiary)
-                .label(tr!("boss.identity"))
-                .outlined()
-                .background(theme.raised)
-                .selected(identity_handle.is_open()),
-            "boss-identity-menu",
-            &identity_handle,
-            MenuAlign::BelowRight,
-            move |_| {
-                let rename = weak.clone();
-                let face = weak.clone();
-                let items = vec![
-                    MenuItem::new(tr!("common.rename"), move |window, cx| {
-                        let _ = rename.update(cx, |this, cx| {
-                            if let Some(session_id) = session_id {
-                                this.begin_session_rename(session_id, window, cx);
-                            }
-                        });
-                    })
-                    .icon("icons/pencil.svg")
-                    .disabled(session_id.is_none()),
-                    MenuItem::new(tr!("boss.new_face"), move |_, cx| {
-                        let _ = face.update(cx, |this, cx| {
-                            if let Some(session_id) = session_id {
-                                this.regenerate_managed_avatar(session_id, cx);
-                            }
-                        });
-                    })
-                    .icon("icons/rotate-cw.svg")
-                    .disabled(session_id.is_none()),
-                ];
-                items
-            },
-        );
         div()
             .flex()
             .items_center()
@@ -6977,88 +6955,76 @@ impl Waku {
                             .child(host),
                     ),
             )
-            .child(identity_menu)
-            .child(
-                boss_button("boss-chat", tr!("boss.chat"), &theme)
-                    .child(icon("icons/message-square.svg", 14.0, theme.text_secondary))
-                    .child(tr!("boss.chat"))
-                    .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx)),
-            )
             .into_any_element()
     }
 
-    /// The fixed section navigation under the header — a strip of quiet
-    /// text items, not a row of bordered action buttons.
-    fn render_boss_section_strip(
+    /// Vertical section navigation matching the Settings sidebar.
+    fn render_boss_section_navigation(
         &self,
         key: DaemonKey,
         tab: BossTab,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        div()
-            .flex()
-            .items_center()
-            .gap(px(2.0))
-            .px(px(16.0))
-            .py(px(6.0))
-            .border_b_1()
-            .border_color(theme.separator)
-            .children(
-                [
-                    (BossTab::Memory, "boss.memory", "icons/brain.svg"),
-                    (BossTab::Personas, "boss.personas", "icons/user-round.svg"),
-                    (BossTab::Employees, "boss.history", "icons/folder-clock.svg"),
-                    (BossTab::Plans, "boss.plans", "icons/map.svg"),
-                    (
-                        BossTab::Instructions,
-                        "boss.pinned_instructions",
-                        "icons/file-text.svg",
-                    ),
-                    (
-                        BossTab::Deliverables,
-                        "boss.deliverables",
-                        "icons/file-text.svg",
-                    ),
-                ]
-                .into_iter()
-                .map(|(target, label, glyph)| {
-                    let selected = tab == target;
-                    div()
-                        .id(SharedString::from(format!("boss-section-{label}")))
-                        .tab_index(0)
-                        .h(px(26.0))
-                        .px(px(10.0))
-                        .rounded(px(6.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .text_size(sp(12.5))
-                        .cursor_pointer()
-                        .when(selected, |element| {
-                            element.bg(theme.overlay).text_color(theme.text)
+        div().flex().flex_col().gap(px(3.0)).p(px(12.0)).children(
+            [
+                (BossTab::Memory, "boss.memory", "icons/brain.svg"),
+                (BossTab::Personas, "boss.personas", "icons/user-round.svg"),
+                (BossTab::Employees, "boss.history", "icons/folder-clock.svg"),
+                (BossTab::Plans, "boss.plans", "icons/map.svg"),
+                (
+                    BossTab::Instructions,
+                    "boss.pinned_instructions",
+                    "icons/file-text.svg",
+                ),
+                (
+                    BossTab::Deliverables,
+                    "boss.deliverables",
+                    "icons/file-text.svg",
+                ),
+            ]
+            .into_iter()
+            .map(|(target, label, glyph)| {
+                let selected = tab == target;
+                div()
+                    .id(SharedString::from(format!("boss-section-{label}")))
+                    .tab_index(0)
+                    .h(px(36.0))
+                    .px(px(11.0))
+                    .rounded(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .text_size(sp(13.0))
+                    .cursor_pointer()
+                    .when(selected, |element| {
+                        element
+                            .bg(theme.sidebar_item_background)
+                            .text_color(theme.text)
+                    })
+                    .when(!selected, |element| {
+                        element.text_color(theme.text_secondary).hover(|style| {
+                            style
+                                .bg(theme.sidebar_item_background)
+                                .text_color(theme.text)
                         })
-                        .when(!selected, |element| {
-                            element
-                                .text_color(theme.text_secondary)
-                                .hover(|style| style.bg(theme.overlay).text_color(theme.text))
-                        })
-                        .focus_visible(|style| style.bg(theme.focus_highlight()))
-                        .child(icon(
-                            glyph,
-                            13.0,
-                            if selected {
-                                theme.text_secondary
-                            } else {
-                                theme.text_tertiary
-                            },
-                        ))
-                        .child(tr!(label))
-                        .on_activation(cx, move |this, window, cx| {
-                            this.open_boss_page(key, target, window, cx)
-                        })
-                }),
-            )
+                    })
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .child(icon(
+                        glyph,
+                        15.0,
+                        if selected {
+                            theme.text_secondary
+                        } else {
+                            theme.text_tertiary
+                        },
+                    ))
+                    .child(tr!(label))
+                    .on_activation(cx, move |this, window, cx| {
+                        this.open_boss_page(key, target, window, cx)
+                    })
+            }),
+        )
     }
 
     /// A section's in-list view switch — the segmented control the

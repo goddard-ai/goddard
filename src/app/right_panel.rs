@@ -5527,9 +5527,9 @@ impl Waku {
     /// same flags `navigation_location` reads — a page beats the selection
     /// parked underneath it.
     pub(super) fn active_right_panel_owner(&self) -> RightPanelOwner {
-        if let Some(key) = self.boss_chat_key() {
+        if let Some((key, _)) = self.boss_ui.page {
             RightPanelOwner::Boss(key)
-        } else if let Some((key, _)) = self.boss_ui.page {
+        } else if let Some(key) = self.boss_chat_key() {
             RightPanelOwner::Boss(key)
         } else if self.notifications.open {
             RightPanelOwner::Inbox
@@ -6738,7 +6738,9 @@ impl Waku {
             .items_center()
             .gap(px(8.0))
             .when(
-                self.state.git_panel_enabled && self.git_panel_owner_allowed(),
+                self.boss_ui.page.is_none()
+                    && self.state.git_panel_enabled
+                    && self.git_panel_owner_allowed(),
                 |element| element.child(self.render_git_panel_toggle(cx)),
             )
             .child(self.render_right_panel_toggle(cx))

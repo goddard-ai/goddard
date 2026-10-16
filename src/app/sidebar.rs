@@ -7180,14 +7180,17 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = Theme::current(cx);
-        let session = self.selected_session();
+        let brain_page = self.boss_ui.page.is_some();
+        let session = self.selected_session().filter(|_| !brain_page);
         // A deliverable's preview page swaps the session's title and chips
         // for the file's own chrome — the header is the page's top bar.
         let deliverable_page = deliverable_header.is_some();
         // The header's pull-request chip reads the same scan the sidebar
         // badge does; the sidebar's own ensure never runs while it is hidden.
         self.ensure_sidebar_pull_requests(cx);
-        let title = if let Some(terminal_id) = self.selected_terminal {
+        let title = if brain_page {
+            String::new()
+        } else if let Some(terminal_id) = self.selected_terminal {
             self.terminal_records
                 .get(&terminal_id)
                 .and_then(|record| record.custom_title.clone())
@@ -7512,7 +7515,9 @@ impl Waku {
                     cx,
                 ),
             )
-            .child(self.render_background_work_summary(cx))
+            .when(!brain_page, |element| {
+                element.child(self.render_background_work_summary(cx))
+            })
             .children(self.render_reclaim_indicator(window, cx))
             .when_some(self.selected_terminal, |element, terminal_id| {
                 element.child(self.render_terminal_split_button(
