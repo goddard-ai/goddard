@@ -284,7 +284,15 @@ pub fn work_context(
                 .count(),
         ));
         let mut section = String::new();
-        let mut header = format!("## {} — {}", project.name, project.path.display());
+        // Every listed project entry carries its canonical registered id
+        // alongside name and path — chain steps and `projects resolve`
+        // selectors consume exactly that triple.
+        let mut header = format!(
+            "## {} — {} · id {}",
+            project.name,
+            project.path.display(),
+            project.id
+        );
         if project.starred {
             header.push_str(" (starred)");
         }
@@ -307,7 +315,9 @@ pub fn work_context(
         digest.push_str(&section);
     }
     if omitted_projects > 0 {
-        digest.push_str(&format!("## …{omitted_projects} more projects omitted\n"));
+        digest.push_str(&format!(
+            "## …{omitted_projects} more projects omitted — `goddard-agent boss projects list` returns the complete registered catalog\n"
+        ));
     }
     // The always-on header: one counts line per user project, then the
     // fleet tallies no project line can carry. It points at the `context`
@@ -322,7 +332,9 @@ pub fn work_context(
     let has_fleet = unmapped_employees > 0 || !automations.automations.is_empty() || open_tasks > 0;
     let mut header = String::new();
     if !header_lines.is_empty() || has_fleet {
-        header.push_str("Work overview — the `context` operation returns the full digest.\n");
+        header.push_str(
+            "Work overview — the `context` operation returns the full digest; `boss projects list` returns every registered project's canonical id, name, and path.\n",
+        );
     }
     let mut folded = 0usize;
     for line in header_lines {
@@ -492,7 +504,7 @@ pub fn work_context(
 
 fn bounded_brief(mut brief: String, cap: usize) -> String {
     if brief.chars().count() > cap {
-        let tail = "\n…Work brief shortened. Use `goddard-agent boss context` or `boss roster` and targeted transcript reads for details.\n";
+        let tail = "\n…Work brief shortened. Use `goddard-agent boss context` or `boss roster` and targeted transcript reads for details; `goddard-agent boss projects list` returns the complete registered project catalog.\n";
         brief = truncate_chars(&brief, cap - tail.chars().count());
         if let Some(line_end) = brief.rfind('\n') {
             brief.truncate(line_end);
@@ -986,6 +998,18 @@ mod tests {
         assert!(work.digest.contains("\"Ship it\" — waiting for input"));
         assert!(!work.digest.contains("Old task"));
         assert!(!work.digest.contains("\"Boss\""));
+        // Every listed project entry carries its canonical registered id
+        // alongside name and path — chain selectors consume that triple.
+        assert!(
+            work.digest
+                .contains(&format!("## app — /work/app · id {}", app.id)),
+            "digest: {}",
+            work.digest
+        );
+        assert!(
+            work.digest
+                .contains(&format!("## lib — /work/lib · id {}", lib.id))
+        );
     }
 
     #[test]

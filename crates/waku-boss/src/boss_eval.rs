@@ -125,6 +125,17 @@ exist only during this script invocation; use named memory buckets for durable s
                                             parked at expiry; transcript,
                                             workspace, and cursor survive
   transcript(sessionId[, turn])             transcript map
+  projects()                                canonical registered catalog —
+                                            [{id,name,path,temporary}]
+  resolveProject(selector | #{id|name|path})  one canonical record — bare
+                                            text reads by shape: UUID → id,
+                                            absolute path → root, else exact
+                                            name; the map selects a kind
+                                            explicitly. Rejects with a stable
+                                            code: project_unknown |
+                                            project_ambiguous |
+                                            project_selector_invalid |
+                                            project_temporary
   readFile(path)                            #{path, content}
   writeFile(path, content)
   listFiles([path])                         [{path,directory}] — root when omitted
@@ -679,6 +690,48 @@ fn bind(engine: &mut Engine, tx: &Sender<EvalMessage>) {
             .and_then(unwrap_result)
         }
     });
+    engine.register_fn("projects", {
+        let tx = tx.clone();
+        move || -> Result<Dynamic, Box<EvalAltResult>> {
+            call(
+                &tx,
+                serde_json::json!({
+                    "type": "projects",
+                    "action": { "type": "list" },
+                }),
+            )
+            .and_then(unwrap_result)
+        }
+    });
+    engine.register_fn("resolveProject", {
+        let tx = tx.clone();
+        move |selector: ImmutableString| -> Result<Dynamic, Box<EvalAltResult>> {
+            call(
+                &tx,
+                serde_json::json!({
+                    "type": "projects",
+                    "action": { "type": "resolve", "selector": selector.as_str() },
+                }),
+            )
+            .and_then(unwrap_result)
+        }
+    });
+    engine.register_fn("resolveProject", {
+        let tx = tx.clone();
+        move |selector: Map| -> Result<Dynamic, Box<EvalAltResult>> {
+            call(
+                &tx,
+                serde_json::json!({
+                    "type": "projects",
+                    "action": {
+                        "type": "resolve",
+                        "selector": dynamic_to_json(&Dynamic::from_map(selector)),
+                    },
+                }),
+            )
+            .and_then(unwrap_result)
+        }
+    });
     engine.register_fn("readFile", {
         let tx = tx.clone();
         move |path: ImmutableString| -> Result<Dynamic, Box<EvalAltResult>> {
@@ -942,6 +995,10 @@ fn unwrap_result(result: serde_json::Value) -> Result<Dynamic, Box<EvalAltResult
         let error = object.get("error").cloned().unwrap_or_default();
         return Err(format!("plan assignment rejected: {error}").into());
     }
+    if object.get("type").and_then(|value| value.as_str()) == Some("projectRejected") {
+        let error = object.get("error").cloned().unwrap_or_default();
+        return Err(format!("project selection rejected: {error}").into());
+    }
     object.remove("type");
     Ok(match object.len() {
         0 => Dynamic::UNIT,
@@ -1136,6 +1193,79 @@ mod tests {
             },
         );
         assert_eq!(outcome.value.as_ref(), Ok(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn project_discovery_bindings_dispatch_and_surface_rejection() {
+        use waku_protocol::projects::{
+            CanonicalProject, ProjectOperation, ProjectSelectionError, ProjectSelectionErrorCode,
+            ProjectSelector, ProjectSelectorFields,
+        };
+        let record = CanonicalProject {
+            id: uuid::Uuid::nil(),
+            name: "alpha".into(),
+            path: "/work/alpha".into(),
+            temporary: false,
+        };
+        let outcome = eval_with("projects()", Scope::new(), &|operation| match operation {
+            BossOperation::Projects {
+                action: ProjectOperation::List,
+            } => Ok(BossResult::Projects {
+                projects: vec![record.clone()],
+            }),
+            other => bail!("unexpected operation {other:?}"),
+        });
+        assert_eq!(
+            outcome.value.unwrap()[0]["id"],
+            serde_json::json!(record.id.to_string())
+        );
+
+        // Bare text and a kinded map reach the same resolve operation.
+        for (script, expected) in [
+            (
+                r#"resolveProject("alpha")"#,
+                ProjectSelector::Bare("alpha".into()),
+            ),
+            (
+                r#"resolveProject(#{name: "alpha"})"#,
+                ProjectSelector::Kinded(ProjectSelectorFields {
+                    name: Some("alpha".into()),
+                    ..Default::default()
+                }),
+            ),
+        ] {
+            let record = record.clone();
+            let outcome = eval_with(script, Scope::new(), &|operation| match operation {
+                BossOperation::Projects {
+                    action: ProjectOperation::Resolve { selector },
+                } => {
+                    assert_eq!(selector, expected);
+                    Ok(BossResult::Project {
+                        project: record.clone(),
+                    })
+                }
+                other => bail!("unexpected operation {other:?}"),
+            });
+            assert_eq!(outcome.value.unwrap()["name"], "alpha");
+        }
+
+        // A coded rejection surfaces as a script error carrying the code.
+        let outcome = eval_with(r#"resolveProject("missing")"#, Scope::new(), &|_| {
+            Ok(BossResult::ProjectRejected {
+                error: ProjectSelectionError {
+                    code: ProjectSelectionErrorCode::ProjectUnknown,
+                    selector: "missing".into(),
+                    step: None,
+                    message: "no registered project named 'missing'".into(),
+                    next_action: "run projects()".into(),
+                    candidates: Vec::new(),
+                    truncated: false,
+                },
+            })
+        });
+        let error = outcome.value.unwrap_err();
+        assert!(error.contains("project selection rejected"));
+        assert!(error.contains("project_unknown"));
     }
 
     #[test]

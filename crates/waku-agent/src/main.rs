@@ -143,6 +143,7 @@ const BOSS_ACTIONS: &[&str] = &[
     "transcript",
     "roster",
     "chain",
+    "projects",
     "script",
     "file",
     "persona",
@@ -408,6 +409,16 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"--all":"include finished employees"}),
             json!({"default":{"type":"roster","roster":"compact active employee roster"},"--all":{"employees":"employee IDs, names, titles, lifecycle, and work goal"}}),
             "goddard-agent boss roster".to_owned(),
+        ),
+        "boss projects list" => (
+            json!({}),
+            json!({"json":{"type":"projects","projects":"the daemon-wide registered catalog visible to this caller — canonical records {id, name, path, temporary}, name-sorted; temporary rows leave the catalog once no live session references them"}}),
+            "goddard-agent boss projects list".to_owned(),
+        ),
+        "boss projects resolve" => (
+            json!({"SELECTOR":{"positional":true,"optional":true,"type":"bare selector — UUID text selects the project ID, absolute or separator-bearing text a registered root path, anything else an exact name ignoring ASCII case","conflictsWith":"--id/--name/--path"},"--id":{"optional":true,"type":"registered project UUID; preserves legacy direct-lookup behavior, including temporary registrations"},"--name":{"optional":true,"type":"exact registered project name, ASCII case-insensitive only — no substring or fuzzy matching"},"--path":{"optional":true,"type":"absolute registered project root — relative paths, ~, subdirectories, and unregistered worktrees reject","notes":"symlinks canonicalize; the stored root spelling still matches when the location is missing"}}),
+            json!({"json":{"type":"project","project":"the one canonical record {id, name, path, temporary}; selection failures exit 2 with a stable code — project_unknown, project_ambiguous (candidate records included), project_selector_invalid, or project_temporary — plus the submitted selector and a next action"}}),
+            "goddard-agent boss projects resolve --name goddard".to_owned(),
         ),
         "boss chain" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"schema":{"$ref":"#/definitions/ChainOperation"}},"notes":"Phase 1 safety contracts only; no provider dispatch. Creation is opt-in; controls require expectedRevision."}),
@@ -852,6 +863,8 @@ fn schema() -> serde_json::Value {
         "boss transcript",
         "boss roster",
         "boss chain",
+        "boss projects list",
+        "boss projects resolve",
         "boss view",
         "boss context",
         "boss instructions list",
@@ -1136,6 +1149,13 @@ fn main() -> ExitCode {
                 {
                     payload["error"]["code"] = json!("plan_contract");
                     payload["error"]["planFailure"] = json!(contract);
+                }
+                if let Some(selection) =
+                    error.downcast_ref::<waku_protocol::projects::ProjectSelectionError>()
+                {
+                    payload["error"]["code"] =
+                        serde_json::to_value(selection.code).unwrap_or_default();
+                    payload["error"]["projectFailure"] = json!(selection);
                 }
                 std::eprintln!("{}", payload);
             } else {
@@ -1613,9 +1633,11 @@ fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
             print_boss(boss_request(op)?)
         }
         "summon" => boss_summon(args),
-        "instructions" | "file" | "persona" | "memory" | "plan" | "deliverable" | "speak" | "automation"
-        | "resource-policy" | "open" | "browse" | "terminal" | "rename" | "avatar"
-        | "report-blocker" | "employee" | "stop" | "resume" => boss_admin(action, args),
+        "instructions" | "file" | "persona" | "memory" | "plan" | "deliverable" | "speak"
+        | "automation" | "resource-policy" | "open" | "browse" | "terminal" | "rename"
+        | "avatar" | "report-blocker" | "employee" | "projects" | "stop" | "resume" => {
+            boss_admin(action, args)
+        }
         _ => unreachable!(),
     }
 }
@@ -1667,6 +1689,23 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
             print_boss(boss_request(Op::WriteFile {
                 path: pos[0].clone(),
                 content,
+            })?)
+        }
+        ("projects", "list") => {
+            let (pos, _) = flags(args, &[], true)?;
+            if !pos.is_empty() {
+                bail!("usage: boss projects list");
+            }
+            print_boss(boss_request(Op::Projects {
+                action: waku_protocol::projects::ProjectOperation::List,
+            })?)
+        }
+        ("projects", "resolve") => {
+            let (pos, opts) = flags(args, &["id", "name", "path"], true)?;
+            print_boss(boss_request(Op::Projects {
+                action: waku_protocol::projects::ProjectOperation::Resolve {
+                    selector: project_selector(&pos, &opts)?,
+                },
             })?)
         }
         ("file", "mkdir") => {
@@ -2872,8 +2911,40 @@ fn boss_request(
         ResponsePayload::Boss {
             result: waku_protocol::boss::BossResult::PlanRejected { error },
         } => Err(error.into()),
+        ResponsePayload::Boss {
+            result: waku_protocol::boss::BossResult::ProjectRejected { error },
+        } => Err(error.into()),
         ResponsePayload::Boss { result } => Ok(result),
         other => bail!("unexpected Boss response: {other:?}"),
+    }
+}
+
+/// Build the `projects resolve` selector: one bare positional, or exactly
+/// one explicit kind flag — never both.
+fn project_selector(
+    positional: &[String],
+    opts: &std::collections::BTreeMap<String, String>,
+) -> anyhow::Result<waku_protocol::projects::ProjectSelector> {
+    use waku_protocol::projects::{ProjectSelector, ProjectSelectorFields};
+    let kinded = |key: &str| opts.get(key).cloned();
+    let fields = ProjectSelectorFields {
+        id: kinded("id"),
+        name: kinded("name"),
+        path: kinded("path"),
+    };
+    let kinded_count = [&fields.id, &fields.name, &fields.path]
+        .into_iter()
+        .filter(|field| field.is_some())
+        .count();
+    match (positional.len(), kinded_count) {
+        (1, 0) => Ok(ProjectSelector::Bare(positional[0].clone())),
+        (0, 1) => Ok(ProjectSelector::Kinded(fields)),
+        (0, 0) => {
+            bail!("usage: boss projects resolve SELECTOR | (--id UUID | --name NAME | --path PATH)")
+        }
+        _ => bail!(
+            "a bare selector and explicit selector flags are mutually exclusive — pass exactly one"
+        ),
     }
 }
 
@@ -3240,6 +3311,54 @@ fn request_session_id() -> Uuid {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_resolve_args_enforce_exactly_one_selector_form() {
+        use waku_protocol::projects::ProjectSelector;
+        // One bare positional or exactly one kinded flag — never a mix.
+        let bare =
+            super::project_selector(&["alpha".to_owned()], &std::collections::BTreeMap::new())
+                .unwrap();
+        assert_eq!(bare, ProjectSelector::Bare("alpha".into()));
+        let kinded = super::project_selector(
+            &[],
+            &std::collections::BTreeMap::from([("name".to_owned(), "alpha".to_owned())]),
+        )
+        .unwrap();
+        assert_eq!(
+            kinded,
+            ProjectSelector::Kinded(waku_protocol::projects::ProjectSelectorFields {
+                name: Some("alpha".into()),
+                ..Default::default()
+            })
+        );
+        for (pos, opts) in [
+            (
+                vec!["alpha".to_owned()],
+                std::collections::BTreeMap::from([("name".to_owned(), "alpha".to_owned())]),
+            ),
+            (
+                vec![],
+                std::collections::BTreeMap::from([
+                    (
+                        "id".to_owned(),
+                        "11111111-1111-4111-8111-111111111111".to_owned(),
+                    ),
+                    ("name".to_owned(), "alpha".to_owned()),
+                ]),
+            ),
+            (vec![], std::collections::BTreeMap::new()),
+            (
+                vec!["a".to_owned(), "b".to_owned()],
+                std::collections::BTreeMap::new(),
+            ),
+        ] {
+            assert!(
+                super::project_selector(&pos, &opts).is_err(),
+                "{pos:?} + {opts:?} must reject"
+            );
+        }
+    }
+
     #[test]
     fn computer_commands_accept_js_and_bounded_run_payloads_without_task_selectors() {
         let command = super::computer_command(&[

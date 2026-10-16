@@ -62,7 +62,7 @@ fn group(path: &str) -> &str {
         return "Companion operations";
     }
     match path.split_whitespace().nth(1).unwrap_or("") {
-        "context" | "view" | "roster" | "transcript" | "report-blocker" => {
+        "context" | "view" | "roster" | "transcript" | "projects" | "report-blocker" => {
             "Understand current work"
         }
         "summon" | "prompt" | "stop" | "resume" | "employee" => "Delegate and manage employees",
@@ -221,6 +221,12 @@ fn purpose(path: &str) -> &str {
         }
         "boss persona adopt" => "Human-only: adopt reviewed role instructions.",
         "boss persona dismiss-proposal" => "Discard the pending instruction proposal.",
+        "boss projects list" => {
+            "List the daemon's registered project catalog — canonical id, name, path, and temporary status for each row."
+        }
+        "boss projects resolve" => {
+            "Resolve one project selector to its canonical record; unknown, ambiguous, malformed, and temporary selections fail with a stable code and a concrete next action."
+        }
         "boss file list" => "List a Boss knowledge directory; omitted path selects the root.",
         "boss file read" => "Read a granted Boss knowledge file by relative path.",
         "boss file write" => "Replace Boss knowledge text; frozen approved plans reject writes.",

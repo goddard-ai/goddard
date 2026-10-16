@@ -23,12 +23,13 @@ import type { PlanItemInput } from "./PlanItemInput";
 import type { PlanItemState } from "./PlanItemState";
 import type { PlanOutcome } from "./PlanOutcome";
 import type { PlanReview } from "./PlanReview";
+import type { ProjectOperation } from "./ProjectOperation";
 import type { ProviderKind } from "./ProviderKind";
 import type { ResourcePolicy } from "./ResourcePolicy";
 import type { ResourceSet } from "./ResourceSet";
 import type { RuntimeMode } from "./RuntimeMode";
 
-export type BossOperation = { "type": "instructionPin", action: InstructionPinOperation, } | { "type": "chain", action: ChainOperation, } | { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "retryRotation" } | { "type": "clear" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, reasoningEffort: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "terminal", title: string, cwd: string, command?: string, } | { "type": "finalizePlan", planFile: string | null, items?: Array<string>, reviewed?: PlanReview, } | { "type": "previewPlan", plan: string, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon",
+export type BossOperation = { "type": "instructionPin", action: InstructionPinOperation, } | { "type": "chain", action: ChainOperation, } | { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "projects", action: ProjectOperation, } | { "type": "retryRotation" } | { "type": "clear" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, reasoningEffort: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "terminal", title: string, cwd: string, command?: string, } | { "type": "finalizePlan", planFile: string | null, items?: Array<string>, reviewed?: PlanReview, } | { "type": "previewPlan", plan: string, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon",
 /**
  * The employee role layered on the canonical Employee base — a
  * shipped specialist or a custom persona. `None` assigns the

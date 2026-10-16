@@ -21258,3 +21258,145 @@ fn boss_prompt_cancels_unsupported_provider_and_preserves_durable_correction() {
         let _ = std::fs::remove_dir_all(root);
     }
 }
+
+/// `boss projects` exposes the canonical registered catalog — id, name,
+/// and path together — and resolves one selector, with unknown and
+/// ambiguous selections rejected by a stable code. Employees and other
+/// non-authority callers are refused.
+#[test]
+fn boss_projects_discovery_exposes_canonical_identity() {
+    use waku_protocol::projects::{
+        ProjectOperation, ProjectSelectionErrorCode, ProjectSelector, ProjectSelectorFields,
+    };
+    let root = std::env::temp_dir().join(format!("waku-projects-{}", Uuid::new_v4()));
+    let project_dir = root.join("alpha");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let (backend, supervisor) = surface_test_backend(&root);
+    backend.boss.set_session_id(supervisor).unwrap();
+
+    let alpha_path = dunce::canonicalize(&project_dir).unwrap();
+    let alpha = Project::from_path(alpha_path.clone());
+    let alpha_id = alpha.id;
+    let mut adhoc = Project::from_path(root.join("adhoc"));
+    adhoc.temporary = true;
+    {
+        let mut state = backend.task_state.lock();
+        state.projects.push(alpha);
+        state.projects.push(adhoc);
+        backend.task_store.save(&mut state).unwrap();
+    }
+
+    let list = |caller| {
+        backend.handle_boss_operation(
+            caller,
+            BossOperation::Projects {
+                action: ProjectOperation::List,
+            },
+            &EventSink::detached(),
+        )
+    };
+    let BossResult::Projects { projects } = list(Some(supervisor)).unwrap() else {
+        panic!("projects list returns the catalog")
+    };
+    let entry = projects.iter().find(|entry| entry.id == alpha_id).unwrap();
+    assert_eq!(entry.name, "alpha");
+    assert_eq!(entry.path, alpha_path);
+    assert!(!entry.temporary);
+    assert!(projects
+        .iter()
+        .any(|entry| entry.name == "adhoc" && entry.temporary));
+    // The human client (no session) reads the same catalog.
+    assert!(list(None).is_ok());
+
+    let resolve = |caller, selector| {
+        backend.handle_boss_operation(
+            caller,
+            BossOperation::Projects {
+                action: ProjectOperation::Resolve { selector },
+            },
+            &EventSink::detached(),
+        )
+    };
+    let BossResult::Project { project } =
+        resolve(Some(supervisor), ProjectSelector::Bare("ALPHA".into())).unwrap()
+    else {
+        panic!("a bare exact name resolves, ignoring ASCII case")
+    };
+    assert_eq!(project.id, alpha_id);
+    let BossResult::Project { project } = resolve(
+        Some(supervisor),
+        ProjectSelector::Kinded(ProjectSelectorFields {
+            path: Some(project_dir.to_string_lossy().into_owned()),
+            ..Default::default()
+        }),
+    )
+    .unwrap() else {
+        panic!("an absolute registered root resolves")
+    };
+    assert_eq!(project.id, alpha_id);
+    let BossResult::Project { project } = resolve(
+        Some(supervisor),
+        ProjectSelector::Bare(alpha_id.to_string()),
+    )
+    .unwrap() else {
+        panic!("a bare UUID resolves as an id")
+    };
+    assert_eq!(project.id, alpha_id);
+
+    // Unknown, ambiguous, and temporary selections reject with their
+    // stable codes — distinguishable by machine, actionable for humans.
+    let BossResult::ProjectRejected { error } = resolve(
+        Some(supervisor),
+        ProjectSelector::Bare("no-such-project".into()),
+    )
+    .unwrap() else {
+        panic!("an unknown name rejects")
+    };
+    assert_eq!(error.code, ProjectSelectionErrorCode::ProjectUnknown);
+    assert!(error.step.is_none());
+    let BossResult::ProjectRejected { error } = resolve(
+        Some(supervisor),
+        ProjectSelector::Kinded(ProjectSelectorFields {
+            name: Some("adhoc".into()),
+            ..Default::default()
+        }),
+    )
+    .unwrap() else {
+        panic!("a temporary name rejects")
+    };
+    assert_eq!(error.code, ProjectSelectionErrorCode::ProjectTemporary);
+    assert_eq!(error.candidates.len(), 1);
+
+    // A second registration sharing the name turns resolution ambiguous;
+    // the candidates carry enough identity to correct the selection.
+    let other = Project::from_path(root.join("alpha-sibling"));
+    {
+        let mut state = backend.task_state.lock();
+        state.projects.push({
+            let mut other = other;
+            other.name = "ALPHA".into();
+            other
+        });
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let BossResult::ProjectRejected { error } =
+        resolve(Some(supervisor), ProjectSelector::Bare("alpha".into())).unwrap()
+    else {
+        panic!("a duplicated name rejects as ambiguous")
+    };
+    assert_eq!(error.code, ProjectSelectionErrorCode::ProjectAmbiguous);
+    assert_eq!(error.candidates.len(), 2);
+    // The id selection still reaches the record directly.
+    assert!(resolve(
+        Some(supervisor),
+        ProjectSelector::Bare(alpha_id.to_string())
+    )
+    .is_ok());
+
+    // Non-authority callers — employees included — are refused discovery.
+    assert!(list(Some(Uuid::new_v4())).is_err());
+    assert!(resolve(Some(Uuid::new_v4()), ProjectSelector::Bare("alpha".into())).is_err());
+
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}

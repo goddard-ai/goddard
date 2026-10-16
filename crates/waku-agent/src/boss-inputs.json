@@ -74,6 +74,22 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "projects"
+            },
+            "action": {
+              "$ref": "#/definitions/ProjectOperation"
+            }
+          },
+          "required": [
+            "type",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "retryRotation"
             }
           },
@@ -3782,6 +3798,64 @@
       ],
       "additionalProperties": true
     },
+    "ProjectOperation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "list"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "resolve"
+            },
+            "selector": {
+              "$ref": "#/definitions/ProjectSelector"
+            }
+          },
+          "required": [
+            "type",
+            "selector"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ProjectSelector": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/ProjectSelectorFields"
+        }
+      ]
+    },
+    "ProjectSelectorFields": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
     "ProviderKind": {
       "anyOf": [
         {
@@ -4029,6 +4103,57 @@
           "required": [
             "type",
             "context"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "projects"
+            },
+            "projects": {
+              "type": "array",
+              "items": {
+                "protocolType": "CanonicalProject"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "projects"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "project"
+            },
+            "project": {
+              "protocolType": "CanonicalProject"
+            }
+          },
+          "required": [
+            "type",
+            "project"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "projectRejected"
+            },
+            "error": {
+              "protocolType": "ProjectSelectionError"
+            }
+          },
+          "required": [
+            "type",
+            "error"
           ],
           "additionalProperties": false
         },

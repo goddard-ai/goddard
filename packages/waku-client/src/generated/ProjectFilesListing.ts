@@ -3,4 +3,4 @@
 /**
  * Which file set `ListProjectFiles` enumerates.
  */
-export type ProjectFilesListing = { "kind": "workingTree" } | { "kind": "baseRef", base_ref: string | null, };
+export type ProjectFilesListing = { "kind": "workingTree" } | { "kind": "baseRef", base_ref: string | null, } | { "kind": "baseRefWithUntracked", base_ref: string | null, paths: Array<string>, };

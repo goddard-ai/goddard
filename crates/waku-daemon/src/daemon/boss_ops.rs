@@ -185,6 +185,12 @@ impl WakuBackend {
                     Ok(waku_protocol::boss::BossResult::PlanRejected {
                         error: error.clone(),
                     })
+                } else if let Some(error) =
+                    error.downcast_ref::<waku_protocol::projects::ProjectSelectionError>()
+                {
+                    Ok(waku_protocol::boss::BossResult::ProjectRejected {
+                        error: error.clone(),
+                    })
                 } else {
                     Err(error)
                 }
@@ -1120,6 +1126,23 @@ impl WakuBackend {
                 Ok(BossResult::Context {
                     context: self.boss_work_context().digest,
                 })
+            }
+            BossOperation::Projects { action } => {
+                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
+                    bail!("only the boss or a human can discover the project catalog");
+                }
+                use waku_protocol::projects::ProjectOperation;
+                let state = self.task_state.lock();
+                match action {
+                    ProjectOperation::List => Ok(BossResult::Projects {
+                        projects: waku_protocol::projects::catalog(&state.projects),
+                    }),
+                    ProjectOperation::Resolve { selector } => {
+                        let project =
+                            waku_protocol::projects::resolve_project(&state.projects, &selector)?;
+                        Ok(BossResult::Project { project })
+                    }
+                }
             }
             BossOperation::RetryRotation => {
                 anyhow::ensure!(

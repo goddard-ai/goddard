@@ -42,6 +42,9 @@ pub(super) fn availability(path: &str) -> Value {
         "boss view" | "boss persona list" | "boss persona show" | "boss roster" => {
             json!({"roles":if path == "boss roster" {json!(["boss","planning","human"])} else {json!(["boss","planning","human","employee"])},"notes":"Employee views are filtered to its visible roles and employees; roster --all uses that filtered view."})
         }
+        "boss projects list" | "boss projects resolve" => {
+            json!({"roles":["boss","planning","human"],"conditions":["Boss experiment enabled","Employee credentials are rejected — employees gain no catalog-discovery authority; employees holding a summon-time boss-authority grant keep it","Read-only: discovery registers nothing and grants no project or memory access","Advisory: the resolved record is not a reservation — chain acceptance revalidates against the live catalog"]})
+        }
         "boss file read" | "boss file list" => {
             json!({"roles":["boss","planning","human","employee"],"conditions":["Employee reads plans, pinned non-memory files, its persona, and discoverable ancestor directories; memory contents use memory operations","Paths are relative to Boss files root; traversal and symlinks rejected"]})
         }

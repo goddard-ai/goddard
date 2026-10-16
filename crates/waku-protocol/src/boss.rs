@@ -2949,6 +2949,13 @@ pub enum BossOperation {
     /// A bounded digest of the user's projects, tasks, and automations —
     /// the same snapshot the context router attaches to boss prompts.
     Context,
+    /// Read-only registered-project discovery: the canonical catalog and
+    /// single-selector resolution chain steps consume. Boss principals
+    /// and the human only — employees have no catalog-discovery
+    /// authority, matching `Context`.
+    Projects {
+        action: crate::projects::ProjectOperation,
+    },
     /// Re-run the rotation reconciler now — the paused banner's retry
     /// action. Human-only: the reconcile still enforces its own settle
     /// and threshold rules, so retrying can only advance a pending
@@ -3669,6 +3676,19 @@ pub enum BossResult {
     },
     Context {
         context: String,
+    },
+    /// The canonical registered-project catalog — `projects list`.
+    Projects {
+        projects: Vec<crate::projects::CanonicalProject>,
+    },
+    /// The one canonical record a selector resolved — `projects resolve`.
+    Project {
+        project: crate::projects::CanonicalProject,
+    },
+    /// Recoverable selection rejection — a stable machine-readable code,
+    /// the submitted selector, and bounded candidates; does not select.
+    ProjectRejected {
+        error: crate::projects::ProjectSelectionError,
     },
     Automations {
         state: crate::automations::AutomationsState,

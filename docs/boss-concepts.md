@@ -109,7 +109,9 @@ detail or establish that an outcome's acceptance criteria were met.
 
 Temporary obligations belong in [Boss instruction pins](boss-instructions.md).
 They stay in Boss's working context until released, while memory and personas
-continue to supply durable knowledge and standing guidance.
+continue to supply durable knowledge and standing guidance. A project's
+canonical registered identity — the id, name, and path a chain step or script
+should carry — comes from [Boss project discovery](boss-projects.md).
 
 Current memory access uses named buckets. Employees can access their assigned
 project's shared bucket and additional explicitly granted buckets. Personal

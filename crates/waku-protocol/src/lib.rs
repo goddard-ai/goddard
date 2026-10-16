@@ -58,6 +58,7 @@ pub mod pairing;
 pub mod persistence;
 pub mod pid;
 pub mod projectless;
+pub mod projects;
 pub mod provider_session;
 pub mod resources;
 pub mod routing;

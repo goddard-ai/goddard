@@ -14,7 +14,8 @@ export type EmployeeExpiry = { cause: ExpiryCause,
 resumable: boolean,
 /**
  * Agent-owned prompts still parked in the mirrored queue at expiry
- * — they ride the ticket's pending list ahead of a revive prompt.
+ * — they ride the ticket's pending list ahead of a revive prompt and
+ * behind the continuation note a `resume` synthesizes.
  */
 parkedPrompts: number,
 /**

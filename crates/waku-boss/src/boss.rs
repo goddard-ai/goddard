@@ -4325,6 +4325,7 @@ impl BossService {
             BossOperation::Chain { .. }
             | BossOperation::InstructionPin { .. }
             | BossOperation::Context
+            | BossOperation::Projects { .. }
             | BossOperation::Roster
             | BossOperation::Open { .. }
             | BossOperation::Browse { .. }
