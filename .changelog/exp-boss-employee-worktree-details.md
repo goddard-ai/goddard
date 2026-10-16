@@ -1,1 +1,1 @@
-- Show employee worktree markers and last activity in the Boss sidebar when available.
+- Keep employee job titles truncated alongside worktree markers and last activity on one detail line in the Boss sidebar.

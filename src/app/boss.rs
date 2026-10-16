@@ -11772,36 +11772,52 @@ pub(super) fn boss_sidebar_label(
                 })
                 .when_some(title_accessory, |line, accessory| line.child(accessory)),
         )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(4.0))
-                .text_size(sp(13.0))
-                .line_height(sp(15.0))
-                .text_color(theme.text_tertiary)
-                .when_some(provider, |row, provider| {
-                    row.child(crate::ui::provider_mark(
-                        provider,
-                        12.0,
-                        theme.text_tertiary,
-                    ))
-                })
-                .when(
-                    show_job_icon && !job_title.is_empty() && provider.is_none(),
-                    |row| {
-                        row.child(icon(
-                            job_icon.unwrap_or_else(|| job_title_icon(&job_title)),
-                            12.0,
-                            theme.text_tertiary,
-                        ))
-                    },
-                )
-                .child(div().min_w_0().truncate().child(job_title)),
-        )
-        .when_some(trailing_detail, |row, detail| {
-            row.child(div().flex_1()).child(detail)
+        .child(boss_sidebar_detail_line(
+            div().child(job_title.clone()).into_any_element(),
+            &job_title,
+            job_icon,
+            show_job_icon,
+            theme,
+            provider,
+            trailing_detail,
+        ))
+}
+
+fn boss_sidebar_detail_line(
+    job_title: AnyElement,
+    title_for_icon: &str,
+    job_icon: Option<&'static str>,
+    show_job_icon: bool,
+    theme: &Theme,
+    provider: Option<ProviderKind>,
+    trailing_detail: Option<AnyElement>,
+) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .text_size(sp(13.0))
+        .line_height(sp(15.0))
+        .text_color(theme.text_tertiary)
+        .when_some(provider, |row, provider| {
+            row.child(crate::ui::provider_mark(
+                provider,
+                12.0,
+                theme.text_tertiary,
+            ))
         })
+        .when(
+            show_job_icon && !title_for_icon.is_empty() && provider.is_none(),
+            |row| {
+                row.child(icon(
+                    job_icon.unwrap_or_else(|| job_title_icon(title_for_icon)),
+                    12.0,
+                    theme.text_tertiary,
+                ))
+            },
+        )
+        .child(div().flex_1().min_w_0().truncate().child(job_title))
+        .when_some(trailing_detail, |row, detail| row.child(detail))
 }
 
 fn employee_sidebar_details(session: Option<&AgentSession>, now: u64) -> (bool, Option<String>) {
@@ -12280,6 +12296,60 @@ mod tests {
     }
 
     struct DeliverableHoverLayoutHarness;
+
+    struct EmployeeSidebarDetailLayoutHarness;
+
+    impl Render for EmployeeSidebarDetailLayoutHarness {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let theme = Theme::current(cx);
+            div().size_full().child(
+                boss_sidebar_detail_line(
+                    div()
+                        .id("employee-sidebar-job-title")
+                        .debug_selector(|| "employee-sidebar-job-title".into())
+                        .child("A very long employee job title that must yield space")
+                        .into_any_element(),
+                    "A very long employee job title that must yield space",
+                    Some("icons/code.svg"),
+                    true,
+                    &theme,
+                    None,
+                    Some(
+                        div()
+                            .id("employee-sidebar-metadata")
+                            .debug_selector(|| "employee-sidebar-metadata".into())
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
+                            .child("2m ago")
+                            .into_any_element(),
+                    ),
+                )
+                .id("employee-sidebar-detail-line")
+                .debug_selector(|| "employee-sidebar-detail-line".into())
+                .w(px(180.0)),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn employee_sidebar_metadata_stays_on_the_truncated_title_line(cx: &mut gpui::TestAppContext) {
+        let (_view, cx) = cx.add_window_view(|_, _| EmployeeSidebarDetailLayoutHarness);
+        cx.run_until_parked();
+
+        let line = cx.debug_bounds("employee-sidebar-detail-line").unwrap();
+        let metadata = cx.debug_bounds("employee-sidebar-metadata").unwrap();
+        let title = cx.debug_bounds("employee-sidebar-job-title").unwrap();
+        assert!(title.size.width > px(0.0));
+        assert!(title.size.width < px(120.0));
+        assert!(title.right() < metadata.origin.x);
+        assert!(metadata.origin.x > line.origin.x);
+        assert!(metadata.right() <= line.right());
+        assert_eq!(metadata.center().y, line.center().y);
+        assert_eq!(line.size.width, px(180.0));
+    }
 
     impl Render for DeliverableHoverLayoutHarness {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
