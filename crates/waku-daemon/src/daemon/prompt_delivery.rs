@@ -189,6 +189,7 @@ pub(super) fn deliver_agent_prompt(
     task_store: &StateStore,
     boss: &crate::boss::BossService,
     automations: &AutomationService,
+    lineage: &[Uuid],
 ) -> anyhow::Result<()> {
     boss.require_active(session_id)?;
     // An incident-fenced Boss chat holds its queued work: delivering now
@@ -279,6 +280,7 @@ pub(super) fn deliver_agent_prompt(
         reference_context.clone(),
         boss.is_boss(session_id),
         automation_prompt,
+        lineage,
     )? {
         PromptPersistence::Submitted => {}
         PromptPersistence::Waiting => {
@@ -463,21 +465,26 @@ pub(super) fn persist_agent_prompt(
     reference_context: Option<crate::model::ReferenceContext>,
     boss_notification: bool,
     automation_prompt: bool,
+    lineage: &[Uuid],
 ) -> anyhow::Result<PromptPersistence> {
     let mut state = task_state.lock();
-    let Some(session) = state
+    let Some(index) = state
         .sessions
-        .iter_mut()
-        .find(|session| session.id == session_id)
+        .iter()
+        .position(|session| session.id == session_id)
     else {
         bail!("task {session_id} is unknown to the daemon");
     };
-    task_store.hydrate(session)?;
-    anyhow::ensure!(session.archived_at.is_none(), "task is archived");
+    task_store.hydrate(&mut state.sessions[index])?;
+    anyhow::ensure!(
+        state.sessions[index].archived_at.is_none(),
+        "task is archived"
+    );
     if boss_notification || automation_prompt {
         // Claim the durable id under the same lock as the user queue and
         // active turn. A competing settlement/scheduler delivery may have
         // rehydrated this entry before the first delivery removed its mirror.
+        let session = &state.sessions[index];
         if session.active_turn_id().is_some()
             || (boss_notification
                 && !report_trigger.as_ref().is_some_and(|trigger| {
@@ -491,6 +498,7 @@ pub(super) fn persist_agent_prompt(
         }
     }
     let dequeued = queued_id.is_some_and(|queued_id| {
+        let session = &mut state.sessions[index];
         let before = session.queued_messages.len();
         session
             .queued_messages
@@ -499,20 +507,29 @@ pub(super) fn persist_agent_prompt(
     });
     // A redriven delivery folds onto the copy that already landed — the
     // trigger's event id is the dedupe identity whether the first delivery
-    // persisted by message id or a steered echo's own.
-    let duplicate = (boss_notification || automation_prompt)
-        && session
-            .messages
-            .iter()
-            .any(|message| message.id == message_id)
-        || report_trigger.as_ref().is_some_and(|trigger| {
-            session.messages.iter().any(|message| {
-                message
-                    .report_trigger
-                    .as_ref()
-                    .is_some_and(|held| held.event_id == trigger.event_id)
+    // persisted by message id or a steered echo's own. For a Boss
+    // notification the claim spans the whole rotation lineage: a report
+    // parked on or delivered to a retired generation still counts, so a
+    // refresh cannot write it a second time on the successor.
+    let duplicate = lineage.iter().any(|lineage_id| {
+        state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == *lineage_id)
+            .is_some_and(|held| {
+                task_store.hydrate(held).is_ok()
+                    && (((boss_notification || automation_prompt)
+                        && (held.messages.iter().any(|m| m.id == message_id)
+                            || held.queued_messages.iter().any(|m| m.id == message_id)))
+                        || report_trigger.as_ref().is_some_and(|trigger| {
+                            held.messages.iter().any(|m| {
+                                m.report_trigger
+                                    .as_ref()
+                                    .is_some_and(|held| held.event_id == trigger.event_id)
+                            })
+                        }))
             })
-        });
+    });
     if duplicate {
         if dequeued {
             state.mark_session_dirty(session_id);
@@ -520,6 +537,7 @@ pub(super) fn persist_agent_prompt(
         }
         return Ok(PromptPersistence::Duplicate);
     }
+    let session = &mut state.sessions[index];
     if session.adopt_submitted_prompt(
         message,
         turn_id,
@@ -590,14 +608,14 @@ pub(super) fn unmirror_agent_queued_prompt(
     task_store: &StateStore,
     session_id: Uuid,
     queued_id: Uuid,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let mut state = task_state.lock();
     let Some(session) = state
         .sessions
         .iter_mut()
         .find(|session| session.id == session_id)
     else {
-        return Ok(());
+        return Ok(false);
     };
     task_store.hydrate(session)?;
     let before = session.queued_messages.len();
@@ -605,12 +623,12 @@ pub(super) fn unmirror_agent_queued_prompt(
         .queued_messages
         .retain(|queued| queued.id != queued_id);
     if session.queued_messages.len() == before {
-        return Ok(());
+        return Ok(false);
     }
     session.updated_at = crate::model::unix_time();
     state.mark_session_dirty(session_id);
     task_store.save(&mut state)?;
-    Ok(())
+    Ok(true)
 }
 
 /// Refill the in-memory prompt queue from agent entries the session

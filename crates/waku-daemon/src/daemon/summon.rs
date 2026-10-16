@@ -191,9 +191,11 @@ impl WakuBackend {
     /// and a later pass collapses the wait into one reminder.
     ///
     /// The batch's queue id is deterministic over the covered tasks and
-    /// their period: a re-scan while a copy still waits parked finds the
-    /// mirrored chip and only marks — a post-enqueue failure can no longer
-    /// stack a duplicate reminder on every pass.
+    /// their period — independent of which Boss generation is active: a
+    /// re-scan while a copy still waits parked, or one that already
+    /// delivered to a retired session, finds it through the rotation
+    /// lineage and only marks — a refresh can no longer stack a duplicate
+    /// reminder on every pass.
     pub(super) fn deliver_outcome_reminders(&self, now: u64) -> anyhow::Result<()> {
         let due = self.boss.scan_outcome_reminders(now)?;
         if due.is_empty() {
@@ -231,9 +233,12 @@ impl WakuBackend {
             "These tasks have no active assignment or recorded waiting reason:\n{}",
             lines.join("\n")
         );
-        let batch = outcome_reminder_batch(session, &document.outcomes, &due);
+        let batch = outcome_reminder_batch(&document.outcomes, &due);
         let events = self.event_source.lock().clone();
-        let result = if self.agent_prompt_mirrored(session, batch) {
+        // A parked chip or a delivered row on any generation of this Boss
+        // chat means the reminder landed already — rotation must not mint
+        // a second copy.
+        let result = if self.boss_lineage_message_landed(session, batch) {
             Ok(())
         } else {
             self.queue_agent_prompt_with_id(
@@ -253,36 +258,14 @@ impl WakuBackend {
                 // error can leave the nudge durably queued — the parked
                 // chip still drains through the ordinary queue, and
                 // marking the batch keeps the next pass from enqueueing
-                // another copy. Nothing mirrored means the reminder never
+                // another copy. Nothing landed means the reminder never
                 // reached the queue and retries unmarked.
-                if self.agent_prompt_mirrored(session, batch) {
+                if self.boss_lineage_message_landed(session, batch) {
                     self.boss.mark_outcomes_reminded(&due, now)?;
                 }
                 Err(error)
             }
         }
-    }
-
-    /// Whether the session document still mirrors the parked copy of a
-    /// queued agent prompt — `queue_agent_prompt_with_id` writes the mirror
-    /// before any delivery attempt, so its presence means the prompt is
-    /// durably queued even when the drain behind it failed.
-    fn agent_prompt_mirrored(&self, session_id: Uuid, queued_id: Uuid) -> bool {
-        let mut state = self.task_state.lock();
-        let Some(session) = state
-            .sessions
-            .iter_mut()
-            .find(|session| session.id == session_id)
-        else {
-            return false;
-        };
-        if self.task_store.hydrate(session).is_err() {
-            return false;
-        }
-        session
-            .queued_messages
-            .iter()
-            .any(|entry| entry.id == queued_id)
     }
 
     /// The host resource broker — or the test-rooted ledger a backend was
@@ -1134,29 +1117,9 @@ impl WakuBackend {
                 continue;
             };
             let queued_id = Uuid::from_u128(0xFEED_FACE_u128 << 96 | u128::from(note.id));
-            {
-                let mut state = self.task_state.lock();
-                let already = state
-                    .sessions
-                    .iter_mut()
-                    .find(|session| session.id == target)
-                    .and_then(|session| {
-                        self.task_store.hydrate(session).ok()?;
-                        let parked = session
-                            .queued_messages
-                            .iter()
-                            .any(|queued| queued.id == queued_id);
-                        let delivered = session
-                            .messages
-                            .iter()
-                            .any(|message| message.id == queued_id);
-                        Some(parked || delivered)
-                    })
-                    .unwrap_or(false);
-                if already {
-                    let _ = self.boss.wave_outbox_mark_delivered(note.id);
-                    continue;
-                }
+            if self.boss_lineage_message_landed(target, queued_id) {
+                let _ = self.boss.wave_outbox_mark_delivered(note.id);
+                continue;
             }
             let total = note.finished + note.failed + note.cancelled;
             let prompt = if note.cancelled == total {
@@ -1244,18 +1207,7 @@ impl WakuBackend {
                 let Some(target) = self.boss.report_target_for(employee.supervisor_id) else {
                     continue;
                 };
-                let already = {
-                    let mut state = self.task_state.lock();
-                    state
-                        .sessions
-                        .iter_mut()
-                        .find(|s| s.id == target)
-                        .is_some_and(|session| {
-                            self.task_store.hydrate(session).is_ok()
-                                && (session.queued_messages.iter().any(|m| m.id == notice.id)
-                                    || session.messages.iter().any(|m| m.id == notice.id))
-                        })
-                };
+                let already = self.boss_lineage_message_landed(target, notice.id);
                 if already {
                     let _ = self
                         .boss
@@ -2681,18 +2633,19 @@ impl WakuBackend {
     }
 }
 
-/// The deterministic queue identity for one reminder batch — the Boss
-/// session it targets plus every covered task's unattended period and last
-/// delivered reminder. A re-scan over an unchanged batch reproduces the
+/// The deterministic queue identity for one reminder batch — every covered
+/// task's unattended period and last delivered reminder, independent of the
+/// Boss session it targets. A re-scan over an unchanged batch reproduces the
 /// same id, so its mirrored chip dedupes instead of stacking a copy per
-/// pass; a new unattended period, a changed task set, or a delivered batch
-/// mints a fresh reminder rather than folding onto the old one.
-fn outcome_reminder_batch(
-    session: Uuid,
+/// pass — across rotations too, since a parked or delivered copy on a
+/// retired generation lands in the lineage scan. A new unattended period,
+/// a changed task set, or a delivered batch mints a fresh reminder rather
+/// than folding onto the old one.
+pub(super) fn outcome_reminder_batch(
     outcomes: &[waku_protocol::boss::BossOutcome],
     due: &[Uuid],
 ) -> Uuid {
-    let mut material = session.as_bytes().to_vec();
+    let mut material = Vec::new();
     let mut stamps: Vec<(Uuid, u64, u64)> = due
         .iter()
         .filter_map(|id| outcomes.iter().find(|task| task.id == *id))

@@ -857,7 +857,7 @@ impl WakuBackend {
         let Some(target) = self.chain_report_target(chain) else {
             return;
         };
-        if self.supervisor_message_landed(target, attention.id) {
+        if self.boss_lineage_message_landed(target, attention.id) {
             return;
         }
         let step = &chain.steps[chain.current_step];
@@ -910,7 +910,7 @@ impl WakuBackend {
         let Some(target) = self.chain_report_target(chain) else {
             return;
         };
-        if self.supervisor_message_landed(target, chain.id) {
+        if self.boss_lineage_message_landed(target, chain.id) {
             return;
         }
         let document = self.boss.document();
@@ -1039,21 +1039,5 @@ impl WakuBackend {
             .supervisor_id
             .and_then(|id| self.boss.report_target_for(id))
             .or_else(|| self.boss.document().session_id)
-    }
-
-    /// Whether a durable report with this message id already reached the
-    /// target — parked or delivered both count, so redelivery dedupes the
-    /// same incident rather than stacking another wake.
-    fn supervisor_message_landed(&self, target: Uuid, message_id: Uuid) -> bool {
-        let mut state = self.task_state.lock();
-        state
-            .sessions
-            .iter_mut()
-            .find(|session| session.id == target)
-            .is_some_and(|session| {
-                self.task_store.hydrate(session).is_ok()
-                    && (session.queued_messages.iter().any(|m| m.id == message_id)
-                        || session.messages.iter().any(|m| m.id == message_id))
-            })
     }
 }

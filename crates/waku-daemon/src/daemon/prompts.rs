@@ -488,6 +488,7 @@ impl WakuBackend {
                 &self.task_store,
                 &self.boss,
                 &self.automations,
+                &self.boss_lineage_sessions(session_id),
             )?;
         }
         Ok(())

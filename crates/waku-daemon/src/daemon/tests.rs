@@ -6940,6 +6940,7 @@ fn a_steered_report_delivers_once_through_mirror_and_restart() {
         &backend.task_store,
         &backend.boss,
         &backend.automations,
+        &[supervisor],
     )
     .unwrap();
     assert_eq!(parent.steers.lock().len(), 1);
@@ -13783,6 +13784,148 @@ fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A refresh must not resurrect a reminder the retired chat already held:
+/// the batch id is session-independent and the landed check spans the
+/// rotation lineage, so a rescan on the successor marks instead of
+/// minting a second copy — the zombie "no active assignment" prompts the
+/// user saw after every Boss refresh. `delivered` covers a batch whose
+/// transcript row landed while its reminded mark never wrote; `parked`
+/// covers the chip the incident fence carried over.
+#[test]
+fn outcome_reminder_dedupes_across_boss_rotation() {
+    use waku_boss::rotation_continuity::ContinuityLedger;
+    for delivered in [false, true] {
+        let root =
+            std::env::temp_dir().join(format!("reminder-rotation-{}", Uuid::new_v4()));
+        let (mut backend, _) = surface_test_backend(&root);
+        let predecessor = rotation_boss(&backend);
+        backend.set_daemon_address("http://127.0.0.1:1".into());
+        backend.runtime_test_cli = Some("/usr/bin/true".into());
+        let mut daemon_settings = backend.settings.get();
+        daemon_settings
+            .provider_binary_overrides
+            .insert(ProviderKind::Codex, "/usr/bin/true".into());
+        backend.settings.replace(daemon_settings).unwrap();
+        // The boss chat owns no live runtime and every spawn attempt fails —
+        // reminder deliveries can only park.
+        backend.runtime_test_start = Some(Arc::new(|_, _, _| {
+            Err(anyhow::anyhow!("provider launch down"))
+        }));
+
+        let task = backend
+            .boss
+            .create_outcome(None, "Keep reminders honest", "one nudge per period")
+            .unwrap();
+        let now = waku_protocol::model::unix_time();
+        let grace = waku_protocol::boss::OUTCOME_UNATTENDED_GRACE;
+        // The first scan arms the grace clock; nothing queues yet.
+        backend.deliver_outcome_reminders(now).unwrap();
+        let batch =
+            summon::outcome_reminder_batch(&backend.boss.document().outcomes, &[task.id]);
+        let text = "These tasks have no active assignment or recorded waiting reason:\n• Keep reminders honest";
+        if delivered {
+            // The batch row landed on the predecessor's transcript while
+            // its reminded mark never wrote — the state a crashed save
+            // leaves behind. The real settle recorder closes the turn and
+            // idles the session so the rotation's settle gate passes.
+            {
+                let mut state = backend.task_state.lock();
+                let session = state.session_mut(predecessor).unwrap();
+                backend.task_store.hydrate(session).unwrap();
+                session.adopt_submitted_prompt(text, Uuid::new_v4(), batch, None, true, None);
+                backend.task_store.save(&mut state).unwrap();
+            }
+            record_boss_event(
+                &backend.task_state,
+                &backend.task_store,
+                predecessor,
+                &DriverEvent::TurnFinished {
+                    success: true,
+                    summary: None,
+                    summary_i18n: None,
+                },
+            )
+            .unwrap();
+        } else {
+            // Mirrored but unmarked — the state a failed mark write leaves.
+            mirror_agent_queued_prompt(
+                &backend.task_state,
+                &backend.task_store,
+                predecessor,
+                batch,
+                text,
+                None,
+                false,
+                None,
+            )
+            .unwrap();
+        }
+
+        if delivered {
+            // A settled chat rotates on the context threshold.
+            let mut state = backend.task_state.lock();
+            state.session_mut(predecessor).unwrap().context_usage =
+                Some(crate::model::ContextUsage {
+                    tokens: 76,
+                    window: Some(100),
+                });
+            backend.task_store.save(&mut state).unwrap();
+        } else {
+            // A parked chip holds the settle gate — only an incident-fenced
+            // refresh carries queued work onto the successor.
+            ContinuityLedger::update(&root.join("boss/continuity.json"), |ledger| {
+                ledger.record_compaction_incident(predecessor, now, "provider compaction");
+            })
+            .unwrap();
+        }
+        backend.reconcile_boss_rotation(now + 1).unwrap();
+        let successor = backend.boss.identity_and_session().1.unwrap();
+        assert_ne!(successor, predecessor);
+
+        // The rescan sees the identical batch — the parked chip or the
+        // delivered row on the retired chat both count as landed — and
+        // only marks; nothing new queues and nothing new is written.
+        backend
+            .deliver_outcome_reminders(now + grace + 2)
+            .unwrap();
+        let successor_detail = backend
+            .task_store
+            .load_session_detail(successor)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            successor_detail
+                .queued_messages
+                .iter()
+                .filter(|queued| queued.id == batch)
+                .count(),
+            usize::from(!delivered),
+            "the parked chip carries; a delivered one must not re-park"
+        );
+        assert!(
+            successor_detail
+                .queued_messages
+                .iter()
+                .all(|queued| queued.id == batch),
+            "no second reminder may park on the successor"
+        );
+        assert!(
+            successor_detail
+                .messages
+                .iter()
+                .all(|message| !message.content.contains("no active assignment")),
+            "no reminder may be written to the successor transcript"
+        );
+        let outcome = &backend.boss.document().outcomes[0];
+        assert!(
+            outcome.last_reminder.is_some(),
+            "the landed batch still marks — the cadence is preserved"
+        );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
 /// A recorded wait or a live assignment covers a task end to end — the
 /// reminder never reaches the queue while either holds, and clearing the
 /// cover re-arms a fresh grace period.
@@ -15624,8 +15767,10 @@ fn finalize_plan_steers_an_open_boss_turn() {
         pending.hidden,
         pending.report_trigger,
     );
-    unmirror_agent_queued_prompt(&backend.task_state, &backend.task_store, boss, queued_id)
-        .unwrap();
+    assert!(
+        unmirror_agent_queued_prompt(&backend.task_state, &backend.task_store, boss, queued_id)
+            .unwrap()
+    );
     let mut state = backend.task_state.lock();
     let session = state
         .sessions
@@ -16496,6 +16641,127 @@ fn a_boss_steer_arriving_for_a_rotated_chat_is_queued_on_the_successor() {
     assert!(active.queued_messages.iter().any(|message| {
         message.id == queued_id && message.content == "Keep the release plan focused on QA"
     }));
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A steer echo that arrives on the retired chat after a refresh still owns
+/// the parked chip the carry moved — the unmirror scans the lineage, so the
+/// successor's parked copy drops instead of draining as a duplicate report.
+#[test]
+fn a_steer_echo_on_a_retired_boss_chat_unmirrors_the_carried_chip() {
+    use waku_boss::rotation_continuity::ContinuityLedger;
+    let root = std::env::temp_dir().join(format!("boss-steer-echo-rotation-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let predecessor = rotation_boss(&backend);
+    let capture = Arc::new(CaptureDriver::default());
+    // The report went out as a steer into the retired chat's parked turn —
+    // its mirrored chip stayed queued awaiting the provider's echo.
+    let chip = Uuid::new_v4();
+    mirror_agent_queued_prompt(
+        &backend.task_state,
+        &backend.task_store,
+        predecessor,
+        chip,
+        "employee report",
+        None,
+        true,
+        None,
+    )
+    .unwrap();
+
+    // An incident refresh carries the parked chip onto the successor while
+    // the steer echo is still owed to the retired session id.
+    let now = crate::model::unix_time();
+    ContinuityLedger::update(&root.join("boss/continuity.json"), |ledger| {
+        ledger.record_compaction_incident(predecessor, now, "provider compaction");
+    })
+    .unwrap();
+    backend.reconcile_boss_rotation(now + 1).unwrap();
+    let successor = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(successor, predecessor);
+    assert!(
+        backend
+            .task_store
+            .load_session_detail(successor)
+            .unwrap()
+            .unwrap()
+            .queued_messages
+            .iter()
+            .any(|queued| queued.id == chip),
+        "the parked chip carried to the successor"
+    );
+
+    // The in-flight steer record rides the retired id; the echo resolving
+    // it must drop the chip wherever the lineage holds it.
+    assert!(backend.agent.record_pending_steer(
+        predecessor,
+        crate::agent::AgentPrompt {
+            prompt: "employee report".into(),
+            transport: None,
+            sender: None,
+            queued_id: Some(chip),
+            submission_id: None,
+            context: None,
+            hidden: true,
+            report_trigger: None,
+        },
+    ));
+    let late_runtime = Uuid::new_v4();
+    backend.sessions.lock().insert(
+        predecessor,
+        RuntimeEntry {
+            plan_gate: None,
+            runtime_id: late_runtime,
+            driver: DriverHandle::from_control(capture),
+            stable: None,
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: root.clone(),
+        },
+    );
+    let (sender, receiver) = driver::test_event_channel();
+    sender
+        .send(DriverEvent::SteerAccepted {
+            message: "employee report".into(),
+            sent_by_task: None,
+            hidden: false,
+            report_trigger: None,
+        })
+        .unwrap();
+    drop(sender);
+    forward_driver_events(
+        predecessor,
+        late_runtime,
+        receiver,
+        EventSink::detached(),
+        DriverHandle::from_control(Arc::new(CaptureDriver::default())),
+        backend.agent.clone(),
+        backend.task_state.clone(),
+        backend.task_store.clone(),
+        backend.sessions.clone(),
+        backend.runtime_lifecycles.clone(),
+        backend.automations.clone(),
+        backend.boss.clone(),
+        backend.auto_prompts.clone(),
+        backend.repo_maps.clone(),
+        backend.data_dir.clone(),
+    );
+
+    let successor_detail = backend
+        .task_store
+        .load_session_detail(successor)
+        .unwrap()
+        .unwrap();
+    assert!(
+        successor_detail
+            .queued_messages
+            .iter()
+            .all(|queued| queued.id != chip),
+        "the carried chip dropped with the echo — nothing left to re-deliver"
+    );
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -19618,6 +19884,104 @@ fn chain_retry_admission_survives_boss_rotation() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// A chain exception whose report already reached the retired Boss chat
+/// must not re-deliver to the successor — the landed check spans the
+/// rotation lineage, so a refresh cannot turn one incident into a second
+/// wake on the fresh chat.
+#[test]
+fn chain_exception_report_dedupes_across_boss_rotation() {
+    use waku_boss::rotation_continuity::ContinuityLedger;
+    let root = std::env::temp_dir().join(format!("waku-chain-rotate-report-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    // Open repairs the seeded row into a real Boss chat so the session
+    // lineage exists for the journal to name.
+    assert_eq!(rotation_boss(&backend), boss);
+    let project = backend.task_state.lock().projects[0].id;
+    let personas = backend.boss.document().personas.clone();
+    let outcome = backend
+        .boss
+        .create_outcome(Some(boss), "Investigate then verify", "Evidence verified")
+        .unwrap();
+    let BossResult::State { state } = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Chain {
+                action: ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition: chain_test_definition(
+                        project,
+                        outcome.id,
+                        personas[0].id,
+                        2,
+                        head.clone(),
+                    ),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("chain state expected")
+    };
+    let first = state.employees[0].clone();
+    backend.run_summon_scheduler();
+    // The employee dies mid-work — terminal failure seals and the chain
+    // pauses with one exception reported to the live boss chat.
+    backend
+        .finish_boss_employee(
+            first.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::ProcessExited { mid_turn: true },
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.status, ChainStatus::Paused);
+    assert!(chain.attention.is_some());
+    assert_eq!(
+        chain_reports(&backend, boss).len(),
+        1,
+        "one exception per incident"
+    );
+    // Close the turn the report opened so the settle gate sees a quiet
+    // chat, then refresh under an incident — the parked-work carry is
+    // exercised the same way either way.
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        boss,
+        &DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    )
+    .unwrap();
+    let now = crate::model::unix_time();
+    ContinuityLedger::update(&root.join("boss/continuity.json"), |ledger| {
+        ledger.record_compaction_incident(boss, now, "provider compaction");
+    })
+    .unwrap();
+    backend.reconcile_boss_rotation(now + 1).unwrap();
+    let successor = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(successor, boss);
+    // Every drive pass reconsiders the unhandled exception — the retired
+    // chat's delivered row still counts as landed, so nothing re-parks or
+    // re-writes on the successor.
+    backend.drive_chains();
+    backend.drive_chains();
+    assert!(
+        chain_reports(&backend, successor).is_empty(),
+        "the refresh must not mint a second exception report"
+    );
+    assert_eq!(
+        chain_reports(&backend, boss).len(),
+        1,
+        "the original report stays on the retired transcript"
+    );
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn chain_restart_recovers_at_admission_and_handoff_boundaries() {
     let root = std::env::temp_dir().join(format!("waku-chain-restart-{}", Uuid::new_v4()));
@@ -20120,7 +20484,8 @@ fn automation_runs_wait_for_their_own_delivered_turns() {
             None,
             None,
             false,
-            true
+            true,
+            &[session_id]
         )
         .unwrap(),
         PromptPersistence::Waiting

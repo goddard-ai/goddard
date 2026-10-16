@@ -20,6 +20,47 @@ fn handoff_delivery_id(session_id: Uuid) -> String {
     format!("boss-handoff:{session_id}")
 }
 
+/// Every session id a Boss chat lineage has owned — each generation the
+/// rotation journal names, oldest first, plus `session_id` itself. When
+/// the journal does not name the session the answer is just the session,
+/// so employee and planning targets keep single-session dedupe. A
+/// notification parked or delivered on a retired generation counts as
+/// landed for the lineage: each successor's transcript starts empty by
+/// design, so a same-session scan alone would mint a second copy after
+/// every refresh.
+pub(super) fn boss_lineage_ids(journal_path: &std::path::Path, session_id: Uuid) -> Vec<Uuid> {
+    let journal = RotationJournal::load(journal_path).unwrap_or_default();
+    let named = journal.active_session_id == Some(session_id)
+        || journal.intent.as_ref().is_some_and(|intent| {
+            intent.old_session_id == session_id || intent.new_session_id == session_id
+        })
+        || journal.rotations.iter().any(|rotation| {
+            rotation.old_session_id == session_id || rotation.new_session_id == session_id
+        });
+    if !named {
+        return vec![session_id];
+    }
+    let mut lineage: Vec<Uuid> = Vec::new();
+    let mut push = |id: Uuid| {
+        if !lineage.contains(&id) {
+            lineage.push(id);
+        }
+    };
+    for rotation in &journal.rotations {
+        push(rotation.old_session_id);
+        push(rotation.new_session_id);
+    }
+    if let Some(intent) = &journal.intent {
+        push(intent.old_session_id);
+        push(intent.new_session_id);
+    }
+    if let Some(active) = journal.active_session_id {
+        push(active);
+    }
+    push(session_id);
+    lineage
+}
+
 /// The transcript's quiet lifecycle marker — the archived chat and its
 /// successor each carry one at the boundary. The pre-refresh text stays
 /// recognized so an intent staged before the rename cannot duplicate it.
@@ -139,6 +180,31 @@ impl WakuBackend {
             return session_id;
         }
         self.boss.identity_and_session().1.unwrap_or(session_id)
+    }
+
+    /// The sessions a durable notification to `session_id` counts as
+    /// landed on — the whole Boss generation chain when the rotation
+    /// journal names this chat, just the session otherwise.
+    pub(super) fn boss_lineage_sessions(&self, session_id: Uuid) -> Vec<Uuid> {
+        boss_lineage_ids(&self.boss_journal_path(), session_id)
+    }
+
+    /// Whether a durable notification with this message id already reached
+    /// the lineage — parked in or delivered to any generation, not only
+    /// the session holding the pointer now.
+    pub(super) fn boss_lineage_message_landed(&self, session_id: Uuid, message_id: Uuid) -> bool {
+        let mut state = self.task_state.lock();
+        self.boss_lineage_sessions(session_id).iter().any(|id| {
+            state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == *id)
+                .is_some_and(|session| {
+                    self.task_store.hydrate(session).is_ok()
+                        && (session.queued_messages.iter().any(|m| m.id == message_id)
+                            || session.messages.iter().any(|m| m.id == message_id))
+                })
+        })
     }
 
     /// The installed provider's prevention-contract evidence for the active

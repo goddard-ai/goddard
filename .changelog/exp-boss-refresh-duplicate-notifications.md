@@ -1,0 +1,1 @@
+- Boss session refreshes no longer replay employee notifications or "no active assignment or waiting reason" reminders that a retired chat already received.

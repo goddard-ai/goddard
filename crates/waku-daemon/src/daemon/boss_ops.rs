@@ -2103,28 +2103,38 @@ impl WakuBackend {
                 .split_once("reports a blocker that needs your attention: ")
                 .is_some_and(|(_, report)| normalize(report) == blocker)
         };
-        if self.agent.has_pending_steer_matching(supervisor, |steer| {
-            matches(&steer.prompt, steer.report_trigger.as_ref())
-        }) {
-            return Ok(true);
+        // A blocker the retired chat still holds — pending steer, parked
+        // chip, or delivered row — must not re-report to the successor.
+        for target in self.boss_lineage_sessions(supervisor) {
+            if self.agent.has_pending_steer_matching(target, |steer| {
+                matches(&steer.prompt, steer.report_trigger.as_ref())
+            }) {
+                return Ok(true);
+            }
         }
         let mut state = self.task_state.lock();
-        let Some(session) = state
-            .sessions
-            .iter_mut()
-            .find(|session| session.id == supervisor)
-        else {
-            return Ok(false);
-        };
-        self.task_store.hydrate(session)?;
-        Ok(session
-            .messages
-            .iter()
-            .any(|message| matches(&message.content, message.report_trigger.as_ref()))
-            || session
-                .queued_messages
+        for target in self.boss_lineage_sessions(supervisor) {
+            let Some(session) = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == target)
+            else {
+                continue;
+            };
+            self.task_store.hydrate(session)?;
+            if session
+                .messages
                 .iter()
-                .any(|queued| matches(&queued.content, queued.report_trigger.as_ref())))
+                .any(|message| matches(&message.content, message.report_trigger.as_ref()))
+                || session
+                    .queued_messages
+                    .iter()
+                    .any(|queued| matches(&queued.content, queued.report_trigger.as_ref()))
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// `control`'s `setWorkspace` action: one operation that stops the

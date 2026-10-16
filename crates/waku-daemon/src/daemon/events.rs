@@ -872,12 +872,22 @@ pub(super) fn forward_driver_events(
                 }
                 // A queue-drained prompt folded into the parked turn: its
                 // mirrored chip's wait is over even when the steer carried
-                // no sender (an automation run) to attribute.
-                if let Some(queued_id) = steer.as_ref().and_then(|steer| steer.queued_id)
-                    && unmirror_agent_queued_prompt(&task_state, &task_store, session_id, queued_id)
-                        .is_ok()
-                {
-                    send_agent_queue_changed(&task_state, &events, session_id);
+                // no sender (an automation run) to attribute. The echo can
+                // land on a retired Boss chat after the carry moved the
+                // chip to the successor — unmirror across the lineage so
+                // the parked copy cannot drain as a second report.
+                if let Some(queued_id) = steer.as_ref().and_then(|steer| steer.queued_id) {
+                    for target in boss_rotation::boss_lineage_ids(
+                        &data_dir.join("boss/rotation.json"),
+                        session_id,
+                    ) {
+                        let removed =
+                            unmirror_agent_queued_prompt(&task_state, &task_store, target, queued_id)
+                                .unwrap_or(false);
+                        if removed && sessions.lock().contains_key(&target) {
+                            send_agent_queue_changed(&task_state, &events, target);
+                        }
+                    }
                 }
                 DriverEvent::SteerAccepted {
                     message,
@@ -1024,6 +1034,10 @@ pub(super) fn forward_driver_events(
                     &task_store,
                     &boss,
                     &automations,
+                    &boss_rotation::boss_lineage_ids(
+                        &data_dir.join("boss/rotation.json"),
+                        session_id,
+                    ),
                 ) {
                     eprintln!(
                         "goddard-daemon could not deliver a queued employee prompt for task {session_id}: {error:#}"
@@ -1079,6 +1093,10 @@ pub(super) fn forward_driver_events(
                     &task_store,
                     &boss,
                     &automations,
+                    &boss_rotation::boss_lineage_ids(
+                        &data_dir.join("boss/rotation.json"),
+                        session_id,
+                    ),
                 ) {
                     eprintln!(
                         "goddard-daemon could not deliver a queued agent prompt for task {session_id}: {error:#}"
