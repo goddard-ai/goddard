@@ -1,0 +1,1 @@
+- Show employee worktree markers and last activity in the Boss sidebar when available.

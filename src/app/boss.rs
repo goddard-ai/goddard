@@ -5116,6 +5116,7 @@ impl Waku {
                 &theme,
                 None,
                 None,
+                None,
             ))
             .when(speech_visible, |row| {
                 let label = if speech_playing {
@@ -5419,6 +5420,23 @@ impl Waku {
                 None,
             )
         };
+        let (uses_worktree, activity_label) = employee_sidebar_details(session, unix_time());
+        let trailing_detail = (uses_worktree || activity_label.is_some()).then(|| {
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary)
+                .when(uses_worktree, |row| {
+                    row.child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
+                })
+                .when_some(activity_label, |row, label| {
+                    row.child(div().child(SharedString::from(label)))
+                })
+                .into_any_element()
+        });
         // Expired and queued rows lend their status slot to the archive
         // control on hover or keyboard focus. Queued work is cancelled;
         // employee history keeps the record.
@@ -5542,6 +5560,7 @@ impl Waku {
                 &theme,
                 detail_provider,
                 title_accessory,
+                trailing_detail,
             ))
             // The flagged employee wears the same unread dot its folded
             // group header does — boss-flagged attention is the only
@@ -5789,6 +5808,7 @@ impl Waku {
                 Some(planning_project_icon),
                 true,
                 &theme,
+                None,
                 None,
                 None,
             ))
@@ -11715,6 +11735,7 @@ pub(super) fn boss_sidebar_label(
     theme: &Theme,
     provider: Option<ProviderKind>,
     title_accessory: Option<AnyElement>,
+    trailing_detail: Option<AnyElement>,
 ) -> Div {
     div()
         .flex_1()
@@ -11778,6 +11799,19 @@ pub(super) fn boss_sidebar_label(
                 )
                 .child(div().min_w_0().truncate().child(job_title)),
         )
+        .when_some(trailing_detail, |row, detail| {
+            row.child(div().flex_1()).child(detail)
+        })
+}
+
+fn employee_sidebar_details(session: Option<&AgentSession>, now: u64) -> (bool, Option<String>) {
+    let Some(session) = session else {
+        return (false, None);
+    };
+    (
+        session.workspace.is_worktree(),
+        sidebar::session_time_label(session, now),
+    )
 }
 
 /// Fallback icon for job titles that match no category — an agent without
@@ -12150,6 +12184,32 @@ fn boss_input(input: Entity<TextInput>, theme: &Theme) -> Div {
 mod tests {
     use super::*;
     use waku_client::boss::{BossDeliverable, BossResourcePolicy};
+
+    #[test]
+    fn employee_sidebar_details_follow_the_session_workspace_and_activity() {
+        let now = 1_000;
+        let mut employee = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        employee.workspace = SessionWorkspace::Worktree {
+            path: PathBuf::from("/tmp/employee"),
+            name: "employee".to_owned(),
+            branch: Some("feature/sidebar".to_owned()),
+            base_branch: None,
+            adopted_by: None,
+        };
+        employee.last_reply_at = Some(880);
+
+        assert_eq!(
+            employee_sidebar_details(Some(&employee), now),
+            (true, Some(sidebar::format_time_ago(120)))
+        );
+
+        employee.workspace = SessionWorkspace::Local;
+        assert_eq!(
+            employee_sidebar_details(Some(&employee), now),
+            (false, Some(sidebar::format_time_ago(120)))
+        );
+        assert_eq!(employee_sidebar_details(None, now), (false, None));
+    }
 
     #[test]
     fn deliverable_activation_only_navigates_for_previewable_files() {
