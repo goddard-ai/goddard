@@ -4063,7 +4063,7 @@ fn stream_batches_commit_full_adjacent_text_and_preserve_event_order() {
     ]);
 
     assert!(matches!(
-        pop_stream_batch(&mut events, StreamDeltaKind::Text, &mut 0),
+        pop_stream_batch(&mut events, StreamDeltaKind::Text, &mut 0, usize::MAX),
         Some(DriverEvent::TextDelta(text)) if text == "first line\nsecond line"
     ));
     assert!(matches!(
@@ -4075,6 +4075,128 @@ fn stream_batches_commit_full_adjacent_text_and_preserve_event_order() {
         events.get(1),
         Some(DriverEvent::TextDelta(text)) if text == "after tool"
     ));
+}
+
+#[test]
+fn startup_replay_batches_preserve_text_and_never_advance_the_cursor_past_applied_output() {
+    let runtime_id = Uuid::new_v4();
+    let epoch = Uuid::new_v4();
+    let mut events = VecDeque::new();
+    let mut expected = String::new();
+    for sequence in 1..=400 {
+        let text = format!("{sequence},");
+        expected.push_str(&text);
+        events.push_back(DriverEvent::TextDelta(text));
+        events.push_back(DriverEvent::RuntimeEventCursorAdvanced(
+            RuntimeEventCursor {
+                runtime_id,
+                epoch,
+                sequence,
+            },
+        ));
+    }
+    let mut applied = String::new();
+    let mut cursor = 0;
+    let mut batches = 0;
+    while !events.is_empty() {
+        if matches!(
+            events.front(),
+            Some(DriverEvent::RuntimeEventCursorAdvanced(_))
+        ) {
+            let Some(DriverEvent::RuntimeEventCursorAdvanced(next)) = events.pop_front() else {
+                unreachable!();
+            };
+            assert!(next.sequence >= cursor);
+            assert!(next.sequence <= applied.matches(',').count() as u64);
+            cursor = next.sequence;
+        } else {
+            let before = events.len();
+            let Some(DriverEvent::TextDelta(text)) =
+                pop_stream_batch(&mut events, StreamDeltaKind::Text, &mut 0, 3)
+            else {
+                panic!("expected text batch");
+            };
+            assert!(before - events.len() <= 3);
+            applied.push_str(&text);
+            batches += 1;
+        }
+    }
+    assert!(batches > 1);
+    assert_eq!(applied, expected);
+    assert_eq!(cursor, 400);
+
+    // Large adjacent deltas also yield before coalescing the entire replay.
+    let mut large = (0..200)
+        .map(|_| DriverEvent::TextDelta("x".repeat(1024)))
+        .collect::<VecDeque<_>>();
+    let Some(DriverEvent::TextDelta(text)) =
+        pop_stream_batch(&mut large, StreamDeltaKind::Text, &mut 0, usize::MAX)
+    else {
+        panic!("expected text batch");
+    };
+    assert_eq!(text.len(), 64 * 1024);
+    assert!(!large.is_empty());
+}
+
+#[test]
+fn startup_hydration_keeps_newer_list_edits_and_live_transcript_detail() {
+    let mut stored = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    stored.begin_turn("Stored prompt");
+    stored.config_activation = Some(ConfigActivation {
+        generation: 1,
+        revision: 1,
+    });
+    let mut current = stored.list_projection();
+    current.title = "Renamed while loading".into();
+    current.archived_at = Some(42);
+    current.provider = ProviderKind::Claude;
+    current.model = Some("newer selection".into());
+    current.config_activation = Some(ConfigActivation {
+        generation: 1,
+        revision: 2,
+    });
+
+    super::runtime::merge_hydrated_session(&mut current, stored.clone());
+    assert!(current.detail_loaded);
+    assert_eq!(current.title, "Renamed while loading");
+    assert_eq!(current.archived_at, Some(42));
+    assert_eq!(current.provider, ProviderKind::Claude);
+    assert_eq!(current.model.as_deref(), Some("newer selection"));
+    assert_eq!(current.messages[0].content, "Stored prompt");
+
+    current.begin_turn("Newer live prompt");
+    let before = serde_json::to_value(&current).unwrap();
+    super::runtime::merge_hydrated_session(&mut current, stored);
+    assert_eq!(serde_json::to_value(&current).unwrap(), before);
+}
+
+#[test]
+fn startup_unloaded_task_cannot_offer_send_or_continue() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("Stored prompt");
+    session.status = SessionStatus::Idle;
+    session.detail_loaded = false;
+    for has_draft in [false, true] {
+        assert_eq!(
+            composer_submit_action(Some(&session), false, has_draft),
+            ComposerSubmitAction::Preparing
+        );
+    }
+    session.detail_loaded = true;
+    assert_eq!(
+        composer_submit_action(Some(&session), false, true),
+        ComposerSubmitAction::Send
+    );
+    session.status = SessionStatus::Working;
+    assert_eq!(
+        composer_submit_action(Some(&session), false, true),
+        ComposerSubmitAction::Stop
+    );
+    session.detail_loaded = false;
+    assert_eq!(
+        composer_submit_action(Some(&session), false, true),
+        ComposerSubmitAction::Stop
+    );
 }
 
 #[test]

@@ -1,0 +1,1 @@
+- Switch tasks while their conversations load, with a retry option if loading fails; background recovery now yields between batches to keep navigation responsive.

@@ -1,5 +1,8 @@
 _version: 1
 
+sessions.loading: タスクを読み込み中…
+sessions.load_failed: このタスクを読み込めませんでした。
+
 settings.composer_dictation: コンポーザーの音声入力
 settings.composer_dictation_description: マイクで短く話すと、Whistle がオフラインで文字起こしし、カーソル位置に挿入します
 settings.composer_dictation_downloading: ダウンロード中…

@@ -1183,7 +1183,7 @@ enum ProviderBinary {
 /// Goddard's runtime map yet. Its event receiver safely buffers early events.
 struct PreparedDriver {
     handle: DriverHandle,
-    events: Receiver<DriverEvent>,
+    events: Receiver<driver::DriverEventBatch>,
     /// Stored session detail fetched while attaching to a skeleton's runtime:
     /// driver events are transcript writes, so the detail has to land before
     /// they do or what they build is never persistable.
@@ -1658,7 +1658,7 @@ struct SessionRuntime {
     /// Invalidates stale ApplyOptions responses when settings change again or
     /// this runtime is replaced while the RPC is in flight.
     options_generation: u64,
-    events: Receiver<DriverEvent>,
+    events: Receiver<driver::DriverEventBatch>,
     pending_events: VecDeque<DriverEvent>,
     /// Presentation metadata for steering messages awaiting the provider's
     /// accepted/rejected acknowledgement, in transport order.
@@ -2377,7 +2377,6 @@ struct TranscriptScrollPosition {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct PendingSessionActivation {
     session_id: Uuid,
-    transition: SessionActivationTransition,
 }
 
 #[derive(Clone)]
@@ -2522,14 +2521,19 @@ pub struct Waku {
     daemon_lan_ip: Option<String>,
     /// Session details currently being fetched from the daemon. Sidebar rows
     /// stay usable while the selected transcript hydrates asynchronously.
-    session_hydrations: HashSet<Uuid>,
+    session_hydrations: sessions::SessionHydrations,
+    /// Unvisited runtimes in this drain round. Retained across yields so a
+    /// busy selected task cannot starve background completions and approvals.
+    driver_event_round: VecDeque<Uuid>,
+    /// Stop pressed before the restarted desktop finished attaching.
+    pending_session_cancels: HashSet<Uuid>,
     /// The selected session's summon-card employee ids under a fingerprint of
     /// the transcript's `boss_summon` markers, so activations and the
     /// resident-transcript trim reuse one scan instead of re-parsing every
     /// activity. `RefCell` because the readers take `&self`.
     summon_card_cache: RefCell<Option<(u64, Vec<Uuid>)>>,
-    /// Selection is committed only after this target's transcript arrives, so
-    /// the currently visible task stays intact during daemon latency.
+    /// Selection is already committed; detail-dependent landing effects wait
+    /// for this transcript without replaying navigation or restoring drafts.
     pending_session_activation: Option<PendingSessionActivation>,
     /// A `goddard://new-task?prompt=` payload waiting for its draft — the
     /// destination may still be provisioning a projectless workspace, so the
@@ -2575,7 +2579,7 @@ pub struct Waku {
     turn_settled_while_visible: Option<Uuid>,
     analytics: crate::analytics::Analytics,
     state: PersistedState,
-    store: StateStore,
+    store: Arc<StateStore>,
     /// Cached before rendering so path labels can abbreviate the home prefix
     /// without consulting the environment or account database in a frame.
     home_directory: Option<PathBuf>,
@@ -5367,7 +5371,7 @@ impl Waku {
             .as_deref()
             .map(read_auto_restart)
             .unwrap_or(false);
-        let store = StateStore::remote(daemon.clone());
+        let store = Arc::new(StateStore::remote(daemon.clone()));
         let daemons = store.daemons();
         let daemon_hostname = crate::daemon::local_hostname().unwrap_or_else(|| "this-mac".into());
         let daemon_lan_ip = crate::daemon::local_ipv4();
@@ -5976,18 +5980,7 @@ impl Waku {
             if session.status != SessionStatus::Idle {
                 session.status = SessionStatus::Idle;
             }
-            let interrupted_turn = if let Some(turn) = session
-                .turns
-                .last_mut()
-                .filter(|turn| turn.status == TurnStatus::Running)
-            {
-                turn.status = TurnStatus::Interrupted;
-                turn.interruption = Some(waku_protocol::model::TurnInterruption::Daemon);
-                turn.completed_at = Some(unix_time());
-                Some(turn.turn_count)
-            } else {
-                None
-            };
+            let interrupted_turn = sessions::settle_idle_session_detail(session);
             // A crash mid-turn leaves work in the tree worth checkpointing, but
             // one `capture_turn` per interrupted session is upwards of ten
             // `git` invocations each — paid here, before the window has drawn
@@ -6006,23 +5999,6 @@ impl Waku {
                     untouched: false,
                 });
             }
-            for message in &mut session.messages {
-                message.streaming = false;
-            }
-            for block in &mut session.transcript_blocks {
-                block.activities.retain(|activity| {
-                    activity
-                        .reasoning
-                        .as_ref()
-                        .is_none_or(|reasoning| !reasoning.content.trim().is_empty())
-                });
-                for activity in &mut block.activities {
-                    activity.complete = true;
-                }
-            }
-            session
-                .transcript_blocks
-                .retain(|block| !block.activities.is_empty());
         }
         let initial_composer_draft = state
             .selected_session
@@ -7208,7 +7184,9 @@ impl Waku {
                 remote_catalogs_path,
                 daemon_hostname,
                 daemon_lan_ip,
-                session_hydrations: HashSet::new(),
+                session_hydrations: sessions::SessionHydrations::default(),
+                driver_event_round: VecDeque::new(),
+                pending_session_cancels: HashSet::new(),
                 summon_card_cache: RefCell::new(None),
                 pending_session_activation: None,
                 pending_deep_link_prompt: None,
@@ -8035,20 +8013,12 @@ impl Waku {
                 this.analytics.clone(),
                 cx.background_executor(),
             );
+            // Queue the visible transcript before background runtime recovery.
+            if let Some(session_id) = this.state.selected_session {
+                this.ensure_session_loaded(session_id, cx);
+            }
             for session_id in startup_live_session_ids {
-                // Antigravity's runtime is the app-local TUI terminal, not a
-                // daemon attachment. It respawns lazily — only the selected
-                // session's surface exists at launch.
-                let is_agy = this.state.sessions.iter().any(|session| {
-                    session.id == session_id && session.provider == ProviderKind::Antigravity
-                });
-                if is_agy {
-                    if this.state.selected_session == Some(session_id) {
-                        this.ensure_agy_terminal(session_id, cx);
-                    }
-                } else {
-                    this.start_runtime_attachment(session_id, cx);
-                }
+                this.start_runtime_attachment(session_id, cx);
             }
             this.start_pending_checkpoint_captures(cx);
             // The autocomplete indexes prefetch alongside, so typing `/` or

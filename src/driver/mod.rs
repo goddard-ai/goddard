@@ -13,8 +13,8 @@ use crossbeam_channel::{Sender, bounded, select};
 use parking_lot::Mutex;
 
 pub use waku_client::driver::{
-    DriverControl, DriverEventSender, DriverHandle, DriverStartOptions, SessionOptions,
-    event_channel,
+    DriverControl, DriverEventBatch, DriverEventSender, DriverHandle, DriverStartOptions,
+    SessionOptions, event_channel,
 };
 
 pub(crate) fn start_remote(
@@ -148,11 +148,7 @@ fn connect_remote(
                                 )),
                             };
                             let process_exited = matches!(&event, DriverEvent::ProcessExited);
-                            if forwarding_events.send(event).is_err()
-                                || forwarding_events
-                                    .send(DriverEvent::RuntimeEventCursorAdvanced(cursor))
-                                    .is_err()
-                            {
+                            if forwarding_events.send_sequenced(event, cursor).is_err() {
                                 return;
                             }
                             if process_exited {
@@ -566,11 +562,7 @@ pub(crate) fn watch_friend_session(
                         if matches!(event, DriverEvent::ProcessExited) {
                             continue;
                         }
-                        if forwarding.send(event).is_err()
-                            || forwarding
-                                .send(DriverEvent::RuntimeEventCursorAdvanced(cursor))
-                                .is_err()
-                        {
+                        if forwarding.send_sequenced(event, cursor).is_err() {
                             return;
                         }
                     }

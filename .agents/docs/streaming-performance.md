@@ -96,6 +96,16 @@ Two hard-won rules:
   second**, sailing straight past the floor. Fast thinking hitting 40% CPU
   while text streamed at 10% was this one flag.
 
+Recovery replay uses a cooperative 4 ms driver-drain budget. Each runtime
+collects at most 1,024 deliveries per visit, each carrying an event and its
+optional replay cursor together. Adjacent text batches stop at 1,024 events
+or after 64 KiB of output (individual events are not split), and their
+cursors apply before yielding or saving. A retained round resumes unvisited
+runtimes after a yield, with the selected task first in each new round. Pending
+receiver events keep the pump scheduled on the existing commit cadence,
+even when their wake edge was already consumed. These limits do not preempt
+one expensive handler or save; measure those separately when input stalls.
+
 **Pulse ticks, ≤ 60 Hz.** All repeating animation rides the shared
 self-parking clock in [src/ui/motion.rs](../../crates/waku-ui/src/ui/motion.rs): loaders read
 a phase from a shared epoch, leases expire 300 ms after the loader last

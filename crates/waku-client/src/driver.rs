@@ -8,18 +8,46 @@ use uuid::Uuid;
 use waku_protocol::computer_use::ComputerToolRequest;
 use waku_protocol::model::{
     BackgroundWorkKey, DriverEvent, GoalOperation, MessageAttachment, ProviderResumeCursor,
-    QueuedMessage, RuntimeMode, UserInputAnswer,
+    QueuedMessage, RuntimeEventCursor, RuntimeMode, UserInputAnswer,
 };
 
 #[derive(Clone)]
 pub struct DriverEventSender {
-    events: Sender<DriverEvent>,
+    events: Sender<DriverEventBatch>,
     wake: smol::channel::Sender<()>,
+}
+
+/// One local delivery unit. A sequenced event and its replay cursor enter
+/// the UI queue together, so a budgeted drain can yield at a safe boundary.
+pub struct DriverEventBatch {
+    pub event: DriverEvent,
+    pub cursor: Option<RuntimeEventCursor>,
 }
 
 impl DriverEventSender {
     pub fn send(&self, event: DriverEvent) -> Result<(), SendError<DriverEvent>> {
-        self.events.send(event)?;
+        self.send_batch(DriverEventBatch {
+            event,
+            cursor: None,
+        })
+    }
+
+    /// Deliver output and the cursor that acknowledges precisely that output.
+    pub fn send_sequenced(
+        &self,
+        event: DriverEvent,
+        cursor: RuntimeEventCursor,
+    ) -> Result<(), SendError<DriverEvent>> {
+        self.send_batch(DriverEventBatch {
+            event,
+            cursor: Some(cursor),
+        })
+    }
+
+    fn send_batch(&self, batch: DriverEventBatch) -> Result<(), SendError<DriverEvent>> {
+        self.events
+            .send(batch)
+            .map_err(|error| SendError(error.0.event))?;
         let _ = self.wake.try_send(());
         Ok(())
     }
@@ -27,7 +55,7 @@ impl DriverEventSender {
 
 pub fn event_channel(
     wake: smol::channel::Sender<()>,
-) -> (DriverEventSender, Receiver<DriverEvent>) {
+) -> (DriverEventSender, Receiver<DriverEventBatch>) {
     let (events, receiver) = unbounded();
     (DriverEventSender { events, wake }, receiver)
 }
@@ -224,4 +252,34 @@ pub struct SessionOptions {
     pub reasoning_effort: Option<String>,
     pub service_tier: Option<String>,
     pub context_window: Option<String>,
+}
+
+#[cfg(test)]
+mod event_batch_tests {
+    use super::*;
+
+    #[test]
+    fn startup_replay_output_and_cursor_are_delivered_as_one_unit() {
+        let (wake, wake_events) = smol::channel::bounded(1);
+        let (sender, events) = event_channel(wake);
+        let cursor = RuntimeEventCursor {
+            runtime_id: Uuid::new_v4(),
+            epoch: Uuid::new_v4(),
+            sequence: 12,
+        };
+        sender
+            .send_sequenced(DriverEvent::TextDelta("output".into()), cursor)
+            .unwrap();
+        assert!(wake_events.try_recv().is_ok());
+        let batch = events.try_recv().unwrap();
+        assert!(matches!(batch.event, DriverEvent::TextDelta(text) if text == "output"));
+        assert_eq!(batch.cursor, Some(cursor));
+        assert!(events.is_empty());
+        drop(events);
+        assert!(
+            sender
+                .send(DriverEvent::TextDelta("closed".into()))
+                .is_err()
+        );
+    }
 }

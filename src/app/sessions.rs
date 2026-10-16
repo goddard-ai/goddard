@@ -1,11 +1,146 @@
 use super::*;
 
+/// One shared queue for navigation, runtime attachment and panel hydration.
+/// A visible task can overtake queued warmup, without duplicating an active read.
+#[derive(Default)]
+pub(super) struct SessionHydrations {
+    queued: VecDeque<Uuid>,
+    running: HashSet<Uuid>,
+}
+
+impl SessionHydrations {
+    pub(super) fn contains(&self, session_id: Uuid) -> bool {
+        self.running.contains(&session_id) || self.queued.contains(&session_id)
+    }
+
+    fn enqueue(&mut self, session_id: Uuid, visible: bool) {
+        if self.running.contains(&session_id) {
+            return;
+        }
+        if visible {
+            self.queued.retain(|id| *id != session_id);
+            self.queued.push_front(session_id);
+        } else if !self.queued.contains(&session_id) {
+            self.queued.push_back(session_id);
+        }
+    }
+
+    fn next(&mut self) -> Option<Uuid> {
+        if self.running.len() >= 2 {
+            return None;
+        }
+        let id = self.queued.pop_front()?;
+        self.running.insert(id);
+        Some(id)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Uuid> {
+        self.running.iter().chain(self.queued.iter())
+    }
+}
+
+pub(super) fn settle_idle_session_detail(session: &mut AgentSession) -> Option<usize> {
+    if session.status.is_busy() {
+        return None;
+    }
+    let interrupted_turn = if let Some(turn) = session
+        .turns
+        .last_mut()
+        .filter(|turn| turn.status == TurnStatus::Running)
+    {
+        turn.status = TurnStatus::Interrupted;
+        turn.interruption = Some(waku_protocol::model::TurnInterruption::Daemon);
+        turn.completed_at = Some(unix_time());
+        Some(turn.turn_count)
+    } else {
+        None
+    };
+    for message in &mut session.messages {
+        message.streaming = false;
+    }
+    for block in &mut session.transcript_blocks {
+        block.activities.retain(|activity| {
+            activity
+                .reasoning
+                .as_ref()
+                .is_none_or(|reasoning| !reasoning.content.trim().is_empty())
+        });
+        for activity in &mut block.activities {
+            activity.complete = true;
+        }
+    }
+    session
+        .transcript_blocks
+        .retain(|block| !block.activities.is_empty());
+    interrupted_turn
+}
+
 fn retain_runtime_after_cancel(provider: ProviderKind) -> bool {
     // Amp offers no interrupt on its stream — stopping it means ending the
     // process. The thread survives on Amp's side and the next prompt resumes
     // it with `threads continue`. Every other provider has a protocol
     // interrupt and keeps its runtime warm.
     !matches!(provider, ProviderKind::Amp)
+}
+
+#[cfg(test)]
+mod startup_hydration_tests {
+    use super::*;
+
+    #[test]
+    fn startup_async_detail_settles_interrupted_history_without_stopping_a_live_turn() {
+        let mut idle = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        idle.begin_turn("Prompt before restart");
+        idle.push_message(MessageRole::Assistant, "partial output");
+        idle.messages.last_mut().unwrap().streaming = true;
+        idle.status = SessionStatus::Idle;
+        let mut live = idle.clone();
+        live.status = SessionStatus::Working;
+
+        assert_eq!(settle_idle_session_detail(&mut idle), Some(1));
+        assert_eq!(idle.turns[0].status, TurnStatus::Interrupted);
+        assert!(idle.messages.iter().all(|message| !message.streaming));
+        assert_eq!(settle_idle_session_detail(&mut idle), None);
+
+        assert_eq!(settle_idle_session_detail(&mut live), None);
+        assert_eq!(live.turns[0].status, TurnStatus::Running);
+        assert!(live.messages.last().unwrap().streaming);
+    }
+
+    #[test]
+    fn startup_hydration_prioritizes_selection_without_duplicate_or_unbounded_reads() {
+        let ids = [
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        ];
+        let mut queue = SessionHydrations::default();
+        for id in ids {
+            queue.enqueue(id, false);
+        }
+        assert_eq!(queue.next(), Some(ids[0]));
+        assert_eq!(queue.next(), Some(ids[1]));
+        assert_eq!(queue.next(), None);
+
+        // A click overtakes queued warmup. Repeated clicks on active and
+        // queued tasks still produce exactly one read per task.
+        queue.enqueue(ids[3], true);
+        queue.enqueue(ids[3], true);
+        queue.enqueue(ids[0], true);
+        queue.running.remove(&ids[0]);
+        assert_eq!(queue.next(), Some(ids[3]));
+        assert_eq!(queue.next(), None);
+        queue.running.remove(&ids[1]);
+        assert_eq!(queue.next(), Some(ids[2]));
+        queue.running.clear();
+        assert_eq!(queue.next(), None);
+        assert!(!queue.contains(ids[0]));
+
+        // A completed or failed request can be explicitly retried.
+        queue.enqueue(ids[0], true);
+        assert_eq!(queue.next(), Some(ids[0]));
+    }
 }
 
 /// How long a cancelled turn's wire drain may park follow-ups before the
@@ -19,7 +154,7 @@ fn new_task_runtime_mode(
     remembered: RuntimeMode,
 ) -> RuntimeMode {
     current
-        .filter(|session| session.project_id == project_id)
+        .filter(|session| session.project_id == project_id && session.detail_loaded)
         .map(|session| session.runtime_mode)
         .unwrap_or(remembered)
 }
@@ -637,24 +772,6 @@ impl Waku {
         // row exist inside them.
         self.reveal_dormant_sidebar_session(session_id, cx);
         self.reveal_sidebar_session(session_id);
-        let needs_hydration = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .is_some_and(|session| !session.detail_loaded);
-        if needs_hydration {
-            self.pending_session_activation = Some(PendingSessionActivation {
-                session_id,
-                transition,
-            });
-            // Keep the current transcript visible until the daemon returns the
-            // target session, but acknowledge the click immediately in the
-            // sidebar instead of making the UI appear unresponsive.
-            cx.notify();
-            self.ensure_session_loaded(session_id, cx);
-            return;
-        }
         self.pending_session_activation = None;
         self.finish_session_activation(session_id, transition, cx);
     }
@@ -696,124 +813,284 @@ impl Waku {
             }
         }
         self.activate_session(target, cx);
-        self.mark_employee_viewed_for_session(target, cx);
+        if self
+            .selected_session()
+            .is_some_and(|session| session.detail_loaded)
+        {
+            self.mark_employee_viewed_for_session(target, cx);
+        }
         // A deep link's prompt rides the activation so it also lands on a
         // draft whose projectless workspace was still provisioning.
         self.apply_deep_link_prompt(cx);
     }
 
-    /// Loads a session's transcript if startup only fetched its list columns.
-    ///
-    /// The SQLite query and daemon round trip both stay off the UI thread. The
-    /// current selection stays rendered until the requested session is whole.
+    /// Queue detail reads off the UI thread. The selected task overtakes
+    /// background warmup and the queue bounds concurrent transcript loads.
     pub(super) fn ensure_session_loaded(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let needs_hydration = self
+        if self
             .state
             .sessions
             .iter()
-            .find(|session| session.id == session_id)
-            .is_some_and(|session| !session.detail_loaded);
-        if !needs_hydration || !self.session_hydrations.insert(session_id) {
+            .any(|session| session.id == session_id && !session.detail_loaded)
+        {
+            self.session_hydrations
+                .enqueue(session_id, self.state.selected_session == Some(session_id));
+            self.start_pending_session_hydrations(cx);
+        }
+    }
+
+    fn start_pending_session_hydrations(&mut self, cx: &mut Context<Self>) {
+        while let Some(session_id) = self.session_hydrations.next() {
+            if !self
+                .state
+                .sessions
+                .iter()
+                .any(|session| session.id == session_id && !session.detail_loaded)
+            {
+                self.session_hydrations.running.remove(&session_id);
+                continue;
+            }
+            if self.daemon_for_session(session_id).is_none() {
+                self.session_hydrations.running.remove(&session_id);
+                if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id)
+                {
+                    self.use_remote_host(host, cx);
+                }
+                continue;
+            }
+            let store = self.store.clone();
+            cx.spawn(async move |waku, cx| {
+                let result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let mut session =
+                            store.load_session_detail(session_id)?.ok_or_else(|| {
+                                std::io::Error::new(
+                                    std::io::ErrorKind::NotFound,
+                                    "the task no longer exists",
+                                )
+                            })?;
+                        session.migrate_legacy_state();
+                        let interrupted_turn = settle_idle_session_detail(&mut session);
+                        Ok::<_, std::io::Error>((session, interrupted_turn))
+                    })
+                    .await;
+                let _ = waku.update(cx, |waku, cx| {
+                    waku.session_hydrations.running.remove(&session_id);
+                    match result {
+                        Ok((session, interrupted_turn)) => {
+                            waku.trim_resident_transcripts();
+                            let applied = if let Some(existing) = waku
+                                .state
+                                .sessions
+                                .iter_mut()
+                                .find(|existing| existing.id == session_id)
+                            {
+                                super::runtime::merge_hydrated_session(existing, session)
+                            } else {
+                                false
+                            };
+                            if applied
+                                && let Some(turn_count) = interrupted_turn
+                                && let Some(project_path) = waku
+                                    .state
+                                    .sessions
+                                    .iter()
+                                    .find(|session| session.id == session_id)
+                                    .and_then(|session| waku.workspace_path_for_session(session))
+                                    .map(Path::to_path_buf)
+                            {
+                                waku.pending_checkpoint_captures
+                                    .push(PendingCheckpointCapture {
+                                        session_id,
+                                        turn_count,
+                                        project_path,
+                                        untouched: false,
+                                    });
+                                waku.start_pending_checkpoint_captures(cx);
+                            }
+                            let selected_before_refresh = waku.state.selected_session;
+                            waku.reconcile_boss_chat_refresh(cx);
+                            if selected_before_refresh == waku.state.selected_session {
+                                waku.finish_selected_session_hydration(session_id, applied, cx);
+                            }
+                            if waku.pending_queue_drains.contains(&session_id) {
+                                waku.pending_queue_drains.retain(|id| *id != session_id);
+                                waku.drain_queued_message(session_id, cx);
+                            }
+                            if waku.state.sessions.iter().any(|session| {
+                                session.id == session_id
+                                    && (session.status.is_busy()
+                                        || waku.pending_session_cancels.contains(&session_id)
+                                        || waku.state.selected_session == Some(session_id))
+                            }) {
+                                waku.start_runtime_attachment(session_id, cx);
+                            }
+                        }
+                        Err(error) => {
+                            // Keep the selected loading view and its draft; a
+                            // retry never replays history or restores the composer.
+                            if waku.state.selected_session == Some(session_id) {
+                                waku.show_toast(tr!("errors.open_session", error = error));
+                            } else {
+                                eprintln!("could not hydrate task {session_id}: {error}");
+                            }
+                        }
+                    }
+                    waku.start_pending_session_hydrations(cx);
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+    }
+
+    fn finish_selected_session_hydration(
+        &mut self,
+        session_id: Uuid,
+        detail_arrived: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.selected_session != Some(session_id)
+            || !self
+                .selected_session()
+                .is_some_and(|session| session.detail_loaded)
+        {
             return;
         }
-        let Some(daemon) = self.daemon_for_session(session_id) else {
-            // Offline remote host: the selection is use, so start its
-            // interactive connect; drop the mark so hydration retries when
-            // the supervisor registers and the row is re-selected.
-            if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id) {
-                self.use_remote_host(host, cx);
-            }
-            self.session_hydrations.remove(&session_id);
-            return;
+        let landing_pending = self
+            .pending_session_activation
+            .is_some_and(|pending| pending.session_id == session_id);
+        let mut attention = matches!(self.transcript_landing,
+            Some((id, TranscriptLanding::LastTurn)) if id == session_id);
+        if landing_pending {
+            self.pending_session_activation = None;
+            self.remember_selected_session_options();
+            attention |= self.mark_selected_session_seen(false);
+            self.mark_employee_viewed_for_session(session_id, cx);
+            self.complete_deliverable_activation(session_id, cx);
+            self.apply_deep_link_prompt(cx);
+        }
+        // Selection already reset the departing view and restored this draft.
+        // A data arrival must preserve typing, annotations and an open paste editor.
+        if detail_arrived {
+            self.reset_transcript_rows(self.transcript_row_count());
+            // The loading view cannot scroll. Re-apply even a saved Position
+            // that set `transcript_is_scrolled` before any rows existed.
+            self.apply_transcript_landing(attention, cx);
+        }
+        for employee_id in self.summon_card_employees() {
+            self.ensure_session_loaded(employee_id, cx);
+        }
+        self.refresh_composer_sources(cx);
+        self.ensure_recent_boss_history(cx);
+        self.maybe_voice_brief(session_id, cx);
+    }
+
+    fn remember_selected_session_options(&mut self) {
+        if let Some((
+            project_id,
+            provider,
+            auto_route,
+            runtime_mode,
+            environment,
+            model,
+            reasoning_effort,
+            service_tier,
+            context_window,
+        )) = self
+            .selected_session()
+            .filter(|session| session.detail_loaded)
+            .map(|session| {
+                (
+                    session.project_id,
+                    session.provider,
+                    // A started session that came through Auto clears its draft
+                    // flag when the decision lands; its route record still
+                    // counts as the last-used Auto pick.
+                    session.auto_route || session.route_decision.is_some(),
+                    session.runtime_mode,
+                    session.environment(),
+                    session.model.clone(),
+                    session.reasoning_effort.clone(),
+                    session.service_tier.clone(),
+                    session.context_window.clone(),
+                )
+            })
+        {
+            self.state.selected_project = Some(project_id);
+            self.state.last_provider = provider;
+            self.state.last_auto_route = auto_route;
+            self.state.last_runtime_mode = runtime_mode;
+            self.state
+                .remember_project_runtime_mode(project_id, runtime_mode);
+            self.state.last_environment = environment;
+            self.state.last_model = model;
+            self.state.last_reasoning_effort = reasoning_effort;
+            self.state.last_service_tier = service_tier;
+            self.state.last_context_window = context_window;
+        }
+    }
+
+    fn mark_selected_session_seen(&mut self, session_changed: bool) -> bool {
+        let Some(session_id) = self.state.selected_session else {
+            return false;
         };
-        cx.spawn(async move |waku, cx| {
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    match waku_client::persistence::hydrate_session(&daemon, session_id)? {
-                        Some(session) => Ok(session),
-                        None => {
-                            anyhow::bail!("the task no longer exists")
-                        }
-                    }
-                })
-                .await;
-            let _ = waku.update(cx, |waku, cx| {
-                waku.session_hydrations.remove(&session_id);
-                match result {
-                    Ok(session) => {
-                        // Trim before the hydrated row lands so this arrival
-                        // is never the release victim — the window counts
-                        // sessions that were already resident, not the one
-                        // just fetched.
-                        waku.trim_resident_transcripts();
-                        let replaced = if let Some(existing) = waku
-                            .state
-                            .sessions
-                            .iter_mut()
-                            .find(|existing| existing.id == session_id)
-                        {
-                            // A runtime attach can hydrate the same session
-                            // first; its copy already carries the live
-                            // events this older stored snapshot would erase.
-                            if !existing.detail_loaded {
-                                *existing = session;
-                            }
-                            true
-                        } else {
-                            false
-                        };
-                        let selected_before_refresh = waku.state.selected_session;
-                        waku.reconcile_boss_chat_refresh(cx);
-                        let refreshed = selected_before_refresh != waku.state.selected_session;
-                        // A drain armed before this detail landed — a Boss
-                        // rotation's carried follow-ups — parked on the
-                        // skeleton. Run it now that the queue is visible.
-                        if waku.pending_queue_drains.contains(&session_id) {
-                            waku.pending_queue_drains.retain(|id| *id != session_id);
-                            waku.drain_queued_message(session_id, cx);
-                        }
-                        let pending = waku
-                            .pending_session_activation
-                            .filter(|pending| pending.session_id == session_id);
-                        if pending.is_some() {
-                            waku.pending_session_activation = None;
-                        }
-                        if replaced && let Some(pending) = pending {
-                            waku.finish_session_activation(session_id, pending.transition, cx);
-                        } else if !refreshed && waku.state.selected_session == Some(session_id) {
-                            waku.reset_visible_state();
-                            waku.reset_transcript_rows(waku.transcript_row_count());
-                            if !waku.transcript_is_scrolled.get() {
-                                // The original activation already consumed
-                                // the attention state; its chosen landing
-                                // still says whether this session wanted the
-                                // last turn over the restored position.
-                                let attention = matches!(
-                                    waku.transcript_landing,
-                                    Some((id, TranscriptLanding::LastTurn))
-                                        if id == session_id
-                                );
-                                waku.apply_transcript_landing(attention, cx);
-                            }
-                            waku.refresh_composer_sources(cx);
-                            waku.ensure_recent_boss_history(cx);
-                        }
-                    }
-                    Err(error) => {
-                        if waku
-                            .pending_session_activation
-                            .is_some_and(|pending| pending.session_id == session_id)
-                        {
-                            waku.pending_session_activation = None;
-                        }
-                        waku.show_toast(tr!("errors.open_session", error = error));
-                    }
-                }
-                cx.notify();
+        // Selection clears the unseen stamp, so read the attention state —
+        // an unread completion or a turn waiting on the reader — first:
+        // it decides whether the transcript opens on the last turn instead
+        // of the position the reader left it at.
+        let detail_loaded = self
+            .selected_session()
+            .is_some_and(|session| session.detail_loaded);
+        let had_unseen = if detail_loaded {
+            self.state.unseen_completions.remove(&session_id).is_some()
+        } else {
+            self.state.unseen_completions.contains_key(&session_id)
+        };
+        // ⌘⇧D's park signal: a chain departure re-stamps the session only
+        // when it was unread on arrival or a turn settled while it was on
+        // screen. A settle during the pending activation keeps its flag
+        // across this landing; a different session's stint resets both.
+        if had_unseen {
+            self.unread_when_selected = Some(session_id);
+        } else if session_changed {
+            self.unread_when_selected = None;
+        }
+        if session_changed && self.turn_settled_while_visible != Some(session_id) {
+            self.turn_settled_while_visible = None;
+        }
+        let attention = had_unseen
+            || self.state.sessions.iter().any(|session| {
+                session.id == session_id && session.status == SessionStatus::Waiting
             });
-        })
-        .detach();
+        // Archive reads this stamp to pick the viewed task's landing: a
+        // visit that began on fresh attention keeps draining that queue,
+        // while a revisit hands off to the sidebar neighbor instead.
+        if attention {
+            self.attention_when_selected = Some(session_id);
+        } else if session_changed {
+            self.attention_when_selected = None;
+        }
+        if had_unseen {
+            self.transcript_new_content_dot = self
+                .selected_session()
+                .and_then(|session| {
+                    session
+                        .messages
+                        .iter()
+                        .rev()
+                        .find(|message| message.role == MessageRole::Assistant)
+                })
+                .map(|message| NewContentDot {
+                    message_id: message.id,
+                    armed_at: Instant::now(),
+                    fade_started: None,
+                });
+        } else if session_changed {
+            self.transcript_new_content_dot = None;
+        }
+        attention
     }
 
     fn activate_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
@@ -832,6 +1109,11 @@ impl Waku {
             }
         }
         self.state.selected_session = Some(session_id);
+        let detail_loaded = self
+            .selected_session()
+            .is_some_and(|session| session.detail_loaded);
+        self.pending_session_activation =
+            (!detail_loaded).then_some(PendingSessionActivation { session_id });
         self.ensure_recent_boss_history(cx);
         // The scratchpad's mic follows the visible chat — the outgoing
         // session's dictation pauses here, not when its panel repaints.
@@ -879,53 +1161,7 @@ impl Waku {
         // Session selection and terminal selection are mutually exclusive —
         // the transcript takes the main area back from the terminal.
         self.selected_terminal = None;
-        // Selection clears the unseen stamp, so read the attention state —
-        // an unread completion or a turn waiting on the reader — first:
-        // it decides whether the transcript opens on the last turn instead
-        // of the position the reader left it at.
-        let had_unseen = self.state.unseen_completions.remove(&session_id).is_some();
-        // ⌘⇧D's park signal: a chain departure re-stamps the session only
-        // when it was unread on arrival or a turn settled while it was on
-        // screen. A settle during the pending activation keeps its flag
-        // across this landing; a different session's stint resets both.
-        if had_unseen {
-            self.unread_when_selected = Some(session_id);
-        } else if session_changed {
-            self.unread_when_selected = None;
-        }
-        if session_changed && self.turn_settled_while_visible != Some(session_id) {
-            self.turn_settled_while_visible = None;
-        }
-        let attention = had_unseen
-            || self.state.sessions.iter().any(|session| {
-                session.id == session_id && session.status == SessionStatus::Waiting
-            });
-        // Archive reads this stamp to pick the viewed task's landing: a
-        // visit that began on fresh attention keeps draining that queue,
-        // while a revisit hands off to the sidebar neighbor instead.
-        if attention {
-            self.attention_when_selected = Some(session_id);
-        } else if session_changed {
-            self.attention_when_selected = None;
-        }
-        if had_unseen {
-            self.transcript_new_content_dot = self
-                .selected_session()
-                .and_then(|session| {
-                    session
-                        .messages
-                        .iter()
-                        .rev()
-                        .find(|message| message.role == MessageRole::Assistant)
-                })
-                .map(|message| NewContentDot {
-                    message_id: message.id,
-                    armed_at: Instant::now(),
-                    fade_started: None,
-                });
-        } else if session_changed {
-            self.transcript_new_content_dot = None;
-        }
+        let attention = self.mark_selected_session_seen(session_changed);
         self.task_switcher.record_access(session_id);
         // Picking a task hands the main area back to the transcript; the
         // Projects, Drafts, Automations, and Inbox pages keep their state
@@ -936,49 +1172,13 @@ impl Waku {
         self.boss_ui.page = None;
         self.automations_detail = None;
         self.notifications.open = false;
-        if let Some((
-            project_id,
-            provider,
-            auto_route,
-            runtime_mode,
-            environment,
-            model,
-            reasoning_effort,
-            service_tier,
-            context_window,
-        )) = self.selected_session().map(|session| {
-            (
-                session.project_id,
-                session.provider,
-                // A started session that came through Auto clears its draft
-                // flag when the decision lands; its route record still
-                // counts as the last-used Auto pick.
-                session.auto_route || session.route_decision.is_some(),
-                session.runtime_mode,
-                session.environment(),
-                session.model.clone(),
-                session.reasoning_effort.clone(),
-                session.service_tier.clone(),
-                session.context_window.clone(),
-            )
-        }) {
-            self.state.selected_project = Some(project_id);
-            self.state.last_provider = provider;
-            self.state.last_auto_route = auto_route;
-            self.state.last_runtime_mode = runtime_mode;
-            self.state
-                .remember_project_runtime_mode(project_id, runtime_mode);
-            self.state.last_environment = environment;
-            self.state.last_model = model;
-            self.state.last_reasoning_effort = reasoning_effort;
-            self.state.last_service_tier = service_tier;
-            self.state.last_context_window = context_window;
+        if let Some(session) = self.selected_session() {
+            self.state.selected_project = Some(session.project_id);
         }
+        self.remember_selected_session_options();
         if self
             .selected_session()
-            .is_some_and(|session| {
-                !session.has_started() && !self.session_is_boss_managed(session)
-            })
+            .is_some_and(|session| !session.has_started() && !self.session_is_boss_managed(session))
         {
             self.session_navigation.remember_new_task(session_id);
         }
@@ -1008,7 +1208,9 @@ impl Waku {
         // A deliverable row's own navigation re-arms its composer context and
         // opens its file preview once the boss chat it opened is on
         // screen — the click parks both behind this landing.
-        self.complete_deliverable_activation(session_id, cx);
+        if detail_loaded {
+            self.complete_deliverable_activation(session_id, cx);
+        }
         self.reset_visible_state();
         if session_changed {
             // Each materialized worktree has its own cache entry. A task that
@@ -1018,14 +1220,26 @@ impl Waku {
         }
         self.refresh_composer_sources(cx);
         self.reset_transcript_rows(self.transcript_row_count());
-        self.apply_transcript_landing(attention, cx);
+        if detail_loaded {
+            self.apply_transcript_landing(attention, cx);
+        } else {
+            // A search reveal needs real rows, and unread attention still
+            // targets the last turn even though the skeleton has no turns.
+            let landing = if attention {
+                TranscriptLanding::LastTurn
+            } else {
+                self.saved_transcript_landing(session_id)
+                    .unwrap_or(TranscriptLanding::Tail)
+            };
+            self.transcript_landing = Some((session_id, landing));
+        }
         self.save();
         if let Some(session) = self.selected_session()
             && session.has_started()
         {
             // Antigravity has no daemon runtime to attach to — its surface
             // is the TUI terminal, ensured and focused instead.
-            if session.provider == ProviderKind::Antigravity {
+            if session.provider == ProviderKind::Antigravity && session.detail_loaded {
                 self.agy_last_visible.insert(session_id, Instant::now());
                 self.ensure_agy_terminal(session_id, cx);
                 if let Some(terminal) = self.agy_terminal(session_id) {
@@ -1044,7 +1258,11 @@ impl Waku {
         if session_changed {
             self.drain_pending_workspace_cleanups(cx);
         }
-        self.maybe_voice_brief(session_id, cx);
+        if detail_loaded {
+            self.maybe_voice_brief(session_id, cx);
+        } else {
+            self.ensure_session_loaded(session_id, cx);
+        }
         cx.notify();
     }
 
@@ -1510,6 +1728,12 @@ impl Waku {
         let Some(session_id) = self.state.selected_session else {
             return;
         };
+        if self
+            .selected_session()
+            .is_some_and(|session| !session.detail_loaded)
+        {
+            return;
+        }
         let rows = self.active_transcript_rows();
         let offset = rows.logical_scroll_top();
         // A bottom-aligned list reports a past-the-end index while parked on
@@ -2230,6 +2454,7 @@ impl Waku {
             cx.notify();
             return;
         }
+        self.pending_session_cancels.remove(&session_id);
         // A task's side chats are not independent sessions — closing or
         // archiving their parent deletes them with it.
         for child_id in self.side_chat_descendants(session_id) {
@@ -6548,6 +6773,18 @@ impl Waku {
 
     pub(super) fn cancel_session_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         self.escape_stop_confirmation.clear();
+        if !self.runtimes.contains_key(&session_id)
+            && self.state.sessions.iter().any(|session| {
+                session.id == session_id
+                    && session.status.is_busy()
+                    && (!session.detail_loaded || self.runtime_attach_pending.contains(&session_id))
+            })
+        {
+            self.pending_session_cancels.insert(session_id);
+            self.start_runtime_attachment(session_id, cx);
+            cx.notify();
+            return;
+        }
         // Preparation's worktree, checkpoint, routing, and spawn work has no
         // mid-flight interrupt, so Stop abandons the wait: the background
         // result is discarded when it lands and the unstarted turn unwinds
@@ -6598,7 +6835,7 @@ impl Waku {
         // follow-ups: the user asked to stop, not to continue.
         let mut keep_runtime = true;
         if let Some(runtime) = runtime.as_mut() {
-            Self::collect_runtime_events(runtime);
+            Self::collect_runtime_events(runtime, usize::MAX);
             while let Some(event) = runtime.pending_events.pop_front() {
                 keep_runtime &= self.handle_driver_event(session_id, runtime, event, false, cx);
                 if !keep_runtime {

@@ -499,43 +499,65 @@ pub(super) fn merge_remote_session_catalog(
 
     for remote in remote {
         if let Some(local) = local.iter_mut().find(|session| session.id == remote.id) {
-            local.title = remote.title;
-            local.auto_title = remote.auto_title;
-            local.project_id = remote.project_id;
-            // A snapshot that predates the confirmed activation cannot own
-            // the effective fields — its provider/model/effort are
-            // pre-activation requested state. The mark itself merges
-            // forward only, so the snapshot cannot lower the local
-            // high-water and reopen stale redeliveries either.
-            if remote.config_activation >= local.config_activation {
-                local.provider = remote.provider;
-                local.model = remote.model;
-                local.reasoning_effort = remote.reasoning_effort;
-            }
-            local.config_activation = local.config_activation.max(remote.config_activation);
-            local.created_at = remote.created_at;
-            local.last_reply_at = remote.last_reply_at;
-            local.archived_at = remote.archived_at;
-            local.pinned_at = remote.pinned_at;
-            local.dormant_at = remote.dormant_at;
-            local.dormant_exempt_until = remote.dormant_exempt_until;
-            local.side_chat_of = remote.side_chat_of;
-            // A hydrated session's workspace is at least as fresh as the
-            // stored column the projection carries — and may hold an unsaved
-            // move — so only skeletons adopt it.
-            if !local.detail_loaded {
-                local.workspace = remote.workspace;
-            }
-            if !has_local_runtime(local.id) {
-                local.status = remote.status;
-                local.updated_at = remote.updated_at;
-            }
+            merge_session_catalog_row(local, remote, has_local_runtime(local.id));
         } else {
             local.push(remote);
         }
     }
 
     removed
+}
+
+/// Preserve newer resident detail and list edits while installing a stored baseline.
+pub(super) fn merge_hydrated_session(
+    existing: &mut AgentSession,
+    mut hydrated: AgentSession,
+) -> bool {
+    if existing.detail_loaded {
+        return false;
+    }
+    let columns = existing.list_projection();
+    merge_session_catalog_row(&mut hydrated, columns, false);
+    *existing = hydrated;
+    true
+}
+
+fn merge_session_catalog_row(
+    local: &mut AgentSession,
+    remote: AgentSession,
+    has_local_runtime: bool,
+) {
+    local.title = remote.title;
+    local.auto_title = remote.auto_title;
+    local.project_id = remote.project_id;
+    // A snapshot that predates the confirmed activation cannot own
+    // the effective fields — its provider/model/effort are
+    // pre-activation requested state. The mark itself merges
+    // forward only, so the snapshot cannot lower the local
+    // high-water and reopen stale redeliveries either.
+    if remote.config_activation >= local.config_activation {
+        local.provider = remote.provider;
+        local.model = remote.model;
+        local.reasoning_effort = remote.reasoning_effort;
+    }
+    local.config_activation = local.config_activation.max(remote.config_activation);
+    local.created_at = remote.created_at;
+    local.last_reply_at = remote.last_reply_at;
+    local.archived_at = remote.archived_at;
+    local.pinned_at = remote.pinned_at;
+    local.dormant_at = remote.dormant_at;
+    local.dormant_exempt_until = remote.dormant_exempt_until;
+    local.side_chat_of = remote.side_chat_of;
+    // A hydrated session's workspace is at least as fresh as the
+    // stored column the projection carries — and may hold an unsaved
+    // move — so only skeletons adopt it.
+    if !local.detail_loaded {
+        local.workspace = remote.workspace;
+    }
+    if !has_local_runtime {
+        local.status = remote.status;
+        local.updated_at = remote.updated_at;
+    }
 }
 
 /// Perform every blocking operation between accepting a submission and
@@ -2703,6 +2725,7 @@ impl Waku {
         }
         for session_id in &removed {
             self.runtime_attach_pending.remove(session_id);
+            self.pending_session_cancels.remove(session_id);
             self.runtime_attach_misses.remove(session_id);
             self.runtimes.remove(session_id);
             self.background_work.remove(session_id);
@@ -2819,12 +2842,43 @@ impl Waku {
     }
 
     pub(super) fn start_runtime_attachment(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            && session.provider == ProviderKind::Antigravity
+        {
+            // Antigravity owns an app-local TUI, not a daemon runtime. Its
+            // saved provider cursor must arrive before the TUI can resume.
+            if session.detail_loaded && self.pending_session_cancels.remove(&session_id) {
+                self.cancel_session_turn(session_id, cx);
+                return;
+            }
+            if self.state.selected_session == Some(session_id) {
+                if session.detail_loaded {
+                    self.ensure_agy_terminal(session_id, cx);
+                } else {
+                    self.ensure_session_loaded(session_id, cx);
+                }
+            }
+            return;
+        }
+        if self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && !session.detail_loaded && !session.incognito)
+        {
+            self.ensure_session_loaded(session_id, cx);
+            return;
+        }
         if self.runtimes.contains_key(&session_id)
             // A submission already starting this session installs its own
             // runtime; an attach racing it would subscribe a second handle
             // to the same daemon runtime.
             || self.submission_preparations.contains(&session_id)
-            || !self.runtime_attach_pending.insert(session_id)
+            || self.runtime_attach_pending.contains(&session_id)
         {
             return;
         }
@@ -2838,6 +2892,7 @@ impl Waku {
             }
             return;
         };
+        self.runtime_attach_pending.insert(session_id);
         let event_wake = self.event_wake_tx.clone();
         let (replay_cursor, hydrate) = self
             .state
@@ -3919,7 +3974,12 @@ impl Waku {
                     let boss_rows = (self.boss_chat_key().is_some()
                         && self.state.selected_session == Some(session_id))
                     .then(|| self.transcript_row_kinds.borrow().clone());
+                    let detail_arrived = !self.state.sessions[index].detail_loaded
+                        && prepared.hydrated_session.is_some();
                     self.install_prepared_driver(session_id, prepared);
+                    if self.pending_session_cancels.remove(&session_id) {
+                        self.cancel_session_turn(session_id, cx);
+                    }
                     self.watch_unstarted_turn(session_id, unstarted_turn, cx);
                     let selected_before_refresh = self.state.selected_session;
                     self.reconcile_boss_chat_refresh(cx);
@@ -3929,7 +3989,7 @@ impl Waku {
                             // Attaching the successor's runtime is data arrival,
                             // not a second landing after an in-place refresh.
                             self.splice_transcript_rows_after_visibility_change(&previous);
-                        } else {
+                        } else if detail_arrived {
                             self.reset_visible_state();
                             self.reset_transcript_rows(self.transcript_row_count());
                             self.reapply_transcript_landing(session_id, cx);
@@ -3939,6 +3999,10 @@ impl Waku {
                 }
             }
             Ok(None) => {
+                if self.pending_session_cancels.remove(&session_id) {
+                    self.cancel_session_turn(session_id, cx);
+                    return;
+                }
                 let busy = self
                     .state
                     .sessions
@@ -6636,6 +6700,16 @@ impl Waku {
             }
             return;
         }
+        if let Some(session_id) = self
+            .selected_session()
+            .filter(|session| !session.detail_loaded)
+            .map(|session| session.id)
+        {
+            self.restore_composer_submission(session_id, submission, cx);
+            self.ensure_session_loaded(session_id, cx);
+            cx.notify();
+            return;
+        }
         let Some(session) = self.selected_session() else {
             return;
         };
@@ -6741,6 +6815,17 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let session_id = self.resolve_boss_chat_session(session_id);
+        if self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && !session.detail_loaded)
+        {
+            self.restore_composer_submission(session_id, submission, cx);
+            self.ensure_session_loaded(session_id, cx);
+            cx.notify();
+            return;
+        }
         let Some(session) = self
             .state
             .sessions
@@ -7501,6 +7586,17 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let session_id = self.resolve_boss_chat_session(session_id);
+        if self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && !session.detail_loaded)
+        {
+            self.restore_composer_submission(session_id, submission, cx);
+            self.ensure_session_loaded(session_id, cx);
+            cx.notify();
+            return;
+        }
         if self.response_fork_preparations.contains_key(&session_id) {
             return;
         }
@@ -8373,9 +8469,14 @@ impl Waku {
         .detach();
     }
 
-    pub(super) fn collect_runtime_events(runtime: &mut SessionRuntime) {
-        while let Ok(event) = runtime.events.try_recv() {
-            runtime.pending_events.push_back(event);
+    pub(super) fn collect_runtime_events(runtime: &mut SessionRuntime, limit: usize) {
+        for batch in runtime.events.try_iter().take(limit) {
+            runtime.pending_events.push_back(batch.event);
+            if let Some(cursor) = batch.cursor {
+                runtime
+                    .pending_events
+                    .push_back(DriverEvent::RuntimeEventCursorAdvanced(cursor));
+            }
         }
     }
 
@@ -8439,11 +8540,11 @@ impl Waku {
             self.flush_daemon_recovery_report(cx);
         }
 
-        if self
-            .runtimes
-            .values()
-            .any(|runtime| !runtime.pending_events.is_empty() || runtime.stream_remeasure_pending)
-        {
+        if self.runtimes.values().any(|runtime| {
+            !runtime.events.is_empty()
+                || !runtime.pending_events.is_empty()
+                || runtime.stream_remeasure_pending
+        }) {
             EventPumpSchedule::StreamFrame
         } else if let Some(delay) = self.next_timed_pump_delay() {
             EventPumpSchedule::BackgroundOutput(delay)
@@ -8510,28 +8611,57 @@ impl Waku {
             }
             cx.notify();
         }
-        let session_ids = self.runtimes.keys().copied().collect::<Vec<_>>();
+        // Bound both ingestion and application. A recovery replay can contain
+        // thousands of events, and draining to empty would monopolize input.
+        // Leave ample room for fast live streams (including their cursor
+        // events); the time budget, not a token-sized quota, governs yielding.
+        const EVENTS_PER_RUNTIME: usize = 1024;
+        let deadline = Instant::now() + Duration::from_millis(4);
+        if self.driver_event_round.is_empty() {
+            self.driver_event_round
+                .extend(self.runtimes.keys().copied());
+            if let Some(selected) = self.state.selected_session {
+                self.driver_event_round.retain(|id| *id != selected);
+                if self.runtimes.contains_key(&selected) {
+                    self.driver_event_round.push_front(selected);
+                }
+            }
+        }
         let mut changed = false;
         let mut persisted_state_changed = false;
         let mut force_save = false;
         let mut selected_changed = false;
-        for session_id in session_ids {
+        while Instant::now() < deadline {
+            let Some(session_id) = self.driver_event_round.pop_front() else {
+                break;
+            };
             let Some(mut runtime) = self.runtimes.remove(&session_id) else {
                 continue;
             };
             let follow_up_remeasure = std::mem::take(&mut runtime.stream_remeasure_pending);
-            Self::collect_runtime_events(&mut runtime);
+            if runtime.pending_events.is_empty() {
+                Self::collect_runtime_events(&mut runtime, EVENTS_PER_RUNTIME);
+            }
             let mut runtime_changed = false;
             let mut background_changed = false;
             let mut markdown_changed = false;
             let mut keep_runtime = true;
             while let Some(event) = runtime.pending_events.front() {
+                // Output and its cursor are one persistence boundary. Finish
+                // the cursor(s) of an applied batch even when its text used
+                // the last of this pass's budget.
+                if Instant::now() >= deadline
+                    && !matches!(event, DriverEvent::RuntimeEventCursorAdvanced(_))
+                {
+                    break;
+                }
                 let kind = stream_delta_kind(event);
                 let event = if let Some(kind) = kind {
                     pop_stream_batch(
                         &mut runtime.pending_events,
                         kind,
                         &mut runtime.pending_reasoning_newlines,
+                        EVENTS_PER_RUNTIME,
                     )
                 } else {
                     runtime.pending_events.pop_front()

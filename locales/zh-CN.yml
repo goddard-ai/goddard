@@ -1,5 +1,8 @@
 _version: 1
 
+sessions.loading: 正在加载任务…
+sessions.load_failed: 无法加载此任务。
+
 settings.composer_dictation: 编辑器语音听写
 settings.composer_dictation_description: 使用麦克风录制短句，Whistle 会离线转写并插入到光标位置
 settings.composer_dictation_downloading: 正在下载…

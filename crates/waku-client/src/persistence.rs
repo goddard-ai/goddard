@@ -1,5 +1,9 @@
 //! Desktop-owned preferences and RPC proxies for daemon-owned task state.
 
+#[cfg(test)]
+#[path = "persistence/startup_tests.rs"]
+mod startup_tests;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write as _};
@@ -4232,14 +4236,9 @@ impl StateStore {
             state.push_session(session);
         }
         state.ensure_runtime_session();
-        if let Some(selected) = state.selected_session
-            && let Some(session) = state
-                .sessions
-                .iter_mut()
-                .find(|session| session.id == selected)
-        {
-            let _ = self.hydrate(session);
-        }
+        // The desktop mounts this catalog before fetching the selected
+        // transcript on its background executor. Never put a detail RPC on
+        // the window-construction path.
         state
     }
 
@@ -4294,47 +4293,43 @@ impl StateStore {
         if session.detail_loaded {
             return Ok(());
         }
-        let Some(daemon) = self.daemons.daemon_for_session(session.id) else {
+        match self.load_session_detail(session.id)? {
+            Some(stored) => *session = stored,
+            None => session.detail_loaded = true,
+        }
+        Ok(())
+    }
+
+    /// Fetch authoritative detail and seed its incremental-save baseline.
+    /// A missing row stays missing, so asynchronous navigation cannot turn a
+    /// removed task into a new empty, detail-loaded session.
+    pub fn load_session_detail(&self, session_id: Uuid) -> io::Result<Option<AgentSession>> {
+        let Some(daemon) = self.daemons.daemon_for_session(session_id) else {
             return Err(io::Error::new(
                 io::ErrorKind::NotConnected,
                 "the session's daemon is not connected",
             ));
         };
-        match hydrate_session(&daemon, session.id)? {
-            Some(stored) => {
-                // The hydrated copy is exactly the daemon's stored prefix —
-                // seed the save cursor so the next save can send a tail
-                // instead of re-shipping the whole transcript.
-                self.save_cursors.lock().insert(
-                    session.id,
-                    SaveCursor {
-                        messages: stored.messages.len(),
-                        blocks: stored.transcript_blocks.len(),
-                        signature: detail_prefix_signature(
-                            &stored.messages,
-                            &stored.transcript_blocks,
-                        ),
-                        tail_sends: 0,
-                    },
-                );
-                *session = stored;
-                // A queue entry whose id already runs in the transcript was
-                // delivered — the chip's id doubles as its sent message's
-                // id. Rehydrating it as parked would drain and resend the
-                // same prompt.
-                session.queued_messages.retain(|queued| {
-                    !session
-                        .messages
-                        .iter()
-                        .any(|message| message.id == queued.id)
-                });
-                Ok(())
-            }
-            None => {
-                session.detail_loaded = true;
-                Ok(())
-            }
-        }
+        let Some(mut stored) = hydrate_session(&daemon, session_id)? else {
+            return Ok(None);
+        };
+        // Hash before locking: background hydration must not block UI-side
+        // saves while hashing a potentially large transcript.
+        let cursor = SaveCursor {
+            messages: stored.messages.len(),
+            blocks: stored.transcript_blocks.len(),
+            signature: detail_prefix_signature(&stored.messages, &stored.transcript_blocks),
+            tail_sends: 0,
+        };
+        self.save_cursors.lock().insert(session_id, cursor);
+        // A delivered queue entry shares its message id with the transcript.
+        stored.queued_messages.retain(|queued| {
+            !stored
+                .messages
+                .iter()
+                .any(|message| message.id == queued.id)
+        });
+        Ok(Some(stored))
     }
 
     /// Partition the merged catalog back to its owning daemons: each receives

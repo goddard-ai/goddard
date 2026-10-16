@@ -1622,10 +1622,16 @@ pub(super) fn pop_stream_batch(
     events: &mut VecDeque<DriverEvent>,
     kind: StreamDeltaKind,
     pending_reasoning_newlines: &mut usize,
+    max_events: usize,
 ) -> Option<DriverEvent> {
     let mut chunk = String::new();
     let mut latest_cursor = None;
-    loop {
+    for _ in 0..max_events {
+        // Coalescing itself is bounded; one run of adjacent token deltas must
+        // not consume an entire recovery backlog before the pump can yield.
+        if chunk.len() >= 64 * 1024 {
+            break;
+        }
         match events.front() {
             Some(DriverEvent::RuntimeEventCursorAdvanced(_)) => {
                 latest_cursor = events.pop_front();

@@ -224,6 +224,50 @@ impl Waku {
         chat_viewport_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if let Some(session_id) = self
+            .selected_session()
+            .filter(|session| !session.detail_loaded)
+            .map(|session| session.id)
+        {
+            let loading = self.session_hydrations.contains(session_id);
+            let theme = Theme::current(cx);
+            let focus = self.transcript_control_focus("hydrate-task-retry", cx);
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(12.0))
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .child(if loading {
+                    tr!("sessions.loading")
+                } else {
+                    tr!("sessions.load_failed")
+                })
+                .when(!loading, |view| {
+                    view.child(
+                        div()
+                            .id("hydrate-task-retry")
+                            .track_focus(&focus)
+                            .tab_index(0)
+                            .rounded(px(6.0))
+                            .px(px(12.0))
+                            .py(px(6.0))
+                            .border(hairline())
+                            .border_color(theme.border_subtle)
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .hover(|style| style.bg(theme.overlay))
+                            .child(tr!("common.retry"))
+                            .on_activation(cx, move |this, _, cx| {
+                                this.ensure_session_loaded(session_id, cx);
+                                cx.notify();
+                            }),
+                    )
+                })
+                .into_any_element();
+        }
         self.begin_transcript_frame();
         self.prefetch_checkpoint_refs(cx);
         self.resolve_transcript_commit_refs(cx);

@@ -516,6 +516,8 @@ pub(super) fn composer_submit_action(
         ComposerSubmitAction::Preparing
     } else if session.is_some_and(|session| session.status.is_busy()) {
         ComposerSubmitAction::Stop
+    } else if session.is_some_and(|session| !session.detail_loaded) {
+        ComposerSubmitAction::Preparing
     } else if !has_draft && session.is_some_and(session_awaits_continue) {
         ComposerSubmitAction::Continue
     } else {
@@ -5940,6 +5942,9 @@ impl Waku {
         preparing: bool,
         has_draft: bool,
     ) -> ComposerSubmitAction {
+        if preparing || session.is_some_and(|session| !session.detail_loaded) {
+            return composer_submit_action(session, preparing, has_draft);
+        }
         if !has_draft
             && session.is_some_and(|session| self.quarantine_handoff_transfer(session).is_some())
         {
@@ -6249,10 +6254,11 @@ impl Waku {
         // reads as unavailable and the submission path refuses too, so
         // `enter` cannot slip past a disabled control.
         let no_providers = self.model_picker_has_no_providers();
-        let can_send = has_draft && !no_providers;
+        let detail_ready = session.is_none_or(|session| session.detail_loaded);
+        let can_send = has_draft && !no_providers && detail_ready;
         // Continue needs no draft — an interrupted session is exactly what
         // makes it available — but it still needs a provider to run.
-        let can_continue = !no_providers;
+        let can_continue = !no_providers && detail_ready;
         let (autocomplete, autocomplete_actionable) =
             match self.render_composer_autocomplete_for(surface, window, cx) {
                 Some((element, actionable)) => (Some(element), actionable),
@@ -6791,6 +6797,20 @@ impl Waku {
     /// send stages attachments and honors Big Picture's targeting; a side
     /// chat's is a plain prompt to the chat's own session.
     fn submit_composer_card_draft(&mut self, surface: &ComposerCard, cx: &mut Context<Self>) {
+        let session_id = match surface {
+            ComposerCard::Main => self.composer_session().map(|session| session.id),
+            ComposerCard::SideChat { session_id, .. } => Some(*session_id),
+        };
+        if let Some(session_id) = session_id.filter(|id| {
+            self.state
+                .sessions
+                .iter()
+                .any(|session| session.id == *id && !session.detail_loaded)
+        }) {
+            self.ensure_session_loaded(session_id, cx);
+            cx.notify();
+            return;
+        }
         match surface {
             ComposerCard::Main => {
                 if self.voice_scratchpad_sendable() {

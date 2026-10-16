@@ -1,5 +1,10 @@
 _version: 2
 
+sessions.loading:
+  en: Loading task…
+sessions.load_failed:
+  en: Could not load this task.
+
 menu.about:
   en: About %{app}
 menu.check_for_updates:
