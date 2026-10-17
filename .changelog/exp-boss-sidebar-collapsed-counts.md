@@ -1,0 +1,1 @@
+- Show the number of terminals and recent deliverables beside each collapsed group in the sidebar.

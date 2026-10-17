@@ -4242,8 +4242,13 @@ impl Waku {
         let terminals_collapsed = self
             .sidebar_collapsed_groups
             .contains(&SidebarGroup::Terminals);
+        let mut collapsed_members: HashMap<SidebarGroup, Vec<Uuid>> = HashMap::new();
         rows.push(SidebarRow::Header(SidebarGroup::Terminals));
-        for terminal_id in self.sidebar_terminal_ids() {
+        let terminal_ids = self.sidebar_terminal_ids().collect::<Vec<_>>();
+        if terminals_collapsed {
+            collapsed_members.insert(SidebarGroup::Terminals, terminal_ids.clone());
+        }
+        for terminal_id in terminal_ids {
             if !terminals_collapsed
                 || self
                     .terminal_records
@@ -4278,6 +4283,16 @@ impl Waku {
         );
         if !recent_deliverables.is_empty() || !dormant_deliverables.is_empty() {
             let collapsed = self.sidebar_collapsed_groups.contains(&SidebarGroup::Deliverables);
+            if collapsed {
+                collapsed_members.insert(
+                    SidebarGroup::Deliverables,
+                    recent_deliverables
+                        .iter()
+                        .chain(&dormant_deliverables)
+                        .map(|(_, id)| *id)
+                        .collect(),
+                );
+            }
             rows.push(SidebarRow::Header(SidebarGroup::Deliverables));
             if !collapsed {
                 // The group folds like a project section: live rows cap at
@@ -4322,7 +4337,6 @@ impl Waku {
         // Separate the whole utility cluster from the Boss block below.
         rows.push(SidebarRow::GroupSpacer);
 
-        let mut collapsed_members: HashMap<SidebarGroup, Vec<Uuid>> = HashMap::new();
         if self.state.boss_experiment_enabled && !self.boss_ui.hosts.is_empty() {
             for key in &self.boss_ui.hosts {
                 rows.push(SidebarRow::Boss(*key));
@@ -5066,6 +5080,14 @@ impl Waku {
                 .unwrap_or_else(|| tr!("project.no_project_name")),
             SidebarGroup::Projectless => tr!("sidebar.chats"),
         };
+        let collapsed_count = (collapsed
+            && matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables))
+        .then(|| {
+            self.sidebar_collapsed_group_members
+                .borrow()
+                .get(&group)
+                .map_or(0, Vec::len)
+        });
         let folder_missing =
             matches!(group, SidebarGroup::Project(id) if self.missing_projects.contains(&id));
         let project_starred = matches!(group, SidebarGroup::Project(id) if self
@@ -5352,6 +5374,15 @@ impl Waku {
                         .items_center()
                         .gap(px(2.0))
                         .child(div().min_w_0().truncate().child(label))
+                        .when_some(collapsed_count, |element, count| {
+                            element.child(
+                                div()
+                                    .flex_none()
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(format!("{count}")),
+                            )
+                        })
                         .when(project_starred, |element| {
                             element.child(div().flex_none().child(icon(
                                 "icons/star-filled.svg",
