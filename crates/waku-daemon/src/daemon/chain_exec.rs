@@ -67,6 +67,14 @@ pub(super) enum ChainBinding {
 /// state so every caller reconciles the same facts.
 pub(super) fn chain_binding(boss: &BossService, session_id: Uuid) -> Option<ChainBinding> {
     let document = boss.document();
+    chain_binding_in(&document, session_id)
+}
+
+/// Reuse a caller's snapshot when resolving multiple employee bindings.
+pub(super) fn chain_binding_in(
+    document: &waku_protocol::boss::BossState,
+    session_id: Uuid,
+) -> Option<ChainBinding> {
     let mut stale = false;
     for chain in &document.chains {
         if let Some(attempt) = chain.steps[chain.current_step].attempts.last()

@@ -3424,6 +3424,9 @@ pub struct Waku {
     /// Throttle for the dormant-worktree sweep pass, like
     /// `sidebar_checkout_scanned_at`.
     dormant_sweep_scanned_at: Cell<Option<Instant>>,
+    /// A pass keeps at most two background jobs active and cannot overlap
+    /// another pass, even when a remote inspection outlasts the rescan delay.
+    dormant_sweep_in_flight: Cell<bool>,
     /// Bumped when a new dormant-worktree sweep pass starts so a stale
     /// pass's completions cannot act on newer state.
     dormant_sweep_generation: Cell<u64>,
@@ -7549,6 +7552,7 @@ impl Waku {
                 sidebar_alt_generation: 0,
                 dormant_worktrees_swept: RefCell::new(HashSet::new()),
                 dormant_sweep_scanned_at: Cell::new(None),
+                dormant_sweep_in_flight: Cell::new(false),
                 dormant_sweep_generation: Cell::new(0),
                 sidebar_shortcut_hints: false,
                 sidebar_shortcut_hint_generation: 0,

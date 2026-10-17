@@ -1194,9 +1194,18 @@ impl WakuBackend {
             .iter()
             .chain(document.retired_employees.iter())
         {
+            if !employee
+                .plan_blockers
+                .iter()
+                .any(|notice| notice.supervisor_notified_at.is_none())
+            {
+                continue;
+            }
             // A chain-bound employee's plan blocker stays quiet — the
             // attempt's terminal disposition carries it as one incident.
-            if chain_exec::chain_binding(&self.boss, employee.session_id).is_some() {
+            // Reuse this pass's snapshot: cloning the full Boss document
+            // for every retired employee made idle reconciliation expensive.
+            if chain_exec::chain_binding_in(&document, employee.session_id).is_some() {
                 continue;
             }
             for notice in employee

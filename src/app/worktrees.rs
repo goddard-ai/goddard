@@ -1,4 +1,5 @@
 use super::*;
+use futures::{StreamExt, stream::FuturesUnordered};
 
 /// Keyboard-navigable rows in the composer worktree picker.
 #[derive(Clone, Debug, PartialEq)]
@@ -1002,10 +1003,13 @@ impl Waku {
     /// the sweep itself queued through the archive drain are left to it.
     pub(super) fn ensure_dormant_worktree_sweeps(&self, cx: &mut Context<Self>) {
         const DORMANT_SWEEP_RESCAN: Duration = Duration::from_secs(600);
-        if self
-            .dormant_sweep_scanned_at
-            .get()
-            .is_some_and(|instant| instant.elapsed() < DORMANT_SWEEP_RESCAN)
+        // Leave daemon worker capacity for interactive workspace requests.
+        const DORMANT_SWEEP_CONCURRENCY: usize = 2;
+        if self.dormant_sweep_in_flight.get()
+            || self
+                .dormant_sweep_scanned_at
+                .get()
+                .is_some_and(|instant| instant.elapsed() < DORMANT_SWEEP_RESCAN)
         {
             return;
         }
@@ -1023,84 +1027,112 @@ impl Waku {
                     .find(|session| session.id == *session_id)
                     .is_some_and(|session| self.session_dormant_now(session))
             });
-        let mut candidates = Vec::new();
-        for session in &self.state.sessions {
-            if !session.has_started()
-                || session.archived_at.is_some()
-                || session.is_busy()
-                || Some(session.id) == self.state.selected_session
-                || !self.session_dormant_now(session)
-                || self.pending_workspace_cleanups.contains(&session.id)
-                || self.dormant_worktrees_swept.borrow().contains(&session.id)
-            {
-                continue;
-            }
-            let SessionWorkspace::Worktree {
-                path, base_branch, ..
-            } = &session.workspace
-            else {
-                continue;
-            };
-            candidates.push((session.id, path.clone(), base_branch.clone()));
+        let candidates: Vec<_> = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| self.dormant_worktree_sweep_candidate(session))
+            .map(|session| session.id)
+            .collect();
+        if candidates.is_empty() {
+            return;
         }
-        for (session_id, path, base) in candidates {
-            let Some(workspace) = self.workspace_client_for_session(session_id) else {
-                continue;
-            };
-            self.dormant_worktrees_swept.borrow_mut().insert(session_id);
-            let local = !self.is_remote_session(session_id);
-            cx.spawn(async move |waku, cx| {
-                let worktree_path = path.clone();
-                let removed = cx
-                    .background_executor()
-                    .spawn(async move {
-                        // Nothing to tear down — a remote path can't be
-                        // probed here, but the daemon's own preview request
-                        // fails on a missing cwd either way.
-                        if local && !path.exists() {
-                            return true;
+        self.dormant_sweep_in_flight.set(true);
+        cx.spawn(async move |waku, cx| {
+            let mut candidates = candidates.into_iter();
+            let mut running = FuturesUnordered::new();
+            loop {
+                while running.len() < DORMANT_SWEEP_CONCURRENCY {
+                    let Some(session_id) = candidates.next() else {
+                        break;
+                    };
+                    // A candidate may wait minutes behind other worktrees.
+                    // Resolve its current workspace and eligibility only
+                    // when a worker slot becomes free.
+                    let next = waku.update(cx, |waku, _| {
+                        if waku.dormant_sweep_generation.get() != generation {
+                            return None;
                         }
-                        let clean = matches!(
-                            workspace.request(
-                                waku_client::WorkspaceOperation::InspectArchivePreview {
-                                    cwd: path.clone(),
-                                    base,
-                                },
-                            ),
-                            Ok(waku_client::WorkspaceResult::ArchivePreview {
-                                preview: Some(preview)
-                            }) if preview.files.is_empty() && preview.unpushed_commits.is_empty()
-                        );
-                        if !clean {
-                            return false;
-                        }
-                        let git_ref = checkpoint::archive_ref(session_id);
-                        let verified = workspace
-                            .request(waku_client::WorkspaceOperation::CaptureRef {
-                                cwd: path.clone(),
-                                git_ref: git_ref.clone(),
+                        let session = waku
+                            .state
+                            .sessions
+                            .iter()
+                            .find(|session| session.id == session_id)
+                            .filter(|session| waku.dormant_worktree_sweep_candidate(session))?;
+                        let SessionWorkspace::Worktree {
+                            path, base_branch, ..
+                        } = &session.workspace
+                        else {
+                            return None;
+                        };
+                        let path = path.clone();
+                        let base = base_branch.clone();
+                        let workspace = waku.workspace_client_for_session(session_id)?;
+                        let local = !waku.is_remote_session(session_id);
+                        waku.dormant_worktrees_swept.borrow_mut().insert(session_id);
+                        Some((workspace, path, base, local))
+                    });
+                    let Ok(Some((workspace, path, base, local))) = next else {
+                        continue;
+                    };
+                    let worktree_path = path.clone();
+                    let executor = cx.background_executor().clone();
+                    running.push(async move {
+                        let removed = executor
+                            .spawn(async move {
+                                // Nothing to tear down — a remote path can't be
+                                // probed here, but the daemon's own preview request
+                                // fails on a missing cwd either way.
+                                if local && !path.exists() {
+                                    return true;
+                                }
+                                let clean = matches!(
+                                    workspace.request(
+                                        waku_client::WorkspaceOperation::InspectArchivePreview {
+                                            cwd: path.clone(),
+                                            base,
+                                        },
+                                    ),
+                                    Ok(waku_client::WorkspaceResult::ArchivePreview {
+                                        preview: Some(preview)
+                                    }) if preview.files.is_empty() && preview.unpushed_commits.is_empty()
+                                );
+                                if !clean {
+                                    return false;
+                                }
+                                let git_ref = checkpoint::archive_ref(session_id);
+                                let verified = workspace
+                                    .request(waku_client::WorkspaceOperation::CaptureRef {
+                                        cwd: path.clone(),
+                                        git_ref: git_ref.clone(),
+                                    })
+                                    .and_then(|_| {
+                                        workspace.request(waku_client::WorkspaceOperation::HasRef {
+                                            cwd: path.clone(),
+                                            git_ref,
+                                        })
+                                    })
+                                    .is_ok_and(|result| {
+                                        matches!(result, waku_client::WorkspaceResult::Bool { value: true })
+                                    });
+                                // Same contract as the archive drain: the force flag
+                                // only runs behind a verified snapshot.
+                                verified
+                                    && (workspace
+                                        .request(waku_client::WorkspaceOperation::RemoveWorktree {
+                                            path: path.clone(),
+                                            force: true,
+                                        })
+                                        .is_ok()
+                                        || (local && !path.exists()))
                             })
-                            .and_then(|_| {
-                                workspace.request(waku_client::WorkspaceOperation::HasRef {
-                                    cwd: path.clone(),
-                                    git_ref,
-                                })
-                            })
-                            .is_ok_and(|result| {
-                                matches!(result, waku_client::WorkspaceResult::Bool { value: true })
-                            });
-                        // Same contract as the archive drain: the force flag
-                        // only runs behind a verified snapshot.
-                        verified
-                            && (workspace
-                                .request(waku_client::WorkspaceOperation::RemoveWorktree {
-                                    path: path.clone(),
-                                    force: true,
-                                })
-                                .is_ok()
-                                || (local && !path.exists()))
-                    })
-                    .await;
+                            .await;
+                        (session_id, worktree_path, removed)
+                    });
+                }
+                let Some((session_id, worktree_path, removed)) = running.next().await else {
+                    break;
+                };
                 let _ = waku.update(cx, move |waku, cx| {
                     if waku.dormant_sweep_generation.get() != generation {
                         return;
@@ -1114,9 +1146,26 @@ impl Waku {
                             .remove(&session_id);
                     }
                 });
-            })
-            .detach();
-        }
+            }
+            let _ = waku.update(cx, |waku, _| {
+                if waku.dormant_sweep_generation.get() == generation {
+                    waku.dormant_sweep_in_flight.set(false);
+                    waku.dormant_sweep_scanned_at.set(Some(Instant::now()));
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn dormant_worktree_sweep_candidate(&self, session: &AgentSession) -> bool {
+        session.has_started()
+            && session.archived_at.is_none()
+            && !session.is_busy()
+            && Some(session.id) != self.state.selected_session
+            && self.session_dormant_now(session)
+            && !self.pending_workspace_cleanups.contains(&session.id)
+            && !self.dormant_worktrees_swept.borrow().contains(&session.id)
+            && matches!(session.workspace, SessionWorkspace::Worktree { .. })
     }
 
     /// The workspace a projectless project's archived sessions can retire:

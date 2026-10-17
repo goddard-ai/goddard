@@ -1,0 +1,1 @@
+- Agent commands close their daemon connections cleanly instead of logging a WebSocket reset after successful requests.

@@ -61,6 +61,10 @@ enum Outgoing {
     /// Close only this connection — sent when the daemon stops answering,
     /// so a slow daemon survives for the supervisor's in-place reconnect.
     Close,
+    CloseGracefully {
+        deadline: Instant,
+        closed: Sender<()>,
+    },
     /// Ask the daemon itself to exit — only for the process owner tearing
     /// down a managed daemon it is already replacing.
     Shutdown,
@@ -492,6 +496,24 @@ impl DaemonClient {
         let _ = self.inner.outgoing.send(Outgoing::Close);
     }
 
+    /// Close this connection and wait at most `timeout` for its WebSocket
+    /// closing handshake. Short-lived processes must wait before exiting,
+    /// otherwise the socket thread dies without sending its Close frame.
+    /// Pending requests fail immediately; the daemon keeps running.
+    pub fn disconnect(&self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        let (closed, completion) = bounded(1);
+        fail_connection(&self.inner);
+        if self
+            .inner
+            .outgoing
+            .send(Outgoing::CloseGracefully { deadline, closed })
+            .is_ok()
+        {
+            let _ = completion.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        }
+    }
+
     pub fn unsubscribe(&self, session_id: Uuid, runtime_id: Uuid) {
         self.inner.sessions.lock().remove(&(session_id, runtime_id));
     }
@@ -776,7 +798,11 @@ fn run_client(
     bulk: Receiver<ClientMessage>,
     weak_inner: std::sync::Weak<ClientInner>,
 ) {
-    'connection: while let Some(inner) = weak_inner.upgrade() {
+    'connection: loop {
+        let Some(inner) = weak_inner.upgrade() else {
+            close_socket(&mut socket, Instant::now() + Duration::from_millis(250));
+            break;
+        };
         while let Some(message) = next_outgoing(&outgoing, &bulk) {
             match message {
                 Outgoing::Message(message) => {
@@ -786,6 +812,11 @@ fn run_client(
                 }
                 Outgoing::Close => {
                     let _ = socket.close(None);
+                    break 'connection;
+                }
+                Outgoing::CloseGracefully { deadline, closed } => {
+                    close_socket(&mut socket, deadline);
+                    let _ = closed.send(());
                     break 'connection;
                 }
                 Outgoing::Shutdown => {
@@ -937,6 +968,28 @@ fn run_client(
     // because the socket died still releases its waiters and subscribers.
     if let Some(inner) = weak_inner.upgrade() {
         fail_connection(&inner);
+    }
+}
+
+fn close_socket(socket: &mut DaemonSocket, deadline: Instant) {
+    match socket.get_mut() {
+        MaybeTlsStream::Plain(stream) => stream.deadline = Some(deadline),
+        MaybeTlsStream::Rustls(stream) => stream.sock.deadline = Some(deadline),
+        #[allow(unreachable_patterns)]
+        _ => return,
+    }
+    if socket.close(None).is_err() {
+        return;
+    }
+    while Instant::now() < deadline {
+        match socket.read() {
+            Ok(Message::Close(_)) => {
+                let _ = socket.flush();
+                break;
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
     }
 }
 

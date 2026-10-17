@@ -12,6 +12,16 @@ pub enum AgentClient {
     Runtime(stable::Bridge),
 }
 
+impl Drop for AgentClient {
+    fn drop(&mut self) {
+        match self {
+            Self::Daemon(client) => client.disconnect(Duration::from_millis(250)),
+            #[cfg(unix)]
+            Self::Runtime(_) => {}
+        }
+    }
+}
+
 impl AgentClient {
     pub fn connect() -> anyhow::Result<Self> {
         if let Some(path) = std::env::var_os(waku_protocol::RUNTIME_INGRESS_ENV) {

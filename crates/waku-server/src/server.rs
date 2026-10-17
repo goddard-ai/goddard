@@ -2270,7 +2270,10 @@ fn handle_connection(
                     eprintln!("goddard-daemon ignored invalid message: {error}");
                 }
             },
-            Ok(Message::Close(_)) => break,
+            Ok(Message::Close(_)) => {
+                let _ = socket.flush();
+                break;
+            }
             Ok(Message::Ping(_)) => {
                 let _ = socket.flush();
             }
@@ -4026,6 +4029,48 @@ mod tests {
             Err(RecvTimeoutError::Disconnected)
         ));
         server.join().unwrap();
+    }
+
+    #[test]
+    fn server_replies_to_the_websocket_closing_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(TestBackend::default()),
+                server_shutdown,
+                ServerOptions::default(),
+            )
+            .unwrap()
+        });
+        let stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let (mut socket, _) = tungstenite::client(format!("ws://{address}/v1"), stream).unwrap();
+        write_json(
+            &mut socket,
+            &ClientMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                token: "secret".into(),
+                client_id: Uuid::new_v4(),
+                resume_from: vec![],
+            },
+        )
+        .unwrap();
+        assert!(matches!(socket.read(), Ok(Message::Text(_))));
+        socket.close(None).unwrap();
+        let closing_reply = socket.read();
+        shutdown.store(true, Ordering::Release);
+        server.join().unwrap();
+        assert!(
+            matches!(closing_reply, Ok(Message::Close(_))),
+            "daemon dropped TCP without replying to Close: {closing_reply:?}"
+        );
     }
 
     #[test]
