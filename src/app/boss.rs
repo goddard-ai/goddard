@@ -5370,19 +5370,6 @@ impl Waku {
         // Option trades the job title for the employee's model and effort,
         // the same reveal a task row's detail line performs.
         let alt_held = self.sidebar_alt_held;
-        let revealed_project = alt_held
-            .then(|| {
-                session
-                    .and_then(|session| {
-                        self.state
-                            .projects
-                            .iter()
-                            .find(|project| project.id == session.project_id)
-                            .filter(|project| !project.is_projectless())
-                            .map(|project| project.display_name())
-                    })
-            })
-            .flatten();
         let (detail, detail_provider) = if alt_held {
             self.boss_ui.queued_model_targets.get(&id).map_or_else(
                 || {
@@ -5421,22 +5408,33 @@ impl Waku {
             )
         };
         let (uses_worktree, activity_label) = employee_sidebar_details(session, unix_time());
-        let trailing_detail = (uses_worktree || activity_label.is_some()).then(|| {
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(5.0))
-                .text_size(sp(12.5))
-                .text_color(theme.text_tertiary)
-                .when(uses_worktree, |row| {
-                    row.child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
-                })
-                .when_some(activity_label, |row, label| {
-                    row.child(div().child(SharedString::from(label)))
-                })
-                .into_any_element()
+        let project = session.and_then(|session| {
+            self.state
+                .projects
+                .iter()
+                .find(|project| project.id == session.project_id)
         });
+        let project_label = project.map_or_else(
+            || tr!("sidebar.unknown_project"),
+            |project| {
+                if project.is_projectless() {
+                    tr!("project.chat")
+                } else {
+                    project.display_name()
+                }
+            },
+        );
+        let project_icon = if matches!(self.session_host(id), waku_client::DaemonKey::Remote(_)) {
+            "icons/server.svg"
+        } else if project.is_some_and(Project::is_projectless) {
+            "icons/chat.svg"
+        } else if project.is_some_and(Project::is_friends) {
+            "icons/friends.svg"
+        } else if project.is_some_and(|project| project.friend_peer_id.is_some()) {
+            "icons/user-round.svg"
+        } else {
+            "icons/folder.svg"
+        };
         // Expired and queued rows lend their status slot to the archive
         // control on hover or keyboard focus. Queued work is cancelled;
         // employee history keeps the record.
@@ -5542,42 +5540,120 @@ impl Waku {
                 },
             )
             .child(self.boss_avatar_animated(identity, 24.0, cx))
-            .child(boss_sidebar_label(
-                identity.name.clone(),
-                detail.unwrap_or_default(),
-                revealed_project,
-                if alt_held {
-                    None
-                } else {
-                    self.boss_ui
-                        .employee_icons
-                        .get(&id)
-                        .copied()
-                        .flatten()
-                        .map(crate::custom_commands::icon_path)
-                },
-                true,
-                &theme,
-                detail_provider,
-                title_accessory,
-                trailing_detail,
-            ))
-            // The flagged employee wears the same unread dot its folded
-            // group header does — boss-flagged attention is the only
-            // "unread" an employee row carries.
-            .when(attention_unread, |row| {
-                row.child(
-                    div()
-                        .id(format!("boss-employee-attention-{id}"))
-                        .flex_none()
-                        .size(px(12.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .tooltip(Tooltip::text(tr!("boss.employee_needs_attention")))
-                        .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
-                )
-            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .text_size(sp(13.0))
+                            .line_height(sp(16.0))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.0))
+                                    .truncate()
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .truncate()
+                                            .text_color(theme.text)
+                                            .child(identity.name.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .text_color(theme.text_secondary)
+                                            .child("is a"),
+                                    )
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .truncate()
+                                            .text_color(theme.text_secondary)
+                                            .when_some(detail_provider, |row, provider| {
+                                                row.child(crate::ui::provider_mark(
+                                                    provider,
+                                                    12.0,
+                                                    theme.text_tertiary,
+                                                ))
+                                            })
+                                            .when(!alt_held, |row| {
+                                                row.when_some(
+                                                    self.boss_ui
+                                                        .employee_icons
+                                                        .get(&id)
+                                                        .copied()
+                                                        .flatten()
+                                                        .map(crate::custom_commands::icon_path),
+                                                    |row, icon_path| {
+                                                        row.child(icon(
+                                                            icon_path,
+                                                            12.0,
+                                                            theme.text_tertiary,
+                                                        ))
+                                                    },
+                                                )
+                                            })
+                                            .child(detail.unwrap_or_default()),
+                                    ),
+                            )
+                            .when_some(title_accessory, |row, accessory| row.child(accessory))
+                            .when(attention_unread, |row| {
+                                row.child(
+                                    div()
+                                        .id(format!("boss-employee-attention-{id}"))
+                                        .flex_none()
+                                        .size(px(12.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .tooltip(Tooltip::text(tr!(
+                                            "boss.employee_needs_attention"
+                                        )))
+                                        .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .text_size(sp(11.5))
+                            .line_height(sp(14.0))
+                            .text_color(theme.text_tertiary)
+                            .child(icon(project_icon, 11.0, theme.text_tertiary))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .truncate()
+                                    .child(SharedString::from(project_label)),
+                            )
+                            .when(uses_worktree, |row| {
+                                row.child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
+                            })
+                            .when_some(activity_label, |row, label| {
+                                row.child(div().flex_none().child(SharedString::from(label)))
+                            }),
+                    ),
+            )
             .into_any_element()
     }
 
