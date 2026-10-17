@@ -2365,6 +2365,8 @@ sidebar.dormant:
   en: Dormant
 sidebar.chats:
   en: Chats
+sidebar.collapsed_group_members:
+  en: "+%{count} more"
 sidebar.recent_deliverables:
   en: Deliverables
 sidebar.deliverables_view_all:

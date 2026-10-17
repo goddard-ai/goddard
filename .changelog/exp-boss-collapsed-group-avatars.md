@@ -1,0 +1,1 @@
+- A collapsed employee group in the sidebar — Building, Helping, or Employees under a boss — now shows small avatars for up to four of its members right in the group header, with "+N more" counting the rest.

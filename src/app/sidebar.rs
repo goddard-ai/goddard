@@ -355,6 +355,23 @@ fn append_sidebar_planning_group(rows: &mut Vec<SidebarRow>, sessions: &[Uuid], 
     rows.push(SidebarRow::CollapsibleGroupSpacer { collapsed });
 }
 
+/// The member faces a collapsed employee group's header previews — up to
+/// `SIDEBAR_COLLAPSED_GROUP_AVATARS` members with a resolvable identity —
+/// and the member count its "+N more" tail omits. A member without an
+/// identity can't paint a face, so it falls into the omitted count.
+fn collapsed_employee_avatar_strip<'a>(
+    members: &[Uuid],
+    identities: &'a HashMap<Uuid, waku_client::boss::BossIdentity>,
+) -> (Vec<&'a waku_client::boss::BossIdentity>, usize) {
+    let faces = members
+        .iter()
+        .filter_map(|id| identities.get(id))
+        .take(SIDEBAR_COLLAPSED_GROUP_AVATARS)
+        .collect::<Vec<_>>();
+    let omitted = members.len() - faces.len();
+    (faces, omitted)
+}
+
 /// Live roster entries override dismissals from their previous admission,
 /// including while queued and before the unarchived session snapshot arrives.
 /// Expired employees still honor the user's archive choices.
@@ -543,6 +560,11 @@ const SIDEBAR_GROUP_ICON_GAP: f32 = 5.0;
 /// with the group label's: header inset + icon width + icon-to-label gap.
 pub(super) const SIDEBAR_GROUP_CHILD_PADDING: f32 =
     SIDEBAR_GROUP_HEADER_INSET + SIDEBAR_GROUP_ICON_WIDTH + SIDEBAR_GROUP_ICON_GAP;
+/// Member faces a collapsed employee group's header previews before its
+/// "+N more" tail counts the rest.
+const SIDEBAR_COLLAPSED_GROUP_AVATARS: usize = 4;
+/// A header face is a third of the 24px avatar a member's own row paints.
+const SIDEBAR_COLLAPSED_GROUP_AVATAR_SIZE: f32 = 8.0;
 /// Chats shown under a project group before the rest fold behind "Show more".
 const SIDEBAR_PROJECT_DEFAULT_VISIBLE: usize = 16;
 const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
@@ -4924,6 +4946,44 @@ impl Waku {
             0
         };
         let header_status = sidebar_group_header_status(has_unread, has_working, queued_count);
+        // A folded employee group wears its hidden members' faces on the
+        // header itself — up to four at a third of a row's avatar — and
+        // counts the rest beside them.
+        let member_strip = (collapsed
+            && matches!(
+                group,
+                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees
+            ))
+        .then(|| {
+            self.sidebar_collapsed_group_members
+                .borrow()
+                .get(&group)
+                .map(|members| collapsed_employee_avatar_strip(members, &self.boss_ui.identities))
+                .unwrap_or_default()
+        })
+        .filter(|(faces, omitted)| !faces.is_empty() || *omitted > 0)
+        .map(|(faces, omitted)| {
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(2.0))
+                // The letter a placeholder paints while its raster renders
+                // inherits this size to fit inside the small face box.
+                .text_size(sp(9.0))
+                .children(faces.into_iter().map(|identity| {
+                    self.boss_avatar(identity, SIDEBAR_COLLAPSED_GROUP_AVATAR_SIZE, cx)
+                }))
+                .when(omitted > 0, |strip| {
+                    strip.child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("sidebar.collapsed_group_members", count = omitted)),
+                    )
+                })
+        });
         let group_key = group.element_key();
         let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
         let header_focus = self
@@ -5362,6 +5422,7 @@ impl Waku {
                         })
                         .when_some(updated_chevron, |element, chevron| element.child(chevron)),
                 )
+                .when_some(member_strip, |element, strip| element.child(strip))
                 .child(div().flex_1()),
         )
         .when_some(compose, |element, compose| element.child(compose))
@@ -8719,6 +8780,75 @@ mod tests {
         assert_eq!(
             SidebarGroup::from_persisted(SidebarGroup::Planning.persisted()),
             Some(SidebarGroup::Planning)
+        );
+    }
+
+    #[test]
+    fn collapsed_employee_group_header_previews_member_faces() {
+        let mut identities = HashMap::new();
+        let mut member_ids = Vec::new();
+        for n in 0..7u128 {
+            let id = Uuid::from_u128(n + 1);
+            member_ids.push(id);
+            identities.insert(
+                id,
+                BossIdentity {
+                    id,
+                    name: format!("Employee {n}"),
+                    avatar_seed: format!("seed-{n}"),
+                    avatar_style: Default::default(),
+                },
+            );
+        }
+        let members = |count: usize| member_ids[..count].to_vec();
+
+        // No members paints no strip; one to four paint in roster order
+        // with nothing omitted.
+        let (faces, omitted) = collapsed_employee_avatar_strip(&[], &identities);
+        assert!(faces.is_empty());
+        assert_eq!(omitted, 0);
+        for count in 1..=SIDEBAR_COLLAPSED_GROUP_AVATARS {
+            let (faces, omitted) = collapsed_employee_avatar_strip(&members(count), &identities);
+            assert_eq!(
+                faces.iter().map(|face| face.id).collect::<Vec<_>>(),
+                members(count)
+            );
+            assert_eq!(omitted, 0);
+        }
+
+        // Past four, the header's tail counts the members left out.
+        for (count, expected_omitted) in [(5, 1), (6, 2), (7, 3)] {
+            let (faces, omitted) = collapsed_employee_avatar_strip(&members(count), &identities);
+            assert_eq!(faces.len(), SIDEBAR_COLLAPSED_GROUP_AVATARS);
+            assert_eq!(omitted, expected_omitted);
+        }
+
+        // A member without an identity can't paint a face — it counts
+        // toward the tail rather than leaving a gap in the strip.
+        let mut mixed = members(4);
+        mixed.push(Uuid::from_u128(99));
+        let (faces, omitted) = collapsed_employee_avatar_strip(&mixed, &identities);
+        assert_eq!(faces.len(), 4);
+        assert_eq!(omitted, 1);
+
+        // The strip rides the header the fold already leaves behind: a
+        // collapsed employee group still emits only header and spacer.
+        let mut rows = Vec::new();
+        append_sidebar_employee_group(
+            &mut rows,
+            SidebarGroup::Employees,
+            waku_client::DaemonKey::Local,
+            &members(2),
+            &members(4)[2..],
+            true,
+            0,
+        );
+        assert_eq!(
+            rows,
+            vec![
+                SidebarRow::Header(SidebarGroup::Employees),
+                SidebarRow::CollapsibleGroupSpacer { collapsed: true },
+            ]
         );
     }
 
