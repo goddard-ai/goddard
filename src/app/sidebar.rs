@@ -563,8 +563,8 @@ pub(super) const SIDEBAR_GROUP_CHILD_PADDING: f32 =
 /// Member faces a collapsed employee group's header previews before its
 /// "+N more" tail counts the rest.
 const SIDEBAR_COLLAPSED_GROUP_AVATARS: usize = 4;
-/// A header face is a third of the 24px avatar a member's own row paints.
-const SIDEBAR_COLLAPSED_GROUP_AVATAR_SIZE: f32 = 8.0;
+/// Collapsed groups preview member faces at 16px on their own line.
+const SIDEBAR_COLLAPSED_GROUP_AVATAR_SIZE: f32 = 16.0;
 /// Chats shown under a project group before the rest fold behind "Show more".
 const SIDEBAR_PROJECT_DEFAULT_VISIBLE: usize = 16;
 const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
@@ -4963,8 +4963,7 @@ impl Waku {
         };
         let header_status = sidebar_group_header_status(has_unread, has_working, queued_count);
         // A folded employee group wears its hidden members' faces on the
-        // header itself — up to four at a third of a row's avatar — and
-        // counts the rest beside them.
+        // second line — up to four faces — and counts the rest beside them.
         let member_strip = (collapsed
             && matches!(
                 group,
@@ -4986,7 +4985,7 @@ impl Waku {
                 .gap(px(2.0))
                 // The letter a placeholder paints while its raster renders
                 // inherits this size to fit inside the small face box.
-                .text_size(sp(9.0))
+                .text_size(sp(18.0))
                 .children(faces.into_iter().map(|identity| {
                     self.boss_avatar(identity, SIDEBAR_COLLAPSED_GROUP_AVATAR_SIZE, cx)
                 }))
@@ -5458,7 +5457,6 @@ impl Waku {
                         })
                         .when_some(updated_chevron, |element, chevron| element.child(chevron)),
                 )
-                .when_some(member_strip, |element, strip| element.child(strip))
                 .child(div().flex_1()),
         )
         .when_some(compose, |element, compose| element.child(compose))
@@ -5573,6 +5571,19 @@ impl Waku {
             .when(action_row, |element| element.pt(px(SIDEBAR_ACTION_ROW_GAP)))
             .pb(px(SIDEBAR_GROUP_HEADER_BOTTOM_GAP))
             .child(header)
+            .when_some(member_strip, |element, strip| {
+                element.child(
+                    div()
+                        .id(SharedString::from(format!(
+                            "sidebar-group-members-{group_key}"
+                        )))
+                        .pl(px(SIDEBAR_GROUP_CHILD_PADDING))
+                        .child(strip)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.toggle_sidebar_group(group, window, cx);
+                        })),
+                )
+            })
     }
 
     fn open_new_task_for_sidebar_group(
