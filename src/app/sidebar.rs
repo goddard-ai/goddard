@@ -118,6 +118,7 @@ pub(super) enum SidebarGroup {
     /// Building assignments. The old internal/persisted name preserves disclosure state.
     Outcomes,
     Errands,
+    Waiting,
     /// Legacy assignments whose purpose has not been explicitly classified.
     Employees,
     Date(SessionDateGroup),
@@ -135,6 +136,7 @@ impl SidebarGroup {
             Self::Planning => "phase-planning".into(),
             Self::Outcomes => "outcomes".into(),
             Self::Errands => "errands".into(),
+            Self::Waiting => "waiting".into(),
             Self::Employees => "employees".into(),
             Self::Date(group) => format!("date-{}", group.index()).into(),
             Self::Project(project_id) => format!("project-{project_id}").into(),
@@ -153,6 +155,7 @@ impl SidebarGroup {
             Self::Planning => PersistedSidebarGroup::Planning,
             Self::Outcomes => PersistedSidebarGroup::Outcomes,
             Self::Errands => PersistedSidebarGroup::Errands,
+            Self::Waiting => PersistedSidebarGroup::Waiting,
             Self::Employees => PersistedSidebarGroup::Employees,
             Self::Date(group) => PersistedSidebarGroup::Date(group.index()),
             Self::Project(project_id) => PersistedSidebarGroup::Project(project_id),
@@ -172,6 +175,7 @@ impl SidebarGroup {
             PersistedSidebarGroup::Planning => Self::Planning,
             PersistedSidebarGroup::Outcomes => Self::Outcomes,
             PersistedSidebarGroup::Errands => Self::Errands,
+            PersistedSidebarGroup::Waiting => Self::Waiting,
             PersistedSidebarGroup::Employees => Self::Employees,
             PersistedSidebarGroup::Date(index) => Self::Date(*SessionDateGroup::ALL.get(index)?),
             PersistedSidebarGroup::Project(project_id) => Self::Project(project_id),
@@ -189,6 +193,7 @@ impl SidebarGroup {
             Self::Errands => mix(fingerprint, 0x602),
             Self::Outcomes => mix(fingerprint, 0x603),
             Self::Employees => mix(fingerprint, 0x604),
+            Self::Waiting => mix(fingerprint, 0x605),
             Self::Date(group) => mix(fingerprint, group.index() as u64 + 1),
             Self::Project(project_id) => mix_uuid(mix(fingerprint, 0x100), project_id),
             Self::Projectless => mix(fingerprint, 0x200),
@@ -196,7 +201,13 @@ impl SidebarGroup {
     }
 }
 
-fn sidebar_purpose_group(purpose: Option<waku_protocol::boss::EmployeePurpose>) -> SidebarGroup {
+fn sidebar_purpose_group(
+    purpose: Option<waku_protocol::boss::EmployeePurpose>,
+    queued: bool,
+) -> SidebarGroup {
+    if queued {
+        return SidebarGroup::Waiting;
+    }
     match purpose {
         Some(waku_protocol::boss::EmployeePurpose::Building) => SidebarGroup::Outcomes,
         Some(waku_protocol::boss::EmployeePurpose::Helping) => SidebarGroup::Errands,
@@ -296,7 +307,7 @@ fn sidebar_group_header_status(
     }
 }
 
-/// One boss-employee section — Building, Helping, or Employees — nested under its boss
+/// One boss-employee section — Building, Helping, Waiting, or Employees — nested under its boss
 /// row: the header, the working members, then the finished tail capped by a
 /// "name finished ago" fold row. A collapsed group renders just its header —
 /// the header aggregates its hidden members' unread, queued, and working
@@ -4361,6 +4372,7 @@ impl Waku {
                 for group in [
                     SidebarGroup::Outcomes,
                     SidebarGroup::Errands,
+                    SidebarGroup::Waiting,
                     SidebarGroup::Employees,
                 ] {
                     let shown = |id: &&Uuid| {
@@ -4527,7 +4539,7 @@ impl Waku {
         }
 
         let has_session_header = rows.iter().any(|row| {
-            matches!(row, SidebarRow::Header(group) if !matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees))
+            matches!(row, SidebarRow::Header(group) if !matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees))
         });
         if !has_session_header {
             // Keep the header actions visible while there is no history.
@@ -4808,9 +4820,9 @@ impl Waku {
                 // The header actions belong to the session history — the
                 // Terminals and Recent deliverables groups sit above it but never
                 // carry them.
-                let first = !matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees)
+                let first = !matches!(group, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees)
                     && !rows[..index].iter().any(|row| {
-                        matches!(row, SidebarRow::Header(other) if !matches!(other, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees))
+                        matches!(row, SidebarRow::Header(other) if !matches!(other, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees))
                     });
                 self.render_sidebar_group_header(group, first, cx)
                     .into_any_element()
@@ -4884,7 +4896,7 @@ impl Waku {
                 // The employee groups' dot answers only to the boss-flagged
                 // attention set — an ordinary finished turn is not unread,
                 // so `unseen_completions` never feeds it.
-                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees => self
+                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees => self
                     .sidebar_collapsed_group_members
                     .borrow()
                     .get(&group)
@@ -4914,7 +4926,7 @@ impl Waku {
         // whose header uses the hourglass instead of the running spinner.
         let has_working = collapsed
             && match group {
-                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees => self
+                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees => self
                     .sidebar_collapsed_group_members
                     .borrow()
                     .get(&group)
@@ -4946,7 +4958,7 @@ impl Waku {
         let queued_count = if collapsed
             && matches!(
                 group,
-                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees
+                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees
             )
         {
             self.sidebar_collapsed_group_members
@@ -4967,7 +4979,7 @@ impl Waku {
         let member_strip = (collapsed
             && matches!(
                 group,
-                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Employees
+                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees
             ))
         .then(|| {
             self.sidebar_collapsed_group_members
@@ -5069,6 +5081,7 @@ impl Waku {
             SidebarGroup::Planning => tr!("phase.planning"),
             SidebarGroup::Outcomes => "Building".into(),
             SidebarGroup::Errands => "Helping".into(),
+            SidebarGroup::Waiting => "Waiting".into(),
             SidebarGroup::Employees => "Employees".into(),
             SidebarGroup::Date(group) => group.label(),
             SidebarGroup::Project(_) if project_is_projectless => tr!("sidebar.chats"),
@@ -5116,6 +5129,7 @@ impl Waku {
                 | SidebarGroup::Planning
                 | SidebarGroup::Outcomes
                 | SidebarGroup::Errands
+                | SidebarGroup::Waiting
                 | SidebarGroup::Employees
                 | SidebarGroup::Pinned
                 | SidebarGroup::Terminals
@@ -5329,6 +5343,7 @@ impl Waku {
                 group,
                 SidebarGroup::Errands
                     | SidebarGroup::Outcomes
+                    | SidebarGroup::Waiting
                     | SidebarGroup::Employees
                     | SidebarGroup::Planning
             ),
@@ -5611,6 +5626,7 @@ impl Waku {
             | SidebarGroup::Planning
             | SidebarGroup::Outcomes
             | SidebarGroup::Errands
+            | SidebarGroup::Waiting
             | SidebarGroup::Employees
             | SidebarGroup::Date(_)
             | SidebarGroup::Dormant
@@ -5620,10 +5636,12 @@ impl Waku {
         window.focus(&focus, cx);
     }
 
-    /// The finished-employee fold row an Outcomes or Errands group ends on.
-    /// Each purpose section owns its finished-tail reveal counter.
+    /// Queued employees wait together before returning to their purpose section.
     fn sidebar_employee_group(&self, id: Uuid) -> SidebarGroup {
-        sidebar_purpose_group(self.boss_ui.employee_purposes.get(&id).copied())
+        sidebar_purpose_group(
+            self.boss_ui.employee_purposes.get(&id).copied(),
+            self.boss_ui.queued.contains_key(&id),
+        )
     }
 
     fn sidebar_employee_reveals(
@@ -8703,7 +8721,8 @@ mod tests {
             (Some(EmployeePurpose::Helping), SidebarGroup::Errands),
             (None, SidebarGroup::Employees),
         ] {
-            assert_eq!(sidebar_purpose_group(purpose), group);
+            assert_eq!(sidebar_purpose_group(purpose, false), group);
+            assert_eq!(sidebar_purpose_group(purpose, true), SidebarGroup::Waiting);
             assert_eq!(SidebarGroup::from_persisted(group.persisted()), Some(group));
             let employee = Uuid::new_v4();
             let mut rows = Vec::new();
@@ -8803,11 +8822,11 @@ mod tests {
             ]
         );
 
-        // An empty group emits nothing at all.
+        // An empty Waiting group emits nothing at all.
         rows.clear();
         append_sidebar_employee_group(
             &mut rows,
-            SidebarGroup::Errands,
+            SidebarGroup::Waiting,
             key,
             &[],
             &[],
@@ -8823,6 +8842,10 @@ mod tests {
         assert_eq!(
             SidebarGroup::from_persisted(SidebarGroup::Outcomes.persisted()),
             Some(SidebarGroup::Outcomes)
+        );
+        assert_eq!(
+            SidebarGroup::from_persisted(SidebarGroup::Waiting.persisted()),
+            Some(SidebarGroup::Waiting)
         );
         assert_eq!(
             SidebarGroup::from_persisted(SidebarGroup::Planning.persisted()),

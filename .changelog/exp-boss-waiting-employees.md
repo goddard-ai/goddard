@@ -1,0 +1,1 @@
+- Queued employees appear in a separate Waiting group after Helping, which hides when empty.

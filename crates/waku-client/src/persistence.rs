@@ -1092,6 +1092,7 @@ pub enum PersistedSidebarGroup {
     Errands,
     Outcomes,
     Employees,
+    Waiting,
     Planning,
     Date(usize),
     Project(Uuid),
