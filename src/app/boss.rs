@@ -5424,17 +5424,6 @@ impl Waku {
                 }
             },
         );
-        let project_icon = if matches!(self.session_host(id), waku_client::DaemonKey::Remote(_)) {
-            "icons/server.svg"
-        } else if project.is_some_and(Project::is_projectless) {
-            "icons/chat.svg"
-        } else if project.is_some_and(Project::is_friends) {
-            "icons/friends.svg"
-        } else if project.is_some_and(|project| project.friend_peer_id.is_some()) {
-            "icons/user-round.svg"
-        } else {
-            "icons/folder.svg"
-        };
         // Expired and queued rows lend their status slot to the archive
         // control on hover or keyboard focus. Queued work is cancelled;
         // employee history keeps the record.
@@ -5508,18 +5497,18 @@ impl Waku {
         } else {
             None
         };
-        div()
+        let row = div()
             .id(format!("boss-employee-{id}"))
             .when(archivable, |row| row.group(group_name.clone()))
             .tab_index(0)
-            .h(px(42.0))
+            .h(px(sidebar::SIDEBAR_SESSION_CARD_HEIGHT))
             .w_full()
             .pl(px(sidebar::SIDEBAR_GROUP_CHILD_PADDING))
             .pr(px(8.0))
             .flex()
             .items_center()
             .gap(px(8.0))
-            .rounded(px(6.0))
+            .rounded(px(9.0))
             .cursor_pointer()
             .when(selected, |row| row.bg(theme.sidebar_item_background))
             .hover(|style| style.bg(theme.overlay))
@@ -5546,6 +5535,7 @@ impl Waku {
                     .min_w_0()
                     .flex()
                     .flex_col()
+                    .gap(px(4.0))
                     .justify_center()
                     .child(
                         div()
@@ -5553,64 +5543,28 @@ impl Waku {
                             .min_w_0()
                             .flex()
                             .items_center()
-                            .gap(px(4.0))
-                            .text_size(sp(13.0))
-                            .line_height(sp(16.0))
+                            .gap(px(6.0))
+                            .text_size(sp(13.5))
+                            .line_height(sp(18.0))
                             .child(
                                 div()
                                     .min_w_0()
                                     .flex_1()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(4.0))
                                     .truncate()
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .flex_1()
-                                            .truncate()
-                                            .text_color(theme.text)
-                                            .child(identity.name.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_none()
-                                            .text_color(theme.text_secondary)
-                                            .child("is a"),
-                                    )
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .flex_1()
-                                            .truncate()
-                                            .text_color(theme.text_secondary)
-                                            .when_some(detail_provider, |row, provider| {
-                                                row.child(crate::ui::provider_mark(
-                                                    provider,
-                                                    12.0,
-                                                    theme.text_tertiary,
-                                                ))
-                                            })
-                                            .when(!alt_held, |row| {
-                                                row.when_some(
-                                                    self.boss_ui
-                                                        .employee_icons
-                                                        .get(&id)
-                                                        .copied()
-                                                        .flatten()
-                                                        .map(crate::custom_commands::icon_path),
-                                                    |row, icon_path| {
-                                                        row.child(icon(
-                                                            icon_path,
-                                                            12.0,
-                                                            theme.text_tertiary,
-                                                        ))
-                                                    },
-                                                )
-                                            })
-                                            .child(detail.unwrap_or_default()),
-                                    ),
+                                    .text_color(theme.text)
+                                    .child(identity.name.clone()),
                             )
+                            .when(alt_held, |row| {
+                                row.child(
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .truncate()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_tertiary)
+                                        .child(project_label),
+                                )
+                            })
                             .when_some(title_accessory, |row, accessory| row.child(accessory))
                             .when(attention_unread, |row| {
                                 row.child(
@@ -5635,25 +5589,58 @@ impl Waku {
                             .flex()
                             .items_center()
                             .gap(px(5.0))
-                            .text_size(sp(11.5))
-                            .line_height(sp(14.0))
+                            .min_h(sp(15.0))
+                            .text_size(sp(13.0))
+                            .line_height(sp(15.0))
                             .text_color(theme.text_tertiary)
-                            .child(icon(project_icon, 11.0, theme.text_tertiary))
+                            .when_some(detail_provider, |row, provider| {
+                                row.child(crate::ui::provider_mark(
+                                    provider,
+                                    12.5,
+                                    theme.text_tertiary,
+                                ))
+                            })
+                            .when(!alt_held, |row| {
+                                let title = detail.as_deref().unwrap_or_default();
+                                row.when(!title.is_empty(), |row| {
+                                    row.child(icon(
+                                        self.boss_ui
+                                            .employee_icons
+                                            .get(&id)
+                                            .copied()
+                                            .flatten()
+                                            .map(crate::custom_commands::icon_path)
+                                            .unwrap_or_else(|| job_title_icon(title)),
+                                        12.5,
+                                        theme.text_tertiary,
+                                    ))
+                                })
+                            })
                             .child(
                                 div()
                                     .min_w_0()
                                     .flex_1()
                                     .truncate()
-                                    .child(SharedString::from(project_label)),
+                                    .child(detail.unwrap_or_default()),
                             )
                             .when(uses_worktree, |row| {
                                 row.child(icon("icons/fork.svg", 11.0, theme.text_tertiary))
                             })
                             .when_some(activity_label, |row, label| {
-                                row.child(div().flex_none().child(SharedString::from(label)))
+                                row.child(
+                                    div()
+                                        .flex_none()
+                                        .text_size(sp(12.5))
+                                        .child(SharedString::from(label)),
+                                )
                             }),
                     ),
             )
+            .into_any_element();
+        div()
+            .w_full()
+            .pb(px(sidebar::SIDEBAR_SESSION_ROW_GAP))
+            .child(row)
             .into_any_element()
     }
 

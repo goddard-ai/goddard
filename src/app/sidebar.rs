@@ -532,7 +532,7 @@ fn updater_button_available_content(
 /// Height of a session card plus the separation reserved beneath it in the
 /// virtualized sidebar list. Keep the gap inside the list row so measured and
 /// estimated heights stay identical for off-screen sessions.
-const SIDEBAR_SESSION_CARD_HEIGHT: f32 = 51.0;
+pub(super) const SIDEBAR_SESSION_CARD_HEIGHT: f32 = 51.0;
 pub(super) const SIDEBAR_SESSION_ROW_GAP: f32 = 1.0;
 const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
 const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 30.0;
@@ -1432,8 +1432,10 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
             SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
-        SidebarRow::Session(_) | SidebarRow::Deliverable(..) => SIDEBAR_SESSION_ROW_HEIGHT,
-        SidebarRow::Boss(_) | SidebarRow::Planning(_) | SidebarRow::Employee(_) => 42.0,
+        SidebarRow::Session(_) | SidebarRow::Deliverable(..) | SidebarRow::Employee(_) => {
+            SIDEBAR_SESSION_ROW_HEIGHT
+        }
+        SidebarRow::Boss(_) | SidebarRow::Planning(_) => 42.0,
         SidebarRow::Terminal(_) => terminals::SIDEBAR_TERMINAL_ROW_HEIGHT,
         SidebarRow::BossShowMore(_)
         | SidebarRow::ErrandsShowMore(_)
