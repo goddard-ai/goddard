@@ -101,6 +101,7 @@ pub(super) const CANNED_PROMPTS: &[(&str, &str)] = &[
     ("proceed", "suggestions.proceed"),
     ("make-it-happen", "suggestions.make_it_happen"),
     ("keep-going", "suggestions.keep_going"),
+    ("done", "suggestions.done"),
     ("run-tests", "suggestions.run_tests"),
     ("fix-errors", "suggestions.fix_errors"),
     ("commit-changes", "suggestions.commit_changes"),

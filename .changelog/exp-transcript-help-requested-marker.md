@@ -1,0 +1,1 @@
+- With turn status markers on, a reply that needs you to do something outside the chat — run a command, grant a permission, change a setting — now shows a **Help requested** chip under the response, plus a "Done — continue" suggestion to resume once you've handled it.

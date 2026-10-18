@@ -1188,6 +1188,8 @@ status_markers.decision:
   en: Awaiting decision
 status_markers.details:
   en: Awaiting details
+status_markers.action_needed:
+  en: Help requested
 status_markers.aligned:
   en: Aligned
 status_markers.unverified:
@@ -3782,6 +3784,8 @@ suggestions.choose_manually:
   en: Choose an option
 suggestions.keep_going:
   en: Keep going
+suggestions.done:
+  en: Done — continue.
 suggestions.run_tests:
   en: Run the tests
 suggestions.fix_errors:

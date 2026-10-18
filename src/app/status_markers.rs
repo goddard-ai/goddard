@@ -131,10 +131,10 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         tone: MarkerTone::Info,
         threshold: 0.55,
         instructions: "The requested work remains unfinished because the assistant \
-            asks the user for a go-ahead, a decision, or missing details before \
-            continuing. A rhetorical question after completed work does not count. \
-            A reply whose substance is replaying the request to confirm shared \
-            understanding is `aligned` instead.",
+            asks the user for a go-ahead, a decision, missing details, or an action \
+            only the user can take before continuing. A rhetorical question after \
+            completed work does not count. A reply whose substance is replaying \
+            the request to confirm shared understanding is `aligned` instead.",
     },
     StatusMarker {
         id: "aligned",
@@ -197,6 +197,18 @@ const INPUT_MARKERS: &[StatusMarker] = &[
             clarification from the user before continuing. A request to approve \
             an already specified action is a go-ahead instead.",
     },
+    StatusMarker {
+        id: "action-needed",
+        label_key: "status_markers.action_needed",
+        icon: "icons/circle-help.svg",
+        tone: MarkerTone::Warning,
+        threshold: 0.55,
+        instructions: "The assistant asks the user to do something outside this \
+            conversation before it can continue — run a command, grant a \
+            permission, change a setting or file, install a tool, or verify a \
+            result in another app. A need the user can satisfy entirely with a \
+            typed reply is `go-ahead`, `decision`, or `details` instead.",
+    },
 ];
 
 const PARTIAL_MARKERS: &[StatusMarker] = &[StatusMarker {
@@ -243,6 +255,7 @@ pub(super) enum StatusSuggestedAction {
     RunTests,
     YouDecide,
     Diagnose,
+    Done,
 }
 
 impl StatusSuggestedAction {
@@ -257,6 +270,7 @@ impl StatusSuggestedAction {
             Self::RunTests => "run-tests",
             Self::YouDecide => "you-decide",
             Self::Diagnose => "diagnose",
+            Self::Done => "done",
         }
     }
 }
@@ -280,6 +294,7 @@ fn suggested_actions(evaluation: &Evaluation) -> Vec<StatusSuggestedAction> {
             "go-ahead"
                 | "aligned"
                 | "decision"
+                | "action-needed"
                 | "awaiting-input"
                 | "needs-continuation"
                 | "errors-remain"
@@ -292,6 +307,8 @@ fn suggested_actions(evaluation: &Evaluation) -> Vec<StatusSuggestedAction> {
         Some("go-ahead") => vec![StatusSuggestedAction::Proceed],
         Some("aligned") => vec![StatusSuggestedAction::MakeItHappen],
         Some("decision") | Some("awaiting-input") => vec![StatusSuggestedAction::YouDecide],
+        // A typed prompt can't perform the step — it reports it done.
+        Some("action-needed") => vec![StatusSuggestedAction::Done],
         Some("needs-continuation") => vec![StatusSuggestedAction::KeepGoing],
         // `errors-remain` is the failed flag's subtype — it only leads
         // `cleared` when repairable errors outscored the bare failure.
@@ -306,7 +323,7 @@ fn waiting_for_user_input(evaluation: &Evaluation) -> bool {
     cleared_markers(evaluation).iter().any(|(marker, _)| {
         matches!(
             marker.id,
-            "awaiting-input" | "go-ahead" | "decision" | "details" | "aligned"
+            "awaiting-input" | "go-ahead" | "decision" | "details" | "action-needed" | "aligned"
         )
     })
 }
@@ -341,9 +358,10 @@ fn marker_action_signal(markers: &[String], action: &str) -> &'static str {
             },
             // A turn that waited on the user: a reply — offered or bespoke —
             // confirms the wait was real.
-            "awaiting-input" | "go-ahead" | "decision" | "details" | "aligned" => match action {
+            "awaiting-input" | "go-ahead" | "decision" | "details" | "action-needed"
+            | "aligned" => match action {
                 "new-prompt" | "proceed" | "make-it-happen" | "keep-going" | "you-decide"
-                | "implement-plan" | "whats-next" | "address-review" | "fix-ci" => {
+                | "implement-plan" | "whats-next" | "address-review" | "fix-ci" | "done" => {
                     confirmed = true;
                 }
                 _ => {}
@@ -529,9 +547,10 @@ fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
     questions.insert(
         INPUT_QUESTION.to_owned(),
         EvalQuestion::Choice {
-            instructions: "If this turn ends awaiting input, what kind of response \
-                does the assistant need from the user? Judge the closing `response` \
-                against the unfinished work. Otherwise choose `other`."
+            instructions: "If this turn ends awaiting input, what kind of input or \
+                action does the assistant need from the user before it can \
+                continue? Judge the closing `response` against the unfinished \
+                work. Otherwise choose `other`."
                 .to_owned(),
             criteria: INPUT_MARKERS
                 .iter()
@@ -934,8 +953,8 @@ pub(super) struct SidebarStatusMarker {
 /// footer-only; the failure flags claim the danger glyphs.
 fn sidebar_bucket(marker: &StatusMarker) -> Option<(&'static str, MarkerTone)> {
     match marker.id {
-        "awaiting-input" | "go-ahead" | "decision" | "details" | "aligned" | "partial"
-        | "needs-continuation" => Some(("icons/chat.svg", MarkerTone::Info)),
+        "awaiting-input" | "go-ahead" | "decision" | "details" | "action-needed" | "aligned"
+        | "partial" | "needs-continuation" => Some(("icons/chat.svg", MarkerTone::Info)),
         "blocked" => Some(("icons/ban.svg", MarkerTone::Danger)),
         "failed" | "errors-remain" => Some(("icons/block.svg", MarkerTone::Danger)),
         _ => None,
@@ -1058,6 +1077,14 @@ impl Waku {
                             action_predictions::suggested_action_title("diagnose")
                                 .unwrap_or_else(|| tr!("suggestions.diagnose")),
                         ),
+                        StatusSuggestedAction::Done => (
+                            "icons/check.svg",
+                            action_predictions::suggested_prompt(
+                                "done",
+                                &self.state.suggested_prompts,
+                            )
+                            .unwrap_or_else(|| tr!("suggestions.done")),
+                        ),
                     };
                     let tooltip = action_predictions::suggested_prompt(
                         action.canned_id(),
@@ -1173,7 +1200,8 @@ impl Waku {
             | StatusSuggestedAction::FixErrors
             | StatusSuggestedAction::RunTests
             | StatusSuggestedAction::YouDecide
-            | StatusSuggestedAction::Diagnose => {
+            | StatusSuggestedAction::Diagnose
+            | StatusSuggestedAction::Done => {
                 let Some(prompt) = action_predictions::suggested_prompt(
                     action.canned_id(),
                     &self.state.suggested_prompts,
@@ -1752,6 +1780,7 @@ mod tests {
             ("go-ahead", "go-ahead"),
             ("decision", "decision"),
             ("details", "details"),
+            ("action-needed", "action-needed"),
         ] {
             let markers = cleared_markers(&answers(choice, 0.82));
             assert_eq!(markers[0].0.id, expected);
@@ -1792,6 +1821,12 @@ mod tests {
             [StatusSuggestedAction::YouDecide]
         );
         assert!(waiting_for_user_input(&verdict("decision")));
+        // An out-of-chat ask can't be canned — the chip reports it done.
+        assert_eq!(
+            suggested_actions(&verdict("action-needed")),
+            [StatusSuggestedAction::Done]
+        );
+        assert!(waiting_for_user_input(&verdict("action-needed")));
         // An input ask the subtype question can't classify keeps the
         // generic awaiting-input chip — also a "you decide" case.
         assert_eq!(
@@ -2033,6 +2068,10 @@ mod tests {
         // A waiting ending is confirmed by any reply.
         assert_eq!(
             marker_action_signal(&markers(&["awaiting-input"]), "new-prompt"),
+            "confirmed"
+        );
+        assert_eq!(
+            marker_action_signal(&markers(&["action-needed"]), "done"),
             "confirmed"
         );
         // A wall: engaging the failure confirms, shipping anyway denies it.

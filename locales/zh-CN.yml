@@ -1349,6 +1349,7 @@ suggestions.make_it_happen: 开始实现
 suggestions.add_details: 补充信息
 suggestions.choose_manually: 输入选择
 suggestions.keep_going: 继续
+suggestions.done: 已完成 — 请继续。
 suggestions.run_tests: 运行测试
 suggestions.fix_errors: 修复剩余错误
 suggestions.commit_changes: 提交这些更改
@@ -2895,6 +2896,7 @@ status_markers.awaiting_input: 等待输入
 status_markers.go_ahead: 等待确认
 status_markers.decision: 等待决定
 status_markers.details: 等待补充信息
+status_markers.action_needed: 请求协助
 status_markers.aligned: 已对齐
 status_markers.blocked: 受阻
 status_markers.complete: 已完成

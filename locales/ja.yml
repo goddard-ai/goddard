@@ -1377,6 +1377,7 @@ suggestions.make_it_happen: 作業を始めて
 suggestions.add_details: 詳細を入力
 suggestions.choose_manually: 選択を入力
 suggestions.keep_going: 続ける
+suggestions.done: 完了しました — 続けてください。
 suggestions.run_tests: テストを実行
 suggestions.fix_errors: 残りのエラーを修正
 suggestions.commit_changes: 変更をコミット
@@ -2943,6 +2944,7 @@ status_markers.awaiting_input: 入力待ち
 status_markers.go_ahead: 承認待ち
 status_markers.decision: 選択待ち
 status_markers.details: 詳細待ち
+status_markers.action_needed: 対応待ち
 status_markers.aligned: 認識一致
 status_markers.blocked: ブロック中
 status_markers.complete: 完了
