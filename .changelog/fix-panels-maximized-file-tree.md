@@ -1,0 +1,1 @@
+- Maximizing a file tab in the right panel keeps the file tree visible and available to resize or toggle.

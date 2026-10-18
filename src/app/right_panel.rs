@@ -9654,13 +9654,11 @@ impl Waku {
         let theme = Theme::current(cx);
         let deliverable_page = deliverable_title.is_some();
         let show_tree = show_tree && !Path::new(&relative_path).is_absolute();
-        let fullscreen = self.panel_fullscreen_active();
-        let file_tree_width = if !show_tree || fullscreen {
-            0.0
-        } else if !self.right_panel_file_tree_visible {
-            0.0
-        } else {
+        let tree_visible = show_tree && self.right_panel_file_tree_visible;
+        let file_tree_width = if tree_visible {
             fitted_file_tree_width(panel_width, self.right_panel_file_tree_width)
+        } else {
+            0.0
         };
         let (editor_state, writable, _) =
             self.ensure_right_panel_file_editor(&relative_path, window, cx);
@@ -9708,12 +9706,7 @@ impl Waku {
                         .gap(px(8.0))
                         .border_b(hairline())
                         .border_color(theme.separator)
-                        .children(self.file_viewer_chrome(
-                            &relative_path,
-                            None,
-                            show_tree && !fullscreen,
-                            cx,
-                        )),
+                        .children(self.file_viewer_chrome(&relative_path, None, show_tree, cx)),
                 )
             })
             .child(body)
@@ -9748,32 +9741,26 @@ impl Waku {
             .min_w_0()
             .flex()
             .child(editor)
-            // Fullscreen drops the file tree entirely; its resize handle
-            // would fight a surface that owns the window's width. A page
-            // render with `show_tree` off leaves the column out too.
-            .when(
-                show_tree && !fullscreen && self.right_panel_file_tree_visible,
-                |element| {
-                    element.child(
-                        div()
-                            .w(px(file_tree_width))
-                            .min_w(px(FILE_TREE_MIN_WIDTH))
-                            .h_full()
-                            .flex_none()
-                            .flex()
-                            .flex_col()
-                            .relative()
-                            .border_l(hairline())
-                            .border_color(theme.separator)
-                            .child(self.render_right_panel_working_tree(Some(&relative_path), cx))
-                            .child(self.render_panel_resize_handle(
-                                "right-panel-file-tree-resize-handle",
-                                PanelResizeTarget::FileTree,
-                                cx,
-                            )),
-                    )
-                },
-            )
+            .when(tree_visible, |element| {
+                element.child(
+                    div()
+                        .w(px(file_tree_width))
+                        .min_w(px(FILE_TREE_MIN_WIDTH))
+                        .h_full()
+                        .flex_none()
+                        .flex()
+                        .flex_col()
+                        .relative()
+                        .border_l(hairline())
+                        .border_color(theme.separator)
+                        .child(self.render_right_panel_working_tree(Some(&relative_path), cx))
+                        .child(self.render_panel_resize_handle(
+                            "right-panel-file-tree-resize-handle",
+                            PanelResizeTarget::FileTree,
+                            cx,
+                        )),
+                )
+            })
     }
 
     /// The `FileAtRef` surface: a file's blob at a git ref, read-only — the

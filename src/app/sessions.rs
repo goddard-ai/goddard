@@ -3979,6 +3979,11 @@ impl Waku {
                 right_panel_width
             }
             PanelResizeTarget::FileTree => {
+                let right_panel_width = if self.panel_fullscreen_active() {
+                    self.panel_fullscreen_rendered_width
+                } else {
+                    right_panel_width
+                };
                 let width =
                     fitted_file_tree_width(right_panel_width, self.right_panel_file_tree_width);
                 self.right_panel_file_tree_width = width;
@@ -4039,6 +4044,11 @@ impl Waku {
                 *stored = width;
             }
             PanelResizeTarget::FileTree => {
+                let right_panel_width = if self.panel_fullscreen_active() {
+                    self.panel_fullscreen_rendered_width
+                } else {
+                    right_panel_width
+                };
                 let maximum = FILE_TREE_MAX_WIDTH
                     .min(right_panel_width - FILE_EDITOR_MIN_WIDTH)
                     .max(FILE_TREE_MIN_WIDTH);
