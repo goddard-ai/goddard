@@ -28,11 +28,11 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use gpui::{
-    Action, AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Div, Font,
-    FontStyle, FontWeight, HitboxId, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollHandle,
-    SharedString, StrikethroughStyle, StyledText, TextLayout, TextRun, UnderlineStyle, Window,
-    canvas, div, font, img, point, prelude::*, px, quad, relative, size,
+    Action, AnyElement, AnyView, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase,
+    Div, Font, FontStyle, FontWeight, HitboxId, Hsla, InteractiveText, IntoElement, KeyDownEvent,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
+    ScrollHandle, SharedString, StrikethroughStyle, StyledText, TextLayout, TextRun,
+    UnderlineStyle, Window, canvas, div, font, img, point, prelude::*, px, quad, relative, size,
 };
 use regex::Regex;
 use unicode_script::{Script, UnicodeScript};
@@ -90,6 +90,14 @@ impl TextGeometry {
 
 /// The transcript's shared selection handles, specialised to real geometry.
 pub type TranscriptSelection = SelectionState<TextGeometry>;
+
+/// Internal display-only links into a submitted message's atom list.
+pub const PASTED_TEXT_LINK_PREFIX: &str = "goddard-paste://";
+// Added only to the parsed display copy; saved messages keep their original spans.
+pub(super) const PASTED_TEXT_MARK: char = '\u{FFF8}';
+
+/// A host-supplied preview for links with content beyond their URL.
+pub type LinkTooltip = Rc<dyn Fn(&str, &mut Window, &mut gpui::App) -> Option<AnyView>>;
 
 /// An optional app-owned override for clicked markdown links.
 ///
@@ -429,11 +437,12 @@ pub fn flatten(
     // `Label` is inside the span itself.
     enum Scan {
         Text,
-        Id(Vec<u8>),
+        Id(Vec<u8>, bool),
         Ref,
         Label {
             start: usize,
             target: AtomChipTarget,
+            paste_index: Option<usize>,
         },
     }
     let mut scan = Scan::Text;
@@ -555,12 +564,15 @@ pub fn flatten(
                         );
                         segment_start = index + ch.len_utf8();
                         if ch == waku_protocol::model::MESSAGE_ATOM_OPEN {
-                            scan = Scan::Id(Vec::new());
+                            scan = Scan::Id(Vec::new(), false);
                         }
                     }
                 }
-                Scan::Id(nibbles) => {
-                    if nibbles.is_empty() && ch == waku_protocol::model::MESSAGE_ATOM_REF {
+                Scan::Id(nibbles, paste) => {
+                    if nibbles.is_empty() && ch == PASTED_TEXT_MARK {
+                        *paste = true;
+                        segment_start = index + ch.len_utf8();
+                    } else if nibbles.is_empty() && ch == waku_protocol::model::MESSAGE_ATOM_REF {
                         // A reference span: one kind nibble follows the mark.
                         scan = Scan::Ref;
                         segment_start = index + ch.len_utf8();
@@ -572,15 +584,23 @@ pub fn flatten(
                         // label; anything else was never an id, and its
                         // characters rejoin the label — the same way
                         // `atom_visible_text` keeps a longer selector run.
-                        let target = (nibbles.len() == 32 && !is_atom_id_char(ch))
-                            .then(|| {
-                                let mut bytes = [0u8; 16];
-                                for (position, pair) in nibbles.chunks_exact(2).enumerate() {
-                                    bytes[position] = (pair[0] << 4) | pair[1];
-                                }
-                                Uuid::from_bytes(bytes)
-                            })
-                            .map_or(AtomChipTarget::Text, AtomChipTarget::Session);
+                        let id = (nibbles.len() == 32 && !is_atom_id_char(ch)).then(|| {
+                            let mut bytes = [0u8; 16];
+                            for (position, pair) in nibbles.chunks_exact(2).enumerate() {
+                                bytes[position] = (pair[0] << 4) | pair[1];
+                            }
+                            Uuid::from_bytes(bytes)
+                        });
+                        let paste_index = if *paste {
+                            id.and_then(|id| usize::try_from(id.as_u128()).ok())
+                        } else {
+                            None
+                        };
+                        let target = if *paste {
+                            AtomChipTarget::Text
+                        } else {
+                            id.map_or(AtomChipTarget::Text, AtomChipTarget::Session)
+                        };
                         let start = flat.text.len();
                         // The label's icon slot — the same leading
                         // whitespace the composer field paints its chip
@@ -596,7 +616,8 @@ pub fn flatten(
                             palette,
                             true,
                         );
-                        if matches!(target, AtomChipTarget::Text) && !nibbles.is_empty() {
+                        if !*paste && matches!(target, AtomChipTarget::Text) && !nibbles.is_empty()
+                        {
                             let selectors: String = nibbles
                                 .iter()
                                 .filter_map(|nibble| char::from_u32(0xFE00 + *nibble as u32))
@@ -605,7 +626,11 @@ pub fn flatten(
                                 &selectors, &run.style, &atom_font, base_color, palette, true,
                             );
                         }
-                        scan = Scan::Label { start, target };
+                        scan = Scan::Label {
+                            start,
+                            target,
+                            paste_index,
+                        };
                         segment_start = index;
                     }
                 }
@@ -632,11 +657,19 @@ pub fn flatten(
                             palette,
                             true,
                         );
-                        scan = Scan::Label { start, target };
+                        scan = Scan::Label {
+                            start,
+                            target,
+                            paste_index: None,
+                        };
                     }
                     segment_start = index + ch.len_utf8();
                 }
-                Scan::Label { start, target } => {
+                Scan::Label {
+                    start,
+                    target,
+                    paste_index,
+                } => {
                     if ch == waku_protocol::model::MESSAGE_ATOM_END {
                         flat.emit(
                             &crate::input::nonbreaking_chip_text(&run.text[segment_start..index]),
@@ -674,6 +707,9 @@ pub fn flatten(
                                 range,
                                 format!("{}{session_id}", waku_protocol::TASK_LINK_PREFIX),
                             ));
+                        } else if let Some(index) = paste_index {
+                            flat.links
+                                .push((range, format!("{PASTED_TEXT_LINK_PREFIX}{index}")));
                         }
                         scan = Scan::Text;
                         segment_start = index + ch.len_utf8();
@@ -1289,7 +1325,7 @@ fn fixation_segments(
 pub struct MarkdownView {
     parser: IncrementalParser,
     /// Cache the prompt transform so repaints do not rescan reference tokens.
-    prompt_references: Option<(String, String)>,
+    prompt_references: Option<(String, String, bool)>,
     /// Mended replacement for the final block while streaming.
     tail: Vec<TopBlock>,
     flats: RefCell<HashMap<usize, Rc<FlatText>>>,
@@ -1447,23 +1483,39 @@ impl MarkdownView {
     /// display atoms (for example, restored boss history). Decode only the
     /// rendered copy; assistant prose and the saved message stay untouched.
     pub fn set_transcript_text(&mut self, text: &str, mend: bool, user: bool) {
+        self.set_transcript_text_with_atom_links(text, mend, user, false);
+    }
+
+    /// Link folded paste spans to their saved atom positions. Enable only
+    /// when the host supplies their payloads and handles the internal URLs.
+    pub fn set_transcript_text_with_atom_links(
+        &mut self,
+        text: &str,
+        mend: bool,
+        user: bool,
+        atom_links: bool,
+    ) {
         if !user {
             self.prompt_references = None;
             self.set_text_with_soft_breaks_as_newlines(text, mend, false);
             return;
         }
-        let (source, display) = self
+        let (source, display, _) = self
             .prompt_references
             .take()
-            .filter(|(source, _)| source == text)
+            .filter(|(source, _, links)| source == text && *links == atom_links)
             .unwrap_or_else(|| {
+                // Add links before decoding provider reference tokens: those
+                // tokens have no entry in the saved display-atom list.
+                let linked = atom_links.then(|| super::prompt_refs::pasted_text_links(text));
                 (
                     text.to_owned(),
-                    super::prompt_refs::display(text).into_owned(),
+                    super::prompt_refs::display(linked.as_deref().unwrap_or(text)).into_owned(),
+                    atom_links,
                 )
             });
         self.set_text_with_soft_breaks_as_newlines(&display, mend, true);
-        self.prompt_references = Some((source, display));
+        self.prompt_references = Some((source, display, atom_links));
     }
 
     /// Point the view at transcript prompt markdown, retaining soft line
@@ -1637,6 +1689,7 @@ pub struct Ctx<'a> {
     selection: TranscriptSelection,
     search: Option<SearchHighlights>,
     link_handler: Option<LinkHandler>,
+    link_tooltip: Option<LinkTooltip>,
     /// Remote image URL → already-downloaded local file, for surfaces that
     /// cache media off-thread (the GitHub detail). A miss falls through to
     /// `image_placeholder`, then to GPUI fetching the URL itself.
@@ -1726,6 +1779,7 @@ impl<'a> Ctx<'a> {
             selection,
             search: None,
             link_handler: None,
+            link_tooltip: None,
             image_resolver: None,
             image_placeholder: None,
             annotation_ref_labels: 0,
@@ -1766,6 +1820,11 @@ impl<'a> Ctx<'a> {
 
     pub fn with_link_handler(mut self, handler: LinkHandler) -> Self {
         self.link_handler = Some(handler);
+        self
+    }
+
+    pub fn with_link_tooltip(mut self, tooltip: LinkTooltip) -> Self {
+        self.link_tooltip = Some(tooltip);
         self
     }
 
@@ -1941,6 +2000,7 @@ impl<'a> Ctx<'a> {
             selection: self.selection.clone(),
             search: self.search.clone(),
             link_handler: self.link_handler.clone(),
+            link_tooltip: self.link_tooltip.clone(),
             image_resolver: self.image_resolver.clone(),
             image_placeholder: self.image_placeholder.clone(),
             annotation_ref_labels: self.annotation_ref_labels,
@@ -2101,6 +2161,7 @@ fn text_element_with_selection(
     selection: TranscriptSelection,
     search: Option<SearchHighlights>,
     link_handler: Option<LinkHandler>,
+    link_tooltip: Option<LinkTooltip>,
     file_menu: Option<(ContextMenuHandle, FileRefMenuItems)>,
     commit_menu: Option<(ContextMenuHandle, CommitRefMenuItems)>,
     link_menu: Option<(ContextMenuHandle, LinkMenuItems)>,
@@ -2121,6 +2182,7 @@ fn text_element_with_selection(
     let layout = styled.layout().clone();
     let resolved_commits = selection.resolved_commits.clone();
 
+    let paste_handler = link_handler.clone();
     let body: AnyElement = if flat.links.is_empty() {
         styled.into_any_element()
     } else {
@@ -2141,6 +2203,14 @@ fn text_element_with_selection(
                 let text = flat.text.clone();
                 move |index, window, cx| {
                     let (range, url) = links.iter().find(|(range, _)| range.contains(&index))?;
+                    if let Some(tooltip) = &link_tooltip
+                        && let Some(view) = tooltip(url, window, cx)
+                    {
+                        return Some(view);
+                    }
+                    if url.starts_with(PASTED_TEXT_LINK_PREFIX) {
+                        return None;
+                    }
                     let target = waku_protocol::model::ReferenceContext::decode_reference(url)
                         .map(|(context, target)| {
                             let path = Path::new(&target);
@@ -2405,10 +2475,62 @@ fn text_element_with_selection(
     .size_full();
 
     let mut element = div()
+        .id(SharedString::from(format!(
+            "{}-body-{}",
+            key.row, key.index
+        )))
         .relative()
         .w_full()
         .min_w_0()
         .cursor(CursorStyle::IBeam);
+    let paste_links: Vec<_> = flat
+        .links
+        .iter()
+        .filter(|(_, url)| url.starts_with(PASTED_TEXT_LINK_PREFIX))
+        .map(|(range, url)| {
+            (
+                crate::input::copy_chip_text(&flat.text[range.clone()])
+                    .trim()
+                    .to_owned(),
+                url.clone(),
+            )
+        })
+        .collect();
+    if !paste_links.is_empty()
+        && let Some(handler) = paste_handler
+    {
+        let menu = link_menu.as_ref().map(|(menu, _)| menu.clone());
+        element = element
+            .tab_index(0)
+            .focus_visible(|style| style.bg(selection_wash))
+            .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                if !matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    return;
+                }
+                if paste_links.len() == 1 {
+                    handler(&paste_links[0].1, window, cx);
+                } else if let Some(menu) = &menu {
+                    // Multiple chips in one selectable paragraph share a tab
+                    // stop; the menu supplies arrow-key access to each paste.
+                    menu.set_context_items(
+                        paste_links
+                            .iter()
+                            .enumerate()
+                            .map(|(index, (label, url))| {
+                                let url = url.clone();
+                                let handler = handler.clone();
+                                MenuItem::new(
+                                    format!("{}: {label}", index + 1),
+                                    move |window, cx| handler(&url, window, cx),
+                                )
+                            })
+                            .collect(),
+                    );
+                    menu.open_context_menu(window, cx);
+                }
+                cx.stop_propagation();
+            });
+    }
     // `InteractiveText` counts a press of any button toward its click, so a
     // right press on a link still primes its activation. Remember whether the
     // press landed on a link and swallow that release — a right-click is the
@@ -2508,6 +2630,7 @@ fn text_element(flat: &Rc<FlatText>, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.selection.clone(),
         ctx.search.clone(),
         ctx.link_handler.clone(),
+        ctx.link_tooltip.clone(),
         ctx.context_menu.clone().zip(ctx.file_ref_items.clone()),
         ctx.context_menu.clone().zip(ctx.commit_ref_items.clone()),
         ctx.context_menu.clone().zip(ctx.link_items.clone()),
@@ -2545,6 +2668,7 @@ pub fn selectable_flat_text(
         flat.runs.clone(),
         key,
         selection,
+        None,
         None,
         None,
         None,
@@ -4608,6 +4732,65 @@ mod tests {
                 ("gone".to_owned(), "~~gone~~".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn pasted_text_links_keep_saved_atom_positions_and_copy_labels() {
+        use waku_protocol::model::{
+            MESSAGE_ATOM_END as E, MESSAGE_ATOM_OPEN as O, MESSAGE_ATOM_REF as R,
+            encode_atom_session_id,
+        };
+        let session = Uuid::new_v4();
+        let source = format!(
+            "{O}Pasted text{E} {O}{}{name}{E} {O}{R}\u{FE00}Project{E} {O}Pasted text{E}",
+            encode_atom_session_id(session),
+            name = "Task"
+        );
+        let mut view = MarkdownView::new();
+        view.set_transcript_text_with_atom_links(&source, false, true, true);
+        let flat = flatten(
+            &runs_of(view.parser.text()),
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+            &[],
+        );
+        let pastes: Vec<_> = flat
+            .links
+            .iter()
+            .filter(|(_, url)| url.starts_with(PASTED_TEXT_LINK_PREFIX))
+            .map(|(_, url)| url.as_str())
+            .collect();
+        assert_eq!(pastes, ["goddard-paste://0", "goddard-paste://3"]);
+        assert!(
+            flat.links
+                .iter()
+                .any(|(_, url)| url == &format!("{}{session}", waku_protocol::TASK_LINK_PREFIX))
+        );
+        assert_eq!(
+            flat.copy
+                .fragments
+                .iter()
+                .map(|(_, label)| label.as_ref())
+                .collect::<Vec<_>>(),
+            ["Pasted text", "Task", "Project", "Pasted text"]
+        );
+        view.set_transcript_text(&source, false, true);
+        assert!(!view.parser.text().contains(PASTED_TEXT_MARK));
+        let source = format!("`{O}Pasted text{E}`");
+        view.set_transcript_text_with_atom_links(&source, false, true, true);
+        let flat = flatten(
+            &runs_of(view.parser.text()),
+            &palette(),
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            palette().text,
+            &[],
+        );
+        assert_eq!(flat.links[0].1, "goddard-paste://0");
+        assert!(!flat.text.contains(PASTED_TEXT_MARK));
+        assert!(!flat.text.contains("goddard-paste"));
     }
 
     #[test]

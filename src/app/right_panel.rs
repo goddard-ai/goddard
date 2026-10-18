@@ -5351,6 +5351,10 @@ impl Waku {
         url: &str,
         cx: &mut Context<Self>,
     ) -> Vec<MenuItem> {
+        // A paste's display-only position is not an external URL to open or copy.
+        if url.starts_with(md::render::PASTED_TEXT_LINK_PREFIX) {
+            return Vec::new();
+        }
         let open_target = url.to_owned();
         let waku = cx.entity().downgrade();
         let mut items = vec![MenuItem::new(tr!("common.open_link"), move |_, cx| {
@@ -9964,6 +9968,24 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         self.open_pasted_text_tab(PastedTextKey::Atom(revision), Some(text), None, cx);
+    }
+
+    pub(super) fn open_sent_pasted_text(
+        &mut self,
+        message: Uuid,
+        index: usize,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        use std::hash::{Hash, Hasher};
+        let mut revision = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut revision);
+        self.open_pasted_text_tab(
+            PastedTextKey::MessageAtom(message, index, revision.finish()),
+            Some(text),
+            None,
+            cx,
+        );
     }
 
     /// The `.txt` attachment chip's paste opens the same way; its text is a

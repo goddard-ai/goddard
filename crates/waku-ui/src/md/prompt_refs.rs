@@ -82,3 +82,42 @@ pub(super) fn display(text: &str) -> Cow<'_, str> {
         Cow::Owned(output)
     }
 }
+
+/// Give each folded paste its position in the saved atom list, including
+/// reference atoms, so identical labels still resolve to distinct payloads.
+pub(super) fn pasted_text_links(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut index = 0;
+    while let Some(start) = rest.find(MESSAGE_ATOM_OPEN) {
+        let inner_start = start + MESSAGE_ATOM_OPEN.len_utf8();
+        let Some(end) = rest[inner_start..].find(MESSAGE_ATOM_END) else {
+            break;
+        };
+        let end = inner_start + end + MESSAGE_ATOM_END.len_utf8();
+        let inner = &rest[inner_start..end - MESSAGE_ATOM_END.len_utf8()];
+        output.push_str(&rest[..start]);
+        let span = &rest[start..end];
+        if !inner.starts_with(MESSAGE_ATOM_REF)
+            && waku_protocol::model::decode_atom_session_id(inner)
+                .0
+                .is_none()
+        {
+            // Keep the identity inside the existing span. Markdown link
+            // syntax would turn into visible punctuation inside inline code.
+            output.push(MESSAGE_ATOM_OPEN);
+            output.push(super::render::PASTED_TEXT_MARK);
+            output.push_str(&encode_atom_session_id(uuid::Uuid::from_u128(
+                index as u128,
+            )));
+            output.push_str(inner);
+            output.push(MESSAGE_ATOM_END);
+        } else {
+            output.push_str(span);
+        }
+        index += 1;
+        rest = &rest[end..];
+    }
+    output.push_str(rest);
+    output
+}

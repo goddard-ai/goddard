@@ -9373,6 +9373,12 @@ fn inline_atom_paints(
                 label: SharedString::from(atom.label()),
                 icon: Some(icon),
                 avatar,
+                tooltip: match &atom.kind {
+                    ComposerAtomKind::PastedText(text) => Some(Rc::new(pasted_text_tooltip(
+                        pasted_text_preview(text).into(),
+                    ))),
+                    _ => None,
+                },
             }
         })
         .collect()

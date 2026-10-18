@@ -2154,6 +2154,46 @@ impl Waku {
                         .with_commit_refs(
                             message.role == MessageRole::Assistant || message.notice.is_some(),
                         );
+                    if message.role == MessageRole::User && !message.atoms.is_empty() {
+                        let atoms = Rc::new(message.atoms.clone());
+                        let tooltip_atoms = atoms.clone();
+                        let message_id = message.id;
+                        let waku = cx.entity().downgrade();
+                        let links = self.markdown_link_handler.clone();
+                        ctx = ctx
+                            .with_link_handler(Rc::new(move |url, window, cx| {
+                                if let Some(index) =
+                                    url.strip_prefix(md::render::PASTED_TEXT_LINK_PREFIX)
+                                {
+                                    if let Some((index, atom)) =
+                                        index.parse::<usize>().ok().and_then(|index| {
+                                            atoms.get(index).map(|atom| (index, atom))
+                                        })
+                                    {
+                                        let _ = waku.update(cx, |this, cx| {
+                                            this.open_sent_pasted_text(
+                                                message_id,
+                                                index,
+                                                atom.payload.clone(),
+                                                cx,
+                                            );
+                                        });
+                                    }
+                                } else {
+                                    links(url, window, cx);
+                                }
+                            }))
+                            .with_link_tooltip(Rc::new(move |url, window, cx| {
+                                let index = url
+                                    .strip_prefix(md::render::PASTED_TEXT_LINK_PREFIX)?
+                                    .parse::<usize>()
+                                    .ok()?;
+                                let atom = tooltip_atoms.get(index)?;
+                                Some(composer::pasted_text_tooltip(
+                                    composer::pasted_text_preview(&atom.payload).into(),
+                                )(window, cx))
+                            }));
+                    }
                     if message.role == MessageRole::Assistant {
                         ctx = ctx.with_reference_context(message.turn_id.and_then(|turn| {
                             self.transcript_reference_contexts
@@ -2226,10 +2266,11 @@ impl Waku {
                     let view = matches!(message.role, MessageRole::User | MessageRole::Assistant)
                         .then(|| {
                             let view = markdown.entry(message.id).or_default();
-                            view.set_transcript_text(
+                            view.set_transcript_text_with_atom_links(
                                 &display_content,
                                 message.streaming,
                                 message.role == MessageRole::User,
+                                !message.atoms.is_empty(),
                             );
                             &*view
                         });

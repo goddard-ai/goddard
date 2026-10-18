@@ -909,7 +909,7 @@ enum RightPanelSurface {
     },
     /// The employee roster and goal status for the owning Boss chat.
     Goals,
-    /// A pasted block opened from a composer's "Pasted text" chip — the
+    /// A pasted block opened from a "Pasted text" chip — the
     /// paste's text read-only in a tab. `key` names the paste so a second
     /// click reactivates rather than duplicating; the strip's
     /// `pasted_texts` holds the content.
@@ -918,10 +918,11 @@ enum RightPanelSurface {
 
 /// A pasted-text tab's identity — the atom revision an inline paste opened
 /// with (a new one each edit), or the stored `.txt` path a too-large paste
-/// reads on mount.
+/// reads on mount. Sent atoms use their message, position, and content revision.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum PastedTextKey {
     Atom(Uuid),
+    MessageAtom(Uuid, usize, u64),
     Blob(PathBuf),
 }
 

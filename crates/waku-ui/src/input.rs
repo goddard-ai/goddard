@@ -7,13 +7,13 @@ use crate::md::highlight::{self, Lang, TokenClass};
 use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
 use crate::ui::scrollbar::{self, ScrollbarState};
 use gpui::{
-    App, Bounds, ClipboardEntry, ClipboardItem, Context, Corners, CursorStyle, DispatchPhase,
-    Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
-    Focusable, Font, FontWeight, Global, GlobalElementId, Hsla, InspectorElementId, IntoElement,
-    KeyBinding, LayoutId, Length, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    PaintQuad, Pixels, Point, ScrollHandle, SharedString, StyledText, Subscription, Task,
-    TextLayout, TextRun, UTF16Selection, UnderlineStyle, Window, accesskit, actions, div, fill,
-    font, point, prelude::*, px, size,
+    AnyView, App, Bounds, ClipboardEntry, ClipboardItem, Context, Corners, CursorStyle,
+    DispatchPhase, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
+    EventEmitter, FocusHandle, Focusable, Font, FontWeight, Global, GlobalElementId, Hitbox, Hsla,
+    InspectorElementId, InteractiveText, IntoElement, KeyBinding, LayoutId, Length, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollHandle,
+    SharedString, StyledText, Subscription, Task, TextLayout, TextRun, UTF16Selection,
+    UnderlineStyle, Window, accesskit, actions, div, fill, font, point, prelude::*, px, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -715,6 +715,8 @@ pub(crate) enum AtomGlyph {
 /// placeholder and fallback.
 #[derive(Clone)]
 pub struct InlineAtom {
+    /// Optional preview, prepared by the owner and shown over the painted label.
+    pub tooltip: Option<Rc<dyn Fn(&mut Window, &mut App) -> AnyView>>,
     pub label: SharedString,
     pub icon: Option<&'static str>,
     pub avatar: Option<Arc<gpui::RenderImage>>,
@@ -2451,6 +2453,19 @@ impl TextInput {
     }
 
     fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        // Selecting a whole chip with Shift+Arrow makes Enter its keyboard
+        // equivalent of a click; an ordinary caret still submits/inserts.
+        if self.content.get(self.selected_range.clone()) == Some("\u{FFF9}")
+            && self
+                .marker_atoms()
+                .any(|(marker, atom)| {
+                    marker == self.selected_range.start
+                        && atom.is_some_and(|atom| atom.tooltip.is_some())
+                })
+        {
+            cx.emit(InputEvent::InlineAtomClicked(self.selected_range.start));
+            return;
+        }
         if self.mode == FieldMode::MultiLine && !self.submit_on_enter {
             self.insert_newline(window, cx);
             return;
@@ -3525,7 +3540,7 @@ impl InputElement {
             window,
             cx,
         );
-        let layout = layout_state.text.layout().clone();
+        let layout = layout_state.layout.clone();
         let x_for_index = |index: usize| {
             layout
                 .position_for_index(index)
@@ -3565,7 +3580,8 @@ impl InputElement {
 }
 
 struct InputLayoutState {
-    text: StyledText,
+    text: InteractiveText,
+    layout: TextLayout,
     text_layout_state: (),
     /// Atom label ranges in display coordinates — prepaint turns them into
     /// the chip quads the wash paints as.
@@ -3576,6 +3592,7 @@ struct InputLayoutState {
 }
 
 struct PrepaintState {
+    text_hitbox: Hitbox,
     cursor: Option<PaintQuad>,
     /// The chip quads under each atom's label, painted beneath the text.
     atom_chips: Vec<PaintQuad>,
@@ -3797,7 +3814,7 @@ impl Element for InputElement {
     type PrepaintState = PrepaintState;
 
     fn id(&self) -> Option<ElementId> {
-        None
+        Some(("input-text", self.input.entity_id()).into())
     }
 
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
@@ -3952,12 +3969,29 @@ impl Element for InputElement {
             annotations,
             atoms,
         );
-        let mut text = StyledText::new(display_text).with_runs(runs);
+        let previews: Vec<_> = atom_ranges
+            .iter()
+            .cloned()
+            .zip(input.inline_atoms.iter().map(|atom| atom.tooltip.clone()))
+            .filter_map(|(range, tooltip)| Some((range, tooltip?)))
+            .collect();
+        let styled = StyledText::new(display_text).with_runs(runs);
+        let layout = styled.layout().clone();
+        let mut text = InteractiveText::new("input-text", styled);
+        if !previews.is_empty() {
+            text = text.tooltip(move |index, window, cx| {
+                previews
+                    .iter()
+                    .find(|(range, _)| range.contains(&index))
+                    .map(|(_, tooltip)| tooltip(window, cx))
+            });
+        }
         let (layout_id, text_layout_state) = text.request_layout(id, inspector_id, window, cx);
         (
             layout_id,
             InputLayoutState {
                 text,
+                layout,
                 text_layout_state,
                 atom_ranges,
                 atom_icons,
@@ -3967,8 +4001,8 @@ impl Element for InputElement {
 
     fn prepaint(
         &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         layout_state: &mut Self::RequestLayoutState,
         window: &mut Window,
@@ -3977,16 +4011,16 @@ impl Element for InputElement {
         let text_bounds = self
             .single_line_text_bounds(bounds, layout_state, window, cx)
             .unwrap_or(bounds);
-        layout_state.text.prepaint(
-            None,
-            None,
+        let text_hitbox = layout_state.text.prepaint(
+            id,
+            inspector_id,
             text_bounds,
             &mut layout_state.text_layout_state,
             window,
             cx,
         );
         let theme = Theme::current(cx);
-        let layout = layout_state.text.layout().clone();
+        let layout = layout_state.layout.clone();
         let mut atom_chips = Vec::new();
         let mut atom_icons = Vec::new();
         for (index, range) in layout_state.atom_ranges.iter().enumerate() {
@@ -4067,6 +4101,7 @@ impl Element for InputElement {
                 .update(cx, |input, _| input.caret_reconciled = Some(follow_state));
         }
         PrepaintState {
+            text_hitbox,
             cursor,
             atom_chips,
             atom_icons,
@@ -4075,8 +4110,8 @@ impl Element for InputElement {
 
     fn paint(
         &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         layout_state: &mut Self::RequestLayoutState,
         prepaint: &mut Self::PrepaintState,
@@ -4109,11 +4144,11 @@ impl Element for InputElement {
             window.paint_quad(chip);
         }
         layout_state.text.paint(
-            None,
-            None,
+            id,
+            inspector_id,
             bounds,
             &mut layout_state.text_layout_state,
-            &mut (),
+            &mut prepaint.text_hitbox,
             window,
             cx,
         );
@@ -4147,7 +4182,7 @@ impl Element for InputElement {
         if visually_focused && let Some(cursor) = prepaint.cursor.take() {
             window.paint_quad(cursor);
         }
-        let text_layout = layout_state.text.layout().clone();
+        let text_layout = layout_state.layout.clone();
         self.input.update(cx, |input, _| {
             input.last_layout = Some(text_layout);
         });
@@ -4858,6 +4893,7 @@ mod tests {
                         label: "Big refactor".into(),
                         icon: Some(ATOM_SESSION_ICON),
                         avatar: None,
+                        tooltip: None,
                     }],
                     cx,
                 );
@@ -4904,6 +4940,8 @@ mod tests {
     fn a_click_on_an_atom_chip_reports_its_marker(cx: &mut TestAppContext) {
         use super::{ATOM_PASTED_ICON, INLINE_ATOM_MARKER as A, InlineAtom};
         cx.update(super::init);
+        let previewed = Rc::new(std::cell::Cell::new(false));
+        let preview_sink = previewed.clone();
         let (harness, cx) = cx.add_window_view(|window, cx| {
             let input = cx.new(|cx| {
                 let mut input = TextInput::new(window, cx).multi_line();
@@ -4913,6 +4951,10 @@ mod tests {
                         label: "pasted text".into(),
                         icon: Some(ATOM_PASTED_ICON),
                         avatar: None,
+                        tooltip: Some(Rc::new(move |window, cx| {
+                            preview_sink.set(true);
+                            crate::ui::tooltip::Tooltip::text("the pasted contents")(window, cx)
+                        })),
                     }],
                     cx,
                 );
@@ -4944,12 +4986,31 @@ mod tests {
             let range = &input.atom_display_ranges()[0];
             super::atom_chip_bounds(input.last_layout.as_ref().unwrap(), range)[0].center()
         });
+        cx.simulate_mouse_move(position, None, Modifiers::none());
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(2));
+        cx.run_until_parked();
+        assert!(
+            previewed.get(),
+            "hovering the chip builds its content preview"
+        );
         cx.simulate_click(position, Modifiers::none());
         assert!(
             events
                 .borrow()
                 .iter()
                 .any(|event| matches!(event, InputEvent::InlineAtomClicked(m) if *m == marker))
+        );
+        input.update(cx, |input, cx| {
+            input.move_to(marker, cx);
+        });
+        cx.simulate_keystrokes("shift-right enter");
+        assert!(
+            matches!(events.borrow().last(), Some(InputEvent::InlineAtomClicked(m)) if *m == marker)
+        );
+        assert_eq!(
+            input.read_with(cx, |input, _| input.content.to_string()),
+            format!("see {A} now")
         );
         // Beside the chip is ordinary text — a click there reports nothing.
         let clicks = events

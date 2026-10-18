@@ -1,1 +1,1 @@
-- Click a "Pasted text" chip in the composer — a collapsed paste atom or a stored `.txt` attachment — to read the full paste in a new right-panel tab; hovering the `.txt` chip previews its leading characters, and double-clicking a paste atom opens its editor.
+- Hover over inline pasted-text chips in the composer or sent messages to preview their contents, and click to read the full text in a right-panel tab; double-click a composer chip to edit it.
