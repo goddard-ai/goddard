@@ -5375,6 +5375,9 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(2.0))
+                        .when(action_row, |element| {
+                            element.items_baseline().gap(px(4.0))
+                        })
                         .child(div().min_w_0().truncate().child(label))
                         .when_some(collapsed_count, |element, count| {
                             element.child(
