@@ -41,6 +41,31 @@ struct Lease {
     /// rebuilds per notify, so a loader on an expensive surface can trade
     /// animation granularity for a cheaper cadence.
     stride: u32,
+    notified: bool,
+}
+
+impl Lease {
+    fn renew(&mut self, until: Instant, stride: u32) {
+        self.until = until;
+        // The first loader rendered after a notify chooses a fresh cadence;
+        // other loaders in that render can only make it faster.
+        self.stride = if self.notified {
+            stride
+        } else {
+            self.stride.min(stride)
+        };
+        self.notified = false;
+    }
+
+    fn notify_due(&mut self, ticks: u64) -> bool {
+        if ticks % u64::from(self.stride.max(1)) != 0 {
+            return false;
+        }
+        // Keep retrying at this cadence until a render renews the lease or
+        // it expires. A notification is not an acknowledgement of a redraw.
+        self.notified = true;
+        true
+    }
 }
 
 struct PulseClock {
@@ -85,11 +110,12 @@ fn pulse_lease_with_stride(view: EntityId, stride: u32, cx: &mut App) {
     clock
         .leases
         .entry(view)
-        .and_modify(|lease| {
-            lease.until = until;
-            lease.stride = lease.stride.min(stride);
-        })
-        .or_insert(Lease { until, stride });
+        .and_modify(|lease| lease.renew(until, stride))
+        .or_insert(Lease {
+            until,
+            stride,
+            notified: false,
+        });
     if clock.running {
         return;
     }
@@ -110,14 +136,7 @@ fn pulse_lease_with_stride(view: EntityId, stride: u32, cx: &mut App) {
                 let due = clock
                     .leases
                     .iter_mut()
-                    .filter(|(_, lease)| ticks % lease.stride.max(1) as u64 == 0)
-                    .map(|(view, lease)| {
-                        // Strides re-establish on the render this notify
-                        // triggers; without the reset, one full-rate lease
-                        // would drag its view's cadence down permanently.
-                        lease.stride = u32::MAX;
-                        *view
-                    })
+                    .filter_map(|(view, lease)| lease.notify_due(ticks).then_some(*view))
                     .collect::<Vec<_>>();
                 for view in due {
                     cx.notify(view);
@@ -325,6 +344,34 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pulse_retries_until_a_delayed_render_renews_its_cadence() {
+        let until = Instant::now() + PULSE_LEASE;
+        let mut lease = Lease {
+            until,
+            stride: 1,
+            notified: false,
+        };
+
+        for tick in 1..=3 {
+            assert!(
+                lease.notify_due(tick),
+                "a missed redraw must not stop ticks"
+            );
+        }
+
+        // The fast spinner disappeared before the delayed render. Two
+        // remaining loaders request different, slower cadences in that render.
+        lease.renew(until, 4);
+        lease.renew(until, 2);
+        assert!(lease.notify_due(4));
+        assert!(!lease.notify_due(5));
+        assert!(
+            lease.notify_due(6),
+            "slower loaders also retry without input"
+        );
+    }
 
     #[test]
     fn a_slide_eases_out_and_then_retires() {

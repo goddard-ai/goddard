@@ -116,10 +116,12 @@ per *view*, not per animation: spinners use the full 60 Hz rate, while
 `spin_slow` uses every second tick (≈ 30 Hz). Non-spinning pulses and
 `pulse_lease` retain ≈ 30 Hz; `pulse_lease_slow` and `Pulse::every(2)` use
 ≈ 15 Hz for loaders mounted on expensive surfaces — the working dots set the
-transcript pane's tick floor for the entire turn. Strides re-establish on
-every tick (a lease's stride resets after it fires); an earlier version kept
-the minimum stride forever, so one full-rate lease permanently dragged its
-pane back to 30 Hz.
+transcript pane's tick floor for the entire turn. After a notification, the
+next render re-establishes the stride from its mounted loaders. Until that
+render, ticks keep notifying at the existing cadence so a missed redraw does
+not stall the animation. Leases still expire after 300 ms without renewal.
+Re-establishing the stride lets a view slow down after its fastest loader
+disappears.
 
 The veil dissolve is a pulse-clock client like everything else: the message
 veil at ≈ 30 Hz, the reasoning veil at ≈ 15 Hz, both leasing

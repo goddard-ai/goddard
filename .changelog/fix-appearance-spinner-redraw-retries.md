@@ -1,0 +1,1 @@
+- Spinners retry redraws while idle so a missed frame does not immediately stop their animation.
