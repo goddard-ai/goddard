@@ -40,6 +40,7 @@ struct StatusMarker {
 }
 
 /// Which theme color a marker's icon and label take.
+#[derive(Clone, Copy)]
 pub(super) enum MarkerTone {
     Success,
     Info,
@@ -936,27 +937,21 @@ fn status_marker_chip(marker: &StatusMarker, probability: f64, theme: &Theme) ->
         )
 }
 
-/// What the sidebar status slot can say about a session's last turn. The
-/// footer's many chips collapse to two glyphs — chat for endings that
-/// wait on the user's reply, block for turns that hit a wall — because
-/// the slot's job is glanceability: more shapes would be harder to keep
-/// straight than the verdict they carry.
+/// The actionable turn marker shown in the sidebar, using the same icon,
+/// label, and tone as its transcript chip.
 pub(super) struct SidebarStatusMarker {
     pub(super) icon: &'static str,
     pub(super) label_key: &'static str,
     pub(super) tone: MarkerTone,
 }
 
-/// Which of the two sidebar glyphs a marker maps to, if any. Endings that
-/// leave nothing pending for the user (`complete`, `answered`,
-/// `nothing-to-do`, `pushed-back`, `other`) and the quality flags stay
-/// footer-only; the failure flags claim the danger glyphs.
+/// Quiet endings and quality flags remain footer-only.
 fn sidebar_bucket(marker: &StatusMarker) -> Option<(&'static str, MarkerTone)> {
     match marker.id {
         "awaiting-input" | "go-ahead" | "decision" | "details" | "action-needed" | "aligned"
-        | "partial" | "needs-continuation" => Some(("icons/chat.svg", MarkerTone::Info)),
-        "blocked" => Some(("icons/ban.svg", MarkerTone::Danger)),
-        "failed" | "errors-remain" => Some(("icons/block.svg", MarkerTone::Danger)),
+        | "partial" | "needs-continuation" | "blocked" | "failed" | "errors-remain" => {
+            Some((marker.icon, marker.tone))
+        }
         _ => None,
     }
 }
@@ -2251,14 +2246,18 @@ mod tests {
                 ),
             )]))
         };
-        // Endings that wait on the user's reply collapse to the chat glyph.
-        for choice in ["awaiting-input", "aligned", "partial"] {
+        // Sidebar icons match the corresponding transcript chips.
+        for (choice, icon) in [
+            ("awaiting-input", "icons/chat.svg"),
+            ("aligned", "icons/chat.svg"),
+            ("partial", "icons/hourglass.svg"),
+        ] {
             let marker = sidebar_marker(&ending(choice, 0.90)).unwrap();
-            assert_eq!(marker.icon, "icons/chat.svg");
+            assert_eq!(marker.icon, icon);
         }
         // The failure flags claim the danger glyphs — including beside a
         // waiting ending, where the wall outranks the chat.
-        for (flag, icon) in [("blocked", "icons/ban.svg"), ("failed", "icons/block.svg")] {
+        for (flag, icon) in [("blocked", "icons/ban.svg"), ("failed", "icons/x-bold.svg")] {
             let verdict = evaluation(
                 [
                     (
@@ -2280,8 +2279,7 @@ mod tests {
 
     #[test]
     fn sidebar_marker_uses_the_cleared_subtype_and_ignores_quality_flags() {
-        // A decision refines awaiting-input; the glyph buckets by what the
-        // turn wants while the tooltip keeps the subtype's own label.
+        // A decision uses the subtype's own icon and label.
         let decision = evaluation(BTreeMap::from([
             (
                 ENDING_QUESTION.to_owned(),
