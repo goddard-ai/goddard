@@ -6080,29 +6080,41 @@ impl Waku {
         if save_draft_chip.is_none() && action_suggestion.is_none() {
             return field;
         }
+        // Accessory chips borrow the transcript's airspace without changing
+        // its viewport. Anchor their bottom above the parked queue so wrapped
+        // rows grow upward; only the queue reserves height in the lane.
+        let queue_height = if self.big_picture.is_open() {
+            0.0
+        } else {
+            self.composer_autocomplete.queue_card_height()
+        };
         div()
             .w_full()
             .flex_none()
             .flex()
             .flex_col()
             .child(
-                div()
-                    .flex_none()
-                    .px(px(20.0 - COMPOSER_OVERHANG))
-                    .pb(px(6.0))
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
-                            .mx_auto()
-                            .pl(px(COMPOSER_CHIP_INSET))
-                            .flex()
-                            .flex_wrap()
-                            .items_center()
-                            .gap(px(6.0))
-                            .children(save_draft_chip)
-                            .children(action_suggestion),
-                    ),
+                div().flex_none().relative().h_0().child(
+                    div()
+                        .absolute()
+                        .bottom(px(8.0 + queue_height))
+                        .left_0()
+                        .right_0()
+                        .px(px(20.0 - COMPOSER_OVERHANG))
+                        .child(
+                            div()
+                                .w_full()
+                                .max_w(px(CONTENT_MAX_WIDTH + COMPOSER_OVERHANG * 2.0))
+                                .mx_auto()
+                                .pl(px(COMPOSER_CHIP_INSET))
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap(px(6.0))
+                                .children(save_draft_chip)
+                                .children(action_suggestion),
+                        ),
+                ),
             )
             .child(field)
     }
