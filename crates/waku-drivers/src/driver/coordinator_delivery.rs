@@ -74,6 +74,18 @@ pub fn deliver_coordinator_package(
         adapter.coordinator_policy_enforced(),
         "coordinator capability policy unsupported"
     );
+    if let Some(frozen) = &ledger.frozen_coordinator {
+        anyhow::ensure!(
+            frozen.successor == current.session,
+            "frozen predecessor cannot submit coordinator work"
+        );
+        waku_boss::guarded_lifecycle::validate_replacement_capacity(
+            frozen.predecessor,
+            frozen.successor,
+            expected_budget,
+            adapter.coordinator_replacement_capacity().as_ref(),
+        )?;
+    }
     let attempt = ContinuityLedger::update(ledger_path, |ledger| {
         anyhow::ensure!(
             !ledger

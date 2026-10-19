@@ -268,6 +268,15 @@ pub trait DriverControl: Send + Sync {
         false
     }
 
+    /// A qualified broker must hold a hard-cap reservation across activation.
+    /// Local runtime IDs and free-slot arithmetic are not reservation evidence.
+    /// Current launch paths cannot supply this contract; replacement stays paused.
+    fn coordinator_replacement_capacity(
+        &self,
+    ) -> Option<waku_boss::guarded_lifecycle::ReplacementCapacity> {
+        None
+    }
+
     fn coordinator_startup_observation(
         &self,
     ) -> Option<waku_boss::provider_budget::StartupBudgetEvidence> {

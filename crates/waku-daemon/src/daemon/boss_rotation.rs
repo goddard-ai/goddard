@@ -689,6 +689,12 @@ impl WakuBackend {
         let latest = ContinuityLedger::load(&self.boss_continuity_path())?;
         let adapter = driver.coordinator_control();
         let observed = adapter.coordinator_startup_observation();
+        waku_boss::guarded_lifecycle::validate_replacement_capacity(
+            intent.old_session_id,
+            intent.new_session_id,
+            &expected,
+            adapter.coordinator_replacement_capacity().as_ref(),
+        )?;
         latest.validate_successor(
             &package,
             attempt,
@@ -1784,6 +1790,14 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
         self.inner
             .coordinator_control()
             .reconcile_coordinator_package(attempt)
+    }
+
+    fn coordinator_replacement_capacity(
+        &self,
+    ) -> Option<waku_boss::guarded_lifecycle::ReplacementCapacity> {
+        self.inner
+            .coordinator_control()
+            .coordinator_replacement_capacity()
     }
 
     fn coordinator_startup_observation(

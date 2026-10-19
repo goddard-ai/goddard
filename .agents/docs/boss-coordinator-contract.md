@@ -111,3 +111,32 @@ qualified adapter, replacement admission/capacity integration, a successful
 ownership activation grant, provider-internal loop interception, or live crash
 qualification. All current providers remain paused. Those gates must be closed
 before the full item-3 lifecycle or prevention outcome can be called complete.
+
+## Replacement-capacity admission gate
+
+`DriverControl::coordinator_replacement_capacity` defaults to unavailable for
+all current adapters. Both a fresh exact-package replacement submission and
+pre-publication/recovery validation require a broker observation bound to the
+predecessor, successor and complete independently expected startup binding.
+Unknown receipt reconciliation remains permitted without acquiring or inventing
+a new reservation; it cannot replay the package or activate either owner.
+
+`ReplacementCapacity` distinguishes overlapping provider processes from a
+confirmed predecessor release. Overlap counts both slots; releasing the old
+slot permits replacement at a cap of one. Occupancy includes the successor and
+all other held slots in the same pool. Missing evidence, changed binding, empty
+reservation, zero occupancy and exceeding the cap block. The positive fixtures
+exercise this accounting contract only, not qualification or actual reservation.
+
+This is a required interface and pause path, not a capacity broker integration
+or an activation grant. An enabling adapter still needs a broker-native,
+restart-reconcilable reservation held atomically through publication, shared
+with employee and alternate launch admission. A numeric snapshot or local ID
+cannot establish that contract. Current employee admission does not provide
+that Boss replacement lease. No current adapter implements this method.
+
+Item 3 remains incomplete: effective provider-internal checkpoint enforcement
+and startup binding (item 1), native exact receipt/policy readiness (item 2),
+and a broker lease plus atomic ownership/grant publication are still required.
+No positive production activation path is enabled. Existing durable freeze,
+pending events and uncertain receipts remain intact on these failures.

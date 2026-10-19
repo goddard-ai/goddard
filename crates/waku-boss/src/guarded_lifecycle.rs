@@ -20,6 +20,64 @@ pub struct FrozenCoordinator {
     pub package: Option<CoordinatorPackage>,
 }
 
+/// Adapter/broker observation, never constructed from model output or saved IDs.
+/// The broker must hold this reservation through publication and enforce the cap
+/// across employees, other Bosses and every launch path. A snapshot alone is
+/// insufficient: current adapters deliberately return no such observation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReplacementCapacity {
+    pub predecessor: Uuid,
+    pub successor: Uuid,
+    pub startup: StartupBudgetBinding,
+    /// Broker-native reservation identity, reconciled rather than recreated on restart.
+    pub reservation: String,
+    pub hard_cap: u64,
+    /// All held slots in the provider/model pool, including this successor.
+    pub occupied: u64,
+    pub placement: ReplacementPlacement,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReplacementPlacement {
+    /// Both provider processes count toward the same hard cap.
+    Overlap,
+    /// Broker has confirmed termination and released the predecessor's slot.
+    PredecessorReleased,
+}
+
+/// Validate a held reservation against independently obtained lifecycle identity.
+/// This checks binding/accounting only; it grants neither provider qualification
+/// nor ownership. Caller must retain the broker lease while publishing authority.
+pub fn validate_replacement_capacity(
+    predecessor: Uuid,
+    successor: Uuid,
+    expected: &StartupBudgetBinding,
+    observed: Option<&ReplacementCapacity>,
+) -> anyhow::Result<()> {
+    let held = observed.ok_or_else(|| {
+        anyhow::anyhow!("Boss refresh paused: replacement capacity contract unavailable")
+    })?;
+    anyhow::ensure!(
+        !predecessor.is_nil()
+            && !successor.is_nil()
+            && predecessor != successor
+            && held.predecessor == predecessor
+            && held.successor == successor
+            && held.startup == *expected
+            && !held.reservation.is_empty(),
+        "replacement capacity binding changed"
+    );
+    anyhow::ensure!(
+        held.occupied > 0 && held.occupied <= held.hard_cap,
+        "replacement capacity hard cap exceeded"
+    );
+    anyhow::ensure!(
+        held.placement != ReplacementPlacement::Overlap || held.occupied >= 2,
+        "overlapping predecessor slot not accounted"
+    );
+    Ok(())
+}
+
 impl ContinuityLedger {
     /// Freeze before waiting for quiescence. Duplicate triggers keep the original
     /// successor and checkpoint. A different replacement cannot discard evidence.
@@ -180,6 +238,105 @@ mod tests {
             generation: package.binding.generation,
             package_digest: package.exact_content().unwrap().digest().unwrap(),
             operation_id: Uuid::new_v4(),
+        }
+    }
+
+    #[test]
+    fn replacement_capacity_requires_bound_held_slots_without_bursting() {
+        let old = Uuid::new_v4();
+        let new = Uuid::new_v4();
+        let expected = binding(&package(new));
+        let mut held = ReplacementCapacity {
+            predecessor: old,
+            successor: new,
+            startup: expected.clone(),
+            reservation: "trusted-test-broker-lease".into(),
+            hard_cap: 2,
+            occupied: 2,
+            placement: ReplacementPlacement::Overlap,
+        };
+        // Trusted broker fixtures test placement, not real provider qualification.
+        assert!(validate_replacement_capacity(old, new, &expected, Some(&held)).is_ok());
+        held.hard_cap = 1;
+        assert!(validate_replacement_capacity(old, new, &expected, Some(&held)).is_err());
+        held.occupied = 1;
+        assert!(validate_replacement_capacity(old, new, &expected, Some(&held)).is_err());
+        held.placement = ReplacementPlacement::PredecessorReleased;
+        assert!(validate_replacement_capacity(old, new, &expected, Some(&held)).is_ok());
+        for field in 0..6 {
+            let mut changed = held.clone();
+            match field {
+                0 => changed.predecessor = Uuid::new_v4(),
+                1 => changed.successor = Uuid::new_v4(),
+                2 => changed.startup.runtime_id = Uuid::new_v4(),
+                3 => changed.startup.operation_id = Uuid::new_v4(),
+                4 => changed.reservation.clear(),
+                _ => changed.occupied = 0,
+            }
+            assert!(validate_replacement_capacity(old, new, &expected, Some(&changed)).is_err());
+        }
+        assert!(validate_replacement_capacity(old, new, &expected, None).is_err());
+    }
+
+    #[test]
+    fn replacement_capacity_never_qualifies_any_current_runtime() {
+        use crate::coordinator_contract::ProviderPackageReceipt;
+        for provider in ProviderKind::ALL {
+            let old = Uuid::new_v4();
+            let mut p = package(Uuid::new_v4());
+            p.binding.provider = provider;
+            let mut ledger = ContinuityLedger::default();
+            ledger
+                .freeze_coordinator(old, p.binding.session, 0)
+                .unwrap();
+            ledger.stage_successor("delivery", &p, 0).unwrap();
+            let attempt = ledger
+                .submit_package("delivery", Uuid::new_v4(), 1)
+                .unwrap();
+            assert!(ledger.record_coordinator_outcome(
+                &attempt,
+                PackageOutcome::Confirmed(ProviderPackageReceipt {
+                    attempt: attempt.clone(),
+                    native_session: "trusted-fixture-session".into(),
+                    native_request: "trusted-fixture-request".into(),
+                }),
+                2
+            ));
+            let mut expected = binding(&p);
+            expected.runtime_id = attempt.runtime_id;
+            let held = ReplacementCapacity {
+                predecessor: old,
+                successor: p.binding.session,
+                startup: expected.clone(),
+                reservation: "trusted-test-broker-lease".into(),
+                hard_cap: 1,
+                occupied: 1,
+                placement: ReplacementPlacement::PredecessorReleased,
+            };
+            assert!(
+                validate_replacement_capacity(old, p.binding.session, &expected, Some(&held))
+                    .is_ok()
+            );
+            let evidence = StartupBudgetEvidence {
+                binding: expected.clone(),
+                bounds: BudgetBounds {
+                    compaction_floor: Some(100),
+                    current_context: Some(0),
+                    max_growth: Some(1),
+                    safety_margin: Some(1),
+                },
+            };
+            let before = ledger.clone();
+            assert!(
+                ledger
+                    .validate_successor(&p, &attempt, &expected, Some(&evidence), true)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("UnqualifiedRuntime")
+            );
+            assert_eq!(ledger, before);
+            assert!(ledger.coordinator_frozen(old));
+            assert!(ledger.coordinator_frozen(p.binding.session));
         }
     }
 
