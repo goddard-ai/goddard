@@ -6243,13 +6243,6 @@ impl Waku {
                                     .child(div().min_w_0().truncate().child(file_name)),
                             )
                             .child(div().flex_1())
-                            // The pin marker keeps a pinned row's state
-                            // visible outside hover — the group no longer
-                            // explains it the way the Pinned header does
-                            // for tasks.
-                            .when(pinned, |line| {
-                                line.child(icon("icons/pin-filled.svg", 12.0, theme.text_tertiary))
-                            })
                             .child(
                                 div()
                                     .flex_none()
