@@ -13547,6 +13547,7 @@ impl Waku {
             .iter()
             .map(|session| (session.id, session))
             .collect();
+        let searching = !self.boss_ui.goals_query.is_empty();
         let now = unix_time();
         let mut finished: Vec<Arc<BossOutcomePanelRow>> = Vec::new();
         let mut running = Vec::new();
@@ -13557,6 +13558,15 @@ impl Waku {
         // sections keeps its expansion and its focus-friendly outcome id.
         let mut entries: HashMap<Uuid, Vec<BossOutcomeItem>> = HashMap::new();
         for row in rows.iter() {
+            if searching
+                && !row
+                    .outcome
+                    .outcome
+                    .to_lowercase()
+                    .contains(&self.boss_ui.goals_query)
+            {
+                continue;
+            }
             if hide_archived_outcome_row(row, &sessions, now) {
                 continue;
             }
@@ -13709,7 +13719,7 @@ impl Waku {
             if section_rows.is_empty() {
                 continue;
             }
-            let collapsed = self.boss_ui.goals_collapsed.contains(&(key, section));
+            let collapsed = !searching && self.boss_ui.goals_collapsed.contains(&(key, section));
             items.push(BossOutcomeItem::Header {
                 section,
                 label,
@@ -13735,13 +13745,13 @@ impl Waku {
                 .goals_history_expanded
                 .contains(&(key, section));
             let (visible, hidden) = boss_goals_section_fold(section_rows, now, cap);
-            let shown = if history_expanded {
+            let shown = if searching || history_expanded {
                 section_rows.as_slice()
             } else {
                 visible.as_slice()
             };
             items.extend(shown.iter().flat_map(|row| expand(row, &entries)));
-            if hidden > 0 {
+            if hidden > 0 && !searching {
                 items.push(BossOutcomeItem::HistoryToggle {
                     section,
                     older_count: hidden,
@@ -13830,11 +13840,33 @@ impl Waku {
             .flex()
             .flex_col()
             .px(px(12.0))
-            .child(div().flex_none().pb(px(8.0)).child(project_menu));
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .pb(px(8.0))
+                    .child(
+                        TextField::new("boss-goals-search", self.boss_goals_search.clone())
+                            .icon("icons/search.svg", 13.0)
+                            .flex_1()
+                            .min_w_0(),
+                    )
+                    .child(project_menu),
+            );
         if items.is_empty() {
             return panel.child(self.render_right_panel_empty_message(
-                tr!("boss.goals_empty_title"),
-                tr!("boss.goals_empty_body"),
+                if searching {
+                    tr!("boss.goals_no_matches")
+                } else {
+                    tr!("boss.goals_empty_title")
+                },
+                if searching {
+                    tr!("boss.goals_no_matches_body")
+                } else {
+                    tr!("boss.goals_empty_body")
+                },
                 cx,
             ));
         }

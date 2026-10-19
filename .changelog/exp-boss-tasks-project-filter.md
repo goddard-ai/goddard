@@ -1,1 +1,1 @@
-- Filter the groups in the Boss Tasks tab by project, with “All projects” selected by default.
+- Filter the Boss Tasks tab by outcome title and project, with “All projects” selected by default; searching expands matching groups and reveals older matches.

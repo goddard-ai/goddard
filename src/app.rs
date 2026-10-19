@@ -3894,6 +3894,8 @@ pub struct Waku {
     /// The Memory Records feed's search field — text, project name, and
     /// bucket label over every accessible record.
     boss_memory_search: Entity<TextInput>,
+    /// Filters Tasks by outcome title.
+    boss_goals_search: Entity<TextInput>,
     /// Virtualized list over the filtered skill rows.
     skills_list_state: ListState,
     skills_scrollbar: Rc<ScrollbarState>,
@@ -5820,6 +5822,13 @@ impl Waku {
                 .accessibility_label(tr!("boss.history_search"))
                 .placeholder(tr!("boss.history_search_placeholder"))
         });
+        let boss_goals_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .tab_index(0)
+                .clear_on_escape()
+                .accessibility_label(tr!("boss.goals_search"))
+                .placeholder(tr!("boss.goals_search"))
+        });
         let boss_memory_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .tab_index(0)
@@ -6918,6 +6927,23 @@ impl Waku {
             )
             .detach();
             cx.subscribe(
+                &boss_goals_search,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        this.boss_ui.goals_query = this
+                            .boss_goals_search
+                            .read(cx)
+                            .content()
+                            .trim()
+                            .to_lowercase();
+                        this.boss_ui.goals_list.reset(0);
+                        this.boss_ui.goals_signature = None;
+                        cx.notify();
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &boss_memory_search,
                 |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
@@ -7763,6 +7789,7 @@ impl Waku {
                 skills_search,
                 boss_history_search,
                 boss_memory_search,
+                boss_goals_search,
                 skills_list_state: ListState::new(0, ListAlignment::Top, px(512.0)),
                 skills_scrollbar: ScrollbarState::new(),
                 skills_rows: RefCell::new(Vec::new()),

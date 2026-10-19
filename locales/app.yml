@@ -6467,6 +6467,12 @@ boss.goals_needs_attention:
   en: "%{count} needs attention"
 boss.goals_updated_ago:
   en: "%{ago} ago"
+boss.goals_search:
+  en: Search outcome titles…
+boss.goals_no_matches:
+  en: No matching tasks
+boss.goals_no_matches_body:
+  en: Try another outcome title or project.
 boss.goals_empty_title:
   en: No tasks yet
 boss.goals_empty_body:

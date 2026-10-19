@@ -15000,6 +15000,10 @@ impl Waku {
                 input.set_placeholder(tr!("input.search_fonts"), cx)
             });
         }
+        self.boss_goals_search.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("boss.goals_search"), cx);
+            input.set_placeholder(tr!("boss.goals_search"), cx)
+        });
         self.skills_search.update(cx, |input, cx| {
             input.set_accessibility_label(tr!("skills.search"), cx);
             input.set_placeholder(tr!("skills.search"), cx)

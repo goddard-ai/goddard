@@ -626,6 +626,8 @@ pub(super) struct BossUi {
     pub(super) goals_signature: Option<u64>,
     /// Selected project per Tasks host; no entry means all projects.
     pub(super) goals_project: HashMap<DaemonKey, Uuid>,
+    /// Normalized title query, mirrored from the search input on edits.
+    pub(super) goals_query: String,
     pub(super) goals_collapsed: HashSet<(DaemonKey, BossGoalSection)>,
     /// Daemons whose Pending section was seeded collapsed — the fold is a
     /// first-visit default; toggles after that win freely.
@@ -856,6 +858,7 @@ impl Default for BossUi {
             goals_list_owner: None,
             goals_signature: None,
             goals_project: HashMap::new(),
+            goals_query: String::new(),
             goals_collapsed: HashSet::new(),
             goals_collapsed_seeded: HashSet::new(),
             goals_history_expanded: HashSet::new(),
