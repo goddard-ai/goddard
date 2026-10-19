@@ -74,6 +74,7 @@ export type { ChainDefinition } from "./ChainDefinition";
 export type { ChainHandoff } from "./ChainHandoff";
 export type { ChainHistory } from "./ChainHistory";
 export type { ChainOperation } from "./ChainOperation";
+export type { ChainProjectSelector } from "./ChainProjectSelector";
 export type { ChainResult } from "./ChainResult";
 export type { ChainStatus } from "./ChainStatus";
 export type { ChainStep } from "./ChainStep";

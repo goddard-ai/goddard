@@ -196,6 +196,18 @@ impl WakuBackend {
                 }
             })
             .map(|mut result| {
+                if let waku_protocol::boss::BossResult::State { state } = &mut result {
+                    let projects = self.task_state.lock();
+                    for chain in &mut state.chains {
+                        for step in &mut chain.steps {
+                            step.project_metadata = projects
+                                .projects
+                                .iter()
+                                .find(|project| project.id == step.definition.project_id)
+                                .map(waku_protocol::projects::CanonicalProject::of);
+                        }
+                    }
+                }
                 if caller.is_some_and(|id| !self.boss.is_boss(id))
                     && let waku_protocol::boss::BossResult::State { state } = &mut result
                 {
@@ -261,54 +273,39 @@ impl WakuBackend {
                             .any(|chain| chain.request_id == *request_id),
                         _ => false,
                     };
-                    // Lost-response retries use the accepted record even if external
-                    // dependencies have since changed; conflicts are checked by the reducer.
+                    let projects = self.task_state.lock().projects.clone();
+                    // Keep the submitted definition untouched for replay comparison.
+                    // Only the preflight copy and durable execution steps are canonicalized.
+                    let mut project_bindings = Vec::new();
                     if !existing_request {
                         let document = self.boss.document();
-                        let steps: Vec<_> = match &action {
+                        let steps = match &action {
                             ChainOperation::Create { definition, .. } => {
-                                definition.steps.iter().collect()
+                                let mut steps = definition.steps.clone();
+                                for (index, step) in steps.iter_mut().enumerate() {
+                                    step.resolve_project(&projects, index)?;
+                                }
+                                steps
                             }
-                            ChainOperation::Revise {
-                                chain_id,
-                                step,
-                                definition,
-                                ..
-                            } => {
-                                // Policy checks see the post-edit run, not
-                                // the replacement alone.
-                                document
-                                    .chains
-                                    .iter()
-                                    .find(|chain| chain.id == *chain_id)
-                                    .map(|chain| {
-                                        chain
-                                            .steps
-                                            .iter()
-                                            .enumerate()
-                                            .map(|(index, stored)| {
-                                                if index == *step {
-                                                    definition
-                                                } else {
-                                                    &stored.definition
-                                                }
-                                            })
-                                            .collect()
-                                    })
-                                    .unwrap_or_else(|| vec![definition])
+                            ChainOperation::Revise { chain_id, step, definition,
+                                expected_revision, expected_definition_version } => {
+                                let chain = document.chains.iter().find(|chain| chain.id == *chain_id)
+                                    .ok_or_else(|| anyhow!("unknown chain"))?;
+                                anyhow::ensure!(chain.revision == *expected_revision && chain.definition_version == *expected_definition_version,
+                                    "stale chain revision or definition");
+                                let mut steps: Vec<_> = chain.steps.iter().map(|stored| stored.definition.clone()).collect();
+                                let target = steps.get_mut(*step).ok_or_else(|| anyhow!("unknown chain step"))?;
+                                let mut replacement = definition.clone();
+                                replacement.resolve_project(&projects, *step)?;
+                                *target = replacement;
+                                steps
                             }
                             _ => vec![],
                         };
-                        for step in &steps {
-                            let project = self
-                                .task_state
-                                .lock()
-                                .projects
-                                .iter()
-                                .find(|project| project.id == step.project_id)
-                                .cloned()
-                                .ok_or_else(|| anyhow!("unknown chain project"))?;
-                            anyhow::ensure!(project.path.is_dir(), "chain project is unavailable");
+                        for (index, step) in steps.iter().enumerate() {
+                            let project = projects.iter().find(|project| project.id == step.project_id)
+                                .ok_or_else(|| anyhow!("project_unavailable: Step {}: accepted project {} is no longer registered; restore its registration or explicitly revise the chain", index + 1, step.project_id))?;
+                            anyhow::ensure!(project.path.is_dir(), "project_unavailable: Step {}: project '{}' (ID {}) root '{}' is unavailable; restore its directory before retrying", index + 1, project.name, project.id, project.path.display());
                             if !step.resources.is_empty() {
                                 self.resource_broker()?.validate_set(&step.resources)?;
                             }
@@ -352,7 +349,8 @@ impl WakuBackend {
                                 );
                             }
                         }
-                        self.validate_chain_projects(&steps)?;
+                        self.validate_chain_projects(&steps.iter().collect::<Vec<_>>())?;
+                        project_bindings = steps.iter().map(|step| step.project_id).collect();
                     }
                     let is_result = matches!(action, ChainOperation::RecordResult { .. });
                     // Resume on a gate-paused chain re-verifies the sealed
@@ -369,7 +367,7 @@ impl WakuBackend {
                             state: self.boss.document(),
                         });
                     }
-                    self.boss.chain_operation(caller, action)?;
+                    self.boss.chain_operation_with_project_bindings(caller, action, Some(&project_bindings))?;
                     if is_result {
                         Ok(BossResult::Saved)
                     } else {

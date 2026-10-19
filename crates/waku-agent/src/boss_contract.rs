@@ -28,7 +28,7 @@ pub(super) fn availability(path: &str) -> Value {
             json!({"roles":["task","boss","planning","human"],"conditions":["Employees cannot use task prompts; boss prompt retains control of supervised employees"]})
         }
         "boss chain" => {
-            json!({"roles":["boss","planning","human","employee"],"conditions":["Boss experiment enabled","Employees may only record their bound attempt result; response is Saved","Controls and inspection require Boss or human authority","Accepted steps admit and hand off automatically; exceptions pause the chain"]})
+            json!({"roles":["boss","planning","human","employee"],"conditions":["Boss experiment enabled","Employees may only record their bound attempt result; response is Saved","Controls and inspection require Boss or human authority","Accepted steps admit and hand off automatically; exceptions pause the chain","Create/revise: exactly one of projectId, project.name or project.path; selectors resolve before acceptance and bind canonical IDs","Discovery: goddard-agent boss projects list or boss projects resolve; duplicate matches require an explicit ID or root","Accepted create replay preserves original selector and bindings; changed-definition reuse conflicts"]})
         }
         "boss summon" => {
             json!({"roles":["boss","planning","human","employee"],"conditions":["Boss experiment enabled","Employee requires summonEmployees grant and active supervisor","Employee permissions are clamped to its grants","--boss-authority grants Boss-level operation authority for the admission — boss or human callers only, fixed at summon, ends with the assignment"]})
@@ -84,6 +84,19 @@ pub(super) fn enrich_leaf(path: &str, mut leaf: Value) -> Value {
     if path == "search" {
         leaf["inputConventions"]["content"] =
             json!("Supply one positional query, --text, or --file; --file - reads UTF-8 stdin");
+    }
+    if path == "boss chain" {
+        leaf["definitions"] = inputs()["definitions"].clone();
+        leaf["constraints"] = json!([
+            "Each create/revise step requires exactly one of projectId, project.name, or project.path",
+            "projectId is UUID-only; project.name and project.path cannot be combined",
+            "Accepted execution uses canonical projectId; original submitted selectors remain the create replay key"
+        ]);
+        leaf["errors"]["projectSelection"] = json!({
+            "codes": ["project_unknown", "project_ambiguous", "project_selector_invalid", "project_temporary"],
+            "details": "error.projectFailure carries code, selector, 1-based step, message, nextAction, candidates and truncated",
+            "dispatch": "project_unavailable appears in the paused chain reason and attempt history"
+        });
     }
     if path == "boss summon" {
         let object = leaf["inputs"]

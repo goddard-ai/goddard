@@ -421,8 +421,8 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss projects resolve --name goddard".to_owned(),
         ),
         "boss chain" => (
-            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"schema":{"$ref":"#/definitions/ChainOperation"}},"notes":"Phase 1 safety contracts only; no provider dispatch. Creation is opt-in; controls require expectedRevision."}),
-            json!({"json":"BossResult::State with durable chains; RecordResult returns Saved"}),
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"schema":{"$ref":"#/definitions/ChainOperation"}},"notes":"Create/revise steps require exactly one of projectId (registered UUID), project.name (exact ASCII case-insensitive name), or project.path (absolute registered root). Run boss projects list or boss projects resolve for discovery. Selectors bind canonical IDs before acceptance; duplicate matches reject with candidates. Retry an unchanged create with the same requestId and supervisor after a lost response. Changed definitions conflict. Controls require expectedRevision."}),
+            json!({"json":"BossResult::State with durable chains, canonical projectId and current projectMetadata (null when missing); RecordResult returns Saved; project selection errors return ProjectRejected with stable code, selector, step, nextAction and candidates"}),
             "goddard-agent boss chain --json-file chain.json".to_owned(),
         ),
         "boss view" => (
@@ -1550,7 +1550,7 @@ fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
         "chain" => {
             let (_, opts) = flags(args, &["json", "json-file"], false)?;
             let action = serde_json::from_str(&json_input(&opts)?)
-                .context("invalid typed chain operation")?;
+                .context("invalid typed chain operation; provide exactly one of projectId (registered UUID), project.name, or project.path; memory bucket IDs are not project IDs; run `goddard-agent boss projects list`; older daemons need an upgrade or projectId")?;
             print_boss(boss_request(BossOperation::Chain { action })?)
         }
         "view" | "context" | "roster" => {

@@ -58,6 +58,26 @@ chain_enum!(ChainControl {
     Cancel
 });
 
+/// Explicit chain selector: names and registered roots never overload projectId.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChainProjectSelector {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_selector_text"
+    )]
+    #[ts(optional)]
+    pub name: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_selector_text"
+    )]
+    #[ts(optional)]
+    pub path: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ChainStepDefinition {
@@ -67,7 +87,22 @@ pub struct ChainStepDefinition {
     pub purpose: Option<crate::boss::EmployeePurpose>,
     pub title: String,
     pub prompt: String,
+    /// Exactly one of projectId, project.name, or project.path is required at intake.
+    /// Accepted execution definitions always contain the canonical projectId.
+    #[serde(
+        default,
+        skip_serializing_if = "Uuid::is_nil",
+        deserialize_with = "deserialize_project_id"
+    )]
+    #[ts(as = "Option<Uuid>", optional)]
     pub project_id: Uuid,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_project_selector"
+    )]
+    #[ts(optional)]
+    pub project: Option<ChainProjectSelector>,
     pub persona_id: Option<Uuid>,
     pub provider: ProviderKind,
     /// Concrete selection, never inherited or auto-routed at dispatch.
@@ -87,6 +122,69 @@ pub struct ChainStepDefinition {
     pub plan_id: Option<Uuid>,
     pub item_id: Option<Uuid>,
     pub successor_brief: String,
+}
+
+fn deserialize_selector_text<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    String::deserialize(deserializer).map(Some)
+}
+
+fn deserialize_project_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Uuid, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    Uuid::parse_str(&value).ok().filter(|id| !id.is_nil()).ok_or_else(||
+        serde::de::Error::custom("projectId must be a registered project UUID; memory bucket IDs are separate identifiers; run `goddard-agent boss projects list`"))
+}
+
+fn deserialize_project_selector<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ChainProjectSelector>, D::Error> {
+    ChainProjectSelector::deserialize(deserializer).map(Some)
+}
+
+impl ChainStepDefinition {
+    /// Resolve intake selection without retaining a mutable name/path execution target.
+    pub fn resolve_project(
+        &mut self,
+        projects: &[crate::model::Project],
+        index: usize,
+    ) -> Result<(), crate::projects::ProjectSelectionError> {
+        use crate::projects::*;
+        let selector = match (&self.project, self.project_id.is_nil()) {
+            (None, false) => ProjectSelector::Kinded(ProjectSelectorFields {
+                id: Some(self.project_id.to_string()),
+                ..Default::default()
+            }),
+            (Some(fields), true) => ProjectSelector::Kinded(ProjectSelectorFields {
+                name: fields.name.clone(),
+                path: fields.path.clone(),
+                ..Default::default()
+            }),
+            _ => {
+                return Err(ProjectSelectionError {
+                    code: ProjectSelectionErrorCode::ProjectSelectorInvalid,
+                    selector:
+                        serde_json::json!({"projectId": self.project_id, "project": self.project})
+                            .to_string(),
+                    step: None,
+                    message: "provide exactly one of projectId, project.name, or project.path"
+                        .into(),
+                    next_action: "Run `goddard-agent boss projects list` and supply one selector."
+                        .into(),
+                    candidates: vec![],
+                    truncated: false,
+                }
+                .at_step(index));
+            }
+        };
+        self.project_id = resolve_project(projects, &selector)
+            .map_err(|error| error.at_step(index))?
+            .id;
+        self.project = None;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -175,6 +273,9 @@ pub struct ChainHandoff {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ChainStep {
+    /// Current catalog metadata for the bound ID in inspection responses; null means missing.
+    #[serde(default)]
+    pub project_metadata: Option<crate::projects::CanonicalProject>,
     pub definition: ChainStepDefinition,
     pub status: StepStatus,
     pub attempts: Vec<ChainAttempt>,

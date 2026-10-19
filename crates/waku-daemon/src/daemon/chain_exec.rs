@@ -191,6 +191,42 @@ impl WakuBackend {
         chain_binding(&self.boss, session_id)
     }
 
+    /// Resolve only a chain's accepted UUID, including before its shell is bound.
+    /// Ordinary summons retain their existing path/registration behavior.
+    pub(super) fn chain_employee_project(
+        &self,
+        employee: &waku_protocol::boss::BossEmployee,
+    ) -> anyhow::Result<Option<(Uuid, PathBuf)>> {
+        let document = self.boss.document();
+        let project_id = document.chains.iter().find_map(|chain| {
+            chain.steps.iter().find_map(|step| {
+                step.attempts
+                    .iter()
+                    .any(|attempt| {
+                        attempt.employee_id == Some(employee.session_id)
+                            || employee.request_id == Some(attempt.dispatch_id)
+                    })
+                    .then_some(step.definition.project_id)
+            })
+        });
+        let Some(project_id) = project_id else {
+            return Ok(None);
+        };
+        let project = self.task_state.lock().projects.iter()
+            .find(|project| project.id == project_id).cloned()
+            .ok_or_else(|| anyhow!("project_unavailable: accepted project {project_id} is no longer registered; restore that registration or explicitly revise the chain; no replacement was selected"))?;
+        let root = dunce::canonicalize(&project.path).with_context(|| format!(
+            "project_unavailable: accepted project '{}' (ID {}) root '{}' is unavailable; restore its directory before retrying",
+            project.name, project.id, project.path.display()))?;
+        anyhow::ensure!(
+            root.is_dir(),
+            "project_unavailable: accepted project '{}' (ID {}) root is not a directory",
+            project.name,
+            project.id
+        );
+        Ok(Some((project_id, root)))
+    }
+
     /// The workspace and revision a fresh dispatch actually observed — the
     /// attempt's recorded `startingRevision` a later verifier checks
     /// against, never the revision the summon merely intended.
@@ -305,10 +341,12 @@ impl WakuBackend {
             .find(|project| project.id == definition.project_id)
             .cloned()
         else {
-            return self.chain_admission_failed(chain, attempt, "chain project is unavailable");
+            return self.chain_admission_failed(chain, attempt, format!(
+                "project_unavailable: accepted project {} is no longer registered; restore that registration or explicitly revise the chain; no replacement was selected", definition.project_id));
         };
         if !project.path.is_dir() {
-            return self.chain_admission_failed(chain, attempt, "chain project is unavailable");
+            return self.chain_admission_failed(chain, attempt, format!(
+                "project_unavailable: accepted project '{}' (ID {}) root '{}' is unavailable; restore its directory before retrying", project.name, project.id, project.path.display()));
         }
         // Handoff inputs are re-verified at dispatch: a drifted landing or
         // workspace surfaces as an error here, which pauses the chain —

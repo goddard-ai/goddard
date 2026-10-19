@@ -19129,6 +19129,7 @@ fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
         )
         .unwrap();
     let step = ChainStepDefinition {
+        project: None,
         purpose: Some(waku_protocol::boss::EmployeePurpose::Helping),
         title: "Investigate".into(),
         prompt: "Read-only investigation".into(),
@@ -19150,6 +19151,39 @@ fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
         item_id: None,
         successor_brief: "Verify the evidence".into(),
     };
+    // Public JSON accepts only the additive tagged selector and UUID legacy form.
+    let legacy = serde_json::to_value(&step).unwrap();
+    assert!(legacy.get("project").is_none());
+    for invalid in [
+        serde_json::json!("project-memory-bucket"),
+        serde_json::json!(null),
+        serde_json::json!("00000000-0000-0000-0000-000000000000"),
+    ] {
+        let mut payload = legacy.clone();
+        payload["projectId"] = invalid;
+        assert!(serde_json::from_value::<ChainStepDefinition>(payload).is_err());
+    }
+    let catalog = backend.task_state.lock().projects.clone();
+    for selector in [
+        serde_json::json!({}),
+        serde_json::json!({"name":"", "path":"/tmp"}),
+        serde_json::json!({"path":"relative"}),
+    ] {
+        let mut payload = legacy.clone();
+        payload.as_object_mut().unwrap().remove("projectId");
+        payload["project"] = selector;
+        let mut parsed: ChainStepDefinition = serde_json::from_value(payload).unwrap();
+        assert_eq!(
+            parsed.resolve_project(&catalog, 1).unwrap_err().code,
+            waku_protocol::projects::ProjectSelectionErrorCode::ProjectSelectorInvalid
+        );
+    }
+    let mut both = step.clone();
+    both.project = Some(waku_protocol::chains::ChainProjectSelector {
+        name: Some(catalog[0].name.clone()),
+        ..Default::default()
+    });
+    assert!(both.resolve_project(&catalog, 0).is_err());
     let mut definition = ChainDefinition {
         outcome_id: outcome.id,
         finishes_outcome: false,
@@ -19163,18 +19197,97 @@ fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
             definition,
         },
     };
-    assert!(
-        backend
-            .handle_boss_operation(
-                Some(boss),
-                operation(definition.clone()),
-                &EventSink::detached()
-            )
-            .is_err()
+    let BossResult::ProjectRejected { error } = backend
+        .handle_boss_operation(
+            Some(boss),
+            operation(definition.clone()),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("project rejection expected")
+    };
+    assert_eq!(error.step, Some(2));
+    assert_eq!(
+        error.code,
+        waku_protocol::projects::ProjectSelectionErrorCode::ProjectUnknown
     );
     assert!(backend.boss.document().chains.is_empty());
     assert!(backend.boss.document().employees.is_empty());
-    definition.steps[1].project_id = project_id;
+    let project = backend.task_state.lock().projects[0].clone();
+    definition.steps[0].project_id = Uuid::nil();
+    definition.steps[0].project = Some(waku_protocol::chains::ChainProjectSelector {
+        name: Some(project.name.to_ascii_uppercase()),
+        ..Default::default()
+    });
+    definition.steps[1].project_id = Uuid::nil();
+    definition.steps[1].project = Some(waku_protocol::chains::ChainProjectSelector {
+        path: Some(format!("{}/./", project.path.display())),
+        ..Default::default()
+    });
+    let mut duplicate = project.clone();
+    duplicate.id = Uuid::new_v4();
+    backend.task_state.lock().projects.push(duplicate);
+    let BossResult::ProjectRejected { error } = backend
+        .handle_boss_operation(
+            Some(boss),
+            operation(definition.clone()),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("ambiguity expected")
+    };
+    assert_eq!(
+        error.code,
+        waku_protocol::projects::ProjectSelectionErrorCode::ProjectAmbiguous
+    );
+    assert_eq!(error.candidates.len(), 2);
+    assert!(backend.boss.document().chains.is_empty());
+    assert!(backend.boss.document().employees.is_empty());
+    backend.task_state.lock().projects.pop();
+    // The same request ID remains available after both preflight failures.
+
+    let BossResult::Project {
+        project: discovered,
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Projects {
+                action: waku_protocol::projects::ProjectOperation::Resolve {
+                    selector: waku_protocol::projects::ProjectSelector::Kinded(
+                        waku_protocol::projects::ProjectSelectorFields {
+                            name: Some(project.name.clone()),
+                            ..Default::default()
+                        },
+                    ),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("canonical discovery expected")
+    };
+    assert_eq!(discovered.id, project_id);
+    // Boss scripts reach the same authoritative acceptance path, including selector intake.
+    let script = format!(
+        "op({})",
+        serde_json::to_string(&operation(definition.clone()))
+            .unwrap()
+            .replace('{', "#{")
+            .replace(":null", ":()")
+    );
+    assert!(matches!(
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Eval { script },
+                &EventSink::detached()
+            )
+            .unwrap(),
+        BossResult::Eval { .. }
+    ));
     let BossResult::State { state } = backend
         .handle_boss_operation(
             Some(boss),
@@ -19194,6 +19307,100 @@ fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
     assert!(state.chains[0].steps[1].attempts.is_empty());
     assert_eq!(state.employees.len(), 1);
     let accepted = state.chains[0].id;
+    for step in &state.chains[0].steps {
+        assert_eq!(step.definition.project_id, project_id);
+        assert!(step.definition.project.is_none());
+        assert_eq!(step.project_metadata.as_ref().unwrap().id, project_id);
+    }
+    let stored: waku_protocol::chains::EmployeeChain =
+        serde_json::from_value(serde_json::to_value(&state.chains[0]).unwrap()).unwrap();
+    assert!(stored.request.steps[0].project.is_some());
+    assert_eq!(stored.steps[0].definition.project_id, project_id);
+    // Pause, then reject an invalid replacement atomically; stale revisions win over resolution.
+    backend
+        .boss
+        .chain_operation(
+            Some(boss),
+            ChainOperation::Control {
+                chain_id: accepted,
+                expected_revision: state.chains[0].revision,
+                control: waku_protocol::chains::ChainControl::Pause,
+                source_revision: None,
+            },
+        )
+        .unwrap();
+    backend.drive_chains();
+    let paused = backend.boss.document().chains[0].clone();
+    assert_eq!(paused.status, ChainStatus::Paused);
+    let mut replacement = definition.steps[1].clone();
+    replacement.project = Some(waku_protocol::chains::ChainProjectSelector {
+        name: Some("unregistered".into()),
+        ..Default::default()
+    });
+    let revise = |replacement, revision| BossOperation::Chain {
+        action: ChainOperation::Revise {
+            chain_id: accepted,
+            expected_revision: revision,
+            expected_definition_version: paused.definition_version,
+            step: 1,
+            definition: replacement,
+        },
+    };
+    let error = backend
+        .handle_boss_operation(
+            Some(boss),
+            revise(replacement.clone(), paused.revision + 1),
+            &EventSink::detached(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("stale chain"));
+    assert!(matches!(
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                revise(replacement, paused.revision),
+                &EventSink::detached()
+            )
+            .unwrap(),
+        BossResult::ProjectRejected { .. }
+    ));
+    assert_eq!(
+        backend.boss.document().chains[0].definition_version,
+        paused.definition_version
+    );
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            revise(definition.steps[1].clone(), paused.revision),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    assert_eq!(
+        backend.boss.document().chains[0].steps[1]
+            .definition
+            .project_id,
+        project_id
+    );
+    // Replacing a selector by its equivalent UUID is still changed-definition reuse.
+    let mut changed = definition.clone();
+    changed.steps[0].project = None;
+    changed.steps[0].project_id = project_id;
+    assert!(
+        backend
+            .handle_boss_operation(Some(boss), operation(changed), &EventSink::detached())
+            .unwrap_err()
+            .to_string()
+            .contains("conflicting chain request")
+    );
+    backend.task_state.lock().projects[0].name = "renamed".into();
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            operation(definition.clone()),
+            &EventSink::detached(),
+        )
+        .unwrap();
+
     // A repeated accepted request remains queryable even after project access disappears.
     backend.task_state.lock().projects.clear();
     let BossResult::State { state } = backend
@@ -19205,6 +19412,105 @@ fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
     assert_eq!(state.chains.len(), 1);
     assert_eq!(state.chains[0].id, accepted);
     assert_eq!(state.employees.len(), 1);
+    assert!(state.chains[0].steps[0].project_metadata.is_none());
+    // Re-registration at the same root cannot change accepted bindings.
+    let mut replacement = project;
+    replacement.id = Uuid::new_v4();
+    backend.task_state.lock().projects.push(replacement);
+    assert_eq!(
+        backend.boss.document().chains[0].steps[0]
+            .definition
+            .project_id,
+        project_id
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn chain_queued_dispatch_never_rebinds_to_an_equivalent_registration() {
+    let root = std::env::temp_dir().join(format!("chain-project-binding-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    let mut selected = backend.task_state.lock().projects[0].clone();
+    selected.id = Uuid::new_v4();
+    selected.name = "Explicit duplicate root".into();
+    backend.task_state.lock().projects.push(selected.clone());
+    let outcome = backend
+        .boss
+        .create_outcome(Some(boss), "Inspect", "Evidence")
+        .unwrap();
+    let persona = backend.boss.document().personas[0].id;
+    let mut definition = chain_test_definition(selected.id, outcome.id, persona, 0, head);
+    definition.finishes_outcome = false;
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Chain {
+                action: ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let employee = backend.boss.document().employees[0].clone();
+    assert_eq!(
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == employee.session_id)
+            .unwrap()
+            .project_id,
+        selected.id
+    );
+    // Simulate a restart without its memory-only shell, then remove the bound row.
+    // Another registration still has the identical path and must never replace it.
+    {
+        let mut state = backend.task_state.lock();
+        state
+            .sessions
+            .retain(|session| session.id != employee.session_id);
+        state.projects.retain(|project| project.id != selected.id);
+    }
+    backend.run_summon_scheduler();
+    let document = backend.boss.document();
+    let chain = &document.chains[0];
+    assert_eq!(chain.status, ChainStatus::Paused);
+    assert!(
+        chain
+            .reason
+            .as_deref()
+            .unwrap()
+            .contains("project_unavailable")
+    );
+    assert!(
+        chain
+            .reason
+            .as_deref()
+            .unwrap()
+            .contains(&selected.id.to_string())
+    );
+    assert!(
+        chain.steps[0].attempts[0]
+            .sealed
+            .as_ref()
+            .unwrap()
+            .terminal_message
+            .contains("project_unavailable")
+    );
+    assert_eq!(chain.steps[0].definition.project_id, selected.id);
+    assert!(document.employees[0].expired);
+    assert_eq!(backend.task_state.lock().projects.len(), 1);
+    assert!(
+        !backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .any(|session| session.id == employee.session_id)
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -19265,6 +19571,7 @@ fn chain_test_definition(
         finishes_outcome: true,
         steps: vec![
             ChainStepDefinition {
+                project: None,
                 purpose: Some(waku_protocol::boss::EmployeePurpose::Helping),
                 project_id: project,
                 title: "investigate".into(),
@@ -19287,6 +19594,7 @@ fn chain_test_definition(
                 item_id: None,
             },
             ChainStepDefinition {
+                project: None,
                 purpose: Some(waku_protocol::boss::EmployeePurpose::Helping),
                 project_id: project,
                 title: "verify".into(),

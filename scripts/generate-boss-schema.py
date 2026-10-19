@@ -159,6 +159,18 @@ for name, schema in defs.items():
             decl = raw[max(0, raw.rfind('#[derive', 0, m.start())):m.start()]
             schema['additionalProperties'] = 'deny_unknown_fields' not in decl
             break
+# Chain intake uses exclusive selection; projectId remains UUID-only.
+defs['ChainStepDefinition']['oneOf'] = [
+    {'required': ['projectId'], 'not': {'required': ['project']}},
+    {'required': ['project'], 'not': {'required': ['projectId']}},
+]
+defs['ChainStepDefinition']['properties']['project'] = {
+    'type': 'object',
+    'properties': {'name': {'type': 'string', 'minLength': 1}, 'path': {'type': 'string', 'minLength': 1}},
+    'additionalProperties': False,
+    'oneOf': [{'required': ['name'], 'not': {'required': ['path']}},
+              {'required': ['path'], 'not': {'required': ['name']}}],
+}
 load('BossResult')
 
 def result_types(value):

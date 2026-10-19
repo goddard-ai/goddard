@@ -76,10 +76,151 @@ as the `context` work digest. Employees cannot discover the catalog; an
 employee holding a summon-time Boss-authority grant keeps it. Selecting a
 project grants that project no extra permissions and no memory-bucket access.
 
-## Planned: chain step selectors
+## Create a chain by name or root
 
-Chain definitions today still require a per-step project UUID. A follow-up
-change will let each step name its project by `{"projectId": "…"}` or a tagged
-`{"project": {"name": "…" | "path": "…"}}` selector resolved against this same
-catalog and rules. Until that lands, `projects resolve` is how a caller turns a
-known name or path into the UUID a chain step needs.
+Chain creation and revision accept exactly one project selection per step:
+`"projectId": "REGISTERED_UUID"`, `"project": {"name": "goddard"}`, or
+`"project": {"path": "/absolute/registered/root"}`. Keep `projectId` UUID-only.
+Name/path selections use the discovery rules above and reject temporary
+registrations. UUID selections retain legacy temporary-project behavior.
+
+These commands require a daemon with chain selector support. Older daemons
+reject the new fields; upgrade or resolve the project and use `projectId`.
+
+1. List or resolve the project using the commands above. Obtain an open outcome
+   UUID from `goddard-agent boss view`, and choose an installed provider model.
+2. Save this complete create operation as `chain.json`. Replace the illustrative
+   outcome UUID and project name with your actual values; choose a new request
+   UUID once for this logical creation. This one-step helping chain does not
+   claim outcome completion.
+
+   ```json
+   {
+     "type": "create",
+     "requestId": "22222222-2222-4222-8222-222222222222",
+     "definition": {
+       "outcomeId": "33333333-3333-4333-8333-333333333333",
+       "finishesOutcome": false,
+       "steps": [{
+         "purpose": "helping",
+         "title": "Inspect the project",
+         "prompt": "Read the project instructions and report the package layout. Make no changes.",
+         "project": {"name": "goddard"},
+         "personaId": null,
+         "provider": "codex",
+         "model": "gpt-5.5",
+         "reasoningEffort": null,
+         "permissions": {"bucketIds": [], "integrationIds": [], "summonEmployees": false, "computerUse": false},
+         "resources": {},
+         "workspace": "local",
+         "baseRevision": null,
+         "boundary": "artifactsReady",
+         "requiredChecks": [],
+         "requiredArtifacts": [],
+         "requiredApprovals": [],
+         "maxRetries": 0,
+         "planId": null,
+         "itemId": null,
+         "successorBrief": ""
+       }]
+     }
+   }
+   ```
+
+3. Run `goddard-agent boss chain --json-file chain.json`. For a root selection,
+   replace the entire `project` object with `{"path": "/absolute/registered/root"}`.
+   Shell expansion does not happen inside JSON; supply the full absolute path.
+4. Inspect the returned chain, or save
+   `{"type":"show","chainId":"ACTUAL_CHAIN_UUID"}` as `show.json` and run
+   `goddard-agent boss chain --json-file show.json`. Each accepted step's
+   `definition.projectId` is its execution identity. `projectMetadata` shows
+   the current catalog name/path, or `null` if that ID is no longer registered.
+   The chain's `request` preserves the submitted selector for replay comparison.
+
+All steps resolve and validate before any are accepted. An unknown or ambiguous
+later step leaves no chain, employee, or outcome-finisher claim. Errors identify
+the 1-based failing step and include a stable code and next action. For
+`project_ambiguous`, choose a candidate's ID or registered root, update the
+failed definition, and retry with the same request ID. Do not repeatedly submit
+an unchanged ambiguous selection. A failed preflight does not reserve the ID.
+
+For a malformed UUID or memory-derived identifier, run project discovery and
+copy the canonical UUID, or use a name/root selector. Never reconstruct project
+UUIDs from memory bucket metadata.
+
+## Revise an unstarted step
+
+Use a chain with at least two steps; the one-step creation example above has
+no unstarted successor to revise. Pause the chain with a control operation
+using its current `revision`. Only an unstarted step without attempts can be revised. Save this operation as
+`revise.json`, replacing the illustrative chain UUID, revision numbers, registered root,
+and model with values from your chain and catalog:
+
+```json
+{
+  "type": "revise",
+  "chainId": "44444444-4444-4444-8444-444444444444",
+  "expectedRevision": 4,
+  "expectedDefinitionVersion": 1,
+  "step": 1,
+  "definition": {
+    "purpose": "helping",
+    "title": "Inspect the project",
+    "prompt": "Read the project instructions and report the package layout. Make no changes.",
+    "project": {
+      "path": "/Users/alec/dev/goddard-ai/goddard"
+    },
+    "personaId": null,
+    "provider": "codex",
+    "model": "gpt-5.5",
+    "reasoningEffort": null,
+    "permissions": {
+      "bucketIds": [],
+      "integrationIds": [],
+      "summonEmployees": false,
+      "computerUse": false
+    },
+    "resources": {},
+    "workspace": "local",
+    "baseRevision": null,
+    "boundary": "artifactsReady",
+    "requiredChecks": [],
+    "requiredArtifacts": [],
+    "requiredApprovals": [],
+    "maxRetries": 0,
+    "planId": null,
+    "itemId": null,
+    "successorBrief": ""
+  }
+}
+```
+
+The replacement is a complete step object. `step` is zero-based, so `1` selects the second step. Run
+`goddard-agent boss chain --json-file revise.json`. A failed replacement leaves
+the accepted definition intact; a stale revision requires inspecting the chain
+and reviewing current state before retrying.
+
+## Scripts and retries
+
+Boss scripting uses the same authoritative endpoint:
+
+```sh
+goddard-agent boss script --text 'op(#{type: "chain", action: #{type: "show", chainId: "ACTUAL_CHAIN_UUID"}})'
+```
+
+For create or revise, pass the same complete operation under `action`; Rhai
+maps use `#{...}` and null is `()`. Typed clients send `BossOperation::Chain`
+with the same operation. Neither surface bypasses resolution or owner checks.
+
+After a lost create response, retry the **unchanged definition, request ID, and
+supervisor**. Accepted replay returns the original chain and canonical bindings
+even after rename, removal, or re-registration. Changing a selector to an
+equivalent UUID still conflicts with an accepted request ID. Revisions do not
+change the original replay key.
+
+A later missing registration or directory pauses execution with
+`project_unavailable` in the primary reason and attempt history. Restore the
+original registration/directory or explicitly revise an eligible step. A
+similarly named project or a new registration at the same path never replaces
+the bound identity automatically. Existing UUID payloads and stored chains keep
+working.

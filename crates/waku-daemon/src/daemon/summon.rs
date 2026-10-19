@@ -501,30 +501,52 @@ impl WakuBackend {
         // Unstarted shells are memory-only. Absence after restart is not a
         // cancellation: reconstruct from the durable accepted ticket. Explicit
         // removal and archive still fence dispatch, including stale snapshots.
-        let shell = self.task_state.lock().sessions.iter()
+        let shell = self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
             .find(|session| session.id == session_id)
             .map(|session| session.archived_at.is_some());
-        if employee.cancelled || shell == Some(true)
+        if employee.cancelled
+            || shell == Some(true)
             || self.removed_session_ids.lock().contains(&session_id)
         {
             self.stop_queued_employee(session_id)?;
             return Ok(true);
         }
-        if shell.is_none() {
+        let chain_project = match self.chain_employee_project(employee) {
+            Ok(project) => project,
+            Err(error) => {
+                self.boss
+                    .set_employee_blocker(session_id, format!("{error:#}"))?;
+                self.finish_boss_employee(
+                    session_id,
+                    false,
+                    waku_protocol::boss::EmployeeSettle::LaunchFailed,
+                )?;
+                return Ok(true);
+            }
+        };
+        if shell.is_none() && chain_project.is_none() {
             // The ticket's project must still resolve to a registered
             // checkout: a row another client removed — or a checkout that
             // no longer exists — ends the admission like an explicit
             // removal rather than wedging the queue on a lookup error.
             let project = dunce::canonicalize(Path::new(&ticket.project)).ok();
-            let registered = project.is_some_and(|project| {
-                self.task_state.lock().projects.iter().any(|entry| {
-                    dunce::canonicalize(&entry.path).is_ok_and(|path| path == project)
-                })
-            });
+            let registered =
+                project.is_some_and(|project| {
+                    self.task_state.lock().projects.iter().any(|entry| {
+                        dunce::canonicalize(&entry.path).is_ok_and(|path| path == project)
+                    })
+                });
             if !registered {
                 self.stop_queued_employee(session_id)?;
                 return Ok(true);
             }
+            self.restore_employee_shell(employee, &ticket)?;
+        }
+        if shell.is_none() && chain_project.is_some() {
             self.restore_employee_shell(employee, &ticket)?;
         }
         // A chain-bound ticket may only launch while its attempt still
@@ -909,9 +931,14 @@ impl WakuBackend {
             }
             return Ok(true);
         }
-        let project = dunce::canonicalize(Path::new(&ticket.project))
-            .with_context(|| format!("project path {} does not exist", ticket.project))?;
-        let (project_id, project_path) = self.register_agent_project(&project)?;
+        let (project_id, project_path) = match self.chain_employee_project(employee)? {
+            Some(bound) => bound,
+            None => {
+                let project = dunce::canonicalize(Path::new(&ticket.project))
+                    .with_context(|| format!("project path {} does not exist", ticket.project))?;
+                self.register_agent_project(&project)?
+            }
+        };
         let (workspace, adopted_from) = match ticket.workspace.unwrap_or_default() {
             AgentWorkspace::Local => (SessionWorkspace::Local, None),
             AgentWorkspace::Worktree => {
@@ -1698,6 +1725,10 @@ impl WakuBackend {
         employee: &waku_protocol::boss::BossEmployee,
         ticket: &waku_protocol::boss::SummonTicket,
     ) -> anyhow::Result<()> {
+        let project_root = self
+            .chain_employee_project(employee)?
+            .map(|(_, root)| root)
+            .unwrap_or_else(|| PathBuf::from(&ticket.project));
         let resolved = self.resolve_agent_task_selection(
             Some(employee.supervisor_id),
             &AgentCreateSelection {
@@ -1708,7 +1739,9 @@ impl WakuBackend {
                 service_tier: None,
                 context_window: None,
             },
-            Path::new(&ticket.project), &ticket.prompt, true,
+            &project_root,
+            &ticket.prompt,
+            true,
         )?;
         self.create_employee_shell(employee, &resolved, ticket)
     }
@@ -1722,9 +1755,14 @@ impl WakuBackend {
         resolved: &ResolvedAgentSelection,
         ticket: &waku_protocol::boss::SummonTicket,
     ) -> anyhow::Result<()> {
-        let project = dunce::canonicalize(Path::new(&ticket.project))
-            .with_context(|| format!("project path {} does not exist", ticket.project))?;
-        let (project_id, _) = self.register_agent_project(&project)?;
+        let project_id = match self.chain_employee_project(employee)? {
+            Some((id, _)) => id,
+            None => {
+                let project = dunce::canonicalize(Path::new(&ticket.project))
+                    .with_context(|| format!("project path {} does not exist", ticket.project))?;
+                self.register_agent_project(&project)?.0
+            }
+        };
         let mut session = AgentSession::new(project_id, resolved.provider);
         session.id = employee.session_id;
         session.set_title(&employee.identity.name);

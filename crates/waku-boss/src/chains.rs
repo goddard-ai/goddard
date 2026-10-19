@@ -325,6 +325,18 @@ impl BossService {
         caller: Option<Uuid>,
         action: ChainOperation,
     ) -> Result<EmployeeChain> {
+        self.chain_operation_with_project_bindings(caller, action, None)
+    }
+
+    /// Trusted host bindings from complete preflight, in step order. Keeping these
+    /// separate from the submitted request prevents a second filesystem-dependent
+    /// selector lookup from changing the validated target before acceptance.
+    pub fn chain_operation_with_project_bindings(
+        &self,
+        caller: Option<Uuid>,
+        action: ChainOperation,
+        bindings: Option<&[Uuid]>,
+    ) -> Result<EmployeeChain> {
         let owner = caller.is_none_or(|caller| self.has_boss_authority(caller));
         if !owner {
             ensure!(
@@ -356,6 +368,18 @@ impl BossService {
                         result = Some(existing.clone());
                         return Ok(());
                     }
+                    let request = definition.clone();
+                    let mut definition = definition;
+                    for (index, step) in definition.steps.iter_mut().enumerate() {
+                        if let Some(bindings) = bindings {
+                            step.project_id = *bindings.get(index)
+                                .ok_or_else(|| anyhow!("missing preflight project binding"))?;
+                            ensure!(!step.project_id.is_nil(), "invalid preflight project binding");
+                            step.project = None;
+                        } else {
+                            ensure!(step.project.is_none() && !step.project_id.is_nil(), "chain selectors require authoritative project resolution");
+                        }
+                    }
                     ensure!(
                         definition.steps.iter().all(|step| state
                             .employee_purpose(step.purpose, step.persona_id, None)
@@ -375,6 +399,7 @@ impl BossService {
                                 definition.purpose, definition.persona_id, None,
                             );
                             ChainStep {
+                                project_metadata: None,
                                 definition,
                                 status: StepStatus::NotStarted,
                                 attempts: Vec::new(),
@@ -390,7 +415,7 @@ impl BossService {
                         request_id,
                         supervisor_id: caller,
                         finisher_reserved: definition.finishes_outcome,
-                        request: definition,
+                        request,
                         definition_version: 1,
                         revision: 0,
                         current_step: 0,
@@ -578,7 +603,19 @@ impl BossService {
                     step,
                     definition,
                 } => {
+                    let existing = state.chains.iter().find(|chain| chain.id == chain_id)
+                        .ok_or_else(|| anyhow!("unknown chain"))?;
+                    ensure!(existing.revision == expected_revision && existing.definition_version == expected_definition_version,
+                        "stale chain revision or definition");
                     let mut definition = definition;
+                    if let Some(bindings) = bindings {
+                        definition.project_id = *bindings.get(step)
+                            .ok_or_else(|| anyhow!("missing preflight project binding"))?;
+                        ensure!(!definition.project_id.is_nil(), "invalid preflight project binding");
+                        definition.project = None;
+                    } else {
+                        ensure!(definition.project.is_none() && !definition.project_id.is_nil(), "chain selectors require authoritative project resolution");
+                    }
                     definition.purpose = state.employee_purpose(definition.purpose, definition.persona_id, None);
                     ensure!(
                         definition.purpose.is_some(),
@@ -1046,7 +1083,11 @@ impl BossService {
                 .then(|| "terminal message is unavailable".to_owned());
             if terminal.disposition != ResultDisposition::Success {
                 packet.disposition = terminal.disposition;
-                reason = Some("terminal execution did not succeed".to_owned());
+                reason = Some(if terminal.message.contains("project_unavailable:") {
+                    terminal.message.clone()
+                } else {
+                    "terminal execution did not succeed".to_owned()
+                });
             } else if packet.disposition != ResultDisposition::Success {
                 reason = Some("structured result missing or unsuccessful".to_owned());
             }
@@ -1472,6 +1513,7 @@ mod tests {
                 .unwrap()
                 .id;
             let step = ChainStepDefinition {
+                project: None,
                 purpose: Some(waku_protocol::boss::EmployeePurpose::Helping),
                 title: "Investigate".into(),
                 prompt: "Investigate only".into(),
@@ -2389,6 +2431,7 @@ mod tests {
             submission_id: Some("submission".into()),
         });
         let step = ChainStep {
+            project_metadata: None,
             definition: step,
             status: StepStatus::CheckingHandoff,
             attempts: vec![],
