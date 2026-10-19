@@ -5470,7 +5470,9 @@ impl Waku {
                                     .child(format!("· {name} · {state_label}")),
                             )
                         })
-                        .when_some(updated_chevron, |element, chevron| element.child(chevron)),
+                        .when_some(updated_chevron, |element, chevron| {
+                            element.child(chevron.when(action_row, |icon| icon.self_center()))
+                        }),
                 )
                 .child(div().flex_1()),
         )
