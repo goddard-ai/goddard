@@ -367,19 +367,25 @@ fn append_sidebar_planning_group(rows: &mut Vec<SidebarRow>, sessions: &[Uuid], 
 }
 
 /// The member faces a collapsed employee group's header previews — up to
-/// `SIDEBAR_COLLAPSED_GROUP_AVATARS` members with a resolvable identity —
+/// `SIDEBAR_COLLAPSED_GROUP_AVATARS` non-expired members with a resolvable identity —
 /// and the member count its "+N more" tail omits. A member without an
 /// identity can't paint a face, so it falls into the omitted count.
 fn collapsed_employee_avatar_strip<'a>(
     members: &[Uuid],
     identities: &'a HashMap<Uuid, waku_client::boss::BossIdentity>,
+    expired: &HashSet<Uuid>,
 ) -> (Vec<&'a waku_client::boss::BossIdentity>, usize) {
-    let faces = members
-        .iter()
-        .filter_map(|id| identities.get(id))
-        .take(SIDEBAR_COLLAPSED_GROUP_AVATARS)
-        .collect::<Vec<_>>();
-    let omitted = members.len() - faces.len();
+    let mut faces = Vec::new();
+    let mut omitted = 0;
+    for id in members.iter().filter(|id| !expired.contains(id)) {
+        if faces.len() < SIDEBAR_COLLAPSED_GROUP_AVATARS
+            && let Some(identity) = identities.get(id)
+        {
+            faces.push(identity);
+        } else {
+            omitted += 1;
+        }
+    }
     (faces, omitted)
 }
 
@@ -4985,7 +4991,13 @@ impl Waku {
             self.sidebar_collapsed_group_members
                 .borrow()
                 .get(&group)
-                .map(|members| collapsed_employee_avatar_strip(members, &self.boss_ui.identities))
+                .map(|members| {
+                    collapsed_employee_avatar_strip(
+                        members,
+                        &self.boss_ui.identities,
+                        &self.boss_ui.expired,
+                    )
+                })
                 .unwrap_or_default()
         })
         .filter(|(faces, omitted)| !faces.is_empty() || *omitted > 0)
@@ -8876,11 +8888,12 @@ mod tests {
 
         // No members paints no strip; one to four paint in roster order
         // with nothing omitted.
-        let (faces, omitted) = collapsed_employee_avatar_strip(&[], &identities);
+        let (faces, omitted) = collapsed_employee_avatar_strip(&[], &identities, &HashSet::new());
         assert!(faces.is_empty());
         assert_eq!(omitted, 0);
         for count in 1..=SIDEBAR_COLLAPSED_GROUP_AVATARS {
-            let (faces, omitted) = collapsed_employee_avatar_strip(&members(count), &identities);
+            let (faces, omitted) =
+                collapsed_employee_avatar_strip(&members(count), &identities, &HashSet::new());
             assert_eq!(
                 faces.iter().map(|face| face.id).collect::<Vec<_>>(),
                 members(count)
@@ -8890,7 +8903,8 @@ mod tests {
 
         // Past four, the header's tail counts the members left out.
         for (count, expected_omitted) in [(5, 1), (6, 2), (7, 3)] {
-            let (faces, omitted) = collapsed_employee_avatar_strip(&members(count), &identities);
+            let (faces, omitted) =
+                collapsed_employee_avatar_strip(&members(count), &identities, &HashSet::new());
             assert_eq!(faces.len(), SIDEBAR_COLLAPSED_GROUP_AVATARS);
             assert_eq!(omitted, expected_omitted);
         }
@@ -8899,9 +8913,26 @@ mod tests {
         // toward the tail rather than leaving a gap in the strip.
         let mut mixed = members(4);
         mixed.push(Uuid::from_u128(99));
-        let (faces, omitted) = collapsed_employee_avatar_strip(&mixed, &identities);
+        let (faces, omitted) =
+            collapsed_employee_avatar_strip(&mixed, &identities, &HashSet::new());
         assert_eq!(faces.len(), 4);
         assert_eq!(omitted, 1);
+
+        // Expired members neither take face slots nor inflate the tail,
+        // including when their identity is missing.
+        let expired = HashSet::from([member_ids[0], member_ids[5], Uuid::from_u128(99)]);
+        let mut mixed = members(7);
+        mixed.push(Uuid::from_u128(99));
+        let (faces, omitted) = collapsed_employee_avatar_strip(&mixed, &identities, &expired);
+        assert_eq!(
+            faces.iter().map(|face| face.id).collect::<Vec<_>>(),
+            member_ids[1..5]
+        );
+        assert_eq!(omitted, 1);
+        let expired = member_ids.iter().copied().collect();
+        let (faces, omitted) = collapsed_employee_avatar_strip(&members(7), &identities, &expired);
+        assert!(faces.is_empty());
+        assert_eq!(omitted, 0);
 
         // The strip rides the header the fold already leaves behind: a
         // collapsed employee group still emits only header and spacer.
