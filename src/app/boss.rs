@@ -5549,7 +5549,7 @@ impl Waku {
                             .child(
                                 div()
                                     .min_w_0()
-                                    .flex_1()
+                                    .when(!alt_held, |name| name.flex_1())
                                     .truncate()
                                     .text_color(theme.text)
                                     .child(identity.name.clone()),
