@@ -381,7 +381,7 @@ pub(super) fn boss_incident_fenced(boss: &crate::boss::BossService, session_id: 
     use waku_boss::rotation_continuity::ContinuityLedger;
     boss.is_boss(session_id)
         && ContinuityLedger::load(&boss.root().join("continuity.json"))
-            .map(|ledger| ledger.has_incident(session_id))
+            .map(|ledger| ledger.has_incident(session_id) || ledger.coordinator_frozen(session_id))
             .unwrap_or(true)
 }
 

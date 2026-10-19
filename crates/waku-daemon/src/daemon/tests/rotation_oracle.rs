@@ -142,7 +142,7 @@ fn boss_manual_compact_translates_to_a_durable_safe_refresh() {
     let observed = install_rotation_observer(&backend);
     let capture = boss_runtime(&backend, boss, runtime);
     // The occupancy heuristic is opted out — a refresh request still
-    // rotates because it is a prevention request, not a preference.
+    // requests refresh because it is a prevention request, not a preference.
     let mut settings = backend.settings.get();
     settings.boss_rotation_disabled = true;
     backend.settings.replace(settings).unwrap();
@@ -165,13 +165,15 @@ fn boss_manual_compact_translates_to_a_durable_safe_refresh() {
     let ledger = ContinuityLedger::load(&root.join("boss/continuity.json")).unwrap();
     assert!(ledger.rotation_request.is_some());
 
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
+    assert!(
+        backend
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
+    );
     let next = backend.boss.identity_and_session().1.unwrap();
-    assert_ne!(boss, next);
+    assert_eq!(boss, next);
     let ledger = ContinuityLedger::load(&root.join("boss/continuity.json")).unwrap();
-    assert!(ledger.rotation_request.is_none());
+    assert!(ledger.rotation_request.is_some());
 
     let observations = observed.lock().clone();
     assert!(
@@ -314,95 +316,39 @@ fn provider_events_feed_context_transport_and_compaction_observations() {
 }
 
 #[test]
-fn rotation_journal_emits_real_ownership_and_publication_stages() {
+fn rotation_journal_never_reports_publication_before_readiness() {
     let root = std::env::temp_dir().join(format!("boss-lifecycle-oracle-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let old = rotation_boss(&backend);
-    let old_runtime = Uuid::new_v4();
-    boss_runtime(&backend, old, old_runtime);
     let observed = install_rotation_observer(&backend);
     {
         let mut state = backend.task_state.lock();
-        let session = state.session_mut(old).unwrap();
-        session.context_usage = Some(crate::model::ContextUsage {
+        state.session_mut(old).unwrap().context_usage = Some(crate::model::ContextUsage {
             tokens: 76,
             window: Some(100),
         });
         backend.task_store.save(&mut state).unwrap();
     }
-
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
-    let next = backend.boss.identity_and_session().1.unwrap();
-    assert_ne!(old, next);
-
-    let observations = observed.lock().clone();
-    let stages = observations
+    assert!(
+        backend
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
+    );
+    let stages = observed
+        .lock()
         .iter()
-        .filter_map(|observation| match observation {
+        .filter_map(|o| match o {
             RotationObservation::Lifecycle(LifecycleObservation { stage, .. }) => Some(*stage),
             _ => None,
         })
         .collect::<Vec<_>>();
-    for stage in [
-        RotationLifecycleStage::Triggered,
-        RotationLifecycleStage::IntentPersisted,
-        RotationLifecycleStage::SuccessorPrepared,
-        RotationLifecycleStage::PointerPublished,
-        RotationLifecycleStage::PredecessorFenced,
-        RotationLifecycleStage::OwnershipCommitted,
-    ] {
-        assert!(stages.contains(&stage), "missing {stage:?} in {stages:?}");
-    }
-    assert!(observations.iter().any(|observation| {
-        matches!(
-            observation,
-            RotationObservation::Ownership(ownership)
-                if ownership.session_id == old
-                    && ownership.state
-                        == waku_boss::rotation_oracle::OwnershipState::Fenced
-        )
-    }));
-    assert!(observations.iter().any(|observation| {
-        matches!(
-            observation,
-            RotationObservation::Ownership(ownership)
-                if ownership.session_id == next
-                    && ownership.state
-                        == waku_boss::rotation_oracle::OwnershipState::Active
-        )
-    }));
-
-    // The current implementation is intentionally reported unsafe: the next
-    // prompt crosses the provider boundary before the new admission guard.
-    let new_runtime = Uuid::new_v4();
-    let capture = boss_runtime(&backend, next, new_runtime);
-    backend
-        .handle(
-            Request {
-                request_id: Uuid::new_v4(),
-                session_id: next,
-                runtime_id: new_runtime,
-                command: Command::Prompt {
-                    prompt: "continue".into(),
-                    turn_id: None,
-                    message_id: None,
-                    hidden: false,
-                    attachments: Vec::new(),
-                },
-            },
-            EventSink::detached(),
-            None,
-        )
-        .unwrap();
-    assert!(capture.prompts.lock().is_empty());
-
+    assert!(stages.contains(&RotationLifecycleStage::IntentPersisted));
+    assert!(stages.contains(&RotationLifecycleStage::SuccessorPrepared));
+    assert!(!stages.contains(&RotationLifecycleStage::PointerPublished));
+    assert!(!stages.contains(&RotationLifecycleStage::OwnershipCommitted));
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
     let report =
         waku_boss::rotation_oracle::RotationOracle::evaluate(observed.lock().iter().cloned());
-    assert_eq!(report.rotations, 1);
-    assert!(report.durable_actions >= 3);
-    assert!(report.ownership_observations >= 4);
     assert_eq!(report.unsafe_admissions, 0);
     assert_eq!(report.compactions, 0);
     std::fs::remove_dir_all(root).ok();
@@ -423,9 +369,7 @@ fn retired_boss_generation_is_fenced_at_the_driver_boundary() {
         });
         backend.task_store.save(&mut state).unwrap();
     }
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
+    install_legacy_boss_rotation(&backend, crate::model::unix_time()).unwrap();
     let next = backend.boss.identity_and_session().1.unwrap();
     assert_ne!(old, next);
 
@@ -492,9 +436,7 @@ fn stale_boss_credential_is_denied_after_rotation() {
         });
         backend.task_store.save(&mut state).unwrap();
     }
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
+    install_legacy_boss_rotation(&backend, crate::model::unix_time()).unwrap();
     assert_ne!(old, backend.boss.identity_and_session().1.unwrap());
 
     // Every scoped command minted under the retired generation is denied —
@@ -546,9 +488,7 @@ fn boss_handoff_ignores_uncorrelated_turn_started_and_retains_content() {
         });
         backend.task_store.save(&mut state).unwrap();
     }
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
+    install_legacy_boss_rotation(&backend, crate::model::unix_time()).unwrap();
     let next = backend.boss.identity_and_session().1.unwrap();
     let ledger_path = root.join("boss/continuity.json");
 
@@ -673,9 +613,7 @@ fn failed_turn_cannot_reject_or_retry_an_unconfirmed_boss_delivery() {
         });
         backend.task_store.save(&mut state).unwrap();
     }
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
+    install_legacy_boss_rotation(&backend, crate::model::unix_time()).unwrap();
     let next = backend.boss.identity_and_session().1.unwrap();
     let ledger_path = root.join("boss/continuity.json");
 
@@ -720,19 +658,8 @@ fn failed_turn_cannot_reject_or_retry_an_unconfirmed_boss_delivery() {
 }
 
 #[test]
-fn durable_handoff_preparation_precedes_publication_and_unqualified_send_is_held() {
-    use waku_boss::rotation_continuity::{ContinuityDeliveryStatus, ContinuityLedger};
-    struct InlineAcceptance(Box<dyn Fn(String) + Send + Sync>);
-    impl crate::driver::DriverControl for InlineAcceptance {
-        fn prompt(&self, prompt: String) {
-            (self.0)(prompt);
-        }
-        fn cancel(&self) {}
-        fn respond(&self, _: String, _: String) {}
-        fn rollback(&self, _: usize) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
-            Ok(None)
-        }
-    }
+fn durable_handoff_failure_and_missing_readiness_both_prevent_publication() {
+    use waku_boss::rotation_continuity::ContinuityLedger;
     let root = std::env::temp_dir().join(format!("boss-handoff-order-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let old = rotation_boss(&backend);
@@ -744,8 +671,6 @@ fn durable_handoff_preparation_precedes_publication_and_unqualified_send_is_held
         });
         backend.task_store.save(&mut state).unwrap();
     }
-    // Deny the continuity transaction after the successor is staged.
-    // Its durable delivery must exist before ownership can publish.
     let obstruction = root.join("boss/continuity.lock");
     std::fs::create_dir(&obstruction).unwrap();
     assert!(
@@ -755,65 +680,26 @@ fn durable_handoff_preparation_precedes_publication_and_unqualified_send_is_held
     );
     assert_eq!(backend.boss.identity_and_session().1, Some(old));
     std::fs::remove_dir(obstruction).unwrap();
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
-    let next = backend.boss.identity_and_session().1.unwrap();
-    assert_ne!(old, next);
-    let runtime = Uuid::new_v4();
-    let capture = boss_runtime(&backend, next, runtime);
-    let boss = backend.boss.clone();
-    let state = backend.task_state.clone();
-    let store = backend.task_store.clone();
-    let ledger_path = root.join("boss/continuity.json");
-    let inline_path = ledger_path.clone();
-    let captured = capture.clone();
-    let inner = DriverHandle::from_control(Arc::new(InlineAcceptance(Box::new(move |prompt| {
-        assert!(prompt.contains("<boss-session-rotation>"));
-        assert_eq!(
-            ContinuityLedger::load(&inline_path)
-                .unwrap()
-                .pending_for_session(next)
-                .unwrap()
-                .status,
-            ContinuityDeliveryStatus::Submitted
-        );
-        captured.prompts.lock().push(prompt);
-        super::super::events::boss_continuity_note_event(
-            &boss,
-            &state,
-            &store,
-            next,
-            &DriverEvent::TurnStarted,
-        );
-    }))));
-    let driver = backend.boss_driver_boundary(next, runtime, inner);
-    backend.sessions.lock().get_mut(&next).unwrap().driver = driver;
-    backend
-        .queue_agent_prompt(
-            next,
-            "resume preserved work".into(),
-            None,
-            &EventSink::detached(),
-        )
-        .unwrap();
-    assert!(capture.prompts.lock().is_empty());
-    assert!(
-        ContinuityLedger::load(&ledger_path)
-            .unwrap()
-            .pending_for_session(next)
-            .is_some()
-    );
     assert!(
         backend
-            .task_state
-            .lock()
-            .session_mut(next)
-            .unwrap()
-            .pending_provider_context
-            .is_some()
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
     );
-    assert!(backend.agent.has_queued(next));
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    let ledger = ContinuityLedger::load(&root.join("boss/continuity.json")).unwrap();
+    let frozen = ledger.frozen_coordinator.as_ref().unwrap();
+    assert!(frozen.package.is_some());
+    let capture = boss_runtime(&backend, frozen.successor, Uuid::new_v4());
+    let driver = backend
+        .sessions
+        .lock()
+        .get(&frozen.successor)
+        .unwrap()
+        .driver
+        .clone();
+    driver.prompt("unqualified successor must wait".into());
+    assert!(capture.prompts.lock().is_empty());
+    assert!(backend.boss_fenced_chat(frozen.successor));
     std::fs::remove_dir_all(root).ok();
 }
 
@@ -831,9 +717,7 @@ fn queued_event_to_retired_chat_retargets_the_successor() {
         });
         backend.task_store.save(&mut state).unwrap();
     }
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
+    install_legacy_boss_rotation(&backend, crate::model::unix_time()).unwrap();
     let next = backend.boss.identity_and_session().1.unwrap();
     let capture = boss_runtime(&backend, next, Uuid::new_v4());
 
@@ -863,7 +747,7 @@ fn queued_event_to_retired_chat_retargets_the_successor() {
 }
 
 #[test]
-fn identity_drift_during_staging_aborts_the_rotation() {
+fn identity_drift_during_staging_pauses_and_preserves_evidence() {
     use crate::boss_rotation::{RotationIntent, RotationJournal};
     use waku_boss::rotation_continuity::ContinuityLedger;
     let root = std::env::temp_dir().join(format!("boss-identity-drift-{}", Uuid::new_v4()));
@@ -894,18 +778,19 @@ fn identity_drift_during_staging_aborts_the_rotation() {
     });
     journal.persist(&journal_path).unwrap();
 
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
+    assert!(
+        backend
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
+    );
 
-    // The stage unwinds rather than activating stale grants: intent
-    // cleared, staged row removed, pointer untouched, delivery dropped.
+    // Changed authority cannot discard the frozen checkpoint or activate it.
     let journal = RotationJournal::load(&journal_path).unwrap();
-    assert!(journal.intent.is_none());
+    assert!(journal.intent.is_some());
     assert_eq!(journal.active_session_id, Some(old));
     assert_eq!(backend.boss.identity_and_session().1, Some(old));
     assert!(
-        !backend
+        backend
             .task_state
             .lock()
             .sessions
@@ -1071,5 +956,271 @@ fn coordinator_contract_scoped_alternate_routes_are_denied_before_effects() {
     );
     employee.prompt("existing employee grant".into());
     assert_eq!(employee_capture.prompts.lock().len(), 1);
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn guarded_lifecycle_freezes_queued_intake_and_restarts_without_publication() {
+    use waku_boss::{boss_rotation::RotationJournal, rotation_continuity::ContinuityLedger};
+    let root = std::env::temp_dir().join(format!("guarded-rotation-restart-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let old = rotation_boss(&backend);
+    let original = crate::model::QueuedMessage::new(&"large input ".repeat(10000));
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(old).unwrap();
+        session.context_usage = Some(crate::model::ContextUsage {
+            tokens: 76,
+            window: Some(100),
+        });
+        session.queued_messages.push(original.clone());
+        backend.task_store.save(&mut state).unwrap();
+    }
+    assert!(
+        backend
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
+    );
+    let path = root.join("boss/continuity.json");
+    let ledger = ContinuityLedger::load(&path).unwrap();
+    let frozen = ledger.frozen_coordinator.clone().unwrap();
+    assert!(
+        frozen
+            .package
+            .as_ref()
+            .unwrap()
+            .event_ids
+            .contains(&original.id)
+    );
+    assert!(backend.boss_incident_fenced(old));
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    let before = backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .filter(|s| s.boss_managed)
+        .count();
+    drop(backend);
+    let backend = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        StateStore::daemon(root.join("app.db")),
+    )
+    .unwrap();
+    for _ in 0..3 {
+        assert!(
+            backend
+                .reconcile_boss_rotation(crate::model::unix_time())
+                .is_err()
+        );
+        assert_eq!(backend.boss.identity_and_session().1, Some(old));
+        assert_eq!(
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .filter(|s| s.boss_managed)
+                .count(),
+            before
+        );
+    }
+    let restored = ContinuityLedger::load(&path).unwrap();
+    assert_eq!(restored.frozen_coordinator, Some(frozen));
+    assert_eq!(restored.deliveries.len(), ledger.deliveries.len());
+    let mut state = backend.task_store.load().unwrap();
+    let source = state.session_mut(old).unwrap();
+    backend.task_store.hydrate(source).unwrap();
+    assert!(source.archived_at.is_none());
+    assert!(
+        source
+            .queued_messages
+            .iter()
+            .any(|m| m.id == original.id && m.content == original.content)
+    );
+    let journal = RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
+    assert_eq!(journal.generation, 0);
+    assert!(journal.rotations.is_empty());
+    assert!(backend.sessions.lock().is_empty());
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn guarded_lifecycle_open_tool_loop_freezes_before_waiting_for_quiescence() {
+    use waku_boss::rotation_continuity::ContinuityLedger;
+    let root = std::env::temp_dir().join(format!("guarded-open-turn-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let old = rotation_boss(&backend);
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(old).unwrap();
+        session.context_usage = Some(crate::model::ContextUsage {
+            tokens: 76,
+            window: Some(100),
+        });
+        session.begin_turn("unfinished long tool loop");
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let capture = boss_runtime(&backend, old, Uuid::new_v4());
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time())
+        .unwrap();
+    let path = root.join("boss/continuity.json");
+    let frozen = ContinuityLedger::load(&path)
+        .unwrap()
+        .frozen_coordinator
+        .unwrap();
+    assert!(frozen.package.is_none());
+    let driver = backend.sessions.lock().get(&old).unwrap().driver.clone();
+    driver.prompt("no next request".into());
+    driver.respond("tool".into(), "oversized result".repeat(10000));
+    driver.steer("no continuation".into());
+    assert!(driver.rollback(1).is_err());
+    assert!(capture.prompts.lock().is_empty());
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .session_mut(old)
+            .unwrap()
+            .active_turn_id()
+            .is_some()
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn guarded_lifecycle_reconciles_original_receipt_without_replaying_or_activating() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use waku_boss::{
+        coordinator_contract::{PackageOutcome, ProviderPackageReceipt},
+        rotation_continuity::{ContinuityAttempt, ContinuityLedger},
+    };
+    struct ReceiptQuery {
+        queries: AtomicUsize,
+        accepted: AtomicBool,
+    }
+    impl crate::driver::DriverControl for ReceiptQuery {
+        fn prompt(&self, _: String) {
+            panic!("receipt reconciliation must not prompt");
+        }
+        fn cancel(&self) {}
+        fn respond(&self, _: String, _: String) {
+            panic!("no tool continuation");
+        }
+        fn rollback(&self, _: usize) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
+            anyhow::bail!("no resume")
+        }
+        fn reconcile_coordinator_package(&self, attempt: &ContinuityAttempt) -> PackageOutcome {
+            self.queries.fetch_add(1, Ordering::SeqCst);
+            if self.accepted.load(Ordering::SeqCst) {
+                PackageOutcome::Confirmed(ProviderPackageReceipt {
+                    attempt: attempt.clone(),
+                    native_session: "fixture-native-session".into(),
+                    native_request: "fixture-native-request".into(),
+                })
+            } else {
+                PackageOutcome::Unknown
+            }
+        }
+    }
+    let root = std::env::temp_dir().join(format!("guarded-receipt-recovery-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let old = rotation_boss(&backend);
+    {
+        let mut state = backend.task_state.lock();
+        state.session_mut(old).unwrap().context_usage = Some(crate::model::ContextUsage {
+            tokens: 76,
+            window: Some(100),
+        });
+        backend.task_store.save(&mut state).unwrap();
+    }
+    assert!(
+        backend
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
+    );
+    let path = backend.boss_continuity_path();
+    let next = ContinuityLedger::load(&path)
+        .unwrap()
+        .frozen_coordinator
+        .unwrap()
+        .successor;
+    let runtime = Uuid::new_v4();
+    boss_runtime(&backend, next, runtime);
+    let query = Arc::new(ReceiptQuery {
+        queries: AtomicUsize::new(0),
+        accepted: AtomicBool::new(false),
+    });
+    let driver =
+        backend.boss_driver_boundary(next, runtime, DriverHandle::from_control(query.clone()));
+    backend.sessions.lock().get_mut(&next).unwrap().driver = driver;
+    // Seed a native submission whose acknowledgement was lost. This fixture
+    // creates correlation only and never qualifies or launches a real provider.
+    let attempt = ContinuityLedger::update(&path, |ledger| {
+        ledger.submit_package(&format!("boss-successor:{next}"), runtime, 1)
+    })
+    .unwrap()
+    .unwrap();
+    for _ in 0..2 {
+        assert!(
+            backend
+                .reconcile_boss_rotation(crate::model::unix_time())
+                .unwrap_err()
+                .to_string()
+                .contains("unresolved")
+        );
+        let ledger = ContinuityLedger::load(&path).unwrap();
+        assert_eq!(ledger.deliveries[0].attempt.as_ref(), Some(&attempt));
+        assert_eq!(ledger.deliveries[0].attempts, 1);
+    }
+    assert_eq!(query.queries.load(Ordering::SeqCst), 2);
+    query.accepted.store(true, Ordering::SeqCst);
+    assert!(
+        backend
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
+    );
+    let ledger = ContinuityLedger::load(&path).unwrap();
+    assert_eq!(ledger.provider_receipts[0].attempt, attempt);
+    assert_eq!(ledger.deliveries[0].attempts, 1);
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .session_mut(old)
+            .unwrap()
+            .archived_at
+            .is_none()
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn guarded_lifecycle_unqualified_refresh_never_attempts_capacity_bypass() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let root = std::env::temp_dir().join(format!("guarded-capacity-{}", Uuid::new_v4()));
+    let (mut backend, _) = surface_test_backend(&root);
+    let launches = Arc::new(AtomicUsize::new(0));
+    let count = launches.clone();
+    backend.runtime_test_start = Some(Arc::new(move |_, _, _| {
+        count.fetch_add(1, Ordering::SeqCst);
+        Err(anyhow::anyhow!("fixture: hard capacity exhausted or provider unavailable"))
+    }));
+    let old = rotation_boss(&backend);
+    {
+        let mut state = backend.task_state.lock();
+        state.session_mut(old).unwrap().context_usage = Some(crate::model::ContextUsage { tokens: 76, window: Some(100) });
+        backend.task_store.save(&mut state).unwrap();
+    }
+    for _ in 0..3 {
+        assert!(backend.reconcile_boss_rotation(crate::model::unix_time()).is_err());
+        assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    }
+    assert_eq!(launches.load(Ordering::SeqCst), 0);
+    assert!(backend.sessions.lock().is_empty());
     std::fs::remove_dir_all(root).ok();
 }

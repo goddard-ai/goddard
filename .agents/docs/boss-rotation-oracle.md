@@ -27,10 +27,12 @@ All production ledger mutations use `ContinuityLedger::update`, which locks
 a stable companion file through read/modify/write. This preserves concurrent
 handoff, receipt, refresh and incident updates. Successor publication stops
 when preparing its durable delivery fails. These changes do not establish
-power-loss durability, acceptance of an exact payload, or activation gating:
-generic turn-start signals are ignored and the existing rotation still
-publishes its pointer before provider startup. Those adapter
-and lifecycle contracts remain required for the full guarantee.
+power-loss durability or runtime qualification. Rotation now freezes the old
+generation durably before waiting for quiescence, stages an immutable exact
+successor checkpoint, and blocks pointer publication on exact native acceptance
+and readiness validation. Current adapters cannot satisfy those checks. Recovery
+of an older, already-published intent also pauses before predecessor retirement;
+it does not retroactively treat that pointer as validated activation.
 
 ## Exact-package receipt contract
 

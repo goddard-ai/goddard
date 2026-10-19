@@ -81,3 +81,33 @@ mbx test -p waku-drivers --lib coordinator_delivery
 mbx test -p waku-daemon --lib rotation_oracle
 mbx check -p waku-daemon -p waku-core
 ```
+
+## Guarded replacement checkpoint
+
+`ContinuityLedger.frozen_coordinator` binds the predecessor, successor and old
+generation before waiting for a running turn to settle. New input and results
+remain on the durable predecessor queue. Queue emptiness is not a prerequisite
+for freezing or preparing a quiescent successor. Oversized inputs stay intact
+in the task store; staging enumerates their event identities rather than
+silently consuming them.
+
+A staged successor cannot launch as an ordinary task. Its exact checkpoint binds
+current identity, grants, model, generation, work references, queued event IDs
+and unresolved effects. Repeated triggers and daemon restarts retain that same
+checkpoint. Changed authority or event state blocks rather than overwriting a
+submitted package. Generic provider events still cannot settle an unknown
+receipt or authorize effect replay.
+
+Before pointer publication, `validate_rotation_successor` requires exact native
+acceptance and calls the item-2 readiness validator. It repeats this validation
+for recovery of pointers published by older code. Missing adapter evidence
+leaves the intent pending and both generations fenced against growth. No new
+provider process or capacity slot is acquired while qualification is absent.
+Every exposed growth boundary independently calls the item-1 budget validator;
+missing observations cannot inherit permission from a previous operation.
+
+This is fail-closed checkpoint/recovery enforcement. It does not supply a
+qualified adapter, replacement admission/capacity integration, a successful
+ownership activation grant, provider-internal loop interception, or live crash
+qualification. All current providers remain paused. Those gates must be closed
+before the full item-3 lifecycle or prevention outcome can be called complete.

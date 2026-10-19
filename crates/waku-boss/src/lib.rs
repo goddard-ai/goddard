@@ -5,6 +5,7 @@ pub mod boss_context;
 pub mod boss_eval;
 pub mod boss_rotation;
 pub mod coordinator_contract;
+pub mod guarded_lifecycle;
 pub mod chains;
 pub mod instruction_pins;
 pub mod provider_budget;

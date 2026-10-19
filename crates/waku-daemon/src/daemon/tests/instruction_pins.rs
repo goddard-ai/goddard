@@ -144,9 +144,7 @@ fn instruction_pins_preserve_human_provenance_and_survive_rotation() {
         });
         backend.task_store.save(&mut state).unwrap();
     }
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
+    install_legacy_boss_rotation(&backend, crate::model::unix_time()).unwrap();
     let next = backend.boss.identity_and_session().1.unwrap();
     assert_ne!(next, old);
     let outbound = backend.boss_outbound_prompt(next, "Continue existing work.".into());

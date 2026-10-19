@@ -10122,7 +10122,9 @@ fn start_now_dispatches_a_queued_ticket_through_burst_headroom() {
     backend.runtime_test_cli = Some("/usr/bin/true".into());
     backend.runtime_test_start = Some(Arc::new(move |_, _, _| {
         *counting.lock() += 1;
-        Ok(DriverHandle::from_control(Arc::new(CaptureDriver::default())))
+        Ok(DriverHandle::from_control(Arc::new(
+            CaptureDriver::default(),
+        )))
     }));
     let mut daemon_settings = backend.settings.get();
     daemon_settings
@@ -10191,7 +10193,9 @@ fn start_now_takes_the_queue_head_but_never_crosses_the_hard_cap() {
     backend.set_daemon_address("http://127.0.0.1:1".into());
     backend.runtime_test_cli = Some("/usr/bin/true".into());
     backend.runtime_test_start = Some(Arc::new(|_, _, _| {
-        Ok(DriverHandle::from_control(Arc::new(CaptureDriver::default())))
+        Ok(DriverHandle::from_control(Arc::new(
+            CaptureDriver::default(),
+        )))
     }));
     let mut daemon_settings = backend.settings.get();
     daemon_settings
@@ -10284,15 +10288,15 @@ fn start_now_takes_the_queue_head_but_never_crosses_the_hard_cap() {
     let first_employee = backend.boss.employee(first).unwrap();
     assert_eq!(first_employee.lifecycle(), EmployeeLifecycle::Queued);
     assert!(
+        first_employee.ticket.as_ref().is_some_and(|ticket| ticket
+            .blocked_by
+            .iter()
+            .any(|blocker| matches!(blocker, AdmissionBlocker::ModelLimit { used: 1, limit: 1 }))),
+        "the unforced ticket reports the saturated lane: {:?}",
         first_employee
             .ticket
             .as_ref()
-            .is_some_and(|ticket| ticket.blocked_by.iter().any(|blocker| matches!(
-                blocker,
-                AdmissionBlocker::ModelLimit { used: 1, limit: 1 }
-            ))),
-        "the unforced ticket reports the saturated lane: {:?}",
-        first_employee.ticket.as_ref().map(|ticket| &ticket.blocked_by)
+            .map(|ticket| &ticket.blocked_by)
     );
 
     // The forced press on the still-blocked sibling keeps it waiting —
@@ -13974,7 +13978,7 @@ fn outcome_reminder_dedupes_across_boss_rotation() {
             })
             .unwrap();
         }
-        backend.reconcile_boss_rotation(now + 1).unwrap();
+        install_legacy_boss_rotation(&backend, now + 1).unwrap();
         let successor = backend.boss.identity_and_session().1.unwrap();
         assert_ne!(successor, predecessor);
 
@@ -16689,6 +16693,61 @@ fn rotation_boss(backend: &WakuBackend) -> Uuid {
     session.id
 }
 
+/// Seed a committed record from the pre-guard daemon for tests of stale
+/// credentials, lineage dedupe and legacy receipts. This does not exercise or
+/// qualify successor admission; production rotation must never use this path.
+fn install_legacy_boss_rotation(backend: &WakuBackend, now: u64) -> anyhow::Result<()> {
+    use waku_boss::{
+        boss_rotation::RotationJournal,
+        rotation_continuity::{ContinuityDeliveryKind, ContinuityLedger},
+    };
+    let (identity, active) = backend.boss.identity_and_session();
+    let old = active.unwrap();
+    let mut journal = RotationJournal::load(&backend.boss_journal_path())?;
+    let next_id = Uuid::new_v4();
+    journal.active_session_id = Some(old);
+    journal.begin(identity.id, old, next_id, now)?;
+    {
+        let mut state = backend.task_state.lock();
+        let source = state.session_mut(old).unwrap();
+        backend.task_store.hydrate(source)?;
+        let mut next = AgentSession::new(identity.id, source.provider);
+        next.id = next_id;
+        next.model = source.model.clone();
+        next.title = identity.name;
+        next.boss_managed = true;
+        next.pending_provider_context = Some(format!(
+            "<boss-session-rotation>Continue coordinating work from {old}</boss-session-rotation>"
+        ));
+        next.push_message(
+            MessageRole::System,
+            "Boss session refreshed; active work preserved.",
+        );
+        next.push_message(MessageRole::System, format!("<boss-rotation-link:{old}>"));
+        next.messages.last_mut().unwrap().hidden = true;
+        next.queued_messages = std::mem::take(&mut source.queued_messages);
+        source.archived_at = Some(now);
+        state.push_session(next);
+        backend.task_store.save(&mut state)?;
+    }
+    ContinuityLedger::update(&backend.boss_continuity_path(), |ledger| {
+        ledger.prepare(
+            &format!("boss-handoff:{next_id}"),
+            next_id,
+            journal.generation + 1,
+            ContinuityDeliveryKind::SessionHandoff,
+            now,
+        );
+        ledger.resolve_rotation_request();
+    })?;
+    backend.boss.replace_session_id(old, next_id)?;
+    journal.commit(now)?;
+    journal.persist(&backend.boss_journal_path())?;
+    backend.agent.migrate_queue(old, next_id);
+    backend.agent.migrate_user_stop(old, next_id);
+    Ok(())
+}
+
 #[test]
 fn a_boss_steer_arriving_for_a_rotated_chat_is_queued_on_the_successor() {
     let root = std::env::temp_dir().join(format!("boss-steer-rotation-{}", Uuid::new_v4()));
@@ -16703,9 +16762,7 @@ fn a_boss_steer_arriving_for_a_rotated_chat_is_queued_on_the_successor() {
             });
         backend.task_store.save(&mut state).unwrap();
     }
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
+    install_legacy_boss_rotation(&backend, crate::model::unix_time()).unwrap();
     let successor = backend.boss.identity_and_session().1.unwrap();
     assert_ne!(successor, predecessor);
 
@@ -16773,7 +16830,7 @@ fn a_steer_echo_on_a_retired_boss_chat_unmirrors_the_carried_chip() {
         ledger.record_compaction_incident(predecessor, now, "provider compaction");
     })
     .unwrap();
-    backend.reconcile_boss_rotation(now + 1).unwrap();
+    install_legacy_boss_rotation(&backend, now + 1).unwrap();
     let successor = backend.boss.identity_and_session().1.unwrap();
     assert_ne!(successor, predecessor);
     assert!(
@@ -17210,254 +17267,50 @@ fn clear_replaces_the_boss_chat_and_removes_retired_generations() {
 }
 
 #[test]
-fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
-    use crate::boss_rotation::RotationJournal;
+fn boss_rotation_never_archives_or_publishes_without_readiness() {
+    use waku_boss::{boss_rotation::RotationJournal, rotation_continuity::ContinuityLedger};
     let root = std::env::temp_dir().join(format!("boss-rotation-runtime-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let old = rotation_boss(&backend);
-    let capture = Arc::new(CaptureDriver::default());
-    let driver = DriverHandle::from_control(capture.clone());
-    let old_runtime = Uuid::new_v4();
-    backend.sessions.lock().insert(
-        old,
-        RuntimeEntry {
-            plan_gate: None,
-            runtime_id: old_runtime,
-            driver: driver.clone(),
-            stable: None,
-            last_active: std::time::Instant::now(),
-            resumable: true,
-            computer_use_available: false,
-            provider: ProviderKind::Codex,
-            cwd: root.clone(),
-        },
-    );
     {
         let mut state = backend.task_state.lock();
-        let session = state.session_mut(old).unwrap();
-        session.reasoning_effort = Some("high".into());
-        session.begin_turn("Keep supervising the release");
-        session.push_message(
-            MessageRole::Assistant,
-            "The release work is still in flight",
-        );
+        let source = state.session_mut(old).unwrap();
+        source.begin_turn("Keep supervising the release");
+        source.finish_active_turn(TurnStatus::Completed);
         backend.task_store.save(&mut state).unwrap();
     }
-    // Exercise the daemon's actual recorder, including partial provider
-    // usage reports, rather than seeding a client-owned usage snapshot.
-    record_boss_event(
-        &backend.task_state,
-        &backend.task_store,
-        old,
-        &DriverEvent::UsageUpdated {
+    for event in [
+        DriverEvent::UsageUpdated {
             context_tokens: Some(81),
             context_window: None,
         },
-    )
-    .unwrap();
-    record_boss_event(
-        &backend.task_state,
-        &backend.task_store,
-        old,
-        &DriverEvent::UsageUpdated {
+        DriverEvent::UsageUpdated {
             context_tokens: None,
             context_window: Some(100),
         },
-    )
-    .unwrap();
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time() + 301)
-        .unwrap();
-    assert_eq!(
-        backend.boss.identity_and_session().1,
-        Some(old),
-        "open turns never rotate"
-    );
-    record_boss_event(
-        &backend.task_state,
-        &backend.task_store,
-        old,
-        &DriverEvent::TurnFinished {
-            success: true,
-            summary: None,
-            summary_i18n: None,
-        },
-    )
-    .unwrap();
-    let refreshed = backend
-        .task_state
-        .lock()
-        .session_mut(old)
-        .unwrap()
-        .last_reply_at
-        .unwrap();
-    // A settled chat that just crossed the threshold rotates on the next
-    // reconcile — a still-warm provider prompt cache must not defer it.
-    backend.reconcile_boss_rotation(refreshed).unwrap();
-    let next = backend.boss.identity_and_session().1.unwrap();
-    assert_ne!(old, next);
-    // Runtime teardown is detached so a stalled event pump cannot park the
-    // Boss operation lock — poll for it rather than assuming it landed
-    // before the reconcile returned.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while *capture.shutdowns.lock() == 0 && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(10));
+    ] {
+        record_boss_event(&backend.task_state, &backend.task_store, old, &event).unwrap();
     }
-    assert_eq!(*capture.shutdowns.lock(), 1);
-    assert!(!backend.sessions.lock().contains_key(&old));
     assert!(
         backend
-            .ensure_agent_runtime(old, &EventSink::detached())
-            .err()
-            .expect("archived chat must not restart")
-            .to_string()
-            .contains("archived")
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
     );
-    assert_eq!(backend.boss.report_target_for(old), Some(next));
-    let journal_path = root.join("boss/rotation.json");
-    let journal = RotationJournal::load(&journal_path).unwrap();
-    assert_eq!(journal.active_session_id, Some(next));
-    assert_eq!(journal.generation, 1);
-    assert!(journal.intent.is_none());
-    assert_eq!(journal.rotations.len(), 1);
-    assert_eq!(journal.rotations[0].old_session_id, old);
-    assert_eq!(journal.rotations[0].new_session_id, next);
-    assert!(journal.rotations[0].committed_at.is_some());
-    // Read both transcripts back from the real database, proving archive
-    // preserves the source and staging survives restart.
-    let mut stored = backend.task_store.load().unwrap();
-    for id in [old, next] {
-        let session = stored.session_mut(id).unwrap();
-        backend.task_store.hydrate(session).unwrap();
-        let marker = session
-            .messages
-            .iter()
-            .find(|message| message.content == "Boss session refreshed; active work preserved.")
-            .unwrap();
-        assert_eq!(marker.role, MessageRole::System);
-        assert!(!marker.hidden);
-        assert!(!marker.content.contains("context_tokens"));
-        assert!(!marker.content.contains(&old.to_string()));
-        assert!(!marker.content.contains(&next.to_string()));
-    }
-    let transcript = backend
-        .handle_boss_operation(
-            Some(next),
-            waku_protocol::boss::BossOperation::Transcript {
-                session_id: old,
-                turn: None,
-            },
-            &EventSink::detached(),
-        )
-        .unwrap();
-    assert!(
-        serde_json::to_string(&transcript)
-            .unwrap()
-            .contains("Keep supervising the release"),
-        "the new Boss can retrieve the archived conversation through its transcript API"
-    );
-    let previous = stored.session_mut(old).unwrap();
-    assert!(previous.archived_at.is_some());
-    assert!(
-        previous
-            .messages
-            .iter()
-            .any(|message| message.content == "Keep supervising the release")
-    );
-    let fresh = stored.session_mut(next).unwrap();
-    assert!(fresh.archived_at.is_none());
-    assert!(fresh.boss_managed);
-    assert_eq!(fresh.model.as_deref(), Some("gpt-6.1-sol"));
-    assert_eq!(fresh.reasoning_effort.as_deref(), Some("high"));
-    assert!(fresh.provider_cursor.is_none());
-    assert!(fresh.context_usage.is_none());
-    let next_runtime = Uuid::new_v4();
-    backend.sessions.lock().insert(
-        next,
-        RuntimeEntry {
-            plan_gate: None,
-            runtime_id: next_runtime,
-            driver,
-            stable: None,
-            last_active: std::time::Instant::now(),
-            resumable: false,
-            computer_use_available: false,
-            provider: ProviderKind::Codex,
-            cwd: root.clone(),
-        },
-    );
-    let prompt = |id, runtime_id| {
-        backend.handle(
-            Request {
-                request_id: Uuid::new_v4(),
-                session_id: id,
-                runtime_id,
-                command: Command::Prompt {
-                    prompt: "Continue the release".into(),
-                    turn_id: None,
-                    message_id: None,
-                    hidden: false,
-                    attachments: Vec::new(),
-                },
-            },
-            EventSink::detached(),
-            None,
-        )
-    };
-    assert!(
-        prompt(old, old_runtime)
-            .unwrap_err()
-            .to_string()
-            .contains("archived")
-    );
-    prompt(next, next_runtime).unwrap();
-    assert!(capture.prompts.lock().is_empty());
-    let state = backend.task_state.lock();
-    let successor = state.sessions.iter().find(|s| s.id == next).unwrap();
-    assert!(
-        successor
-            .queued_messages
-            .iter()
-            .any(|m| m.content == "Continue the release")
-    );
-    let handoff = successor.pending_provider_context.as_ref().unwrap();
-    assert!(handoff.contains("Keep supervising the release"));
-    assert!(handoff.contains(&format!("boss transcript {old}")));
-    drop(state);
-    // Unqualified submission stays queued; generic turn-start is not a receipt.
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
     assert!(
         backend
             .task_state
             .lock()
-            .session_mut(next)
+            .session_mut(old)
             .unwrap()
-            .pending_provider_context
-            .is_some()
+            .archived_at
+            .is_none()
     );
-    super::events::boss_continuity_note_event(
-        &backend.boss,
-        &backend.task_state,
-        &backend.task_store,
-        next,
-        &DriverEvent::TurnStarted,
-    );
-    assert!(
-        backend
-            .task_state
-            .lock()
-            .session_mut(next)
-            .unwrap()
-            .pending_provider_context
-            .is_some()
-    );
-    let recovered_boss = crate::boss::BossService::open(root.join("boss")).unwrap();
-    assert_eq!(recovered_boss.identity_and_session().1, Some(next));
-    backend.reconcile_boss_rotation(refreshed + 600).unwrap();
-    assert_eq!(
-        RotationJournal::load(&journal_path).unwrap().generation,
-        1,
-        "new chat does not inherit context pressure"
-    );
+    let journal = RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
+    assert!(journal.intent.is_some());
+    assert!(journal.rotations.is_empty());
+    let ledger = ContinuityLedger::load(&root.join("boss/continuity.json")).unwrap();
+    assert!(ledger.frozen_coordinator.unwrap().package.is_some());
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -17468,114 +17321,39 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
 /// while a stalled pump held it, every Boss chat prompt and boss command
 /// ran out the client request timeout.
 #[test]
-fn boss_rotation_commits_while_predecessor_teardown_waits_on_its_event_pump() {
-    use crate::boss_rotation::RotationJournal;
+fn boss_rotation_pause_does_not_wait_on_predecessor_event_pump() {
     let root = std::env::temp_dir().join(format!("boss-rotation-offlock-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let old = rotation_boss(&backend);
-    let capture = Arc::new(CaptureDriver::default());
-    let driver = DriverHandle::from_control(capture.clone());
-    let old_runtime = Uuid::new_v4();
-    backend.sessions.lock().insert(
-        old,
-        RuntimeEntry {
-            plan_gate: None,
-            runtime_id: old_runtime,
-            driver: driver.clone(),
-            stable: None,
-            last_active: std::time::Instant::now(),
-            resumable: true,
-            computer_use_available: false,
-            provider: ProviderKind::Codex,
-            cwd: root.clone(),
-        },
-    );
     {
         let mut state = backend.task_state.lock();
-        let session = state.session_mut(old).unwrap();
-        session.begin_turn("Keep supervising the release");
-        session.push_message(
-            MessageRole::Assistant,
-            "The release work is still in flight",
-        );
+        state.session_mut(old).unwrap().context_usage = Some(crate::model::ContextUsage {
+            tokens: 81,
+            window: Some(100),
+        });
         backend.task_store.save(&mut state).unwrap();
     }
-    record_boss_event(
-        &backend.task_state,
-        &backend.task_store,
-        old,
-        &DriverEvent::UsageUpdated {
-            context_tokens: Some(81),
-            context_window: None,
-        },
-    )
-    .unwrap();
-    record_boss_event(
-        &backend.task_state,
-        &backend.task_store,
-        old,
-        &DriverEvent::UsageUpdated {
-            context_tokens: None,
-            context_window: Some(100),
-        },
-    )
-    .unwrap();
-    record_boss_event(
-        &backend.task_state,
-        &backend.task_store,
-        old,
-        &DriverEvent::TurnFinished {
-            success: true,
-            summary: None,
-            summary_i18n: None,
-        },
-    )
-    .unwrap();
-    let refreshed = backend
-        .task_state
-        .lock()
-        .session_mut(old)
-        .unwrap()
-        .last_reply_at
-        .unwrap();
-    // The event pump applies each event under the session's lifecycle gate;
-    // hold it the way a stalled pump would.
     let lifecycle = backend.runtime_lifecycles.session(old);
     let gate = lifecycle.lock();
-    backend.reconcile_boss_rotation(refreshed).unwrap();
-    let next = backend.boss.identity_and_session().1.unwrap();
-    assert_ne!(old, next);
-    let journal = RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
-    assert!(journal.intent.is_none());
     assert!(
-        journal
-            .rotations
-            .last()
-            .is_some_and(|rotation| rotation.committed_at.is_some()),
-        "rotation commits while predecessor teardown is still waiting"
+        backend
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
     );
-    // Boss chat commands must not inherit the pump's stall.
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
     assert!(
         backend
             .boss
             .try_operation_guard(std::time::Duration::from_secs(1))
             .is_some()
     );
-    assert_eq!(*capture.shutdowns.lock(), 0);
-    assert!(backend.sessions.lock().contains_key(&old));
     drop(gate);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while *capture.shutdowns.lock() == 0 && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    assert_eq!(*capture.shutdowns.lock(), 1);
-    assert!(!backend.sessions.lock().contains_key(&old));
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
-fn boss_rotation_carries_the_persisted_composer_draft() {
+fn boss_rotation_pause_preserves_the_persisted_composer_draft() {
     let root = std::env::temp_dir().join(format!("boss-rotation-draft-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let mut settings = backend.settings.get();
@@ -17613,24 +17391,19 @@ fn boss_rotation_carries_the_persisted_composer_draft() {
         });
         backend.task_store.save(&mut state).unwrap();
     }
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
+    assert!(
+        backend
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
+    );
     let next = backend.boss.identity_and_session().1.unwrap();
-    assert_ne!(old, next);
+    assert_eq!(old, next);
     let drafts = backend.composer_drafts.load().unwrap();
     let carried = drafts
         .get(crate::persistence::ComposerDraftKey::Session(next))
-        .expect("the unsent draft follows the chat to its replacement session");
+        .expect("the draft stays on the paused current session");
     assert_eq!(carried.text, "hold the release until QA lands");
     assert_eq!(carried.attachments.len(), 1);
-    assert!(
-        drafts
-            .get(crate::persistence::ComposerDraftKey::Session(old))
-            .is_none(),
-        "nothing stays parked on the archived predecessor"
-    );
-
     // The carried draft runs the ordinary lifecycle afterward — a client
     // clearing the slot after submit (or discarding the draft) removes it.
     backend
@@ -17694,16 +17467,18 @@ fn boss_rotation_opt_out_and_exact_threshold_keep_the_current_chat() {
     assert_eq!(backend.boss.identity_and_session().1, Some(old));
     settings.boss_rotation_disabled = false;
     backend.settings.replace(settings).unwrap();
-    backend
-        .reconcile_boss_rotation(crate::model::unix_time())
-        .unwrap();
-    assert_ne!(backend.boss.identity_and_session().1, Some(old));
+    assert!(
+        backend
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
+    );
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
-fn boss_rotation_recovers_each_interrupted_publication_boundary_once() {
+fn boss_rotation_recovery_blocks_each_unvalidated_publication_boundary() {
     use crate::boss_rotation::RotationJournal;
     for boundary in 0..3 {
         let root = std::env::temp_dir().join(format!("boss-rotation-recovery-{}", Uuid::new_v4()));
@@ -17711,9 +17486,10 @@ fn boss_rotation_recovers_each_interrupted_publication_boundary_once() {
         let old = rotation_boss(&backend);
         {
             let mut state = backend.task_state.lock();
-            let session = state.session_mut(old).unwrap();
-            session.begin_turn("Keep supervising the existing work");
-            session.finish_active_turn(TurnStatus::Completed);
+            state
+                .session_mut(old)
+                .unwrap()
+                .push_message(MessageRole::System, "durable unfinished work");
             backend.task_store.save(&mut state).unwrap();
         }
         let next = Uuid::new_v4();
@@ -17724,65 +17500,52 @@ fn boss_rotation_recovers_each_interrupted_publication_boundary_once() {
         };
         let now = crate::model::unix_time();
         journal.begin(identity.id, old, next, now).unwrap();
-        journal.intent.as_mut().unwrap().reason = Some(
-            "boss_rotation_context_threshold=0.75 exceeded (context_tokens=76, context_window=100)"
-                .into(),
-        );
+        let intent = journal.intent.as_mut().unwrap();
+        intent.identity_digest = Some(backend.boss.identity_digest());
+        intent.provider = Some(format!("{:?}", ProviderKind::Codex));
+        intent.model = Some("gpt-6.1-sol".into());
         journal.persist(&root.join("boss/rotation.json")).unwrap();
         if boundary >= 1 {
-            let mut state = backend.task_state.lock();
             let mut staged = AgentSession::new(identity.id, ProviderKind::Codex);
             staged.id = next;
             staged.boss_managed = true;
-            staged.title = identity.name;
-            // Staging initializes a durable transcript and handoff; bare
-            // drafts are deliberately excluded by StateStore::save.
-            staged.push_message(MessageRole::System, "Boss rotation handoff staged");
-            staged.pending_provider_context = Some(format!("Continue supervising work from {old}"));
+            staged.model = Some("gpt-6.1-sol".into());
+            staged.push_message(MessageRole::System, "staged checkpoint");
+            staged.pending_provider_context = Some("unfinished work".into());
+            let mut state = backend.task_state.lock();
             state.push_session(staged);
             backend.task_store.save(&mut state).unwrap();
         }
         if boundary == 2 {
             backend.boss.replace_session_id(old, next).unwrap();
         }
-        // An opt-out must not strand a partially published rotation.
-        let mut settings = backend.settings.get();
-        settings.boss_rotation_disabled = true;
-        backend.settings.replace(settings).unwrap();
         drop(backend);
         let backend = WakuBackend::new(
             DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
             StateStore::daemon(root.join("app.db")),
         )
         .unwrap();
-        backend.reconcile_boss_rotation(now + 1).unwrap();
-        backend.reconcile_boss_rotation(now + 2).unwrap();
-        assert_eq!(backend.boss.identity_and_session().1, Some(next));
+        for _ in 0..2 {
+            assert!(backend.reconcile_boss_rotation(now + 1).is_err());
+        }
+        assert_eq!(
+            backend.boss.identity_and_session().1,
+            Some(if boundary == 2 { next } else { old })
+        );
         let journal = RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
-        assert_eq!(journal.generation, 1);
-        assert_eq!(journal.rotations.len(), 1);
-        let mut state = backend.task_store.load().unwrap();
-        let old_session = state.session_mut(old).unwrap();
-        backend.task_store.hydrate(old_session).unwrap();
-        assert!(old_session.archived_at.is_some());
-        assert_eq!(
-            old_session
-                .messages
-                .iter()
-                .filter(|message| {
-                    message.content == "Boss session refreshed; active work preserved."
-                })
-                .count(),
-            1
+        assert_eq!(journal.generation, 0);
+        assert!(journal.rotations.is_empty());
+        assert_eq!(journal.intent.unwrap().new_session_id, next);
+        assert!(
+            backend
+                .task_state
+                .lock()
+                .session_mut(old)
+                .unwrap()
+                .archived_at
+                .is_none()
         );
-        assert_eq!(
-            state
-                .sessions
-                .iter()
-                .filter(|session| session.id == next)
-                .count(),
-            1
-        );
+        assert!(backend.sessions.lock().is_empty());
         drop(backend);
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -20383,7 +20146,7 @@ fn chain_exception_report_dedupes_across_boss_rotation() {
         ledger.record_compaction_incident(boss, now, "provider compaction");
     })
     .unwrap();
-    backend.reconcile_boss_rotation(now + 1).unwrap();
+    install_legacy_boss_rotation(&backend, now + 1).unwrap();
     let successor = backend.boss.identity_and_session().1.unwrap();
     assert_ne!(successor, boss);
     // The unqualified predecessor held the report. Carry it once, preserving

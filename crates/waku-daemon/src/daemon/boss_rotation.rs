@@ -5,20 +5,14 @@ use crate::boss_rotation::{
 };
 use crate::model::MessageRole;
 use waku_boss::boss_rotation::RotationCause;
-use waku_boss::rotation_continuity::{ContinuityDeliveryKind, ContinuityLedger};
-use waku_boss::rotation_oracle::{CompactionStage, ContextSampleSource, RotationLifecycleStage};
+use waku_boss::rotation_continuity::ContinuityLedger;
 #[cfg(test)]
 use waku_boss::rotation_oracle::{
     AdmissionBoundary, AdmissionDecision, DurableAction, DurableActionKind, DurableActionStatus,
     LifecycleObservation, OwnershipObservation, OwnershipState, ProviderAdmission,
     ProviderCompaction, ProviderTransport, ProviderTransportStatus, RotationObservation,
 };
-
-/// The logical identifier of the bound handoff a successor must receive.
-/// Retries reconcile onto the same delivery rather than duplicating it.
-fn handoff_delivery_id(session_id: Uuid) -> String {
-    format!("boss-handoff:{session_id}")
-}
+use waku_boss::rotation_oracle::{CompactionStage, ContextSampleSource, RotationLifecycleStage};
 
 /// Every session id a Boss chat lineage has owned — each generation the
 /// rotation journal names, oldest first, plus `session_id` itself. When
@@ -115,14 +109,12 @@ impl WakuBackend {
         }
         let journal_fenced = RotationJournal::load(&self.boss_journal_path())
             .map(|journal| {
-                journal
-                    .intent
-                    .as_ref()
-                    .is_some_and(|intent| intent.old_session_id == session_id)
-                    || journal
-                        .rotations
-                        .iter()
-                        .any(|rotation| rotation.old_session_id == session_id)
+                journal.intent.as_ref().is_some_and(|intent| {
+                    intent.old_session_id == session_id || intent.new_session_id == session_id
+                }) || journal
+                    .rotations
+                    .iter()
+                    .any(|rotation| rotation.old_session_id == session_id)
             })
             .unwrap_or(false);
         if journal_fenced {
@@ -168,7 +160,9 @@ impl WakuBackend {
     pub(super) fn boss_incident_fenced(&self, session_id: Uuid) -> bool {
         self.boss.is_boss(session_id)
             && ContinuityLedger::load(&self.boss_continuity_path())
-                .map(|ledger| ledger.has_incident(session_id))
+                .map(|ledger| {
+                    ledger.has_incident(session_id) || ledger.coordinator_frozen(session_id)
+                })
                 .unwrap_or(true)
     }
 
@@ -214,11 +208,8 @@ impl WakuBackend {
         &self,
         provider: ProviderKind,
     ) -> waku_boss::rotation_continuity::ProviderQualification {
-        let version = crate::model::provider_probe(provider, None)
-            .path
-            .as_deref()
-            .and_then(crate::model::probe_provider_version);
-        waku_boss::rotation_continuity::qualify_provider(provider, version.as_deref())
+        // PATH probes cannot establish the effective launch contract.
+        waku_boss::rotation_continuity::qualify_provider(provider, None)
     }
 
     /// The last daemon-owned boundary every Boss provider handle crosses.
@@ -559,6 +550,154 @@ impl WakuBackend {
     /// `retired` collects sessions whose runtimes must be torn down after
     /// the caller drops the Boss operation lock — teardown waits on the
     /// session's event-pump gate, which must never park the lock.
+    /// Validate an exact checkpoint before either publication or recovered
+    /// publication can retire a generation. No runtime is launched here: all
+    /// current adapters lack qualified admission and replacement capacity.
+    fn validate_rotation_successor(
+        &self,
+        state: &PersistedState,
+        intent: &waku_boss::boss_rotation::RotationIntent,
+        now: u64,
+    ) -> anyhow::Result<()> {
+        use waku_boss::coordinator_contract::{CoordinatorBinding, CoordinatorPackage};
+        use waku_boss::rotation_continuity::{ContinuityPackage, ContinuityScope};
+        let next = state
+            .sessions
+            .iter()
+            .find(|s| s.id == intent.new_session_id)
+            .ok_or_else(|| anyhow!("successor checkpoint unavailable"))?;
+        let old = state
+            .sessions
+            .iter()
+            .find(|s| s.id == intent.old_session_id)
+            .ok_or_else(|| anyhow!("predecessor checkpoint unavailable"))?;
+        let identity_revision = self.boss.identity_digest();
+        anyhow::ensure!(
+            intent.identity_digest.as_ref() == Some(&identity_revision),
+            "Boss refresh identity is stale or unbound"
+        );
+        anyhow::ensure!(
+            intent.provider.as_deref() == Some(format!("{:?}", next.provider).as_str())
+                && intent.model == next.model
+                && old.provider == next.provider
+                && old.model == next.model,
+            "Boss refresh configuration changed"
+        );
+        let document = self.boss.document();
+        // A staged session is deliberately not yet a principal. Render identity
+        // from the current principal, independently of the narrative handoff.
+        let principal = self
+            .boss
+            .identity_and_session()
+            .1
+            .ok_or_else(|| anyhow!("coordinator principal unavailable"))?;
+        let package = CoordinatorPackage {
+            binding: CoordinatorBinding {
+                provider: next.provider,
+                session: next.id,
+                generation: intent
+                    .old_generation
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow!("Boss generation exhausted"))?,
+                identity_revision: identity_revision.clone(),
+                grants_revision: serde_json::to_string(&document.resource_policy)?,
+                model: next.model.clone().unwrap_or_default(),
+                scope: ContinuityScope::Coordinator,
+            },
+            content: ContinuityPackage {
+                identity_revision,
+                scope: ContinuityScope::Coordinator,
+                instructions: self.boss.canonical_boss_instructions(principal)?,
+                context: next
+                    .pending_provider_context
+                    .clone()
+                    .ok_or_else(|| anyhow!("continuity context unavailable"))?,
+            },
+            event_ids: old
+                .messages
+                .iter()
+                .map(|m| m.id)
+                .chain(old.queued_messages.iter().map(|m| m.id))
+                .chain(next.queued_messages.iter().map(|m| m.id))
+                .collect(),
+            work_ids: document
+                .employees
+                .iter()
+                .map(|e| e.session_id)
+                .chain(document.planning.iter().map(|p| p.id))
+                .chain(document.outcomes.iter().map(|o| o.id))
+                .chain(document.deliverables.iter().map(|d| d.id))
+                .collect(),
+            effect_ids: ContinuityLedger::load(&self.boss_continuity_path())?
+                .coordinator_effects
+                .iter()
+                .filter(|e| e.resolution.is_none())
+                .map(|e| e.id.clone())
+                .collect(),
+        };
+        let id = format!("boss-successor:{}", next.id);
+        ContinuityLedger::update(&self.boss_continuity_path(), |ledger| {
+            ledger.stage_successor(&id, &package, now)
+        })??;
+        let ledger = ContinuityLedger::load(&self.boss_continuity_path())?;
+        let attempt = ledger
+            .deliveries
+            .iter()
+            .find(|d| d.delivery_id == id)
+            .and_then(|d| d.attempt.as_ref())
+            .ok_or_else(|| anyhow!("Boss refresh paused: exact provider acceptance unavailable"))?;
+        let (runtime_id, driver) = self
+            .sessions
+            .lock()
+            .get(&next.id)
+            .map(|entry| (entry.runtime_id, entry.driver.clone()))
+            .ok_or_else(|| anyhow!("Boss refresh paused: prepared runtime unavailable"))?;
+        anyhow::ensure!(
+            attempt.runtime_id == runtime_id,
+            "successor runtime changed"
+        );
+        // No adapter currently supplies effective, independently trusted bounds
+        // or policy enforcement. Never infer launch revisions from a receipt or
+        // copy adapter evidence into its independently expected binding.
+        let expected = waku_boss::provider_budget::StartupBudgetBinding {
+            provider: next.provider,
+            runtime_version: String::new(),
+            model: package.binding.model.clone(),
+            configuration_revision: String::new(),
+            instruction_revision: package.binding.identity_revision.clone(),
+            runtime_id,
+            generation: package.binding.generation,
+            package_digest: package.exact_content()?.digest()?,
+            operation_id: Uuid::new_v4(),
+        };
+        if ledger.deliveries.iter().any(|delivery| {
+            delivery.delivery_id == id
+                && delivery.status
+                    == waku_boss::rotation_continuity::ContinuityDeliveryStatus::Submitted
+        }) {
+            // Query the original attempt only. Unknown reconciliation cannot
+            // create a replacement attempt or replay a provider effect.
+            crate::driver::deliver_coordinator_package(
+                driver.coordinator_control(),
+                &self.boss_continuity_path(),
+                &id,
+                &package,
+                &package.binding,
+                &expected,
+            )?;
+        }
+        let latest = ContinuityLedger::load(&self.boss_continuity_path())?;
+        let adapter = driver.coordinator_control();
+        let observed = adapter.coordinator_startup_observation();
+        latest.validate_successor(
+            &package,
+            attempt,
+            &expected,
+            observed.as_ref(),
+            adapter.coordinator_policy_enforced(),
+        )
+    }
+
     fn rotate_boss_chat(
         &self,
         settings: &crate::DaemonSettings,
@@ -605,9 +744,8 @@ impl WakuBackend {
                 return Ok(());
             };
             self.task_store.hydrate(old)?;
-            if !boss_chat_settled(old, &self.agent, incident) {
-                return Ok(());
-            }
+            // Trigger and freeze independently of queue emptiness or an open
+            // provider turn. Quiescence is checked only after the durable fence.
             let policy = BossRotationConfig::from_settings(settings);
             let reason = if let Some(reason) = requested.clone() {
                 reason
@@ -625,6 +763,17 @@ impl WakuBackend {
                     usage.window.unwrap_or_default(),
                 )
             };
+            if old.messages.is_empty() {
+                // The task store omits empty drafts even when their queues are
+                // populated. Anchor the predecessor durably before freezing so
+                // restart cannot lose a first-turn input or unfinished intake.
+                old.push_message(MessageRole::System, "Boss coordination checkpoint.");
+                old.messages.last_mut().expect("checkpoint appended").hidden = true;
+                self.task_store.save(&mut state)?;
+            }
+            let old = state
+                .session_mut(active)
+                .expect("rotation source is present");
             journal.active_session_id = Some(active);
             journal.begin(identity.id, active, Uuid::new_v4(), now)?;
             {
@@ -705,6 +854,13 @@ impl WakuBackend {
             active == intent.old_session_id || active == intent.new_session_id,
             "Boss rotation session pointer diverged"
         );
+        ContinuityLedger::update(&continuity_path, |ledger| {
+            ledger.freeze_coordinator(
+                intent.old_session_id,
+                intent.new_session_id,
+                intent.old_generation,
+            )
+        })??;
         let predecessor = format!("<boss-rotation-link:{}>", intent.old_session_id);
         if active == intent.old_session_id {
             if let Some(fenced_at) = fenced_at {
@@ -716,7 +872,7 @@ impl WakuBackend {
             self.task_store.hydrate(old)?;
             // Hold the task lease through publication: prompt recording
             // cannot open a turn between this check and the archive flag.
-            if !boss_chat_settled(old, &self.agent, incident) {
+            if !boss_chat_settled(old, &self.agent, true) {
                 return Ok(());
             }
             if !state
@@ -765,20 +921,6 @@ impl WakuBackend {
                     DurableActionKind::SuccessorPreparation,
                 );
             }
-            // The bound identity/continuity package is prepared — it stays
-            // pending until provider transport acceptance is recorded.
-            {
-                let delivery_id = handoff_delivery_id(intent.new_session_id);
-                ContinuityLedger::update(&continuity_path, |ledger| {
-                    ledger.prepare(
-                        &delivery_id,
-                        intent.new_session_id,
-                        intent.old_generation.saturating_add(1),
-                        ContinuityDeliveryKind::SessionHandoff,
-                        now,
-                    );
-                })?;
-            }
             // Revalidate the bound revision before the pointer switch: a
             // persona, grant or provider change during staging means this
             // successor was built for a stale revision. Never activate
@@ -793,39 +935,25 @@ impl WakuBackend {
                     .iter()
                     .find(|session| session.id == intent.new_session_id)
                     .is_some_and(|staged| {
-                        intent.provider.as_deref().is_none_or(|provider| {
-                            provider == format!("{:?}", staged.provider)
-                        }) && intent
-                            .model
+                        intent
+                            .provider
                             .as_deref()
-                            .is_none_or(|model| model == staged.model.as_deref().unwrap_or(""))
+                            .is_none_or(|provider| provider == format!("{:?}", staged.provider))
+                            && intent
+                                .model
+                                .as_deref()
+                                .is_none_or(|model| model == staged.model.as_deref().unwrap_or(""))
                     });
                 if !identity_current || !config_current {
-                    eprintln!(
-                        "Boss session rotation aborted: identity or configuration changed during staging (boss={} old_session_id={} new_session_id={})",
-                        identity.id, intent.old_session_id, intent.new_session_id,
+                    // Do not discard a submitted package or an uncertain effect.
+                    // A changed revision requires explicit reconciliation; the old
+                    // generation stays frozen and the checkpoint remains durable.
+                    anyhow::bail!(
+                        "Boss refresh paused: authoritative identity or configuration changed"
                     );
-                    #[cfg(test)]
-                    {
-                        self.observe_rotation_lifecycle(&intent, RotationLifecycleStage::Failed);
-                    }
-                    state
-                        .sessions
-                        .retain(|session| session.id != intent.new_session_id);
-                    self.task_store.save(&mut state)?;
-                    // The staged delivery belongs to the discarded successor —
-                    // drop it so the ledger holds no pending package for a
-                    // session that never existed.
-                    ContinuityLedger::update(&continuity_path, |ledger| {
-                        ledger.deliveries.retain(|delivery| {
-                            delivery.session_id != intent.new_session_id
-                        });
-                    })?;
-                    journal.abort();
-                    journal.persist(&path)?;
-                    return Ok(());
                 }
             }
+            self.validate_rotation_successor(&state, &intent, now)?;
             self.boss
                 .replace_session_id(active, intent.new_session_id)?;
             journal.record_stage(RotationLifecycleStage::PointerPublished, now);
@@ -840,6 +968,9 @@ impl WakuBackend {
                 );
             }
         }
+        // Older daemons may have published before validation. Recovery must
+        // not archive the predecessor or call that successor active on restart.
+        self.validate_rotation_successor(&state, &intent, now)?;
         anyhow::ensure!(
             state
                 .sessions
@@ -1496,9 +1627,8 @@ impl BossOwnershipDriver {
     /// Whether this handle may admit context growth right now. Ownership
     /// reads the live pointer, not a value captured at wrap time — a
     /// mid-call rotation fences the predecessor immediately.
-    #[cfg(test)]
     fn owner_generation(&self) -> Option<u64> {
-        let journal = RotationJournal::load(&self.journal_path).unwrap_or_default();
+        let journal = RotationJournal::load(&self.journal_path).ok()?;
         if let Some(intent) = &journal.intent {
             if intent.new_session_id == self.session_id {
                 return Some(intent.old_generation.saturating_add(1));
@@ -1534,9 +1664,45 @@ impl BossOwnershipDriver {
         let archived = self.task_state.lock().sessions.iter()
             .find(|session| session.id == self.session_id)
             .is_none_or(|session| session.archived_at.is_some());
-        let incident = ContinuityLedger::load(&self.continuity_path)
+        let ledger = ContinuityLedger::load(&self.continuity_path);
+        let incident = ledger
+            .as_ref()
             .map(|ledger| ledger.has_incident(self.session_id))
             .unwrap_or(true);
+        // Every context-growing DriverControl boundary revalidates. The current
+        // adapters expose no trusted effective bounds; never reuse a startup
+        // check or infer a continuation budget from reported occupancy.
+        let generation = self.owner_generation();
+        let expected = waku_boss::provider_budget::StartupBudgetBinding {
+            provider: self
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|s| s.id == self.session_id)
+                .map(|s| s.provider)
+                .unwrap_or(ProviderKind::Codex),
+            runtime_version: String::new(),
+            model: String::new(),
+            configuration_revision: String::new(),
+            instruction_revision: self.boss.identity_digest(),
+            runtime_id: self.runtime_id,
+            generation: generation.unwrap_or_default(),
+            package_digest: String::new(),
+            operation_id: Uuid::new_v4(),
+        };
+        let budget_valid = ledger.as_ref().is_ok_and(|ledger| {
+            generation.is_some_and(|generation| {
+                waku_boss::guarded_lifecycle::validate_growth(
+                    ledger,
+                    self.session_id,
+                    generation,
+                    &expected,
+                    None,
+                )
+                .is_ok()
+            })
+        });
         // No current adapter has a proven policy or effective budget contract.
         // This also fences planning and handles created before qualification changed.
         let policy = self
@@ -1546,7 +1712,8 @@ impl BossOwnershipDriver {
         // Readiness must be independently bound and committed by a future lifecycle.
         // Adapter self-report alone cannot authorize existing handles.
         let readiness_committed = false;
-        let allowed = active && !archived && !incident && policy && readiness_committed;
+        let allowed =
+            active && !archived && !incident && policy && readiness_committed && budget_valid;
         if !allowed {
             eprintln!(
                 "Boss driver fence denied {boundary} for session {} (active={active} archived={archived} incident={incident})",
@@ -1606,6 +1773,33 @@ impl BossOwnershipDriver {
 }
 
 impl crate::driver::DriverControl for BossOwnershipDriver {
+    // Receipt queries do not admit context growth or authorize a resend.
+    fn reconcile_coordinator_package(
+        &self,
+        attempt: &waku_boss::rotation_continuity::ContinuityAttempt,
+    ) -> waku_boss::coordinator_contract::PackageOutcome {
+        if attempt.session_id != self.session_id || attempt.runtime_id != self.runtime_id {
+            return waku_boss::coordinator_contract::PackageOutcome::Unknown;
+        }
+        self.inner
+            .coordinator_control()
+            .reconcile_coordinator_package(attempt)
+    }
+
+    fn coordinator_startup_observation(
+        &self,
+    ) -> Option<waku_boss::provider_budget::StartupBudgetEvidence> {
+        self.inner
+            .coordinator_control()
+            .coordinator_startup_observation()
+    }
+
+    fn coordinator_policy_enforced(&self) -> bool {
+        self.inner
+            .coordinator_control()
+            .coordinator_policy_enforced()
+    }
+
     fn prompt(&self, prompt: String) {
         if !self.admit("prompt") {
             self.hold_prompt(&prompt);

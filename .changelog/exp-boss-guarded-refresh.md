@@ -1,0 +1,1 @@
+- Boss refresh now keeps the current session and queued work paused until the replacement's instructions, continuity receipt, and safety checks validate.
