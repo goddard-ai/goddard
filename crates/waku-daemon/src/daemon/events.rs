@@ -344,8 +344,8 @@ fn boss_journal_generation(boss: &crate::boss::BossService, session_id: Uuid) ->
 /// generation is fenced and a safe refresh is requested.
 pub(super) fn boss_continuity_note_event(
     boss: &crate::boss::BossService,
-    task_state: &Mutex<PersistedState>,
-    task_store: &StateStore,
+    _task_state: &Mutex<PersistedState>,
+    _task_store: &StateStore,
     session_id: Uuid,
     event: &DriverEvent,
 ) {
@@ -356,44 +356,8 @@ pub(super) fn boss_continuity_note_event(
     let path = boss.root().join("continuity.json");
     let now = crate::model::unix_time();
     match event {
-        DriverEvent::TurnStarted => {
-            match ContinuityLedger::update(&path, |ledger| ledger.mark_accepted(session_id, now)) {
-                Ok(true) => {}
-                Ok(false) => return,
-                Err(error) => {
-                    eprintln!("could not record Boss transport acceptance: {error:#}");
-                    return;
-                }
-            }
-            let mut state = task_state.lock();
-            let context = state
-                .sessions
-                .iter_mut()
-                .find(|session| session.id == session_id)
-                .and_then(|session| session.pending_provider_context.take());
-            if let Some(context) = context {
-                state.mark_session_dirty(session_id);
-                if let Err(error) = task_store.save(&mut state) {
-                    if let Some(session) = state.session_mut(session_id) {
-                        session.pending_provider_context = Some(context);
-                    }
-                    state.mark_session_dirty(session_id);
-                    eprintln!("could not consume the delivered Boss context: {error:#}");
-                }
-            }
-        }
-        DriverEvent::TurnFinished {
-            success: false, ..
-        }
-        | DriverEvent::Error(_)
-        | DriverEvent::LocalizedError { .. }
-        | DriverEvent::ProcessExited => {
-            if let Err(error) = ContinuityLedger::update(&path, |ledger| {
-                ledger.mark_rejected(session_id, now);
-            }) {
-                eprintln!("could not record Boss transport rejection: {error:#}");
-            }
-        }
+        // Generic activity/turn/error signals carry no exact package receipt.
+        // In particular process exit and failed turns leave acceptance unknown.
         DriverEvent::RichActivity(item) if crate::model::is_context_compaction(item) => {
             eprintln!(
                 "Boss compaction incident on session {session_id}: {}; the generation is fenced and a safe refresh was requested",

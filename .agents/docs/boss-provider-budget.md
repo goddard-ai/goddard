@@ -119,12 +119,14 @@ Repeated empty-session rotation cannot repair an oversized package. Each
 continuation requires new evidence, and the lifecycle must atomically prevent
 reuse/races; this stateless API does not enforce single use or ownership.
 
-**Integration boundary:** this patch provides qualification decisions and the
-startup validator. It does not wire production admission, receipts, activation,
-provider controls or lifecycle pauses. The current running daemon was untouched;
-its legacy fence can still admit unqualified work. Production fail-closed
-behavior remains a consumer/lifecycle integration requirement. Do not advertise
-the full prevention guarantee from these unit tests.
+**Integration boundary:** item 1 provides qualification decisions and the
+startup validator. The [item-2 coordinator contract](boss-coordinator-contract.md)
+now stages production startup packages and invokes validation before launch;
+all current configurations remain blocked. Existing handles and scoped
+coordinator CLI actions also fail closed. Activation, provider controls and
+lifecycle pauses remain separate work. These source changes do not update a
+running daemon or qualify its provider. Do not advertise the full prevention
+guarantee from deterministic unit tests.
 
 ## Verification and remaining qualification
 

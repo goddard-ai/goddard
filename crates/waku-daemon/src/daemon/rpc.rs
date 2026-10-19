@@ -277,7 +277,61 @@ impl Backend for WakuBackend {
         if let Some(caller) = agent
             && self.boss_fenced_chat(caller)
         {
-            bail!("credential belongs to a fenced Boss generation; the active chat owns coordination");
+            bail!(
+                "credential belongs to a fenced Boss generation; the active chat owns coordination"
+            );
+        }
+        if agent.is_some_and(|caller| self.boss.is_boss_principal(caller)) {
+            bail!("Boss coordination paused: no qualified coordinator readiness binding");
+        }
+        if self.boss.is_boss_principal(session_id)
+            && let Command::Prompt {
+                prompt,
+                message_id,
+                attachments,
+                hidden,
+                ..
+            } = &request.command
+        {
+            let mut queued = crate::model::QueuedMessage::new(prompt);
+            queued.id = message_id.unwrap_or(request.request_id);
+            anyhow::ensure!(!queued.id.is_nil(), "coordinator input identity missing");
+            queued.attachments = attachments.clone();
+            queued.hidden = *hidden;
+            let mut state = self.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|s| s.id == session_id)
+                .ok_or_else(|| anyhow!("coordinator session unavailable"))?;
+            self.task_store.hydrate(session)?;
+            anyhow::ensure!(
+                session.archived_at.is_none(),
+                "coordinator session archived"
+            );
+            if let Some(existing) = session.queued_messages.iter().find(|m| m.id == queued.id) {
+                anyhow::ensure!(
+                    existing.content == queued.content
+                        && existing.attachments == queued.attachments
+                        && existing.hidden == queued.hidden,
+                    "coordinator input identity conflict"
+                );
+            } else if let Some(existing) = session.messages.iter().find(|m| m.id == queued.id) {
+                anyhow::ensure!(
+                    existing.content == queued.content
+                        && existing.attachments == queued.attachments,
+                    "coordinator input identity conflict"
+                );
+            } else {
+                session.queued_messages.push(queued);
+            }
+            // Retry persistence even for an existing in-memory entry after a
+            // previous save failure; Ack must always follow durable storage.
+            state.mark_session_dirty(session_id);
+            self.task_store.save(&mut state)?;
+            drop(state);
+            self.notify_task_state();
+            return Ok(ResponsePayload::Ack);
         }
         if let Command::Respond { request_id, .. } = &request.command
             && request_id.starts_with(waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX)
@@ -1946,7 +2000,13 @@ impl Backend for WakuBackend {
                 if agent.is_some_and(|id| self.boss.is_boss_principal(id)) {
                     bail!("the boss delegates computer use to granted employees");
                 }
-                self.agent_computer_use(session_id, agent, Some(&code), timeout_ms, title.as_deref())
+                self.agent_computer_use(
+                    session_id,
+                    agent,
+                    Some(&code),
+                    timeout_ms,
+                    title.as_deref(),
+                )
             }
             Command::AgentComputerUseRun { request } => {
                 if agent.is_some_and(|id| self.boss.is_boss_principal(id)) {
@@ -2082,7 +2142,8 @@ impl Backend for WakuBackend {
                     // current Boss chat and tell the originating client that
                     // it was parked instead of silently dropping it.
                     let routed = target_session != session_id;
-                    let fenced = self.boss_incident_fenced(target_session);
+                    let fenced = self.boss.is_boss_principal(target_session)
+                        || self.boss_incident_fenced(target_session);
                     if routed || fenced {
                         let reason = if routed {
                             "The Boss chat rotated; the prompt is queued on the active chat."

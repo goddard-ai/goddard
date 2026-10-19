@@ -7,6 +7,8 @@ mod claude;
 mod cloud;
 mod codex;
 mod computer_use;
+mod coordinator_delivery;
+pub use coordinator_delivery::deliver_coordinator_package;
 mod copilot;
 mod deepseek;
 mod mcp;
@@ -15,8 +17,8 @@ mod opencode;
 mod opencode_computer_use;
 mod pi;
 pub mod session_import;
-mod support;
 mod stable_projection;
+mod support;
 pub use stable_projection::NativeEventProjection;
 mod title_refresh;
 
@@ -105,6 +107,10 @@ pub struct DriverHandle {
 impl DriverHandle {
     pub fn from_control(control: Arc<dyn DriverControl>) -> Self {
         Self { inner: control }
+    }
+
+    pub fn coordinator_control(&self) -> &dyn DriverControl {
+        self.inner.as_ref()
     }
 
     pub fn prompt(&self, prompt: String) {
@@ -239,6 +245,35 @@ pub enum AgentSurfaceDelivery {
 }
 
 pub trait DriverControl: Send + Sync {
+    /// Default adapters cannot deliver exact persistent Boss instructions.
+    /// This must never fall back to `prompt` or synthesize a receipt.
+    fn submit_coordinator_package(
+        &self,
+        _package: &waku_boss::coordinator_contract::CoordinatorPackage,
+        attempt: &waku_boss::rotation_continuity::ContinuityAttempt,
+    ) -> waku_boss::coordinator_contract::PackageOutcome {
+        waku_boss::coordinator_contract::PackageOutcome::DefinitivelyNotAccepted(attempt.clone())
+    }
+
+    /// No authoritative lost-ack query is implemented by current adapters.
+    fn reconcile_coordinator_package(
+        &self,
+        _attempt: &waku_boss::rotation_continuity::ContinuityAttempt,
+    ) -> waku_boss::coordinator_contract::PackageOutcome {
+        waku_boss::coordinator_contract::PackageOutcome::Unknown
+    }
+
+    /// Absence means enforcement is unsupported, including alternate surfaces.
+    fn coordinator_policy_enforced(&self) -> bool {
+        false
+    }
+
+    fn coordinator_startup_observation(
+        &self,
+    ) -> Option<waku_boss::provider_budget::StartupBudgetEvidence> {
+        None
+    }
+
     fn prompt(&self, prompt: String);
     /// `prompt` already carries the attachments' `@`-mention text; transports
     /// with a native attachment channel send them structurally too, and the

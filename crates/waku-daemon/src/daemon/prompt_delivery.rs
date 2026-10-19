@@ -194,7 +194,7 @@ pub(super) fn deliver_agent_prompt(
     boss.require_active(session_id)?;
     // An incident-fenced Boss chat holds its queued work: delivering now
     // would record a turn the fence-denied provider can never confirm.
-    if boss_incident_fenced(boss, session_id) {
+    if boss.is_boss_principal(session_id) || boss_incident_fenced(boss, session_id) {
         agent.requeue_front(session_id, entry);
         return Ok(());
     }
@@ -334,16 +334,12 @@ pub(super) fn deliver_agent_prompt(
     };
     let prompt = agent_prompt_envelope(task_state, session_id, entry.sender, &entry.prompt)
         .unwrap_or(entry.prompt);
-    let carried_handoff = handoff.is_some();
     let prompt = handoff.map_or(prompt.clone(), |context| {
         format!(
             "{}\n\nNext assignment: {prompt}",
             provider_context_block(&context)
         )
     });
-    if boss_chat && carried_handoff {
-        mark_boss_delivery_submitted(boss, session_id);
-    }
     driver.prompt(wrap_boss_outbound_prompt(
         task_state,
         &automations.document(),
@@ -364,16 +360,18 @@ pub(super) fn provider_context_block(context: &str) -> String {
 /// handoff after a crash between receipt commit and context cleanup.
 pub(super) fn boss_handoff_accepted(boss: &crate::boss::BossService, session_id: Uuid) -> bool {
     use waku_boss::rotation_continuity::{ContinuityDeliveryStatus, ContinuityLedger};
-    ContinuityLedger::load(&boss.root().join("continuity.json"))
-        .ok()
-        .and_then(|ledger| {
-            ledger
-                .deliveries
-                .into_iter()
-                .rev()
-                .find(|delivery| delivery.session_id == session_id)
+    ContinuityLedger::load(&boss.root().join("continuity.json")).is_ok_and(|ledger| {
+        ledger.deliveries.iter().any(|delivery| {
+            delivery.session_id == session_id
+                && delivery.status == ContinuityDeliveryStatus::Accepted
+                && delivery.attempt.as_ref().is_some_and(|attempt| {
+                    ledger
+                        .provider_receipts
+                        .iter()
+                        .any(|receipt| &receipt.attempt == attempt)
+                })
         })
-        .is_some_and(|delivery| delivery.status == ContinuityDeliveryStatus::Accepted)
+    })
 }
 
 /// Whether the continuity ledger fences this session. An incident-fenced
@@ -385,24 +383,6 @@ pub(super) fn boss_incident_fenced(boss: &crate::boss::BossService, session_id: 
         && ContinuityLedger::load(&boss.root().join("continuity.json"))
             .map(|ledger| ledger.has_incident(session_id))
             .unwrap_or(true)
-}
-
-/// The bound package just went out over provider transport. Submission is
-/// recorded without consuming the pending state — only a `TurnStarted`
-/// acceptance clears it.
-pub(super) fn mark_boss_delivery_submitted(boss: &crate::boss::BossService, session_id: Uuid) {
-    use waku_boss::rotation_continuity::ContinuityLedger;
-    let path = boss.root().join("continuity.json");
-    if let Err(error) = ContinuityLedger::update(&path, |ledger| {
-        if let Some(delivery_id) = ledger
-            .pending_for_session(session_id)
-            .map(|delivery| delivery.delivery_id.clone())
-        {
-            ledger.mark_submitted(&delivery_id, crate::model::unix_time());
-        }
-    }) {
-        eprintln!("could not record a Boss continuity submission: {error:#}");
-    }
 }
 
 /// The boss-context half of an outbound boss prompt: the persona wrap

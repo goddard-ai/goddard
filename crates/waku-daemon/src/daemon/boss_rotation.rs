@@ -230,7 +230,7 @@ impl WakuBackend {
         #[cfg_attr(not(test), allow(unused_variables))] runtime_id: Uuid,
         driver: DriverHandle,
     ) -> DriverHandle {
-        if self.boss.is_boss(session_id) || self.boss_rotation_names(session_id) {
+        if self.boss.is_boss_principal(session_id) || self.boss_rotation_names(session_id) {
             #[cfg(test)]
             if let Some(ownership) = self.boss_rotation_ownership(session_id) {
                 self.record_rotation_observation(RotationObservation::Ownership(ownership));
@@ -238,11 +238,9 @@ impl WakuBackend {
             return DriverHandle::from_control(Arc::new(BossOwnershipDriver {
                 inner: driver,
                 session_id,
-                #[cfg(test)]
                 runtime_id,
                 boss: self.boss.clone(),
                 task_state: self.task_state.clone(),
-                #[cfg(test)]
                 journal_path: self.boss_journal_path(),
                 continuity_path: self.boss_continuity_path(),
                 #[cfg(test)]
@@ -1376,11 +1374,9 @@ impl crate::driver::DriverControl for RotationObservedDriver {
 struct BossOwnershipDriver {
     inner: DriverHandle,
     session_id: Uuid,
-    #[cfg(test)]
     runtime_id: Uuid,
     boss: Arc<crate::boss::BossService>,
     task_state: Arc<Mutex<PersistedState>>,
-    #[cfg(test)]
     journal_path: PathBuf,
     continuity_path: PathBuf,
     #[cfg(test)]
@@ -1390,6 +1386,113 @@ struct BossOwnershipDriver {
 }
 
 impl BossOwnershipDriver {
+    fn hold_prompt(&self, prompt: &str) {
+        let result = (|| -> anyhow::Result<()> {
+            use waku_boss::coordinator_contract::{CoordinatorBinding, CoordinatorPackage};
+            use waku_boss::rotation_continuity::{ContinuityPackage, ContinuityScope};
+            let document = self.boss.document();
+            let generation = RotationJournal::load(&self.journal_path)?.generation;
+            let scope = if self.boss.is_planning(self.session_id) {
+                ContinuityScope::Planning
+            } else {
+                ContinuityScope::Coordinator
+            };
+            let (provider, model, event_ids) = {
+                let state = self.task_state.lock();
+                let session = state
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == self.session_id)
+                    .ok_or_else(|| anyhow::anyhow!("missing coordinator session"))?;
+                (
+                    session.provider,
+                    session.model.clone().unwrap_or_default(),
+                    session
+                        .queued_messages
+                        .iter()
+                        .map(|m| m.id)
+                        .chain(session.messages.iter().map(|m| m.id))
+                        .collect(),
+                )
+            };
+            let identity_revision = self.boss.identity_digest();
+            let package = CoordinatorPackage {
+                binding: CoordinatorBinding {
+                    provider,
+                    session: self.session_id,
+                    generation,
+                    identity_revision: identity_revision.clone(),
+                    grants_revision: serde_json::to_string(&document.resource_policy)?,
+                    model,
+                    scope,
+                },
+                content: ContinuityPackage {
+                    identity_revision,
+                    scope,
+                    instructions: self.boss.canonical_boss_instructions(self.session_id)?,
+                    context: prompt.into(),
+                },
+                event_ids,
+                work_ids: document
+                    .employees
+                    .iter()
+                    .map(|e| e.session_id)
+                    .chain(document.planning.iter().map(|p| p.id))
+                    .chain(document.outcomes.iter().map(|o| o.id))
+                    .chain(document.deliverables.iter().map(|d| d.id))
+                    .collect(),
+                effect_ids: ContinuityLedger::load(&self.continuity_path)?
+                    .coordinator_effects
+                    .iter()
+                    .filter(|e| e.resolution.is_none())
+                    .map(|e| e.id.clone())
+                    .collect(),
+            };
+            let id = format!(
+                "coordinator-held:{}:{}",
+                self.session_id,
+                package.exact_content()?.digest()?
+            );
+            ContinuityLedger::update(&self.continuity_path, |ledger| {
+                ledger.prepare_coordinator(&id, &package, crate::model::unix_time())
+            })??;
+            let provider = self
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|s| s.id == self.session_id)
+                .map(|s| s.provider)
+                .ok_or_else(|| anyhow::anyhow!("missing provider"))?;
+            let expected = waku_boss::provider_budget::StartupBudgetBinding {
+                provider,
+                runtime_version: String::new(),
+                model: package.binding.model.clone(),
+                configuration_revision: String::new(),
+                instruction_revision: package.binding.identity_revision.clone(),
+                runtime_id: self.runtime_id,
+                generation,
+                package_digest: package.exact_content()?.digest()?,
+                operation_id: Uuid::new_v4(),
+            };
+            // Preparation is connected to the adapter seam, but absent trusted
+            // effective observations stop before any submission in current adapters.
+            crate::driver::deliver_coordinator_package(
+                self.inner.coordinator_control(),
+                &self.continuity_path,
+                &id,
+                &package,
+                &package.binding,
+                &expected,
+            )
+            .map(|_| ())
+        })();
+        if let Err(_blocker) = result {
+            // Input remains in the durable transcript and/or prepared package.
+            // No provider submission or acknowledgement is inferred.
+        }
+    }
+
     /// Whether this handle may admit context growth right now. Ownership
     /// reads the live pointer, not a value captured at wrap time — a
     /// mid-call rotation fences the predecessor immediately.
@@ -1434,7 +1537,16 @@ impl BossOwnershipDriver {
         let incident = ContinuityLedger::load(&self.continuity_path)
             .map(|ledger| ledger.has_incident(self.session_id))
             .unwrap_or(true);
-        let allowed = active && !archived && !incident;
+        // No current adapter has a proven policy or effective budget contract.
+        // This also fences planning and handles created before qualification changed.
+        let policy = self
+            .inner
+            .coordinator_control()
+            .coordinator_policy_enforced();
+        // Readiness must be independently bound and committed by a future lifecycle.
+        // Adapter self-report alone cannot authorize existing handles.
+        let readiness_committed = false;
+        let allowed = active && !archived && !incident && policy && readiness_committed;
         if !allowed {
             eprintln!(
                 "Boss driver fence denied {boundary} for session {} (active={active} archived={archived} incident={incident})",
@@ -1496,6 +1608,7 @@ impl BossOwnershipDriver {
 impl crate::driver::DriverControl for BossOwnershipDriver {
     fn prompt(&self, prompt: String) {
         if !self.admit("prompt") {
+            self.hold_prompt(&prompt);
             return;
         }
         self.inner.prompt(prompt);
@@ -1509,6 +1622,7 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
         attachments: Vec<crate::model::MessageAttachment>,
     ) {
         if !self.admit("prompt") {
+            self.hold_prompt(&prompt);
             return;
         }
         self.inner.prompt_with_attachments(prompt, attachments);
@@ -1527,6 +1641,8 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
     fn steer(&self, prompt: String) {
         if self.admit("steer") {
             self.inner.steer(prompt);
+        } else {
+            self.hold_prompt(&prompt);
         }
     }
 
@@ -1544,18 +1660,14 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
     }
 
     fn computer_use_available(&self) -> bool {
-        self.inner.computer_use_available()
+        false
     }
 
     fn refresh_background_work(&self) {
-        self.inner.refresh_background_work();
+        // Unqualified provider discovery may trigger autonomous activity.
     }
 
-    fn stop_background_work(
-        &self,
-        key: crate::model::BackgroundWorkKey,
-        control_id: String,
-    ) {
+    fn stop_background_work(&self, key: crate::model::BackgroundWorkKey, control_id: String) {
         self.inner.stop_background_work(key, control_id);
     }
 
@@ -1565,11 +1677,7 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
         }
     }
 
-    fn respond_user_input(
-        &self,
-        request_id: String,
-        answers: Vec<crate::model::UserInputAnswer>,
-    ) {
+    fn respond_user_input(&self, request_id: String, answers: Vec<crate::model::UserInputAnswer>) {
         if self.admit("respond_user_input") {
             self.inner.respond_user_input(request_id, answers);
         }
@@ -1641,21 +1749,16 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
     }
 
     fn apply_options(&self, options: crate::driver::SessionOptions) -> bool {
-        self.inner.apply_options(options)
+        let _ = options;
+        false
     }
 
-    fn rollback(
-        &self,
-        turns: usize,
-    ) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
+    fn rollback(&self, turns: usize) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
         anyhow::ensure!(self.admit("rollback"), "Boss session is fenced");
         self.inner.rollback(turns)
     }
 
-    fn fork(
-        &self,
-        turns_to_remove: usize,
-    ) -> anyhow::Result<crate::model::ProviderResumeCursor> {
+    fn fork(&self, turns_to_remove: usize) -> anyhow::Result<crate::model::ProviderResumeCursor> {
         anyhow::ensure!(self.admit("fork"), "Boss session is fenced");
         self.inner.fork(turns_to_remove)
     }
@@ -1703,4 +1806,104 @@ fn boss_rotation_handoff(old: &AgentSession, marker: &str) -> String {
         old.id,
         recent.join("\n\n"),
     )
+}
+
+impl WakuBackend {
+    /// Stage canonical authority and enumerable work before any provider launch.
+    /// Current adapters cannot supply trusted prelaunch observations; keep the
+    /// package durable and return a blocker before startup/resume context grows.
+    pub(super) fn prepare_coordinator_startup(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        provider: ProviderKind,
+        model: Option<&str>,
+    ) -> anyhow::Result<()> {
+        use waku_boss::coordinator_contract::{CoordinatorBinding, CoordinatorPackage};
+        use waku_boss::provider_budget::{StartupBudgetBinding, validate_startup_budget};
+        use waku_boss::rotation_continuity::{ContinuityPackage, ContinuityScope};
+        let journal = RotationJournal::load(&self.boss_journal_path())?;
+        let document = self.boss.document();
+        let scope = if self.boss.is_planning(session_id) {
+            ContinuityScope::Planning
+        } else {
+            ContinuityScope::Coordinator
+        };
+        let identity_revision = self.boss.identity_digest();
+        let grants_revision = serde_json::to_string(&document.resource_policy)?;
+        let binding = CoordinatorBinding {
+            provider,
+            session: session_id,
+            generation: journal.generation,
+            identity_revision: identity_revision.clone(),
+            grants_revision,
+            model: model.unwrap_or_default().into(),
+            scope,
+        };
+        let (event_ids, context) = {
+            let state = self.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .ok_or_else(|| anyhow::anyhow!("coordinator session unavailable"))?;
+            (
+                session
+                    .queued_messages
+                    .iter()
+                    .map(|message| message.id)
+                    .collect(),
+                session.pending_provider_context.clone().unwrap_or_default(),
+            )
+        };
+        let instructions = self.boss.canonical_boss_instructions(session_id)?;
+        let package = CoordinatorPackage {
+            binding,
+            content: ContinuityPackage {
+                identity_revision: identity_revision.clone(),
+                scope,
+                instructions,
+                context,
+            },
+            event_ids,
+            // Employee identities enumerate work independently of a bounded digest.
+            work_ids: document
+                .employees
+                .iter()
+                .map(|e| e.session_id)
+                .chain(document.planning.iter().map(|p| p.id))
+                .chain(document.outcomes.iter().map(|o| o.id))
+                .chain(document.deliverables.iter().map(|d| d.id))
+                .collect(),
+            effect_ids: ContinuityLedger::load(&self.boss_continuity_path())?
+                .coordinator_effects
+                .iter()
+                .filter(|e| e.resolution.is_none())
+                .map(|e| e.id.clone())
+                .collect(),
+        };
+        let digest = package.exact_content()?.digest()?;
+        let id = format!("coordinator-startup:{session_id}:{digest}");
+        // Model absence blocks admission, but must not discard staged content.
+        ContinuityLedger::update(&self.boss_continuity_path(), |ledger| {
+            ledger.prepare_coordinator(&id, &package, crate::model::unix_time())
+        })??;
+        let expected = StartupBudgetBinding {
+            provider,
+            runtime_version: String::new(),
+            model: package.binding.model,
+            configuration_revision: String::new(),
+            instruction_revision: identity_revision,
+            runtime_id,
+            generation: journal.generation,
+            package_digest: digest,
+            operation_id: Uuid::new_v4(),
+        };
+        // No PATH/config-file inference and no copying evidence into expectations.
+        let result = validate_startup_budget(&expected, None);
+        anyhow::bail!(
+            "Boss coordination paused: startup contract unavailable ({:?}); continuity preserved",
+            result.err()
+        );
+    }
 }

@@ -53,9 +53,6 @@ impl WakuBackend {
         } else {
             None
         };
-        if handoff.is_some() {
-            mark_boss_delivery_submitted(&self.boss, session_id);
-        }
         let prompt = match handoff {
             Some(context) if !prompt.contains(&context) => format!(
                 "{}\n\n{prompt}",

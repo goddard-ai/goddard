@@ -9,41 +9,35 @@ rotation request.
 
 ## The ownership fence and continuity ledger
 
-`BossOwnershipDriver` wraps every Boss-chat `DriverHandle` in production —
-the last daemon-owned boundary before the provider. It admits a
-context-growing call only while the durable pointer still names that
-session, the session is unarchived, and no compaction incident fenced it.
-`compact` is never forwarded: a manual compact writes a durable refresh
-request that the reconciler settles as a rotation, and a detected
-provider-side compaction records an incident that fences the generation
-and requests the same refresh. An unreadable continuity ledger or a missing
-session record denies context growth. This ownership fence does not yet
-enforce provider qualification or deny provider-native shell execution.
+`BossOwnershipDriver` wraps Boss and planning handles. Current adapters are
+unqualified, so it denies context growth even when the pointer is current.
+The startup guard runs before launch/resume; scoped Boss/planning CLI actions
+also remain denied until a lifecycle can commit independently validated
+readiness. Manual compact still requests a fresh session. Deterministic human
+controls and employee behavior retain their existing authorization.
 
-`boss/continuity.json` is the durable ledger beside the journal: bound
-handoff deliveries move `Prepared → Submitted → Accepted`, where only a
-recorded `TurnStarted` for a submitted delivery consumes
-`pending_provider_context`, after acceptance is persisted. An unrelated
-turn-start cannot accept a prepared or rejected package. A rejected or
-unconfirmed submission stays pending under the same delivery identifier
-and reconciles on retry. The ledger also holds compaction incidents and
-the rotation request queue.
+`boss/continuity.json` retains exact packages, native receipts and unresolved
+effect references beside legacy handoffs, incidents and refresh requests.
+Generic `TurnStarted`, errors and process exits cannot accept or reject a
+continuity delivery. Human input and employee results remain durably queued.
+See the [coordinator contract](boss-coordinator-contract.md) for adapter and
+readiness boundaries.
 
 All production ledger mutations use `ContinuityLedger::update`, which locks
 a stable companion file through read/modify/write. This preserves concurrent
 handoff, receipt, refresh and incident updates. Successor publication stops
 when preparing its durable delivery fails. These changes do not establish
 power-loss durability, acceptance of an exact payload, or activation gating:
-the legacy turn-start signal has no bound delivery receipt and the existing
-rotation still publishes ownership before provider startup. Those adapter
+generic turn-start signals are ignored and the existing rotation still
+publishes its pointer before provider startup. Those adapter
 and lifecycle contracts remain required for the full guarantee.
 
 ## Exact-package receipt contract
 
 `ContinuityLedger` also supports an exact-package path for adapter integration.
-It is not connected to production provider submission yet. Legacy records and
-`TurnStarted` handling retain their existing behavior and establish no stronger
-receipt evidence.
+Production startup prepares this path and blocks before provider launch;
+existing handles connect through `deliver_coordinator_package`, which cannot
+submit with current qualification. Legacy records cannot prove exact receipt.
 
 `prepare_package` binds a delivery id to a session, generation, canonical
 instruction text, identity revision, coordinator/planning scope and continuity
@@ -59,9 +53,10 @@ The adapter integration sequence is:
 2. Deliver the persisted package intact, using the provider's highest-priority
    persistent instruction surface for canonical instructions. The package does
    not yet represent attachment delivery or autonomous tool continuations.
-3. On explicit adapter acceptance, persist `accept_package` with the echoed
-   correlation. Every field must match. An unbound turn-start cannot accept
-   this package, and a stale attempt cannot accept its retry.
+3. On explicit adapter acceptance, persist `record_coordinator_outcome` with
+   the echoed correlation and provider-native session/request receipt. Every
+   field must match. An unbound turn-start cannot accept this package, and a
+   stale attempt cannot accept its retry.
 4. Reconcile an unconfirmed submission before retrying. `submit_package`
    rejects an already-submitted attempt. Only a correlated definitive rejection
    through `reject_package` permits a new attempt; process exit and ordinary
@@ -100,14 +95,13 @@ Daemon unit tests install `RuntimeLifecycles::rotation_observer` and
 receive these observations:
 
 - The production `BossOwnershipDriver` reports each admission decision
-  (`Unguarded` while the ownership fence holds — the measured U+G+M<C
-  guard is still a workstream-3 item — or `Blocked` when it denies) and
+  (`Blocked` for every current configuration) and
   the `Submitted` transport for the pending bound delivery.
   `RotationObservedDriver` keeps the observation-only wrap for other Boss
   principals.
 - `forward_driver_events` maps actual provider events for Boss principals:
-  usage updates become context samples, `TurnStarted`/steer acknowledgements
-  become transport evidence bound to the journal's generation, and
+  usage updates become context samples, generic `TurnStarted`/steer events
+  remain legacy observational signals (never exact-package receipts), and
   localized compaction activities become compaction
   started/completed/failed observations.
 - `rotate_boss_chat` emits lifecycle, durable-action, and ownership
@@ -133,8 +127,8 @@ adding a second source of truth.
   `shuffled_tail`.
 
 The daemon tests prove the seams observe real driver commands, provider
-events, and the existing journal. Current reports intentionally mark Boss
-provider admissions unsafe until the guarded lifecycle exists. Integrated
+events, and the existing journal. Current daemon reports record blocked admissions. The standalone intentionally
+unsafe fixtures still prove that the oracle detects unguarded admissions. Integrated
 acceptance tests should assert `is_clean()` only after the implementation
 supplies guarded bounds, provider acceptance evidence, and successor
 activation.
@@ -144,5 +138,6 @@ activation.
 The [provider budget contract](boss-provider-budget.md) defines item 2's
 startup-validation input and fail-closed results. Installed versions and old
 qualification ledger classifications no longer qualify any current runtime.
-The validator is not yet connected to production submission or activation;
-the existing ownership fence still does not enforce the measured budget.
+Production startup now calls the validator and pauses before context growth.
+Activation and measured continuation admission remain lifecycle work; no current
+configuration is qualified.

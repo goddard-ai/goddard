@@ -648,6 +648,7 @@ impl BossService {
             "specialistPersonaIds": state.specialist_persona_ids,
             "personaDefaults": state.persona_defaults,
             "resourcePolicy": state.resource_policy,
+            "planningScopes": state.planning,
         });
         format!("{:x}", Sha256::digest(material.to_string().as_bytes()))
     }
@@ -2695,6 +2696,18 @@ impl BossService {
         if !self.is_managed(session) || !self.injected.lock().insert(session) {
             return prompt;
         }
+        self.persona_context(session, prompt)
+    }
+
+    /// Render authoritative instructions without consuming injection or delivery state.
+    pub fn canonical_boss_instructions(&self, session: Uuid) -> anyhow::Result<String> {
+        anyhow::ensure!(self.is_boss_principal(session), "not a Boss principal");
+        let instructions = self.persona_context(session, String::new());
+        anyhow::ensure!(!instructions.is_empty(), "Boss instructions unavailable");
+        Ok(instructions)
+    }
+
+    fn persona_context(&self, session: Uuid, prompt: String) -> String {
         let state = self.document();
         let employee = state
             .employees

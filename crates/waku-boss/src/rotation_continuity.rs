@@ -83,8 +83,8 @@ pub enum ContinuityDeliveryStatus {
     Submitted,
     /// Provider transport acceptance was durably recorded.
     Accepted,
-    /// A transport rejection or unconfirmed submission was observed. The
-    /// delivery remains pending and retries under the same identifier.
+    /// Definitive nonacceptance was observed. Unknown submissions remain
+    /// Submitted; they never authorize a retry.
     Rejected,
 }
 
@@ -179,6 +179,8 @@ pub struct RotationRequest {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ContinuityLedger {
+    pub coordinator_effects: Vec<crate::coordinator_contract::CoordinatorEffect>,
+    pub provider_receipts: Vec<crate::coordinator_contract::ProviderPackageReceipt>,
     pub deliveries: Vec<ContinuityDelivery>,
     pub compaction_incidents: Vec<CompactionIncident>,
     pub rotation_request: Option<RotationRequest>,
@@ -275,6 +277,7 @@ impl ContinuityLedger {
         runtime_id: Uuid,
         now: u64,
     ) -> anyhow::Result<ContinuityAttempt> {
+        anyhow::ensure!(!runtime_id.is_nil(), "missing adapter runtime identity");
         let delivery = self
             .deliveries
             .iter_mut()
@@ -467,16 +470,21 @@ impl ContinuityLedger {
         let terminal = self
             .deliveries
             .iter()
-            .filter(|delivery| !delivery.status.pending())
+            .filter(|delivery| !delivery.status.pending() && delivery.package.is_none())
             .count();
         if terminal > RETAINED_TERMINAL_DELIVERIES {
             let mut excess = terminal - RETAINED_TERMINAL_DELIVERIES;
             self.deliveries.retain(|delivery| {
-                if delivery.status.pending() || excess == 0 {
+                if delivery.package.is_some() || delivery.status.pending() || excess == 0 {
                     return true;
                 }
                 excess -= 1;
                 false
+            });
+            self.provider_receipts.retain(|receipt| {
+                self.deliveries
+                    .iter()
+                    .any(|delivery| delivery.attempt.as_ref() == Some(&receipt.attempt))
             });
         }
     }
@@ -530,6 +538,16 @@ impl ContinuityLedger {
         match fs::read(path) {
             Ok(bytes) => {
                 let ledger: Self = serde_json::from_slice(&bytes)?;
+                for receipt in &ledger.provider_receipts {
+                    anyhow::ensure!(
+                        !receipt.native_session.is_empty()
+                            && !receipt.native_request.is_empty()
+                            && ledger.deliveries.iter().any(|delivery| delivery.status
+                                == ContinuityDeliveryStatus::Accepted
+                                && delivery.attempt.as_ref() == Some(&receipt.attempt)),
+                        "invalid provider receipt binding"
+                    );
+                }
                 for delivery in &ledger.deliveries {
                     let Some(package) = &delivery.package else {
                         anyhow::ensure!(

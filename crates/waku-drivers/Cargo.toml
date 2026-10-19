@@ -10,6 +10,7 @@ license = "GPL-3.0-only"
 test-support = []
 
 [dependencies]
+waku-boss = { path = "../waku-boss" }
 agent-client-protocol = "2.0.0"
 anyhow = "1.0"
 async-trait = "0.1"

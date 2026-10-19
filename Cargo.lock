@@ -11595,6 +11595,7 @@ dependencies = [
  "url",
  "uuid",
  "waku-base",
+ "waku-boss",
  "waku-exec",
  "waku-git",
  "waku-localization",

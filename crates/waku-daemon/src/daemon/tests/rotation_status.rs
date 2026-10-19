@@ -439,24 +439,23 @@ fn incident_refresh_delivers_carried_work_once_the_swap_commits() {
     backend.deliver_pending_agent_prompts();
     assert!(capture.prompts.lock().is_empty());
     assert!(backend.agent.has_queued(next));
-    // The user's resume releases the hold; the scheduler's delivery pass
-    // then drains the carried report through the successor's runtime.
+    // Releasing the stop hold cannot qualify the successor's provider.
     backend.agent.clear_user_stop(next);
     backend.deliver_pending_agent_prompts();
-    {
-        let prompts = capture.prompts.lock();
-        assert_eq!(prompts.len(), 1);
-        assert!(prompts[0].contains("parked report"));
-        assert!(prompts[0].contains("boss-session-rotation"));
-    }
-    assert!(!backend.agent.has_queued(next));
+    assert!(capture.prompts.lock().is_empty());
+    assert!(backend.agent.has_queued(next));
     let state = backend.task_state.lock();
     let successor = state
         .sessions
         .iter()
         .find(|session| session.id == next)
         .unwrap();
-    assert!(successor.queued_messages.is_empty());
+    assert_eq!(successor.queued_messages.len(), 1);
+    assert!(
+        successor.queued_messages[0]
+            .content
+            .contains("parked report")
+    );
     drop(state);
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();

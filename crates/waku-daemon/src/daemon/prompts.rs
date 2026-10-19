@@ -347,6 +347,9 @@ impl WakuBackend {
         }) {
             return Ok(());
         }
+        if self.boss.is_boss_principal(target) {
+            return Ok(());
+        }
         if plan_finalized {
             let (runtime_id, driver) = self.ensure_agent_runtime(target, events)?;
             if self.agent.has_open_turn(target) && !driver.supports_steer() {
@@ -460,7 +463,7 @@ impl WakuBackend {
         // An incident-fenced Boss chat holds its queue: popping and
         // "delivering" into a fence-denied provider boundary would record
         // the message while silently dropping the effect.
-        if self.boss.is_boss(session_id) && self.boss_incident_fenced(session_id) {
+        if self.boss.is_boss_principal(session_id) || self.boss_incident_fenced(session_id) {
             return Ok(());
         }
         while let Some(entry) = self.agent.pop_queued(session_id) {

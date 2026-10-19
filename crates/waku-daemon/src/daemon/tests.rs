@@ -17411,14 +17411,20 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
             .contains("archived")
     );
     prompt(next, next_runtime).unwrap();
-    let prompts = capture.prompts.lock();
-    assert_eq!(prompts.len(), 1);
-    assert!(prompts[0].contains("Continue the release"));
-    assert!(prompts[0].contains("Keep supervising the release"));
-    assert!(prompts[0].contains(&format!("boss transcript {old}")));
-    drop(prompts);
-    // Submission keeps the bound package pending — it is consumed when
-    // provider transport acceptance (`TurnStarted`) is recorded.
+    assert!(capture.prompts.lock().is_empty());
+    let state = backend.task_state.lock();
+    let successor = state.sessions.iter().find(|s| s.id == next).unwrap();
+    assert!(
+        successor
+            .queued_messages
+            .iter()
+            .any(|m| m.content == "Continue the release")
+    );
+    let handoff = successor.pending_provider_context.as_ref().unwrap();
+    assert!(handoff.contains("Keep supervising the release"));
+    assert!(handoff.contains(&format!("boss transcript {old}")));
+    drop(state);
+    // Unqualified submission stays queued; generic turn-start is not a receipt.
     assert!(
         backend
             .task_state
@@ -17442,7 +17448,7 @@ fn boss_rotation_swaps_archives_and_continues_with_a_durable_handoff() {
             .session_mut(next)
             .unwrap()
             .pending_provider_context
-            .is_none()
+            .is_some()
     );
     let recovered_boss = crate::boss::BossService::open(root.join("boss")).unwrap();
     assert_eq!(recovered_boss.identity_and_session().1, Some(next));
@@ -20346,6 +20352,18 @@ fn chain_exception_report_dedupes_across_boss_rotation() {
         1,
         "one exception per incident"
     );
+    let original_report = backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .find(|s| s.id == boss)
+        .unwrap()
+        .queued_messages
+        .iter()
+        .find(|m| m.content.contains("Employee chain"))
+        .unwrap()
+        .id;
     // Close the turn the report opened so the settle gate sees a quiet
     // chat, then refresh under an incident — the parked-work carry is
     // exercised the same way either way.
@@ -20368,19 +20386,23 @@ fn chain_exception_report_dedupes_across_boss_rotation() {
     backend.reconcile_boss_rotation(now + 1).unwrap();
     let successor = backend.boss.identity_and_session().1.unwrap();
     assert_ne!(successor, boss);
-    // Every drive pass reconsiders the unhandled exception — the retired
-    // chat's delivered row still counts as landed, so nothing re-parks or
-    // re-writes on the successor.
+    // The unqualified predecessor held the report. Carry it once, preserving
+    // logical identity; repeated drive passes cannot create another report.
     backend.drive_chains();
     backend.drive_chains();
+    assert_eq!(chain_reports(&backend, successor).len(), 1);
+    assert!(chain_reports(&backend, boss).is_empty());
     assert!(
-        chain_reports(&backend, successor).is_empty(),
-        "the refresh must not mint a second exception report"
-    );
-    assert_eq!(
-        chain_reports(&backend, boss).len(),
-        1,
-        "the original report stays on the retired transcript"
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|s| s.id == successor)
+            .unwrap()
+            .queued_messages
+            .iter()
+            .any(|m| m.id == original_report)
     );
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
