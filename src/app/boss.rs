@@ -8561,9 +8561,8 @@ impl Waku {
     }
 
     /// The ellipsis popover an employee's top bar carries after its job
-    /// title — the linked plan, brief, persona, memory, and resource inventory the
-    /// summon recorded. The boss's own chat gets no button: it has no
-    /// assignment to show.
+    /// title — the linked plan, custom persona, and granted access.
+    /// Hide the trigger when there are no details to show.
     fn employee_assignment_popover(
         &self,
         session_id: Uuid,
@@ -8597,6 +8596,9 @@ impl Waku {
             .iter()
             .find(|plan| Some(plan.id) == plan_id)
             .map(|plan| (plan.session_id, plan.idea.clone()));
+        if plan.is_none() && rows.is_empty() {
+            return None;
+        }
         let plan_focus = self.transcript_control_focus("employee-assignment-plan", cx);
         let waku = cx.entity().downgrade();
         let handle = self.menu_handle(format!("employee-assignment-{session_id}"), cx);
@@ -8634,17 +8636,7 @@ impl Waku {
                     .overflow_y_scroll()
                     .p(px(8.0))
                     .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .h(px(30.0))
-                            .px(px(8.0))
-                            .flex()
-                            .items_center()
-                            .text_size(sp(13.5))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("boss.assignment")),
-                    );
+                    .flex_col();
                 if let Some((plan_session, title)) = &plan {
                     let plan_session = *plan_session;
                     let waku = waku.clone();
@@ -8658,8 +8650,12 @@ impl Waku {
                             .gap(px(2.0))
                             .child(
                                 div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(5.0))
                                     .text_size(sp(11.5))
                                     .text_color(theme.text_tertiary)
+                                    .child(icon("icons/map.svg", 13.0, theme.text_tertiary))
                                     .child(tr!("boss.assignment_plan")),
                             )
                             .child(
@@ -8688,7 +8684,7 @@ impl Waku {
                             ),
                     );
                 }
-                for (label, value) in rows.iter() {
+                for (icon_path, label, value) in rows.iter() {
                     content = content.child(
                         div()
                             .w_full()
@@ -8699,8 +8695,12 @@ impl Waku {
                             .gap(px(2.0))
                             .child(
                                 div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(5.0))
                                     .text_size(sp(11.5))
                                     .text_color(theme.text_tertiary)
+                                    .child(icon(*icon_path, 13.0, theme.text_tertiary))
                                     .child(label.clone()),
                             )
                             .child(
@@ -8729,56 +8729,33 @@ impl Waku {
         ))
     }
 
-    /// The inventory the employee top bar's assignment popover lists —
-    /// label/value pairs for the brief, persona, access, and resource
-    /// state the summon recorded.
+    /// Supplemental assignment context, excluding defaults and transcript status.
     fn employee_assignment_rows(
         &self,
         state: &BossState,
         employee: &waku_protocol::boss::BossEmployee,
-    ) -> Vec<(String, String)> {
-        // The assigned role composes over the canonical Employee base —
-        // the popover names both so "Employee + Researcher" reads as
-        // layered rather than replaced.
-        let base_name = state
-            .employee_persona_id
-            .and_then(|id| state.personas.iter().find(|persona| persona.id == id))
-            .map(|persona| persona.name.clone());
-        let role_name = state
+    ) -> Vec<(&'static str, String, String)> {
+        let persona = state
             .personas
             .iter()
             .find(|persona| persona.id == employee.persona_id)
-            .filter(|persona| Some(persona.id) != state.employee_persona_id)
-            .map(|persona| persona.name.clone());
-        let persona_name = match (base_name, role_name) {
-            (Some(base), Some(role)) => Some(tr!(
-                "boss.assignment_persona_layered",
-                base = base,
-                role = role
-            )),
-            (Some(base), None) => {
-                if Some(employee.persona_id) == state.employee_persona_id {
-                    Some(base)
-                } else if state.persona_id == employee.persona_id {
-                    Some(tr!("boss.assignment_persona_invalid", base = base))
-                } else {
-                    Some(tr!("boss.assignment_persona_missing", base = base))
-                }
-            }
-            (None, role) => role,
-        };
+            .filter(|persona| {
+                Some(persona.id) != state.employee_persona_id && persona.id != state.persona_id
+            });
         let permissions = &employee.permissions;
         let mut access = Vec::new();
         if !permissions.bucket_ids.is_empty() {
-            access.push(tr!(
-                "boss.assignment_buckets",
-                count = permissions.bucket_ids.len()
+            access.push(format!(
+                "{}: {}",
+                tr!("boss.detail_buckets"),
+                permissions.bucket_ids.join(", ")
             ));
         }
         if !permissions.integration_ids.is_empty() {
-            access.push(tr!(
-                "boss.assignment_integrations",
-                count = permissions.integration_ids.len()
+            access.push(format!(
+                "{}: {}",
+                tr!("boss.detail_integrations"),
+                permissions.integration_ids.join(", ")
             ));
         }
         if permissions.summon_employees {
@@ -8790,111 +8767,20 @@ impl Waku {
         if employee.boss_authority {
             access.push(tr!("boss.authority"));
         }
-        let resources = employee.ticket.as_ref().map(|ticket| {
-            let resources = &ticket.resources;
-            if resources.is_empty() {
-                tr!("boss.assignment_resources_none")
-            } else {
-                let mut parts = Vec::new();
-                if !resources.exclusive.is_empty() {
-                    parts.push(tr!(
-                        "boss.resource_exclusive",
-                        count = resources.exclusive.len()
-                    ));
-                }
-                if resources.resident_devices > 0 {
-                    parts.push(tr!(
-                        "boss.resource_devices",
-                        count = resources.resident_devices
-                    ));
-                }
-                if resources.native_builds > 0 {
-                    parts.push(tr!("boss.resource_builds", count = resources.native_builds));
-                }
-                if resources.desktop_input > 0 {
-                    parts.push(tr!("boss.resource_desktop"));
-                }
-                if ticket.reservation.is_some() {
-                    tr!(
-                        "boss.assignment_resources_reserved",
-                        detail = parts.join(" · ")
-                    )
-                } else {
-                    tr!(
-                        "boss.assignment_resources_requested",
-                        detail = parts.join(" · ")
-                    )
-                }
-            }
-        });
-        let brief = employee
-            .ticket
-            .as_ref()
-            .map(|ticket| ticket.prompt.trim().to_owned())
-            .filter(|prompt| !prompt.is_empty());
-        let mut rows: Vec<(String, String)> = [
-            brief.map(|brief| (tr!("boss.assignment_brief"), brief)),
-            persona_name.map(|name| (tr!("boss.assignment_persona"), name)),
-            Some((
+        let mut rows = Vec::new();
+        if let Some(persona) = persona {
+            rows.push((
+                "icons/user-round.svg",
+                tr!("boss.assignment_persona"),
+                persona.name.clone(),
+            ));
+        }
+        if !access.is_empty() {
+            rows.push((
+                "icons/key-round.svg",
                 tr!("boss.assignment_access"),
-                if access.is_empty() {
-                    tr!("boss.assignment_access_none")
-                } else {
-                    access.join(" · ")
-                },
-            )),
-            resources.map(|line| (tr!("boss.assignment_resources"), line)),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        if let Some(label) = boss_plan_readiness_label(employee) {
-            rows.push((tr!("boss.plan_readiness"), label));
-        }
-        if let Some(binding) = &employee.plan_binding {
-            rows.push((
-                tr!("boss.plan_binding"),
-                format!(
-                    "{} / {} / {}",
-                    binding.owner_id,
-                    binding.plan_id,
-                    binding.content_digest.as_deref().unwrap_or("—")
-                ),
+                access.join("\n"),
             ));
-        }
-        if let Some(readiness) = &employee.plan_readiness {
-            rows.push((
-                tr!("boss.plan_delivery"),
-                tr!(
-                    "boss.plan_delivery_detail",
-                    delivered = readiness.delivered
-                ),
-            ));
-            rows.push((
-                tr!("boss.plan_attempt"),
-                format!("{} / {}", readiness.attempt, readiness.runtime_generation),
-            ));
-            if let Some(error) = &readiness.failure {
-                rows.push((tr!("boss.plan_recovery"), error.detail.clone()));
-            }
-            if let Some(notice) = employee
-                .plan_blockers
-                .iter()
-                .rev()
-                .find(|n| n.attempt == readiness.attempt)
-            {
-                rows.push((
-                    tr!("boss.plan_blocker_receipt"),
-                    if notice.supervisor_notified_at.is_some() {
-                        tr!("boss.plan_blocker_notified")
-                    } else {
-                        tr!("boss.plan_blocker_recorded")
-                    },
-                ));
-            }
-        }
-        if let Some(admission) = boss_queue_detail(employee, None) {
-            rows.push((tr!("boss.plan_admission"), admission));
         }
         rows
     }
@@ -11749,46 +11635,6 @@ pub(super) fn boss_employee_row_element(
                 .child(marker),
         )
         .into_any_element()
-}
-
-/// Keep required-plan progression separate from admission and never reuse a
-/// previous attempt's delivery evidence while a fresh ticket waits.
-pub(super) fn boss_plan_readiness_label(
-    employee: &waku_protocol::boss::BossEmployee,
-) -> Option<String> {
-    use waku_protocol::boss::{PlanAssignmentKind, PlanReadinessPhase};
-    if employee.assignment_kind == PlanAssignmentKind::Research && employee.plan_id.is_some() {
-        return Some(tr!("boss.plan_research_only"));
-    }
-    if employee.plan_binding.is_none() && employee.plan_id.is_none() {
-        return None;
-    }
-    let phase = if employee.ticket.as_ref().is_some_and(|ticket| {
-        ticket
-            .blocked_by
-            .iter()
-            .any(|b| matches!(b, waku_protocol::boss::AdmissionBlocker::Plan { .. }))
-    }) {
-        tr!("boss.plan_blocked")
-    } else {
-        match employee.plan_readiness.as_ref().map(|r| r.phase) {
-            Some(PlanReadinessPhase::Blocked) => tr!("boss.plan_blocked"),
-            Some(PlanReadinessPhase::Delivered) | Some(PlanReadinessPhase::Ready) => {
-                tr!("boss.plan_delivered")
-            }
-            _ => tr!("boss.plan_preparing"),
-        }
-    };
-    Some(tr!(
-        "boss.plan_readiness_summary",
-        phase = phase,
-        revision = employee
-            .plan_binding
-            .as_ref()
-            .and_then(|binding| binding.revision_id)
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| tr!("boss.plan_revision_unverified"))
-    ))
 }
 
 /// A queued employee's wait reason for the sidebar row tooltip and the
