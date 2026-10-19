@@ -624,6 +624,8 @@ pub(super) struct BossUi {
     pub(super) goals_scrollbar: Rc<ScrollbarState>,
     pub(super) goals_list_owner: Option<DaemonKey>,
     pub(super) goals_signature: Option<u64>,
+    /// Selected project per Tasks host; no entry means all projects.
+    pub(super) goals_project: HashMap<DaemonKey, Uuid>,
     pub(super) goals_collapsed: HashSet<(DaemonKey, BossGoalSection)>,
     /// Daemons whose Pending section was seeded collapsed — the fold is a
     /// first-visit default; toggles after that win freely.
@@ -853,6 +855,7 @@ impl Default for BossUi {
             goals_scrollbar: ScrollbarState::new(),
             goals_list_owner: None,
             goals_signature: None,
+            goals_project: HashMap::new(),
             goals_collapsed: HashSet::new(),
             goals_collapsed_seeded: HashSet::new(),
             goals_history_expanded: HashSet::new(),
@@ -3136,7 +3139,7 @@ impl Waku {
 
     /// The projects the host's retained work spans — the filter menu's
     /// options in name order, the boss's own project included.
-    fn boss_history_project_options(&self, key: DaemonKey) -> Vec<(Uuid, String)> {
+    pub(super) fn boss_history_project_options(&self, key: DaemonKey) -> Vec<(Uuid, String)> {
         let mut options: Vec<(Uuid, String)> = self
             .state
             .projects

@@ -1,0 +1,1 @@
+- Filter the groups in the Boss Tasks tab by project, with “All projects” selected by default.

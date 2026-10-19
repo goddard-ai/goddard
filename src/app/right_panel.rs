@@ -13486,20 +13486,61 @@ impl Waku {
             .get(&key)
             .cloned()
             .unwrap_or_else(|| Arc::new(Vec::new()));
-        if rows.is_empty() {
-            return div()
-                .id("boss-goals-panel")
-                .flex_1()
-                .min_h_0()
-                .flex()
-                .flex_col()
-                .px(px(12.0))
-                .child(self.render_right_panel_empty_message(
-                    tr!("boss.goals_empty_title"),
-                    tr!("boss.goals_empty_body"),
-                    cx,
-                ));
-        }
+        let project_options = self.boss_history_project_options(key);
+        let project_filter = self
+            .boss_ui
+            .goals_project
+            .get(&key)
+            .copied()
+            .filter(|id| project_options.iter().any(|(option, _)| option == id));
+        let project_label = project_filter
+            .and_then(|id| project_options.iter().find(|(option, _)| *option == id))
+            .map(|(_, name)| name.clone())
+            .unwrap_or_else(|| tr!("boss.history_all_projects"));
+        let weak = cx.entity().downgrade();
+        let handle = self.menu_handle("boss-goals-project", cx);
+        let project_menu = dropdown_menu(
+            MenuChip::new("boss-goals-project")
+                .icon("icons/folder.svg", theme.text_tertiary)
+                .label(project_label)
+                .outlined()
+                .height(px(28.0))
+                .max_w(px(220.0))
+                .selected(handle.is_open()),
+            "boss-goals-project-menu",
+            &handle,
+            MenuAlign::BelowLeft,
+            move |_| {
+                let mut items = vec![
+                    MenuItem::new(tr!("boss.history_all_projects"), {
+                        let weak = weak.clone();
+                        move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.boss_ui.goals_project.remove(&key);
+                                this.boss_ui.goals_list.reset(0);
+                                this.boss_ui.goals_signature = None;
+                                cx.notify();
+                            });
+                        }
+                    })
+                    .selected(project_filter.is_none()),
+                ];
+                items.extend(project_options.iter().map(|(id, name)| {
+                    let id = *id;
+                    let weak = weak.clone();
+                    MenuItem::new(name.clone(), move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.boss_ui.goals_project.insert(key, id);
+                            this.boss_ui.goals_list.reset(0);
+                            this.boss_ui.goals_signature = None;
+                            cx.notify();
+                        });
+                    })
+                    .selected(project_filter == Some(id))
+                }));
+                items
+            },
+        );
         let sessions: HashMap<Uuid, &AgentSession> = self
             .state
             .sessions
@@ -13518,6 +13559,34 @@ impl Waku {
         for row in rows.iter() {
             if hide_archived_outcome_row(row, &sessions, now) {
                 continue;
+            }
+            if let Some(project_id) = project_filter {
+                let project = self
+                    .state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == project_id)
+                    .or_else(|| self.boss_ui.projects.get(&project_id));
+                let member_matches = row.members.iter().any(|member| {
+                    if let Some(session) = sessions.get(&member.employee.session_id) {
+                        return session.project_id == project_id;
+                    }
+                    member.employee.ticket.as_ref().is_some_and(|ticket| {
+                        project.is_some_and(|project| {
+                            ticket.project == project.name
+                                || ticket.project == project.display_name()
+                                || Path::new(&ticket.project) == project.path
+                        })
+                    })
+                });
+                let history_matches = row.outcome.assignments.iter().any(|assignment| {
+                    sessions
+                        .get(&assignment.session)
+                        .is_some_and(|session| session.project_id == project_id)
+                });
+                if !member_matches && !history_matches {
+                    continue;
+                }
             }
             let focus = self
                 .boss_ui
@@ -13760,7 +13829,15 @@ impl Waku {
             .min_h_0()
             .flex()
             .flex_col()
-            .px(px(12.0));
+            .px(px(12.0))
+            .child(div().flex_none().pb(px(8.0)).child(project_menu));
+        if items.is_empty() {
+            return panel.child(self.render_right_panel_empty_message(
+                tr!("boss.goals_empty_title"),
+                tr!("boss.goals_empty_body"),
+                cx,
+            ));
+        }
         if offline {
             panel = panel.child(
                 div()
@@ -13851,14 +13928,9 @@ impl Waku {
                                         .on_activation_app(move |_, cx| {
                                             let _ = toggle_waku.update(cx, |this, cx| {
                                                 let id = (key, section);
-                                                if !this
-                                                    .boss_ui
-                                                    .goals_history_expanded
-                                                    .remove(&id)
+                                                if !this.boss_ui.goals_history_expanded.remove(&id)
                                                 {
-                                                    this.boss_ui
-                                                        .goals_history_expanded
-                                                        .insert(id);
+                                                    this.boss_ui.goals_history_expanded.insert(id);
                                                 }
                                                 cx.notify();
                                             });
