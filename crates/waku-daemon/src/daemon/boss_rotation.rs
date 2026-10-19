@@ -558,7 +558,7 @@ impl WakuBackend {
         state: &PersistedState,
         intent: &waku_boss::boss_rotation::RotationIntent,
         now: u64,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<waku_boss::replacement_lease::ReplacementPin> {
         use waku_boss::coordinator_contract::{CoordinatorBinding, CoordinatorPackage};
         use waku_boss::rotation_continuity::{ContinuityPackage, ContinuityScope};
         let next = state
@@ -701,6 +701,15 @@ impl WakuBackend {
             &expected,
             observed.as_ref(),
             adapter.coordinator_policy_enforced(),
+        )?;
+        let broker = adapter.coordinator_replacement_broker().ok_or_else(|| {
+            anyhow!("Boss refresh paused: durable replacement broker unavailable")
+        })?;
+        waku_boss::replacement_lease::hold_replacement(
+            &self.boss_continuity_path(),
+            &broker,
+            &expected,
+            now,
         )
     }
 
@@ -718,6 +727,28 @@ impl WakuBackend {
         let continuity_path = self.boss_continuity_path();
         let mut journal = RotationJournal::load(&path)?;
         let ledger = ContinuityLedger::load(&continuity_path)?;
+        if journal.intent.is_none()
+            && ledger
+                .replacement_leases
+                .iter()
+                .any(|lease| lease.successor == active)
+        {
+            anyhow::ensure!(
+                journal.active_session_id == Some(active),
+                "replacement owner diverged"
+            );
+            let driver = self
+                .sessions
+                .lock()
+                .get(&active)
+                .map(|entry| entry.driver.clone())
+                .ok_or_else(|| anyhow!("replacement lease recovery awaits prepared runtime"))?;
+            let broker = driver
+                .coordinator_control()
+                .coordinator_replacement_broker()
+                .ok_or_else(|| anyhow!("replacement lease recovery awaits durable broker"))?;
+            broker.reconcile_committed(&continuity_path, &journal)?;
+        }
         // A requested refresh (manual compact or a compaction incident)
         // triggers independently of the occupancy opt-out — both are
         // prevention requests, not threshold preferences.
@@ -959,7 +990,11 @@ impl WakuBackend {
                     );
                 }
             }
-            self.validate_rotation_successor(&state, &intent, now)?;
+        }
+        // Pin the same durable lease across pointer, retirement and ownership
+        // commit. Recovery must reacquire this pin before touching either owner.
+        let replacement_pin = self.validate_rotation_successor(&state, &intent, now)?;
+        if active == intent.old_session_id {
             self.boss
                 .replace_session_id(active, intent.new_session_id)?;
             journal.record_stage(RotationLifecycleStage::PointerPublished, now);
@@ -974,9 +1009,6 @@ impl WakuBackend {
                 );
             }
         }
-        // Older daemons may have published before validation. Recovery must
-        // not archive the predecessor or call that successor active on restart.
-        self.validate_rotation_successor(&state, &intent, now)?;
         anyhow::ensure!(
             state
                 .sessions
@@ -1075,6 +1107,7 @@ impl WakuBackend {
             });
         }
         journal.persist(&path)?;
+        replacement_pin.activated(&continuity_path)?;
         // The refresh request — manual compact or incident — is consumed
         // by the committed swap. Incidents stay as evidence.
         if ledger.rotation_request.is_some() {
@@ -1798,6 +1831,14 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
         self.inner
             .coordinator_control()
             .coordinator_replacement_capacity()
+    }
+
+    fn coordinator_replacement_broker(
+        &self,
+    ) -> Option<waku_boss::replacement_lease::ReplacementBroker> {
+        self.inner
+            .coordinator_control()
+            .coordinator_replacement_broker()
     }
 
     fn coordinator_startup_observation(

@@ -9,6 +9,7 @@ pub mod guarded_lifecycle;
 pub mod chains;
 pub mod instruction_pins;
 pub mod provider_budget;
+pub mod replacement_lease;
 pub mod rotation_continuity;
 pub mod rotation_oracle;
 

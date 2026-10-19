@@ -74,7 +74,7 @@ pub fn deliver_coordinator_package(
         adapter.coordinator_policy_enforced(),
         "coordinator capability policy unsupported"
     );
-    if let Some(frozen) = &ledger.frozen_coordinator {
+    let _replacement_pin = if let Some(frozen) = &ledger.frozen_coordinator {
         anyhow::ensure!(
             frozen.successor == current.session,
             "frozen predecessor cannot submit coordinator work"
@@ -85,7 +85,18 @@ pub fn deliver_coordinator_package(
             expected_budget,
             adapter.coordinator_replacement_capacity().as_ref(),
         )?;
-    }
+        let broker = adapter.coordinator_replacement_broker().ok_or_else(|| {
+            anyhow::anyhow!("Boss refresh paused: durable replacement broker unavailable")
+        })?;
+        Some(waku_boss::replacement_lease::hold_replacement(
+            ledger_path,
+            &broker,
+            expected_budget,
+            now,
+        )?)
+    } else {
+        None
+    };
     let attempt = ContinuityLedger::update(ledger_path, |ledger| {
         anyhow::ensure!(
             !ledger

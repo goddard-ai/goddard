@@ -128,15 +128,56 @@ all other held slots in the same pool. Missing evidence, changed binding, empty
 reservation, zero occupancy and exceeding the cap block. The positive fixtures
 exercise this accounting contract only, not qualification or actual reservation.
 
-This is a required interface and pause path, not a capacity broker integration
-or an activation grant. An enabling adapter still needs a broker-native,
-restart-reconcilable reservation held atomically through publication, shared
-with employee and alternate launch admission. A numeric snapshot or local ID
-cannot establish that contract. Current employee admission does not provide
-that Boss replacement lease. No current adapter implements this method.
+The snapshot gate is now backed by the durable lease contract below. No current
+adapter supplies either observation or broker. A numeric snapshot or local ID
+still cannot authorize publication. Current employee admission does not share
+the new pool; connecting every actual launch path is a qualification prerequisite.
 
-Item 3 remains incomplete: effective provider-internal checkpoint enforcement
-and startup binding (item 1), native exact receipt/policy readiness (item 2),
-and a broker lease plus atomic ownership/grant publication are still required.
-No positive production activation path is enabled. Existing durable freeze,
-pending events and uncertain receipts remain intact on these failures.
+## Durable replacement lease
+
+`replacement_lease::ReplacementBroker` persists a provider/model pool, its
+immutable identity and hard cap, ordinary live slots, and replacement leases.
+`ContinuityLedger.replacement_leases` stores the acquisition intent before the
+broker is touched. Each intent binds broker/lease IDs, predecessor, successor,
+runtime, generation, configuration, identity and exact startup package. Fresh
+budget-operation IDs may change; they are independently checked at each guard
+and do not create a new capacity reservation.
+
+| Boundary | Durable rule |
+| --- | --- |
+| Acquisition | Persist one Requested intent; reserve and sync the slot; persist Held. A crash between those writes reconciles the same ID. |
+| Duplicate trigger | Reuse the intent, lease and original deadline. Never reserve twice or extend expiry. |
+| Submission/publication | Hold a broker lock through the operation. The daemon keeps that pin through pointer publication, predecessor fencing and durable ownership commit. |
+| Restart | Reopen the same broker identity and reconcile the saved lease. Missing/foreign leases, changed bindings and expiry deny publication. A pointer alone is insufficient. |
+| Success | Persist Activated after the ownership commit, then settle the lease. The successor remains counted as an ordinary live slot. |
+| Failure | Independently confirm that the exact successor runtime stopped, persist Failed, then release its slot. A timeout or provider error is not stop evidence. |
+
+The broker uses exclusive private staging, file sync, atomic rename and Unix
+parent-directory sync. Its lock file survives record replacement. Acquisition
+and settlement fail promptly if the pool is pinned elsewhere. Dropping a pin or
+losing the daemon never releases a durable slot. Unpinned expiry is checked at
+the original 120-second lease deadline and blocks future publication; it does
+not free potentially running work. Expiry/revocation cannot race a publication
+while its broker pin is held. No automatic renewal or unsafe fallback exists.
+
+`reconcile_committed` repairs death after the journal commit but before lease
+settlement. It requires the matching durable Activated rotation, generation and
+owner; the daemon also verifies its authoritative Boss pointer. Terminal release
+is idempotent. A missing broker or uncertain stop retains capacity and pauses.
+Lock order is coordinator operation/task state, broker, then brief continuity
+transactions; continuity transactions release their lock before acquiring the
+broker. Broker code must not acquire task or coordinator operation locks.
+
+Run `mbx test -p waku-boss --lib replacement_lease` for acquisition and restart
+faults, pointer/ownership boundaries, terminal-write failures, stale/foreign
+bindings, lease loss/expiry, lock exclusion and hard-cap accounting. These are
+trusted future-contract fixtures using disposable local stores. They neither
+launch a provider nor prove actual process-death or power-loss behavior.
+
+Item 3 remains incomplete. Every actual provider/employee/alternate launch must
+share an authoritative pool before an adapter can supply this broker; none does.
+Effective provider-internal checkpoints/startup evidence (item 1), native exact
+receipt/policy readiness (item 2), and atomic activation-grant publication remain
+gates. The pin covers existing ownership publication and must also enclose any
+future grant commit. No positive production activation path is enabled. Existing
+durable freeze, pending events and uncertain receipts remain intact.

@@ -12,7 +12,7 @@ use crate::rotation_oracle::ContextBounds;
 
 /// Authoritative expected configuration, obtained from the actual launched
 /// runtime, never inferred from PATH, settings on disk, or a saved receipt.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct StartupBudgetBinding {
     pub provider: ProviderKind,
     pub runtime_version: String,

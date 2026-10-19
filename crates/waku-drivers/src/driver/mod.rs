@@ -277,6 +277,14 @@ pub trait DriverControl: Send + Sync {
         None
     }
 
+    /// No current launch route shares a durable replacement pool with all
+    /// employee/alternate admissions. Do not supply a broker until it does.
+    fn coordinator_replacement_broker(
+        &self,
+    ) -> Option<waku_boss::replacement_lease::ReplacementBroker> {
+        None
+    }
+
     fn coordinator_startup_observation(
         &self,
     ) -> Option<waku_boss::provider_budget::StartupBudgetEvidence> {

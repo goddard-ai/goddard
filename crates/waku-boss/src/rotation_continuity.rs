@@ -179,6 +179,7 @@ pub struct RotationRequest {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ContinuityLedger {
+    pub replacement_leases: Vec<crate::replacement_lease::ReplacementLease>,
     pub frozen_coordinator: Option<crate::guarded_lifecycle::FrozenCoordinator>,
     pub coordinator_effects: Vec<crate::coordinator_contract::CoordinatorEffect>,
     pub provider_receipts: Vec<crate::coordinator_contract::ProviderPackageReceipt>,
