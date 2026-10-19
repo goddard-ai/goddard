@@ -30,11 +30,10 @@ use waku_protocol::model::ProviderKind;
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "status", content = "detail")]
 pub enum ProviderQualification {
-    /// Verified against the running installed provider — today: Codex
-    /// >= 0.159.0, whose `PreCompact` veto was proven at runtime.
+    /// Historical prevention-control evidence. This alone does not establish
+    /// an effective-runtime contract or permit startup admission.
     RuntimeVerified { detail: String },
-    /// Verified in shipped provider code without a live trigger —
-    /// today: Pi >= 0.85.1, whose extension veto is code-verified.
+    /// Source-only prevention-control evidence; insufficient for admission.
     CodeVerified { detail: String },
     /// No enforceable contract evidence for this configuration.
     Unqualified { reason: String },
@@ -42,55 +41,25 @@ pub enum ProviderQualification {
 
 impl ProviderQualification {
     pub fn qualified(&self) -> bool {
-        !matches!(self, Self::Unqualified { .. })
+        // Legacy serialized evidence is not a current runtime qualification.
+        false
     }
 }
 
-/// The installed-version floors behind the current qualification matrix.
-/// New evidence must come from provider qualification work — never raise a
-/// floor or add a provider here on documentation alone.
-const CODEX_QUALIFIED_FLOOR: (u64, u64, u64) = (0, 159, 0);
-const PI_QUALIFIED_FLOOR: (u64, u64, u64) = (0, 85, 1);
-
-fn version_tuple(version: &str) -> Option<(u64, u64, u64)> {
-    let mut parts = version.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    let patch = parts.next().unwrap_or("0").parse().ok()?;
-    Some((major, minor, patch))
-}
-
-/// Classify one provider configuration by its detected installed version.
-/// A missing or unparsed version is never assumed qualified.
+/// Installed versions identify prevention candidates, not effective runtime
+/// contracts. No current configuration has established finite startup and
+/// continuation bounds plus verified effective launch controls. Keep all
+/// routes unqualified until that evidence is available for an exact binding.
 pub fn qualify_provider(
     provider: ProviderKind,
     detected_version: Option<&str>,
 ) -> ProviderQualification {
-    let version = detected_version.and_then(version_tuple);
-    match provider {
-        ProviderKind::Codex if version.is_some_and(|v| v >= CODEX_QUALIFIED_FLOOR) => {
-            ProviderQualification::RuntimeVerified {
-                detail: format!(
-                    "codex {} has a runtime-proven PreCompact veto",
-                    detected_version.unwrap_or_default()
-                ),
-            }
-        }
-        ProviderKind::Pi if version.is_some_and(|v| v >= PI_QUALIFIED_FLOOR) => {
-            ProviderQualification::CodeVerified {
-                detail: format!(
-                    "pi {} ships a code-verified compaction veto extension",
-                    detected_version.unwrap_or_default()
-                ),
-            }
-        }
-        _ => ProviderQualification::Unqualified {
-            reason: format!(
-                "{} {} has no verified pre-compaction prevention contract",
-                provider.display_name(),
-                detected_version.unwrap_or("(version undetected)")
-            ),
-        },
+    ProviderQualification::Unqualified {
+        reason: format!(
+            "{} {} lacks an effective-runtime prevention and bounded-context contract",
+            provider.display_name(),
+            detected_version.unwrap_or("(version undetected)")
+        ),
     }
 }
 
@@ -816,42 +785,28 @@ mod tests {
     }
 
     #[test]
-    fn qualification_holds_only_the_proven_configurations() {
-        assert!(matches!(
-            qualify_provider(ProviderKind::Codex, Some("0.159.0")),
-            ProviderQualification::RuntimeVerified { .. }
-        ));
-        assert!(matches!(
-            qualify_provider(ProviderKind::Codex, Some("codex-cli 0.160.1")),
-            ProviderQualification::Unqualified { .. }
-        ));
-        assert!(matches!(
-            qualify_provider(ProviderKind::Codex, Some("0.158.9")),
-            ProviderQualification::Unqualified { .. }
-        ));
-        // No detected version is never assumed qualified.
-        assert!(matches!(
-            qualify_provider(ProviderKind::Codex, None),
-            ProviderQualification::Unqualified { .. }
-        ));
-        assert!(matches!(
-            qualify_provider(ProviderKind::Pi, Some("0.85.1")),
-            ProviderQualification::CodeVerified { .. }
-        ));
-        assert!(matches!(
-            qualify_provider(ProviderKind::Pi, Some("0.85.0")),
-            ProviderQualification::Unqualified { .. }
-        ));
-        for provider in [
-            ProviderKind::Claude,
-            ProviderKind::OpenCode,
-            ProviderKind::OhMyPi,
-            ProviderKind::Devin,
+    fn installed_versions_never_qualify_an_effective_runtime() {
+        for provider in ProviderKind::ALL {
+            for version in [
+                None,
+                Some("0.159.0"),
+                Some("0.162.1"),
+                Some("0.85.1"),
+                Some("9.9.9"),
+            ] {
+                assert!(!qualify_provider(provider, version).qualified());
+            }
+        }
+        // Old persisted classifications cannot turn into a startup grant.
+        for evidence in [
+            ProviderQualification::RuntimeVerified {
+                detail: "historical probe".into(),
+            },
+            ProviderQualification::CodeVerified {
+                detail: "source inspection".into(),
+            },
         ] {
-            assert!(matches!(
-                qualify_provider(provider, Some("9.9.9")),
-                ProviderQualification::Unqualified { .. }
-            ));
+            assert!(!evidence.qualified());
         }
     }
 

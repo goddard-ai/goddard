@@ -138,3 +138,11 @@ provider admissions unsafe until the guarded lifecycle exists. Integrated
 acceptance tests should assert `is_clean()` only after the implementation
 supplies guarded bounds, provider acceptance evidence, and successor
 activation.
+
+## Startup budget qualification
+
+The [provider budget contract](boss-provider-budget.md) defines item 2's
+startup-validation input and fail-closed results. Installed versions and old
+qualification ledger classifications no longer qualify any current runtime.
+The validator is not yet connected to production submission or activation;
+the existing ownership fence still does not enforce the measured budget.
