@@ -19,6 +19,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use waku_protocol::model::ProviderKind;
 
@@ -124,6 +125,46 @@ impl ContinuityDeliveryStatus {
     }
 }
 
+/// Exact provider-facing continuity content. The adapter must deliver `instructions`
+/// through its highest-priority persistent instruction surface and `context`
+/// intact. Neither a summary nor a model acknowledgement is a receipt.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinuityPackage {
+    pub identity_revision: String,
+    pub scope: ContinuityScope,
+    pub instructions: String,
+    pub context: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ContinuityScope {
+    Coordinator,
+    Planning,
+}
+
+impl ContinuityPackage {
+    pub fn digest(&self) -> anyhow::Result<String> {
+        Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(self)?)))
+    }
+}
+
+/// Correlation an adapter must echo in its acceptance or definitive rejection
+/// receipt. This value is prepared before submission and alone proves no
+/// acceptance. Runtime and attempt identity prevent delayed events from
+/// accepting a retry or a replacement process.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinuityAttempt {
+    pub delivery_id: String,
+    pub session_id: Uuid,
+    pub generation: u64,
+    pub runtime_id: Uuid,
+    pub attempt_id: Uuid,
+    pub package_digest: String,
+}
+
 /// One logical delivery to a Boss session, identified across retries by
 /// `delivery_id`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -137,6 +178,12 @@ pub struct ContinuityDelivery {
     pub attempts: u32,
     pub created_at: u64,
     pub updated_at: u64,
+    /// Absent for legacy session-only deliveries. Never upgrade those
+    /// historical acceptances into proof of exact-package receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<ContinuityPackage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<ContinuityAttempt>,
 }
 
 /// A provider-side compaction observed on a Boss session. The fenced
@@ -197,18 +244,160 @@ impl ContinuityLedger {
                 attempts: 0,
                 created_at: now,
                 updated_at: now,
+                package: None,
+                attempt: None,
             });
         }
     }
 
-    /// A pending delivery just went out to the provider. Submission never
-    /// consumes the delivery — acceptance does.
+    /// Prepare an immutable exact package. Reusing a logical identity with
+    /// different content, scope, session or generation is an integrity error.
+    /// Legacy records cannot acquire stronger evidence after the fact.
+    pub fn prepare_package(
+        &mut self,
+        delivery_id: &str,
+        session_id: Uuid,
+        generation: u64,
+        package: ContinuityPackage,
+        now: u64,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !package.identity_revision.is_empty(),
+            "missing continuity identity revision"
+        );
+        anyhow::ensure!(
+            !package.instructions.is_empty(),
+            "missing canonical continuity instructions"
+        );
+        if let Some(existing) = self
+            .deliveries
+            .iter()
+            .find(|item| item.delivery_id == delivery_id)
+        {
+            anyhow::ensure!(
+                existing.session_id == session_id
+                    && existing.generation == generation
+                    && existing.kind == ContinuityDeliveryKind::SessionHandoff
+                    && existing.package.as_ref() == Some(&package),
+                "continuity delivery binding conflict"
+            );
+            return Ok(());
+        }
+        self.prepare(
+            delivery_id,
+            session_id,
+            generation,
+            ContinuityDeliveryKind::SessionHandoff,
+            now,
+        );
+        self.deliveries
+            .last_mut()
+            .expect("prepared delivery exists")
+            .package = Some(package);
+        Ok(())
+    }
+
+    /// Persist this returned correlation before contacting the adapter, using
+    /// `update`. A submitted attempt has unknown effects and cannot be retried
+    /// automatically: reconcile its receipt or explicitly record rejection.
+    pub fn submit_package(
+        &mut self,
+        delivery_id: &str,
+        runtime_id: Uuid,
+        now: u64,
+    ) -> anyhow::Result<ContinuityAttempt> {
+        let delivery = self
+            .deliveries
+            .iter_mut()
+            .find(|item| item.delivery_id == delivery_id)
+            .ok_or_else(|| anyhow::anyhow!("continuity delivery is missing"))?;
+        anyhow::ensure!(
+            matches!(
+                delivery.status,
+                ContinuityDeliveryStatus::Prepared | ContinuityDeliveryStatus::Rejected
+            ),
+            "continuity submission requires reconciliation"
+        );
+        let package = delivery
+            .package
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("legacy continuity delivery has no exact package"))?;
+        let receipt = ContinuityAttempt {
+            delivery_id: delivery.delivery_id.clone(),
+            session_id: delivery.session_id,
+            generation: delivery.generation,
+            runtime_id,
+            attempt_id: Uuid::new_v4(),
+            package_digest: package.digest()?,
+        };
+        delivery.status = ContinuityDeliveryStatus::Submitted;
+        delivery.attempts = delivery.attempts.saturating_add(1);
+        delivery.updated_at = now;
+        delivery.attempt = Some(receipt.clone());
+        Ok(receipt)
+    }
+
+    /// Apply adapter receipt evidence, never an unbound turn-start event.
+    /// Duplicate receipts reconcile successfully; foreign or stale receipts
+    /// leave the pending package unchanged.
+    pub fn accept_package(&mut self, receipt: &ContinuityAttempt, now: u64) -> bool {
+        let Some(delivery) = self
+            .deliveries
+            .iter_mut()
+            .find(|item| item.delivery_id == receipt.delivery_id)
+        else {
+            return false;
+        };
+        if delivery.attempt.as_ref() != Some(receipt)
+            || delivery.session_id != receipt.session_id
+            || delivery.generation != receipt.generation
+            || !delivery.package.as_ref().is_some_and(|package| {
+                package.digest().ok().as_ref() == Some(&receipt.package_digest)
+            })
+            || !matches!(
+                delivery.status,
+                ContinuityDeliveryStatus::Submitted | ContinuityDeliveryStatus::Accepted
+            )
+        {
+            return false;
+        }
+        if delivery.status == ContinuityDeliveryStatus::Accepted {
+            return true;
+        }
+        delivery.status = ContinuityDeliveryStatus::Accepted;
+        delivery.updated_at = now;
+        self.prune_terminal();
+        true
+    }
+
+    /// Only a correlated definitive adapter rejection permits another
+    /// attempt. A process exit or lost acknowledgement is not rejection.
+    pub fn reject_package(&mut self, receipt: &ContinuityAttempt, now: u64) -> bool {
+        let Some(delivery) = self
+            .deliveries
+            .iter_mut()
+            .find(|item| item.delivery_id == receipt.delivery_id)
+        else {
+            return false;
+        };
+        if delivery.status != ContinuityDeliveryStatus::Submitted
+            || delivery.attempt.as_ref() != Some(receipt)
+        {
+            return false;
+        }
+        delivery.status = ContinuityDeliveryStatus::Rejected;
+        delivery.updated_at = now;
+        true
+    }
+
+    /// Record legacy submission. Exact packages require `submit_package`
+    /// and cannot be submitted through this session-only compatibility path.
     pub fn mark_submitted(&mut self, delivery_id: &str, now: u64) {
         if let Some(delivery) = self
             .deliveries
             .iter_mut()
             .find(|delivery| delivery.delivery_id == delivery_id)
-            .filter(|delivery| delivery.status.pending())
+            .filter(|delivery| delivery.status.pending() && delivery.package.is_none())
         {
             delivery.status = ContinuityDeliveryStatus::Submitted;
             delivery.attempts = delivery.attempts.saturating_add(1);
@@ -216,9 +405,9 @@ impl ContinuityLedger {
         }
     }
 
-    /// Transport acceptance can settle only a submitted delivery. A turn
-    /// event before submission cannot acknowledge a prepared or rejected
-    /// package. Return whether acceptance was recorded.
+    /// Legacy transport acceptance can settle only a submitted legacy
+    /// delivery. Exact packages require `accept_package`; a session-only
+    /// event never acknowledges them. Return whether acceptance was recorded.
     pub fn mark_accepted(&mut self, session_id: Uuid, now: u64) -> bool {
         let Some(delivery) = self
             .deliveries
@@ -228,7 +417,7 @@ impl ContinuityLedger {
         else {
             return false;
         };
-        if delivery.status != ContinuityDeliveryStatus::Submitted {
+        if delivery.status != ContinuityDeliveryStatus::Submitted || delivery.package.is_some() {
             return false;
         }
         delivery.status = ContinuityDeliveryStatus::Accepted;
@@ -237,12 +426,13 @@ impl ContinuityLedger {
         true
     }
 
-    /// A transport rejection or unconfirmed submission for the session's
-    /// pending delivery. The delivery stays pending under its identifier.
+    /// Legacy rejection/unconfirmed submission. Exact packages remain
+    /// unresolved until a correlated definitive `reject_package` receipt.
     pub fn mark_rejected(&mut self, session_id: Uuid, now: u64) {
         if let Some(delivery) = self.deliveries.iter_mut().rev().find(|delivery| {
             delivery.session_id == session_id
                 && delivery.status == ContinuityDeliveryStatus::Submitted
+                && delivery.package.is_none()
         }) {
             delivery.status = ContinuityDeliveryStatus::Rejected;
             delivery.updated_at = now;
@@ -328,7 +518,17 @@ impl ContinuityLedger {
         }
         let bytes = serde_json::to_vec_pretty(self)?;
         let temp = temporary_path(path);
-        fs::write(&temp, bytes)?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temp)?;
+        use std::io::Write;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
         fs::rename(temp, path)?;
         Ok(())
     }
@@ -359,7 +559,41 @@ impl ContinuityLedger {
 
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         match fs::read(path) {
-            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Ok(bytes) => {
+                let ledger: Self = serde_json::from_slice(&bytes)?;
+                for delivery in &ledger.deliveries {
+                    let Some(package) = &delivery.package else {
+                        anyhow::ensure!(
+                            delivery.attempt.is_none(),
+                            "continuity attempt has no package"
+                        );
+                        continue;
+                    };
+                    anyhow::ensure!(
+                        !package.identity_revision.is_empty() && !package.instructions.is_empty(),
+                        "continuity package identity is missing"
+                    );
+                    if let Some(attempt) = &delivery.attempt {
+                        anyhow::ensure!(
+                            delivery.status != ContinuityDeliveryStatus::Prepared,
+                            "continuity prepared package has a submitted attempt"
+                        );
+                        anyhow::ensure!(
+                            attempt.delivery_id == delivery.delivery_id
+                                && attempt.session_id == delivery.session_id
+                                && attempt.generation == delivery.generation
+                                && attempt.package_digest == package.digest()?,
+                            "continuity package binding is invalid"
+                        );
+                    } else {
+                        anyhow::ensure!(
+                            delivery.status == ContinuityDeliveryStatus::Prepared,
+                            "continuity package receipt correlation is missing"
+                        );
+                    }
+                }
+                Ok(ledger)
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error.into()),
         }
@@ -373,6 +607,213 @@ fn temporary_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn package() -> ContinuityPackage {
+        ContinuityPackage {
+            identity_revision: "policy-revision-7".into(),
+            scope: ContinuityScope::Planning,
+            instructions: "Coordinate design only; no implementation or finalization grant.".into(),
+            context: "Employee result pending; approval remains unresolved.".into(),
+        }
+    }
+
+    #[test]
+    fn exact_package_rejects_rebinding_and_legacy_receipts() {
+        let session = Uuid::new_v4();
+        let mut ledger = ContinuityLedger::default();
+        ledger
+            .prepare_package("bound", session, 7, package(), 10)
+            .unwrap();
+        let prepared = ledger.clone();
+        for changed in [
+            ContinuityPackage {
+                scope: ContinuityScope::Coordinator,
+                ..package()
+            },
+            ContinuityPackage {
+                identity_revision: "changed".into(),
+                ..package()
+            },
+            ContinuityPackage {
+                instructions: "different instructions".into(),
+                ..package()
+            },
+            ContinuityPackage {
+                context: "different result".into(),
+                ..package()
+            },
+        ] {
+            assert!(
+                ledger
+                    .prepare_package("bound", session, 7, changed, 11)
+                    .is_err()
+            );
+            assert_eq!(ledger, prepared);
+        }
+        assert!(
+            ledger
+                .prepare_package("bound", Uuid::new_v4(), 7, package(), 11)
+                .is_err()
+        );
+        assert!(
+            ledger
+                .prepare_package("bound", session, 8, package(), 11)
+                .is_err()
+        );
+        ledger
+            .prepare_package("bound", session, 7, package(), 11)
+            .unwrap();
+        assert_eq!(ledger, prepared);
+        ledger.mark_submitted("bound", 12);
+        assert_eq!(ledger, prepared);
+        let receipt = ledger.submit_package("bound", Uuid::new_v4(), 12).unwrap();
+        assert!(!ledger.mark_accepted(session, 13));
+        ledger.mark_rejected(session, 13);
+        assert_eq!(
+            ledger.deliveries[0].status,
+            ContinuityDeliveryStatus::Submitted
+        );
+        assert!(ledger.accept_package(&receipt, 14));
+        assert!(ledger.accept_package(&receipt, 15));
+        assert_eq!(ledger.deliveries[0].updated_at, 14);
+
+        ledger.prepare(
+            "legacy",
+            session,
+            8,
+            ContinuityDeliveryKind::SessionHandoff,
+            16,
+        );
+        assert!(
+            ledger
+                .prepare_package("legacy", session, 8, package(), 17)
+                .is_err()
+        );
+        assert!(ledger.submit_package("legacy", Uuid::new_v4(), 17).is_err());
+    }
+
+    #[test]
+    fn exact_package_receipt_reconciles_unknown_effect_after_restart() {
+        let root = std::env::temp_dir().join(format!("boss-exact-{}", Uuid::new_v4()));
+        let path = root.join("continuity.json");
+        let session = Uuid::new_v4();
+        let runtime = Uuid::new_v4();
+        let receipt = ContinuityLedger::update(&path, |ledger| {
+            ledger.prepare_package("bound", session, 7, package(), 10)?;
+            ledger.submit_package("bound", runtime, 11)
+        })
+        .unwrap()
+        .unwrap();
+        let mut reopened = ContinuityLedger::load(&path).unwrap();
+        assert_eq!(reopened.deliveries[0].package, Some(package()));
+        // Losing the response cannot turn unknown effects into permission to replay.
+        assert!(reopened.submit_package("bound", runtime, 12).is_err());
+        let before = reopened.clone();
+        let mut foreign = Vec::new();
+        let mut changed = receipt.clone();
+        changed.delivery_id = "other".into();
+        foreign.push(changed);
+        let mut changed = receipt.clone();
+        changed.session_id = Uuid::new_v4();
+        foreign.push(changed);
+        let mut changed = receipt.clone();
+        changed.generation += 1;
+        foreign.push(changed);
+        let mut changed = receipt.clone();
+        changed.runtime_id = Uuid::new_v4();
+        foreign.push(changed);
+        let mut changed = receipt.clone();
+        changed.attempt_id = Uuid::new_v4();
+        foreign.push(changed);
+        let mut changed = receipt.clone();
+        changed.package_digest = "wrong".into();
+        foreign.push(changed);
+        for forged in &foreign {
+            assert!(!reopened.accept_package(forged, 12));
+            assert!(!reopened.reject_package(forged, 12));
+            assert_eq!(reopened, before);
+        }
+        assert!(reopened.reject_package(&receipt, 13));
+        assert!(!reopened.accept_package(&receipt, 14));
+        let retry = reopened.submit_package("bound", runtime, 15).unwrap();
+        assert_ne!(receipt.attempt_id, retry.attempt_id);
+        assert!(!reopened.accept_package(&receipt, 16));
+        reopened.persist(&path).unwrap();
+        assert!(
+            ContinuityLedger::update(&path, |ledger| ledger.accept_package(&retry, 17)).unwrap()
+        );
+        let accepted = ContinuityLedger::load(&path).unwrap();
+        assert!(accepted.pending_for_session(session).is_none());
+        assert_eq!(accepted.deliveries[0].attempts, 2);
+        assert_eq!(accepted.deliveries[0].package, Some(package()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn exact_package_corruption_cannot_recover_as_accepted() {
+        let root = std::env::temp_dir().join(format!("boss-exact-integrity-{}", Uuid::new_v4()));
+        let path = root.join("continuity.json");
+        let mut ledger = ContinuityLedger::default();
+        ledger
+            .prepare_package("bound", Uuid::new_v4(), 1, package(), 10)
+            .unwrap();
+        let receipt = ledger.submit_package("bound", Uuid::new_v4(), 11).unwrap();
+        assert!(ledger.accept_package(&receipt, 12));
+        ledger.persist(&path).unwrap();
+        assert!(ContinuityLedger::load(&path).is_ok());
+        let accepted = ledger.clone();
+        ledger.deliveries[0].package.as_mut().unwrap().scope = ContinuityScope::Coordinator;
+        ledger.persist(&path).unwrap();
+        assert!(ContinuityLedger::load(&path).is_err());
+        ledger = accepted;
+        ledger.deliveries[0].attempt = None;
+        ledger.persist(&path).unwrap();
+        assert!(ContinuityLedger::load(&path).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn exact_package_acceptance_write_failure_keeps_unknown_attempt() {
+        let root = std::env::temp_dir().join(format!("boss-exact-fault-{}", Uuid::new_v4()));
+        let path = root.join("continuity.json");
+        let receipt = ContinuityLedger::update(&path, |ledger| {
+            ledger.prepare_package("bound", Uuid::new_v4(), 1, package(), 10)?;
+            ledger.submit_package("bound", Uuid::new_v4(), 11)
+        })
+        .unwrap()
+        .unwrap();
+        let retained = root.join("retained.json");
+        let result = ContinuityLedger::update(&path, |ledger| {
+            fs::rename(&path, &retained).unwrap();
+            fs::create_dir(&path).unwrap();
+            ledger.accept_package(&receipt, 12)
+        });
+        assert!(result.is_err());
+        fs::remove_dir(&path).unwrap();
+        fs::rename(&retained, &path).unwrap();
+        let mut reopened = ContinuityLedger::load(&path).unwrap();
+        assert_eq!(
+            reopened.deliveries[0].status,
+            ContinuityDeliveryStatus::Submitted
+        );
+        assert!(
+            reopened
+                .submit_package("bound", Uuid::new_v4(), 13)
+                .is_err()
+        );
+        assert!(
+            ContinuityLedger::update(&path, |ledger| ledger.accept_package(&receipt, 14)).unwrap()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn qualification_holds_only_the_proven_configurations() {

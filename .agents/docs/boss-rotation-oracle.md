@@ -38,6 +38,62 @@ the legacy turn-start signal has no bound delivery receipt and the existing
 rotation still publishes ownership before provider startup. Those adapter
 and lifecycle contracts remain required for the full guarantee.
 
+## Exact-package receipt contract
+
+`ContinuityLedger` also supports an exact-package path for adapter integration.
+It is not connected to production provider submission yet. Legacy records and
+`TurnStarted` handling retain their existing behavior and establish no stronger
+receipt evidence.
+
+`prepare_package` binds a delivery id to a session, generation, canonical
+instruction text, identity revision, coordinator/planning scope and continuity
+text. Repreparing identical content is idempotent; changed content or identity
+is rejected. A legacy record cannot be upgraded into an exact receipt.
+
+The adapter integration sequence is:
+
+1. Persist `prepare_package` and `submit_package` through
+   `ContinuityLedger::update`. The returned `ContinuityAttempt` contains the
+   delivery, session, generation, runtime, unique attempt and package digest.
+   It is correlation data, not acceptance evidence.
+2. Deliver the persisted package intact, using the provider's highest-priority
+   persistent instruction surface for canonical instructions. The package does
+   not yet represent attachment delivery or autonomous tool continuations.
+3. On explicit adapter acceptance, persist `accept_package` with the echoed
+   correlation. Every field must match. An unbound turn-start cannot accept
+   this package, and a stale attempt cannot accept its retry.
+4. Reconcile an unconfirmed submission before retrying. `submit_package`
+   rejects an already-submitted attempt. Only a correlated definitive rejection
+   through `reject_package` permits a new attempt; process exit and ordinary
+   turn failure cannot authorize replay of this package.
+
+For example, losing the acceptance response across a daemon restart leaves
+`Submitted` and the same attempt on disk. Reconcile that attempt with the
+provider; do not generate a second attempt merely because the daemon restarted.
+Duplicate accepted receipts are idempotent. Receipt persistence failure leaves
+the original attempt unresolved. Loading a package with missing or mismatched
+receipt correlation fails closed, including changes to the persisted scope.
+
+Package files contain private instructions and context. Ledger staging uses
+exclusive creation, mode 0600 on Unix, and file sync before atomic rename.
+Directory/power-loss durability and real process-death qualification are not
+established by the deterministic restart tests.
+
+Activation still needs independent validation of current authoritative identity,
+scope, grants, event position, pending effects and startup headroom before
+coordination ownership transfers. Receipt acceptance does not grant activation.
+Production integration requires a provider-correlated receipt, persistent
+instruction delivery and provider-native execution policy. The legacy
+`DriverControl::prompt` returns unit and `DriverEvent::TurnStarted` has no
+correlation fields; those interfaces cannot supply this proof. The opt-in stable
+runtime has durable dispatch identities, but that alone does not qualify Boss
+instruction delivery or native tool policy. Do not silently route unsupported
+Boss providers through it or mark them qualified.
+
+Focused regression command: `mbx test -p waku-boss --lib rotation_continuity`.
+This tests durable bindings, stale/foreign receipt rejection, unknown-effect
+replay refusal and persistence failure; it does not test actual providers.
+
 ## Test-only daemon seams
 
 Daemon unit tests install `RuntimeLifecycles::rotation_observer` and
