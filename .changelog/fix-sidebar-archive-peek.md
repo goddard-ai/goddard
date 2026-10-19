@@ -1,0 +1,1 @@
+- Archiving a task with the keyboard shortcut keeps the temporarily revealed sidebar open.

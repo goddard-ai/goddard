@@ -371,6 +371,13 @@ impl Waku {
             self.sidebar_peek_exit_hold = true;
             return;
         }
+        // Archiving can put a confirmation surface over the hover probe.
+        // Losing hover there is not a pointer departure from the sidebar.
+        if self.sidebar_peek_action_hold
+            && window.mouse_position().x <= px(self.sidebar_peek_width(window))
+        {
+            return;
+        }
         self.begin_sidebar_peek_exit(cx);
         cx.notify();
     }
@@ -391,14 +398,22 @@ impl Waku {
     }
 
     /// A row action run from the peek-mounted sidebar (pin, archive) keeps
-    /// the overlay after its menu closes; the hold releases the next time
-    /// the pointer enters the panel.
+    /// the overlay after its menu closes or its contents change; the hold
+    /// releases the next time the pointer enters the panel.
     pub(super) fn hold_sidebar_peek(&mut self) {
         if matches!(
             self.sidebar_peek,
             SidebarPeek::Shown { .. } | SidebarPeek::Exiting { .. }
         ) {
             self.sidebar_peek_action_hold = true;
+            // A keyboard action can arrive while the hover exit is already
+            // animating. Keep the panel fully shown instead of letting that
+            // pending exit finish despite the hold.
+            if matches!(self.sidebar_peek, SidebarPeek::Exiting { .. }) {
+                self.sidebar_peek = SidebarPeek::Shown {
+                    entered: Instant::now() - SIDEBAR_PEEK_SLIDE,
+                };
+            }
         }
     }
 
