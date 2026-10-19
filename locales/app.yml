@@ -6859,6 +6859,8 @@ boss.dispatching_detail:
   en: Slot reserved — the provider is starting.
 boss.assignment:
   en: Assignment
+boss.assignment_plan:
+  en: Plan
 boss.assignment_brief:
   en: Brief
 boss.assignment_persona:

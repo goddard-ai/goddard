@@ -8544,20 +8544,24 @@ impl Waku {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        self.employee_plan_recovery(key, employee).map(|recovery| {
-            boss_employee_plan_chips(
-                &cx.entity().downgrade(),
-                key,
-                employee.session_id,
-                &recovery,
-                slot,
-                theme,
-            )
-        })
+        self.employee_plan_recovery(key, employee)
+            .filter(|recovery| recovery.retry)
+            .map(|mut recovery| {
+                // The plan title in Assignment owns navigation from the header.
+                recovery.open = None;
+                boss_employee_plan_chips(
+                    &cx.entity().downgrade(),
+                    key,
+                    employee.session_id,
+                    &recovery,
+                    slot,
+                    theme,
+                )
+            })
     }
 
     /// The ellipsis popover an employee's top bar carries after its job
-    /// title — the brief, persona, memory, and resource inventory the
+    /// title — the linked plan, brief, persona, memory, and resource inventory the
     /// summon recorded. The boss's own chat gets no button: it has no
     /// assignment to show.
     fn employee_assignment_popover(
@@ -8583,6 +8587,18 @@ impl Waku {
                 .map(|employee| (state, employee))
         })?;
         let rows = Rc::new(self.employee_assignment_rows(state, employee));
+        let plan_id = employee
+            .plan_binding
+            .as_ref()
+            .map(|binding| binding.plan_id)
+            .or(employee.plan_id);
+        let plan = state
+            .planning
+            .iter()
+            .find(|plan| Some(plan.id) == plan_id)
+            .map(|plan| (plan.session_id, plan.idea.clone()));
+        let plan_focus = self.transcript_control_focus("employee-assignment-plan", cx);
+        let waku = cx.entity().downgrade();
         let handle = self.menu_handle(format!("employee-assignment-{session_id}"), cx);
         let trigger = div()
             .id(SharedString::from(format!(
@@ -8629,6 +8645,49 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .child(tr!("boss.assignment")),
                     );
+                if let Some((plan_session, title)) = &plan {
+                    let plan_session = *plan_session;
+                    let waku = waku.clone();
+                    let handle = handle.clone();
+                    content = content.child(
+                        div()
+                            .px(px(8.0))
+                            .pb(px(6.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(tr!("boss.assignment_plan")),
+                            )
+                            .child(
+                                div()
+                                    .id("employee-assignment-plan")
+                                    .track_focus(&plan_focus)
+                                    .tab_index(0)
+                                    .rounded(px(4.0))
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.accent)
+                                    .underline()
+                                    .cursor_pointer()
+                                    .hover(|style| style.bg(theme.overlay))
+                                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                    .on_activation_app(move |window, cx| {
+                                        handle.close(window, cx);
+                                        let _ = waku.update(cx, |this, cx| {
+                                            this.request_session_activation(
+                                                plan_session,
+                                                SessionActivationTransition::Visit,
+                                                cx,
+                                            );
+                                        });
+                                    })
+                                    .child(title.clone()),
+                            ),
+                    );
+                }
                 for (label, value) in rows.iter() {
                     content = content.child(
                         div()
