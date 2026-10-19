@@ -2235,6 +2235,7 @@ fn boss_outcome_prerequisite_failed(
 /// failure or blocked attempt no roster record still answers. Mirrors
 /// `boss_outcome_attention`'s evidence; `None` when nothing more specific
 /// than the status itself is recorded.
+#[cfg(test)]
 fn boss_outcome_attention_cause(row: &boss::BossOutcomeRow) -> Option<String> {
     for member in &row.members {
         let employee = &member.employee;
@@ -2301,12 +2302,9 @@ struct BossOutcomePanelRow {
     queued_extra: usize,
     title: String,
     project_label: Option<String>,
-    /// The row's state detail — a flagged cause or an owed decision.
-    /// Pending rows carry no detail: their wait or queue explanation
-    /// stays off the row.
+    /// An owed-handoff count, when the outcome has pending decisions.
     detail: Option<String>,
-    /// A live member's blocker, rendered on its own third line — never
-    /// populated for pending rows.
+    /// A queued member's admission wait, rendered on its own third line.
     reason: Option<String>,
     updated_label: Option<String>,
     attention: bool,
@@ -4715,10 +4713,8 @@ mod tests {
     }
 
     /// An expanded outcome keeps every attempt distinct and honest,
-    /// newest summoned first: a settled failure carries its recorded
-    /// cause on its own line, a queued dependent names its failed
-    /// prerequisite and its admission wait as separate lines, a flagged
-    /// member shows its blocker text, and only employees whose
+    /// newest summoned first: the structured fields retain recorded
+    /// causes, waits, and blockers, while only employees whose
     /// conversation the snapshot knows become navigable.
     #[test]
     fn outcome_employees_track_each_attempt_and_its_cause() {
@@ -4848,8 +4844,8 @@ mod tests {
 
     /// A session's retries collapse to one card: the newest generation —
     /// and anything still in flight — keeps `current`; earlier settled
-    /// generations compress into quiet history lines that still carry
-    /// the verdict, the recorded cause, and the stamp.
+    /// generations compress into quiet history lines that carry the
+    /// verdict and stamp without the blocked or mid-turn exit reason.
     #[test]
     fn outcome_attempt_history_collapses_to_lines() {
         use waku_protocol::boss::{
@@ -4907,7 +4903,7 @@ mod tests {
             )
         );
         assert!(
-            history.detail.contains("provider exited mid-turn"),
+            !history.detail.contains("provider exited mid-turn"),
             "{}",
             history.detail
         );
@@ -12876,8 +12872,9 @@ impl Waku {
             }
         };
         // The member the status speaks for: a live assignee first, then
-        // the next queued admission. Only queued wait text earns the row's
-        // third line; blockers remain available in expanded details.
+        // the next queued admission. Only queued admission wait text earns
+        // the row's third line; blocker causes and outcome wait labels stay
+        // out of Tasks rows.
         let queued: Vec<&boss::BossOutcomeMember> =
             row.members.iter().filter(|member| boss_outcome_queued(member)).collect();
         let speaker_member = boss_outcome_speaker_member(row);
@@ -12936,44 +12933,12 @@ impl Waku {
             .saturating_sub(usize::from(speaker_member.is_some_and(|member| {
                 member.employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
             })));
-        // The row's honest detail: a flagged row names its cause first —
-        // an open conflict's reason or the unresolved blocker/failure —
-        // then the recorded pause and an owed decision's count. A pending
-        // row keeps none of this: its wait or queue explanation never
-        // reaches the row.
+        // Keep the compact row free of blocker causes and outcome wait
+        // labels. An owed-decision count remains useful without exposing
+        // the underlying reason.
         let pending_handoffs = row.outcome.pending_handoffs().count();
-        let detail = (!pending)
-            .then(|| {
-                row.attention
-                    .then(|| {
-                        row.outcome
-                            .completion_conflict
-                            .as_ref()
-                            .map(|conflict| conflict.reason.clone())
-                            .or_else(|| {
-                                let has_blocker = row.members.iter().any(|member| {
-                                    let employee = &member.employee;
-                                    waku_protocol::boss::BossOutcome::assignment_unresolved(
-                                        employee,
-                                    ) && employee
-                                        .blocker
-                                        .as_deref()
-                                        .is_some_and(|text| !text.trim().is_empty())
-                                });
-                                (!has_blocker)
-                                    .then(|| boss_outcome_attention_cause(row))
-                                    .flatten()
-                            })
-                    })
-                    .flatten()
-                    .or_else(|| boss_outcome_wait_label(&row.outcome, now))
-                    .or_else(|| {
-                        (pending_handoffs > 0).then(|| {
-                            tr!("boss.goals_handoffs_owed", count = pending_handoffs)
-                        })
-                    })
-            })
-            .flatten();
+        let detail = (!pending && pending_handoffs > 0)
+            .then(|| tr!("boss.goals_handoffs_owed", count = pending_handoffs));
         let expanded = self
             .boss_ui
             .goals_row_expanded
@@ -13130,7 +13095,8 @@ struct BossOutcomeEmployeeFields {
     /// joined with " · " after the job title on the detail line.
     detail: String,
     status: BossGoalStatus,
-    /// Blocked/queued/cause text — each on the card's own line.
+    /// Recorded blocked/queued/cause text; history presentation filters
+    /// blocked reasons and the mid-turn exit cause.
     reasons: Vec<boss::BossEmployeeReason>,
     /// Still in flight or the session's newest recorded attempt — the
     /// only rows painted with the full employee card. Older attempts
@@ -13222,10 +13188,8 @@ fn boss_outcome_employee_fields(
                 .filter(|part| !part.is_empty())
                 .collect::<Vec<_>>()
                 .join(" · ");
-            // Each explanation gets the card's own line — the member's
-            // reported blocker, the admission wait, the failed
-            // prerequisite, then the settled attempt's recorded cause or
-            // blocked flag.
+            // Retain each source reason so history rows can choose which
+            // details to present without changing the recorded status.
             let mut reasons = Vec::new();
             if let Some(blocker) = member
                 .and_then(|member| member.employee.blocker.as_deref())
@@ -13274,10 +13238,7 @@ fn boss_outcome_employee_fields(
             } else {
                 format!("{name} — {detail}")
             };
-            let aria_status = std::iter::once(status.label())
-                .chain(reasons.iter().map(|reason| reason.text().to_owned()))
-                .collect::<Vec<_>>()
-                .join(" · ");
+            let aria_status = status.label();
             BossOutcomeEmployeeFields {
                 key: format!(
                     "{}:{}:{}",
@@ -13326,10 +13287,9 @@ fn boss_outcome_employee_fields(
 }
 
 /// An earlier attempt's history line — the status marker, name and
-/// verdict up front, then the attempt context, recorded cause, and age
-/// in the detail. Only the current attempt keeps the full card, so a
-/// session's retries read as one card plus quiet lines instead of a wall
-/// of repeated chips and readiness labels.
+/// verdict up front, then attempt context and age. Blocker text and the
+/// mid-turn exit cause stay out of Tasks rows. Only the current attempt
+/// keeps the full card, so retries read as one card plus quiet lines.
 fn boss_outcome_attempt_entry(
     fields: &BossOutcomeEmployeeFields,
     now: u64,
@@ -13337,6 +13297,17 @@ fn boss_outcome_attempt_entry(
     let (icon, tone, spin) = fields.status.marker();
     let mut detail = fields.detail.clone();
     for reason in &fields.reasons {
+        let visible = match reason {
+            boss::BossEmployeeReason::Blocked(_) => false,
+            boss::BossEmployeeReason::Queued(_) => true,
+            boss::BossEmployeeReason::Detail(text) => {
+                text != &tr!("boss.goals_cause_exited_mid_turn")
+                    && text != &tr!("boss.goals_status_blocked")
+            }
+        };
+        if !visible {
+            continue;
+        }
         if !detail.is_empty() {
             detail.push_str(" · ");
         }
@@ -13558,7 +13529,7 @@ impl Waku {
             if prepared.expanded {
                 // Each session's current attempt paints the same card the
                 // Employees tab uses, newest summoned first, followed by
-                // the conflict/handoff/wait notes; earlier attempts
+                // the conflict/handoff notes; earlier attempts
                 // compress into quiet history lines at the end. Entries
                 // that name a conversation the session snapshot knows get
                 // the list's persistent focus handle; the rest stay inert.
@@ -13594,6 +13565,7 @@ impl Waku {
                 detail_items.extend(
                     boss_outcome_note_entries(row, &sessions, now)
                         .into_iter()
+                        .filter(|entry| !entry.key.ends_with(":wait"))
                         .map(&mut entries_focus),
                 );
                 detail_items.extend(attempt_history.into_iter().map(&mut entries_focus));

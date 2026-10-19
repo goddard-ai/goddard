@@ -1,0 +1,1 @@
+- In the Tasks tab, blocked outcome rows keep their status without showing the blocker reason; expanding rows hides outcome “waiting on” notes and the “provider exited mid-turn” cause too.

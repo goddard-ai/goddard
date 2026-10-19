@@ -1,1 +1,0 @@
-- In the Tasks tab, blocked outcome rows keep their status without showing the blocker reason; open the row to see assignment details.
