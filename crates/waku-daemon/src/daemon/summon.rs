@@ -564,8 +564,8 @@ impl WakuBackend {
             return Ok(false);
         }
         // A linked assignment holds at the queue head until its readiness
-        // lands — the finishing assignment waits on the outcome's
-        // completion conditions, an ordinary one on its prerequisites.
+        // lands — the finishing assignment waits on settled siblings
+        // and handoff decisions, an ordinary one on its prerequisites.
         // Each pass re-evaluates; the hold reads as ordinary Waiting work.
         if !self.boss.assignment_ready(employee) {
             self.boss.record_blocked(

@@ -9724,6 +9724,102 @@ fn a_queued_ticket_dispatches_after_restart() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// Failed siblings permit a repair finisher to reach resource admission.
+/// Broker failure and daemon recovery retain the same durable ticket, and
+/// the next scheduler pass retries without a prompt or ticket edit.
+#[test]
+fn a_repair_finisher_retries_broker_admission_after_restart() {
+    use waku_protocol::boss::{AdmissionBlocker, BossOperation, BossResult, EmployeeLifecycle};
+    let root = std::env::temp_dir().join(format!("summon-repair-retry-{}", Uuid::new_v4()));
+    let (backend, boss) = summon_test_backend(&root);
+    let outcome = backend
+        .boss
+        .create_outcome(None, "Repair failed work", "verified repair")
+        .unwrap();
+    let mut worker_op = summon_op(
+        &backend,
+        &root,
+        "failed sibling",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon { outcome_id, .. } = &mut worker_op {
+        *outcome_id = Some(outcome.id);
+    }
+    assert!(
+        backend
+            .handle_boss_operation(Some(boss), worker_op, &EventSink::detached())
+            .is_err()
+    );
+    let worker = backend
+        .boss
+        .document()
+        .employees
+        .into_iter()
+        .find(|employee| employee.job_title == "failed sibling")
+        .unwrap();
+    assert!(worker.expired);
+    assert!(!waku_protocol::boss::BossOutcome::assignment_succeeded(
+        &worker
+    ));
+
+    // A file in place of the broker directory deterministically fails I/O.
+    let unavailable = root.join("unavailable-broker");
+    std::fs::write(&unavailable, "unavailable").unwrap();
+    *backend.broker_root.lock() = Some(unavailable.clone());
+    let mut finisher_op = summon_op(
+        &backend,
+        &root,
+        "repair finisher",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon {
+        outcome_id,
+        finishes_outcome,
+        ..
+    } = &mut finisher_op
+    {
+        *outcome_id = Some(outcome.id);
+        *finishes_outcome = true;
+    }
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(Some(boss), finisher_op, &EventSink::detached())
+        .unwrap()
+    else {
+        panic!("expected queued summon")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    let employee = backend.boss.employee(session_id).unwrap();
+    let ticket = employee.ticket.unwrap();
+    assert!(matches!(
+        ticket.blocked_by.as_slice(),
+        [AdmissionBlocker::HostResources { .. }]
+    ));
+    drop(backend);
+
+    let backend = reopen_backend(&root);
+    *backend.broker_root.lock() = Some(unavailable.clone());
+    backend.run_summon_scheduler();
+    assert_eq!(
+        backend.boss.employee(session_id).unwrap().lifecycle(),
+        EmployeeLifecycle::Queued
+    );
+    std::fs::remove_file(&unavailable).unwrap();
+    backend.run_summon_scheduler();
+    let employee = backend.boss.employee(session_id).unwrap();
+    assert_eq!(employee.lifecycle(), EmployeeLifecycle::Working);
+    let recovered = employee.ticket.unwrap();
+    assert_eq!(recovered.generation, ticket.generation);
+    assert_eq!(recovered.sequence, ticket.sequence);
+    assert!(recovered.blocked_by.is_empty());
+    assert!(recovered.reservation.is_some());
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A queued ticket holds on the unresolved Employee base instead of
 /// dispatching under a guessed persona, and the human's recorded pick
 /// releases it into the normal launch path.

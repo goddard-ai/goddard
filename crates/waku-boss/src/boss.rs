@@ -1829,8 +1829,9 @@ impl BossService {
     }
 
     /// Whether an admitted ticket may start now under task readiness —
-    /// a finishing assignment waits for the completion conditions, an
-    /// ordinary one for its prerequisites' accepted successes. A held
+    /// a finishing assignment waits for siblings to settle and handoff
+    /// decisions to land; an ordinary one waits for its prerequisites'
+    /// accepted successes. A held
     /// assignment keeps its queued state; the next settle or decision
     /// re-evaluates.
     pub fn assignment_ready(&self, employee: &BossEmployee) -> bool {
@@ -1849,13 +1850,23 @@ impl BossService {
             return false;
         }
         if assignment.finishes_outcome {
-            return task
-                .completion_outstanding(
-                    &state.employees,
-                    &state.retired_employees,
-                    employee.session_id,
-                )
-                .is_empty();
+            // Settled failures must not prevent the finisher from starting
+            // repair work. Accepting its eventual success still uses the
+            // stricter completion check, including unresolved failures.
+            return task.pending_handoffs().next().is_none()
+                && state
+                    .employees
+                    .iter()
+                    .chain(state.retired_employees.iter())
+                    .all(|sibling| {
+                        sibling.session_id == employee.session_id
+                            || sibling
+                                .assignment
+                                .as_ref()
+                                .is_none_or(|assignment| assignment.outcome_id != task.id)
+                            || sibling.expired
+                            || sibling.cancelled
+                    });
         }
         assignment.prerequisites.iter().all(|prerequisite| {
             state
@@ -12918,6 +12929,47 @@ mod memory_op_tests {
             )
             .unwrap();
         assert_eq!(outcome(&service, task.id).pending_handoffs().count(), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_finisher_can_start_after_failed_siblings_settle_but_cannot_close_the_outcome() {
+        let root = std::env::temp_dir().join(format!("boss-finisher-repair-{}", Uuid::new_v4()));
+        let (service, boss) = outcome_fixture(&root);
+        let task = service
+            .create_outcome(None, "Repair failed work", "verified repair")
+            .unwrap();
+        let worker = admit_on(&service, boss, task.id, false, None);
+        let finisher = admit_on(&service, boss, task.id, true, None);
+        assert!(!service.assignment_ready(&finisher));
+        service
+            .set_employee_blocker(worker.session_id, "launch failed".into())
+            .unwrap();
+        service
+            .begin_finishing(worker.session_id, false, false, ExpiryCause::Failed)
+            .unwrap();
+        service.complete_expiry(worker.session_id, None).unwrap();
+        assert!(
+            outcome(&service, task.id)
+                .pending_handoffs()
+                .next()
+                .is_none()
+        );
+        assert!(
+            service.assignment_ready(&finisher),
+            "a settled failure permits repair work"
+        );
+        // Recovery must make the same admission decision from the durable record.
+        drop(service);
+        let service = BossService::open(root.clone()).unwrap();
+        assert!(service.assignment_ready(&finisher));
+        let finisher = settle_ok(&service, finisher.session_id);
+        assert!(matches!(
+            service.assignment_finished(&finisher).unwrap(),
+            AssignmentFinish::Conflict { .. }
+        ));
+        assert_eq!(outcome(&service, task.id).state, OutcomeState::Open);
+        drop(service);
         fs::remove_dir_all(root).unwrap();
     }
 
