@@ -2372,8 +2372,9 @@ enum BossOutcomeItem {
 /// Replace a Goals list's items like `reset_with_uniform_height`, also
 /// seeding each item's focus handle into the list's item records — a
 /// focused row, entry, or header scrolled out of the painted range keeps
-/// rendering, so a remount into the sibling list never drops focus.
+/// rendering. Preserve the viewport across expansion and other item updates.
 fn reset_boss_goals_list(list_state: &ListState, items: &[BossOutcomeItem], row_height: f32) {
+    let scroll_top = list_state.logical_scroll_top();
     list_state.reset(items.len());
     list_state.splice_focusable(
         0..items.len(),
@@ -2389,6 +2390,7 @@ fn reset_boss_goals_list(list_state: &ListState, items: &[BossOutcomeItem], row_
         0..items.len(),
         std::iter::repeat_n(Some(px(row_height)), items.len()),
     );
+    list_state.scroll_to(scroll_top);
 }
 
 /// The `boss_ui.goals_focus_handles` key a focusable panel item owns —
@@ -3343,6 +3345,40 @@ mod tests {
         assert!(
             cx.read(|app| view.read(app).boss_ui.goals_list.logical_scroll_top().item_ix) >= 6
         );
+    }
+
+    #[gpui::test]
+    fn goals_list_updates_preserve_scroll_offset(cx: &mut gpui::TestAppContext) {
+        let ongoing = (0..20).map(|i| Uuid::from_u128(i + 300)).collect();
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            GoalsRowFocusHarness::new(window, cx, 3, Vec::new(), ongoing)
+        });
+        cx.run_until_parked();
+
+        let list = cx.read(|app| view.read(app).boss_ui.goals_list.clone());
+        let scroll_top = gpui::ListOffset {
+            item_ix: 8,
+            offset_in_item: px(7.0),
+        };
+        list.scroll_to(scroll_top);
+        cx.run_until_parked();
+
+        // Expansion inserts items after the outcome; collapse removes them.
+        // Both changes rebuild the list's focus records and size hints.
+        for expanded in [true, false] {
+            let _ = view.update(cx, |this, cx| {
+                if expanded {
+                    this.ongoing.insert(9, Uuid::from_u128(999));
+                } else {
+                    this.ongoing.remove(9);
+                }
+                cx.notify();
+            });
+            cx.run_until_parked();
+            let actual = list.logical_scroll_top();
+            assert_eq!(actual.item_ix, scroll_top.item_ix);
+            assert_eq!(actual.offset_in_item, scroll_top.offset_in_item);
+        }
     }
 
     #[test]
@@ -13680,13 +13716,12 @@ impl Waku {
         self.boss_ui
             .goals_focus_handles
             .retain(|(daemon, item_key), _| *daemon != key || live_focus_keys.contains(item_key));
-        // Reset a viewport when its item sequence or scaled row height
-        // changes — count-preserving reorders reset too, but title and
-        // timestamp ticks never do.
+        // Refresh item records when the sequence or scaled row height changes,
+        // preserving the viewport. Title and timestamp ticks need no refresh.
         let row_height = boss_goal_row_height(self.state.ui_font_size);
         // The item signature names each row's outcome and each expanded
         // entry's own key — an expansion or a membership change in the
-        // sequence resets the viewport; a status label tick does not.
+        // sequence refreshes the records; a status label tick does not.
         let item_signature = |hasher: &mut DefaultHasher, item: &BossOutcomeItem| match item {
             BossOutcomeItem::Header {
                 section,
@@ -13738,6 +13773,9 @@ impl Waku {
         let owner_changed = self.boss_ui.goals_list_owner != Some(key);
         let goals_list = self.boss_ui.goals_list.clone();
         if owner_changed || self.boss_ui.goals_signature != Some(signature) {
+            if owner_changed {
+                goals_list.reset(0);
+            }
             self.boss_ui.goals_signature = Some(signature);
             reset_boss_goals_list(&goals_list, &items, row_height);
         }
