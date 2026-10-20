@@ -102,6 +102,7 @@ struct ClientInner {
     /// `bossSpeechRequested` broadcasts — `(request_id, parts)` for the
     /// client's voice pipeline.
     speech_subscribers: Mutex<Vec<Sender<(Uuid, Vec<String>)>>>,
+    wireframe_subscribers: Mutex<Vec<Sender<(Uuid, String)>>>,
     boss_browse_subscribers: Mutex<Vec<Sender<(Uuid, Uuid, String, Option<String>)>>>,
     last_sequences: Mutex<HashMap<(Uuid, Uuid), LastSequence>>,
     disconnected: AtomicBool,
@@ -367,6 +368,7 @@ impl DaemonClient {
             review_subscribers: Mutex::new(Vec::new()),
             friend_session_closed_subscribers: Mutex::new(Vec::new()),
             speech_subscribers: Mutex::new(Vec::new()),
+            wireframe_subscribers: Mutex::new(Vec::new()),
             boss_browse_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
@@ -585,6 +587,13 @@ impl DaemonClient {
     pub fn subscribe_speech(&self) -> Receiver<(Uuid, Vec<String>)> {
         let (events, receiver) = unbounded();
         self.inner.speech_subscribers.lock().push(events);
+        receiver
+    }
+
+    /// Live wireframe preview requests: `(session, workspace-relative path)`.
+    pub fn subscribe_wireframes(&self) -> Receiver<(Uuid, String)> {
+        let (events, receiver) = unbounded();
+        self.inner.wireframe_subscribers.lock().push(events);
         receiver
     }
 
@@ -924,6 +933,11 @@ fn run_client(
                             subscriber.send((request_id, parts.clone())).is_ok()
                         });
                     }
+                    ServerMessage::WireframePreviewRequested { session_id, path } => {
+                        inner.wireframe_subscribers.lock().retain(|subscriber| {
+                            subscriber.send((session_id, path.clone())).is_ok()
+                        });
+                    }
                     ServerMessage::BossBrowseRequested {
                         request_id,
                         session_id,
@@ -1017,6 +1031,7 @@ fn fail_connection(inner: &ClientInner) {
     inner.review_subscribers.lock().clear();
     inner.friend_session_closed_subscribers.lock().clear();
     inner.speech_subscribers.lock().clear();
+    inner.wireframe_subscribers.lock().clear();
     inner.boss_browse_subscribers.lock().clear();
 }
 

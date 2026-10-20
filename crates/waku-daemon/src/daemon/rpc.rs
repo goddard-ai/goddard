@@ -1928,6 +1928,7 @@ impl Backend for WakuBackend {
                     sender, task_id, thread_id, provider, prompt, delivery, events,
                 )
             }
+            Command::AgentWireframe { path } => self.agent_wireframe(agent, &path, &events),
             Command::AgentRenameSelf { title } => self.agent_rename_self(agent, &title, &events),
             Command::AgentProposeArchive { task_ids, reason } => {
                 self.agent_propose_archive(agent, task_ids, reason, &events)

@@ -4112,6 +4112,9 @@ pub struct Waku {
     /// `(daemon, request id, utterance fragments)` for the speech pipeline.
     speech_tx: Sender<(waku_client::DaemonKey, Uuid, Vec<String>)>,
     speech_events: Receiver<(waku_client::DaemonKey, Uuid, Vec<String>)>,
+    wireframe_tx: Sender<(waku_client::DaemonKey, Uuid, String)>,
+    wireframe_events: Receiver<(waku_client::DaemonKey, Uuid, String)>,
+    pending_wireframes: HashMap<Uuid, String>,
     boss_browse_tx: Sender<(waku_client::DaemonKey, Uuid, Uuid, String, Option<String>)>,
     boss_browse_events: Receiver<(waku_client::DaemonKey, Uuid, Uuid, String, Option<String>)>,
     pending_boss_browse: VecDeque<(Uuid, String, Option<String>)>,
@@ -6110,6 +6113,7 @@ impl Waku {
         let (automations_tx, automations_events) = unbounded();
         let (boss_tx, boss_events) = unbounded();
         let (speech_tx, speech_events) = unbounded();
+        let (wireframe_tx, wireframe_events) = unbounded();
         let (boss_browse_tx, boss_browse_events) = unbounded();
         let (boss_voice_gate_tx, boss_voice_gate_events) = unbounded();
         let (voice_scratchpad_tx, voice_scratchpad_events) = unbounded();
@@ -7930,6 +7934,9 @@ impl Waku {
                 boss_events,
                 speech_tx,
                 speech_events,
+                wireframe_tx,
+                wireframe_events,
+                pending_wireframes: HashMap::new(),
                 boss_browse_tx,
                 boss_browse_events,
                 pending_boss_browse: VecDeque::new(),

@@ -167,7 +167,7 @@ taskId?: string | null,
  * daemon-known tasks. `provider` disambiguates when more than one
  * task carries the id.
  */
-threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentRenameSelf", title: string, } | { "type": "agentProposeArchive",
+threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentWireframe", path: string, } | { "type": "agentRenameSelf", title: string, } | { "type": "agentProposeArchive",
 /**
  * Waku task ids to archive. Each must name a started, unarchived
  * task in the caller's own project; side chats leave with their

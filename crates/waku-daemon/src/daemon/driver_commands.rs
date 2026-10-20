@@ -131,6 +131,7 @@ pub(super) fn handle_driver_command(
         | Command::CloseSession
         | Command::AgentCreateSession { .. }
         | Command::AgentPrompt { .. }
+        | Command::AgentWireframe { .. }
         | Command::AgentRenameSelf { .. }
         | Command::AgentProposeArchive { .. }
         | Command::AgentMergeSubmit

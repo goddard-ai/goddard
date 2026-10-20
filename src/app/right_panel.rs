@@ -5150,6 +5150,32 @@ mod tests {
 }
 
 impl Waku {
+    pub(super) fn drain_wireframe_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        while let Ok((key, session_id, path)) = self.wireframe_events.try_recv() {
+            if self.daemons.session_owner(session_id) == key
+                && self.state.wireframes_experiment_enabled
+            {
+                // Keep background tasks from stealing the user's current task.
+                self.pending_wireframes.insert(session_id, path);
+                changed = true;
+            }
+        }
+        if self.state.wireframes_experiment_enabled
+            && let RightPanelOwner::Session(session_id) = self.active_right_panel_owner()
+            && let Some(path) = self.pending_wireframes.remove(&session_id)
+        {
+            self.sync_right_panel_owner(cx);
+            if let Some(editor) = self.right_panel_file_editors.get_mut(&path) {
+                editor.show_source = false;
+            }
+            self.open_right_panel_file(path, cx);
+            self.set_right_panel_visible(true, cx);
+            changed = true;
+        }
+        changed
+    }
+
     pub(super) fn drain_boss_browse_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         while let Ok((key, _request_id, session_id, url, title)) =
@@ -5998,6 +6024,7 @@ impl Waku {
         }
         self.plan_docs.remove(&session_id);
         self.plan_wireframes.remove(&session_id);
+        self.pending_wireframes.remove(&session_id);
         self.plan_annotations.remove(&session_id);
         self.right_panel_pr_states
             .retain(|(owner, _), _| *owner != session_id);

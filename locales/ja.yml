@@ -3119,7 +3119,7 @@ experiments.voice_briefing_dnd_caption: 現地時刻で15分刻み。自動ブ�
 experiments.voice_scratchpad_title: VoicePad
 experiments.voice_scratchpad_description: 送信ボタンの横にある VP ボタンで音声メモ帳を開き、マイクの音声をメッセージに文字起こしします——Enter で送信、Esc で破棄します。「推論プロバイダー」にある Vercel AI Gateway の認証情報を使用します。
 experiments.wireframes_title: ワイヤーフレーム
-experiments.wireframes_description: 計画セッションが計画ドキュメントの横に低忠実度の画面ワイヤーフレームを出力できるようにします——ファイルビューアーでは実際の UI のようにテーマ付き要素としてプレビューされます。オフにするとこれらの機能は非表示になりますが、出力済みのファイルは削除されません。
+experiments.wireframes_description: タスクのエージェントや計画セッションが作成した低忠実度の画面ワイヤーフレームを、右パネルでテーマ付き UI としてプレビューします。オフにするとプレビューは非表示になりますが、ファイルは削除されません。
 daemon.restart: デーモンを再起動
 daemon.restart_pending: 再起動中…
 daemon.degraded_banner: デーモンは稼働していますが応答していません——Goddard は接続を試行し続けるため、実行中のタスクはそのまま保持されます。

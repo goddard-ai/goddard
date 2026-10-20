@@ -679,6 +679,10 @@ pub enum Command {
         #[serde(default)]
         delivery: AgentPromptDelivery,
     },
+    /// Validate a workspace wireframe and request its preview in connected desktop clients.
+    AgentWireframe {
+        path: String,
+    },
     /// Set the title of the calling agent's own task. Requires a per-task grant.
     AgentRenameSelf {
         title: String,
@@ -1189,6 +1193,11 @@ pub enum ServerMessage {
         session_id: Uuid,
         url: String,
         title: Option<String>,
+    },
+    /// Live-only request to preview a validated wireframe in its owning task.
+    WireframePreviewRequested {
+        session_id: Uuid,
+        path: String,
     },
     /// The pairing document changed — a pair request arrived or resolved,
     /// or a paired client was revoked. Carries the whole document.

@@ -3070,7 +3070,7 @@ experiments.voice_briefing_dnd_caption: 本地时间，以 15 分钟为步长。
 experiments.voice_scratchpad_title: VoicePad
 experiments.voice_scratchpad_description: 发送按钮旁的 VP 按钮会打开听写草稿板，把麦克风内容转写成消息——回车发送，Esc 丢弃。使用“推理服务”下的 Vercel AI Gateway 凭证。
 experiments.wireframes_title: 线框图
-experiments.wireframes_description: 允许规划会话在计划文档旁输出低保真界面线框图——文件查看器会将其渲染为带主题的元素，如同真实 UI。关闭后会隐藏这些入口，但不会删除已生成的文件。
+experiments.wireframes_description: 在右侧面板中，将任务代理和规划会话生成的低保真界面线框图预览为带主题的 UI。关闭后会隐藏预览，但不会删除文件。
 daemon.restart: 重启守护进程
 daemon.restart_pending: 正在重启…
 daemon.degraded_banner: 守护进程仍在运行但没有响应——Goddard 会继续尝试连接，运行中的任务不受影响。

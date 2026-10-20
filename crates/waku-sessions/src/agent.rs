@@ -957,6 +957,9 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
     instruction.push_str(&format!(
         "\n- `computer js` / `computer reset` — when Computer Use is enabled for this task, execute JavaScript or reset its persistent kernel using `{command} computer js --text 'jsRepl.write(1 + 1)'` (or `--file script.js`; `--file -` reads stdin). Read the bundled Computer Use skill before the first call; open returned image paths with your image-reading tool."
     ));
+    instruction.push_str(&format!(
+        "\n- `wireframe PATH.wireframe.json` — validate a wireframe file relative to this task's workspace and open its right-panel preview in a connected desktop client. Write the file first; requires Settings → Experiments → Wireframes. `{command} wireframe --help` describes the JSON format. Available to normal tasks as well as planning sessions."
+    ));
     if scope.task_tools {
         instruction.push_str(&format!(
             "\n- `create` — when the user asks you to create, start, or \

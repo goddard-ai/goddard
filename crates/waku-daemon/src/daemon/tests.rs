@@ -21594,3 +21594,70 @@ fn boss_projects_discovery_exposes_canonical_identity() {
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn task_wireframes_require_opt_in_valid_documents_and_workspace_containment() {
+    let root = std::env::temp_dir().join(format!("waku-wireframe-{}", Uuid::new_v4()));
+    let (backend, task, _) = read_scope_test_backend(&root);
+    let sink = EventSink::detached();
+    let valid = r#"{"version":1,"name":"Example","screens":[{"name":"Main","width":800,"height":600,"root":{"type":"text","text":"Hello"}}]}"#;
+    std::fs::write(root.join("repo/design.wireframe.json"), valid).unwrap();
+    let mut settings = backend.settings.get();
+    settings.wireframes_experiment_enabled = false;
+    backend.settings.replace(settings.clone()).unwrap();
+    assert!(
+        backend
+            .agent_wireframe(Some(task), "design.wireframe.json", &sink)
+            .is_err()
+    );
+    settings.wireframes_experiment_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    assert!(
+        backend
+            .agent_wireframe(None, "design.wireframe.json", &sink)
+            .is_err()
+    );
+    assert!(matches!(
+        backend
+            .agent_wireframe(Some(task), "design.wireframe.json", &sink)
+            .unwrap(),
+        ResponsePayload::Ack
+    ));
+    std::fs::write(root.join("outside.wireframe.json"), valid).unwrap();
+    assert!(
+        backend
+            .agent_wireframe(Some(task), "../outside.wireframe.json", &sink)
+            .is_err()
+    );
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            root.join("outside.wireframe.json"),
+            root.join("repo/link.wireframe.json"),
+        )
+        .unwrap();
+        assert!(
+            backend
+                .agent_wireframe(Some(task), "link.wireframe.json", &sink)
+                .is_err()
+        );
+    }
+    std::fs::write(root.join("repo/design.wireframe.json"), "{}").unwrap();
+    assert!(
+        backend
+            .agent_wireframe(Some(task), "design.wireframe.json", &sink)
+            .is_err()
+    );
+    std::fs::write(
+        root.join("repo/design.wireframe.json"),
+        vec![b' '; 1_048_577],
+    )
+    .unwrap();
+    assert!(
+        backend
+            .agent_wireframe(Some(task), "design.wireframe.json", &sink)
+            .is_err()
+    );
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}

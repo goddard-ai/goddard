@@ -30,6 +30,56 @@ impl WakuBackend {
         Ok(())
     }
 
+    pub(super) fn agent_wireframe(
+        &self,
+        agent: Option<Uuid>,
+        path: &str,
+        events: &EventSink,
+    ) -> anyhow::Result<ResponsePayload> {
+        let caller = agent.ok_or_else(|| anyhow!("wireframes require a scoped task credential"))?;
+        if !self.settings.get().wireframes_experiment_enabled {
+            bail!("enable Wireframes in Settings → Experiments first");
+        }
+        if !path.to_ascii_lowercase().ends_with(".wireframe.json") {
+            bail!("wireframe paths must end in .wireframe.json");
+        }
+        let relative = validate_workspace_relative_path(Path::new(path))?;
+        let root = {
+            let state = self.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == caller)
+                .ok_or_else(|| anyhow!("unknown task {caller}"))?;
+            let project = state
+                .projects
+                .iter()
+                .find(|project| project.id == session.project_id)
+                .ok_or_else(|| anyhow!("task has no project"))?;
+            session.workspace.path().unwrap_or(&project.path).to_owned()
+        }
+        .canonicalize()?;
+        let file = root.join(&relative).canonicalize()?;
+        if !file.starts_with(&root) {
+            bail!("wireframe must stay inside this task's workspace");
+        }
+        if !file.is_file() {
+            bail!("wireframe must be a regular file");
+        }
+        // Bound reads before parsing, including files that grow after metadata is read.
+        use std::io::Read as _;
+        let mut content = String::new();
+        std::fs::File::open(&file)?
+            .take(1_048_577)
+            .read_to_string(&mut content)?;
+        if content.len() > 1_048_576 {
+            bail!("wireframe exceeds the 1 MiB limit");
+        }
+        waku_protocol::wireframe::Wireframe::parse(&content)?;
+        events.wireframe_preview_requested(caller, relative.to_string_lossy().into_owned());
+        Ok(ResponsePayload::Ack)
+    }
+
     /// A scoped `rename` either applies outright — the task holds a stored
     /// grant — or parks a permission request on the session until the user
     /// answers. The request survives the turn that raised it: it is parked

@@ -498,6 +498,16 @@ impl EventSink {
             .broadcast_speech(request_id, parts, Some(self.source_subscriber_id))
     }
 
+    /// Ask connected desktop clients to preview a validated task wireframe.
+    pub fn wireframe_preview_requested(&self, session_id: Uuid, path: String) {
+        let mut state = self.hub.state.lock();
+        Hub::broadcast(
+            &mut state,
+            &ServerMessage::WireframePreviewRequested { session_id, path },
+            None,
+        );
+    }
+
     /// Ask connected clients to open a URL in the boss chat's right panel.
     pub fn boss_browse_requested(
         &self,
@@ -2428,6 +2438,7 @@ fn is_agent_command(command: &Command) -> bool {
         Command::Boss { .. }
             | Command::AgentCreateSession { .. }
             | Command::AgentPrompt { .. }
+            | Command::AgentWireframe { .. }
             | Command::AgentRenameSelf { .. }
             | Command::AgentProposeArchive { .. }
             | Command::AgentMergeSubmit
@@ -2505,6 +2516,7 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::AgentResources { .. }
             | Command::AgentMergeSubmit
             | Command::AgentProjectMap { .. }
+            | Command::AgentWireframe { .. }
             | Command::StartIntegrationAuth { .. }
             | Command::ConnectIntegration { .. }
     )
@@ -2848,6 +2860,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::CloseSession => "closeSession",
         Command::AgentCreateSession { .. } => "agentCreateSession",
         Command::AgentPrompt { .. } => "agentPrompt",
+        Command::AgentWireframe { .. } => "agentWireframe",
         Command::AgentRenameSelf { .. } => "agentRenameSelf",
         Command::AgentProposeArchive { .. } => "agentProposeArchive",
         Command::AgentMergeSubmit => "agentMergeSubmit",

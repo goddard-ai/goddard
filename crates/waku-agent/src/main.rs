@@ -800,6 +800,11 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"json":{"landed":"true after the worktree is rebased, verified, and landed","sha":"landed commit SHA"}}),
             "goddard-agent merge submit".to_owned(),
         ),
+        "wireframe" => (
+            json!({"PATH":{"positional":true,"required":true,"type":"workspace-relative .wireframe.json file"},"description":"Write the JSON file, then invoke this command to validate it and request a right-panel preview in this task. Requires Settings → Experiments → Wireframes. Live-only: a connected desktop client must receive the request. Minimal document: {\"version\":1,\"name\":\"Design\",\"screens\":[{\"name\":\"Main\",\"width\":800,\"height\":600,\"root\":{\"type\":\"frame\",\"direction\":\"column\",\"gap\":12,\"padding\":16,\"children\":[{\"type\":\"text\",\"text\":\"Hello\",\"role\":\"title\"}]}}]}. Nodes: frame, rect, text, divider. Frames contain children. Sizing: pixels, hug, fill. Surface tones: surface, inset, overlay, ink, accent. Text roles: title, body, caption, label. Text tones: primary, secondary, tertiary, accent."}),
+            json!({"accepted":{"ok":true},"meaning":"document validated and preview request broadcast; does not confirm a client opened it"}),
+            "goddard-agent wireframe designs/main.wireframe.json".to_owned(),
+        ),
         "rename" => (
             json!({"TITLE":{"positional":true,"required":true,"type":"this task's new title; inspect read first and preserve its unique purpose"}}),
             json!({"accepted":{"ok":true},"approvalRequired":"AgentAskOutcome; waits for human approval unless standing permission exists"}),
@@ -854,6 +859,7 @@ fn schema() -> serde_json::Value {
         "search",
         "history search",
         "map",
+        "wireframe",
         "rename",
         "archive",
         "ask",
@@ -1304,9 +1310,18 @@ fn run() -> anyhow::Result<()> {
         #[cfg(unix)]
         "__resource_exec" => resources::exec_child(arguments),
         "command" => command_flags(arguments.collect()),
-        "rename" | "archive" | "ask" => {
+        "wireframe" | "rename" | "archive" | "ask" => {
             let args: Vec<String> = arguments.collect();
             let command = match subcommand.as_str() {
+                "wireframe" => {
+                    let (pos, _) = flags(args, &[], true)?;
+                    if pos.len() != 1 {
+                        bail!("usage: goddard-agent wireframe PATH.wireframe.json");
+                    }
+                    Command::AgentWireframe {
+                        path: pos[0].clone(),
+                    }
+                }
                 "rename" => {
                     let (pos, _) = flags(args, &[], true)?;
                     if pos.len() != 1 {
