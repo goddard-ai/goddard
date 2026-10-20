@@ -27,13 +27,18 @@ pub struct RouteRun {
     pub record: EvalDecisionRecord,
 }
 
-const CLASS_INSTRUCTIONS: &str = "Which model tier does this task require? medium is the user's \
-workhorse and the default for ordinary engineering: exploration, debugging, code review, planning, \
-and feature implementation, including multi-step work. Choose easy only for clearly mechanical, \
-low-risk work with an obvious approach and little judgment. Choose hard only for unusually \
-demanding reasoning, subtle interacting constraints, or high-stakes decisions where an ordinary \
-capable model is unlikely to be reliable. Needing exploration, a plan, or multiple steps does not \
-by itself warrant hard. When the evidence for either extreme is unclear, choose medium.";
+const CLASS_INSTRUCTIONS: &str = "Which model tier is needed to make reliable progress on this \
+request? Medium is the user's normal workhorse. Judge the unresolved reasoning, not duration, \
+scope, file count, or implementation volume. Choose hard when more thorough reasoning is likely \
+to materially improve correctness or the chosen approach beyond what the workhorse would reliably \
+produce: distinguishing competing plausible explanations, reconciling subtle interacting \
+constraints, or deriving consequences through several dependent deductions. An important reasoning \
+bottleneck can justify hard even when most subsequent work is ordinary implementation. Missing \
+information, unfamiliar code, high stakes, and requests to investigate or plan do not by themselves \
+establish hard; ordinary inspection and established methods may suffice. An established approach \
+usually calls for medium, even with extensive implementation. Implementation can still require hard \
+if important reasoning remains unresolved. Choose easy for mechanical work with an obvious approach \
+and little judgment. Do not assume hidden complexity. When evidence is insufficient, choose medium.";
 
 /// The class answer must clear this confidence before it routes; below it
 /// the session keeps the default route.
@@ -161,8 +166,8 @@ pub fn routing_questions() -> BTreeMap<String, EvalQuestion> {
             instructions: CLASS_INSTRUCTIONS.to_owned(),
             criteria: BTreeMap::from([
                 ("easy".to_owned(), Some("clearly mechanical, low-risk work with little judgment".to_owned())),
-                ("medium".to_owned(), Some("the workhorse default: ordinary engineering, exploration, debugging, planning, and implementation".to_owned())),
-                ("hard".to_owned(), Some("unusually demanding reasoning or high-stakes decisions beyond ordinary engineering".to_owned())),
+                ("medium".to_owned(), Some("the workhorse can reliably resolve the remaining decisions using ordinary analysis, inspection, and established methods".to_owned())),
+                ("hard".to_owned(), Some("a substantial unresolved reasoning bottleneck where deeper analysis is likely to materially improve correctness or the approach beyond the workhorse".to_owned())),
             ]),
         },
     )])

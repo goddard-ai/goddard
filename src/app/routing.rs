@@ -22,9 +22,10 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 use waku_client::routing::{
     ModelHandoff, model_handoff_class, model_handoff_questions, model_handoff_targets,
+    turn_effort_question,
 };
-use waku_protocol::eval::{EvalAnswer, EvalQuestion};
-use waku_protocol::model::{ProviderKind, ProviderResumeCursor, RuntimeMode};
+use waku_protocol::eval::EvalAnswer;
+use waku_protocol::model::{ProviderKind, ProviderModelOption, ProviderResumeCursor, RuntimeMode};
 use waku_protocol::routing::{RouteCandidate, RouteDecision, RouteTarget, TaskClass};
 
 use super::runtime::start_driver;
@@ -194,7 +195,8 @@ pub(super) struct TurnRoutePlan {
     session_id: Uuid,
     prompt: String,
     model: String,
-    efforts: Vec<String>,
+    efforts: Vec<ProviderModelOption>,
+    default_effort: Option<String>,
     current_effort: Option<String>,
     owner: RouteDecision,
     original_model: Option<String>,
@@ -217,10 +219,6 @@ pub(super) struct TurnRouteDecision {
 }
 
 const TURN_EFFORT_CONFIDENCE: f64 = 0.7;
-const TURN_EFFORT_INSTRUCTIONS: &str = "Which reasoning effort does nextRequest deserve? \
-Answer with the effort that best fits the request's difficulty — but treat the current \
-effort as the default: only pick a different level when the task clearly warrants more \
-or less reasoning than usual.";
 
 impl TurnRoutePlan {
     /// One bounded background call batches independent effort and model
@@ -232,23 +230,14 @@ impl TurnRoutePlan {
             "nextRequest": self.prompt.chars().take(4_000).collect::<String>(),
             "model": self.model,
             "currentEffort": self.current_effort,
+            "defaultEffort": self.default_effort,
+            "previousTurn": self.previous_turn,
         });
         let mut questions = BTreeMap::new();
         if self.efforts.len() >= 2 {
-            questions.insert(
-                "effort".to_owned(),
-                EvalQuestion::Choice {
-                    instructions: TURN_EFFORT_INSTRUCTIONS.to_owned(),
-                    criteria: self
-                        .efforts
-                        .iter()
-                        .map(|effort| (effort.clone(), None))
-                        .collect(),
-                },
-            );
+            questions.insert("effort".to_owned(), turn_effort_question(&self.efforts));
         }
         if let Some(handoff) = &self.handoff {
-            state["previousTurn"] = json!(self.previous_turn);
             state["currentClass"] = json!(handoff.current_class(&self.model));
             state["models"] = json!({"medium": handoff.medium.target, "hard": handoff.hard.target});
             questions.extend(model_handoff_questions());
@@ -293,7 +282,7 @@ impl TurnRoutePlan {
             }) if handoff.is_none()
                 && confidence.is_finite()
                 && (TURN_EFFORT_CONFIDENCE..=1.0).contains(confidence)
-                && self.efforts.contains(choice)
+                && self.efforts.iter().any(|effort| &effort.id == choice)
                 && self.current_effort.as_ref() != Some(choice) =>
             {
                 Some(choice.clone())
@@ -445,33 +434,31 @@ impl Waku {
             return None;
         }
         let model = self.model_metadata_for_session(session)?;
-        let efforts = model
-            .reasoning_efforts
-            .iter()
-            .map(|option| option.id.clone())
-            .collect::<Vec<_>>();
+        let efforts = model.reasoning_efforts.clone();
         let handoff = self.model_handoff_for_session(session).filter(|_| {
             session
                 .turns
                 .last()
                 .is_some_and(|turn| turn.status != TurnStatus::Running)
         });
-        let previous_turn = handoff
-            .as_ref()
-            .and_then(|_| session.turns.last())
+        if efforts.len() < 2 && handoff.is_none() {
+            return None;
+        }
+        let previous_turn = session
+            .turns
+            .last()
+            .filter(|turn| turn.status != TurnStatus::Running)
             .map(|turn| {
                 let mut state = status_markers::turn_eval_state(session, turn.id, None);
                 state["finish"]["success"] = json!(turn.status == TurnStatus::Completed);
                 state
             });
-        if efforts.len() < 2 && handoff.is_none() {
-            return None;
-        }
         Some(TurnRoutePlan {
             session_id: session.id,
             prompt,
             model: model.id.clone(),
             efforts,
+            default_effort: model.default_reasoning_effort.clone(),
             current_effort: session
                 .reasoning_effort
                 .clone()

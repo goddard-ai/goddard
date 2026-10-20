@@ -1,10 +1,57 @@
-//! Conservative model handoffs for Auto tasks that started on Hard.
+//! Per-turn reasoning effort and conservative model handoffs for Auto tasks.
 
 use std::collections::BTreeMap;
 
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
-use waku_protocol::model::{ProviderKind, ProviderModel};
+use waku_protocol::model::{ProviderKind, ProviderModel, ProviderModelOption};
 use waku_protocol::routing::{RouteClassMap, RouteDecision, RouteTarget, TaskClass};
+
+const TURN_EFFORT_INSTRUCTIONS: &str = "Which reasoning effort should the current model use for \
+nextRequest, given what previousTurn establishes and what remains unresolved? Judge whether more \
+deliberate thinking would materially improve this turn's correctness or approach. Use medium or \
+normal effort when offered as the baseline for ordinary analysis and execution of a settled \
+approach; otherwise use defaultEffort or the closest supported ordinary level. Use lower effort \
+for mechanical work needing little judgment. Increase effort for competing plausible explanations, \
+subtle interacting constraints, or several dependent deductions where deeper analysis is likely \
+to help. Reserve xhigh or max for exceptionally demanding reasoning where a smaller increase is \
+unlikely to suffice. Duration, scope, file count, high stakes, missing information, and labels like \
+planning or implementation do not by themselves justify increased effort. Implementation may still \
+need deeper reasoning if important decisions remain unresolved. Judge the upcoming work rather \
+than inheriting the task's initial difficulty or currentEffort. Select only an offered effort; \
+this question does not select a different model.";
+
+fn turn_effort_description(option: &ProviderModelOption) -> Option<String> {
+    let description = match option.id.as_str() {
+        "none" => "No extended reasoning; direct mechanical execution.",
+        "minimal" => "Minimal reasoning for obvious, mechanical work.",
+        "low" => "Light reasoning for straightforward work with little judgment.",
+        "medium" | "normal" => {
+            "Normal reasoning for ordinary analysis and execution of a settled approach."
+        }
+        "high" => {
+            "More deliberate analysis that materially helps resolve an important reasoning bottleneck."
+        }
+        "xhigh" => {
+            "Exceptionally thorough reasoning for a bottleneck that high effort is unlikely to resolve reliably."
+        }
+        "max" => {
+            "Maximum reasoning, reserved for exceptional bottlenecks where smaller increases are unlikely to suffice."
+        }
+        _ => return option.description.clone(),
+    };
+    Some(description.to_owned())
+}
+
+/// Judge effort on the current model independently of model-tier selection.
+pub fn turn_effort_question(efforts: &[ProviderModelOption]) -> EvalQuestion {
+    EvalQuestion::Choice {
+        instructions: TURN_EFFORT_INSTRUCTIONS.to_owned(),
+        criteria: efforts
+            .iter()
+            .map(|effort| (effort.id.clone(), turn_effort_description(effort)))
+            .collect(),
+    }
+}
 
 /// An approved class-map target and the map that supplied it.
 #[derive(Clone, Debug, PartialEq)]
@@ -104,14 +151,19 @@ pub fn model_handoff_questions() -> BTreeMap<String, EvalQuestion> {
     BTreeMap::from([(
         "remaining_work".into(),
         EvalQuestion::Choice {
-            instructions: "Which model tier does the NEXT request require, given the previous \
-                settled turn? Medium is the user's workhorse. Choose medium when the investigation \
-                has established an approach and the remaining work is ordinary implementation, \
-                verification, or explanation. Choose hard when unresolved ambiguity, subtle \
-                interacting constraints, high-stakes reasoning, or newly revealed complexity still \
-                requires the stronger model. A plan or the first code edit alone does not prove \
-                the remaining work is easier. Account for the next request, not just the previous \
-                turn's ending. Treat currentClass as the default when evidence is unclear."
+            instructions: "Which model tier does the NEXT request need, given the previous \
+                settled turn? Medium is the user's normal workhorse. Judge unresolved reasoning \
+                in the upcoming work, not duration, scope, implementation volume, or phase labels. \
+                Choose hard when deeper analysis is likely to materially improve correctness or \
+                the approach beyond the workhorse: distinguishing competing plausible explanations, \
+                reconciling subtle interacting constraints, or making several dependent deductions. \
+                Missing information, unfamiliar code, and high stakes alone do not establish hard. \
+                Choose medium when the important decisions are resolved and ordinary analysis, \
+                implementation, verification, or explanation can reliably finish the work. A plan \
+                or first code edit alone does not establish that those decisions are resolved; \
+                implementation may still expose a reasoning bottleneck. Account for nextRequest \
+                and what previousTurn establishes. Treat currentClass as the default when evidence \
+                is unclear."
                 .into(),
             criteria: BTreeMap::from([
                 (
@@ -120,7 +172,7 @@ pub fn model_handoff_questions() -> BTreeMap<String, EvalQuestion> {
                 ),
                 (
                     "hard".into(),
-                    Some("the remaining work still needs unusually demanding reasoning".into()),
+                    Some("a remaining reasoning bottleneck makes deeper analysis materially valuable beyond the workhorse".into()),
                 ),
             ]),
         },

@@ -1,0 +1,80 @@
+[
+  {
+    "name": "sync correctness unresolved",
+    "kind": "start",
+    "state": {"task": "Our background sync occasionally resurrects deleted records after reconnecting. Determine which interleavings of deletes, retries, and offline edits cause this, and design and implement a fix that preserves concurrent edits. Several plausible causes fit the observations; the fix must reconcile deletion ordering and retry idempotency.", "project": null},
+    "expected": ["hard"]
+  },
+  {
+    "name": "sync correctness settled",
+    "kind": "start",
+    "state": {"task": "Implement the attached, reviewed sync fix: persist deletion tombstones, reject incoming updates older than the tombstone, and retain tombstones until all replicas acknowledge them. The design resolves ordering, concurrent edits, and retry behavior. Follow its specified interfaces and test cases across the 40 affected files.", "project": null},
+    "expected": ["medium"]
+  },
+  {
+    "name": "long ordinary implementation",
+    "kind": "start",
+    "state": {"task": "Implement a settings screen with 20 fields, using our existing form components, validation helpers, and save API. This will take multiple days. The field schema and interaction design are supplied.", "project": null},
+    "expected": ["medium"]
+  },
+  {
+    "name": "short subtle reasoning",
+    "kind": "start",
+    "state": {"task": "Review a five-line lock-free deletion change. Derive whether it preserves linearizability under concurrent readers, memory reclamation, and ABA; two plausible arguments disagree about which interleaving is legal.", "project": null},
+    "expected": ["hard"]
+  },
+  {
+    "name": "investigation alone",
+    "kind": "start",
+    "state": {"task": "Investigate why the settings page shows the wrong label. Locate the label definition, check its localization key, and fix the mismatch using our existing conventions.", "project": null},
+    "expected": ["medium"]
+  },
+  {
+    "name": "high stakes alone",
+    "kind": "start",
+    "state": {"task": "In the production payment service, correct the typo in this comment from 'recieve' to 'receive'. Change only that comment.", "project": null},
+    "expected": ["easy"]
+  },
+  {
+    "name": "go ahead with settled approach",
+    "kind": "effort",
+    "state": {"model": "workhorse", "nextRequest": "Go ahead.", "currentEffort": "max", "defaultEffort": "medium", "previousTurn": {"prompt": "Determine the sync fix.", "response": "The ordering bug is established. The reviewed fix and test matrix resolve concurrent edits, retry idempotency, and replica acknowledgment. Implementation now follows the supplied interfaces and existing storage patterns.", "finish": {"success": true}}},
+    "expected": ["medium"]
+  },
+  {
+    "name": "go ahead with unresolved reasoning",
+    "kind": "effort",
+    "state": {"model": "workhorse", "nextRequest": "Go ahead.", "currentEffort": "medium", "defaultEffort": "medium", "previousTurn": {"prompt": "Determine the sync fix.", "response": "Two competing explanations fit the evidence: stale replay or incorrect tombstone ordering. Each proposed fix may violate concurrent-edit preservation under a different interleaving. We still need to derive the ordering invariant and distinguish these explanations before choosing a fix.", "finish": {"success": true}}},
+    "expected": ["high", "xhigh"]
+  },
+  {
+    "name": "implementation still contains reasoning",
+    "kind": "effort",
+    "state": {"model": "workhorse", "nextRequest": "Implement the fix, resolving the conflict between retry idempotency and concurrent-edit preservation. The plan does not establish which ordering invariant satisfies both; derive it first.", "currentEffort": "medium", "defaultEffort": "medium", "previousTurn": null},
+    "expected": ["high", "xhigh"]
+  },
+  {
+    "name": "mechanical follow-up after hard work",
+    "kind": "effort",
+    "state": {"model": "strong-model", "nextRequest": "Correct the single spelling error in the comment we identified. No other changes.", "currentEffort": "max", "defaultEffort": "high", "previousTurn": {"response": "The concurrency fix is complete and verified. One comment misspells 'acknowledged'.", "finish": {"success": true}}},
+    "expected": ["none", "minimal", "low"]
+  },
+  {
+    "name": "missing information needs inspection",
+    "kind": "effort",
+    "state": {"model": "workhorse", "nextRequest": "Find which existing helper formats timestamps in this unfamiliar repository and use it in the new settings screen.", "currentEffort": "medium", "defaultEffort": "medium", "previousTurn": null},
+    "expected": ["medium"]
+  },
+  {
+    "name": "handoff after decisions resolved",
+    "kind": "handoff",
+    "state": {"nextRequest": "Implement the reviewed design across the remaining 40 files.", "currentClass": "hard", "models": {"medium": {"model": "workhorse"}, "hard": {"model": "strong-model"}}, "previousTurn": {"response": "The root cause, ordering invariant, design, interfaces, and test matrix are established. Remaining work follows existing storage patterns; the correctness questions are resolved.", "finish": {"success": true}}},
+    "expected": ["medium"]
+  },
+  {
+    "name": "handoff retains unresolved reasoning",
+    "kind": "handoff",
+    "state": {"nextRequest": "Continue implementing the sync fix.", "currentClass": "hard", "models": {"medium": {"model": "workhorse"}, "hard": {"model": "strong-model"}}, "previousTurn": {"response": "Initial scaffolding is implemented, but the proposed ordering invariant conflicts with concurrent-edit preservation. Two alternative invariants remain; we must derive their consequences under retries and stale replica replay before choosing.", "finish": {"success": true}}},
+    "expected": ["hard"]
+  }
+]

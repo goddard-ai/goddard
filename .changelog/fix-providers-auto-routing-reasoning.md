@@ -1,0 +1,1 @@
+- Auto model and reasoning-effort routing now judge the benefit of deeper analysis rather than task length or implementation volume, and follow-up effort decisions use the previous turn's context.
