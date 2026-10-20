@@ -9,7 +9,20 @@ export type Reservation = { id: string, task: string, purpose: string, resources
  * runtime-owned sessions. `holder_pid` anchors that matched the old
  * daemon move with it; agent-held callers keep their own pid.
  */
-owner_pid?: number | null, workload_pid: number | null, requested_at: number, duration_seconds: number, deadline: number, granted_at: number | null, cancelled: boolean, released: boolean,
+owner_pid?: number | null, workload_pid: number | null,
+/**
+ * The workload group leader's kernel birth stamp, recorded when the
+ * runner attached the process group. It fences the broker's orphan
+ * reaping against PID reuse: a group leader whose stamp differs is
+ * never signalled. Rows written by older daemons carry no stamp and
+ * are never signalled either.
+ */
+workload_started?: number | null,
+/**
+ * When the broker last sent SIGTERM to an orphaned workload process
+ * group — it escalates to SIGKILL about two seconds later.
+ */
+reap_signalled_at?: number | null, requested_at: number, duration_seconds: number, deadline: number, granted_at: number | null, cancelled: boolean, released: boolean,
 /**
  * The model-slot claim this reservation holds, when it came through
  * `Admission`. Ledger entries written before admission tickets

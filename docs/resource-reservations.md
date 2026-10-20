@@ -99,7 +99,9 @@ must reuse its parent or release before requesting a different set.
 
 Ctrl-C cancels a wait or supervised workload. Cancelling the task or closing its
 provider runtime also cancels its recorded reservations. The live runner stops
-its owned Unix process group; it never targets an external device process.
+its owned Unix process group; if the runner itself has died, the broker stops
+the orphaned group once it verifies the group leader's recorded start time.
+Neither ever targets an external device process.
 
 ## Configure capacity
 
@@ -121,8 +123,12 @@ prevent concurrent daemons from allocating the same capacity. Stale queued
 requests disappear when their holder dies or their deadline passes. An active
 reservation has no time-based lease expiry: a live process group or named
 virtual device keeps capacity even after its owner dies. Process-ID reuse may
-conservatively retain a claim longer; Goddard does not kill processes based on
-recovered PIDs. Do not delete the ledger to bypass a live holder.
+conservatively retain a claim longer. When a reservation's runner has died,
+Goddard stops its registered workload process group — SIGTERM, then SIGKILL
+after about two seconds — only after verifying the group leader's start time
+matches the one recorded at launch, and capacity stays held until the group
+exits. Workloads registered by older daemons recorded no start time and are
+not stopped automatically. Do not delete the ledger to bypass a live holder.
 
 If a request stays blocked, inspect `resource status`. Stop your own workload
 or shut down your own retained device, then inspect status again. Device

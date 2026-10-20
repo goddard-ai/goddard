@@ -155,16 +155,22 @@ impl Broker {
                 Some(owner) if r.holder_pid == r.daemon_pid => owner,
                 _ => r.holder_pid,
             };
-            if !waku_protocol::pid::is_alive(daemon_anchor)
-                || !waku_protocol::pid::is_alive(holder_anchor)
-            {
+            let holder_alive = waku_protocol::pid::is_alive(holder_anchor);
+            if !waku_protocol::pid::is_alive(daemon_anchor) || !holder_alive {
                 r.cancelled = true;
             }
             if r.granted_at.is_none() {
-                return !r.cancelled
-                    && !r.released
-                    && r.deadline > now
-                    && waku_protocol::pid::is_alive(holder_anchor);
+                return !r.cancelled && !r.released && r.deadline > now && holder_alive;
+            }
+            // A granted row whose runner died without stopping its
+            // workload signals the orphaned group — the row is still
+            // retained below while the group is alive, so capacity is
+            // never freed early; only signalling is new.
+            if !holder_alive
+                && let Some(pid) = r.workload_pid
+                && group_alive(pid)
+            {
+                reap_orphaned_workload(r, pid, now);
             }
             let live_work = r.workload_pid.is_some_and(group_alive);
             let live_device = r
@@ -184,7 +190,7 @@ impl Broker {
             }
             live_work
                 || live_device
-                || (!r.cancelled && !r.released && waku_protocol::pid::is_alive(holder_anchor))
+                || (!r.cancelled && !r.released && holder_alive)
         });
         let request_id;
         let mut borrowed = false;
@@ -259,6 +265,8 @@ impl Broker {
                         daemon_pid: std::process::id(),
                         owner_pid: None,
                         workload_pid: None,
+                        workload_started: None,
+                        reap_signalled_at: None,
                         requested_at: now,
                         duration_seconds: 0,
                         deadline: now + u64::from(wait_seconds),
@@ -312,6 +320,8 @@ impl Broker {
                             daemon_pid: std::process::id(),
                             owner_pid: None,
                             workload_pid: None,
+                            workload_started: None,
+                            reap_signalled_at: None,
                             requested_at: now,
                             duration_seconds: 0,
                             // Granted rows ignore the deadline; it exists
@@ -341,6 +351,7 @@ impl Broker {
                     bail!("workload process group is not alive");
                 }
                 r.workload_pid = Some(workload_pid);
+                r.workload_started = crate::process_identity::start_time(workload_pid as i32);
                 request_id = Some(id);
             }
             ResourceOperation::Reanchor { id, owner_pid } => {
@@ -892,30 +903,10 @@ fn wait_reason(
     }) {
         return format!("queued behind an earlier reservation ({})", earlier.id);
     }
-    let pools: [(&str, u32, u32, fn(&ResourceSet) -> u32); 3] = [
-        (
-            "resident devices",
-            resources.resident_devices,
-            policy.resident_devices,
-            |r| r.resident_devices,
-        ),
-        (
-            "native builds",
-            resources.native_builds,
-            policy.native_builds,
-            |r| r.native_builds,
-        ),
-        (
-            "desktop input",
-            resources.desktop_input,
-            policy.desktop_input,
-            |r| r.desktop_input,
-        ),
-    ];
     let mut exhausted = Vec::new();
-    for (name, requested, limit, count) in pools {
+    let mut report = |name: &str, requested: u32, limit: u32, count: fn(&ResourceSet) -> u32| {
         if requested == 0 {
-            continue;
+            return;
         }
         let holders: Vec<&Reservation> = ledger
             .reservations
@@ -934,7 +925,25 @@ fn wait_reason(
                 .join(", ");
             exhausted.push(format!("{name} {used}/{limit} held by {names}"));
         }
-    }
+    };
+    report(
+        "resident devices",
+        resources.resident_devices,
+        policy.resident_devices,
+        |r| r.resident_devices,
+    );
+    report(
+        "native builds",
+        resources.native_builds,
+        policy.native_builds,
+        |r| r.native_builds,
+    );
+    report(
+        "desktop input",
+        resources.desktop_input,
+        policy.desktop_input,
+        |r| r.desktop_input,
+    );
     if !exhausted.is_empty() {
         return exhausted.join("; ");
     }
@@ -961,6 +970,54 @@ fn holder_label(r: &Reservation, observation: &Observation) -> String {
         }
     }
     label
+}
+
+/// Stop an orphaned workload process group: the `resource run` runner
+/// normally SIGTERMs its own group before exiting (waku-agent), but a
+/// holder that dies uncatchably — provider teardown — never gets the
+/// chance, and the orphaned group would pin its capacity forever. The
+/// broker SIGTERMs the group, then escalates to SIGKILL about two
+/// seconds later on a subsequent transaction.
+///
+/// Every signal is fenced by the group leader's kernel birth stamp
+/// recorded at `Attach`: a leader whose stamp differs, or a row written
+/// before stamps existed, is never signalled. When the leader is gone
+/// but the group still lives, POSIX never reassigns a group ID while
+/// the group exists, so the group is provably the orphan. Capacity is
+/// still held until the group actually exits — signalling never frees
+/// it early.
+#[cfg(unix)]
+fn reap_orphaned_workload(r: &mut Reservation, pid: u32, now: u64) {
+    // Legacy rows carry no recorded stamp: without a fence there is no
+    // safe signal, so the orphan is left alone.
+    if r.workload_started.is_none() {
+        return;
+    }
+    match crate::process_identity::start_time(pid as i32) {
+        // A live leader must be the exact process that was attached.
+        Some(stamp) if Some(stamp) == r.workload_started => {}
+        // The leader is gone or its stamp unreadable. If the leader
+        // still exists the PID may have been reused — no signal.
+        _ if waku_protocol::pid::is_alive(pid) => return,
+        // Leader gone, group alive: the group ID still names our orphan.
+        _ => {}
+    }
+    match r.reap_signalled_at {
+        None => {
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGTERM);
+            }
+            r.reap_signalled_at = Some(now);
+        }
+        Some(signalled) if now >= signalled + 2 => unsafe {
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        },
+        _ => {}
+    }
+}
+#[cfg(not(unix))]
+fn reap_orphaned_workload(r: &mut Reservation, pid: u32, now: u64) {
+    let _ = (r, pid, now);
 }
 
 #[cfg(unix)]
@@ -1557,6 +1614,14 @@ mod tests {
         h.op(a, ResourceOperation::Release { id: id(&first) });
         let second = h.acquire(b, build());
         assert!(!granted(&second, id(&second)));
+        // A live holder owns its group: release never signals it.
+        let retained = second
+            .reservations
+            .iter()
+            .find(|r| r.id == id(&first))
+            .unwrap();
+        assert!(retained.reap_signalled_at.is_none());
+        assert!(workload.0.try_wait().unwrap().is_none());
         workload.stop();
         assert!(granted(
             &h.op(b, ResourceOperation::Status { id: None }),
@@ -2493,6 +2558,144 @@ mod tests {
             row(&again, again_id).waiting_on.as_deref(),
             Some(format!("device {IOS} held by task {b} (released; device {IOS} retained)").as_str())
         );
+        workload.stop();
+    }
+
+    /// A holder that dies uncatchably never stops its workload's process
+    /// group — the broker SIGTERMs the orphan, keeps the row until the
+    /// group exits, and only then frees the capacity.
+    #[test]
+    #[cfg(unix)]
+    fn orphaned_workload_is_terminated_after_its_holder_dies() {
+        use std::os::unix::process::ExitStatusExt;
+        let h = Harness::new();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let first = h.acquire(a, build());
+        let first_id = id(&first);
+        let mut workload = Workload::start();
+        let attached = h.op(
+            a,
+            ResourceOperation::Attach {
+                id: first_id,
+                workload_pid: workload.0.id(),
+            },
+        );
+        assert!(
+            attached
+                .reservations
+                .iter()
+                .find(|r| r.id == first_id)
+                .unwrap()
+                .workload_started
+                .is_some()
+        );
+        // The runner died without stopping its group.
+        h.mutate(|l| l.reservations[0].holder_pid = u32::MAX / 2);
+        let second = h.acquire(b, build());
+        let second_id = id(&second);
+        assert!(!granted(&second, second_id));
+        let row = second
+            .reservations
+            .iter()
+            .find(|r| r.id == first_id)
+            .unwrap();
+        assert!(row.cancelled);
+        assert!(row.reap_signalled_at.is_some());
+        assert_eq!(workload.0.wait().unwrap().signal(), Some(libc::SIGTERM));
+        let status = h.op(b, ResourceOperation::Status { id: None });
+        assert!(granted(&status, second_id));
+    }
+
+    /// An orphan that ignores SIGTERM is escalated to SIGKILL once the
+    /// grace period has elapsed.
+    #[test]
+    #[cfg(unix)]
+    fn orphan_ignoring_term_is_killed_after_grace() {
+        use std::os::unix::process::{CommandExt, ExitStatusExt};
+        let h = Harness::new();
+        let a = Uuid::new_v4();
+        let first = h.acquire(a, build());
+        let first_id = id(&first);
+        // SIG_IGN survives exec, so this orphan ignores the TERM grace.
+        let mut workload = Workload(
+            Command::new("/bin/sh")
+                .args(["-c", "trap '' TERM; exec /bin/sleep 30"])
+                .process_group(0)
+                .spawn()
+                .unwrap(),
+        );
+        h.op(
+            a,
+            ResourceOperation::Attach {
+                id: first_id,
+                workload_pid: workload.0.id(),
+            },
+        );
+        h.mutate(|l| l.reservations[0].holder_pid = u32::MAX / 2);
+        let signalled = h.op(a, ResourceOperation::Status { id: None });
+        let row = signalled
+            .reservations
+            .iter()
+            .find(|r| r.id == first_id)
+            .unwrap();
+        assert!(row.reap_signalled_at.is_some());
+        assert!(workload.0.try_wait().unwrap().is_none());
+        // Backdate the TERM so the next transaction sees the grace elapsed.
+        h.mutate(|l| l.reservations[0].reap_signalled_at = Some(0));
+        h.op(a, ResourceOperation::Status { id: None });
+        assert_eq!(workload.0.wait().unwrap().signal(), Some(libc::SIGKILL));
+    }
+
+    /// Without a birth stamp matching the group leader, the broker never
+    /// signals: a mismatched stamp means a reused PID, and a missing
+    /// stamp means a row written before the fence existed.
+    #[test]
+    #[cfg(unix)]
+    fn unfenced_workloads_are_never_signalled() {
+        let h = Harness::new();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let first = h.acquire(a, build());
+        let first_id = id(&first);
+        let mut workload = Workload::start();
+        h.op(
+            a,
+            ResourceOperation::Attach {
+                id: first_id,
+                workload_pid: workload.0.id(),
+            },
+        );
+        // A stamp that is not this leader's: signalling stays fenced.
+        h.mutate(|l| {
+            let r = &mut l.reservations[0];
+            r.holder_pid = u32::MAX / 2;
+            r.workload_started = Some(1);
+        });
+        let second = h.acquire(b, build());
+        let second_id = id(&second);
+        assert!(!granted(&second, second_id));
+        let row = second
+            .reservations
+            .iter()
+            .find(|r| r.id == first_id)
+            .unwrap();
+        assert!(row.reap_signalled_at.is_none());
+        assert!(workload.0.try_wait().unwrap().is_none());
+        // Rows written before stamps existed are never signalled either.
+        h.mutate(|l| {
+            let r = &mut l.reservations[0];
+            r.workload_started = None;
+        });
+        let status = h.op(b, ResourceOperation::Status { id: None });
+        let row = status
+            .reservations
+            .iter()
+            .find(|r| r.id == first_id)
+            .unwrap();
+        assert!(row.reap_signalled_at.is_none());
+        assert!(!granted(&status, second_id));
+        assert!(workload.0.try_wait().unwrap().is_none());
         workload.stop();
     }
 }

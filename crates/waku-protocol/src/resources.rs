@@ -137,6 +137,17 @@ pub struct Reservation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner_pid: Option<u32>,
     pub workload_pid: Option<u32>,
+    /// The workload group leader's kernel birth stamp, recorded when the
+    /// runner attached the process group. It fences the broker's orphan
+    /// reaping against PID reuse: a group leader whose stamp differs is
+    /// never signalled. Rows written by older daemons carry no stamp and
+    /// are never signalled either.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload_started: Option<u64>,
+    /// When the broker last sent SIGTERM to an orphaned workload process
+    /// group — it escalates to SIGKILL about two seconds later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reap_signalled_at: Option<u64>,
     pub requested_at: u64,
     #[serde(default)]
     pub duration_seconds: u64,
@@ -227,6 +238,8 @@ mod tests {
             daemon_pid: 0,
             owner_pid: None,
             workload_pid: None,
+            workload_started: None,
+            reap_signalled_at: None,
             requested_at: 0,
             duration_seconds: 0,
             deadline: 0,

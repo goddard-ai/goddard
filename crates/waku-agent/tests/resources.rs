@@ -108,6 +108,8 @@ impl Daemon {
                                 daemon_pid: std::process::id(),
                                 owner_pid: None,
                                 workload_pid: None,
+                                workload_started: None,
+                                reap_signalled_at: None,
                                 requested_at: 1,
                                 duration_seconds: 0,
                                 deadline: u64::from(wait_seconds),
