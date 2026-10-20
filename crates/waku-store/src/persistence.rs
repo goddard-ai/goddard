@@ -4179,6 +4179,7 @@ mod tests {
             branch: Some("waku/investigate".into()),
             base_branch: None,
             adopted_by: None,
+            borrowed: true,
         };
         state.sessions[0].begin_turn("Ask");
         state.sessions[0].push_message(MessageRole::Assistant, "an answer");
@@ -4204,6 +4205,7 @@ mod tests {
                 branch: Some("waku/investigate".into()),
                 base_branch: None,
                 adopted_by: None,
+                borrowed: true,
             }
         );
         // ...and none of what it does not.
@@ -4229,6 +4231,7 @@ mod tests {
                 branch: Some("waku/investigate".into()),
                 base_branch: None,
                 adopted_by: None,
+                borrowed: true,
             }
         );
         assert!(
@@ -5548,6 +5551,7 @@ mod tests {
                 branch: Some("wt/task".into()),
                 base_branch: None,
                 adopted_by: None,
+                borrowed: false,
             }
         );
         let local: Option<String> = connection

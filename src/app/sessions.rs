@@ -2177,7 +2177,9 @@ impl Waku {
             workspace => workspace,
         };
         let abandoned_worktree = match &session.workspace {
-            SessionWorkspace::Worktree { path, .. } if workspace != session.workspace => {
+            SessionWorkspace::Worktree { path, .. }
+                if workspace != session.workspace && !session.workspace.is_borrowed() =>
+            {
                 Some(path.clone())
             }
             _ => None,
@@ -2508,7 +2510,8 @@ impl Waku {
         let draft_worktree = match &self.state.sessions[index].workspace {
             SessionWorkspace::Worktree { path, .. }
                 if !self.state.sessions[index].has_started()
-                    && !self.state.sessions[index].is_side_chat() =>
+                    && !self.state.sessions[index].is_side_chat()
+                    && !self.state.sessions[index].workspace.is_borrowed() =>
             {
                 Some(path.clone())
             }

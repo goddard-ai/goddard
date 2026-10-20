@@ -24,4 +24,9 @@ baseBranch?: string | null,
  * summon takes ownership. This session no longer claims the
  * checkout and cannot resume into it.
  */
-adoptedBy?: string | null, };
+adoptedBy?: string | null,
+/**
+ * An existing checkout selected by the user. Automatic cleanup
+ * leaves it on disk, and the branch picker never resets its base.
+ */
+borrowed?: boolean, };

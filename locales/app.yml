@@ -7265,3 +7265,18 @@ boss.plan_wireframe_next:
   en: Next screen
 boss.plan_wireframe_absent:
   en: No wireframe in this plan
+
+workspace.existing_worktree:
+  en: Existing worktree
+workspace.find_worktree:
+  en: Find a worktree…
+workspace.back_to_options:
+  en: Back to workspace options
+workspace.loading_worktrees:
+  en: Loading worktrees…
+workspace.load_worktrees_failed:
+  en: Could not load worktrees. Go back and try again.
+workspace.no_existing_worktrees:
+  en: No existing worktrees.
+workspace.no_matching_worktrees:
+  en: No matching worktrees.

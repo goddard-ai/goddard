@@ -653,6 +653,7 @@ mod tests {
                 branch: None,
                 base_branch: None,
                 adopted_by: None,
+                borrowed: false,
             },
         );
         let bound = session(
@@ -663,6 +664,7 @@ mod tests {
                 branch: None,
                 base_branch: None,
                 adopted_by: None,
+                borrowed: false,
             },
         );
         let sessions = [selected, bound];

@@ -9495,6 +9495,7 @@ mod tests {
             branch: Some("feature/sidebar".to_owned()),
             base_branch: None,
             adopted_by: None,
+            borrowed: false,
         };
 
         assert_eq!(persisted_sidebar_branch_label(&local), None);

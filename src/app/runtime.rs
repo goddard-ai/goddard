@@ -603,6 +603,7 @@ pub(super) fn prepare_submission(
                 branch: None,
                 base_branch,
                 adopted_by: None,
+                borrowed: false,
             }
         }
         SessionWorkspace::Worktree {
@@ -611,6 +612,7 @@ pub(super) fn prepare_submission(
             branch,
             base_branch,
             adopted_by: _,
+            borrowed,
         } => {
             // The directory can vanish between visits — archived tasks
             // outlive their worktrees once archive cleanup removes them.
@@ -666,6 +668,7 @@ pub(super) fn prepare_submission(
                 branch: if ensured.0 { ensured.1 } else { branch },
                 base_branch,
                 adopted_by: None,
+                borrowed,
             }
         }
         workspace => {

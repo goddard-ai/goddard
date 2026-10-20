@@ -1,0 +1,1 @@
+- Choose an existing Git worktree from the composer's workspace selector, with search and a quick way back to Local.

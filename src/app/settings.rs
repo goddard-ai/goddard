@@ -14982,6 +14982,10 @@ impl Waku {
             input.set_accessibility_label(tr!("input.new_branch_name"), cx);
             input.set_placeholder(tr!("input.new_branch_name"), cx)
         });
+        self.worktree_search.update(cx, |input, cx| {
+            input.set_accessibility_label(tr!("workspace.find_worktree"), cx);
+            input.set_placeholder(tr!("workspace.find_worktree"), cx)
+        });
         self.worktree_name_input.update(cx, |input, cx| {
             input.set_accessibility_label(tr!("input.worktree_name"), cx);
             input.set_placeholder(tr!("input.worktree_name"), cx)

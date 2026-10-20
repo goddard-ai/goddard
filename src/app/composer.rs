@@ -8400,6 +8400,9 @@ impl Waku {
                 let _ = toggle_weak.update(cx, |this, cx| {
                     if open {
                         this.worktree_picker_highlight = None;
+                        this.worktree_picker_existing = false;
+                        this.worktree_picker_generation =
+                            this.worktree_picker_generation.wrapping_add(1);
                         name_input.update(cx, |input, cx| input.clear(cx));
                         // Base entries describe the project checkout, which
                         // may differ from the draft's materialized worktree.
@@ -8502,6 +8505,9 @@ impl Waku {
                 actions.push(worktrees::WorktreePickerAction::Current { name: name.clone() });
             }
             actions.push(worktrees::WorktreePickerAction::Local);
+            if can_configure_workspace && !projectless_selected && !project_gitless {
+                actions.push(worktrees::WorktreePickerAction::BrowseExisting);
+            }
             if can_move_to_worktree {
                 actions.push(worktrees::WorktreePickerAction::Move);
             }
@@ -8529,12 +8535,16 @@ impl Waku {
                 .worktree_picker_highlight
                 .filter(|index| *index < actions.len());
             let weak = cx.entity().downgrade();
+            let existing_picker = self.existing_worktree_picker(cx);
             popover(
                 worktree_trigger,
                 &worktree_handle,
                 MenuAlign::AboveLeft,
                 move |popover, _window, _cx| {
                     let theme = Theme::current(_cx);
+                    if let Some(picker) = &existing_picker {
+                        return picker.render(popover, _cx);
+                    }
                     let work_in_count = actions
                         .iter()
                         .take_while(|action| {
@@ -8542,6 +8552,7 @@ impl Waku {
                                 action,
                                 worktrees::WorktreePickerAction::Current { .. }
                                     | worktrees::WorktreePickerAction::Local
+                                    | worktrees::WorktreePickerAction::BrowseExisting
                             )
                         })
                         .count();
@@ -8564,6 +8575,12 @@ impl Waku {
                                     tr!("workspace.local"),
                                     workspace.is_local(),
                                 ),
+                                worktrees::WorktreePickerAction::BrowseExisting => {
+                                    ("icons/fork.svg", tr!("workspace.existing_worktree"), false)
+                                }
+                                worktrees::WorktreePickerAction::Existing { .. } => {
+                                    unreachable!("existing rows use their own view")
+                                }
                                 worktrees::WorktreePickerAction::Move => {
                                     ("icons/fork.svg", tr!("workspace.move_to_worktree"), false)
                                 }
@@ -8602,6 +8619,19 @@ impl Waku {
                                         .text_color(theme.text)
                                         .child(SharedString::from(label)),
                                 )
+                                .when(
+                                    matches!(
+                                        action,
+                                        worktrees::WorktreePickerAction::BrowseExisting
+                                    ),
+                                    |element| {
+                                        element.child(icon(
+                                            "icons/chevron-right.svg",
+                                            11.0,
+                                            theme.text_secondary,
+                                        ))
+                                    },
+                                )
                                 .when(selected, |element| {
                                     element.child(icon(
                                         "icons/check.svg",
@@ -8614,55 +8644,13 @@ impl Waku {
                             let select_popover = popover.clone();
                             row.on_click(move |_, window, cx| {
                                 let should_close = select_weak
-                                    .update(cx, |this, cx| match &action {
-                                        worktrees::WorktreePickerAction::Current { .. } => true,
-                                        worktrees::WorktreePickerAction::Local => {
-                                            if let Some(session_id) =
-                                                this.ensure_workspace_subject_session(cx)
-                                            {
-                                                this.select_workspace_for(
-                                                    session_id,
-                                                    SessionWorkspace::Local,
-                                                    cx,
-                                                );
-                                            }
-                                            true
-                                        }
-                                        worktrees::WorktreePickerAction::Move => {
-                                            let name = this
-                                                .worktree_name_input
-                                                .read(cx)
-                                                .content()
-                                                .trim()
-                                                .to_owned();
-                                            if let Some(session_id) = this.workspace_subject().0 {
-                                                this.move_session_to_worktree(
-                                                    session_id,
-                                                    (!name.is_empty()).then_some(name),
-                                                    cx,
-                                                );
-                                            }
-                                            true
-                                        }
-                                        worktrees::WorktreePickerAction::Create { base_ref } => {
-                                            let name = this
-                                                .worktree_name_input
-                                                .read(cx)
-                                                .content()
-                                                .trim()
-                                                .to_owned();
-                                            if let Some(session_id) =
-                                                this.ensure_workspace_subject_session(cx)
-                                            {
-                                                this.create_workspace_worktree_for(
-                                                    session_id,
-                                                    (!name.is_empty()).then_some(name),
-                                                    base_ref.clone(),
-                                                    cx,
-                                                );
-                                            }
-                                            true
-                                        }
+                                    .update(cx, |this, cx| {
+                                        this.worktree_picker_highlight = Some(0);
+                                        this.confirm_worktree_picker_action(
+                                            &[action.clone()],
+                                            window,
+                                            cx,
+                                        )
                                     })
                                     .unwrap_or(true);
                                 if should_close {
@@ -8710,7 +8698,11 @@ impl Waku {
                         .on_action(move |_: &ConfirmEntry, window, cx| {
                             let should_close = confirm_weak
                                 .update(cx, |this, cx| {
-                                    this.confirm_worktree_picker_action(&confirm_actions, cx)
+                                    this.confirm_worktree_picker_action(
+                                        &confirm_actions,
+                                        window,
+                                        cx,
+                                    )
                                 })
                                 .unwrap_or(false);
                             if should_close {

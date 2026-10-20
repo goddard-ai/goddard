@@ -1172,6 +1172,10 @@ pub enum SessionWorkspace {
         /// checkout and cannot resume into it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         adopted_by: Option<Uuid>,
+        /// An existing checkout selected by the user. Automatic cleanup
+        /// leaves it on disk, and the branch picker never resets its base.
+        #[serde(default, skip_serializing_if = "is_false")]
+        borrowed: bool,
     },
 }
 
@@ -1197,6 +1201,10 @@ pub struct WorkspaceMove {
 }
 
 impl SessionWorkspace {
+    pub fn is_borrowed(&self) -> bool {
+        matches!(self, Self::Worktree { borrowed: true, .. })
+    }
+
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local)
     }
@@ -7527,6 +7535,7 @@ mod tests {
             branch: None,
             base_branch: None,
             adopted_by: None,
+            borrowed: false,
         };
         session.workspace_moved_from = Some(PathBuf::from("/tmp/waku"));
 
@@ -8957,6 +8966,7 @@ mod tests {
             branch: Some("waku/task".into()),
             base_branch: None,
             adopted_by: None,
+            borrowed: false,
         };
         session.begin_turn("A large prompt");
         session.messages.push(Message::new(

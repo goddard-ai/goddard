@@ -1018,6 +1018,7 @@ mod tests {
                 branch: None,
                 base_branch: None,
                 adopted_by: None,
+                borrowed: false,
             };
             let mut state = self.backend.task_state.lock();
             state.sessions.push(session);

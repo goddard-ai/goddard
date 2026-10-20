@@ -97,6 +97,7 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
                             branch: None,
                             base_branch: None,
                             adopted_by: None,
+                            borrowed: false,
                         };
                     } else if workspace == "cross-project" {
                         target.project_id = project.id;
@@ -167,6 +168,7 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
                                     branch: None,
                                     base_branch: None,
                                     adopted_by: None,
+                                    borrowed: false,
                                 };
                             }
                             state.mark_session_dirty(session);

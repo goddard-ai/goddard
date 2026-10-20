@@ -164,6 +164,7 @@ impl WakuBackend {
                     branch: None,
                     base_branch,
                     adopted_by: None,
+                    borrowed: false,
                 }
             }
             AgentWorkspace::Adopt => unreachable!("adopt is rejected above"),

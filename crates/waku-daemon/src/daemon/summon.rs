@@ -956,6 +956,7 @@ impl WakuBackend {
                         branch: None,
                         base_branch: ticket.base_branch.clone(),
                         adopted_by: None,
+                        borrowed: false,
                     },
                     None,
                 )

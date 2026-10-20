@@ -2945,6 +2945,13 @@ pub struct Waku {
     /// Name field in the composer worktree picker; empty means the daemon
     /// generates a random name.
     worktree_name_input: Entity<TextInput>,
+    worktree_search: Entity<TextInput>,
+    worktree_picker_existing: bool,
+    worktree_picker_generation: u64,
+    worktree_picker_entries: Option<Result<Vec<waku_client::RepoWorktree>, String>>,
+    worktree_picker_actions: Rc<Vec<worktrees::WorktreePickerAction>>,
+    worktree_picker_list: ListState,
+    worktree_picker_back_focus: FocusHandle,
     /// Keyboard cursor over the worktree picker's actions. `None` means the
     /// keyboard has not moved yet, so `enter` takes the first row.
     worktree_picker_highlight: Option<usize>,
@@ -5617,6 +5624,13 @@ impl Waku {
                 .accessibility_label(tr!("input.worktree_name"))
                 .placeholder(tr!("input.worktree_name"))
         });
+        let worktree_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .tab_index(0)
+                .clear_on_escape()
+                .accessibility_label(tr!("workspace.find_worktree"))
+                .placeholder(tr!("workspace.find_worktree"))
+        });
         let project_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -6748,6 +6762,15 @@ impl Waku {
             )
             .detach();
             cx.subscribe(
+                &worktree_search,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        this.refilter_existing_worktrees(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &branch_create_input,
                 |_: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
@@ -7246,6 +7269,13 @@ impl Waku {
                 branch_search,
                 branch_create_input,
                 worktree_name_input,
+                worktree_search,
+                worktree_picker_existing: false,
+                worktree_picker_generation: 0,
+                worktree_picker_entries: None,
+                worktree_picker_actions: Rc::new(Vec::new()),
+                worktree_picker_list: ListState::new(0, ListAlignment::Top, px(100.0)),
+                worktree_picker_back_focus: cx.focus_handle(),
                 worktree_picker_highlight: None,
                 worktree_creation_pending: false,
                 worktree_move_pending: HashSet::new(),

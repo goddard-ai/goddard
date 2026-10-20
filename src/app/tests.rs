@@ -254,6 +254,7 @@ fn remote_task_catalog_adopts_workspace_for_skeletons_only() {
         branch: Some("waku/task".into()),
         base_branch: None,
         adopted_by: None,
+        borrowed: false,
     };
 
     // A skeleton row has no workspace of its own beyond what the daemon

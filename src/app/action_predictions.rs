@@ -2133,6 +2133,7 @@ mod tests {
             branch: None,
             base_branch: None,
             adopted_by: None,
+            borrowed: false,
         };
         assert!(candidate_ids(&session, turn_id).contains(&"land"));
     }

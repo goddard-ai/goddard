@@ -2265,6 +2265,7 @@ impl WakuBackend {
                     branch: None,
                     base_branch: base_branch.clone(),
                     adopted_by: None,
+                    borrowed: false,
                 },
                 None => SessionWorkspace::Local,
             };

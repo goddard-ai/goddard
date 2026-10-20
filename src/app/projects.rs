@@ -1521,6 +1521,7 @@ impl Waku {
                 branch,
                 base_branch: None,
                 adopted_by: None,
+                borrowed: false,
             },
             false,
             window,

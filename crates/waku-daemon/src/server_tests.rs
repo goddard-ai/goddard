@@ -478,6 +478,7 @@ fn a_skeleton_save_updates_columns_without_erasing_detail() {
         branch: Some("waku/task".into()),
         base_branch: None,
         adopted_by: None,
+        borrowed: false,
     };
     {
         let session = &mut state.sessions[0];
@@ -551,6 +552,7 @@ fn a_skeleton_save_merges_columns_and_never_creates_a_row() {
         branch: None,
         base_branch: None,
         adopted_by: None,
+        borrowed: false,
     };
     {
         let session = &mut state.sessions[0];

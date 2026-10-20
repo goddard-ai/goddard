@@ -5834,6 +5834,7 @@ mod tests {
                 branch: Some("feature".to_owned()),
                 base_branch: None,
                 adopted_by: None,
+                borrowed: false,
             },
         );
         let session = state.new_session(project_id, ProviderKind::Codex);

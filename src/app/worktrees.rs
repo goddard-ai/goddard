@@ -6,15 +6,25 @@ use futures::{StreamExt, stream::FuturesUnordered};
 pub(super) enum WorktreePickerAction {
     /// The draft's existing worktree. It leads the list so a bare `enter`
     /// keeps the current choice, matching the branch picker's pinning.
-    Current { name: String },
+    Current {
+        name: String,
+    },
     /// Bind the draft to the project's ordinary checkout.
     Local,
+    BrowseExisting,
+    Existing {
+        path: PathBuf,
+        name: String,
+        branch: Option<String>,
+    },
     /// Move a task already bound to the ordinary checkout into a new
     /// worktree carrying the checkout's state.
     Move,
     /// Create a detached worktree at the given base ref — `None` resolves
     /// the repository's default branch on the daemon.
-    Create { base_ref: Option<String> },
+    Create {
+        base_ref: Option<String>,
+    },
 }
 
 /// The "New worktree" rows: fork from the checkout's current ref, then the
@@ -57,7 +67,9 @@ pub(super) fn workspace_picks_base(
 ) -> bool {
     match workspace {
         SessionWorkspace::NewWorktree { .. } => true,
-        SessionWorkspace::Worktree { .. } => session.is_some_and(|session| !session.has_started()),
+        SessionWorkspace::Worktree { borrowed, .. } => {
+            !*borrowed && session.is_some_and(|session| !session.has_started())
+        }
         SessionWorkspace::Local => false,
     }
 }
@@ -101,7 +113,9 @@ impl Waku {
         }
         // Creating another worktree replaces the draft's current one.
         let replaced = match &session.workspace {
-            SessionWorkspace::Worktree { path, .. } => Some(path.clone()),
+            SessionWorkspace::Worktree { path, .. } if !session.workspace.is_borrowed() => {
+                Some(path.clone())
+            }
             _ => None,
         };
         let Some(workspace) = self.workspace_client_for_session(session_id) else {
@@ -152,6 +166,7 @@ impl Waku {
                                 branch: None,
                                 base_branch: base_branch.clone(),
                                 adopted_by: None,
+                                borrowed: false,
                             };
                             true
                         });
@@ -193,6 +208,15 @@ impl Waku {
     /// submit. Git refuses to remove a dirty worktree, so this cannot destroy
     /// work.
     pub(super) fn remove_draft_worktree(&self, path: PathBuf, cx: &mut Context<Self>) {
+        // Another draft can have selected this checkout from Existing worktree.
+        if self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.workspace.path() == Some(path.as_path()))
+        {
+            return;
+        }
         let Some(workspace) = self.workspace_client_for_path(&path) else {
             return;
         };
@@ -393,6 +417,7 @@ impl Waku {
                 // primary-checkout fallback resolves that same branch.
                 base_branch: None,
                 adopted_by: None,
+                borrowed: false,
             };
             // A session that never started has no recorded paths to correct;
             // a started one's next prompt carries the move notice.
@@ -887,6 +912,9 @@ impl Waku {
             {
                 archived_codex_runtimes.push(session_id);
             }
+            if session.workspace.is_borrowed() {
+                continue;
+            }
             if let SessionWorkspace::Worktree { path, .. } = &session.workspace {
                 // "New task in same worktree" clones the workspace into a
                 // second session; removing the directory while a sibling is
@@ -895,7 +923,7 @@ impl Waku {
                 // one's own cleanup performs the removal.
                 let shared = self.state.sessions.iter().any(|other| {
                     other.id != session_id
-                        && other.archived_at.is_none()
+                        && (other.archived_at.is_none() || other.workspace.is_borrowed())
                         && matches!(
                             &other.workspace,
                             SessionWorkspace::Worktree { path: other_path, .. }
@@ -1158,7 +1186,8 @@ impl Waku {
     }
 
     fn dormant_worktree_sweep_candidate(&self, session: &AgentSession) -> bool {
-        session.has_started()
+        !session.workspace.is_borrowed()
+            && session.has_started()
             && session.archived_at.is_none()
             && !session.is_busy()
             && Some(session.id) != self.state.selected_session
@@ -1166,6 +1195,9 @@ impl Waku {
             && !self.pending_workspace_cleanups.contains(&session.id)
             && !self.dormant_worktrees_swept.borrow().contains(&session.id)
             && matches!(session.workspace, SessionWorkspace::Worktree { .. })
+            && !self.state.sessions.iter().any(|other| {
+                other.workspace.is_borrowed() && other.workspace.path() == session.workspace.path()
+            })
     }
 
     /// The workspace a projectless project's archived sessions can retire:
@@ -1282,7 +1314,7 @@ impl Waku {
         }
     }
 
-    /// Keyboard rows in order: Local, then each create entry.
+    /// Move across the active view's keyboard rows and reveal list entries.
     pub(super) fn move_worktree_picker_highlight(
         &mut self,
         direction: &str,
@@ -1301,6 +1333,9 @@ impl Waku {
             None => 0,
         };
         self.worktree_picker_highlight = Some(next);
+        if self.worktree_picker_existing && next > 0 {
+            self.worktree_picker_list.scroll_to_reveal_item(next - 1);
+        }
         cx.notify();
     }
 
@@ -1310,6 +1345,7 @@ impl Waku {
     pub(super) fn confirm_worktree_picker_action(
         &mut self,
         actions: &[WorktreePickerAction],
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let action = self
@@ -1318,6 +1354,36 @@ impl Waku {
             .or_else(|| actions.first())
             .cloned();
         match action {
+            Some(WorktreePickerAction::BrowseExisting) => {
+                self.open_existing_worktrees(window, cx);
+                false
+            }
+            Some(WorktreePickerAction::Existing { path, name, branch }) => {
+                if let Some(session_id) = self.ensure_workspace_subject_session(cx) {
+                    let same_path = self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .is_some_and(|session| session.workspace.path() == Some(path.as_path()));
+                    if same_path {
+                        return true;
+                    }
+                    self.select_workspace_for(
+                        session_id,
+                        SessionWorkspace::Worktree {
+                            path,
+                            name,
+                            branch,
+                            base_branch: None,
+                            adopted_by: None,
+                            borrowed: true,
+                        },
+                        cx,
+                    );
+                }
+                true
+            }
             Some(WorktreePickerAction::Current { .. }) => true,
             Some(WorktreePickerAction::Local) => {
                 if let Some(session_id) = self.ensure_workspace_subject_session(cx) {
@@ -1363,9 +1429,421 @@ impl Waku {
     }
 }
 
+fn existing_worktree_name(path: &Path) -> String {
+    // Goddard checkouts repeat the repository leaf: worktrees/repo/name/repo.
+    let parent = path.parent();
+    let namespaced = path.ancestors().nth(3).and_then(Path::file_name)
+        == Some(std::ffi::OsStr::new("worktrees"))
+        && parent.and_then(Path::parent).and_then(Path::file_name) == path.file_name();
+    let name = if namespaced {
+        parent.and_then(Path::file_name)
+    } else {
+        path.file_name()
+    };
+    name.map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+impl Waku {
+    fn open_existing_worktrees(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (_, project_id) = self.workspace_subject();
+        let Some(project_id) = project_id else {
+            return;
+        };
+        let Some(cwd) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.clone())
+        else {
+            return;
+        };
+        self.worktree_picker_existing = true;
+        self.worktree_picker_entries = None;
+        self.worktree_search.update(cx, |input, cx| input.clear(cx));
+        self.worktree_picker_generation = self.worktree_picker_generation.wrapping_add(1);
+        let generation = self.worktree_picker_generation;
+        self.refilter_existing_worktrees(cx);
+        let focus = self.worktree_search.read(cx).focus_handle(cx);
+        window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        let Some(workspace) = self.workspace_client_for_project(project_id) else {
+            self.worktree_picker_entries = Some(Err(tr!("errors.daemon_disconnected")));
+            cx.notify();
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    match workspace
+                        .request(waku_client::WorkspaceOperation::ListWorktrees { cwd })?
+                    {
+                        waku_client::WorkspaceResult::RepoWorktrees {
+                            entries: Some(entries),
+                        } => Ok(entries),
+                        _ => anyhow::bail!("Could not load worktrees"),
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.worktree_picker_generation != generation
+                    || this.workspace_subject().1 != Some(project_id)
+                {
+                    return;
+                }
+                this.worktree_picker_entries = Some(result.map_err(|error| error.to_string()));
+                this.refilter_existing_worktrees(cx);
+            });
+        })
+        .detach();
+    }
+
+    pub(super) fn refilter_existing_worktrees(&mut self, cx: &mut Context<Self>) {
+        let query = self
+            .worktree_search
+            .read(cx)
+            .content()
+            .trim()
+            .to_lowercase();
+        let (_, project_id) = self.workspace_subject();
+        let project_path = self
+            .state
+            .projects
+            .iter()
+            .find(|project| Some(project.id) == project_id)
+            .map(|project| &project.path);
+        let mut actions = vec![WorktreePickerAction::Local];
+        if let Some(Ok(entries)) = &self.worktree_picker_entries {
+            for entry in entries {
+                if entry.is_main || Some(&entry.path) == project_path {
+                    continue;
+                }
+                let name = existing_worktree_name(&entry.path);
+                if !query.is_empty()
+                    && !name.to_lowercase().contains(&query)
+                    && !entry.path.to_string_lossy().to_lowercase().contains(&query)
+                    && !entry
+                        .branch
+                        .as_ref()
+                        .is_some_and(|branch| branch.to_lowercase().contains(&query))
+                {
+                    continue;
+                }
+                actions.push(WorktreePickerAction::Existing {
+                    path: entry.path.clone(),
+                    name,
+                    branch: entry.branch.clone(),
+                });
+            }
+        }
+        self.worktree_picker_list.reset(actions.len() - 1);
+        self.worktree_picker_highlight = if query.is_empty() || actions.len() == 1 {
+            None
+        } else {
+            Some(1)
+        };
+        self.worktree_picker_actions = Rc::new(actions);
+        cx.notify();
+    }
+
+    pub(super) fn existing_worktree_picker(
+        &self,
+        cx: &Context<Self>,
+    ) -> Option<ExistingWorktreePicker> {
+        self.worktree_picker_existing
+            .then(|| ExistingWorktreePicker {
+                weak: cx.entity().downgrade(),
+                search: self.worktree_search.clone(),
+                actions: self.worktree_picker_actions.clone(),
+                list: self.worktree_picker_list.clone(),
+                highlight: self.worktree_picker_highlight,
+                workspace: self.workspace_subject_workspace().unwrap_or_default(),
+                back_focus: self.worktree_picker_back_focus.clone(),
+                message: match &self.worktree_picker_entries {
+                    None => Some(tr!("workspace.loading_worktrees")),
+                    Some(Err(_)) => Some(tr!("workspace.load_worktrees_failed")),
+                    Some(Ok(_)) if self.worktree_picker_actions.len() == 1 => Some(
+                        if self.worktree_search.read(cx).content().trim().is_empty() {
+                            tr!("workspace.no_existing_worktrees")
+                        } else {
+                            tr!("workspace.no_matching_worktrees")
+                        },
+                    ),
+                    _ => None,
+                },
+            })
+    }
+}
+
+pub(super) struct ExistingWorktreePicker {
+    weak: WeakEntity<Waku>,
+    search: Entity<TextInput>,
+    actions: Rc<Vec<WorktreePickerAction>>,
+    list: ListState,
+    highlight: Option<usize>,
+    workspace: SessionWorkspace,
+    back_focus: FocusHandle,
+    message: Option<String>,
+}
+
+impl ExistingWorktreePicker {
+    pub(super) fn render(&self, popover: &ContextMenuHandle, cx: &mut App) -> AnyElement {
+        let theme = Theme::current(cx);
+        let back_weak = self.weak.clone();
+        let back = move |window: &mut Window, cx: &mut App| {
+            let _ = back_weak.update(cx, |this, cx| {
+                this.worktree_picker_existing = false;
+                this.worktree_picker_highlight = None;
+                let focus = this.worktree_name_input.read(cx).focus_handle(cx);
+                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                cx.notify();
+            });
+        };
+        let back = Rc::new(back);
+        let back_click = back.clone();
+        let back_confirm = back.clone();
+        let back_key = back;
+        let next_weak = self.weak.clone();
+        let next_actions = self.actions.clone();
+        let previous_weak = self.weak.clone();
+        let previous_actions = self.actions.clone();
+        let confirm_weak = self.weak.clone();
+        let confirm_actions = self.actions.clone();
+        let confirm_popover = popover.clone();
+        let local_weak = self.weak.clone();
+        let local_popover = popover.clone();
+        let rows = self.actions.clone();
+        let row_weak = self.weak.clone();
+        let row_popover = popover.clone();
+        let selected_path = self.workspace.path().map(Path::to_path_buf);
+        let highlight = self.highlight;
+        div()
+            .w(px(320.0))
+            .rounded(px(16.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.raised)
+            .shadow_lg()
+            .flex()
+            .flex_col()
+            .tab_group()
+            .on_action(move |_: &SelectNextEntry, _, cx| {
+                let _ = next_weak.update(cx, |this, cx| {
+                    this.move_worktree_picker_highlight("down", &next_actions, cx)
+                });
+            })
+            .on_action(move |_: &SelectPreviousEntry, _, cx| {
+                let _ = previous_weak.update(cx, |this, cx| {
+                    this.move_worktree_picker_highlight("up", &previous_actions, cx)
+                });
+            })
+            .on_action(move |_: &ConfirmEntry, window, cx| {
+                let close = confirm_weak
+                    .update(cx, |this, cx| {
+                        this.confirm_worktree_picker_action(&confirm_actions, window, cx)
+                    })
+                    .unwrap_or(false);
+                if close {
+                    confirm_popover.close(window, cx);
+                    window.refresh();
+                }
+            })
+            .child(
+                div()
+                    .h(px(52.0))
+                    .px(px(12.0))
+                    .pt(px(10.0))
+                    .pb(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        icon_button("worktree-picker-back", "icons/arrow-left.svg", theme)
+                            .size(px(28.0))
+                            .track_focus(&self.back_focus)
+                            .tab_index(0)
+                            .focus_visible(|style| style.bg(theme.overlay_strong))
+                            .tooltip(Tooltip::text(tr!("workspace.back_to_options")))
+                            .on_click(move |_, window, cx| back_click(window, cx))
+                            .on_action(move |_: &ConfirmEntry, window, cx| {
+                                cx.stop_propagation();
+                                back_confirm(window, cx);
+                            })
+                            .on_key_down(move |event, window, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    cx.stop_propagation();
+                                    back_key(window, cx);
+                                }
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h(px(34.0))
+                            .px(px(10.0))
+                            .rounded(px(11.0))
+                            .bg(theme.surface)
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(icon("icons/search.svg", 15.0, theme.text_secondary))
+                            .child(div().flex_1().min_w_0().child(self.search.clone())),
+                    ),
+            )
+            .child(
+                div().px(px(4.0)).child(
+                    div()
+                        .id("existing-worktrees-local")
+                        .h(px(PICKER_ROW_HEIGHT))
+                        .px(px(8.0))
+                        .rounded(px(8.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .cursor_default()
+                        .when(highlight == Some(0), |row| row.bg(theme.overlay_strong))
+                        .hover(|row| row.bg(theme.overlay))
+                        .child(icon("icons/local.svg", 12.0, theme.text))
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_size(sp(12.5))
+                                .child(tr!("workspace.local")),
+                        )
+                        .when(self.workspace.is_local(), |row| {
+                            row.child(icon("icons/check.svg", 11.0, theme.text_secondary))
+                        })
+                        .on_click(move |_, window, cx| {
+                            let close = local_weak
+                                .update(cx, |this, cx| {
+                                    this.worktree_picker_highlight = Some(0);
+                                    this.confirm_worktree_picker_action(
+                                        &[WorktreePickerAction::Local],
+                                        window,
+                                        cx,
+                                    )
+                                })
+                                .unwrap_or(false);
+                            if close {
+                                local_popover.close(window, cx);
+                                window.refresh();
+                            }
+                        }),
+                ),
+            )
+            .child(
+                div()
+                    .mx(px(12.0))
+                    .my(px(4.0))
+                    .h(hairline())
+                    .bg(theme.separator),
+            )
+            .when_some(self.message.clone(), |element, message| {
+                element.child(
+                    div()
+                        .px(px(14.0))
+                        .py(px(16.0))
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_tertiary)
+                        .child(message),
+                )
+            })
+            .when(self.actions.len() > 1, |element| {
+                element.child(
+                    div()
+                        .h(px(((self.actions.len() - 1) as f32 * 48.0).min(240.0)))
+                        .px(px(4.0))
+                        .child(list(self.list.clone(), move |index, _, _| {
+                            let Some(WorktreePickerAction::Existing { path, name, .. }) =
+                                rows.get(index + 1)
+                            else {
+                                return div().into_any_element();
+                            };
+                            let action = rows[index + 1].clone();
+                            let weak = row_weak.clone();
+                            let popover = row_popover.clone();
+                            div()
+                                .id(SharedString::from(format!("existing-worktree-{index}")))
+                                .h(px(48.0))
+                                .px(px(8.0))
+                                .rounded(px(8.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .cursor_default()
+                                .when(highlight == Some(index + 1), |row| {
+                                    row.bg(theme.overlay_strong)
+                                })
+                                .hover(|row| row.bg(theme.overlay))
+                                .child(icon("icons/fork.svg", 12.0, theme.text))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(2.0))
+                                        .child(
+                                            div()
+                                                .truncate()
+                                                .text_size(sp(12.5))
+                                                .text_color(theme.text)
+                                                .child(name.clone()),
+                                        )
+                                        .child(
+                                            div()
+                                                .truncate()
+                                                .text_size(sp(11.0))
+                                                .text_color(theme.text_tertiary)
+                                                .child(path.display().to_string()),
+                                        ),
+                                )
+                                .when(selected_path.as_ref() == Some(path), |row| {
+                                    row.child(icon("icons/check.svg", 11.0, theme.text_secondary))
+                                })
+                                .on_click(move |_, window, cx| {
+                                    let close = weak
+                                        .update(cx, |this, cx| {
+                                            this.worktree_picker_highlight = Some(0);
+                                            this.confirm_worktree_picker_action(
+                                                &[action.clone()],
+                                                window,
+                                                cx,
+                                            )
+                                        })
+                                        .unwrap_or(false);
+                                    if close {
+                                        popover.close(window, cx);
+                                        window.refresh();
+                                    }
+                                })
+                                .into_any_element()
+                        })),
+                )
+            })
+            .child(div().h(px(4.0)))
+            .into_any_element()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn existing_worktrees_show_their_name_in_both_checkout_layouts() {
+        assert_eq!(
+            existing_worktree_name(Path::new("/dev/worktrees/goddard/keen-flute/goddard")),
+            "keen-flute"
+        );
+        assert_eq!(
+            existing_worktree_name(Path::new("/dev/worktrees/feature")),
+            "feature"
+        );
+        assert_eq!(existing_worktree_name(Path::new("/dev/project")), "project");
+    }
 
     #[test]
     fn create_rows_skip_the_default_when_the_checkout_sits_on_it() {
@@ -1452,9 +1930,19 @@ mod tests {
             branch: None,
             base_branch: Some("main".to_owned()),
             adopted_by: None,
+            borrowed: false,
         };
         let draft = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         assert!(workspace_picks_base(&worktree, Some(&draft)));
+        let mut borrowed_draft = draft.clone();
+        borrowed_draft.workspace = worktree.clone();
+        if let SessionWorkspace::Worktree { borrowed, .. } = &mut borrowed_draft.workspace {
+            *borrowed = true;
+        }
+        assert!(!workspace_picks_base(
+            &borrowed_draft.workspace,
+            Some(&borrowed_draft)
+        ));
 
         // Once the session has started the picker is an ordinary checkout
         // selector again.

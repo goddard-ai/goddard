@@ -56,6 +56,7 @@ fn employee_archive_guard_preserves_dirty_and_unlanded_work() {
         branch: None,
         base_branch: Some("main".into()),
         adopted_by: None,
+        borrowed: false,
     };
     assert_eq!(
         WakuBackend::employee_archive_blocker(&session).unwrap(),
@@ -4777,6 +4778,7 @@ fn removing_a_task_sweeps_its_daemon_terminals() {
         branch: None,
         base_branch: None,
         adopted_by: None,
+        borrowed: false,
     };
     worktree_session.begin_turn("seed");
     worktree_session.finish_active_turn(TurnStatus::Completed);
@@ -8342,6 +8344,7 @@ fn boss_summon_rejects_unadoptable_worktrees() {
         branch: None,
         base_branch: Some("main".into()),
         adopted_by: None,
+        borrowed: false,
     };
     {
         let mut state = fixture.backend.task_state.lock();
@@ -13173,6 +13176,7 @@ fn a_resume_refuses_an_adopted_worktree() {
             branch: Some("wip".into()),
             base_branch: Some("main".into()),
             adopted_by: Some(Uuid::new_v4()),
+            borrowed: false,
         };
         backend.task_store.save(&mut state).unwrap();
     }
@@ -14891,6 +14895,7 @@ fn merge_submit_requires_per_project_opt_in() {
         branch: None,
         base_branch: Some("main".into()),
         adopted_by: None,
+        borrowed: false,
     };
     {
         let mut state = backend.task_state.lock();
@@ -15219,6 +15224,7 @@ fn merge_submit_honors_a_per_project_qa_branch() {
         branch: None,
         base_branch: Some("main".into()),
         adopted_by: None,
+        borrowed: false,
     };
     {
         let mut state = backend.task_state.lock();
