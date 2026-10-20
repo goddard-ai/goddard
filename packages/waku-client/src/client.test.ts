@@ -5,6 +5,7 @@ import {
   WakuConnectionError,
   WakuRpcError,
   daemonUrl,
+  type WakuClientOptions,
   type WebSocketLike,
 } from "./client";
 import { PROTOCOL_VERSION } from "./generated";
@@ -57,7 +58,7 @@ class FakeSocket implements WebSocketLike {
   }
 }
 
-function fixture() {
+function fixture(options: Partial<WakuClientOptions> = {}) {
   const sockets: FakeSocket[] = [];
   let nextId = 0;
   const client = new WakuClient({
@@ -69,6 +70,7 @@ function fixture() {
       sockets.push(socket);
       return socket;
     },
+    ...options,
   });
   return { client, sockets };
 }
@@ -254,6 +256,46 @@ describe("WakuClient", () => {
     const received: number[] = [];
     client.subscribe("session", "runtime", (event) => received.push(event.sequence));
     expect(received).toEqual([1, 2]);
+  });
+
+  test("RPC-only clients discard runtime events but still handle responses and broadcasts", async () => {
+    const { client, sockets } = fixture({ receiveRuntimeEvents: false });
+    const socket = await connect(client, sockets);
+    const revisions: number[] = [];
+    client.subscribeTaskState((revision) => revisions.push(revision));
+
+    for (let runtime = 0; runtime < 100; runtime += 1) {
+      socket.receive({
+        type: "event",
+        sessionId: `session-${runtime}`,
+        runtimeId: `runtime-${runtime}`,
+        epoch: "epoch",
+        sequence: 1,
+        event: { kind: "textDelta", payload: "task output" },
+      });
+    }
+    expect(client.replayCursors()).toHaveLength(0);
+    const received: number[] = [];
+    client.subscribe("session-0", "runtime-0", (event) => received.push(event.sequence));
+    expect(received).toEqual([]);
+
+    const taskState = {
+      type: "taskState" as const,
+      projects: [],
+      sessions: [],
+      defaultCwd: "/tmp",
+      projectlessRoot: null,
+    };
+    const response = client.request({ type: "loadTaskState" });
+    const request = JSON.parse(socket.sent.at(-1)!);
+    socket.receive({
+      type: "response",
+      requestId: request.requestId,
+      outcome: { status: "ok", payload: taskState },
+    });
+    socket.receive({ type: "taskStateChanged", revision: 4 });
+    await expect(response).resolves.toEqual(taskState);
+    expect(revisions).toEqual([4]);
   });
 
   test("notifies connected apps when another client changes task state", async () => {

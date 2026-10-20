@@ -56,6 +56,8 @@ export interface WakuClientOptions {
   requestTimeoutMs?: number;
   /** How long a handshake may take before the attempt fails as `timeout`. */
   connectTimeoutMs?: number;
+  /** Set false for RPC-only connections to discard runtime events and replay cursors. Defaults to true. */
+  receiveRuntimeEvents?: boolean;
   webSocketFactory?: (url: string) => WebSocketLike;
   randomUUID?: () => string;
   now?: () => number;
@@ -134,6 +136,7 @@ export class WakuClient {
   private readonly token: string;
   private readonly requestTimeoutMs: number;
   private readonly connectTimeoutMs: number;
+  private readonly receiveRuntimeEvents: boolean;
   private readonly socketFactory: (url: string) => WebSocketLike;
   private readonly randomUUID: () => string;
   private readonly now: () => number;
@@ -161,6 +164,7 @@ export class WakuClient {
     this.token = options.token;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 120_000;
     this.connectTimeoutMs = options.connectTimeoutMs ?? 15_000;
+    this.receiveRuntimeEvents = options.receiveRuntimeEvents ?? true;
     this.socketFactory =
       options.webSocketFactory ??
       ((url) => {
@@ -504,6 +508,7 @@ export class WakuClient {
       return;
     }
     if (message.type === "event") {
+      if (!this.receiveRuntimeEvents) return;
       const key = subscriptionKey(message.sessionId, message.runtimeId);
       const previous = this.sequences.get(key);
       if (

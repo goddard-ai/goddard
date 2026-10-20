@@ -1231,6 +1231,7 @@ async function liveSessionCount(): Promise<number | undefined> {
       address: daemonAddress,
       token: daemonToken,
       requestTimeoutMs: 5_000,
+      receiveRuntimeEvents: false,
     });
     if (!controlClient.connected) await controlClient.connect();
     const response = await controlClient.request(
