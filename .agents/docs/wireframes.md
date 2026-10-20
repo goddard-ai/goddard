@@ -119,7 +119,9 @@ goddard-agent wireframe designs/tasks.wireframe.json
 | `screens[].root` | Yes | Root node, usually a `frame`. |
 
 The root fills its screen; its own sizing is ignored. Content outside the
-screen bounds is clipped.
+screen bounds is clipped. Previews shrink uniformly to fit the right panel’s
+available width, preserving the layout and aspect ratio. Smaller screens stay
+at their declared size; tall screens remain vertically scrollable.
 
 ## Node types
 

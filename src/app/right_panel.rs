@@ -10957,6 +10957,8 @@ impl Waku {
                 .py(px(32.0))
                 .children(wireframe.screens.iter().map(|screen| {
                     div()
+                        .w_full()
+                        .min_w_0()
                         .flex_none()
                         .flex()
                         .flex_col()

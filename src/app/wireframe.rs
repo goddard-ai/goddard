@@ -17,19 +17,47 @@ use waku_protocol::wireframe::{
 
 use super::*;
 
-/// One screen at its declared size on the theme's canvas — a fixed-size
-/// proposal, not a responsive layout. The root node always spans the
-/// whole screen; its own sizing is ignored per the schema.
+/// Fit one screen to its available width without enlarging it. The aspect-ratio
+/// wrapper reserves the scaled height so scrolling follows the painted screen.
 #[track_caller]
 pub(super) fn wireframe_screen_element(screen: &WireScreen, theme: &Theme) -> Div {
+    let screen = screen.clone();
+    let theme = *theme;
+    div()
+        .relative()
+        .flex_none()
+        .w_full()
+        .max_w(px(screen.width))
+        .aspect_ratio(screen.width / screen.height)
+        .child(
+            canvas(
+                move |bounds, window, cx| {
+                    let scale = (f32::from(bounds.size.width) / screen.width).min(1.0);
+                    let mut element = screen_at_scale(&screen, &theme, scale).into_any_element();
+                    element.prepaint_as_root(
+                        bounds.origin,
+                        bounds.size.map(gpui::AvailableSpace::Definite),
+                        window,
+                        cx,
+                    );
+                    element
+                },
+                |_, mut element, window, cx| element.paint(window, cx),
+            )
+            .absolute()
+            .size_full(),
+        )
+}
+
+fn screen_at_scale(screen: &WireScreen, theme: &Theme, scale: f32) -> Div {
     let mut ids = 0usize;
     div()
         .flex_none()
-        .w(px(screen.width))
-        .h(px(screen.height))
+        .w(px(screen.width * scale))
+        .h(px(screen.height * scale))
         .overflow_hidden()
-        .rounded(px(10.0))
-        .border_1()
+        .rounded(px(10.0 * scale))
+        .border(px(scale))
         .border_color(theme.border_subtle)
         .bg(theme.canvas)
         .child(node_element(
@@ -38,6 +66,7 @@ pub(super) fn wireframe_screen_element(screen: &WireScreen, theme: &Theme) -> Di
             true,
             &mut ids,
             theme,
+            scale,
         ))
 }
 
@@ -47,14 +76,21 @@ fn node_element(
     force_full: bool,
     ids: &mut usize,
     theme: &Theme,
+    scale: f32,
 ) -> AnyElement {
     match node {
-        WireNode::Frame(frame) => frame_element(frame, parent_direction, force_full, ids, theme),
-        WireNode::Rect(rect) => rect_element(rect, parent_direction, force_full, ids, theme),
-        WireNode::Text(text) => text_element(text, parent_direction, force_full, ids, theme),
-        WireNode::Divider(divider) => {
-            divider_element(parent_direction, divider.annotations.as_deref(), ids, theme)
+        WireNode::Frame(frame) => {
+            frame_element(frame, parent_direction, force_full, ids, theme, scale)
         }
+        WireNode::Rect(rect) => rect_element(rect, parent_direction, force_full, ids, theme, scale),
+        WireNode::Text(text) => text_element(text, parent_direction, force_full, ids, theme, scale),
+        WireNode::Divider(divider) => divider_element(
+            parent_direction,
+            divider.annotations.as_deref(),
+            ids,
+            theme,
+            scale,
+        ),
     }
 }
 
@@ -69,18 +105,19 @@ fn apply_sizing<T: Styled>(
     height: WireSize,
     parent_direction: WireDirection,
     force_full: bool,
+    scale: f32,
 ) -> T {
     if force_full {
         return element.size_full();
     }
     let element = match (width, parent_direction) {
-        (WireSize::Fixed(v), _) => element.w(px(v)),
+        (WireSize::Fixed(v), _) => element.w(px(v * scale)),
         (WireSize::Fill, WireDirection::Row) => element.flex_1().min_w_0(),
         (WireSize::Fill, WireDirection::Column) => element.w_full(),
         (WireSize::Hug, _) => element,
     };
     match (height, parent_direction) {
-        (WireSize::Fixed(v), _) => element.h(px(v)),
+        (WireSize::Fixed(v), _) => element.h(px(v * scale)),
         (WireSize::Fill, WireDirection::Column) => element.flex_1().min_h_0(),
         (WireSize::Fill, WireDirection::Row) => element.h_full(),
         (WireSize::Hug, _) => element,
@@ -96,17 +133,20 @@ fn apply_surface<T: Styled>(
     stroke: Option<WireTone>,
     corner_radius: f32,
     theme: &Theme,
+    scale: f32,
 ) -> T {
     let element = match fill {
         Some(tone) => element.bg(fill_color(tone, theme)),
         None => element,
     };
     let element = match stroke {
-        Some(tone) => element.border_1().border_color(line_color(tone, theme)),
+        Some(tone) => element
+            .border(px(scale))
+            .border_color(line_color(tone, theme)),
         None => element,
     };
     if corner_radius > 0.0 {
-        element.rounded(px(corner_radius))
+        element.rounded(px(corner_radius * scale))
     } else {
         element
     }
@@ -130,10 +170,27 @@ fn frame_element(
     force_full: bool,
     ids: &mut usize,
     theme: &Theme,
+    scale: f32,
 ) -> AnyElement {
     match annotated(frame.annotations.as_deref(), ids) {
-        Some(element) => finish_frame(element, frame, parent_direction, force_full, ids, theme),
-        None => finish_frame(div(), frame, parent_direction, force_full, ids, theme),
+        Some(element) => finish_frame(
+            element,
+            frame,
+            parent_direction,
+            force_full,
+            ids,
+            theme,
+            scale,
+        ),
+        None => finish_frame(
+            div(),
+            frame,
+            parent_direction,
+            force_full,
+            ids,
+            theme,
+            scale,
+        ),
     }
 }
 
@@ -144,16 +201,17 @@ fn finish_frame<T: Styled + ParentElement + IntoElement>(
     force_full: bool,
     ids: &mut usize,
     theme: &Theme,
+    scale: f32,
 ) -> AnyElement {
     let element = element.flex();
     let element = match frame.direction {
         WireDirection::Row => element.flex_row(),
         WireDirection::Column => element.flex_col(),
     };
-    let element = element.gap(px(frame.gap));
+    let element = element.gap(px(frame.gap * scale));
     let element = match frame.padding {
-        WirePadding::Uniform(v) => element.p(px(v)),
-        WirePadding::Axes { x, y } => element.px(px(x)).py(px(y)),
+        WirePadding::Uniform(v) => element.p(px(v * scale)),
+        WirePadding::Axes { x, y } => element.px(px(x * scale)).py(px(y * scale)),
     };
     let element = match frame.align {
         WireAlign::Start => element.items_start(),
@@ -173,6 +231,7 @@ fn finish_frame<T: Styled + ParentElement + IntoElement>(
         frame.stroke,
         frame.corner_radius,
         theme,
+        scale,
     );
     let element = apply_sizing(
         element,
@@ -180,13 +239,14 @@ fn finish_frame<T: Styled + ParentElement + IntoElement>(
         frame.height,
         parent_direction,
         force_full,
+        scale,
     );
     element
         .children(
             frame
                 .children
                 .iter()
-                .map(|child| node_element(child, frame.direction, false, ids, theme)),
+                .map(|child| node_element(child, frame.direction, false, ids, theme, scale)),
         )
         .into_any_element()
 }
@@ -197,10 +257,11 @@ fn rect_element(
     force_full: bool,
     ids: &mut usize,
     theme: &Theme,
+    scale: f32,
 ) -> AnyElement {
     match annotated(rect.annotations.as_deref(), ids) {
-        Some(element) => finish_rect(element, rect, parent_direction, force_full, theme),
-        None => finish_rect(div(), rect, parent_direction, force_full, theme),
+        Some(element) => finish_rect(element, rect, parent_direction, force_full, theme, scale),
+        None => finish_rect(div(), rect, parent_direction, force_full, theme, scale),
     }
 }
 
@@ -210,14 +271,23 @@ fn finish_rect<T: Styled + ParentElement + IntoElement>(
     parent_direction: WireDirection,
     force_full: bool,
     theme: &Theme,
+    scale: f32,
 ) -> AnyElement {
-    let element = apply_surface(element, rect.fill, rect.stroke, rect.corner_radius, theme);
+    let element = apply_surface(
+        element,
+        rect.fill,
+        rect.stroke,
+        rect.corner_radius,
+        theme,
+        scale,
+    );
     let element = apply_sizing(
         element,
         rect.width,
         rect.height,
         parent_direction,
         force_full,
+        scale,
     );
     let Some(label) = &rect.label else {
         return element.into_any_element();
@@ -236,7 +306,7 @@ fn finish_rect<T: Styled + ParentElement + IntoElement>(
         .overflow_hidden()
         .child(
             div()
-                .text_size(sp(12.0))
+                .text_size(sp(12.0) * scale)
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(label_color)
                 .truncate()
@@ -251,10 +321,11 @@ fn text_element(
     force_full: bool,
     ids: &mut usize,
     theme: &Theme,
+    scale: f32,
 ) -> AnyElement {
     match annotated(text.annotations.as_deref(), ids) {
-        Some(element) => finish_text(element, text, parent_direction, force_full, theme),
-        None => finish_text(div(), text, parent_direction, force_full, theme),
+        Some(element) => finish_text(element, text, parent_direction, force_full, theme, scale),
+        None => finish_text(div(), text, parent_direction, force_full, theme, scale),
     }
 }
 
@@ -264,6 +335,7 @@ fn finish_text<T: Styled + ParentElement + IntoElement>(
     parent_direction: WireDirection,
     force_full: bool,
     theme: &Theme,
+    scale: f32,
 ) -> AnyElement {
     // The fixed type scale: wireframes use type roles, not raw font
     // specs. Sizes ride `sp` so they follow the user's UI font scale.
@@ -279,7 +351,7 @@ fn finish_text<T: Styled + ParentElement + IntoElement>(
         WireTextAlign::End => TextAlign::Right,
     };
     let element = element
-        .text_size(sp(size))
+        .text_size(sp(size) * scale)
         .font_weight(weight)
         .text_color(text_color(text.tone, theme))
         .text_align(align)
@@ -292,6 +364,7 @@ fn finish_text<T: Styled + ParentElement + IntoElement>(
         text.height,
         parent_direction,
         force_full,
+        scale,
     );
     element.child(text.text.clone()).into_any_element()
 }
@@ -303,10 +376,11 @@ fn divider_element(
     note: Option<&str>,
     ids: &mut usize,
     theme: &Theme,
+    scale: f32,
 ) -> AnyElement {
     match annotated(note, ids) {
-        Some(element) => finish_divider(element, parent_direction, theme),
-        None => finish_divider(div(), parent_direction, theme),
+        Some(element) => finish_divider(element, parent_direction, theme, scale),
+        None => finish_divider(div(), parent_direction, theme, scale),
     }
 }
 
@@ -314,11 +388,12 @@ fn finish_divider<T: Styled + IntoElement>(
     element: T,
     parent_direction: WireDirection,
     theme: &Theme,
+    scale: f32,
 ) -> AnyElement {
     let element = element.flex_none().bg(theme.separator);
     match parent_direction {
-        WireDirection::Column => element.w_full().h(hairline()).into_any_element(),
-        WireDirection::Row => element.h_full().w(hairline()).into_any_element(),
+        WireDirection::Column => element.w_full().h(hairline() * scale).into_any_element(),
+        WireDirection::Row => element.h_full().w(hairline() * scale).into_any_element(),
     }
 }
 
@@ -355,5 +430,49 @@ fn text_color(tone: WireTextTone, theme: &Theme) -> Hsla {
         WireTextTone::Secondary => theme.text_secondary,
         WireTextTone::Tertiary => theme.text_tertiary,
         WireTextTone::Accent => theme.accent,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gpui::test]
+    fn fitted_screens_keep_proportions_across_panel_resizes(cx: &mut gpui::TestAppContext) {
+        struct Harness {
+            width: f32,
+            screen: WireScreen,
+        }
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(self.width)).flex().flex_col().child(
+                    wireframe_screen_element(&self.screen, &Theme::dark())
+                        .debug_selector(|| "fitted-wireframe".into()),
+                )
+            }
+        }
+        let (view, cx) = cx.add_window_view(|_, _| Harness {
+            width: 400.0,
+            screen: WireScreen {
+                name: "Tall screen".into(),
+                width: 800.0,
+                height: 1200.0,
+                root: WireNode::Frame(WireFrame::default()),
+            },
+        });
+        // Check actual layout bounds, including the height used by scrolling,
+        // across shrinking, growing and an available width above natural size.
+        for (width, expected) in [
+            (400.0, size(px(400.0), px(600.0))),
+            (200.0, size(px(200.0), px(300.0))),
+            (1000.0, size(px(800.0), px(1200.0))),
+        ] {
+            view.update(cx, |view, cx| {
+                view.width = width;
+                cx.notify();
+            });
+            cx.run_until_parked();
+            assert_eq!(cx.debug_bounds("fitted-wireframe").unwrap().size, expected);
+        }
     }
 }
