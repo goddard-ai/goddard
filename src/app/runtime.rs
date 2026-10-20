@@ -7817,7 +7817,9 @@ impl Waku {
                 .workspace_path_for_session(session)
                 .map(std::path::Path::to_path_buf)
                 .unwrap_or_default();
-            if session.auto_route {
+            if session.auto_route
+                && !self.managed_session_is_boss(self.daemons.session_owner(session.id), session.id)
+            {
                 self.route_start_plan_for_session(
                     session,
                     submission.human_prompt(),

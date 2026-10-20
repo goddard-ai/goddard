@@ -1,0 +1,1 @@
+- Boss chats keep their selected model and reasoning effort instead of using Jev's automatic model or per-turn effort routing.

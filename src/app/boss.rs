@@ -4389,7 +4389,7 @@ impl Waku {
         )
     }
 
-    fn managed_session_is_boss(&self, key: DaemonKey, session_id: Uuid) -> bool {
+    pub(super) fn managed_session_is_boss(&self, key: DaemonKey, session_id: Uuid) -> bool {
         self.boss_ui
             .states
             .get(&key)

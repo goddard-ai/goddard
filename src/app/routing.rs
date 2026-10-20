@@ -326,9 +326,10 @@ impl Waku {
     /// falls back to `last_used` and says so in the decision.
     pub(super) fn auto_route_available(&self) -> bool {
         self.state.auto_model_routing() != AutoModelRouting::Disabled
-            && self
-                .model_picker_session()
-                .is_some_and(|session| !session.provider_locked())
+            && self.model_picker_session().is_some_and(|session| {
+                !self.managed_session_is_boss(self.daemons.session_owner(session.id), session.id)
+                    && !session.provider_locked()
+            })
             && !self
                 .route_candidates_on(self.model_picker_daemon_key())
                 .is_empty()
@@ -367,6 +368,9 @@ impl Waku {
         project: &Project,
         provisional_cwd: PathBuf,
     ) -> Option<RouteStartPlan> {
+        if self.managed_session_is_boss(self.daemons.session_owner(session.id), session.id) {
+            return None;
+        }
         let daemon = self.daemons.daemon_for_session(session.id)?;
         let key = self.daemons.session_owner(session.id);
         let candidates = self.route_candidates_on(key);
@@ -428,6 +432,9 @@ impl Waku {
         session: &AgentSession,
         prompt: String,
     ) -> Option<TurnRoutePlan> {
+        if self.managed_session_is_boss(self.daemons.session_owner(session.id), session.id) {
+            return None;
+        }
         let owner = session.route_decision.as_ref()?;
         let daemon = self.daemons.daemon_for_session(session.id)?;
         if !daemon.settings().eval_ready() {
@@ -506,7 +513,8 @@ impl Waku {
         else {
             return;
         };
-        if session.route_decision.as_ref() != Some(&decision.owner)
+        if self.managed_session_is_boss(self.daemons.session_owner(session.id), session.id)
+            || session.route_decision.as_ref() != Some(&decision.owner)
             || session.model != decision.original_model
             || session.reasoning_effort != decision.original_effort
             || session.service_tier != decision.original_service_tier
