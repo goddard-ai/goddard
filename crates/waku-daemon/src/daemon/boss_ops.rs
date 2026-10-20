@@ -1023,6 +1023,9 @@ impl WakuBackend {
                     // Same gate `control` uses — the human, the boss, or
                     // the employee's own supervisor decides.
                     self.boss.require_control(caller, session_id)?;
+                    if caller.is_none() {
+                        self.memory_guard.user_resume(session_id)?;
+                    }
                     self.resume_employee(session_id)?;
                     Ok(BossResult::Saved)
                 })

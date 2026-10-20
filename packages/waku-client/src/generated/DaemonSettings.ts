@@ -166,6 +166,12 @@ wireframes_experiment_enabled: boolean,
  */
 runtime_idle_timeout_secs?: number | null,
 /**
+ * MiB allowed for one agent and its descendant processes for 30 seconds
+ * before cancellation and containment. `None` uses 4096 MiB; `0`
+ * disables the per-agent limit. Critical host pressure still holds new launches.
+ */
+agent_memory_limit_mb?: number,
+/**
  * The branch the review queue treats as the shared proposed-work
  * train: `origin/<name>` is what the Review tab lists, and rejections
  * push reverts onto it. Daemon-owned so every attached client sees one

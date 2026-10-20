@@ -188,6 +188,7 @@ impl AcpDriver {
                 agent_env.as_ref(),
                 vm,
                 stderr_lines.clone(),
+                &events,
             )?,
             None => AgentTransport::Host(sdk_agent(
                 &binary,
@@ -195,6 +196,7 @@ impl AcpDriver {
                 launch,
                 agent_env.as_ref(),
                 stderr_lines.clone(),
+                events.process_anchor(),
             )?),
         };
         let (commands, command_rx) = smol::channel::unbounded();
@@ -298,6 +300,7 @@ fn guest_transport(
     agent_env: Option<&crate::agent::AgentLaunchEnv>,
     vm: &Arc<crate::sandbox::ShuruVm>,
     stderr_lines: Arc<Mutex<Vec<String>>>,
+    events: &DriverEventSender,
 ) -> anyhow::Result<AgentTransport> {
     use std::io::{BufRead as _, BufReader, Write as _};
 
@@ -321,6 +324,9 @@ fn guest_transport(
         .envs(environment);
     let mut child = crate::sandbox::spawn(&command, Some(vm))
         .context("could not spawn the provider process in the sandbox VM")?;
+    events
+        .record_process(child.host_pid())
+        .context("could not register sandbox process")?;
     let stdin = child
         .stdin
         .take()
@@ -389,6 +395,7 @@ fn sdk_agent(
     mut launch: AcpLaunch,
     agent_env: Option<&crate::agent::AgentLaunchEnv>,
     stderr_lines: Arc<Mutex<Vec<String>>>,
+    process_anchor: Option<&Path>,
 ) -> anyhow::Result<AcpAgent> {
     let binary = binary
         .to_str()
@@ -410,6 +417,13 @@ fn sdk_agent(
         crate::command_env::merge_agent_environment(&mut environment, agent_env);
     }
 
+    if let Some(path) = process_anchor {
+        environment.push((
+            "GODDARD_PROCESS_ANCHOR".to_owned(),
+            path.to_string_lossy().into_owned(),
+        ));
+    }
+
     // `AcpAgentConfig` deliberately contains only argv and environment. macOS
     // `env -C` supplies the session cwd without a shell, preserving exact
     // argument boundaries and the SDK's process-group lifecycle management.
@@ -420,7 +434,9 @@ fn sdk_agent(
         let mut args = vec![
             "-c".to_owned(),
             crate::command_env::DAEMON_GUARDIAN_SCRIPT.to_owned(),
-            "waku-acp-guardian".to_owned(),
+            process_anchor
+                .map(|path| format!("goddard-runtime:{}", path.display()))
+                .unwrap_or_else(|| "waku-acp-guardian".to_owned()),
             "/usr/bin/env".to_owned(),
             "-C".to_owned(),
             cwd.to_owned(),
@@ -460,7 +476,14 @@ pub(crate) fn catalog_agent(
     cwd: &Path,
 ) -> anyhow::Result<AcpAgent> {
     let launch = launch_for(provider, None)?;
-    sdk_agent(binary, cwd, launch, None, Arc::new(Mutex::new(Vec::new())))
+    sdk_agent(
+        binary,
+        cwd,
+        launch,
+        None,
+        Arc::new(Mutex::new(Vec::new())),
+        None,
+    )
 }
 
 const DEVIN_ACP_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -3744,6 +3767,31 @@ mod tests {
                 .collect::<Vec<_>>(),
         )
         .category(category)
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn memory_guard_registration_survives_the_sdk_spawn_path() {
+        let directory = std::env::temp_dir().join(format!("acp-memory-guard-{}", uuid::Uuid::new_v4()));
+        waku_base::fs_ext::create_private_dir_all(&directory).unwrap();
+        let anchor = directory.join("process");
+        let agent = sdk_agent(
+            Path::new("/bin/sleep"), &directory,
+            AcpLaunch { args: vec!["1".to_owned()], env: Vec::new() },
+            None, Arc::new(Mutex::new(Vec::new())), Some(&anchor),
+        ).unwrap();
+        let (stdin, stdout, stderr, mut child) = agent.spawn_process().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            if std::fs::read_to_string(&anchor).ok().and_then(|pid| pid.trim().parse::<u32>().ok()) == Some(child.id()) { break; }
+            assert!(std::time::Instant::now() < deadline, "SDK guardian did not register its process");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(waku_base::process_identity::has_argument(i32::try_from(child.id()).unwrap(),
+            &format!("goddard-runtime:{}", anchor.display())));
+        assert!(smol::block_on(child.status()).unwrap().success());
+        drop((stdin, stdout, stderr));
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     /// Teardown must reach the actor through `begin_shutdown` while handle

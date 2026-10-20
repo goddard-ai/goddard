@@ -427,6 +427,9 @@ impl CodexDriver {
             .stderr(Stdio::piped());
         let mut child = crate::sandbox::spawn(command, sandbox.as_ref())
             .context("failed to start `codex app-server`")?;
+        events
+            .record_process(child.host_pid())
+            .context("could not register Codex process")?;
 
         let stdin = child
             .stdin

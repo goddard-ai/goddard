@@ -614,6 +614,7 @@ pub struct WakuBackend {
     /// Process-memory sampling for `getDaemonStats` and the
     /// `daemon-stats.jsonl` debugging file.
     stats: Arc<crate::stats::DaemonStats>,
+    memory_guard: memory_guard::MemoryGuard,
     usage_rates_dir: std::path::PathBuf,
     /// `~/Library/Application Support/<app>` — the parent of shared
     /// per-provider sandbox homes.
@@ -748,6 +749,7 @@ mod events;
 mod idle;
 mod instruction_pins;
 mod lifecycle;
+mod memory_guard;
 mod plan_delivery;
 mod projection;
 mod prompt_delivery;

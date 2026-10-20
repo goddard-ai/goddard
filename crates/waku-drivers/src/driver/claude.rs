@@ -296,6 +296,9 @@ impl ClaudeDriver {
             .stderr(Stdio::piped());
         let mut child = crate::sandbox::spawn(command, sandbox.as_ref())
             .context("failed to start `claude` in streaming-input mode")?;
+        events
+            .record_process(child.host_pid())
+            .context("could not register Claude process")?;
         let stdin = child
             .stdin
             .take()

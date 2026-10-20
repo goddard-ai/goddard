@@ -59,9 +59,32 @@ use crate::model::{
 pub struct DriverEventSender {
     events: Sender<DriverEvent>,
     wake: smol::channel::Sender<()>,
+    process_anchor: Option<Arc<PathBuf>>,
 }
 
 impl DriverEventSender {
+    /// The daemon supplies a unique path for this runtime's owned process.
+    /// Shared provider services deliberately do not register a task owner.
+    pub fn with_process_anchor(mut self, path: PathBuf) -> Self {
+        self.process_anchor = Some(Arc::new(path));
+        self
+    }
+
+    pub fn process_anchor(&self) -> Option<&std::path::Path> {
+        self.process_anchor.as_deref().map(PathBuf::as_path)
+    }
+
+    pub fn record_process(&self, pid: u32) -> std::io::Result<()> {
+        if let Some(path) = self.process_anchor() {
+            let birth = i32::try_from(pid)
+                .ok()
+                .and_then(waku_base::process_identity::start_time)
+                .ok_or_else(|| std::io::Error::other("provider process identity unavailable"))?;
+            std::fs::write(path, format!("{pid} {birth}"))?;
+        }
+        Ok(())
+    }
+
     pub fn send(&self, event: DriverEvent) -> Result<(), SendError<DriverEvent>> {
         self.events.send(event)?;
         let _ = self.wake.try_send(());
@@ -90,7 +113,14 @@ pub fn event_channel(
     wake: smol::channel::Sender<()>,
 ) -> (DriverEventSender, Receiver<DriverEvent>) {
     let (events, receiver) = unbounded();
-    (DriverEventSender { events, wake }, receiver)
+    (
+        DriverEventSender {
+            events,
+            wake,
+            process_anchor: None,
+        },
+        receiver,
+    )
 }
 
 #[cfg(any(test, feature = "test-support"))]

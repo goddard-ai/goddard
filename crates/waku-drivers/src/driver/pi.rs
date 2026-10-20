@@ -316,6 +316,9 @@ impl PiDriver {
             .stderr(Stdio::piped());
         let mut child = crate::sandbox::spawn(command, sandbox.as_ref())
             .with_context(|| format!("failed to start `{} --mode rpc`", binary.display()))?;
+        events
+            .record_process(child.host_pid())
+            .context("could not register Pi process")?;
         let stdin = child
             .stdin
             .take()

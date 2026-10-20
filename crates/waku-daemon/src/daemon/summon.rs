@@ -91,6 +91,7 @@ impl WakuBackend {
             .collect();
         candidates
             .into_iter()
+            .filter(|target| !self.memory_guard.paused(*target))
             .filter(|target| {
                 // Admission and workspace moves own their continuation;
                 // a parked queue must not revive a finished employee.
@@ -310,6 +311,9 @@ impl WakuBackend {
     /// Repeat while progress is made so a released slot can admit another
     /// ticket without waiting for the next wakeup.
     pub(crate) fn run_summon_scheduler(&self) {
+        if self.memory_guard.host_critical() {
+            return;
+        }
         // The boss document owns the policy; the broker's file follows it
         // when one was set — a crash between the two writes reconciles
         // here rather than dispatching under a stale host policy.
@@ -482,6 +486,9 @@ impl WakuBackend {
         &self,
         employee: &waku_protocol::boss::BossEmployee,
     ) -> anyhow::Result<bool> {
+        if self.memory_guard.host_critical() || self.memory_guard.paused(employee.session_id) {
+            return Ok(false);
+        }
         let lifecycle = self.runtime_lifecycles.session(employee.session_id);
         let _owner = lifecycle.lock();
         // Scheduler heads are snapshots taken before acquiring this lock.

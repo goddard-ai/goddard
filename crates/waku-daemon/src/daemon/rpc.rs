@@ -134,6 +134,7 @@ impl Backend for WakuBackend {
         // so a second event-source install must not duplicate it either.
         // The probe locks each map in turn rather than nesting — per-minute
         // cadence means a consistent-as-of snapshot per map is enough.
+        self.start_memory_guard();
         let probe_sessions = self.sessions.clone();
         let probe_terminals = self.terminals.clone();
         let probe_state = self.task_state.clone();
@@ -1825,6 +1826,9 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::Ack)
             }
             Command::Start { options } => {
+                if agent.is_none() {
+                    self.memory_guard.user_resume(session_id)?;
+                }
                 let provider = decode_enum(&options.provider)?;
                 let options = DriverStartOptions {
                     binary: options.binary,
@@ -2119,6 +2123,7 @@ impl Backend for WakuBackend {
                 // The user's next prompt or steer is the resume the held
                 // deliveries waited for — release the hold.
                 if matches!(command, Command::Prompt { .. } | Command::Steer { .. }) {
+                    self.memory_guard.check_admission(session_id)?;
                     self.agent.clear_user_stop(session_id);
                 }
                 if boss_chat_command

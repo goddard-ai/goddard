@@ -95,6 +95,8 @@ impl WakuBackend {
             daemon_address: Arc::new(Mutex::new(None)),
             exposed_port: Arc::new(Mutex::new(None)),
             stats: crate::stats::DaemonStats::open(&data_dir),
+            memory_guard: memory_guard::MemoryGuard::open(&data_dir)
+                .context("could not open agent memory guard")?,
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             share: Arc::new(crate::share::ShareService::new(

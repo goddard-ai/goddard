@@ -724,6 +724,7 @@ impl PersistedState {
             wireframes_experiment_enabled: cfg!(debug_assertions),
             // Idle eviction postdates it too; absent means the default.
             runtime_idle_timeout_secs: None,
+            agent_memory_limit_mb: None,
             // So does the review-train branch name — `qa` is the
             // migration.
             qa_branch: waku_protocol::settings::DEFAULT_QA_BRANCH.to_owned(),

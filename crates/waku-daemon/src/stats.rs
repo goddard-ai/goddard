@@ -297,10 +297,11 @@ fn append_json_line(path: &Path, line: &impl Serialize, cap: u64) -> std::io::Re
 /// One process-table row: parent, resident size, and the process name
 /// (`comm` — truncated to 15–16 chars by the kernel, enough for `devin`,
 /// `codex`, `goddard-daemon`).
-struct ProcEntry {
-    ppid: i32,
-    rss: u64,
-    name: String,
+pub(crate) struct ProcEntry {
+    pub(crate) ppid: i32,
+    pub(crate) rss: u64,
+    pub(crate) birth: u64,
+    pub(crate) name: String,
 }
 
 /// Own RSS, the summed RSS of every descendant, and one row per direct
@@ -399,7 +400,7 @@ fn attribute(
 
 /// pid → parent/name/RSS for every readable process.
 #[cfg(target_os = "macos")]
-fn process_table() -> Option<HashMap<i32, ProcEntry>> {
+pub(crate) fn process_table() -> Option<HashMap<i32, ProcEntry>> {
     let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
     if count <= 0 {
         return None;
@@ -449,7 +450,19 @@ fn process_table() -> Option<HashMap<i32, ProcEntry>> {
             continue;
         }
         let rss = unsafe { usage.assume_init() }.ri_phys_footprint;
-        table.insert(pid, ProcEntry { ppid, rss, name });
+        let birth = bsd
+            .pbi_start_tvsec
+            .saturating_mul(1_000_000)
+            .saturating_add(bsd.pbi_start_tvusec);
+        table.insert(
+            pid,
+            ProcEntry {
+                ppid,
+                rss,
+                birth,
+                name,
+            },
+        );
     }
     Some(table)
 }
@@ -457,7 +470,7 @@ fn process_table() -> Option<HashMap<i32, ProcEntry>> {
 /// pid → parent/name/RSS via `/proc/*/status` — one file gives `Name`,
 /// `PPid`, and `VmRSS`.
 #[cfg(target_os = "linux")]
-fn process_table() -> Option<HashMap<i32, ProcEntry>> {
+pub(crate) fn process_table() -> Option<HashMap<i32, ProcEntry>> {
     let mut table = HashMap::new();
     for entry in std::fs::read_dir("/proc").ok()? {
         let Ok(entry) = entry else { continue };
@@ -484,11 +497,15 @@ fn process_table() -> Option<HashMap<i32, ProcEntry>> {
             }
         }
         if let (Some(ppid), Some(rss_kb)) = (ppid, rss_kb) {
+            let Some(birth) = waku_base::process_identity::start_time(pid) else {
+                continue;
+            };
             table.insert(
                 pid,
                 ProcEntry {
                     ppid,
                     rss: rss_kb * 1024,
+                    birth,
                     name: comm.unwrap_or_default(),
                 },
             );
@@ -498,7 +515,7 @@ fn process_table() -> Option<HashMap<i32, ProcEntry>> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn process_table() -> Option<HashMap<i32, ProcEntry>> {
+pub(crate) fn process_table() -> Option<HashMap<i32, ProcEntry>> {
     None
 }
 

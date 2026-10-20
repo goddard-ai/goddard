@@ -1,0 +1,1 @@
+- Local Codex, Claude, Amp, Pi, and ACP tasks now pause when their process tree exceeds 4 GiB for 30 seconds; the task explains the interruption.

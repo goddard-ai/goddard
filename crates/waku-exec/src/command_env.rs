@@ -530,6 +530,10 @@ pub fn plain_command(program: impl AsRef<OsStr>) -> Proc {
 pub const DAEMON_GUARDIAN_SCRIPT: &str = r#"
 daemon=$PPID
 wrapper=$$
+if [ -n "${GODDARD_PROCESS_ANCHOR:-}" ]; then
+  printf '%s\n' "$wrapper" > "$GODDARD_PROCESS_ANCHOR" || exit 1
+  unset GODDARD_PROCESS_ANCHOR
+fi
 exec 9<&0
 "$@" <&9 &
 child=$!

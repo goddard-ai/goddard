@@ -959,6 +959,7 @@ pub(super) fn forward_driver_events(
         // with the leftovers counted as `parkedWork`.
         let mut keeps_working = false;
         if !stale
+            && !agent.user_stopped(session_id)
             && matches!(
                 settle,
                 Some(waku_protocol::boss::EmployeeSettle::TurnFinished)

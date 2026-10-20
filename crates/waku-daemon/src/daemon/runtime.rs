@@ -58,6 +58,7 @@ impl WakuBackend {
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let owner = lifecycle.lock();
         let result = (|| {
+            self.memory_guard.check_admission(session_id)?;
             anyhow::ensure!(
                 !self
                     .runtime_lifecycles
@@ -92,6 +93,8 @@ impl WakuBackend {
     ) -> anyhow::Result<(DriverHandle, bool)> {
         let (wake, _wake_events) = smol::channel::bounded(1);
         let (event_sender, event_receiver) = driver::event_channel(wake);
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let event_sender = event_sender.with_process_anchor(self.memory_guard.anchor(runtime_id));
         let resumable = options.provider_cursor.is_some();
         let cwd = options.cwd.clone();
         let mut options = options;
@@ -642,6 +645,7 @@ impl WakuBackend {
         session_id: Uuid,
         events: &EventSink,
     ) -> anyhow::Result<(Uuid, DriverHandle)> {
+        self.memory_guard.check_admission(session_id)?;
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let _owner = lifecycle.lock();
         anyhow::ensure!(

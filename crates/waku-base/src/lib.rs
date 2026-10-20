@@ -67,6 +67,7 @@ pub mod lan;
 pub mod pairing;
 pub mod power;
 pub mod pressure;
+pub mod process_identity;
 pub mod projectless;
 pub mod protocol;
 pub mod resource_broker;

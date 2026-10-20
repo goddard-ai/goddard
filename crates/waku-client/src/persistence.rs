@@ -2555,6 +2555,8 @@ pub struct PersistedState {
     #[serde(skip)]
     pub runtime_idle_timeout_secs: Option<u64>,
     #[serde(skip)]
+    pub agent_memory_limit_mb: Option<u64>,
+    #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
     dirty_sessions: HashSet<Uuid>,
@@ -2840,6 +2842,7 @@ impl PersistedState {
             sandbox_default_enabled: false,
             wireframes_experiment_enabled: default_experiment_enabled(),
             runtime_idle_timeout_secs: None,
+            agent_memory_limit_mb: None,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -3135,6 +3138,7 @@ impl PersistedState {
             sandbox_default_enabled: self.sandbox_default_enabled,
             wireframes_experiment_enabled: self.wireframes_experiment_enabled,
             runtime_idle_timeout_secs: self.runtime_idle_timeout_secs,
+            agent_memory_limit_mb: self.agent_memory_limit_mb,
             extra: self.daemon_settings_extra.clone(),
         }
     }
@@ -3174,6 +3178,7 @@ impl PersistedState {
         self.sandbox_default_enabled = settings.sandbox_default_enabled;
         self.wireframes_experiment_enabled = settings.wireframes_experiment_enabled;
         self.runtime_idle_timeout_secs = settings.runtime_idle_timeout_secs;
+        self.agent_memory_limit_mb = settings.agent_memory_limit_mb;
         self.daemon_settings_extra = settings.extra;
     }
 

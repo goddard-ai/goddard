@@ -19,6 +19,23 @@ pub fn watch() -> Option<Receiver<()>> {
     platform::watch()
 }
 
+/// Emergency admission/containment signal; sampled off the UI thread.
+pub fn critical() -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        platform::level().map(|level| level < 15)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let contents = std::fs::read_to_string("/proc/pressure/memory").ok()?;
+        Some(psi_some_avg10(&contents)? >= 50.0)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        None
+    }
+}
+
 /// Spawn the shared watcher thread: poll `signal`, emit while it reports
 /// pressure, keep the channel shallow so a burst stays one event.
 #[cfg(any(target_os = "macos", target_os = "linux"))]

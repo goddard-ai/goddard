@@ -146,6 +146,12 @@ pub struct DaemonSettings {
     /// whose session is busy or cannot resume are never evicted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_idle_timeout_secs: Option<u64>,
+    /// MiB allowed for one agent and its descendant processes for 30 seconds
+    /// before cancellation and containment. `None` uses 4096 MiB; `0`
+    /// disables the per-agent limit. Critical host pressure still holds new launches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub agent_memory_limit_mb: Option<u64>,
     /// The branch the review queue treats as the shared proposed-work
     /// train: `origin/<name>` is what the Review tab lists, and rejections
     /// push reverts onto it. Daemon-owned so every attached client sees one
@@ -212,6 +218,7 @@ impl Default for DaemonSettings {
             sandbox_default_enabled: false,
             wireframes_experiment_enabled: default_experiment_enabled(),
             runtime_idle_timeout_secs: None,
+            agent_memory_limit_mb: None,
             qa_branch: DEFAULT_QA_BRANCH.to_owned(),
             keep_awake: false,
             extra: BTreeMap::new(),

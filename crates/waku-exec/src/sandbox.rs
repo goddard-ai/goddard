@@ -1798,6 +1798,14 @@ enum ChildKind {
 }
 
 impl DriverChild {
+    /// Host process that owns this provider, including its VM when sandboxed.
+    pub fn host_pid(&self) -> u32 {
+        match &self.kind {
+            ChildKind::Host(child) => child.id(),
+            ChildKind::Guest(child) => child.vm.child.lock().id(),
+        }
+    }
+
     /// Ask the host guardian to stop its child and run its cleanup trap.
     /// `kill()` would SIGKILL the wrapper before that trap can run.
     pub fn terminate(&mut self) -> std::io::Result<()> {
