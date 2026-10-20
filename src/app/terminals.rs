@@ -197,6 +197,7 @@ pub(super) fn nearest_repo_root(directory: &Path) -> Option<PathBuf> {
 #[derive(Clone, Default)]
 pub(super) struct TerminalLocation {
     package: Option<String>,
+    /// Linked-worktree name, falling back to the active branch.
     worktree: Option<String>,
 }
 
@@ -542,6 +543,7 @@ impl Waku {
             self.sidebar_terminal_locations.borrow_mut().clear();
             return;
         }
+        let workspace = waku_client::WorkspaceClient::new(self.daemons.local().client());
         cx.spawn(async move |waku, cx| {
             let roots = cx
                 .background_executor()
@@ -552,7 +554,20 @@ impl Waku {
                             let root = nearest_repo_root(&cwd);
                             let location = TerminalLocation {
                                 package: nearest_package_name(&cwd),
-                                worktree: root.as_deref().and_then(terminal_worktree_name),
+                                worktree: root.as_deref().and_then(terminal_worktree_name).or_else(
+                                    || match workspace.request(
+                                        waku_client::WorkspaceOperation::InspectBranches {
+                                            cwd: cwd.clone(),
+                                        },
+                                    ) {
+                                        Ok(waku_client::WorkspaceResult::Branches {
+                                            snapshot: Some(snapshot),
+                                        }) => {
+                                            snapshot.current.and_then(|name| nonempty_name(&name))
+                                        }
+                                        _ => None,
+                                    },
+                                ),
                             };
                             (cwd, (root, location))
                         })
@@ -996,6 +1011,10 @@ impl Waku {
                     // checkout, so drop the cached snapshot; the
                     // next read refetches.
                     this.refresh_selected_branch_snapshot(cx);
+                    // Branch switches keep the same cwd, so explicitly
+                    // refresh terminal labels after commands complete.
+                    this.sidebar_terminal_repo_scan_fingerprint.set(None);
+                    this.ensure_sidebar_terminal_repo_roots(cx);
                     // Hand-typed commands journal here; custom-command
                     // terminals already journaled at launch.
                     if !this

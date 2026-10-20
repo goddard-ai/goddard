@@ -1,1 +1,1 @@
-- Terminal labels show the nearest package name and linked worktree name beside the current directory when their names differ, in the sidebar, docked header, expanded terminals, and terminal panels.
+- Terminal labels show the nearest package and linked worktree name, falling back to the active branch when no worktree name is available, beside the directory in sidebar rows and terminal headers.
