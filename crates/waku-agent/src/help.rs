@@ -10,7 +10,8 @@ command with boss summon --help. Help stays complete when piped; --output json e
 selects the structured readable guide. UUID, PATH, NAME and other uppercase examples are
 templates: substitute your values. Examples are never executed. Text inputs use exactly one of
 --text TEXT or --file PATH; --file - reads stdin where documented. Operation output defaults to
-text on terminals and JSON in pipes; --output text|json overrides it."#;
+text on terminals and JSON in pipes, except map which defaults to readable text everywhere.
+--output text|json overrides it."#;
 
 const WORKFLOW: &str = r#"Summon starts a new job; accepted/queued is not finished and is not a failure. Do not summon
 duplicates while waiting. Boss prompts deliver immediately: default interrupt and explicit queue both steer a live

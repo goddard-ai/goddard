@@ -37,7 +37,8 @@ use uuid::Uuid;
 use waku_protocol::computer_use::ComputerUseRunRequest;
 use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
 use waku_protocol::model::{
-    HistorySourceKind, ProjectMapIntent, ProviderKind, UserInputOption, UserInputQuestion,
+    HistorySourceKind, ProjectMapIntent, ProjectMapRanking, ProviderKind, UserInputOption,
+    UserInputQuestion,
 };
 use waku_protocol::{
     AGENT_TASK_ENV, AgentPromptDelivery, AgentWorkspace, Command, ResponsePayload,
@@ -827,12 +828,16 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         "map" => (
             json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"literal UTF-8 question"},"--path":{"type":"workspace-relative scope","optional":true},"--intent":{"enum":["locate","understand","change"],"default":"understand"},"--anchors":{"type":"JSON string array","optional":true},"--known-paths":{"type":"JSON path array","optional":true},"--max-tokens":{"type":"integer","minimum":64,"maximum":4096,"optional":true}}),
-            json!({"json":"AgentProjectMapResult with ranked source locations and map status"}),
+            json!({"text":"Ranked source context followed by a compact map status footer (default, including pipes)","json":"AgentProjectMapResult with ranked source locations and map status; select with --output json"}),
             "goddard-agent map --text 'What controls session expiry?'".to_owned(),
         ),
         _ => unreachable!("missing input schema for executable leaf `{path}`"),
     };
-    let mut help = format!("{example}; output defaults to text on a terminal and JSON when piped.");
+    let mut help = if path == "map" {
+        format!("{example}; output defaults to readable text, including when piped; --output json selects structured output.")
+    } else {
+        format!("{example}; output defaults to text on a terminal and JSON when piped.")
+    };
     if let Some(description) = inputs
         .get("description")
         .and_then(serde_json::Value::as_str)
@@ -1228,7 +1233,9 @@ fn run() -> anyhow::Result<()> {
         explicit_output
             .as_deref()
             .map(|s| s == "json")
-            .unwrap_or_else(|| !std::io::stdout().is_terminal()),
+            .unwrap_or_else(|| {
+                raw_args.first().is_none_or(|arg| arg != "map") && !std::io::stdout().is_terminal()
+            }),
         Ordering::Relaxed,
     );
     HELP_JSON_OUTPUT.store(
@@ -2775,7 +2782,25 @@ fn task_map(args: Vec<String>) -> anyhow::Result<()> {
     };
     match connect()?.request(request_session_id(), Uuid::nil(), command)? {
         ResponsePayload::AgentProjectMap { result } => {
-            println!("{}", serde_json::to_string_pretty(&result)?);
+            if JSON_OUTPUT.load(Ordering::Relaxed) {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                let ranking = match result.ranking {
+                    ProjectMapRanking::Jev => "Jev ranking",
+                    ProjectMapRanking::LocalFallback => "local fallback",
+                };
+                // Context is already formatted text; bypass the generic JSON-to-text renderer.
+                std::println!(
+                    "{}\n\nMap: {} files, ~{} tokens; {ranking}{}.",
+                    result.text.trim_end(),
+                    result.mapped_files,
+                    result.estimated_tokens,
+                    if result.truncated { "; truncated" } else { "" },
+                );
+                if let Some(reason) = result.fallback_reason {
+                    std::println!("Fallback: {reason}");
+                }
+            }
             Ok(())
         }
         other => bail!("unexpected response: {other:?}"),
