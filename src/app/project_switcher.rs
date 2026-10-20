@@ -11,7 +11,7 @@
 //! leaves slots open, the most recently added projects fill them.
 
 use super::*;
-use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 
 const MODAL_WIDTH: f32 = 400.0;
@@ -230,9 +230,42 @@ fn next_project_switcher_index(current: usize, len: usize, reverse: bool) -> Opt
     })
 }
 
+/// Require contiguous words; use fuzzy scores only to rank accepted matches.
+pub(super) struct ProjectSearch {
+    words: Vec<String>,
+    pattern: Pattern,
+}
+
+impl ProjectSearch {
+    pub(super) fn new(query: &str) -> Self {
+        Self {
+            words: query.split_whitespace().map(str::to_lowercase).collect(),
+            pattern: Pattern::new(
+                query.trim(),
+                CaseMatching::Ignore,
+                Normalization::Smart,
+                AtomKind::Fuzzy,
+            ),
+        }
+    }
+
+    pub(super) fn score(
+        &self,
+        text: &str,
+        matcher: &mut Matcher,
+        utf32: &mut Vec<char>,
+    ) -> Option<u32> {
+        let lower = text.to_lowercase();
+        if !self.words.iter().all(|word| lower.contains(word)) {
+            return None;
+        }
+        self.pattern.score(Utf32Str::new(text, utf32), matcher)
+    }
+}
+
 fn matching_action_ids(query: &str, target: ProjectSwitcherTarget) -> Vec<Uuid> {
     let query = query.trim();
-    let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+    let search = ProjectSearch::new(query);
     let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
     let mut utf32 = Vec::new();
     action_ids_for_target(target)
@@ -247,15 +280,15 @@ fn matching_action_ids(query: &str, target: ProjectSwitcherTarget) -> Vec<Uuid> 
             } else {
                 tr!("project.temporary_chat")
             };
-            pattern
-                .score(Utf32Str::new(&label, &mut utf32), &mut matcher)
+            search
+                .score(&label, &mut matcher, &mut utf32)
                 .is_some()
         })
         .collect()
 }
 
 // Empty search keeps the cycling snapshot; a query searches every known project
-// with the same fuzzy name/path matching as “New task in…”.
+// with the same contiguous name/path matching as “New task in…”.
 fn filtered_project_ids(
     recent: &[Uuid],
     projects: &[Project],
@@ -266,7 +299,7 @@ fn filtered_project_ids(
     if query.is_empty() {
         return recent.to_vec();
     }
-    let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+    let search = ProjectSearch::new(query);
     let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
     let mut utf32 = Vec::new();
     let mut scored = projects
@@ -277,9 +310,9 @@ fn filtered_project_ids(
             }
             let path = settings::abbreviate_home_path(&project.path, home);
             let name = project.display_name();
-            let text = format!("{name} {path} directory folder project");
-            pattern
-                .score(Utf32Str::new(&text, &mut utf32), &mut matcher)
+            let text = format!("{name} {path}");
+            search
+                .score(&text, &mut matcher, &mut utf32)
                 .map(|score| (score, project.id))
         })
         .collect::<Vec<_>>();
@@ -1493,7 +1526,7 @@ mod tests {
     }
 
     #[test]
-    fn search_finds_projects_outside_recents_by_fuzzy_name_or_path() {
+    fn search_finds_projects_outside_recents_by_name_or_path_without_weak_matches() {
         let mut projects = (0..12)
             .map(|index| Project {
                 id: Uuid::new_v4(),
@@ -1516,9 +1549,22 @@ mod tests {
         assert!(!recent.contains(&projects[0].id));
         assert_eq!(filtered_project_ids(&recent, &projects, None, "  "), recent);
         assert_eq!(
-            filtered_project_ids(&recent, &projects, None, "FGORCH"),
+            filtered_project_ids(&recent, &projects, None, "FORG ORCH"),
             vec![projects[0].id]
         );
+        for query in [
+            "FGORCH",
+            "folder",
+            "directory",
+            "forch",
+            "orch project",
+            "!orchard",
+        ] {
+            assert!(
+                filtered_project_ids(&recent, &projects, None, query).is_empty(),
+                "weak match for {query:?}"
+            );
+        }
         assert_eq!(
             filtered_project_ids(
                 &recent,

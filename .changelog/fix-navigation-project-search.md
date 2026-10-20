@@ -1,0 +1,1 @@
+- Project search now requires consecutive letters in names or paths, reducing unrelated results while typing in the project picker and “New task in…”.

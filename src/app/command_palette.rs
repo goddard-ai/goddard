@@ -4789,7 +4789,7 @@ impl Waku {
                     self.command_palette.new_task_incognito,
                 ),
                 content_match: None,
-                search_text: format!("{name} {path_label} directory folder project"),
+                search_text: format!("{name} {path_label}"),
                 order: current,
                 recency: 0,
             }
@@ -4841,7 +4841,22 @@ impl Waku {
         let query = query.trim();
         let mut candidates = self.command_palette_new_task_candidates();
         if !query.is_empty() {
-            candidates = self.score_run_script_items(candidates, query);
+            let search = project_switcher::ProjectSearch::new(query);
+            let mut utf32 = Vec::new();
+            let mut scored = candidates
+                .into_iter()
+                .filter_map(|item| {
+                    search
+                        .score(
+                            &item.search_text,
+                            &mut self.command_palette.matcher,
+                            &mut utf32,
+                        )
+                        .map(|score| ScoredPaletteItem { score, item })
+                })
+                .collect::<Vec<_>>();
+            scored.sort_by(|a, b| b.score.cmp(&a.score).then(a.item.order.cmp(&b.item.order)));
+            candidates = scored.into_iter().map(|scored| scored.item).collect();
         }
         // The daemon scan can return thousands of directories; rows are
         // built eagerly, so the list is capped whether or not a query
