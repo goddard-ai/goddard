@@ -1,10 +1,11 @@
 # Boss coordinator readiness contract
 
-Boss and planning runtimes remain paused for every current provider. Item 2
-stages canonical identity and durable references before launch, then calls the
-item-1 startup validator with no effective-runtime evidence. It does not infer
-versions, configuration, controls or bounds from PATH or saved settings. The
-running daemon is unaffected until separately rebuilt and restarted.
+Ordinary Boss and planning chat uses the existing provider prompt and CLI
+surfaces. It does not claim the strict pre-compaction guarantee. Startup and
+driver admission still reject archived, retired, incident-fenced or frozen
+sessions; unreadable continuity also blocks admission. Unverified replacement
+submission and activation remain paused behind the strict contract below.
+Existing prepared packages and unresolved receipts are retained.
 
 ## Integration boundaries
 
@@ -16,17 +17,16 @@ running daemon is unaffected until separately rebuilt and restarted.
   instructions, context, event IDs, work IDs and unresolved-effect references.
   Work IDs enumerate employees, plans, outcomes and deliverables in durable
   Boss state; outcome records retain their handoffs and decisions.
-- `spawn_runtime_inner` stages that package and validates startup before any
-  provider process, native session resume or inherited execution surface starts.
-  Current effective runtime version/configuration is unknown, so startup fails.
-- `BossOwnershipDriver` holds current and stale Boss/planning handles against
-  context growth. No committed readiness grant exists in this unit. Scoped
-  Boss/planning CLI calls are denied at RPC ingress, including alternate launch
-  and script routes. Human controls and employee paths retain their existing
-  authorization. Native execution restrictions are not advertised as supported.
-- Human prompts retain their full content and attachments in the durable queue;
-  employee results remain queued. Generic turn/error/process events cannot
-  acknowledge, reject or consume continuity. Existing legacy accepted records
+- `spawn_runtime_inner` checks existing ownership and continuity fences before
+  launch/resume. Healthy ordinary chat does not require startup-budget evidence.
+- `BossOwnershipDriver` permits the active Boss and registered planning sessions
+  while they are unarchived and unfenced. Scoped CLI calls retain ordinary
+  authorization. Retired credentials, frozen replacements and compaction
+  incidents remain blocked; no native execution-policy qualification is claimed.
+- Healthy human prompts use the normal `PromptSubmitted` and provider-delivery
+  path. Incident-fenced human prompts retain their content and attachments in
+  the durable queue; employee results remain queued while fenced. Generic
+  turn/error/process events cannot acknowledge, reject or consume continuity. Existing legacy accepted records
   cannot establish exact-package acceptance.
 
 ## Exact-package adapter seam

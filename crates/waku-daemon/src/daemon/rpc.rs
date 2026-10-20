@@ -281,10 +281,15 @@ impl Backend for WakuBackend {
                 "credential belongs to a fenced Boss generation; the active chat owns coordination"
             );
         }
-        if agent.is_some_and(|caller| self.boss.is_boss_principal(caller)) {
-            bail!("Boss coordination paused: no qualified coordinator readiness binding");
+        if let Some(caller) = agent
+            && self.boss.is_boss_principal(caller)
+        {
+            self.ensure_coordinator_available(caller)?;
         }
+        // Fenced chats keep accepting durable input for recovery. Healthy
+        // chats use the normal prompt path, including PromptSubmitted and delivery.
         if self.boss.is_boss_principal(session_id)
+            && self.boss_incident_fenced(session_id)
             && let Command::Prompt {
                 prompt,
                 message_id,
@@ -325,8 +330,7 @@ impl Backend for WakuBackend {
             } else {
                 session.queued_messages.push(queued);
             }
-            // Retry persistence even for an existing in-memory entry after a
-            // previous save failure; Ack must always follow durable storage.
+            // Ack follows durable storage, including retries after save failure.
             state.mark_session_dirty(session_id);
             self.task_store.save(&mut state)?;
             drop(state);
@@ -2142,8 +2146,7 @@ impl Backend for WakuBackend {
                     // current Boss chat and tell the originating client that
                     // it was parked instead of silently dropping it.
                     let routed = target_session != session_id;
-                    let fenced = self.boss.is_boss_principal(target_session)
-                        || self.boss_incident_fenced(target_session);
+                    let fenced = self.boss_incident_fenced(target_session);
                     if routed || fenced {
                         let reason = if routed {
                             "The Boss chat rotated; the prompt is queued on the active chat."

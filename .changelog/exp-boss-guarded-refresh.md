@@ -1,1 +1,1 @@
-- Boss refresh now keeps the current session and queued work paused until the replacement's instructions, continuity receipt, and safety checks validate.
+- Boss chat can send prompts and use its CLI again without waiting for unfinished provider safety checks. Frozen refreshes and compaction incidents still hold queued work until replacement safety checks pass.

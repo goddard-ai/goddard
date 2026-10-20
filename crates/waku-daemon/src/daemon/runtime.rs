@@ -101,12 +101,7 @@ impl WakuBackend {
             "task {session_id} is a fenced Boss generation; the active chat owns coordination"
         );
         if self.boss.is_boss_principal(session_id) {
-            self.prepare_coordinator_startup(
-                session_id,
-                runtime_id,
-                provider,
-                options.model.as_deref(),
-            )?;
+            self.ensure_coordinator_available(session_id)?;
         }
         let managed = self.boss.is_managed(session_id);
         let employee_snapshot = self.boss.employee(session_id);

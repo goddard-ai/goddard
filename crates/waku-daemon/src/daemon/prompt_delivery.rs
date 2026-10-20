@@ -194,7 +194,7 @@ pub(super) fn deliver_agent_prompt(
     boss.require_active(session_id)?;
     // An incident-fenced Boss chat holds its queued work: delivering now
     // would record a turn the fence-denied provider can never confirm.
-    if boss.is_boss_principal(session_id) || boss_incident_fenced(boss, session_id) {
+    if boss_incident_fenced(boss, session_id) {
         agent.requeue_front(session_id, entry);
         return Ok(());
     }
@@ -378,9 +378,21 @@ pub(super) fn boss_handoff_accepted(boss: &crate::boss::BossService, session_id:
 /// Boss chat must hold parked deliveries — anything sent now drops at the
 /// ownership fence after opening a turn the provider never confirms.
 pub(super) fn boss_incident_fenced(boss: &crate::boss::BossService, session_id: Uuid) -> bool {
-    use waku_boss::rotation_continuity::ContinuityLedger;
-    boss.is_boss(session_id)
-        && ContinuityLedger::load(&boss.root().join("continuity.json"))
+    use waku_boss::{boss_rotation::RotationJournal, rotation_continuity::ContinuityLedger};
+    if !boss.is_boss_principal(session_id) {
+        return false;
+    }
+    // Intent is durable before the continuity freeze. A crash in between must
+    // not let an ordinary launch or queue drain bypass replacement recovery.
+    let pending_rotation = RotationJournal::load(&boss.root().join("rotation.json"))
+        .map(|journal| {
+            journal.intent.as_ref().is_some_and(|intent| {
+                intent.old_session_id == session_id || intent.new_session_id == session_id
+            })
+        })
+        .unwrap_or(true);
+    pending_rotation
+        || ContinuityLedger::load(&boss.root().join("continuity.json"))
             .map(|ledger| ledger.has_incident(session_id) || ledger.coordinator_frozen(session_id))
             .unwrap_or(true)
 }

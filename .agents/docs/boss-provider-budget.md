@@ -10,6 +10,15 @@ This is Rudolph's item-1 evidence packet for approved revision
 `922930c1-3fc4-4572-9391-4b7078528ade`. The frozen plan is unchanged.
 The report distinguishes source inspection, host observations and missing proof.
 
+## Current product behavior
+
+Ordinary healthy Boss/planning chat is available without the strict budget
+contract. It retains ownership, archive, incident and frozen-replacement fences.
+Replacement submission/activation still requires the validator below and remains
+unqualified. The evidence packet and startup-blocking integration observations
+below describe the original 2026-10-19 implementation, before ordinary chat was
+restored; they do not describe current ordinary-chat admission.
+
 ## Baselines and observations
 
 Inspected on 2026-10-19. Ivan's historical baseline was `f83cf3f3299d`,

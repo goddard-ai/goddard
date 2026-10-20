@@ -41,13 +41,37 @@ fn boss_runtime(backend: &WakuBackend, session_id: Uuid, runtime_id: Uuid) -> Ar
 }
 
 #[test]
-fn boss_provider_admission_fails_closed_and_human_input_stays_queued() {
+fn frozen_boss_admission_fails_closed_and_human_input_stays_queued() {
     let root = std::env::temp_dir().join(format!("boss-admission-oracle-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let boss = rotation_boss(&backend);
     let runtime = Uuid::new_v4();
     let observed = install_rotation_observer(&backend);
     let capture = boss_runtime(&backend, boss, runtime);
+
+    waku_boss::rotation_continuity::ContinuityLedger::update(
+        &backend.boss_continuity_path(),
+        |ledger| ledger.freeze_coordinator(boss, Uuid::new_v4(), 0),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert!(backend.ensure_coordinator_available(boss).is_err());
+    let error = backend
+        .handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: boss,
+                runtime_id: runtime,
+                command: Command::Boss {
+                    operation: waku_protocol::boss::BossOperation::View,
+                },
+            },
+            EventSink::detached(),
+            Some(boss),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("fenced"));
 
     let request_id = Uuid::new_v4();
     backend
@@ -401,7 +425,10 @@ fn retired_boss_generation_is_fenced_at_the_driver_boundary() {
     let fresh_capture = boss_runtime(&backend, next, fresh_runtime);
     let fresh_driver = backend.sessions.lock().get(&next).unwrap().driver.clone();
     fresh_driver.prompt("the committed owner coordinates".into());
-    assert!(fresh_capture.prompts.lock().is_empty());
+    assert_eq!(
+        *fresh_capture.prompts.lock(),
+        vec!["the committed owner coordinates"]
+    );
 
     let guard = observed.lock();
     let admissions = guard
@@ -416,8 +443,7 @@ fn retired_boss_generation_is_fenced_at_the_driver_boundary() {
             && matches!(&admission.decision, AdmissionDecision::Blocked { .. })
     }));
     assert!(admissions.iter().any(|admission| {
-        admission.session_id == next
-            && matches!(&admission.decision, AdmissionDecision::Blocked { .. })
+        admission.session_id == next && matches!(&admission.decision, AdmissionDecision::Unguarded)
     }));
     std::fs::remove_dir_all(root).ok();
 }
@@ -588,8 +614,17 @@ fn boss_handoff_ignores_uncorrelated_turn_started_and_retains_content() {
             &EventSink::detached(),
         )
         .unwrap();
-    assert!(capture.prompts.lock().is_empty());
-    assert!(backend.agent.has_queued(next));
+    assert_eq!(capture.prompts.lock().len(), 1);
+    assert!(!backend.agent.has_queued(next));
+    // Ordinary delivery does not manufacture exact-package acceptance.
+    assert_eq!(
+        ContinuityLedger::load(&ledger_path)
+            .unwrap()
+            .pending_for_session(next)
+            .unwrap()
+            .status,
+        ContinuityDeliveryStatus::Prepared
+    );
     assert!(
         backend
             .boss_outbound_prompt(next, "follow up".into())
@@ -730,15 +765,16 @@ fn queued_event_to_retired_chat_retargets_the_successor() {
         )
         .unwrap();
 
-    assert!(capture.prompts.lock().is_empty());
-    assert!(backend.agent.has_queued(next));
+    assert_eq!(capture.prompts.lock().len(), 1);
+    assert!(capture.prompts.lock()[0].contains("the employee outcome"));
+    assert!(!backend.agent.has_queued(next));
     assert!(
         backend
             .task_state
             .lock()
             .session_mut(next)
             .unwrap()
-            .queued_messages
+            .messages
             .iter()
             .any(|m| m.content.contains("the employee outcome"))
     );
@@ -803,36 +839,57 @@ fn identity_drift_during_staging_pauses_and_preserves_evidence() {
 }
 
 #[test]
-fn coordinator_contract_startup_stages_exact_authority_and_blocks_every_provider_and_planning() {
-    use waku_boss::{
-        coordinator_contract::CoordinatorPackage,
-        rotation_continuity::{ContinuityDeliveryStatus, ContinuityLedger, ContinuityScope},
-    };
-    let root = std::env::temp_dir().join(format!("coordinator-startup-{}", Uuid::new_v4()));
+fn pending_rotation_intent_blocks_chat_before_the_continuity_freeze() {
+    use waku_boss::boss_rotation::RotationJournal;
+    let root = std::env::temp_dir().join(format!("boss-intent-fence-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
-    let session = rotation_boss(&backend);
-    let canonical = backend.boss.canonical_boss_instructions(session).unwrap();
-    assert_eq!(
-        canonical,
-        backend.boss.canonical_boss_instructions(session).unwrap()
-    );
-    assert!(
-        backend
-            .boss
-            .prompt_with_context(session, "input".into())
-            .contains("<boss-persona>")
-    );
-    for provider in ProviderKind::ALL {
-        let error = backend
-            .prepare_coordinator_startup(session, Uuid::new_v4(), provider, Some("model"))
-            .unwrap_err();
-        assert!(error.to_string().contains("continuity preserved"));
+    let boss = rotation_boss(&backend);
+    let runtime = Uuid::new_v4();
+    let capture = boss_runtime(&backend, boss, runtime);
+    let path = backend.boss_journal_path();
+    let mut journal = RotationJournal::load(&path).unwrap();
+    journal.active_session_id = Some(boss);
+    journal
+        .begin(
+            backend.boss.identity_and_session().0.id,
+            boss,
+            Uuid::new_v4(),
+            1,
+        )
+        .unwrap();
+    journal.persist(&path).unwrap();
+    let driver = backend.sessions.lock().get(&boss).unwrap().driver.clone();
+    for corrupt in [false, true] {
+        if corrupt {
+            std::fs::write(&path, b"invalid rotation journal").unwrap();
+        }
+        assert!(backend.ensure_coordinator_available(boss).is_err());
+        driver.prompt("must not bypass recovery".into());
+        driver.steer("must not continue".into());
+        assert!(capture.prompts.lock().is_empty());
+        assert!(capture.steers.lock().is_empty());
     }
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn ordinary_boss_and_planning_chat_deliver_prompts_without_claiming_qualification() {
+    let root = std::env::temp_dir().join(format!("coordinator-chat-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let boss = rotation_boss(&backend);
+    let observed = install_rotation_observer(&backend);
+    let mut planning = AgentSession::new(
+        backend.boss.identity_and_session().0.id,
+        ProviderKind::Codex,
+    );
+    planning.boss_managed = true;
+    let planning_id = planning.id;
+    backend.task_state.lock().push_session(planning);
     backend
         .boss
         .add_plan(waku_protocol::boss::BossPlan {
-            id: Uuid::new_v4(),
-            session_id: session,
+            id: planning_id,
+            session_id: planning_id,
             plan_file: "plans/test.md".into(),
             idea: "Design only".into(),
             finalized_at: None,
@@ -842,120 +899,92 @@ fn coordinator_contract_startup_stages_exact_authority_and_blocks_every_provider
             history: vec![],
         })
         .unwrap();
-    assert!(
+    for session in [boss, planning_id] {
+        backend.ensure_coordinator_available(session).unwrap();
+        let runtime = Uuid::new_v4();
+        let capture = boss_runtime(&backend, session, runtime);
+        let message_id = Uuid::new_v4();
         backend
-            .prepare_coordinator_startup(
-                session,
-                Uuid::new_v4(),
-                ProviderKind::Codex,
-                Some("model")
-            )
-            .is_err()
-    );
-    let ledger = ContinuityLedger::load(&backend.boss_continuity_path()).unwrap();
-    assert_eq!(ledger.deliveries.len(), ProviderKind::ALL.len() + 1);
-    for delivery in &ledger.deliveries {
-        assert_eq!(delivery.status, ContinuityDeliveryStatus::Prepared);
-        assert_eq!(delivery.attempts, 0);
-        let exact = delivery.package.as_ref().unwrap();
-        let bound: CoordinatorPackage = serde_json::from_str(&exact.context).unwrap();
-        assert_eq!(exact.instructions, bound.content.instructions);
-        assert_eq!(bound.binding.session, session);
-    }
-    let planning: CoordinatorPackage = serde_json::from_str(
-        &ledger
-            .deliveries
-            .last()
-            .unwrap()
-            .package
-            .as_ref()
-            .unwrap()
-            .context,
-    )
-    .unwrap();
-    assert_eq!(planning.binding.scope, ContinuityScope::Planning);
-    assert!(planning.content.instructions.contains("product designer"));
-    let capture = boss_runtime(&backend, session, Uuid::new_v4());
-    let driver = backend
-        .sessions
-        .lock()
-        .get(&session)
-        .unwrap()
-        .driver
-        .clone();
-    driver.prompt("planning cannot implement".into());
-    driver.steer("planning cannot research".into());
-    assert!(driver.rollback(1).is_err());
-    assert!(driver.fork(1).is_err());
-    assert!(capture.prompts.lock().is_empty());
-    assert!(capture.steers.lock().is_empty());
-    driver.cancel();
-    assert_eq!(*capture.cancels.lock(), 1);
-    std::fs::remove_dir_all(root).ok();
-}
-
-#[test]
-fn coordinator_contract_scoped_alternate_routes_are_denied_before_effects() {
-    use waku_protocol::boss::BossOperation;
-    let root = std::env::temp_dir().join(format!("coordinator-routes-{}", Uuid::new_v4()));
-    let (backend, _) = surface_test_backend(&root);
-    let boss = rotation_boss(&backend);
-    for command in [
-        Command::OpenTerminal {
-            cwd: root.clone(),
-            cols: 80,
-            rows: 24,
-            owner: Some(boss),
-        },
-        Command::WriteTerminal {
-            data: b"cargo test\n".to_vec(),
-        },
-        Command::AgentProjectMap {
-            query: "source research".into(),
-            path: None,
-            max_tokens: None,
-            intent: Default::default(),
-            anchors: vec![],
-            known_paths: vec![],
-        },
-        Command::AgentMergeSubmit,
-        Command::Boss {
-            operation: BossOperation::Terminal {
-                title: "build".into(),
-                cwd: root.to_string_lossy().into_owned(),
-                command: Some("cargo build".into()),
-            },
-        },
-        Command::Boss {
-            operation: BossOperation::Browse {
-                url: "https://example.com".into(),
-                title: None,
-            },
-        },
-    ] {
-        let error = backend
             .handle(
                 Request {
                     request_id: Uuid::new_v4(),
-                    session_id: boss,
-                    runtime_id: Uuid::new_v4(),
-                    command,
+                    session_id: session,
+                    runtime_id: runtime,
+                    command: Command::Prompt {
+                        prompt: "continue coordinated work".into(),
+                        turn_id: None,
+                        message_id: Some(message_id),
+                        hidden: false,
+                        attachments: vec![],
+                    },
                 },
                 EventSink::detached(),
-                Some(boss),
+                None,
             )
-            .unwrap_err();
-        assert!(error.to_string().contains("readiness binding"));
+            .unwrap();
+        assert_eq!(capture.prompts.lock().len(), 1);
+        assert!(capture.prompts.lock()[0].contains("continue coordinated work"));
+        let state = backend.task_state.lock();
+        let stored = state.sessions.iter().find(|s| s.id == session).unwrap();
+        assert!(stored.queued_messages.is_empty());
+        assert!(
+            stored
+                .messages
+                .iter()
+                .any(|m| m.id == message_id && m.content == "continue coordinated work")
+        );
+        drop(state);
+        // The coordinator can use its ordinary CLI surface again.
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: session,
+                    runtime_id: runtime,
+                    command: Command::Boss {
+                        operation: waku_protocol::boss::BossOperation::View,
+                    },
+                },
+                EventSink::detached(),
+                Some(session),
+            )
+            .unwrap();
+        let driver = backend
+            .sessions
+            .lock()
+            .get(&session)
+            .unwrap()
+            .driver
+            .clone();
+        driver.steer("ordinary continuation".into());
+        assert!(
+            capture
+                .steers
+                .lock()
+                .iter()
+                .any(|s| s == "ordinary continuation")
+        );
+        backend
+            .task_state
+            .lock()
+            .session_mut(session)
+            .unwrap()
+            .archived_at = Some(1);
+        assert!(backend.ensure_coordinator_available(session).is_err());
+        driver.prompt("archived chat must stop".into());
+        assert_eq!(capture.prompts.lock().len(), 1);
     }
-    // The wrapper does not change ordinary/employee driver behavior.
-    let employee_capture = Arc::new(CaptureDriver::default());
-    let employee = backend.boss_driver_boundary(
-        Uuid::new_v4(),
-        Uuid::new_v4(),
-        DriverHandle::from_control(employee_capture.clone()),
-    );
-    employee.prompt("existing employee grant".into());
-    assert_eq!(employee_capture.prompts.lock().len(), 1);
+    assert!(observed.lock().iter().any(|o| matches!(
+        o,
+        RotationObservation::ProviderAdmission(ProviderAdmission {
+            decision: AdmissionDecision::Unguarded,
+            ..
+        })
+    )));
+    let ledger =
+        waku_boss::rotation_continuity::ContinuityLedger::load(&backend.boss_continuity_path())
+            .unwrap();
+    assert!(ledger.provider_receipts.is_empty());
     std::fs::remove_dir_all(root).ok();
 }
 

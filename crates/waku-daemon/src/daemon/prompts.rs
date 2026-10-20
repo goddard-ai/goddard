@@ -347,7 +347,7 @@ impl WakuBackend {
         }) {
             return Ok(());
         }
-        if self.boss.is_boss_principal(target) {
+        if self.boss_incident_fenced(target) {
             return Ok(());
         }
         if plan_finalized {
@@ -463,7 +463,7 @@ impl WakuBackend {
         // An incident-fenced Boss chat holds its queue: popping and
         // "delivering" into a fence-denied provider boundary would record
         // the message while silently dropping the effect.
-        if self.boss.is_boss_principal(session_id) || self.boss_incident_fenced(session_id) {
+        if self.boss_incident_fenced(session_id) {
             return Ok(());
         }
         while let Some(entry) = self.agent.pop_queued(session_id) {

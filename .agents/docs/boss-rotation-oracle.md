@@ -9,12 +9,11 @@ rotation request.
 
 ## The ownership fence and continuity ledger
 
-`BossOwnershipDriver` wraps Boss and planning handles. Current adapters are
-unqualified, so it denies context growth even when the pointer is current.
-The startup guard runs before launch/resume; scoped Boss/planning CLI actions
-also remain denied until a lifecycle can commit independently validated
-readiness. Manual compact still requests a fresh session. Deterministic human
-controls and employee behavior retain their existing authorization.
+`BossOwnershipDriver` wraps Boss and planning handles. Ordinary chat runs under
+existing ownership and continuity checks without claiming the strict budget
+guarantee. Archived, retired, incident-fenced and frozen sessions remain blocked.
+Startup and scoped CLI calls enforce those fences too. Manual compact still
+requests a fresh session; replacement activation remains unqualified.
 
 `boss/continuity.json` retains exact packages, native receipts and unresolved
 effect references beside legacy handoffs, incidents and refresh requests.
@@ -37,9 +36,10 @@ it does not retroactively treat that pointer as validated activation.
 ## Exact-package receipt contract
 
 `ContinuityLedger` also supports an exact-package path for adapter integration.
-Production startup prepares this path and blocks before provider launch;
-existing handles connect through `deliver_coordinator_package`, which cannot
-submit with current qualification. Legacy records cannot prove exact receipt.
+Replacement staging uses this path; `deliver_coordinator_package` cannot
+submit with current qualification. Ordinary healthy chat uses legacy prompt
+delivery without asserting exact-package receipt. Legacy records cannot prove
+exact receipt.
 
 `prepare_package` binds a delivery id to a session, generation, canonical
 instruction text, identity revision, coordinator/planning scope and continuity
@@ -97,7 +97,7 @@ Daemon unit tests install `RuntimeLifecycles::rotation_observer` and
 receive these observations:
 
 - The production `BossOwnershipDriver` reports each admission decision
-  (`Blocked` for every current configuration) and
+  (`Unguarded` for ordinary healthy chat, `Blocked` for fenced sessions) and
   the `Submitted` transport for the pending bound delivery.
   `RotationObservedDriver` keeps the observation-only wrap for other Boss
   principals.
@@ -129,8 +129,8 @@ adding a second source of truth.
   `shuffled_tail`.
 
 The daemon tests prove the seams observe real driver commands, provider
-events, and the existing journal. Current daemon reports record blocked admissions. The standalone intentionally
-unsafe fixtures still prove that the oracle detects unguarded admissions. Integrated
+events, and the existing journal. Daemon reports distinguish ordinary unguarded
+chat from blocked admissions. The standalone intentionally unsafe fixtures still prove that the oracle detects unguarded admissions. Integrated
 acceptance tests should assert `is_clean()` only after the implementation
 supplies guarded bounds, provider acceptance evidence, and successor
 activation.
@@ -140,6 +140,6 @@ activation.
 The [provider budget contract](boss-provider-budget.md) defines item 2's
 startup-validation input and fail-closed results. Installed versions and old
 qualification ledger classifications no longer qualify any current runtime.
-Production startup now calls the validator and pauses before context growth.
-Activation and measured continuation admission remain lifecycle work; no current
-configuration is qualified.
+Replacement submission and activation call the validator and remain paused.
+Ordinary chat does not use this contract or claim measured continuation safety;
+no current configuration is qualified.

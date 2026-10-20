@@ -158,12 +158,7 @@ impl WakuBackend {
     /// visible — until the refresh commits, rather than delivering it to
     /// a provider boundary that can no longer be trusted.
     pub(super) fn boss_incident_fenced(&self, session_id: Uuid) -> bool {
-        self.boss.is_boss(session_id)
-            && ContinuityLedger::load(&self.boss_continuity_path())
-                .map(|ledger| {
-                    ledger.has_incident(session_id) || ledger.coordinator_frozen(session_id)
-                })
-                .unwrap_or(true)
+        super::prompt_delivery::boss_incident_fenced(&self.boss, session_id)
     }
 
     /// The session a message addressed to the Boss should reach now. A
@@ -1663,9 +1658,8 @@ impl BossOwnershipDriver {
         }
     }
 
-    /// Whether this handle may admit context growth right now. Ownership
-    /// reads the live pointer, not a value captured at wrap time — a
-    /// mid-call rotation fences the predecessor immediately.
+    /// Generation attribution for the test oracle, including retired handles.
+    #[cfg(test)]
     fn owner_generation(&self) -> Option<u64> {
         let journal = RotationJournal::load(&self.journal_path).ok()?;
         if let Some(intent) = &journal.intent {
@@ -1694,65 +1688,23 @@ impl BossOwnershipDriver {
             })
     }
 
-    /// `true` while this session still holds coordination: it is the
-    /// pointed Boss chat, unarchived, and unfenced by a compaction incident.
+    /// `true` for the pointed Boss chat or a registered planning session
+    /// while unarchived and unfenced by continuity or a compaction incident.
     /// A staged successor answers `false` until the pointer publishes it —
     /// no authority exists before ownership commits.
     fn admit(&self, boundary: &str) -> bool {
         let active = self.boss.is_boss(self.session_id);
-        let archived = self.task_state.lock().sessions.iter()
+        let archived = self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
             .find(|session| session.id == self.session_id)
             .is_none_or(|session| session.archived_at.is_some());
-        let ledger = ContinuityLedger::load(&self.continuity_path);
-        let incident = ledger
-            .as_ref()
-            .map(|ledger| ledger.has_incident(self.session_id))
-            .unwrap_or(true);
-        // Every context-growing DriverControl boundary revalidates. The current
-        // adapters expose no trusted effective bounds; never reuse a startup
-        // check or infer a continuation budget from reported occupancy.
-        let generation = self.owner_generation();
-        let expected = waku_boss::provider_budget::StartupBudgetBinding {
-            provider: self
-                .task_state
-                .lock()
-                .sessions
-                .iter()
-                .find(|s| s.id == self.session_id)
-                .map(|s| s.provider)
-                .unwrap_or(ProviderKind::Codex),
-            runtime_version: String::new(),
-            model: String::new(),
-            configuration_revision: String::new(),
-            instruction_revision: self.boss.identity_digest(),
-            runtime_id: self.runtime_id,
-            generation: generation.unwrap_or_default(),
-            package_digest: String::new(),
-            operation_id: Uuid::new_v4(),
-        };
-        let budget_valid = ledger.as_ref().is_ok_and(|ledger| {
-            generation.is_some_and(|generation| {
-                waku_boss::guarded_lifecycle::validate_growth(
-                    ledger,
-                    self.session_id,
-                    generation,
-                    &expected,
-                    None,
-                )
-                .is_ok()
-            })
-        });
-        // No current adapter has a proven policy or effective budget contract.
-        // This also fences planning and handles created before qualification changed.
-        let policy = self
-            .inner
-            .coordinator_control()
-            .coordinator_policy_enforced();
-        // Readiness must be independently bound and committed by a future lifecycle.
-        // Adapter self-report alone cannot authorize existing handles.
-        let readiness_committed = false;
-        let allowed =
-            active && !archived && !incident && policy && readiness_committed && budget_valid;
+        // Ordinary chat retains durable ownership/continuity fencing without
+        // claiming the strict provider-budget guarantee used for replacement.
+        let incident = super::prompt_delivery::boss_incident_fenced(&self.boss, self.session_id);
+        let allowed = (active || self.boss.is_planning(self.session_id)) && !archived && !incident;
         if !allowed {
             eprintln!(
                 "Boss driver fence denied {boundary} for session {} (active={active} archived={archived} incident={incident})",
@@ -2058,101 +2010,29 @@ fn boss_rotation_handoff(old: &AgentSession, marker: &str) -> String {
 }
 
 impl WakuBackend {
-    /// Stage canonical authority and enumerable work before any provider launch.
-    /// Current adapters cannot supply trusted prelaunch observations; keep the
-    /// package durable and return a blocker before startup/resume context grows.
-    pub(super) fn prepare_coordinator_startup(
-        &self,
-        session_id: Uuid,
-        runtime_id: Uuid,
-        provider: ProviderKind,
-        model: Option<&str>,
-    ) -> anyhow::Result<()> {
-        use waku_boss::coordinator_contract::{CoordinatorBinding, CoordinatorPackage};
-        use waku_boss::provider_budget::{StartupBudgetBinding, validate_startup_budget};
-        use waku_boss::rotation_continuity::{ContinuityPackage, ContinuityScope};
-        let journal = RotationJournal::load(&self.boss_journal_path())?;
-        let document = self.boss.document();
-        let scope = if self.boss.is_planning(session_id) {
-            ContinuityScope::Planning
-        } else {
-            ContinuityScope::Coordinator
-        };
-        let identity_revision = self.boss.identity_digest();
-        let grants_revision = serde_json::to_string(&document.resource_policy)?;
-        let binding = CoordinatorBinding {
-            provider,
-            session: session_id,
-            generation: journal.generation,
-            identity_revision: identity_revision.clone(),
-            grants_revision,
-            model: model.unwrap_or_default().into(),
-            scope,
-        };
-        let (event_ids, context) = {
-            let state = self.task_state.lock();
-            let session = state
-                .sessions
-                .iter()
-                .find(|s| s.id == session_id)
-                .ok_or_else(|| anyhow::anyhow!("coordinator session unavailable"))?;
-            (
-                session
-                    .queued_messages
-                    .iter()
-                    .map(|message| message.id)
-                    .collect(),
-                session.pending_provider_context.clone().unwrap_or_default(),
-            )
-        };
-        let instructions = self.boss.canonical_boss_instructions(session_id)?;
-        let package = CoordinatorPackage {
-            binding,
-            content: ContinuityPackage {
-                identity_revision: identity_revision.clone(),
-                scope,
-                instructions,
-                context,
-            },
-            event_ids,
-            // Employee identities enumerate work independently of a bounded digest.
-            work_ids: document
-                .employees
-                .iter()
-                .map(|e| e.session_id)
-                .chain(document.planning.iter().map(|p| p.id))
-                .chain(document.outcomes.iter().map(|o| o.id))
-                .chain(document.deliverables.iter().map(|d| d.id))
-                .collect(),
-            effect_ids: ContinuityLedger::load(&self.boss_continuity_path())?
-                .coordinator_effects
-                .iter()
-                .filter(|e| e.resolution.is_none())
-                .map(|e| e.id.clone())
-                .collect(),
-        };
-        let digest = package.exact_content()?.digest()?;
-        let id = format!("coordinator-startup:{session_id}:{digest}");
-        // Model absence blocks admission, but must not discard staged content.
-        ContinuityLedger::update(&self.boss_continuity_path(), |ledger| {
-            ledger.prepare_coordinator(&id, &package, crate::model::unix_time())
-        })??;
-        let expected = StartupBudgetBinding {
-            provider,
-            runtime_version: String::new(),
-            model: package.binding.model,
-            configuration_revision: String::new(),
-            instruction_revision: identity_revision,
-            runtime_id,
-            generation: journal.generation,
-            package_digest: digest,
-            operation_id: Uuid::new_v4(),
-        };
-        // No PATH/config-file inference and no copying evidence into expectations.
-        let result = validate_startup_budget(&expected, None);
-        anyhow::bail!(
-            "Boss coordination paused: startup contract unavailable ({:?}); continuity preserved",
-            result.err()
+    /// Ordinary chat may launch under its existing authority. Replacement
+    /// activation keeps the separate strict provider contract; a frozen or
+    /// incident-fenced session cannot bypass it by starting an ordinary runtime.
+    pub(super) fn ensure_coordinator_available(&self, session_id: Uuid) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.boss_fenced_chat(session_id),
+            "Boss session is a fenced generation; the active chat owns coordination"
         );
+        let state = self.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .ok_or_else(|| anyhow!("coordinator session unavailable"))?;
+        anyhow::ensure!(
+            session.archived_at.is_none(),
+            "coordinator session archived"
+        );
+        drop(state);
+        anyhow::ensure!(
+            !self.boss_incident_fenced(session_id),
+            "Boss session is fenced while a provider-compaction refresh is pending"
+        );
+        Ok(())
     }
 }

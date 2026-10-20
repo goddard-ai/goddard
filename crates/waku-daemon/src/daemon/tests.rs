@@ -20122,14 +20122,13 @@ fn chain_exception_report_dedupes_across_boss_rotation() {
         .iter()
         .find(|s| s.id == boss)
         .unwrap()
-        .queued_messages
+        .messages
         .iter()
         .find(|m| m.content.contains("Employee chain"))
         .unwrap()
         .id;
-    // Close the turn the report opened so the settle gate sees a quiet
-    // chat, then refresh under an incident — the parked-work carry is
-    // exercised the same way either way.
+    // Settle the delivered report, then refresh under an incident. Its
+    // transcript identity must prevent another delivery on the successor.
     record_boss_event(
         &backend.task_state,
         &backend.task_store,
@@ -20149,21 +20148,21 @@ fn chain_exception_report_dedupes_across_boss_rotation() {
     install_legacy_boss_rotation(&backend, now + 1).unwrap();
     let successor = backend.boss.identity_and_session().1.unwrap();
     assert_ne!(successor, boss);
-    // The unqualified predecessor held the report. Carry it once, preserving
-    // logical identity; repeated drive passes cannot create another report.
+    // The predecessor already received the report. Lineage dedupe prevents
+    // repeated drive passes from waking the successor for the same incident.
     backend.drive_chains();
     backend.drive_chains();
-    assert_eq!(chain_reports(&backend, successor).len(), 1);
-    assert!(chain_reports(&backend, boss).is_empty());
+    assert!(chain_reports(&backend, successor).is_empty());
+    assert_eq!(chain_reports(&backend, boss).len(), 1);
     assert!(
         backend
             .task_state
             .lock()
             .sessions
             .iter()
-            .find(|s| s.id == successor)
+            .find(|s| s.id == boss)
             .unwrap()
-            .queued_messages
+            .messages
             .iter()
             .any(|m| m.id == original_report)
     );
