@@ -1487,31 +1487,89 @@ fn sidebar_bottom_aligned_offset(
     }
 }
 
-fn reveal_sidebar_list_row(list: &ListState, rows: &[SidebarRow], index: usize) {
-    let viewport = list.viewport_bounds();
-    if viewport.size.height <= Pixels::ZERO {
-        return;
+fn sidebar_reveal_offset(
+    rows: &[SidebarRow],
+    index: usize,
+    top: ListOffset,
+    viewport_height: Pixels,
+) -> Option<ListOffset> {
+    if viewport_height <= Pixels::ZERO {
+        return None;
     }
-    if let Some(item) = list.bounds_for_item(index) {
-        if item.top() >= viewport.top() && item.bottom() <= viewport.bottom() {
-            return;
-        }
-        list.scroll_to_reveal_item(index);
-    } else if index <= list.logical_scroll_top().item_ix {
-        list.scroll_to(ListOffset {
+    let item_top = if index >= top.item_ix {
+        rows[top.item_ix..index]
+            .iter()
+            .copied()
+            .map(sidebar_row_height)
+            .sum::<Pixels>()
+            - top.offset_in_item
+    } else {
+        -rows[index..top.item_ix.min(rows.len())]
+            .iter()
+            .copied()
+            .map(sidebar_row_height)
+            .sum::<Pixels>()
+            - top.offset_in_item
+    };
+    if item_top < Pixels::ZERO {
+        Some(ListOffset {
             item_ix: index,
             offset_in_item: Pixels::ZERO,
-        });
+        })
+    } else if item_top + sidebar_row_height(rows[index]) > viewport_height {
+        Some(sidebar_bottom_aligned_offset(rows, index, viewport_height))
     } else {
-        // Off-screen rows have not necessarily been measured yet. Their
-        // sidebar heights are fixed, so align a lower target to the viewport
-        // bottom just like scrollIntoView({ block: "nearest" }).
-        list.scroll_to(sidebar_bottom_aligned_offset(
-            rows,
-            index,
-            viewport.size.height,
-        ));
+        None
     }
+}
+
+fn reveal_sidebar_list_row(list: &ListState, rows: &[SidebarRow], index: usize) {
+    // Changed rows may not have measured bounds yet. Fixed sidebar heights
+    // let us check visibility without mistaking an unmeasured row for a hidden one.
+    if let Some(offset) = sidebar_reveal_offset(
+        rows,
+        index,
+        list.logical_scroll_top(),
+        list.viewport_bounds().size.height,
+    ) {
+        list.scroll_to(offset);
+    }
+}
+
+fn splice_sidebar_rows(list: &ListState, previous: &[SidebarRow], rows: &[SidebarRow]) {
+    let prefix = previous
+        .iter()
+        .zip(rows)
+        .take_while(|(a, b)| a == b)
+        .count();
+    let suffix = previous[prefix..]
+        .iter()
+        .rev()
+        .zip(rows[prefix..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let top = list.logical_scroll_top();
+    // Keep the same row under the viewport's top edge even when a changed
+    // range surrounds it. If that row departed, retain its row offset.
+    let anchor = previous.get(top.item_ix).and_then(|row| {
+        rows.iter()
+            .enumerate()
+            .filter(|(_, candidate)| *candidate == row)
+            .min_by_key(|(index, _)| index.abs_diff(top.item_ix))
+            .map(|(index, _)| index)
+    });
+    list.splice(
+        prefix..previous.len() - suffix,
+        rows.len() - prefix - suffix,
+    );
+    list.clone()
+        .with_uniform_item_height(px(SIDEBAR_SESSION_ROW_HEIGHT));
+    list.scroll_to(ListOffset {
+        item_ix: anchor
+            .unwrap_or(top.item_ix)
+            .min(rows.len().saturating_sub(1)),
+        offset_in_item: top.offset_in_item,
+    });
 }
 
 impl Waku {
@@ -4579,7 +4637,7 @@ impl Waku {
     }
 
     /// Keep the virtualized list in sync with the current row snapshot.
-    /// Rows are cheap values, so only the minimal changed suffix is spliced,
+    /// Rows are cheap values, so only the changed middle is spliced,
     /// preserving scroll position and measured heights across unrelated churn
     /// (e.g. the active session's `updated_at` bumping on every stream tick).
     fn sync_sidebar_rows(&self, rows: &[SidebarRow]) {
@@ -4587,14 +4645,7 @@ impl Waku {
         if cached.as_slice() == rows {
             return;
         }
-        let prefix = cached
-            .iter()
-            .zip(rows.iter())
-            .take_while(|(a, b)| a == b)
-            .count();
-        let old_count = cached.len();
-        *cached = rows.to_vec();
-        if old_count == 0 {
+        if cached.is_empty() {
             self.sidebar_list_state
                 .reset_with_uniform_height(rows.len(), px(SIDEBAR_SESSION_ROW_HEIGHT));
             // The offset persisted at quit can only land once rows exist.
@@ -4602,14 +4653,9 @@ impl Waku {
                 self.sidebar_list_state.scroll_to(offset);
             }
         } else {
-            self.sidebar_list_state
-                .splice(prefix..old_count, rows.len() - prefix);
-            // Newly inserted rows have no measured height yet; give them the
-            // uniform hint so the scrollbar keeps a correct total height.
-            self.sidebar_list_state
-                .clone()
-                .with_uniform_item_height(px(SIDEBAR_SESSION_ROW_HEIGHT));
+            splice_sidebar_rows(&self.sidebar_list_state, &cached, rows);
         }
+        *cached = rows.to_vec();
     }
 
     /// The first not-busy session at or below `position` in the current
@@ -9721,6 +9767,55 @@ mod tests {
             pending
         ));
         assert!(sidebar_session_selected(Some(current), None, current));
+    }
+
+    #[test]
+    fn archive_row_updates_preserve_the_viewport_anchor() {
+        let rows: Vec<_> = (1..=40)
+            .map(|id| SidebarRow::Session(Uuid::from_u128(id)))
+            .collect();
+        let list = ListState::new(rows.len(), ListAlignment::Top, px(0.0));
+        list.scroll_to(ListOffset {
+            item_ix: 20,
+            offset_in_item: px(7.0),
+        });
+
+        // Archive above the viewport and change another row below it. The
+        // changed range spans the anchor, as happens when date groups change.
+        let mut updated = rows.clone();
+        updated.remove(5);
+        updated[30] = SidebarRow::Session(Uuid::from_u128(100));
+        splice_sidebar_rows(&list, &rows, &updated);
+        let top = list.logical_scroll_top();
+        assert_eq!(updated[top.item_ix], rows[20]);
+        assert_eq!(top.offset_in_item, px(7.0));
+
+        // Archiving the top row keeps its successor in the same slot.
+        let mut archived_top = updated.clone();
+        archived_top.remove(top.item_ix);
+        splice_sidebar_rows(&list, &updated, &archived_top);
+        assert_eq!(list.logical_scroll_top().item_ix, top.item_ix);
+        assert_eq!(list.logical_scroll_top().offset_in_item, px(7.0));
+    }
+
+    #[test]
+    fn archive_landing_scrolls_only_when_the_destination_is_clipped() {
+        let rows: Vec<_> = (1..=40)
+            .map(|id| SidebarRow::Session(Uuid::from_u128(id)))
+            .collect();
+        let top = ListOffset {
+            item_ix: 20,
+            offset_in_item: px(7.0),
+        };
+        let height = sidebar_row_height(rows[20]);
+        // This also holds immediately after splicing, before rows are measured.
+        assert!(sidebar_reveal_offset(&rows, 21, top, height * 4.0).is_none());
+        let above = sidebar_reveal_offset(&rows, 20, top, height * 4.0).unwrap();
+        assert_eq!(above.item_ix, 20);
+        assert_eq!(above.offset_in_item, px(0.0));
+        let below = sidebar_reveal_offset(&rows, 24, top, height * 4.0).unwrap();
+        assert_eq!(below.item_ix, 21);
+        assert_eq!(below.offset_in_item, px(0.0));
     }
 
     #[test]

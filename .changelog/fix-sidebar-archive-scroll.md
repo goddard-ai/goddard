@@ -1,0 +1,1 @@
+- Archiving the selected task preserves the sidebar scroll position, moves only enough to reveal the next active task, and briefly highlights its row.

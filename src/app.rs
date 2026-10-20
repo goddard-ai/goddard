@@ -3400,7 +3400,7 @@ pub struct Waku {
     /// Pivot a ⌘⇧-click range grows from: the last row a modified click
     /// touched, kept even when a toggle removed it from the set.
     sidebar_multi_selection_anchor: Option<sidebar::SidebarSelection>,
-    /// Short accent wash on a ⌘D jump past the adjacent sidebar sessions.
+    /// Short accent wash on archive landings and non-adjacent ⌘D jumps.
     sidebar_jump_flash: Option<(Uuid, u64)>,
     sidebar_jump_flash_generation: u64,
     /// One stable field reused across sidebar rows so virtualization never

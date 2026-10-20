@@ -2988,6 +2988,14 @@ impl Waku {
         } else {
             self.save();
         }
+        if was_selected {
+            if let Some(session_id) = self.state.selected_session {
+                // Activation can change grouping (for example by clearing
+                // attention), so reveal against the final destination rows.
+                self.reveal_sidebar_session(session_id);
+            }
+            self.flash_sidebar_session(self.state.selected_session, cx);
+        }
         self.show_archived_toast(session_id);
         cx.notify();
     }
@@ -4359,43 +4367,49 @@ impl Waku {
         let dormant = dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
         match self.next_unread_sweep_target(&rows, selected, pending, &dormant) {
             Some(target) => {
-                self.sidebar_jump_flash_generation =
-                    self.sidebar_jump_flash_generation.wrapping_add(1);
-                let generation = self.sidebar_jump_flash_generation;
-                // Only a session row can flash — a deliverable's landing is
-                // its boss chat, which carries no row to wash.
+                // Deliverables land in a boss chat, which has no session row.
                 let flash_target = match target {
-                    UnreadTarget::Session(session_id) => Some(session_id),
-                    UnreadTarget::Deliverable(..) => None,
+                    UnreadTarget::Session(session_id)
+                        if sidebar::sidebar_jump_skips_session(
+                            &rows,
+                            pending.or(selected),
+                            session_id,
+                        ) =>
+                    {
+                        Some(session_id)
+                    }
+                    _ => None,
                 };
-                self.sidebar_jump_flash = flash_target
-                    .filter(|session_id| {
-                        self.sidebar_visible
-                            && !self.big_picture.is_open()
-                            && sidebar::sidebar_jump_skips_session(
-                                &rows,
-                                pending.or(selected),
-                                *session_id,
-                            )
-                    })
-                    .map(|session_id| (session_id, generation));
-                if let Some(flash) = self.sidebar_jump_flash {
-                    cx.spawn(async move |this, cx| {
-                        cx.background_executor()
-                            .timer(Duration::from_millis(450))
-                            .await;
-                        let _ = this.update(cx, |this, cx| {
-                            if this.sidebar_jump_flash == Some(flash) {
-                                this.sidebar_jump_flash = None;
-                                cx.notify();
-                            }
-                        });
-                    })
-                    .detach();
-                }
+                self.flash_sidebar_session(flash_target, cx);
                 self.go_to_unread_target(target, window, cx);
             }
             None => self.new_session_action(&NewSession, window, cx),
+        }
+    }
+
+    pub(super) fn flash_sidebar_session(
+        &mut self,
+        session_id: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) {
+        self.sidebar_jump_flash_generation = self.sidebar_jump_flash_generation.wrapping_add(1);
+        let generation = self.sidebar_jump_flash_generation;
+        self.sidebar_jump_flash = session_id
+            .filter(|_| self.sidebar_visible && !self.big_picture.is_open())
+            .map(|id| (id, generation));
+        if let Some(flash) = self.sidebar_jump_flash {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(450))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.sidebar_jump_flash == Some(flash) {
+                        this.sidebar_jump_flash = None;
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
         }
     }
 
