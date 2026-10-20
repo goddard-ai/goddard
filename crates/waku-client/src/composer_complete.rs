@@ -388,6 +388,57 @@ pub fn filter_scored(
         .collect()
 }
 
+/// Match `@` candidates with compact fuzzy matches only. Priority groups win
+/// over fuzzy score; weak matches are removed before applying the result cap.
+pub fn filter_mentions(
+    haystack: &[&str],
+    query: &str,
+    matcher: &mut Matcher,
+    cap: usize,
+    priority: impl Fn(usize) -> usize,
+) -> Vec<(usize, Vec<u32>)> {
+    if query.trim().is_empty() {
+        let mut indexes = (0..haystack.len()).collect::<Vec<_>>();
+        indexes.sort_by_key(|&index| priority(index));
+        indexes.truncate(cap);
+        return indexes
+            .into_iter()
+            .map(|index| (index, Vec::new()))
+            .collect();
+    }
+    let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+    let mut buf = Vec::new();
+    let mut scored = Vec::new();
+    let mut positions = Vec::new();
+    for (index, text) in haystack.iter().enumerate() {
+        positions.clear();
+        let Some(score) = pattern.indices(Utf32Str::new(text, &mut buf), matcher, &mut positions)
+        else {
+            continue;
+        };
+        positions.sort_unstable();
+        positions.dedup();
+        // At least half the matched span must be query characters, and no
+        // individual gap may skip more than two characters.
+        let compact = positions
+            .first()
+            .zip(positions.last())
+            .is_some_and(|(first, last)| {
+                (last - first + 1) as usize <= positions.len() * 2
+                    && positions.windows(2).all(|pair| pair[1] - pair[0] <= 3)
+            });
+        if compact {
+            scored.push((priority(index), score, index, positions.clone()));
+        }
+    }
+    scored.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+    scored.truncate(cap);
+    scored
+        .into_iter()
+        .map(|(_, _, index, positions)| (index, positions))
+        .collect()
+}
+
 pub fn filter_commands(
     commands: &[SlashCommand],
     query: &str,
@@ -650,6 +701,38 @@ pub fn highlight_byte_ranges(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mention_filter_rejects_scattered_matches_before_capping() {
+        let candidates = [
+            "a-very-long-b-very-long-c",
+            "abc",
+            "a_b_c",
+            "abc preferred",
+            "Äbc",
+        ];
+        let mut matcher = matcher();
+        let matches = filter_mentions(&candidates, "abc", &mut matcher, 2, |index| {
+            usize::from(index != 3)
+        });
+        assert_eq!(
+            matches.iter().map(|(index, _)| *index).collect::<Vec<_>>(),
+            vec![3, 1]
+        );
+        let all = filter_mentions(&candidates, "abc", &mut matcher, 10, |_| 0);
+        assert!(!all.iter().any(|(index, _)| *index == 0));
+        assert!(all.iter().any(|(index, _)| *index == 2));
+        assert!(filter_mentions(&candidates, "unrelated", &mut matcher, 10, |_| 0).is_empty());
+        let empty = filter_mentions(&candidates, "", &mut matcher, 2, |index| {
+            usize::from(index != 3)
+        });
+        assert_eq!(
+            empty.iter().map(|(index, _)| *index).collect::<Vec<_>>(),
+            vec![3, 0]
+        );
+        // The general-purpose matcher remains permissive for other surfaces.
+        assert!(filter_scored(&candidates[..1], "abc", &mut matcher, 1).len() == 1);
+    }
 
     #[test]
     fn side_submission_distinguishes_bare_command_from_prompt() {

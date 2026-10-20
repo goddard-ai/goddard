@@ -118,19 +118,26 @@ impl FileFinderUi {
 }
 
 fn transcript_file_link_paths(session: &AgentSession, root: &Path) -> Vec<String> {
+    transcript_mention_paths(&session.messages, &session.transcript_blocks, root, false)
+}
+
+/// Extract mentions without touching the filesystem. Autocomplete runs this on
+/// a background snapshot; the file finder keeps its existing link-only policy.
+pub(super) fn transcript_mention_paths(
+    messages: &[Message],
+    blocks: &[TranscriptBlock],
+    root: &Path,
+    include_plain_paths: bool,
+) -> Vec<String> {
     let mut paths = BTreeSet::new();
-    for message in &session.messages {
+    for message in messages.iter().filter(|message| !message.hidden) {
         let content = super::transcript::display_message_content(message);
         let tree = md::parser::parse(&content);
         for block in &tree.blocks {
-            collect_transcript_link_block(&block.block, root, &mut paths);
+            collect_transcript_link_block(&block.block, root, &mut paths, include_plain_paths);
         }
     }
-    for activity in session
-        .transcript_blocks
-        .iter()
-        .flat_map(|block| &block.activities)
-    {
+    for activity in blocks.iter().flat_map(|block| &block.activities) {
         if let Some(target) = super::components::activity_file_link_path(activity) {
             let path = super::right_panel::markdown_file_link_path(&target)
                 .unwrap_or_else(|| PathBuf::from(target));
@@ -144,28 +151,29 @@ fn collect_transcript_link_block(
     block: &md::parser::Block,
     root: &Path,
     paths: &mut BTreeSet<String>,
+    include_plain_paths: bool,
 ) {
     use md::parser::Block;
 
     match block {
         Block::Paragraph { runs } | Block::Heading { runs, .. } => {
-            collect_transcript_link_runs(runs, root, paths)
+            collect_transcript_link_runs(runs, root, paths, include_plain_paths)
         }
         Block::BlockQuote { children } => {
             for child in children {
-                collect_transcript_link_block(child, root, paths);
+                collect_transcript_link_block(child, root, paths, include_plain_paths);
             }
         }
         Block::List { items, .. } => {
             for item in items {
                 for child in &item.blocks {
-                    collect_transcript_link_block(child, root, paths);
+                    collect_transcript_link_block(child, root, paths, include_plain_paths);
                 }
             }
         }
         Block::Table { header, rows, .. } => {
             for cell in header.iter().chain(rows.iter().flat_map(|row| row.iter())) {
-                collect_transcript_link_runs(cell, root, paths);
+                collect_transcript_link_runs(cell, root, paths, include_plain_paths);
             }
         }
         Block::Image { .. }
@@ -180,10 +188,18 @@ fn collect_transcript_link_runs(
     runs: &[md::parser::InlineRun],
     root: &Path,
     paths: &mut BTreeSet<String>,
+    include_plain_paths: bool,
 ) {
     let mut text = String::new();
     let mut excluded = Vec::<Range<usize>>::new();
     for run in runs {
+        if include_plain_paths && run.style.code {
+            insert_transcript_file_path(
+                root,
+                Path::new(split_position_suffix(run.text.trim_start_matches('@')).0),
+                paths,
+            );
+        }
         if let Some(target) = run.style.link.as_deref()
             && let Some(path) = super::right_panel::markdown_file_link_path(target)
         {
@@ -193,6 +209,27 @@ fn collect_transcript_link_runs(
         text.push_str(&run.text);
         if run.style.code || run.style.link.is_some() {
             excluded.push(start..text.len());
+        }
+    }
+    if include_plain_paths {
+        let mut offset = 0;
+        for token in text.split_whitespace() {
+            let start = offset + text[offset..].find(token).unwrap_or(0);
+            offset = start + token.len();
+            if excluded
+                .iter()
+                .any(|range| range.start < offset && start < range.end)
+            {
+                continue;
+            }
+            let token = token.trim_matches(|character| {
+                matches!(
+                    character,
+                    ',' | ';' | '!' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '\'' | '"'
+                )
+            });
+            let path = split_position_suffix(token.trim_end_matches('.').trim_start_matches('@')).0;
+            insert_transcript_file_path(root, Path::new(path), paths);
         }
     }
     for capture in TRANSCRIPT_FILE_MENTION.captures_iter(&text) {

@@ -82,11 +82,10 @@ pub(super) struct ComposerSessionRef {
     pub planning: bool,
 }
 
-/// Session rows cap under `@` so a broad query still leaves files reachable.
+/// Each non-file group has its own cap so later kinds remain reachable.
 const SESSION_MENTION_CAP: usize = 8;
 
-/// Reference rows share the same cap for the same reason — the `@` list is
-/// a mention list first, never a second file picker.
+/// Each reference kind has a separate cap within the ordered mention list.
 const REF_MENTION_CAP: usize = 8;
 
 pub(super) fn rank_reference_mentions(
@@ -117,31 +116,98 @@ pub(super) fn rank_reference_mentions(
         .map(|item| item.name.as_str())
         .collect::<Vec<_>>();
     let ranked =
-        composer_complete::filter_scored(&project_names, query, matcher, REF_MENTION_CAP)
+        composer_complete::filter_mentions(&project_names, query, matcher, REF_MENTION_CAP, |_| 0)
             .into_iter()
             .map(|(index, positions)| Scored {
                 item: (*projects[index]).clone(),
                 positions,
             })
             .collect::<Vec<_>>();
-    let project_count = ranked.len();
-    let remaining = REF_MENTION_CAP.saturating_sub(project_count);
     let mut other_ranked = Vec::new();
-    if remaining > 0 {
-        let names = references
+    for kind in [
+        AtomRefKind::Persona,
+        AtomRefKind::Deliverable,
+        AtomRefKind::MemoryBucket,
+        AtomRefKind::Automation,
+    ] {
+        let candidates = references
+            .iter()
+            .filter(|reference| reference.kind == kind)
+            .collect::<Vec<_>>();
+        let names = candidates
             .iter()
             .map(|item| item.name.as_str())
             .collect::<Vec<_>>();
         other_ranked.extend(
-            composer_complete::filter_scored(&names, query, matcher, remaining)
+            composer_complete::filter_mentions(&names, query, matcher, REF_MENTION_CAP, |_| 0)
                 .into_iter()
                 .map(|(index, positions)| Scored {
-                    item: references[index].clone(),
+                    item: (*candidates[index]).clone(),
                     positions,
                 }),
         );
     }
     (ranked, other_ranked)
+}
+
+/// Prefer transcript-mentioned entries before applying the file cap. Each
+/// indexed path is visited once, so a mentioned file never produces a duplicate.
+pub(super) fn rank_file_mentions(
+    files: &[FileEntry],
+    mentioned: &HashSet<String>,
+    query: &str,
+    matcher: &mut Matcher,
+) -> Vec<Scored<FileEntry>> {
+    let paths = files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+    composer_complete::filter_mentions(
+        &paths,
+        query,
+        matcher,
+        composer_complete::FILTER_CAP,
+        |index| usize::from(!mentioned.contains(files[index].path.trim_end_matches('/'))),
+    )
+    .into_iter()
+    .map(|(index, positions)| Scored {
+        item: files[index].clone(),
+        positions,
+    })
+    .collect()
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct TranscriptMentionKey {
+    session: Uuid,
+    root: PathBuf,
+    cursor: Option<waku_protocol::model::RuntimeEventCursor>,
+    updated_at: u64,
+    messages: usize,
+    last_message: Option<(Uuid, usize)>,
+    blocks: usize,
+    last_activities: usize,
+}
+
+impl TranscriptMentionKey {
+    fn new(session: &AgentSession, root: &Path) -> Self {
+        Self {
+            session: session.id,
+            root: root.to_path_buf(),
+            cursor: session.runtime_event_cursor,
+            updated_at: session.updated_at,
+            messages: session.messages.len(),
+            last_message: session
+                .messages
+                .last()
+                .map(|message| (message.id, message.content.len())),
+            blocks: session.transcript_blocks.len(),
+            last_activities: session
+                .transcript_blocks
+                .last()
+                .map_or(0, |block| block.activities.len()),
+        }
+    }
 }
 
 /// Read the stable path from the exact project-reference token emitted by a chip.
@@ -273,6 +339,9 @@ pub(super) struct AutocompleteUi {
     /// newest scheduled fetch — a stale timer must not fire it.
     work_item_scheduled: RefCell<Option<(PathBuf, String)>>,
     work_item_debounce: Cell<u64>,
+    transcript_mention_key: RefCell<Option<TranscriptMentionKey>>,
+    transcript_mentions: RefCell<Rc<HashSet<String>>>,
+    transcript_mentions_ready: Cell<bool>,
 }
 
 impl AutocompleteUi {
@@ -288,6 +357,9 @@ impl AutocompleteUi {
             matcher: RefCell::new(composer_complete::matcher()),
             work_item_scheduled: RefCell::new(None),
             work_item_debounce: Cell::new(0),
+            transcript_mention_key: RefCell::new(None),
+            transcript_mentions: RefCell::new(Rc::new(HashSet::new())),
+            transcript_mentions_ready: Cell::new(true),
         }
     }
 
@@ -957,10 +1029,9 @@ impl Waku {
     }
 
     /// The `@` pool's project references — registered, durable projects the
-    /// boss's `summon` takes by path — minus the surface's own and the
-    /// boss-minted workspaces (a boss chat is not a summon target).
+    /// CLI takes by path, including the current project. Special and
+    /// Boss-minted workspaces are not ordinary project targets.
     fn mentionable_projects(&self, surface: &composer::ComposerCard) -> Vec<composer::ComposerRef> {
-        let current = self.surface_project_id(surface);
         let home = self.home_directory.as_deref();
         self.state
             .projects
@@ -969,7 +1040,6 @@ impl Waku {
                 !project.temporary
                     && !project.is_projectless()
                     && !project.is_friends()
-                    && Some(project.id) != current
                     && !self.boss_ui.projects.contains_key(&project.id)
                     && self.surface_ref_atom_allowed(
                         surface,
@@ -1187,6 +1257,9 @@ impl Waku {
         let Some(ui) = self.surface_ui(surface) else {
             return Rc::new(Vec::new());
         };
+        if trigger.kind == TriggerKind::File && !ui.transcript_mentions_ready.get() {
+            return Rc::new(Vec::new());
+        }
         {
             let memo = ui.results.borrow();
             if let Some(memo) = memo.as_ref().filter(|memo| {
@@ -1213,9 +1286,8 @@ impl Waku {
                     .collect::<Vec<_>>()
             }
             TriggerKind::File => {
-                // Projects lead every other candidate kind. Sessions and
-                // other boss references follow, while files remain reachable
-                // below their separate cap.
+                // Files (transcript mentions first), projects, tasks, then
+                // each Boss reference kind in its explicit precedence.
                 let sessions = self.mentionable_sessions_for(surface);
                 let titles = sessions
                     .iter()
@@ -1231,31 +1303,33 @@ impl Waku {
                     &trigger.query,
                     &mut matcher,
                 );
-                project_rows
+                rank_file_mentions(
+                    &files,
+                    &ui.transcript_mentions.borrow(),
+                    &trigger.query,
+                    &mut matcher,
+                )
+                .into_iter()
+                .map(AutocompleteRow::File)
+                .chain(project_rows.into_iter().map(AutocompleteRow::Ref))
+                .chain(
+                    composer_complete::filter_mentions(
+                        &titles,
+                        &trigger.query,
+                        &mut matcher,
+                        SESSION_MENTION_CAP,
+                        |_| 0,
+                    )
                     .into_iter()
-                    .map(AutocompleteRow::Ref)
-                    .chain(
-                        composer_complete::filter_scored(
-                            &titles,
-                            &trigger.query,
-                            &mut matcher,
-                            SESSION_MENTION_CAP,
-                        )
-                        .into_iter()
-                        .map(|(index, positions)| {
-                            AutocompleteRow::Session(Scored {
-                                item: sessions[index].clone(),
-                                positions,
-                            })
-                        }),
-                    )
-                    .chain(reference_rows.into_iter().map(AutocompleteRow::Ref))
-                    .chain(
-                        composer_complete::filter_files(&files, &trigger.query, &mut matcher)
-                            .into_iter()
-                            .map(AutocompleteRow::File),
-                    )
-                    .collect()
+                    .map(|(index, positions)| {
+                        AutocompleteRow::Session(Scored {
+                            item: sessions[index].clone(),
+                            positions,
+                        })
+                    }),
+                )
+                .chain(reference_rows.into_iter().map(AutocompleteRow::Ref))
+                .collect()
             }
             // The remote search already narrowed `items` to the query; the
             // local pass only re-ranks so digits hit the number and text hits
@@ -1475,6 +1549,97 @@ impl Waku {
             ui.dismissed.set(true);
         }
         cx.notify();
+    }
+
+    /// Prepare transcript preference once per revision, outside rendering.
+    fn schedule_transcript_mentions(
+        &self,
+        surface: &composer::ComposerCard,
+        cx: &mut Context<Self>,
+    ) {
+        let session = match surface {
+            composer::ComposerCard::Main => self.composer_session(),
+            composer::ComposerCard::SideChat { session_id, .. } => self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == *session_id),
+        };
+        let Some(ui) = self.surface_ui(surface) else {
+            return;
+        };
+        let Some((session, root)) = session.zip(self.surface_workspace(surface)) else {
+            if ui.transcript_mention_key.borrow_mut().take().is_some() {
+                *ui.transcript_mentions.borrow_mut() = Rc::new(HashSet::new());
+                ui.transcript_mentions_ready.set(true);
+                *ui.results.borrow_mut() = None;
+            }
+            return;
+        };
+        let key = TranscriptMentionKey::new(session, root);
+        if ui.transcript_mention_key.borrow().as_ref() == Some(&key) {
+            return;
+        }
+        let same_context = ui
+            .transcript_mention_key
+            .borrow()
+            .as_ref()
+            .is_some_and(|old| old.session == key.session && old.root == key.root);
+        if !same_context {
+            ui.transcript_mentions_ready.set(false);
+            *ui.transcript_mentions.borrow_mut() = Rc::new(HashSet::new());
+            *ui.results.borrow_mut() = None;
+        }
+        *ui.transcript_mention_key.borrow_mut() = Some(key.clone());
+        let surface = surface.clone();
+        // Snapshot after the render lease is released. Parse on the background
+        // executor, and discard results if the task or transcript has changed.
+        cx.spawn(async move |waku, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(150))
+                .await;
+            let snapshot = waku
+                .update(cx, |waku, _| {
+                    let ui = waku.surface_ui(&surface)?;
+                    if ui.transcript_mention_key.borrow().as_ref() != Some(&key) {
+                        return None;
+                    }
+                    let session = waku
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == key.session)?;
+                    Some((session.messages.clone(), session.transcript_blocks.clone()))
+                })
+                .ok()
+                .flatten();
+            let Some((messages, blocks)) = snapshot else {
+                return;
+            };
+            let root = key.root.clone();
+            let paths = cx
+                .background_executor()
+                .spawn(async move {
+                    super::file_finder::transcript_mention_paths(&messages, &blocks, &root, true)
+                        .into_iter()
+                        .collect::<HashSet<_>>()
+                })
+                .await;
+            waku.update(cx, |waku, cx| {
+                let Some(ui) = waku.surface_ui(&surface) else {
+                    return;
+                };
+                if ui.transcript_mention_key.borrow().as_ref() != Some(&key) {
+                    return;
+                }
+                *ui.transcript_mentions.borrow_mut() = Rc::new(paths);
+                ui.transcript_mentions_ready.set(true);
+                *ui.results.borrow_mut() = None;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Schedule the remote `gh` search behind a `#` trigger, debounced so a
@@ -1711,6 +1876,9 @@ impl Waku {
         let ui = self.surface_ui(surface)?;
         let trigger = self.composer_trigger_for(surface, window, cx)?;
         self.schedule_work_item_search(surface, &trigger, cx);
+        if trigger.kind == TriggerKind::File {
+            self.schedule_transcript_mentions(surface, cx);
+        }
         // The bucket and memory-file pools are lazily fetched: one pull
         // each per boss the first time a boss surface's mention list draws.
         if trigger.kind == TriggerKind::File
@@ -1722,7 +1890,10 @@ impl Waku {
         let rows = self.autocomplete_rows_for(surface, &trigger);
         let (loading, hint) = match trigger.kind {
             TriggerKind::Command => (self.surface_commands_loading(surface), None),
-            TriggerKind::File => (self.surface_files_loading(surface), None),
+            TriggerKind::File => (
+                self.surface_files_loading(surface) || !ui.transcript_mentions_ready.get(),
+                None,
+            ),
             TriggerKind::WorkItem => {
                 let workspace = self.surface_workspace(surface);
                 let state = workspace.and_then(|path| self.work_item_mentions.get(path));

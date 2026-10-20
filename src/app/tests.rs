@@ -1,6 +1,6 @@
 use super::autocomplete::{
-    is_boss_reference_candidate, project_reference_target, rank_reference_mentions,
-    recent_project_targets_in_messages, session_mention_candidate,
+    is_boss_reference_candidate, project_reference_target, rank_file_mentions,
+    rank_reference_mentions, recent_project_targets_in_messages, session_mention_candidate,
 };
 use super::close_dialog::busy_owned_session_counts;
 use super::composer::{
@@ -1261,6 +1261,77 @@ fn session_mentions_offer_only_the_composers_project() {
     assert!(!session_mention_candidate(&same, None, true));
     // A composer with no draft slot has no project to scope to.
     assert!(session_mention_candidate(&foreign, None, false));
+}
+
+#[test]
+fn transcript_mentions_prioritize_indexed_files_and_directories() {
+    let root = std::path::Path::new("/workspace");
+    let messages = vec![Message::new(
+        MessageRole::Assistant,
+        "See [file](/workspace/src/zebra.rs) and `src/nested/`. Also `src/zebra.rs:12` and ./src/plain.rs. [foreign](/elsewhere/outside.rs)",
+    )];
+    let mentioned = super::file_finder::transcript_mention_paths(&messages, &[], root, true)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    assert!(mentioned.contains("src/zebra.rs"));
+    assert!(mentioned.contains("src/nested"));
+    assert!(mentioned.contains("src/plain.rs"));
+    assert!(!mentioned.contains("outside.rs"));
+    let files = ["src/alpha.rs", "src/nested/", "src/zebra.rs"].map(|path| {
+        crate::composer_complete::FileEntry {
+            path: path.into(),
+            is_dir: path.ends_with('/'),
+        }
+    });
+    let mut matcher = crate::composer_complete::matcher();
+    let rows = rank_file_mentions(&files, &mentioned, "", &mut matcher);
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.item.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["src/nested/", "src/zebra.rs", "src/alpha.rs"]
+    );
+    assert_eq!(
+        rank_file_mentions(&files, &mentioned, "zebra", &mut matcher).len(),
+        1
+    );
+    assert!(rank_file_mentions(&files, &mentioned, "missing", &mut matcher).is_empty());
+}
+
+#[test]
+fn reference_mentions_keep_kind_precedence_and_separate_caps() {
+    let reference = |kind, name: &str| ComposerRef {
+        kind,
+        name: name.to_owned().into(),
+        target: name.to_owned().into(),
+        detail: "".into(),
+    };
+    let projects = (0..10)
+        .map(|index| reference(AtomRefKind::Project, &format!("project {index}")))
+        .collect::<Vec<_>>();
+    let kinds = [
+        AtomRefKind::Persona,
+        AtomRefKind::Deliverable,
+        AtomRefKind::MemoryBucket,
+        AtomRefKind::Automation,
+    ];
+    let references = kinds
+        .iter()
+        .rev()
+        .map(|&kind| reference(kind, "match"))
+        .collect::<Vec<_>>();
+    let (projects, refs) = rank_reference_mentions(
+        &projects,
+        &references,
+        &[],
+        "",
+        &mut crate::composer_complete::matcher(),
+    );
+    assert_eq!(projects.len(), 8);
+    assert_eq!(
+        refs.iter().map(|row| row.item.kind).collect::<Vec<_>>(),
+        kinds
+    );
 }
 
 #[test]
