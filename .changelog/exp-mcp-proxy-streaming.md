@@ -1,0 +1,1 @@
+- MCP integrations: tools from connected services that stream their responses no longer hang or fail in agents, and an unreachable service now reports an error instead of leaving the agent waiting.
