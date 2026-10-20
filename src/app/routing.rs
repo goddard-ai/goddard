@@ -441,7 +441,13 @@ impl Waku {
             return None;
         }
         let model = self.model_metadata_for_session(session)?;
-        let efforts = model.reasoning_efforts.clone();
+        // Any stored goal owns the effort until it is cleared, including
+        // paused or completed goals. Model handoffs remain independent.
+        let efforts = if session.thread_goal.is_none() {
+            model.reasoning_efforts.clone()
+        } else {
+            Vec::new()
+        };
         let handoff = self.model_handoff_for_session(session).filter(|_| {
             session
                 .turns
@@ -522,10 +528,12 @@ impl Waku {
         {
             return;
         }
+        // A goal may have been set while the evaluation was in flight.
+        let effort = decision.effort.filter(|_| session.thread_goal.is_none());
         let handoff = decision.handoff.filter(|(expected, _)| {
             self.model_handoff_for_session(session).as_ref() == Some(expected)
         });
-        if handoff.is_none() && decision.effort.is_none() {
+        if handoff.is_none() && effort.is_none() {
             return;
         }
         let previous = (
@@ -551,7 +559,7 @@ impl Waku {
             session.reasoning_effort = target.target.effort.clone().or(effort);
             session.service_tier = tier;
             session.context_window = window;
-        } else if let Some(effort) = decision.effort {
+        } else if let Some(effort) = effort {
             session.reasoning_effort = Some(effort);
         }
         let applied = self

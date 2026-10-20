@@ -1,0 +1,1 @@
+- Tasks with a goal skip Jev's per-turn reasoning-effort adjustments until the goal is cleared.
