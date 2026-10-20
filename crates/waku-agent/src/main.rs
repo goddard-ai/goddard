@@ -801,7 +801,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent merge submit".to_owned(),
         ),
         "wireframe" => (
-            json!({"PATH":{"positional":true,"required":true,"type":"workspace-relative .wireframe.json file"},"description":"Write the JSON file, then invoke this command to validate it and request a right-panel preview in this task. Requires Settings → Experiments → Wireframes. Live-only: a connected desktop client must receive the request. Minimal document: {\"version\":1,\"name\":\"Design\",\"screens\":[{\"name\":\"Main\",\"width\":800,\"height\":600,\"root\":{\"type\":\"frame\",\"direction\":\"column\",\"gap\":12,\"padding\":16,\"children\":[{\"type\":\"text\",\"text\":\"Hello\",\"role\":\"title\"}]}}]}. Nodes: frame, rect, text, divider. Frames contain children. Sizing: pixels, hug, fill. Surface tones: surface, inset, overlay, ink, accent. Text roles: title, body, caption, label. Text tones: primary, secondary, tertiary, accent."}),
+            json!({"PATH":{"positional":true,"required":true,"type":"workspace-relative .wireframe.json file"},"description":"Write the JSON file, then invoke this command to validate it and request a right-panel preview in this task. Requires Settings → Experiments → Wireframes. See the formatGuide reference for the complete JSON format."}),
             json!({"accepted":{"ok":true},"meaning":"document validated and preview request broadcast; does not confirm a client opened it"}),
             "goddard-agent wireframe designs/main.wireframe.json".to_owned(),
         ),
@@ -844,6 +844,9 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         path,
         json!({"command":path,"help":help,"inputs":inputs,"outputs":output,"example":example,"globalOptions":["--help","--schema","--output text|json"]}),
     );
+    if path == "wireframe" {
+        leaf["formatGuide"] = json!(help::WIREFRAME_GUIDE);
+    }
     if path == "computer js" {
         leaf["inputs"].as_object_mut().unwrap().remove("JSON");
     }
@@ -3902,6 +3905,24 @@ mod tests {
 
     fn args(paths: &[&str]) -> Vec<String> {
         paths.iter().map(|path| (*path).to_owned()).collect()
+    }
+
+    #[test]
+    fn wireframe_help_example_validates_with_the_document_parser() {
+        let contracts = schema();
+        let guide = help::guide(&contracts, "wireframe");
+        let reference = guide["formatGuide"].as_str().unwrap();
+        assert_eq!(contracts["commands"]["wireframe"]["formatGuide"], reference);
+        assert!(help::render(&guide).contains(reference));
+        let example = reference
+            .split_once("```json\n")
+            .unwrap()
+            .1
+            .split_once("```")
+            .unwrap()
+            .0;
+        let document = waku_protocol::wireframe::Wireframe::parse(example).unwrap();
+        assert!(!document.screens.is_empty());
     }
 
     #[test]

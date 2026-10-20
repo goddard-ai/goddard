@@ -1,6 +1,8 @@
 //! Local readable discovery, derived from the same leaf contracts as schemas.
 use serde_json::{Value, json};
 
+pub(super) const WIREFRAME_GUIDE: &str = include_str!("../../../.agents/docs/wireframes.md");
+
 const ORIENTATION: &str = r#"Use command paths, positionals, and flags. JSON is only for documented structured input data
 and output. This guide is local and read-only; listing a capability never grants authorization.
 Full contracts: goddard-agent boss --schema. Focus a family with boss employee --help, or a
@@ -518,7 +520,7 @@ pub(super) fn guide(schema: &Value, family: &str) -> Value {
         let availability = if path.starts_with("boss ") || path.starts_with("computer ") || matches!(path.as_str(), "prompt" | "steer-supervisor") { describe(&leaf["availability"]) } else { authority(path).to_owned() };
         json!({"command":path,"group":group(path),"purpose":purpose(path),"syntax":syntax(path, &leaf["inputs"]),"availability":availability,"inputs":inputs,"constraints":leaf["constraints"],"outcome":describe(&leaf["outputs"]),"example":if path == "boss summon" { json!("goddard-agent boss summon --title 'Audit CLI help' --icon search --text 'Research only; report findings.'") } else { leaf["example"].clone() },"schema":format!("goddard-agent {path} --schema")})
     }).collect();
-    json!({"title":format!("goddard-agent {family} — capability and usage guide"),"orientation":ORIENTATION,"cards":cards,"operationCards":operation_cards(&aggregate, family),"humanReviewActions":aggregate["operations"]["personaDefault"]["actionAvailability"],"scripting":if family == "boss" || family == "boss script" { SCRIPTING } else { "" },"workflow":WORKFLOW})
+    json!({"title":format!("goddard-agent {family} — capability and usage guide"),"orientation":ORIENTATION,"cards":cards,"operationCards":operation_cards(&aggregate, family),"humanReviewActions":aggregate["operations"]["personaDefault"]["actionAvailability"],"scripting":if family == "boss" || family == "boss script" { SCRIPTING } else { "" },"workflow":WORKFLOW,"formatGuide":if family == "wireframe" { WIREFRAME_GUIDE } else { "" }})
 }
 
 pub(super) fn render(guide: &Value) -> String {
@@ -595,6 +597,9 @@ pub(super) fn render(guide: &Value) -> String {
                 card["schema"].as_str().unwrap_or("")
             ));
         }
+    }
+    if let Some(reference) = guide["formatGuide"].as_str().filter(|s| !s.is_empty()) {
+        text.push_str(&format!("\n{reference}\n"));
     }
     if let Some(scripting) = guide["scripting"].as_str().filter(|s| !s.is_empty()) {
         text.push_str(&format!("\nSCRIPTING ROUTES\n{scripting}\n"));
