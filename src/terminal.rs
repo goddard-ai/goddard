@@ -4150,7 +4150,14 @@ fn terminal_rgb(index: usize, theme: Theme) -> Rgb {
             (dim((base >> 16) & 0xff) << 16) | (dim((base >> 8) & 0xff) << 8) | dim(base & 0xff)
         }
         _ => {
-            let rgba: gpui::Rgba = theme.text.into();
+            // OSC 11 queries the background; reporting the foreground here
+            // makes applications infer the opposite light/dark appearance.
+            let color = if index == NamedColor::Background as usize {
+                theme.terminal
+            } else {
+                theme.text
+            };
+            let rgba: gpui::Rgba = color.into();
             return Rgb {
                 r: (rgba.r.clamp(0.0, 1.0) * 255.0) as u8,
                 g: (rgba.g.clamp(0.0, 1.0) * 255.0) as u8,
@@ -4171,6 +4178,48 @@ mod tests {
     use alacritty_terminal::event::VoidListener;
     use alacritty_terminal::vte::ansi::Processor;
     use gpui::{Modifiers, point, size};
+
+    #[test]
+    fn osc_color_queries_report_the_active_terminal_background() {
+        struct ColorReplies {
+            theme: Theme,
+            replies: Arc<Mutex<Vec<String>>>,
+        }
+        impl EventListener for ColorReplies {
+            fn send_event(&self, event: Event) {
+                if let Event::ColorRequest(index, formatter) = event {
+                    self.replies
+                        .lock()
+                        .push(formatter(terminal_rgb(index, self.theme)));
+                }
+            }
+        }
+
+        for (theme, foreground, background) in [
+            (Theme::dark(), "e2e2/e2e2/e2e2", "1515/1515/1515"),
+            (Theme::light(), "2424/2424/2424", "ffff/ffff/ffff"),
+        ] {
+            let replies = Arc::new(Mutex::new(Vec::new()));
+            let listener = ColorReplies {
+                theme,
+                replies: replies.clone(),
+            };
+            let dimensions = TerminalDimensions {
+                columns: 80,
+                rows: 24,
+            };
+            let mut term = Term::new(Config::default(), &dimensions, listener);
+            let mut processor: Processor = Processor::new();
+            processor.advance(&mut term, b"\x1b]10;?\x07\x1b]11;?\x07");
+            assert_eq!(
+                *replies.lock(),
+                [
+                    format!("\x1b]10;rgb:{foreground}\x07"),
+                    format!("\x1b]11;rgb:{background}\x07"),
+                ]
+            );
+        }
+    }
 
     #[cfg(unix)]
     #[test]

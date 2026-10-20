@@ -1,0 +1,1 @@
+- Fixed terminal apps detecting the opposite light or dark theme when querying the integrated terminal's background color.
