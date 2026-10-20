@@ -52,26 +52,6 @@ fn reservation(status: &ResourceStatus, id: Uuid) -> Result<&Reservation> {
         .find(|r| r.id == id)
         .context("reservation ended or wait timed out")
 }
-fn waiting(r: &Reservation, status: &ResourceStatus) -> String {
-    let label = if r.resources.resident_devices > 0 {
-        r.resources.exclusive.join(", ")
-    } else if r.resources.native_builds > 0 {
-        "native build".into()
-    } else {
-        "desktop input".into()
-    };
-    let owner = status
-        .reservations
-        .iter()
-        .find(|h| h.id != r.id && h.granted_at.is_some());
-    match owner {
-        Some(h) => format!(
-            "Waiting for {label}—held by task {} ({})",
-            h.task, h.purpose
-        ),
-        None => format!("Waiting for {label}—queued for host capacity or a user-owned device"),
-    }
-}
 fn acquire(mut payload: Acquire, holder_pid: u32) -> Result<(Uuid, bool)> {
     if payload.parent.is_none() {
         payload.parent = std::env::var(PARENT_ENV)
@@ -96,14 +76,27 @@ fn acquire(mut payload: Acquire, holder_pid: u32) -> Result<(Uuid, bool)> {
             let _ = request(ResourceOperation::Cancel { id });
             bail!("resource wait interrupted");
         }
-        let r = reservation(&status, id)?;
+        let r = match reservation(&status, id) {
+            Ok(r) => r,
+            // The broker drops an expired parked row before the CLI's own
+            // deadline fires — that is a timeout, not a missing row.
+            Err(_) if Instant::now() + Duration::from_secs(2) >= deadline => {
+                bail!(
+                    "resource wait timed out after {}s [request {id}]; last wait: {last_title}",
+                    payload.wait_seconds
+                );
+            }
+            Err(_) => {
+                bail!("reservation ended before it was granted (cancelled or holder exited) [request {id}]")
+            }
+        };
         if r.cancelled || r.released {
             bail!("reservation cancelled");
         }
         if r.granted_at.is_some() {
             return Ok((id, borrowed));
         }
-        let title = waiting(r, &status);
+        let title = r.waiting_title();
         if title != last_title {
             eprintln!("{title} [request {id}]");
             last_title = title;

@@ -394,7 +394,16 @@ impl Broker {
             let waiting_on = (reservation.granted_at.is_none()
                 && !reservation.cancelled
                 && !reservation.released)
-                .then(|| wait_reason(reservation, index, &ledger, &observation, &external_devices));
+                .then(|| {
+                wait_reason(
+                    reservation,
+                    index,
+                    &ledger,
+                    &policy,
+                    &observation,
+                    &external_devices,
+                )
+            });
             ledger.reservations[index].waiting_on = waiting_on;
         }
         // Rename under a stable separate lock: a killed writer leaves either old or new complete JSON.
@@ -832,14 +841,16 @@ fn blocked(
 }
 
 /// Why a parked reservation cannot grant this pass — the named device's
-/// availability first since it is what a user can fix, then the earlier
-/// reservation whose claims stand ahead, then held capacity. Stamped on
-/// the reservation as `waiting_on` so `resource status` names the wait
-/// instead of a bare queue position.
+/// availability first since it is what a user can fix, then the granted
+/// row holding an identical exclusive key, then the earlier reservation
+/// whose claims stand ahead, then each exhausted capacity pool with the
+/// reservations holding it. Stamped on the reservation as `waiting_on`
+/// so `resource status` names the wait instead of a bare queue position.
 fn wait_reason(
     reservation: &Reservation,
     position: usize,
     ledger: &Ledger,
+    policy: &ResourcePolicy,
     observation: &Observation,
     external: &[String],
 ) -> String {
@@ -861,6 +872,18 @@ fn wait_reason(
             return format!("device {device} is running outside Goddard");
         }
     }
+    if let Some((key, holder)) = resources.exclusive.iter().find_map(|key| {
+        ledger
+            .reservations
+            .iter()
+            .find(|held| held.granted_at.is_some() && held.resources.exclusive.contains(key))
+            .map(|held| (key, held))
+    }) {
+        return format!(
+            "device {key} held by {}",
+            holder_label(holder, observation)
+        );
+    }
     if let Some(earlier) = ledger.reservations[..position].iter().find(|earlier| {
         earlier.granted_at.is_none()
             && !earlier.cancelled
@@ -869,31 +892,75 @@ fn wait_reason(
     }) {
         return format!("queued behind an earlier reservation ({})", earlier.id);
     }
-    if let Some(holder) = ledger
-        .reservations
-        .iter()
-        .find(|held| held.granted_at.is_some() && shares_capacity(&held.resources, resources))
-    {
-        return format!("capacity held by task {}", holder.task);
+    let pools: [(&str, u32, u32, fn(&ResourceSet) -> u32); 3] = [
+        (
+            "resident devices",
+            resources.resident_devices,
+            policy.resident_devices,
+            |r| r.resident_devices,
+        ),
+        (
+            "native builds",
+            resources.native_builds,
+            policy.native_builds,
+            |r| r.native_builds,
+        ),
+        (
+            "desktop input",
+            resources.desktop_input,
+            policy.desktop_input,
+            |r| r.desktop_input,
+        ),
+    ];
+    let mut exhausted = Vec::new();
+    for (name, requested, limit, count) in pools {
+        if requested == 0 {
+            continue;
+        }
+        let holders: Vec<&Reservation> = ledger
+            .reservations
+            .iter()
+            .filter(|held| held.granted_at.is_some() && count(&held.resources) > 0)
+            .collect();
+        let used: u64 = holders
+            .iter()
+            .map(|held| u64::from(count(&held.resources)))
+            .sum();
+        if u64::from(requested) + used > u64::from(limit) {
+            let names = holders
+                .iter()
+                .map(|held| holder_label(held, observation))
+                .collect::<Vec<_>>()
+                .join(", ");
+            exhausted.push(format!("{name} {used}/{limit} held by {names}"));
+        }
+    }
+    if !exhausted.is_empty() {
+        return exhausted.join("; ");
     }
     "host capacity".into()
 }
 
-/// The activity-card title for a parked reservation. The scheduler stamps
-/// `waiting_on` every transaction, so rows written by older daemons are
-/// the only ones that fall back to the generic text.
-pub fn waiting_title(r: &Reservation, _status: &ResourceStatus) -> String {
-    let label = if r.resources.resident_devices > 0 {
-        r.resources.exclusive.join(", ")
-    } else if r.resources.native_builds > 0 {
-        "native build".into()
-    } else {
-        "desktop input".into()
-    };
-    match r.waiting_on.as_deref() {
-        Some(reason) => format!("Waiting for {label}—{reason}"),
-        None => format!("Waiting for {label}—queued for host capacity"),
+/// The `task <id>` handle a wait reason gives a granted row, extended for
+/// settled rows that still hold capacity: a released row retained by its
+/// live workload process group, or by a device the inventory still lists.
+fn holder_label(r: &Reservation, observation: &Observation) -> String {
+    let mut label = format!("task {}", r.task);
+    if r.cancelled || r.released {
+        if let Some(pid) = r.workload_pid.filter(|pid| group_alive(*pid)) {
+            label.push_str(&format!(
+                " (released; workload process group {pid} still running)"
+            ));
+        } else if let Some(key) = r
+            .resources
+            .exclusive
+            .iter()
+            .find(|key| resident_device(key) && retained_device(key, observation))
+        {
+            label.push_str(&format!(" (released; device {key} retained)"));
+        }
     }
+    label
 }
 
 #[cfg(unix)]
@@ -2306,6 +2373,127 @@ mod tests {
                 Observation::default()
             )
             .is_err());
+    }
+
+    /// A wait reason names the real blockers: the granted row holding an
+    /// identical exclusive key, or each exhausted pool with every
+    /// reservation retaining it — including released rows whose workload
+    /// group or device still occupies capacity.
+    #[test]
+    #[cfg(unix)]
+    fn wait_reason_names_the_exclusive_holder_and_every_pool_retainer() {
+        const IOS: &str = "ios:91D40099-A056-497D-A572-ADDDFD6A8F23";
+        // The inventory reports B's simulator only after B is granted.
+        let observed = || Observation {
+            devices: vec![IOS.into()],
+            blind: vec![],
+            errors: vec![],
+        };
+        let h = Harness::new();
+        h.broker
+            .set_policy(&ResourcePolicy {
+                resident_devices: 2,
+                native_builds: 3,
+                desktop_input: 1,
+            })
+            .unwrap();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let c = Uuid::new_v4();
+        let set = |exclusive: &str, resident: u32, builds: u32| ResourceSet {
+            exclusive: vec![exclusive.into()],
+            resident_devices: resident,
+            native_builds: builds,
+            desktop_input: 0,
+        };
+        let acquire = |task: Uuid, resources: ResourceSet, observation: Observation| {
+            h.broker
+                .transaction(task, acquisition(resources, None), observation)
+                .unwrap()
+        };
+        let op = |task: Uuid, operation: ResourceOperation| {
+            h.broker.transaction(task, operation, observed()).unwrap()
+        };
+        let row = |status: &ResourceStatus, id: Uuid| {
+            status
+                .reservations
+                .iter()
+                .find(|r| r.id == id)
+                .unwrap()
+                .clone()
+        };
+
+        let first = acquire(
+            a,
+            set("android:octane-tuneful-conch", 1, 1),
+            Observation::default(),
+        );
+        let a_id = id(&first);
+        assert!(granted(&first, a_id));
+        let mut workload = Workload::start();
+        h.broker
+            .transaction(
+                a,
+                ResourceOperation::Attach {
+                    id: a_id,
+                    workload_pid: workload.0.id(),
+                },
+                Observation::default(),
+            )
+            .unwrap();
+        // B's iOS claim grants while the device has not been observed.
+        let second = acquire(b, set(IOS, 1, 0), Observation::default());
+        let b_id = id(&second);
+        assert!(granted(&second, b_id));
+        // A's holder stays alive (this test process), so the released row
+        // is retained by its workload group; B's by the booted simulator.
+        op(a, ResourceOperation::Release { id: a_id });
+        op(b, ResourceOperation::Release { id: b_id });
+
+        let parked = acquire(c, set("android:905d3a9e", 1, 0), observed());
+        let parked_id = id(&parked);
+        assert!(!granted(&parked, parked_id));
+        let expected_pool = format!(
+            "resident devices 2/2 held by task {a} (released; workload process \
+             group {} still running), task {b} (released; device {IOS} retained)",
+            workload.0.id()
+        );
+        assert_eq!(
+            row(&parked, parked_id).waiting_on.as_deref(),
+            Some(expected_pool.as_str())
+        );
+        op(c, ResourceOperation::Cancel { id: parked_id });
+        // A Linux VM draws on the same resident pool and names it identically.
+        let vm = acquire(c, set("linux:webkitgtk", 1, 0), observed());
+        let vm_id = id(&vm);
+        assert!(!granted(&vm, vm_id));
+        assert_eq!(
+            row(&vm, vm_id).waiting_on.as_deref(),
+            Some(expected_pool.as_str())
+        );
+        op(c, ResourceOperation::Cancel { id: vm_id });
+        // A physical device is a plain lock: no resident claim, it grants.
+        let phone = acquire(
+            c,
+            ResourceSet {
+                exclusive: vec!["device:905d3a9e".into()],
+                ..Default::default()
+            },
+            observed(),
+        );
+        let phone_id = id(&phone);
+        assert!(granted(&phone, phone_id));
+        op(c, ResourceOperation::Release { id: phone_id });
+
+        // The identical exclusive key names its own holder, not the pool.
+        let again = acquire(b, set(IOS, 1, 0), observed());
+        let again_id = id(&again);
+        assert!(!granted(&again, again_id));
+        assert_eq!(
+            row(&again, again_id).waiting_on.as_deref(),
+            Some(format!("device {IOS} held by task {b} (released; device {IOS} retained)").as_str())
+        );
+        workload.stop();
     }
 }
 

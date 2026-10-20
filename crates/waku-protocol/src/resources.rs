@@ -156,6 +156,25 @@ pub struct Reservation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_on: Option<String>,
 }
+impl Reservation {
+    /// The activity-card title for a parked reservation. The broker's
+    /// scheduler stamps `waiting_on` every transaction, so rows written
+    /// by older daemons are the only ones that fall back to the generic
+    /// text.
+    pub fn waiting_title(&self) -> String {
+        let label = if self.resources.resident_devices > 0 {
+            self.resources.exclusive.join(", ")
+        } else if self.resources.native_builds > 0 {
+            "native build".into()
+        } else {
+            "desktop input".into()
+        };
+        match self.waiting_on.as_deref() {
+            Some(reason) => format!("Waiting for {label}—{reason}"),
+            None => format!("Waiting for {label}—queued for host capacity"),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
 pub struct ResourceStatus {
@@ -192,6 +211,44 @@ mod tests {
         assert!(serde_json::from_value::<ResourceOperation>(serde_json::json!({
             "action":"acquire", "resources":{"native_builds":1}, "purpose":"test", "holder_pid":42, "task":"forged"
         })).is_err());
+    }
+    #[test]
+    fn waiting_title_renders_the_stamped_reason_or_the_queued_fallback() {
+        let mut reservation = Reservation {
+            id: Uuid::new_v4(),
+            task: Uuid::new_v4(),
+            purpose: "simulated test".into(),
+            resources: ResourceSet {
+                exclusive: vec!["ios:00000000-0000-0000-0000-000000000001".into()],
+                resident_devices: 1,
+                ..Default::default()
+            },
+            holder_pid: 0,
+            daemon_pid: 0,
+            owner_pid: None,
+            workload_pid: None,
+            requested_at: 0,
+            duration_seconds: 0,
+            deadline: 0,
+            granted_at: None,
+            cancelled: false,
+            released: false,
+            admission: None,
+            waiting_on: Some(
+                "device ios:00000000-0000-0000-0000-000000000001 is running outside Goddard"
+                    .into(),
+            ),
+        };
+        assert_eq!(
+            reservation.waiting_title(),
+            "Waiting for ios:00000000-0000-0000-0000-000000000001—device \
+             ios:00000000-0000-0000-0000-000000000001 is running outside Goddard"
+        );
+        reservation.waiting_on = None;
+        assert_eq!(
+            reservation.waiting_title(),
+            "Waiting for ios:00000000-0000-0000-0000-000000000001—queued for host capacity"
+        );
     }
     #[test]
     fn resource_command_and_status_round_trip_the_wire() {

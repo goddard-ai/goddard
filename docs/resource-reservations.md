@@ -69,8 +69,10 @@ goddard-agent resource release RESERVATION-UUID
 Status returns JSON with `policy`, `reservations`, `external_devices`, and
 `observation_errors`. Each reservation names its task, purpose, resources,
 process IDs, timestamps, and `duration_seconds` (time held, or time queued).
-`granted_at:null` means queued. A cancelled/released reservation that remains
-listed is retaining capacity for a live workload or virtual device. Cancel
+`granted_at:null` means queued. A queued reservation's `waiting_on` names the
+device or capacity pool blocking it and which reservations hold it. A
+cancelled/released reservation that remains listed is retaining capacity
+for a live workload or virtual device. Cancel
 operates on your task's requests, including queued requests; it cannot cancel
 another task's work. Release also signals the runner to stop an active workload.
 Neither operation prematurely frees its resources.

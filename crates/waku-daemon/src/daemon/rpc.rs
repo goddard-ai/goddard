@@ -2081,7 +2081,7 @@ impl Backend for WakuBackend {
                     if let Some(reservation) = status.reservations.iter().find(|r| r.id == id) {
                         let waiting = reservation.granted_at.is_none() && !reservation.cancelled;
                         let title = if waiting {
-                            crate::resource_broker::waiting_title(reservation, &status)
+                            reservation.waiting_title()
                         } else {
                             format!("Resources: {}", reservation.purpose)
                         };
