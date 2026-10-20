@@ -457,7 +457,24 @@ impl Waku {
             .gap(px(5.0))
             .text_size(sp(12.0))
             .text_color(theme.text_tertiary);
+        let mut package = None;
         for (index, (glyph, name)) in names.into_iter().enumerate() {
+            if folder_first && glyph == "icons/package.svg" {
+                package = Some(
+                    div()
+                        .flex_none()
+                        .h(sp(15.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(5.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .whitespace_nowrap()
+                        .child(icon(glyph, 12.0, theme.text_tertiary))
+                        .child(single_line_label(&name)),
+                );
+                continue;
+            }
             let label = if index == cwd_index {
                 div().min_w_0().truncate().child(SharedString::from(name))
             } else {
@@ -471,7 +488,24 @@ impl Waku {
                 .child(icon(glyph, 12.0, theme.text_tertiary))
                 .child(label);
         }
-        row.into_any_element()
+        if folder_first {
+            // A non-shrinking package chip wraps as a unit when it cannot
+            // fit beside the location. Clip the second line completely.
+            div()
+                .flex_1()
+                .min_w_0()
+                .h(sp(15.0))
+                .overflow_hidden()
+                .flex()
+                .flex_wrap()
+                .content_start()
+                .gap(px(5.0))
+                .child(row.flex_shrink_0().max_w_full().h(sp(15.0)))
+                .children(package)
+                .into_any_element()
+        } else {
+            row.into_any_element()
+        }
     }
 
     /// Terminal ids in sidebar order — pinned rows lead the group.
@@ -3840,7 +3874,6 @@ impl Waku {
                         true,
                         cx,
                     ))
-                    .child(div().flex_1())
                     .child(
                         div()
                             .flex_none()
