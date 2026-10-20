@@ -384,7 +384,7 @@ impl Waku {
                     })
             })
             .unwrap_or_default();
-        self.render_terminal_location(terminal_id, "icons/folder.svg", label, cx)
+        self.render_terminal_location(terminal_id, "icons/folder.svg", label, false, cx)
     }
 
     /// The sidebar row's repo-anchored location label — the project's
@@ -428,10 +428,11 @@ impl Waku {
         terminal_id: Uuid,
         cwd_icon: &'static str,
         cwd_label: String,
+        folder_first: bool,
         cx: &App,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        let names = self
+        let mut names = self
             .terminal_cwd(terminal_id, cx)
             .map(|cwd| {
                 let locations = self.sidebar_terminal_locations.borrow();
@@ -441,6 +442,13 @@ impl Waku {
                     .unwrap_or_default()
             })
             .unwrap_or_default();
+        let cwd_index = if folder_first {
+            names.reverse();
+            0
+        } else {
+            names.len()
+        };
+        names.insert(cwd_index, (cwd_icon, cwd_label));
         let mut row = div()
             .min_w_0()
             .flex()
@@ -448,23 +456,21 @@ impl Waku {
             .gap(px(5.0))
             .text_size(sp(12.0))
             .text_color(theme.text_tertiary);
-        for (glyph, name) in names {
-            row = row.child(icon(glyph, 12.0, theme.text_tertiary)).child(
+        for (index, (glyph, name)) in names.into_iter().enumerate() {
+            let label = if index == cwd_index {
+                div().min_w_0().truncate().child(SharedString::from(name))
+            } else {
                 div()
                     .min_w_0()
                     .max_w(px(140.0))
                     .truncate()
-                    .child(single_line_label(&name)),
-            );
+                    .child(single_line_label(&name))
+            };
+            row = row
+                .child(icon(glyph, 12.0, theme.text_tertiary))
+                .child(label);
         }
-        row.child(icon(cwd_icon, 12.0, theme.text_tertiary))
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .child(SharedString::from(cwd_label)),
-            )
-            .into_any_element()
+        row.into_any_element()
     }
 
     /// Terminal ids in sidebar order — pinned rows lead the group.
@@ -3581,7 +3587,7 @@ impl Waku {
                     .unwrap_or_default()
                     .to_owned()
             });
-        // The trailing label is the terminal's location, named by its
+        // The leading label is the terminal's location, named by its
         // nearest repository the way a session row names its project —
         // "waku" at the root, "waku/src/app" deeper in. Outside any
         // repository the shell's name stands in under a shell glyph
@@ -3808,7 +3814,13 @@ impl Waku {
                     .gap(px(5.0))
                     .text_size(sp(13.0))
                     .line_height(sp(15.0))
-                    .child(self.render_terminal_location(terminal_id, detail_icon, detail, cx))
+                    .child(self.render_terminal_location(
+                        terminal_id,
+                        detail_icon,
+                        detail,
+                        true,
+                        cx,
+                    ))
                     .child(div().flex_1())
                     .child(
                         div()
