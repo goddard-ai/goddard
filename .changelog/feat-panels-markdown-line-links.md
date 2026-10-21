@@ -1,0 +1,1 @@
+- Open Markdown file links such as `/path/to/notes.md:42` at the rendered block containing the requested line in the preview.

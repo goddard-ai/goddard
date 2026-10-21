@@ -98,8 +98,8 @@ fn line_fragment(fragment: &str) -> bool {
 }
 
 /// Removes the `:line`, `:line:column`, or `#LlineCcolumn` suffixes Codex uses
-/// in clickable local-file references. The location is not yet consumed by
-/// Goddard's compact editor, but it must not become part of the filesystem path.
+/// in clickable local-file references, keeping the navigation target out of
+/// the filesystem path.
 fn strip_file_location(target: &str) -> &str {
     if let Some((path, fragment)) = target.rsplit_once('#')
         && line_fragment(fragment)
@@ -10444,17 +10444,13 @@ impl Waku {
                 return;
             };
             let offset = cursor_offset_for_line_column(state.read(cx).content(), line, column);
-            let preview_heading_offset =
-                heading_line.map(|line| cursor_offset_for_line_column(&content, line, 1));
             state.update(cx, |state, cx| state.select_range(offset..offset, cx));
             let weak = cx.entity().downgrade();
             let path = relative_path.to_owned();
             window.on_next_frame(move |window, cx| {
                 let _ = weak.update(cx, |this, cx| {
                     this.reveal_editor_offset(&state, offset, cx);
-                    if let Some(offset) = preview_heading_offset {
-                        this.reveal_markdown_heading(&path, offset, 0, window, cx);
-                    }
+                    this.reveal_markdown_position(&path, offset, 0, window, cx);
                 });
             });
         }
@@ -10494,7 +10490,7 @@ impl Waku {
         self.preview_list_state(relative_path)
     }
 
-    fn reveal_markdown_heading(
+    fn reveal_markdown_position(
         &mut self,
         relative_path: &str,
         source_offset: usize,
@@ -10518,7 +10514,11 @@ impl Waku {
                 let Some(range) = view.block_source_range(block_index) else {
                     return;
                 };
-                if range.contains(&source_offset) {
+                // Blank lines belong to the following rendered block; an
+                // offset at EOF lands on the final block.
+                if source_offset < range.end
+                    || view.block_source_range(block_index + 1).is_none()
+                {
                     break block_index;
                 }
                 block_index += 1;
@@ -10540,14 +10540,14 @@ impl Waku {
                     .next()
             });
         let Some(target_bounds) = target_bounds else {
-            // The preview mounts only the viewport's blocks, so the heading's
+            // The preview mounts only the viewport's blocks, so the target's
             // glyphs register only after its list item scrolls into view.
             if attempt < 4 {
                 list.scroll_to_reveal_item(target_block);
                 cx.notify();
                 let path = relative_path.to_owned();
                 cx.on_next_frame(window, move |this, window, cx| {
-                    this.reveal_markdown_heading(&path, source_offset, attempt + 1, window, cx)
+                    this.reveal_markdown_position(&path, source_offset, attempt + 1, window, cx)
                 });
             }
             return;
