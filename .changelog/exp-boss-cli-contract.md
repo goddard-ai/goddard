@@ -1,1 +1,0 @@
-- Inspect the complete Boss command contract with `goddard-agent boss --schema`, including typed inputs, scripting routes, role limits, and structured summon options.

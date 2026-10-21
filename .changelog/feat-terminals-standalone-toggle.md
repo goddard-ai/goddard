@@ -1,1 +1,0 @@
-- Press Cmd+Shift+Enter in a focused single-pane standalone terminal to switch between the full-page view and floating card, returning to the previous page when minimized. Split standalone terminals keep using the shortcut to maximize or restore the focused pane.

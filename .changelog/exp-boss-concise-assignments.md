@@ -1,1 +1,0 @@
-- Boss employee assignments relay your request with less expansion and rely on employee personas and project context instead of repeating setup instructions.

@@ -1,1 +1,0 @@
-- Terminals that announce a localhost URL stay visible in the Terminals group, including when the group is folded.

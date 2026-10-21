@@ -1,1 +1,0 @@
-- `goddard-agent resource` wait messages now name the device or capacity pool actually blocking a request and which reservations hold it, instead of an unrelated task.

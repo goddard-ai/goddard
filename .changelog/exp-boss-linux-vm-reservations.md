@@ -1,1 +1,0 @@
-- Employee resource reservations accept a brokered Linux VM by name — `exclusive:["linux:<name>"]` with `resident_devices:1` — sharing the single resident-device slot and same-name exclusivity with iOS and Android reservations.

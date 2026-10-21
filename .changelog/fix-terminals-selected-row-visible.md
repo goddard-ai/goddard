@@ -1,1 +1,0 @@
-- Creating a terminal no longer unfolds the sidebar's Terminals group, and the terminal filling the main area keeps a row under the folded group.

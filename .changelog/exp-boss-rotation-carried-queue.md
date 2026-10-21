@@ -1,1 +1,0 @@
-- **Boss session refresh:** Fixed follow-ups queued on a Boss chat staying parked after a session refresh carried them onto the replacement chat; they now send automatically, in order, once the new chat loads.

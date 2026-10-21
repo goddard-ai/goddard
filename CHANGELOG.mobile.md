@@ -3,6 +3,17 @@
 Release notes for the Goddard mobile app. Changes shared with Desktop are in
 [the main changelog](CHANGELOG.md).
 
+## [0.16.0]
+
+### Features
+
+- A steer the agent can't take mid-turn now parks as a pending message at the end of the transcript — below the working strip — instead of occupying the follow-up queue above the composer.
+
+### Experiments
+
+- **Boss**
+  - The mobile app can now reach the Boss: with the Boss experiment on, the checked-in client exposes the boss chat's session and identity, the employee roster and plan state, deliverable and plan actions, and the boss's live speech/browse/terminal requests.
+
 ## [0.10.0]
 
 ### Features

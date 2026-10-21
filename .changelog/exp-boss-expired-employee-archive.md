@@ -1,1 +1,0 @@
-- Hover an expired employee's sidebar row to reveal an Archive button that removes it from the list; the employee stays in the Boss page's Employees history.

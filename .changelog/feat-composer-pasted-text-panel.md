@@ -1,1 +1,0 @@
-- Hover over inline pasted-text chips in the composer or sent messages to preview their contents, and click to read the full text in a right-panel tab; double-click a composer chip to edit it.

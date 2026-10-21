@@ -1,1 +1,0 @@
-- **Temporary chat:** In the Cmd+N picker, choose **New chat** for a regular projectless conversation or **Temporary chat** for an incognito one. Both appear above **Recently used**; the first recent project is selected when the picker opens, and the row shows its ghost icon.

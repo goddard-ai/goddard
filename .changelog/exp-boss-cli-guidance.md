@@ -1,1 +1,0 @@
-- Agents now learn the canonical `goddard-agent` invocation grammar — command paths, positionals, and flags — in session instructions, task messages, handoffs, and the Computer Use skill; retired whole-operation JSON examples no longer appear, and payload attempts fail with a targeted `--help` hint.

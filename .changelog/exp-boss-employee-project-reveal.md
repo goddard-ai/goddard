@@ -1,1 +1,0 @@
-- Holding Alt in the Boss sidebar shows an employee's project beside their name, with the project shortened first when space is tight.

@@ -1,1 +1,0 @@
-- The Boss avatar style picker includes Mascots — mascot logos from ipaslogo.com, downloaded once into the app's data directory the first time the style is used. Picking it needs network access; other styles still work offline.

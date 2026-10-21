@@ -1,1 +1,0 @@
-- Boss chat now combines employee finish notices that arrive during the same response into one collapsed completion group.

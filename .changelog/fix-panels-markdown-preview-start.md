@@ -1,1 +1,0 @@
-- Newly opened Markdown previews start at the beginning of the document and keep your reading position while the content updates.

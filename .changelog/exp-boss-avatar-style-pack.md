@@ -1,1 +1,0 @@
-- The Boss avatar style picker includes Gaze, Moods, Line Face, Agent Avatars, and Avvvatars. Gaze is the default for new identities.

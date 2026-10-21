@@ -1,1 +1,0 @@
-- Run project scripts from the command palette to move them to the top of that project's script list. The order is remembered across app restarts.

@@ -1,1 +1,0 @@
-- Focusing a task or the Boss chat no longer drops the app's connection to the Goddard daemon when several large transcripts are waiting to be saved.

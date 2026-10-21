@@ -1,1 +1,0 @@
-- Boss chat can send prompts and use its CLI again without waiting for unfinished provider safety checks. Frozen refreshes and compaction incidents still hold queued work until replacement safety checks pass.

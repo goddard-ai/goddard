@@ -1,1 +1,0 @@
-- Stopped or interrupted turns without a provider error now say the agent stopped before responding, instead of showing a Codex-specific message.

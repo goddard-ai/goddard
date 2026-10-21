@@ -1,1 +1,0 @@
-- Planning session replies can now be selected and annotated from the transcript, with the quote attached to the planning discussion.

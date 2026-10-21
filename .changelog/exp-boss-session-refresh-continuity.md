@@ -1,1 +1,0 @@
-- **Boss session safety:** Boss and planning coordination now pauses when runtime safety and delivery cannot be verified. Messages and employee results stay saved, employees continue under existing grants, and uncertain handoffs cannot silently retry. Current providers remain unqualified; asking to compact the Boss still requests a fresh session.

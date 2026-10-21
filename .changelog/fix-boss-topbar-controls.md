@@ -1,2 +1,0 @@
-- The boss chat's top bar no longer shows the 'Open project in…' button or the environment info button; those controls target employee workspaces, not the boss's own session.
-- Keep the sidebar toggle, unread bell, and back/forward controls available in the top bar while viewing a deliverable or Boss Brain page with the sidebar hidden.

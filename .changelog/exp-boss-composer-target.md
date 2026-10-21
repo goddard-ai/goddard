@@ -1,1 +1,0 @@
-- **Boss composer target:** The chip naming where a message goes (Boss, while an employee's page is open) is now a menu — pick an employee to message or steer them directly, or switch back to Boss. Sending to a finished employee queues it for when they resume; a pick whose employee is gone refuses instead of landing on Boss.

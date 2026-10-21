@@ -1,1 +1,0 @@
-- Long prompts in the composer now fade at the edges when they scroll past the visible text area.

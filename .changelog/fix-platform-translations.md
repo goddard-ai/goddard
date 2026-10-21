@@ -1,1 +1,0 @@
-- Japanese and Simplified Chinese translations now cover recent workspace, terminal, and Boss controls instead of falling back to English.

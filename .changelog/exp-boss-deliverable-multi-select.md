@@ -1,1 +1,0 @@
-- Deliverable rows in the sidebar join the multi-selection: ⌘-click toggles rows in, ⌘⇧-click selects the range, and the row menu's pin, sweep, restore, archive, and remove actions batch over every selected deliverable — ⌘⇧A archives and ⌘⌥P pins or unpins them too.

@@ -1,1 +1,0 @@
-- **Boss Brain Memory:** The Documents view is gone — the tab now opens directly on the named memory buckets and their records. The Boss's memory documents themselves are unchanged.

@@ -1,1 +1,0 @@
-- Stable runtime reconnection preserves the original agent CLI grant expiry and blocks expired or stopped-session authority instead of issuing a fresh authorization window.

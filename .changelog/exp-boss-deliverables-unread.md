@@ -1,1 +1,0 @@
-- The Deliverables sidebar header shows an unread dot while collapsed when a listed deliverable has not been opened or was republished since it was last viewed.

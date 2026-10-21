@@ -1,1 +1,0 @@
-- **Employee attention:** Flag Boss employee summons for follow-up. Finished employees show an unread dot that clears on open; flagged rows stay on the sidebar until unflagged or manually archived. Cmd/Ctrl+Shift+U toggles attention; Automations moved to Cmd/Ctrl+Alt+Shift+U.

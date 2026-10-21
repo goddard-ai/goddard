@@ -1,1 +1,0 @@
-- Employees now contact Boss during work only for blockers that require supervisor or human action; routine results arrive in their final reports.

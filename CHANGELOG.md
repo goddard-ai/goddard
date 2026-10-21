@@ -4,6 +4,340 @@ Release notes for Goddard Desktop and features shared across clients.
 Changes specific to the mobile app are in
 [the mobile changelog](CHANGELOG.mobile.md).
 
+## [0.16.0]
+
+### Features
+
+- **Composer**
+  - Choose an existing Git worktree from the composer's workspace selector, with search and a quick way back to Local. The picker lists worktrees without waiting for status scans of every checkout.
+  - `@` autocomplete prioritizes transcript-mentioned files and directories, then other local paths, projects, tasks, and remaining references. Normal tasks can reference any regular project, including their own, and fuzzy matching rejects widely scattered letters.
+  - Hover over inline pasted-text chips in the composer or sent messages to preview their contents, and click to read the full text in a right-panel tab; double-click a composer chip to edit it.
+  - **Recent prompt restore:** The composer remembers the last five prompts you sent — choose "Restore recent prompt…" from the command palette to find one and stage it back into the composer as an editable draft instead of sending it. Restoring over an existing draft is undoable with ⌘Z.
+  - **Save draft shortcut:** Show a **Save draft** chip above the composer whenever it contains content, with a hint for its keyboard shortcut. Selecting it saves the composer as a draft and clears the composer after the draft is written; the chip hides while queued prompts are visible, and ⌘S still opens branch sync when the composer is empty or unfocused.
+- **Terminals**
+  - **Docked card:** ⌘T — or "New terminal in…" in the command palette — opens a terminal as a floating card at the top of the screen, focused and sized so the prompt is always visible, over whatever page you were on. A full-screen terminal's minimize button floats it and returns to the previous page; Escape or the card's close button hides the card while the shell keeps running, and ⌘W while it is focused kills the terminal.
+  - Terminal labels show the nearest package and linked worktree name, falling back to the active branch when no worktree name is available, beside the directory in sidebar rows and terminal headers.
+  - In a standalone split terminal, press ⌘⇧Enter (Ctrl+Shift+Enter on other platforms) to maximize the focused pane; press it again to restore the split layout.
+  - Run project scripts from the command palette to move them to the top of that project's script list. The order is remembered across app restarts.
+  - Clicking a terminal in the sidebar now opens it full screen instead of docking it as a card at the top of the screen.
+  - **Splits:** Split right-panel terminals into up to three stacked panes or standalone terminals into a grid of up to nine panes using the split button or ⌘⌥D. Drag a sidebar terminal into another terminal to join its split; hover sidebar terminals while dragging to preview them.
+  - Press Cmd+Shift+Enter in a focused single-pane standalone terminal to switch between the full-page view and floating card, returning to the previous page when minimized. Split standalone terminals keep using the shortcut to maximize or restore the focused pane.
+- `goddard-agent` and its `map` command now default to readable text in terminals and pipes. Scripts that parse JSON responses or errors must pass `--output json`.
+- When a task uses a new worktree, Cmd+P can find untracked files linked in that task's transcript.
+- **Files:** A repository's `.gitattributes` now steers syntax highlighting — a `linguist-language=<name>` rule colors matching files in the file viewer and in diff surfaces, so a brand-new language can borrow the closest lexer the app ships. Declarations override the extension table, and names the lexer does not know render plain rather than guessing.
+- **Sync branch:** The project picker shows ahead and behind counts, lists projects with outgoing commits first and incoming commits second, and keeps recent order inside each group. Press Shift+Enter to sync a project's current branch and keep the picker open; Enter opens its branch picker.
+- Press ⌘L (Ctrl+L on other platforms) to switch focus between the main composer and the open side-chat composer.
+- Open Markdown file links such as `/path/to/notes.md:42` at the rendered block containing the requested line in the preview.
+- Agents can queue native builds, virtual devices, and shared desktop input with `goddard-agent resource`, using shared capacity across Goddard projects under the same OS account; raw launches still require cooperative coordination.
+- Remember the last access mode separately for each project, and restore it after restarting Goddard or when starting another task in that project.
+- Local Codex, Claude, Amp, Pi, and ACP tasks reclaim idle providers before pausing active work under memory pressure; the default 4 GiB budget allows larger tasks while the host has headroom.
+- The sidebar no longer lists tasks on a remote host that has never connected this session; once a host has been online, a later drop keeps its tasks visible with an unplug indicator instead of an Offline label.
+- **Temporary chat:** In the Cmd+N picker, choose **New chat** for a regular projectless conversation or **Temporary chat** for an incognito one. Both appear above **Recently used**; the first recent project is selected when the picker opens, and the row shows its ghost icon.
+- Steers sent while a reply is streaming now appear as pending messages at the end of the transcript — below the working indicator — instead of occupying the follow-up queue above the composer.
+
+### Experiments
+
+- **Boss**
+  - **Approved plan delivery:** Boss employees assigned an approved plan receive its exact frozen text inside their execution input alongside the implementation brief — no review turn or acknowledgement line. The attempt shows Preparing, Delivered, or a specific blocker; all approved plans up to the 256 KiB approval limit are supported on qualified local runtimes; unsupported runtimes block predictably, and retries redeliver the same approved revision while preserving existing work.
+  - Boss approval now freezes the reviewed text, and implementation assignments stay bound to that approved revision. Draft plan assignments require explicit read-only research.
+  - **Boss:** Approving an archive request now reports by name any task that could not be archived — for example one already archived or removed while the card waited — instead of silently skipping it, and a repeated answer to a settled request is safely ignored.
+  - Archive pending employees from the sidebar using the archive button shown on hover or keyboard focus; their queued work is cancelled.
+  - Boss messages no longer fail because the active chat was archived; the daemon restores that chat automatically while keeping retired conversations archived.
+  - Archived Boss employees stay out of the sidebar until resumed; resuming restores their existing transcript and workspace.
+  - Archiving an employee still queued to start now removes it from the summon queue — it previously stayed queued and could launch into an archived task.
+  - The Boss avatar style picker includes Mascots — mascot logos from ipaslogo.com, downloaded once into the app's data directory the first time the style is used. Picking it needs network access; other styles still work offline.
+  - The Boss avatar style picker includes Gaze, Moods, Line Face, Agent Avatars, and Avvvatars. Gaze is the default for new identities.
+  - Choose one avatar style for the Boss and all employees in Settings → Appearance. New face keeps the selected style while giving that identity a new face.
+  - **Boss Brain:** Opening a Boss's Brain page now hides the right panel instead of showing the boss chat's strip; the panel returns as it was when you leave the page.
+  - **Employee chains:** Run ordered employee steps with verified artifact access and workspace handoffs. Each step passes its result to the next employee, pauses for uncertain evidence, and reports once when the chain completes; failed launches can retry from a verified fresh workspace. Reports identify what started the Boss turn even after the employee has retired.
+  - Create or revise Boss chain steps using an exact project name or registered root path, with ambiguity errors and canonical project identities preserved across retries.
+  - **Boss chat `/clear` command:** Type `/clear` in the Boss chat to reset the conversation — a fresh chat takes over with no transcript carried over, and retired Boss chat sessions are removed. Previously delivered or queued employee notifications stay dismissed, including after restarting Goddard. Employees, planning sessions, and memory are untouched.
+  - Inspect the complete Boss command contract with `goddard-agent boss --schema`, including typed inputs, scripting routes, role limits, and structured summon options.
+  - **Cli guidance:** Agents now learn the canonical `goddard-agent` invocation grammar — command paths, positionals, and flags — in session instructions, task messages, handoffs, and the Computer Use skill; retired whole-operation JSON examples no longer appear, and payload attempts fail with a targeted `--help` hint.
+  - Discover Boss capabilities with `goddard-agent boss --help`: complete local help, family guides, role limits, and canonical command usage remain readable when piped. Whole-operation JSON invocations now fail with guidance to use command paths and flags.
+  - In Boss chat, press ⌘J to open a terminal, matching ⌘T; elsewhere ⌘J still focuses the terminal panel.
+  - **Collapsed group avatars:** A collapsed employee group in the sidebar — Building, Helping, or Employees under a boss — now shows small avatars for up to four of its non-expired members right in the group header, with "+N more" counting the remaining non-expired members.
+  - Clicking a commit hash in the Boss chat transcript opens that commit's diff in the right panel's Review tab, pinned to the named commit.
+  - Boss project mentions now put recently referenced projects first when matches are otherwise equal, while stronger name matches stay ahead.
+  - On an employee’s page, use the composer’s Send-to menu to message or steer that Employee, or switch back to Boss. A missing target refuses the send instead of redirecting it.
+  - Boss employee assignments relay your request with less expansion and rely on employee personas and project context instead of repeating setup instructions.
+  - **Boss:** From Boss chat, `goddard-agent archive` can now propose archiving a task in any project, not just the Boss workspace — the request card names each task's project, and your approval is still required before anything is archived.
+  - Press ⌘W while viewing a deliverable in Boss chat to return to the chat; ⌘W keeps its existing behavior elsewhere.
+  - Clicking a local Boss deliverable that is a directory, unsupported file, or unavailable file opens it in Finder without changing the current app view. Previewable files keep opening in Goddard.
+  - Back from a Boss deliverable preview returns to the chat or planning session you opened it from, and Forward reopens the same deliverable.
+  - **Deliverable multi select:** Deliverable rows in the sidebar join the multi-selection: ⌘-click toggles rows in, ⌘⇧-click selects the range, and the row menu's pin, sweep, restore, archive, and remove actions batch over every selected deliverable — ⌘⇧A archives and ⌘⌥P pins or unpins them too.
+  - Markdown previews of Boss deliverables open at the beginning of the document and keep your reading position while you read, search, or receive content updates.
+  - An open deliverable's title, file name, and preview controls now live in the window's top bar beside the navigation buttons, replacing the separate file header row and the "Goddard Boss" identity that crowded it.
+  - **VoicePad:** A deliverable's preview page gets its own VoicePad — press to talk or open the pad there and its text belongs to that deliverable, never the Boss chat's underneath or a sibling deliverable's. The pending-prompt queue also tucks away while a VoicePad is open so the pad's card stays flush with the composer.
+  - **Boss:** the sidebar's Deliverables group header gains a hover-revealed button that opens the full Deliverables list in the Boss brain; it also takes keyboard focus, so Tab reaches it without hovering.
+  - The sidebar's Deliverables section now sits above the Boss block with a gift icon and the same label style as the action rows, and a published deliverable keeps its row for a day instead of twelve hours.
+  - The Deliverables sidebar header shows an unread dot while collapsed when a listed deliverable has not been opened or was republished since it was last viewed.
+  - **Boss:** Devin employees on required plans now count delivery only after the provider accepts the submitted input — a rejected or failed send blocks the attempt and keeps the brief instead of falsely showing Delivered.
+  - Fixed duplicate employee finish and blocker reports reaching the Boss: a report parked behind a busy supervisor could be delivered twice when a daemon restart or a competing delivery pass replayed its queued copy before the first steer landed.
+  - Reduce the chance of provider compaction in long Boss conversations by rotating after context usage passes 75% of the provider-reported context window.
+  - **Employee attention:** Flag Boss employee summons for follow-up. Finished employees show an unread dot that clears on open; flagged rows stay on the sidebar until unflagged or manually archived. Cmd/Ctrl+Shift+U toggles attention; Automations moved to Cmd/Ctrl+Alt+Shift+U.
+  - Switch the composer from Boss to Employee in that employee’s chat and send a prompt to start queued work without waiting for model slots; hardware reservations and launch prerequisites still apply.
+  - On an employee's page, the composer's Send-to menu now lists only Boss and that chat's employee — labeled "Boss" and "Employee" — instead of the whole roster, and a send can only reach one of those two.
+  - Finished Boss employees now appear by their most recent completed turn, with the newest completion first; queued and working employees keep their existing order.
+  - Boss employee model switches now retain the selected provider, model, and effort after client saves, live updates, and reconnects.
+  - Employees can read Boss plan documents under `plans/` — such as an approved design handed off for implementation — without needing the file pinned to their persona.
+  - Holding Alt in the Boss sidebar shows an employee's project beside their name, with the project shortened first when space is tight.
+  - **Employees:** The Employees tab now shows each employee’s project beside their name, with the relative time on that same line.
+  - Boss employees now group under Building for lasting changes and Helping for research, reviews, checks, monitoring, and chores. Choose purpose when assigning work; older unclassified employees remain visible under Employees until explicitly classified.
+  - Employees now contact Boss during work only for blockers that require supervisor or human action; routine results arrive in their final reports.
+  - Resume a stopped or interrupted Boss employee in place, keeping its existing transcript and workspace.
+  - **Boss:** employees can run `goddard-agent search` to search task transcripts inside their assigned project — sibling tasks and earlier employee runs included. Other projects stay out of reach; only the boss still searches across every project.
+  - Arrange Boss employee sidebar rows into two lines so names, roles, project context, and activity time are easier to scan.
+  - The Boss Employees tab and expanded outcome rows no longer show model and reasoning details or a Resume button, employee chat headers no longer show Resume, and outcome employee rows no longer repeat each employee's job title.
+  - Keep employee job titles truncated alongside worktree markers and last activity on one detail line in the Boss sidebar.
+  - Hover an expired employee's sidebar row to reveal an Archive button that removes it from the list; the employee stays in the Boss page's Employees history.
+  - Fixed prompting or steering a finished employee failing with "Could not start the agent" — the message now re-enters the employee in the summon queue and resumes its existing transcript and workspace once a slot opens.
+  - Switching a finished or failed Boss employee’s model now resumes its existing assignment through capacity admission with the selected provider, model, and effort.
+  - Boss preserves messages sent during a stalled session refresh and reports delivery failures instead of silently losing the prompt.
+  - Fixed relative file references in Boss chat so clicking one opens the referenced file in the right panel.
+  - Boss chats keep their selected model and reasoning effort instead of using Jev's automatic model or per-turn effort routing.
+  - **Boss:** Gaze-style avatars no longer hop. The face stays put while its eyes glance around and blink — on sidebar rows, employee cards, and the employees page — and everything stays still when Reduce Motion is on.
+  - Boss chat can send prompts and use its CLI again without waiting for unfinished provider safety checks. Frozen refreshes and compaction incidents still hold queued work until replacement safety checks pass.
+  - The Boss session no longer displays a context-compaction warning while its existing refresh process continues.
+  - **Earlier-chat annotations:** The Boss chat's loaded earlier-conversation rows support text annotations — select a passage in a previous session's reply and choose Add to chat to stage it with the same input used for other transcript annotations. The sent message carries the source session and message for the Boss to trace back.
+  - **History scroll load:** Scrolling to the top of a Boss chat now loads the previous rotated conversation on its own — no need to activate the "Load earlier conversation" control first. The view stays anchored on the messages already on screen while older ones fill in above, and the control remains as the retry after a failed load.
+  - **Boss history search:** Agents can run `goddard-agent history search` to find retained work — task transcripts, employee sessions (expired and retired included), and earlier Boss chats — by natural-language terms plus project, person, date, and source-kind filters. Each hit carries an evidence excerpt and a source the agent can open; a coverage block reports exactly what was searched, what the result cap cut, and what the caller's access excluded. The search is read-only and never revives or unarchives a record.
+  - **Boss History search:** The Boss page's Employees → History view can now find retained work — ordinary tasks, employees (expired and retired included), earlier Boss chats, and planning sessions — by topic or person, with project, source-kind, and date filters. Hits show the matching excerpt, source, project, date, and archive state; a footer reports exactly what was searched and offers Show more when results are capped. Opening a hit lands on the matched passage and never resumes or unarchives the record.
+  - Reduce Boss background CPU usage when many retired employees are present.
+  - Boss corrections and followups now reach an employee’s active turn immediately, including prompts sent with explicit queue delivery. Employees waiting for capacity still wait for admission.
+  - Keep temporary Boss instructions through chat refreshes with source-backed pins, release conditions, automatic outcome settlement, and an Instructions page for review and editing. Boss also receives a compact current work brief while older transcripts remain available on demand.
+  - Employee resource reservations accept a brokered Linux VM by name — `exclusive:["linux:<name>"]` with `resident_devices:1` — sharing the single resident-device slot and same-name exclusivity with iOS and Android reservations.
+  - Expand long recorded memories directly in Boss and employee transcripts with Show more and Show less, and undo a recording from its card.
+  - **Boss Brain:** Memory Records rows now take notes — pick a row's note affordance or select an exact passage in its text to pin feedback, and pending notes gather at the bottom of the Memory page for review and editing before they go. The page's own composer sends them to Boss as context through the same submission path as everything else; nothing changes in memory until Boss decides what to do with them.
+  - **Boss employees:** The shared memory guidance in a task's first prompt now states the session's actual bucket access — the project bucket plus any granted buckets — describes append-only correction and failure semantics, and re-delivers when an employee's grants change between turns.
+  - Browse accessible memory notes in one Memory Records feed on the Boss Brain page, newest first. Search record text, project, or bucket, filter by project, and send corrections to Boss from each row.
+  - **Boss Memory:** Memories recorded by the Boss or an employee now leave a compact card in that session's transcript — the note's text with its bucket and recorder — that stays visible outside the turn's work fold. Each card's Undo button removes the note from its bucket and settles the card to a Removed state; clicking the card opens the Memory page. Agents can also retract a note with `goddard-agent memory retract NOTE_ID`.
+  - Boss chat `@` mentions now put matching projects first and omit memory files.
+  - **Merge submit:** `goddard-agent merge submit` now refuses to land when the QA branch is checked out in more than one worktree, or when the submitting worktree itself sits on the QA branch, instead of fast-forwarding whichever checkout it found first.
+  - Completing a Boss outcome now stops its assignments still queued to start — they previously stayed queued forever. Finishing employees can start after failed sibling assignments settle and pending handoffs are resolved; unresolved failures still prevent automatic outcome completion.
+  - **Outcomes and assignments:** Boss can coordinate durable outcomes through bounded employee assignments, with assignment history preserved across employee retirement and app restarts. The Tasks tab groups expandable outcomes by status; successful finishing assignments complete quietly, while failures and unfinished handoffs need attention. Open outcomes without active work receive a batched reminder after 15 minutes, then at most daily.
+  - **Boss:** the command palette gains a Search employee chats command (shown while the Boss experiment is on). It lists recent employee chats — expired, retired, and archived included — from the last 3 days, narrows them by name, job, or message text, and lands on the matched passage without unarchiving the record. The window is adjustable under Settings → Experiments → Boss and employees, from 1 to 30 days or Off.
+  - **Boss personas:** Shipped persona default updates now flow into customized roles automatically — a shipped default persona is its shipped base plus whatever you appended, so a new shipped revision swaps the base beneath your text instead of waiting on a review. Persona settings edit only the appended customization for shipped roles; resetting a default clears it, and the boss still reports each update once in its next turn.
+  - **Boss personas:** If an upgraded install cannot tell which saved role is the shared Employee base — several candidates survive and none provably matches a shipped default — Goddard now asks you to pick it in Settings → Boss → Personas instead of guessing. Employees cannot be summoned or resumed until you choose, and every candidate's instructions, permissions, icon, and pinned documents stay exactly as saved.
+  - Every Boss employee receives the shared Employee base instructions followed by its role. Summoning without a persona uses Employee alone; missing roles fail explicitly, and Boss cannot be assigned as an employee persona.
+  - Compare Boss and Employee persona instructions with their shipped defaults in Settings → Boss → Personas, and reset appended customizations with Undo.
+  - Boss persona names are now unique, shipped roles recover without duplicate seeding, and unused custom personas can be deleted from Personas or the Boss CLI. Shipped defaults and personas referenced by current or retired employees are protected.
+  - **Boss personas:** Persona details in Settings → Boss → Personas now show the instruction layers an employee actually receives as a labeled bullet list — the inherited Employee base, the role's shipped default, and your appended customization, in the order they are composed. Only the customization layer is editable; the inherited and shipped layers are read-only.
+  - Boss personas can default new assignments to Building or Helping; explicit assignment purpose takes precedence, and existing employees keep their purpose.
+  - ⌘N project picks no longer open a queued employee's task that happens to share the project — a pick always lands on a real New task draft now instead of reusing a boss-owned session that only looks unstarted.
+  - ⌘N on the boss chat: picking a project or "No project" now reliably lands on the New task page; previously a still-pending open of the chat could snap the view back right after the pick.
+  - With Wireframes enabled in Settings → Experiments, open a planning session’s Plan panel and switch to Wireframe to preview its companion design as it updates. Missing companions stay hidden; invalid designs show an error without affecting the document.
+  - Plan documents a planning session publishes no longer list in the sidebar's Deliverables group or the Boss page's Deliverables tab — the plan stays reachable through its planning session and the Plans tab. Other deliverables are unaffected.
+  - Boss employee instructions and CLI help now explain that verified approved-plan delivery does not require a separate employee acknowledgement; existing assignment restrictions still apply.
+  - Finalizing a planning session interrupts the current Boss turn and takes priority over employee notifications and queued employee or user prompts.
+  - Fixed the plan document preview keeping a stale copy after a planning session rewrote its plan — the plan tab and the Boss Plans detail now refresh on every write.
+  - Planning session replies can now be selected and annotated from the transcript, with the quote attached to the planning discussion.
+  - Planning sessions now mark independent work that can run in parallel and reserve dependencies for real prerequisites or shared-state constraints.
+  - Draft planning sessions now list under a collapsible Planning group beneath their boss in the sidebar, and each row names the project it is planning for instead of a generic Planning label.
+  - **Boss project discovery:** `goddard-agent boss projects list` shows every registered project's canonical id, name, path, and temporary status, and `boss projects resolve` pins one selector — an id, exact name, or absolute root path — to its canonical record. Unknown, ambiguous, malformed, or temporary selections fail with a stable code and a concrete correction instead of silently picking a project. The Boss context digest now shows each project's id alongside its name and path; employees cannot read the catalog.
+  - Boss chat prompts no longer stall forever when they mention an ongoing instruction — the send used to wedge the daemon's Boss lock.
+  - **Boss chat:** Provider switch handoff instructions stay hidden from the transcript while the provider still receives them.
+  - A queued Boss employee’s transcript ends with its wait reason, queue position, and a Start now button that bypasses model capacity limits; hardware reservations and launch prerequisites still apply.
+  - Queued employees stopped, archived, or removed before a daemon restart now stay stopped — a restart could previously launch them anyway. A queued employee whose project folder was deleted also expires instead of sticking the queue.
+  - Show an hourglass on collapsed Boss employee groups when their employees are queued; show the spinner only while work is running.
+  - Boss session refreshes no longer replay employee notifications or "no active assignment or waiting reason" reminders that a retired chat already received.
+  - Boss chat now keeps its scrollback and current position when its session refreshes, without reopening the chat or leaving the page you are viewing.
+  - Boss employees keep internal investigations in supervisor reports and publish deliverables when you ask for an artifact. Markdown deliverables open in reading mode independently of your file editor preference.
+  - Boss delegates codebase research and completion checks to employees, requiring reported evidence before calling work complete or behavior verified.
+  - Resuming an interrupted employee now runs its "verify your partial work" check before the follow-ups queued while it was down — the queued prompts still deliver afterward, in order.
+  - Resumed employees return to the sidebar immediately, even when waiting for capacity after being archived; queued groups show an hourglass, and admitted employees show their new startup status.
+  - **Boss:** Employees and chain steps no longer fail when a provider reports a transient error it flags as retryable — a Devin rate-limit wave, for example — the turn retries in place on a short backoff instead of expiring the employee or pausing the chain. A provider that keeps failing still reports the turn failed after the bounded retries run out.
+  - **Boss:** Typing an "Add to chat" comment on a transcript excerpt no longer loses the draft or its highlight when the Boss chat rotates mid-edit — the annotation carries to the refreshed chat and still ships with your next message. The comment editor also stays visible while the refreshed chat is loading.
+  - An unsent message drafted in the Boss chat now survives session rotation — the text, attachments, and annotations carry over to the replacement chat instead of staying behind on the archived one.
+  - Messages sent from an employee’s page or a deliverable’s preview reach the active Boss chat after a session rotation, even before the app receives the update. Failed sends preserve the draft.
+  - Boss requests a fresh chat after settled context usage crosses its threshold, without waiting for the provider’s prompt cache to expire. Replacement activation still requires qualified runtime safety checks.
+  - Boss chat transcripts hide the injected session rotation context from user messages.
+  - Follow-ups queued in Boss chat remain queued across a session refresh and send in order once the replacement is ready; stopping Boss keeps them parked.
+  - **Rotation start timeout:** Fixed Boss chat failing to start or send while a session refresh was retiring the previous chat — a stalled provider teardown no longer blocks Boss commands for minutes, and the chat now reports a clear retry-able error if a Boss operation is still in flight.
+  - Delayed or paused Boss session refreshes show their status above the transcript, with a concrete cause and Retry refresh action when paused.
+  - **Boss session refresh:** Fixed Boss chat leaving the user on its archived session after a refresh — the chat now follows the replacement automatically, whether the refresh lands while the chat is on screen, under a Boss page or deliverable preview, or while a navigation was in flight.
+  - **VoicePad:** A VoicePad open on a Boss chat now survives session rotation — its transcript carries over to the replacement chat, landing muted, instead of staying behind on the archived one.
+  - Fixed tasks and Boss employees losing follow-ups or access to task tools after a provider restart or model change. Failed launches release their resources, and providers that connect or exit immediately keep their first events.
+  - Boss scripts now return compact mutation acknowledgements and a state digest, preventing large history from reporting an accepted operation as failed and stopping later script operations.
+  - Boss scripts: `op(#{...})` calls that return the full boss state — like `resolveHandoff` and `attachPlan` — no longer fail with "Size of object map too large" once the daemon's records grow past a fixed property budget.
+  - Fixed Boss chat scrollback dead-ending partway through earlier conversations: a retired conversation could lose its archived flag and get rejected, leaving older pages behind a retry that could never succeed.
+  - **Session refresh safety:** Boss refreshes pause when replacement safety or delivery cannot be verified. Messages and employee results stay saved, and uncertain handoffs cannot silently retry. Current providers remain unqualified for replacement activation; ordinary Boss and planning conversations can still run.
+  - **Setmodel effort default:** Fixed `boss employee model` leaving a switched employee on its old reasoning effort — switching provider or model without naming an effort now lands on the new model's catalog default (a rung packed into the model id is honored too) instead of silently keeping the provider thread's stale level.
+  - Show the number of terminals and recent deliverables beside each collapsed group in the sidebar.
+  - Find recent Deliverables beside Terminals in the sidebar utility group, above the Boss section.
+  - Sidebar rows for Boss chats, employees, planning sessions, and deliverables now drag into the current chat — the drop stages the same reference chip an `@` mention would.
+  - Employees summoned by planning sessions and employees that do not finish a task or chain now appear beneath a collapsed Errands sidebar header, with counts and unread attention; expand it to browse their work.
+  - Boss sidebar groups sit closer together when collapsed and keep more separation when expanded.
+  - Sidebar task and Boss deliverable navigation now gets priority over background daemon requests and transcript traffic.
+  - **Boss sidebar open:** Fixed clicking the Boss in the sidebar sometimes doing nothing during a chat refresh — a click mid-refresh now waits for the daemon's answer or lands on the replacement chat, instead of dying on the retired session or being dropped because the selection moved underneath it.
+  - Align employee status and archive controls with the employee name in the Boss sidebar.
+  - **Boss:** Employee personas now ship four built-in specialist roles — Researcher, Feature Developer, Bug Investigator, and Verifier — selectable like custom roles when summoning. Each layers its method on the shared Employee base, gets its own revision-tracked default instructions, and carries no extra permission grants; customized role text is preserved through shipped updates.
+  - Stopping the Boss chat no longer lets queued employee reports resume it immediately; they stay parked until you send the Boss another message.
+  - **Boss:** Suggested actions in an employee chat now name the employee and job title before the action, so the request stays clear when sent to that employee.
+  - **Boss employee authority:** `goddard-agent boss summon --boss-authority` (or `bossAuthority` in scripting) grants an employee Boss-level operation authority for that admission — Boss-authorized operations accept its credential while human-only actions still refuse it. Boss or human callers only; the grant is fixed at summon, cannot be passed on or added by later edits, and ends when the assignment does.
+  - Employee summon cards now appear in the Boss chat the moment the Boss summons them, instead of only after the transcript reloads.
+  - Boss summon now returns working only after dispatch completes and queued only with a verified blocker. A confirmation timeout identifies the accepted employee, allowing inspection or a retry with the same request ID.
+  - Employees can message their supervisor with `goddard-agent steer-supervisor` without a task ID; updates steer live work or start a new turn immediately instead of waiting in a prompt queue.
+  - **Boss task attempts:** Expanding a Boss task in the Tasks tab now shows a full employee card only for each assignee's current attempt; earlier retries collapse into one-line history entries that still name the verdict, cause, and time — so repeated plan-delivery retries no longer fill the tab with duplicate "Open plan" and "Retry plan delivery" controls.
+  - **Boss:** The Tasks tab folds tasks untouched for more than a day behind each group's "Show more" toggle, and each group always keeps at least its leading task visible.
+  - Filter the Boss Tasks tab by outcome title and project, with “All projects” selected by default; searching expands matching groups and reveals older matches.
+  - In the Boss chat's Tasks tab, outcome rows hide assignee names, avatars, and pending wait reasons; expanded employees match sidebar rows. Expanding or collapsing an outcome preserves the scroll position.
+  - Keep the Boss Tasks tab open in chat by default; it stays in the tab strip when you close other tabs.
+  - Open published deliverable links from Boss or employee replies in the right-panel preview, including links to the original source file in older messages.
+  - Boss waits until your queued prompts finish before delivering employee notifications, and keeps those employee prompts out of the prompt queue UI.
+  - Queued employees appear in a separate Waiting group after Helping, which hides when empty.
+  - Employees stay visible in the Boss sidebar while switching workspaces instead of appearing expired.
+  - Employees no longer appear in the composer’s `@` autocomplete, including side chats.
+  - Open the Git panel in an employee chat to review and manage that employee's worktree when the Git panel experiment is enabled.
+  - Archive an eligible planning session from its sidebar row without opening the plan; right-click and ⌘⇧A remain available, and archived plans stay out of Settings → Archived chats like other Boss sessions.
+  - A deliverable's preview page offers the same right-click menu as a chat message — Copy Selection, Search with Google, Copy Message, and Send to Friend — acting on the published document's text.
+  - The Goals panel now groups employee work as Pending, Blocked, In progress, and Finished — Pending starts collapsed, collapsed groups show a muted row count, and blocked or needs-attention tasks collect under Blocked.
+  - Remote Boss rows now show the configured machine name beneath the Boss name, so you can tell which machine owns each Boss and its employees.
+  - Boss messages in employee transcripts and task previews now show the Boss avatar and name above the message.
+  - In boss chat, file and commit references in a reply use the project named by that prompt when it includes exactly one project chip.
+  - **Chat code run project:** Running a code block from a Boss chat reply now runs it in the project the reporting employee worked in — or in the project the message's paths point to — instead of always using the Boss's own folder, and asks which project when it cannot tell.
+  - Resizing the deliverable preview now remembers its width separately from the Boss chat panel.
+  - Viewing a deliverable hides the Boss chat's right panel; returning to chat restores it.
+  - While a deliverable's preview page is open, the sidebar's Boss row no longer stays highlighted as selected — the deliverable's own row carries the selection instead.
+  - Boss steering prompts stay queued if their chat rotates before the provider acknowledges them.
+  - **Topbar controls:** The boss chat's top bar no longer shows the 'Open project in…' button or the environment info button; those controls target employee workspaces, not the boss's own session.
+  - Keep the sidebar toggle, unread bell, and back/forward controls available in the top bar while viewing a deliverable or Boss Brain page with the sidebar hidden.
+  - **Employee model reconfigure:** Boss employee model changes now apply mid-flight as one step — the open turn stops cleanly, the new provider/model/effort applies, and the employee resumes its assignment — and intentional stops no longer mark the turn failed or interrupt the supervisor chat.
+  - Cmd+C now copies selected text from Markdown deliverable previews and file previews.
+  - Focusing a task or the Boss chat no longer drops the app's connection to the Goddard daemon when several large transcripts are waiting to be saved.
+  - **Deliverable annotations:** Option-click a block in a Markdown deliverable to open its annotation editor and attach the comment to your next chat message.
+  - Selecting text on a deliverable's preview page offers Add to chat and opens the comment editor — the floating controls were unreachable there.
+  - Employee sessions now offer the same right-panel tabs as regular tasks, while Goals stays exclusive to boss chat.
+  - Hide pending or blocked outcome rows in the Tasks panel when their employee session is archived.
+  - Finalize a plan directly from its planning session. Agent requests require your explicit answer on the Boss chat before the plan freezes and implementation begins.
+  - Planning sessions now keep their design documents in Boss files instead of project worktrees, so plans survive worktree cleanup.
+  - Fresh employee summons prefer initials not already used by current or recently finished employees.
+  - ⌘S in a boss chat no longer opens "Sync branch…" on a "not a repository" error — a resolved workspace that isn't a Git checkout now asks which project to sync, same as having no repository context at all.
+  - Removed the inferred project label from Boss prompt footers, which could imply project context had been attached.
+  - Employee transcript reads preserve command and file-read evidence for at least 48 hours after expiry, and long tool arguments no longer hide the output.
+  - Boss chat now combines employee finish notices that arrive during the same response into one collapsed completion group.
+- **Sessions**
+  - With Wireframes enabled in Settings → Experiments, task agents can run `goddard-agent wireframe PATH.wireframe.json` to validate and open designs. Task-file and planning previews shrink to fit the panel width; background-task previews open when selected.
+  - Automatically play the next queued voice briefing after the current one ends, with a short pause between briefings.
+- **Sidebar**
+  - With the experimental quick-action dock on, the sidebar's bottom-left strip shows a cluster of mini dock orbs instead of the settings and keyboard-shortcut buttons while the dock is hidden; hovering the strip still raises it.
+  - With the experimental quick-action dock on, its button artwork and glyphs are decoded at startup, so the first raise paints instantly instead of popping images in as they load.
+- **Composer**
+  - Approval requests stay clear of suggested actions, VoicePad transcription bubbles, and floating turn-status markers above the composer.
+  - Enable Composer dictation in Settings → Experiments to record speech and insert an offline Whistle transcription at the caret on Apple silicon Macs; the first use downloads the model. Recording continues until you stop. Disabled by default.
+  - **Voicepad shortcuts:** In the VoicePad scratchpad, ⌥M now opens or resurfaces the pad when it is closed or hidden and keeps its mute-toggle meaning once the pad is up. Escape peels off the discard confirmation, a selection or caret, and an open annotation box first, then hides the pad — the transcript keeps, and the former Cancel pill is now Discard, still the only destructive path. While the pad is up, the suggestion chips and floating action buttons above the composer stay out of its way.
+- **Transcript**
+  - The **Go fast** speed reader is now an experiment opt-in — turn on Speed reader under Settings → Experiments to keep the right-click entry on assistant replies and Markdown previews.
+  - **Help requested marker:** With turn status markers on, a reply that needs you to do something outside the chat — run a command, grant a permission, change a setting — now shows a **Help requested** chip under the response, plus a "Done — continue" suggestion to resume once you've handled it.
+  - Voice briefings now default to a single sentence under 20 words stating the agent's current status; saved custom instructions stay unchanged.
+  - While a voice briefing plays, its headphones icon stays in the response footer instead of also appearing beside the turn in the transcript rail.
+- **Settings**
+  - **Custom MCP servers:** Add your own MCP servers on the Integrations settings page — a stdio command or a remote HTTP endpoint, scoped to the providers you pick. Remote calls ride the local proxy so configured headers stay out of provider config files.
+  - **VoicePad:** Enable double-clicking the blank chat margins to show or hide an open VoicePad. This setting is off by default.
+  - Choose a voice name or ID for each voice briefing speech model in Settings, including custom models; clearing the field restores the model’s default voice.
+- MCP integrations: tools from connected services that stream their responses no longer hang or fail in agents, and an unreachable service now reports an error instead of leaving the agent waiting.
+- **Stable runtime:** a runtime-confirmed model or effort change now reaches the sidebar and task detail without a refresh — confirmed selections are fenced by a durable activation mark so stale event replays and out-of-date client saves cannot resurrect a superseded pick.
+- **Voice briefings:** Automatic playback now waits for you to arrive at a chat with an unread off-screen completion — a reply that finishes while you're already reading it never speaks later. A new "Eager voice briefings" switch (on by default, under "Automatic playback") prepares the summary and audio while you're away so arrival can play immediately; turn it off to generate only when you open the chat. Background-window playback is retired — the "Auto-play while unfocused" option is gone.
+- **VoicePad:** Dictating with Alt+Space while an "Add to chat" comment card is open now types the transcript into the comment field itself, at the caret, instead of a hidden VoicePad pad. The recording indicator still shows in the card while you hold the chord.
+- **VoicePad:** The Alt+Space hold-to-talk chord now works while the latest recording's bubble is being edited — pressing it used to type a nonbreaking space into the bubble's field instead of starting a new recording.
+- **VoicePad:** Pressing Enter with the VoicePad open and no transcript now sends the text in the composer as expected.
+- **VoicePad:** Double-clicking blank space beside the composer now toggles an open VoicePad too — the margin gesture covers the whole chat column, including empty chats. Enable it in Settings > Experiments > VoicePad.
+- VoicePad microphones remain recognized through Bluetooth profile switches, and hold-to-talk retries a refused start instead of staying stuck on “microphone unavailable.”
+- **VoicePad:** Hold Alt+Space to dictate without opening the pad, then edit the transcription bubble or send accumulated text from the composer. Choose Whistle for offline transcription or keep AI Gateway. Recording continues until you release the shortcut, stop, or mute; failed transcription can retry saved audio. Enable VoicePad in Settings → Experiments.
+- The Git panel in a standalone terminal follows its current directory, showing the nearest repository's branch, history, and staging area, or an empty state outside a repository.
+- Pause a voice briefing to hear it soften out over about 150 ms.
+- **Voicepad render polish:** In the VoicePad scratchpad, the composer's VP button now hides while the pad is open and returns when it closes, hides, cancels, or sends; the annotation box wraps dictated text at its edge instead of running off-screen; and the paragraph dividers follow the Border intensity setting and read a bit more clearly by default.
+
+### Fixed
+
+- **Sessions**
+  - Agents now need user approval for each task rename. `/rename` approves one rename; later renames ask again, and manually choosing a title clears any pending approval.
+  - Automation run history now survives daemon restarts, queued runs wait for their own prompt to finish, and unsaved outcomes are reported without automatically repeating provider work.
+  - Queued messages from other agents now resume delivery when their recipient is idle, even if the sender is no longer active.
+  - Managed goals no longer add unread completion markers or play completion sounds for off-screen intermediate turns.
+- **Sidebar**
+  - Archiving a task with the keyboard shortcut keeps the temporarily revealed sidebar open.
+  - Archiving the selected task preserves the sidebar scroll position, moves only enough to reveal the next active task, and briefly highlights its row.
+  - Limit background dormant-worktree cleanup so it leaves room for interactive daemon requests after launch.
+  - Hovering the window's left edge to peek the hidden sidebar no longer shifts the top-row icons — the sidebar toggle, bell, and back/forward buttons now hold the same position they occupy in the header.
+  - Sweeping the task you're viewing into the sidebar's Dormant group now selects the next task in the list instead of leaving the shelved task open.
+  - Fixed collapsed sidebar group headers showing both an unread dot and a working spinner at once; unread now takes precedence.
+- **Composer**
+  - Hide suggested actions whenever the composer has draft content, so they do not compete with writing; while a reply is running, keep only preemptive actions available when the composer is empty.
+  - Long prompts in the composer now fade at the edges when they scroll past the visible text area.
+  - Save draft, suggested actions, and sticky turn statuses no longer shift the transcript when they appear or change above the composer; queued prompts still reserve space.
+  - On the new task page, `@` file suggestions now list the files on the selected base branch when "New worktree" is the workspace, instead of the project checkout's files.
+  - Resume turns labeled Partial by Jev with Enter on an empty composer or the submit button’s play icon.
+  - **Queued annotation chips:** Queued follow-ups carrying annotations or session and paste references now preview them as compact chips flowing inline with the prompt text above the composer — line breaks included — and clicking one to edit restores the draft with the same chips instead of raw token text.
+  - Hovering a queued follow-up above the composer no longer paints its highlight past the queue card's rounded top corners.
+  - When a task can no longer accept an immediate steer, the composer keeps the prompt in the draft instead of silently adding it to the follow-up queue.
+  - ⌘V in a chat now pastes into the composer even when the field isn't focused, instead of doing nothing. Paste still goes to whichever text field has focus, and image or file clipboards still attach.
+- **Providers**
+  - Auto model and reasoning-effort routing now judge the benefit of deeper analysis rather than task length or implementation volume, and follow-up effort decisions use the previous turn's context.
+  - Fixed Codex tasks appearing to stall with no output when the provider's connection drops — the transcript now shows a single "Retrying the request" row that updates with the reconnect reason instead of silently spinning.
+  - Tasks with a goal skip Jev's per-turn reasoning-effort adjustments until the goal is cleared.
+  - **Stable runtime:** cancelling a stable-runtime turn no longer lets the next prompt race ahead of the provider — dispatch stays held until the cancelled turn's terminal event is durable, across daemon reloads; an uncertain or unanswered cancellation keeps the hold instead of guessing.
+  - **Stable runtime:** long-running Codex sessions no longer stall as resolved approvals and inputs accumulate; the adapter drops provider-resolved native requests and refuses answers to dead request ids instead of writing them into a void.
+  - Stable runtime reconnection preserves the original agent CLI grant expiry and blocks expired or stopped-session authority instead of issuing a fresh authorization window.
+- **Transcript**
+  - Fixed the fade at the end of a collapsed long prompt so it appears at the truncation point.
+  - Stopped or interrupted turns without a provider error now say the agent stopped before responding, instead of showing a Codex-specific message.
+  - Context compaction notices no longer appear in task transcripts.
+  - Returning to a chat you had scrolled up in — while a turn finished in the meantime — now reliably shows the jump-to-bottom button above the composer instead of leaving it hidden.
+  - Expanded pasted-text attachments now shrink to fit narrow chat columns instead of clipping at their fixed width.
+  - Keep queued prompts' Steer action available while text streams, and show a steered prompt in the transcript until it is delivered.
+  - Fixed text selection in agent responses containing tables: dragging inside a table cell no longer collapses the selection or snaps it to the row's first cell, so a short span inside a single cell selects as expected.
+  - Long text in Markdown table cells now wraps within its column, while wide tables still scroll horizontally and show a fade at the edge.
+- **Panels**
+  - In the Tasks tab, blocked outcome rows keep their status without showing the blocker reason; expanding rows hides outcome “waiting on” notes and the “provider exited mid-turn” cause too.
+  - Newly opened Markdown previews start at the beginning of the document and keep your reading position while the content updates.
+  - Long lines in Markdown file previews now wrap within the available panel width.
+  - Maximizing a file tab in the right panel keeps the file tree visible and available to resize or toggle.
+  - Errands assigned to a plan now appear in the Goals tab alongside goal assignments.
+  - Fixed the right edge fade on horizontally scrolling Markdown tables so it stays at the table viewport's right edge.
+- **Terminals**
+  - The sidebar's Terminals group highlights only the active standalone terminal, not terminals associated with tasks.
+  - **Cmd t split:** Pressing ⌘T on a floating terminal now splits it into a sibling pane in the same group instead of replacing the card, so the running shell stays visible; at the pane limit the chord shows an "at most N panes" hint, and on a maximized standalone terminal it adds the pane and restores the grid.
+  - Collapsing the Terminals group in the sidebar now keeps the currently active page open.
+  - Copy and paste now work reliably in a full-page terminal: ⌘C copies the grid's selection even while a chat transcript still holds one, and the Edit menu's Copy, Paste, and Select All reach a focused terminal.
+  - In a floating terminal, press ⌘W to close the terminal and its shell; press Escape to hide the card while keeping the shell running.
+  - Terminals that announce a localhost URL stay visible in the Terminals group, including when the group is folded.
+  - Background command output now updates carriage-return progress lines in place instead of displaying repeated redraws.
+  - Pinned terminal location labels use the disambiguated project name when multiple projects share a name.
+  - Creating a terminal no longer unfolds the sidebar's Terminals group, and the terminal filling the main area keeps a row under the folded group.
+  - Fixed terminal apps detecting the opposite light or dark theme when querying the integrated terminal's background color.
+- **Navigation**
+  - Project search now requires consecutive letters in names or paths, reducing unrelated results while typing in the project picker and “New task in…”.
+  - Switch tasks while their conversations load, with a retry option if loading fails; background recovery now yields between batches to keep navigation responsive.
+- **Settings**
+  - Fixed API keys disappearing without configuring the provider when applying them in Settings → Providers.
+  - The built-in “Sharpen complex answers” auto-prompt now starts disabled and is disabled on load if its shipped settings are untouched; edited rules are preserved.
+- **Platform**
+  - Debug builds keep the app, daemon, and agent CLI together, preventing stale CLI copies after rebuilds and keeping completed runtimes available after build-cache cleanup.
+  - Dev channel downloads keep using the last published signed build while a new build is being packaged and published.
+  - The Nightly dev watcher (`bun run dev --serve`) no longer quits when a build fails — it reports the failure, keeps the update feed and daemon running, and retries on the next source change.
+  - Japanese and Simplified Chinese translations now include recent controls across the app instead of falling back to English.
+  - Fixed duplicate project registrations causing project names to expand into absolute paths, including on Windows.
+- Pass a search query directly to `goddard-agent search "your query"`; the existing `--text` and `--file` forms remain available.
+- Spinners retry redraws while idle so a missed frame does not immediately stop their animation.
+- Computer Use can start or reset its JavaScript kernel after a cancelled call. Connection failures now distinguish disconnects from timeouts and provide a private diagnostic log path.
+- Agent commands close their daemon connections cleanly instead of logging a WebSocket reset after successful requests.
+- Pressing ⌘N from a focused floating terminal opens a task and focuses its composer for immediate typing.
+- Fixed a text field crash when search or annotation highlights became stale after its content changed.
+- Fixed Escape sometimes failing to close the command palette or file finder when it was pressed before the picker's search field had taken focus.
+- Vertical scrolling over a Markdown table continues moving the transcript, while horizontal table scrolling stays contained until it reaches an edge.
+- Agents are instructed to keep memory notes brief and durable, leaving status reports and verification logs in task transcripts.
+- The model picker now scrolls smoothly when you drag a favorite model to its top or bottom edge.
+- **Microphone consent:** Goddard can now ask for microphone access: signed builds were missing the audio-input entitlement macOS requires before showing the consent prompt, so the app never appeared under System Settings → Privacy & Security → Microphone and dictation could not be granted.
+- Resource reservations no longer stay blocked forever when a task ends while its `goddard-agent resource run` workload is still running; Goddard now stops the leftover workload and frees its capacity once it exits.
+- A reservation stuck waiting for an unavailable simulator or emulator no longer starves requests behind it: satisfiable requests bypass the blocked head, and `goddard-agent resource status` names what each wait is for.
+- `goddard-agent resource` wait messages now name the device or capacity pool actually blocking a request and which reservations hold it, instead of an unrelated task.
+- **Restart provider resume:** Fixed tasks failing to resume after an app restart with "Could not start the agent" while the provider CLI was still being detected — the resume now waits for the CLI to be found and only reports it missing if it still cannot be found.
+- **Stable runtime:** resolved command tombstones and agent-ingress records can no longer grow without bound — the host refuses new commands and ingress submissions at explicit retention limits instead of accumulating metadata and compaction work indefinitely, while expired identities keep rejecting and unresolved requests are never reclaimed.
+- The three-finger trackpad swipe for back/forward navigation now works when the pointer is over a maximized right panel — the gesture previously did nothing there.
+- The Tasks tab now scrolls its expanded history and active task sections together, instead of trapping the pointer in separate section scroll areas.
+- Temporary chats now show the ghost icon everywhere — the Temporary chip under the composer, the sidebar and header badges, and the command palette — and the chip matches the access mode selector instead of reading as a filled pill.
+
 ## [0.15.0]
 
 ### Features

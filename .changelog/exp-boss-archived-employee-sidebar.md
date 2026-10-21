@@ -1,1 +1,0 @@
-- Archived employees no longer appear in the sidebar's Outcomes and Errands groups; resuming an archived employee unarchives it first so its row returns.

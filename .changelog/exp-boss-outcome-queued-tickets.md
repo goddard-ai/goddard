@@ -1,1 +1,0 @@
-- Completing a Boss outcome now stops its assignments still queued to start — they previously stayed queued forever. Finishing employees can start after failed sibling assignments settle and pending handoffs are resolved; unresolved failures still prevent automatic outcome completion.

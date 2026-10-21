@@ -1,1 +1,0 @@
-- Resource reservations no longer stay blocked forever when a task ends while its `goddard-agent resource run` workload is still running; Goddard now stops the leftover workload and frees its capacity once it exits.

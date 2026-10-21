@@ -1,1 +1,0 @@
-- Markdown previews of Boss deliverables open at the beginning of the document and keep your reading position while you read, search, or receive content updates.

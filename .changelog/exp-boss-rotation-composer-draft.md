@@ -1,1 +1,0 @@
-- An unsent message drafted in the Boss chat now survives session rotation — the text, attachments, and annotations carry over to the replacement chat instead of staying behind on the archived one.

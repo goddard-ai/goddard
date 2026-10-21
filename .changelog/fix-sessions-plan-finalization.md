@@ -1,1 +1,0 @@
-- Finalize a plan directly from its planning session. Agent requests require your explicit answer on the Boss chat before the plan freezes and implementation begins.

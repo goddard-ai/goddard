@@ -1,1 +1,0 @@
-- While a voice briefing plays, its headphones icon stays in the response footer instead of also appearing beside the turn in the transcript rail.

@@ -1,1 +1,0 @@
-- Pause a voice briefing to hear it soften out over about 150 ms.

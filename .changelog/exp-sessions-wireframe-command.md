@@ -1,1 +1,0 @@
-- With Wireframes enabled in Settings → Experiments, task agents can run `goddard-agent wireframe PATH.wireframe.json` to validate and open designs. Task-file and planning previews shrink to fit the panel width; background-task previews open when selected.

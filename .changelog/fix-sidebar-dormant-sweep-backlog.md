@@ -1,1 +1,0 @@
-- Limit background dormant-worktree cleanup so it leaves room for interactive daemon requests after launch.

@@ -1,1 +1,0 @@
-- Archiving an employee still queued to start now removes it from the summon queue — it previously stayed queued and could launch into an archived task.

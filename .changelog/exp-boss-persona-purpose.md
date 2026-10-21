@@ -1,1 +1,0 @@
-- Boss personas can default new assignments to Building or Helping; explicit assignment purpose takes precedence, and existing employees keep their purpose.

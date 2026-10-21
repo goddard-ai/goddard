@@ -1,1 +1,0 @@
-- Find recent Deliverables beside Terminals in the sidebar utility group, above the Boss section.

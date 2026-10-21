@@ -1,1 +1,0 @@
-- Employees stay visible in the Boss sidebar while switching workspaces instead of appearing expired.

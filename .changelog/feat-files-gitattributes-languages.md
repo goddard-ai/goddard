@@ -1,1 +1,0 @@
-- **Files:** A repository's `.gitattributes` now steers syntax highlighting — a `linguist-language=<name>` rule colors matching files in the file viewer and in diff surfaces, so a brand-new language can borrow the closest lexer the app ships. Declarations override the extension table, and names the lexer does not know render plain rather than guessing.

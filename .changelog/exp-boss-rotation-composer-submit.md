@@ -1,1 +1,0 @@
-- Messages sent from an employee’s page or a deliverable’s preview reach the active Boss chat after a session rotation, even before the app receives the update. Failed sends preserve the draft.

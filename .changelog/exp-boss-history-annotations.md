@@ -1,1 +1,0 @@
-- **Earlier-chat annotations:** The Boss chat's loaded earlier-conversation rows support text annotations — select a passage in a previous session's reply and choose Add to chat to stage it with the same input used for other transcript annotations. The sent message carries the source session and message for the Boss to trace back.

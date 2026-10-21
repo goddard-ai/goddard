@@ -1,1 +1,0 @@
-- Keep temporary Boss instructions through chat refreshes with source-backed pins, release conditions, automatic outcome settlement, and an Instructions page for review and editing. Boss also receives a compact current work brief while older transcripts remain available on demand.

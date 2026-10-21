@@ -1,1 +1,0 @@
-- Employees no longer appear in the composer’s `@` autocomplete, including side chats.

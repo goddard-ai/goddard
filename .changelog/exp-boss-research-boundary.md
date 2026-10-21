@@ -1,1 +1,0 @@
-- Boss delegates codebase research and completion checks to employees, requiring reported evidence before calling work complete or behavior verified.

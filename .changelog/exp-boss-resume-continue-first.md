@@ -1,1 +1,0 @@
-- Resuming an interrupted employee now runs its "verify your partial work" check before the follow-ups queued while it was down — the queued prompts still deliver afterward, in order.

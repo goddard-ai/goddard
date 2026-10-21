@@ -1,1 +1,0 @@
-- Collapsing the Terminals group in the sidebar now keeps the currently active page open.

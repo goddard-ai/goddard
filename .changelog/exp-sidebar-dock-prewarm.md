@@ -1,1 +1,0 @@
-- With the experimental quick-action dock on, its button artwork and glyphs are decoded at startup, so the first raise paints instantly instead of popping images in as they load.

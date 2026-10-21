@@ -1,1 +1,0 @@
-- Boss chat prompts no longer stall forever when they mention an ongoing instruction — the send used to wedge the daemon's Boss lock.

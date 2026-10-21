@@ -1,1 +1,0 @@
-- **Boss personas:** Persona details in Settings → Boss → Personas now show the instruction layers an employee actually receives as a labeled bullet list — the inherited Employee base, the role's shipped default, and your appended customization, in the order they are composed. Only the customization layer is editable; the inherited and shipped layers are read-only.

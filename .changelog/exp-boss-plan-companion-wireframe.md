@@ -1,1 +1,0 @@
-- With Wireframes enabled in Settings → Experiments, open a planning session’s Plan panel and switch to Wireframe to preview its companion design as it updates. Missing companions stay hidden; invalid designs show an error without affecting the document.

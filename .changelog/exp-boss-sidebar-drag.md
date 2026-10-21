@@ -1,1 +1,0 @@
-- Sidebar rows for Boss chats, employees, planning sessions, and deliverables now drag into the current chat — the drop stages the same reference chip an `@` mention would.

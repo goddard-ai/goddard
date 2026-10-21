@@ -1,1 +1,0 @@
-- `@` autocomplete prioritizes transcript-mentioned files and directories, then other local paths, projects, tasks, and remaining references. Normal tasks can reference any regular project, including their own, and fuzzy matching rejects widely scattered letters.

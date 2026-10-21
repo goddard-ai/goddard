@@ -1,1 +1,0 @@
-- Pass a search query directly to `goddard-agent search "your query"`; the existing `--text` and `--file` forms remain available.

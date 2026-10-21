@@ -1,1 +1,0 @@
-- Expanded pasted-text attachments now shrink to fit narrow chat columns instead of clipping at their fixed width.

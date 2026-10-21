@@ -1,1 +1,0 @@
-- **Boss session refresh:** Fixed Boss chat leaving the user on its archived session after a refresh — the chat now follows the replacement automatically, whether the refresh lands while the chat is on screen, under a Boss page or deliverable preview, or while a navigation was in flight.

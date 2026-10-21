@@ -1,1 +1,0 @@
-- **VoicePad:** Dictating with Alt+Space while an "Add to chat" comment card is open now types the transcript into the comment field itself, at the caret, instead of a hidden VoicePad pad. The recording indicator still shows in the card while you hold the chord.

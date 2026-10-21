@@ -1,1 +1,0 @@
-- In the Boss chat's Tasks tab, outcome rows hide assignee names, avatars, and pending wait reasons; expanded employees match sidebar rows. Expanding or collapsing an outcome preserves the scroll position.

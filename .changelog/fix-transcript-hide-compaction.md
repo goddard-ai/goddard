@@ -1,1 +1,0 @@
-- Context compaction notices no longer appear in task transcripts.

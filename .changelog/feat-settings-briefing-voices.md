@@ -1,1 +1,0 @@
-- Choose a voice name or ID for each voice briefing speech model in Settings, including custom models; clearing the field restores the model’s default voice.

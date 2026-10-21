@@ -1,1 +1,0 @@
-- Hovering a queued follow-up above the composer no longer paints its highlight past the queue card's rounded top corners.

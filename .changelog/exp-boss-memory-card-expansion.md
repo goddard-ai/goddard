@@ -1,1 +1,0 @@
-- Expand long recorded memories directly in Boss and employee transcripts with Show more and Show less, and undo a recording from its card.

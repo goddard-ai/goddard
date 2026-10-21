@@ -1,1 +1,0 @@
-- Arrange Boss employee sidebar rows into two lines so names, roles, project context, and activity time are easier to scan.

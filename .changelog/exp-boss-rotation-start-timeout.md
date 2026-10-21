@@ -1,1 +1,0 @@
-- Fixed Boss chat failing to start or send while a session refresh was retiring the previous chat — a stalled provider teardown no longer blocks Boss commands for minutes, and the chat now reports a clear retry-able error if a Boss operation is still in flight.

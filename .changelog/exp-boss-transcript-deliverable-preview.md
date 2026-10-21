@@ -1,1 +1,0 @@
-- Open published deliverable links from Boss or employee replies in the right-panel preview, including links to the original source file in older messages.

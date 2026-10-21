@@ -1,1 +1,0 @@
-- Keep employee job titles truncated alongside worktree markers and last activity on one detail line in the Boss sidebar.

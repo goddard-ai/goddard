@@ -1,1 +1,0 @@
-- **Boss:** Typing an "Add to chat" comment on a transcript excerpt no longer loses the draft or its highlight when the Boss chat rotates mid-edit — the annotation carries to the refreshed chat and still ships with your next message. The comment editor also stays visible while the refreshed chat is loading.

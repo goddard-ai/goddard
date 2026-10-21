@@ -1,1 +1,0 @@
-- Computer Use can start or reset its JavaScript kernel after a cancelled call. Connection failures now distinguish disconnects from timeouts and provide a private diagnostic log path.

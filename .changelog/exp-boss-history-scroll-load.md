@@ -1,1 +1,0 @@
-- Scrolling to the top of a Boss chat now loads the previous rotated conversation on its own — no need to activate the "Load earlier conversation" control first. The view stays anchored on the messages already on screen while older ones fill in above, and the control remains as the retry after a failed load.

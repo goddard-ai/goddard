@@ -1,1 +1,0 @@
-- Vertical scrolling over a Markdown table continues moving the transcript, while horizontal table scrolling stays contained until it reaches an edge.

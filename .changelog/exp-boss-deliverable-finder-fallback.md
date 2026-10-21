@@ -1,1 +1,0 @@
-- Clicking a local Boss deliverable that is a directory, unsupported file, or unavailable file opens it in Finder without changing the current app view. Previewable files keep opening in Goddard.

@@ -1,1 +1,0 @@
-- Pinned terminal location labels use the disambiguated project name when multiple projects share a name.

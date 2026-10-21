@@ -1,1 +1,0 @@
-- Resumed employees return to the sidebar immediately, even when waiting for capacity after being archived; queued groups show an hourglass, and admitted employees show their new startup status.

@@ -1,1 +1,0 @@
-- Press ⌘L (Ctrl+L on other platforms) to switch focus between the main composer and the open side-chat composer.

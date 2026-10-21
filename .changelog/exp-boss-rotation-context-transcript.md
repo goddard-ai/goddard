@@ -1,1 +1,0 @@
-- Boss chat transcripts hide the injected session rotation context from user messages.

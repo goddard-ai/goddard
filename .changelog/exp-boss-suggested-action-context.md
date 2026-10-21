@@ -1,1 +1,0 @@
-- **Boss:** Suggested actions in an employee chat now name the employee and job title before the action, so the request stays clear when sent to that employee.

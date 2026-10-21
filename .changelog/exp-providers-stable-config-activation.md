@@ -1,1 +1,0 @@
-- **Stable runtime:** a runtime-confirmed model or effort change now reaches the sidebar and task detail without a refresh — confirmed selections are fenced by a durable activation mark so stale event replays and out-of-date client saves cannot resurrect a superseded pick.

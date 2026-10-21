@@ -1,1 +1,0 @@
-- Dev channel downloads keep using the last published signed build while a new build is being packaged and published.

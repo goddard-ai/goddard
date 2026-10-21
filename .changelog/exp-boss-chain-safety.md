@@ -1,1 +1,0 @@
-- Boss can store opt-in employee chains with durable evidence and recovery controls; automatic employee execution remains disabled during this first phase.

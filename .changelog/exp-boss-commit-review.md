@@ -1,1 +1,0 @@
-- Clicking a commit hash in the Boss chat transcript opens that commit's diff in the right panel's Review tab, pinned to the named commit.

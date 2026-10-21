@@ -1,1 +1,0 @@
-- Archive an eligible planning session from its sidebar row without opening the plan; right-click and ⌘⇧A remain available, and archived plans stay out of Settings → Archived chats like other Boss sessions.

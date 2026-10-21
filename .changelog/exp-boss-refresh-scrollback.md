@@ -1,1 +1,0 @@
-- Boss chat now keeps its scrollback and current position when its session refreshes, without reopening the chat or leaving the page you are viewing.

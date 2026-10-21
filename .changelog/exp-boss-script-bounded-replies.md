@@ -1,1 +1,0 @@
-- Boss scripts now return compact mutation acknowledgements and a state digest, preventing large history from reporting an accepted operation as failed and stopping later script operations.

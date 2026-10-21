@@ -1,1 +1,0 @@
-- Boss scripts: `op(#{...})` calls that return the full boss state — like `resolveHandoff` and `attachPlan` — no longer fail with "Size of object map too large" once the daemon's records grow past a fixed property budget.

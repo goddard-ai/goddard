@@ -1,1 +1,0 @@
-- Boss employee model switches now retain the selected provider, model, and effort after client saves, live updates, and reconnects.

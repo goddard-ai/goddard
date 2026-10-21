@@ -1,1 +1,0 @@
-- Reduce Boss background CPU usage when many retired employees are present.

@@ -1,1 +1,0 @@
-- Fixed `boss employee model` on a working employee resuming on the old provider or model — the interrupted turn now relaunches on the new selection, and a provider switch hands the fresh session a transcript pointer instead of a stale resume cursor.

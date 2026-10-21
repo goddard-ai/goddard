@@ -1,1 +1,0 @@
-- Boss employee rows in the Tasks tab show the employee's job title when available. Outcome rows identify the employee by project and name, with the update time at the far right.

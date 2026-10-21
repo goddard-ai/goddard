@@ -1,1 +1,0 @@
-- Queued follow-ups carrying annotations or session and paste references now preview them as compact chips flowing inline with the prompt text above the composer — line breaks included — and clicking one to edit restores the draft with the same chips instead of raw token text.

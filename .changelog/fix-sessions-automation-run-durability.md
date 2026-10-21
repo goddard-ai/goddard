@@ -1,1 +1,0 @@
-- Automation run history now survives daemon restarts, queued runs wait for their own prompt to finish, and unsaved outcomes are reported without automatically repeating provider work.

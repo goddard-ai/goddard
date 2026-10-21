@@ -1,1 +1,0 @@
-- `goddard-agent` now defaults to readable text in terminals and pipes; scripts that parse responses or errors as JSON must pass `--output json`.

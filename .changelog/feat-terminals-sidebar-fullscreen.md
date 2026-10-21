@@ -1,1 +1,0 @@
-- Clicking a terminal in the sidebar now opens it full screen instead of docking it as a card at the top of the screen.

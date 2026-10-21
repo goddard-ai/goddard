@@ -1,1 +1,0 @@
-- **Recent prompt restore:** The composer remembers the last five prompts you sent — choose "Restore recent prompt…" from the command palette to find one and stage it back into the composer as an editable draft instead of sending it. Restoring over an existing draft is undoable with ⌘Z.

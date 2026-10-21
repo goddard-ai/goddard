@@ -1,1 +1,0 @@
-- Fixed a text field crash when search or annotation highlights became stale after its content changed.

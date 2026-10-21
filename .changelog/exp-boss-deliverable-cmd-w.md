@@ -1,1 +1,0 @@
-- Press ⌘W while viewing a deliverable in Boss chat to return to the chat; ⌘W keeps its existing behavior elsewhere.

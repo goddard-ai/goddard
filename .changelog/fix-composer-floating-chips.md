@@ -1,1 +1,0 @@
-- Save draft, suggested actions, and sticky turn statuses no longer shift the transcript when they appear or change above the composer; queued prompts still reserve space.

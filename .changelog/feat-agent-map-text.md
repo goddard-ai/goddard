@@ -1,1 +1,0 @@
-- `goddard-agent map` now returns readable source context with a compact status footer, including in pipes; use `--output json` for structured output.

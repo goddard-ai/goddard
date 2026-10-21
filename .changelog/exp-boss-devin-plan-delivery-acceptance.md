@@ -1,1 +1,0 @@
-- **Boss:** Devin employees on required plans now count delivery only after the provider accepts the submitted input — a rejected or failed send blocks the attempt and keeps the brief instead of falsely showing Delivered.

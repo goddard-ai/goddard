@@ -1,1 +1,0 @@
-- In the VoicePad scratchpad, the composer's VP button now hides while the pad is open and returns when it closes, hides, cancels, or sends; the annotation box wraps dictated text at its edge instead of running off-screen; and the paragraph dividers follow the Border intensity setting and read a bit more clearly by default.

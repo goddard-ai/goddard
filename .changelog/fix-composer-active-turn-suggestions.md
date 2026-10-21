@@ -1,1 +1,0 @@
-- Hide suggested actions whenever the composer has draft content, so they do not compete with writing; while a reply is running, keep only preemptive actions available when the composer is empty.

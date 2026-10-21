@@ -1,1 +1,0 @@
-- Split right-panel terminals into up to three stacked panes or standalone terminals into a grid of up to nine panes using the split button or ⌘⌥D. Drag a sidebar terminal into another terminal to join its split; hover sidebar terminals while dragging to preview them.

@@ -1,1 +1,0 @@
-- ⌘N project picks no longer open a queued employee's task that happens to share the project — a pick always lands on a real New task draft now instead of reusing a boss-owned session that only looks unstarted.

@@ -1,1 +1,0 @@
-- Align employee status and archive controls with the employee name in the Boss sidebar.

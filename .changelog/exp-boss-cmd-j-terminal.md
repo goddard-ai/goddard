@@ -1,1 +1,0 @@
-- In Boss chat, press ⌘J to open a terminal, matching ⌘T; elsewhere ⌘J still focuses the terminal panel.

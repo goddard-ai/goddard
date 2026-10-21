@@ -1,1 +1,0 @@
-- On an employee's page, the composer's Send-to menu now lists only Boss and that chat's employee — labeled "Boss" and "Employee" — instead of the whole roster, and a send can only reach one of those two.

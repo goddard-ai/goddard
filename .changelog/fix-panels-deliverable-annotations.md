@@ -1,2 +1,0 @@
-- Option-click a block in a Markdown deliverable to open its annotation editor and attach the comment to your next chat message.
-- Selecting text on a deliverable's preview page offers Add to chat and opens the comment editor — the floating controls were unreachable there.

@@ -1,1 +1,0 @@
-- Steers sent while a reply is streaming now appear as pending messages at the end of the transcript — below the working indicator — instead of occupying the follow-up queue above the composer.

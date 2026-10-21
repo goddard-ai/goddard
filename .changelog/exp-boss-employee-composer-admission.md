@@ -1,1 +1,0 @@
-- Switch the composer from Boss to Employee in that employee’s chat and send a prompt to start queued work without waiting for model slots; hardware reservations and launch prerequisites still apply.

@@ -1,1 +1,0 @@
-- Finalizing a planning session interrupts the current Boss turn and takes priority over employee notifications and queued employee or user prompts.

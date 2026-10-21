@@ -1,1 +1,0 @@
-- Finished Boss employees now appear by their most recent completed turn, with the newest completion first; queued and working employees keep their existing order.

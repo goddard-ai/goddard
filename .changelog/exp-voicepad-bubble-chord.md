@@ -1,1 +1,0 @@
-- **VoicePad:** The Alt+Space hold-to-talk chord now works while the latest recording's bubble is being edited — pressing it used to type a nonbreaking space into the bubble's field instead of starting a new recording.

@@ -1,1 +1,0 @@
-- Boss project mentions now put recently referenced projects first when matches are otherwise equal, while stronger name matches stay ahead.

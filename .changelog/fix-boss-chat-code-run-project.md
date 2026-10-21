@@ -1,1 +1,0 @@
-- Running a code block from a Boss chat reply now runs it in the project the reporting employee worked in — or in the project the message's paths point to — instead of always using the Boss's own folder, and asks which project when it cannot tell.

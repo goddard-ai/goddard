@@ -1,1 +1,0 @@
-- Fixed tasks and Boss employees losing follow-ups or access to task tools after a provider restart or model change. Failed launches release their resources, and providers that connect or exit immediately keep their first events.

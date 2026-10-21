@@ -1,1 +1,0 @@
-- The Nightly dev watcher (`bun run dev --serve`) no longer quits when a build fails — it reports the failure, keeps the update feed and daemon running, and retries on the next source change.

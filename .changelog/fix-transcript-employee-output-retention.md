@@ -1,1 +1,0 @@
-- Employee transcript reads preserve command and file-read evidence for at least 48 hours after expiry, and long tool arguments no longer hide the output.

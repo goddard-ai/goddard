@@ -1,1 +1,0 @@
-- Choose one avatar style for the Boss and all employees from the Boss identity menu. New face keeps the selected style while giving that identity a new face.
