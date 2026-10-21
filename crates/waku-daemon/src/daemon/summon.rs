@@ -989,7 +989,7 @@ impl WakuBackend {
                  anything you did not make."
             );
         }
-        let prompt = AgentTaskPrompt::Assignment(envelope).resolve(&workspace, &project_path);
+        let prompt = envelope;
         let turn_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
         {

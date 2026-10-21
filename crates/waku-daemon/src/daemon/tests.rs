@@ -7818,11 +7818,7 @@ fn boss_summon_runs_the_employee_in_a_managed_worktree() {
     assert!(path.starts_with(&worktrees));
     assert!(path.is_dir());
     assert!(crate::worktree::is_linked_worktree(path));
-    assert!(
-        session.messages[0]
-            .content
-            .contains(&format!("Assigned project: {}", path.display()))
-    );
+    assert_eq!(session.messages[0].content, "Summarize the diff");
     assert!(backend.boss.is_employee(session.id));
     assert!(session.boss_managed);
     drop(state);

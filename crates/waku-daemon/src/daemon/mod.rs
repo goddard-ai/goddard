@@ -431,41 +431,6 @@ pub(crate) struct WorktreeAdoption {
     pub workspace: SessionWorkspace,
 }
 
-/// A created task's first prompt. `Fixed` ships as sent. `Assignment` is
-/// the Boss employee wrapper: the job text follows an "Assigned project"
-/// line resolved against the task's run directory — the worktree path for
-/// a worktree summon, the project path for a local one — so the employee
-/// is pointed at the checkout it actually occupies, not the checkout its
-/// supervisor named.
-pub(crate) enum AgentTaskPrompt {
-    Fixed(String),
-    Assignment(String),
-}
-
-impl AgentTaskPrompt {
-    /// The job text as the caller wrote it — before `Assignment` wrapping —
-    /// which is what routing and blank validation judge.
-    fn text(&self) -> &str {
-        match self {
-            Self::Fixed(prompt) | Self::Assignment(prompt) => prompt,
-        }
-    }
-
-    fn is_blank(&self) -> bool {
-        self.text().trim().is_empty()
-    }
-
-    fn resolve(self, workspace: &SessionWorkspace, project: &Path) -> String {
-        match self {
-            Self::Fixed(prompt) => prompt,
-            Self::Assignment(prompt) => format!(
-                "Assigned project: {}\nWork in that project and read its AGENTS.md before beginning. If a sandbox mounts the project at another path, use the guest working directory.\n\n{prompt}",
-                workspace.path().unwrap_or(project).display()
-            ),
-        }
-    }
-}
-
 /// The model pick `createPlan` lands on when the op leaves provider,
 /// model, or effort unset: planning sessions are design/drafting work
 /// and run Codex's sol model at medium effort.

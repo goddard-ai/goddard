@@ -509,7 +509,7 @@ impl WakuBackend {
                 workspace,
                 AgentWorkspace::Local,
                 None,
-                AgentTaskPrompt::Fixed(seed),
+                seed,
                 events,
                 None,
                 Some(plan),

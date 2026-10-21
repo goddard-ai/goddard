@@ -53,7 +53,7 @@ impl WakuBackend {
             project,
             workspace,
             base_branch,
-            AgentTaskPrompt::Fixed(prompt),
+            prompt,
             events,
             None,
             None,
@@ -77,7 +77,7 @@ impl WakuBackend {
             project,
             workspace,
             base_branch,
-            AgentTaskPrompt::Fixed(prompt),
+            prompt,
             events,
             None,
             None,
@@ -92,13 +92,13 @@ impl WakuBackend {
         project: PathBuf,
         workspace: AgentWorkspace,
         base_branch: Option<String>,
-        prompt: AgentTaskPrompt,
+        prompt: String,
         events: &EventSink,
         employee: Option<waku_protocol::boss::BossEmployee>,
         planning: Option<waku_protocol::boss::BossPlan>,
         automation_run: Option<Uuid>,
     ) -> anyhow::Result<Uuid> {
-        if prompt.is_blank() {
+        if prompt.trim().is_empty() {
             bail!("agent sessions require a prompt");
         }
         if selection
@@ -127,7 +127,7 @@ impl WakuBackend {
             sender,
             &selection,
             &project,
-            prompt.text(),
+            &prompt,
             employee.is_some(),
         )?;
         let (project_id, project_path) = self.register_agent_project(&project)?;
@@ -169,7 +169,6 @@ impl WakuBackend {
             }
             AgentWorkspace::Adopt => unreachable!("adopt is rejected above"),
         };
-        let prompt = prompt.resolve(&session.workspace, &project_path);
         if let Some(employee) = &employee {
             session.id = employee.session_id;
             session.set_title(&employee.identity.name);
