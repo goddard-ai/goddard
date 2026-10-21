@@ -189,6 +189,7 @@ impl Backend for WakuBackend {
         // before contention becomes a daemon restart. `None` on platforms
         // without a signal or when setup failed keeps the ordinary cadence.
         let pressure = crate::pressure::watch();
+        let backend = self.weak_self();
         let _ = std::thread::Builder::new()
             .name("waku-idle-reaper".into())
             .spawn(move || {
@@ -207,7 +208,7 @@ impl Backend for WakuBackend {
                 let mut last_pressure_shed: Option<std::time::Instant> = None;
                 loop {
                     let shed = |under_pressure: bool| {
-                        for (session_id, runtime_id, driver) in reap_idle_runtimes(
+                        let evicted = reap_idle_runtimes(
                             &sessions,
                             &task_state,
                             &settings,
@@ -215,7 +216,20 @@ impl Backend for WakuBackend {
                             &lifecycles,
                             &repo_maps,
                             under_pressure,
-                        ) {
+                        );
+                        // One table walk for the pass, before any driver is stopped.
+                        let table = (!evicted.is_empty())
+                            .then(crate::stats::process_table)
+                            .flatten();
+                        for (session_id, runtime_id, driver) in evicted {
+                            if let Some(backend) = backend.upgrade() {
+                                backend.memory_guard.track_idle_eviction(
+                                    session_id,
+                                    runtime_id,
+                                    under_pressure,
+                                    table.as_ref(),
+                                );
+                            }
                             evict_idle_runtime(session_id, runtime_id, driver, &events);
                         }
                     };

@@ -1,6 +1,9 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+mod telemetry;
+use telemetry::{Eviction, IdleEviction, Outcome, Reason};
+
 const INTERVAL: Duration = Duration::from_secs(5);
 const OVERAGE: Duration = Duration::from_secs(30);
 const CANCEL_GRACE: Duration = Duration::from_secs(10);
@@ -21,6 +24,8 @@ pub(super) struct MemoryGuard {
     recovery: Mutex<HashMap<Uuid, Recovery>>,
     stopping: Mutex<HashSet<Uuid>>,
     critical: std::sync::atomic::AtomicBool,
+    eviction_writer: Mutex<()>,
+    idle_evictions: Mutex<Vec<IdleEviction>>,
 }
 
 impl MemoryGuard {
@@ -42,6 +47,8 @@ impl MemoryGuard {
             recovery: Mutex::new(recovery),
             stopping: Mutex::new(HashSet::new()),
             critical: false.into(),
+            eviction_writer: Mutex::new(()),
+            idle_evictions: Mutex::new(Vec::new()),
         })
     }
 
@@ -180,14 +187,15 @@ impl Process {
     }
 
     #[cfg(unix)]
-    fn signal(self, signal: i32) {
+    fn signal(self, signal: i32) -> bool {
         if self.pid > 1 && waku_base::process_identity::start_time(self.pid) == Some(self.birth) {
             // SAFETY: pid is positive, identifies a captured owned process, and its
             // birth stamp was rechecked immediately before this signal.
             unsafe {
-                libc::kill(self.pid, signal);
+                return libc::kill(self.pid, signal) == 0;
             }
         }
+        false
     }
 }
 
@@ -287,6 +295,24 @@ struct Watch {
     phase: Phase,
     safe_restart: bool,
     paused_task: bool,
+    incident: Option<Eviction>,
+    outcome: Outcome,
+}
+
+#[cfg(unix)]
+impl Watch {
+    fn signal(&mut self, signal: i32, outcome: Outcome, guard: &MemoryGuard, now: Instant) {
+        let mut sent = false;
+        for process in &self.owned {
+            sent |= process.signal(signal);
+        }
+        if sent && self.outcome != outcome {
+            self.outcome = outcome;
+            if let Some(incident) = &self.incident {
+                guard.record_eviction(incident, "escalated", Some(outcome), now);
+            }
+        }
+    }
 }
 
 impl WakuBackend {
@@ -323,7 +349,10 @@ impl WakuBackend {
         self.memory_guard
             .critical
             .store(critical, std::sync::atomic::Ordering::Release);
-        let Some(table) = crate::stats::process_table() else {
+        let table = crate::stats::process_table();
+        self.memory_guard
+            .observe_idle_evictions(now, table.as_ref());
+        let Some(table) = table else {
             return;
         };
         self.memory_guard_sample(watches, now, &table, critical);
@@ -363,6 +392,8 @@ impl WakuBackend {
                         phase: Phase::Watching,
                         safe_restart: false,
                         paused_task: false,
+                        incident: None,
+                        outcome: Outcome::Cancelled,
                     },
                 );
             }
@@ -409,6 +440,22 @@ impl WakuBackend {
                     if !sustained && victim != Some(runtime) {
                         continue;
                     }
+                    let incident = Eviction::new(
+                        watch.session,
+                        runtime,
+                        if victim == Some(runtime) {
+                            Reason::CriticalPressure
+                        } else {
+                            Reason::MemoryLimit
+                        },
+                        Some(watch.bytes),
+                        Some(limit_mb),
+                        &watch.owned,
+                        now,
+                    );
+                    self.memory_guard
+                        .record_eviction(&incident, "started", None, now);
+                    watch.incident = Some(incident);
                     let lifecycle = self.runtime_lifecycles.session(watch.session);
                     let _owner = lifecycle.lock();
                     let entry = self
@@ -421,9 +468,7 @@ impl WakuBackend {
                         // A removed/replaced runtime can leave heavy descendants.
                         // Its captured identities still authorize cleanup, but
                         // never authorize pausing the replacement task runtime.
-                        for process in &watch.owned {
-                            process.signal(libc::SIGTERM);
-                        }
+                        watch.signal(libc::SIGTERM, Outcome::Terminated, &self.memory_guard, now);
                         watch.phase = Phase::Terminating { at: now };
                         continue;
                     };
@@ -492,9 +537,7 @@ impl WakuBackend {
                     if now.saturating_duration_since(at) >= CANCEL_GRACE
                         || watch.owned.is_empty() =>
                 {
-                    for process in &watch.owned {
-                        process.signal(libc::SIGTERM);
-                    }
+                    watch.signal(libc::SIGTERM, Outcome::Terminated, &self.memory_guard, now);
                     let lifecycle = self.runtime_lifecycles.session(watch.session);
                     let _owner = lifecycle.lock();
                     let removed = self.remove_runtime(watch.session, Some(runtime), false);
@@ -511,11 +554,17 @@ impl WakuBackend {
                         if watch.paused_task {
                             self.memory_guard.stopping.lock().remove(&watch.session);
                         }
+                        if let Some(incident) = &watch.incident {
+                            self.memory_guard.record_eviction(
+                                incident,
+                                "completed",
+                                Some(watch.outcome),
+                                now,
+                            );
+                        }
                         watch.phase = Phase::Stopped;
                     } else if now.saturating_duration_since(at) >= TERM_GRACE {
-                        for process in &watch.owned {
-                            process.signal(libc::SIGKILL);
-                        }
+                        watch.signal(libc::SIGKILL, Outcome::ForceKilled, &self.memory_guard, now);
                     }
                 }
                 Phase::Stopped if !critical => {
@@ -916,6 +965,37 @@ mod tests {
                 start + Duration::from_secs(55),
                 &table,
                 false,
+            );
+            let records: Vec<serde_json::Value> =
+                std::fs::read_to_string(backend.memory_guard.directory.join("evictions.jsonl"))
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+            let started: Vec<_> = records.iter().filter(|r| r["event"] == "started").collect();
+            let completed: Vec<_> = records
+                .iter()
+                .filter(|r| r["event"] == "completed")
+                .collect();
+            assert_eq!(started.len(), 1);
+            assert_eq!(completed.len(), 1);
+            assert_eq!(
+                started[0]["eviction"]["incident"],
+                completed[0]["eviction"]["incident"]
+            );
+            assert_eq!(
+                started[0]["eviction"]["reason"],
+                if emergency {
+                    "critical_pressure"
+                } else {
+                    "memory_limit"
+                }
+            );
+            assert_eq!(completed[0]["outcome"], "force_killed");
+            assert!(
+                records
+                    .iter()
+                    .any(|r| r["event"] == "escalated" && r["outcome"] == "force_killed")
             );
             assert!(
                 backend.memory_guard.paused(session),
