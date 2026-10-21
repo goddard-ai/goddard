@@ -106,7 +106,9 @@ fn authority(path: &str) -> &str {
         p if p.starts_with("computer ") => {
             "Context-dependent; Computer Use must be enabled and granted; read the bundled Computer Use skill first; existing approval prompts apply"
         }
-        "wireframe" => "Any scoped task, including planning sessions; Wireframes experiment must be enabled",
+        "wireframe" => {
+            "Any scoped task, including planning sessions; Wireframes experiment must be enabled"
+        }
         "create" | "rename" => {
             "Ordinary-task-only; Boss credentials are rejected; rename may wait for human approval"
         }
@@ -146,7 +148,9 @@ fn purpose(path: &str) -> &str {
         "boss instructions retire" => {
             "Retire or supersede a user obligation with recorded evidence."
         }
-        "wireframe" => "Validate a workspace wireframe and request its preview in the owning task’s right panel.",
+        "wireframe" => {
+            "Validate a workspace wireframe and request its preview in the owning task’s right panel."
+        }
         "boss summon" => "Assign a new employee job; acceptance can queue before execution.",
         "boss prompt" | "prompt" => "Send work or a correction with explicit delivery semantics.",
         "boss transcript" | "read" => "Read retained transcript turns without starting work.",

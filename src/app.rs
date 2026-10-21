@@ -88,18 +88,16 @@ use crate::{
     CloseDockedTerminal, CloseFind, CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch,
     CopySelection, CopyWorkingDirectory, CycleFavoriteModel, CycleReasoningEffort,
     DismissDockedTerminal, DismissDraftsLayer, DismissInbox, DismissProjectsLayer,
-    EffortCycleDirection,
-    ExitPanelFullscreen, FindNext,
-    FindPrevious, FocusComposer, FocusProjectsFilter, FocusTerminal, GoToNextTurn,
-    GoToNextUnreadCompletion, GoToPreviousTurn, MarkSessionUnread, MarkUnreadAndGoToNextIdle,
-    Minimize, NavigateBack, NavigateForward, NewProject, NewSession, NewTaskIn, NewTerminal,
-    OpenFind, OpenFindReplace, OpenGoToLine, OpenResumePicker, OpenSettings, PushBaseBranch, Quit,
-    ReplaceAllMatches, RunProjectScript, SaveFile, SelectAllProjectsRows, SelectAutomationsTab,
-    SelectFavoriteModel, SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask,
-    SelectProjectsTab, SelectSidebarSession, SplitTerminal, StepModelPickerBackward,
-    SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward, SyncBranch,
-    ToggleAutomationsPage, ToggleEmployeeAttention,
-    ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleEnvironment,
+    EffortCycleDirection, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
+    FocusProjectsFilter, FocusTerminal, GoToNextTurn, GoToNextUnreadCompletion, GoToPreviousTurn,
+    MarkSessionUnread, MarkUnreadAndGoToNextIdle, Minimize, NavigateBack, NavigateForward,
+    NewProject, NewSession, NewTaskIn, NewTerminal, OpenFind, OpenFindReplace, OpenGoToLine,
+    OpenResumePicker, OpenSettings, PushBaseBranch, Quit, ReplaceAllMatches, RunProjectScript,
+    SaveFile, SelectAllProjectsRows, SelectAutomationsTab, SelectFavoriteModel, SelectFirstProject,
+    SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab, SelectSidebarSession,
+    SplitTerminal, StepModelPickerBackward, SwitchProjectBackward, SwitchProjectForward,
+    SwitchTaskBackward, SwitchTaskForward, SyncBranch, ToggleAutomationsPage, ToggleBigPicture,
+    ToggleBranchPicker, ToggleCommandPalette, ToggleEmployeeAttention, ToggleEnvironment,
     ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
     ToggleFpsCounter, ToggleFullScreen, ToggleGitPanel, ToggleInboxPage, ToggleModelPicker,
     ToggleProjectsPage, ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar,
@@ -913,7 +911,9 @@ enum RightPanelSurface {
     /// paste's text read-only in a tab. `key` names the paste so a second
     /// click reactivates rather than duplicating; the strip's
     /// `pasted_texts` holds the content.
-    PastedText { key: PastedTextKey },
+    PastedText {
+        key: PastedTextKey,
+    },
 }
 
 /// A pasted-text tab's identity — the atom revision an inline paste opened
@@ -3754,7 +3754,8 @@ pub struct Waku {
     /// `linguist-language` rules each file's language resolution consults.
     /// Fetched through the workspace channel off the UI thread like the file
     /// reads it feeds; `None` caches a directory that has no such file.
-    file_language_attrs: QueryCache<(PathBuf, PathBuf), Option<crate::gitattributes::AttributeFile>>,
+    file_language_attrs:
+        QueryCache<(PathBuf, PathBuf), Option<crate::gitattributes::AttributeFile>>,
     /// Set when a turn finishes; the drain loop drops the workspace queries,
     /// since the event handler has no `Context` to refresh them itself.
     workspace_queries_stale: bool,

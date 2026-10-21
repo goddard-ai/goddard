@@ -429,7 +429,9 @@ fn respond(inner: &Arc<Inner>, role: &Role, request: WireRequest) -> WireRespons
                                 let size = match serde_json::to_vec(event) {
                                     Ok(value) => value.len(),
                                     Err(_) => {
-                                        return error(HostError::Malformed("event encoding".into()));
+                                        return error(HostError::Malformed(
+                                            "event encoding".into(),
+                                        ));
                                     }
                                 };
                                 if bytes.saturating_add(size + 1) > ipc::MAX_FRAME_BYTES {

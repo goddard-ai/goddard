@@ -319,9 +319,9 @@ fn provider_resolved_and_turn_abandoned_requests_can_no_longer_be_answered() {
     let tool = opened(&events, RequestClass::Tool).unwrap();
     let approval = opened(&events, RequestClass::Approval).unwrap();
     rig.until(|events| {
-        events
-            .iter()
-            .any(|e| matches!(e.event, ProviderEvent::TurnCompleted { turn_id, .. } if turn_id == turn))
+        events.iter().any(
+            |e| matches!(e.event, ProviderEvent::TurnCompleted { turn_id, .. } if turn_id == turn),
+        )
     });
     // The provider resolved 77 with a notice and abandoned 78 at the turn
     // boundary. A late controller answer to either dead native id is

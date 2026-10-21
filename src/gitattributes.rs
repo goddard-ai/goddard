@@ -217,9 +217,7 @@ fn parse_rule(line: &str) -> Option<Rule> {
     }
     let attr = fields
         .filter_map(|field| match field.as_str() {
-            name if name.eq_ignore_ascii_case("linguist-language") => {
-                Some(LanguageAttr::Erased)
-            }
+            name if name.eq_ignore_ascii_case("linguist-language") => Some(LanguageAttr::Erased),
             name if name
                 .strip_prefix('-')
                 .is_some_and(|name| name.eq_ignore_ascii_case("linguist-language")) =>
@@ -302,9 +300,7 @@ fn match_segments(pattern: &[Vec<char>], path: &[&str]) -> bool {
         return (0..=path.len()).any(|skip| match_segments(rest, &path[skip..]));
     }
     match path.split_first() {
-        Some((head, tail)) => {
-            match_component(segment, head) && match_segments(rest, tail)
-        }
+        Some((head, tail)) => match_component(segment, head) && match_segments(rest, tail),
         None => false,
     }
 }
@@ -330,16 +326,13 @@ fn match_chars(pattern: &[char], text: &[char]) -> bool {
                     .ranges
                     .iter()
                     .any(|(low, high)| *low <= character && character <= *high);
-                inside != class.negated
-                    && match_chars(&pattern[class.consumed..], &text[1..])
+                inside != class.negated && match_chars(&pattern[class.consumed..], &text[1..])
             }
             // An unterminated class makes `[` a literal like any other char.
             None => text.first() == Some(&'[') && match_chars(&pattern[1..], &text[1..]),
         },
         Some(('\\', rest)) => match rest.split_first() {
-            Some((escaped, rest)) => {
-                text.first() == Some(escaped) && match_chars(rest, &text[1..])
-            }
+            Some((escaped, rest)) => text.first() == Some(escaped) && match_chars(rest, &text[1..]),
             None => text.is_empty(),
         },
         Some((literal, rest)) => text.first() == Some(literal) && match_chars(rest, &text[1..]),
@@ -506,7 +499,10 @@ mod tests {
             state(&file, "mod1.wisp"),
             Some(LanguageAttr::Named("Rust".into()))
         );
-        assert_eq!(state(&file, "modx.wisp"), Some(LanguageAttr::Named("Rust".into())));
+        assert_eq!(
+            state(&file, "modx.wisp"),
+            Some(LanguageAttr::Named("Rust".into()))
+        );
         assert_eq!(state(&file, "mod.wisp"), None);
         assert_eq!(
             state(&file, "part7.wisp"),
@@ -536,15 +532,13 @@ mod tests {
 
     #[test]
     fn escaped_spaces_and_hashes_stay_in_the_pattern() {
-        let file = parse_rules("my\\ file.wisp linguist-language=Rust\n\\#tag linguist-language=Go\n");
+        let file =
+            parse_rules("my\\ file.wisp linguist-language=Rust\n\\#tag linguist-language=Go\n");
         assert_eq!(
             state(&file, "my file.wisp"),
             Some(LanguageAttr::Named("Rust".into()))
         );
-        assert_eq!(
-            state(&file, "#tag"),
-            Some(LanguageAttr::Named("Go".into()))
-        );
+        assert_eq!(state(&file, "#tag"), Some(LanguageAttr::Named("Go".into())));
     }
 
     #[test]
@@ -574,11 +568,7 @@ mod tests {
         let dirs = governing_dirs(["a/b/c.rs", "a/d.rs", "top.rs"].into_iter());
         assert_eq!(
             dirs,
-            vec![
-                PathBuf::new(),
-                PathBuf::from("a"),
-                PathBuf::from("a/b"),
-            ]
+            vec![PathBuf::new(), PathBuf::from("a"), PathBuf::from("a/b"),]
         );
     }
 

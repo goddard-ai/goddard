@@ -945,7 +945,10 @@ mod voice_gate {
         #[test]
         fn pinned_device_is_never_replaced_by_the_default() {
             let inputs = vec![device(11, "airpods-uid", 2), device(22, "builtin-uid", 2)];
-            assert_eq!(target_device(Some("airpods-uid"), &inputs, Some(22)), Some(11));
+            assert_eq!(
+                target_device(Some("airpods-uid"), &inputs, Some(22)),
+                Some(11)
+            );
             assert_eq!(target_device(Some("gone-uid"), &inputs, Some(22)), None);
             assert_eq!(target_device(Some("gone-uid"), &[], Some(22)), None);
             assert_eq!(target_device(None, &inputs, Some(22)), Some(22));
@@ -960,7 +963,10 @@ mod voice_gate {
         #[test]
         fn pinned_device_with_no_input_channels_still_targets() {
             let inputs = vec![device(11, "airpods-uid", 0), device(22, "builtin-uid", 2)];
-            assert_eq!(target_device(Some("airpods-uid"), &inputs, Some(22)), Some(11));
+            assert_eq!(
+                target_device(Some("airpods-uid"), &inputs, Some(22)),
+                Some(11)
+            );
             // Unpinned follows the default no matter what the attached
             // set's channel counts say.
             assert_eq!(target_device(None, &inputs, Some(11)), Some(11));

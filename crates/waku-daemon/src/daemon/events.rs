@@ -246,9 +246,7 @@ fn record_accepted_boss_steer(
         return Ok(());
     };
     if session.messages.iter().any(|stored| {
-        stored.id == submission_id
-            && stored.turn_id == Some(turn_id)
-            && stored.content == message
+        stored.id == submission_id && stored.turn_id == Some(turn_id) && stored.content == message
     }) {
         session
             .queued_messages
@@ -308,9 +306,8 @@ fn record_accepted_boss_steer(
 /// binding transport and continuity observations to durable ownership.
 #[cfg(test)]
 fn boss_journal_generation(boss: &crate::boss::BossService, session_id: Uuid) -> Option<u64> {
-    let journal =
-        crate::boss_rotation::RotationJournal::load(&boss.root().join("rotation.json"))
-            .unwrap_or_default();
+    let journal = crate::boss_rotation::RotationJournal::load(&boss.root().join("rotation.json"))
+        .unwrap_or_default();
     if let Some(intent) = &journal.intent {
         if intent.new_session_id == session_id {
             return Some(intent.old_generation.saturating_add(1));
@@ -390,40 +387,40 @@ fn boss_rotation_driver_observation(
     event: &DriverEvent,
 ) -> Option<waku_boss::rotation_oracle::RotationObservation> {
     use waku_boss::rotation_oracle::{
-        AdmissionBoundary, CompactionStage, ContextSample, ContextSampleSource,
-        ProviderCompaction, ProviderTransport, ProviderTransportStatus, RotationObservation,
+        AdmissionBoundary, CompactionStage, ContextSample, ContextSampleSource, ProviderCompaction,
+        ProviderTransport, ProviderTransportStatus, RotationObservation,
     };
     match event {
-        DriverEvent::TurnStarted => Some(RotationObservation::ProviderTransport(
-            ProviderTransport {
+        DriverEvent::TurnStarted => {
+            Some(RotationObservation::ProviderTransport(ProviderTransport {
                 delivery_id: format!("provider-turn:{session_id}:{runtime_id}"),
                 session_id,
                 runtime_id,
                 owner_generation,
                 boundary: AdmissionBoundary::Request,
                 status: ProviderTransportStatus::Accepted,
-            },
-        )),
-        DriverEvent::SteerAccepted { .. } => Some(RotationObservation::ProviderTransport(
-            ProviderTransport {
+            }))
+        }
+        DriverEvent::SteerAccepted { .. } => {
+            Some(RotationObservation::ProviderTransport(ProviderTransport {
                 delivery_id: format!("provider-steer:{session_id}:{runtime_id}"),
                 session_id,
                 runtime_id,
                 owner_generation,
                 boundary: AdmissionBoundary::Continuation,
                 status: ProviderTransportStatus::Accepted,
-            },
-        )),
-        DriverEvent::SteerRejected { .. } => Some(RotationObservation::ProviderTransport(
-            ProviderTransport {
+            }))
+        }
+        DriverEvent::SteerRejected { .. } => {
+            Some(RotationObservation::ProviderTransport(ProviderTransport {
                 delivery_id: format!("provider-steer:{session_id}:{runtime_id}"),
                 session_id,
                 runtime_id,
                 owner_generation,
                 boundary: AdmissionBoundary::Continuation,
                 status: ProviderTransportStatus::Rejected,
-            },
-        )),
+            }))
+        }
         DriverEvent::UsageUpdated {
             context_tokens,
             context_window,
@@ -435,22 +432,20 @@ fn boss_rotation_driver_observation(
             context_window: *context_window,
             source: ContextSampleSource::ProviderReport,
         })),
-        DriverEvent::RichActivity(item) if crate::model::is_context_compaction(item) => {
-            Some(RotationObservation::ProviderCompaction(
-                ProviderCompaction {
-                    session_id,
-                    runtime_id,
-                    owner_generation,
-                    stage: if item.failed {
-                        CompactionStage::Failed
-                    } else if item.complete {
-                        CompactionStage::Completed
-                    } else {
-                        CompactionStage::Started
-                    },
+        DriverEvent::RichActivity(item) if crate::model::is_context_compaction(item) => Some(
+            RotationObservation::ProviderCompaction(ProviderCompaction {
+                session_id,
+                runtime_id,
+                owner_generation,
+                stage: if item.failed {
+                    CompactionStage::Failed
+                } else if item.complete {
+                    CompactionStage::Completed
+                } else {
+                    CompactionStage::Started
                 },
-            ))
-        }
+            }),
+        ),
         _ => None,
     }
 }
@@ -694,7 +689,11 @@ pub(super) fn forward_driver_events(
                 eprintln!("could not record task settlement {session_id}: {error:#}");
             } else if !stale {
                 let _ = super::instruction_pins::capture_boss_instruction_event(
-                    &boss, &task_state, &task_store, session_id, &event,
+                    &boss,
+                    &task_state,
+                    &task_store,
+                    session_id,
+                    &event,
                 );
             }
         }
@@ -820,8 +819,7 @@ pub(super) fn forward_driver_events(
                     agent.mark_parent_index_delivered(session_id);
                     agent.mark_memory_delivered(session_id);
                 }
-                if let Some(submission_id) =
-                    steer.as_ref().and_then(|steer| steer.submission_id)
+                if let Some(submission_id) = steer.as_ref().and_then(|steer| steer.submission_id)
                     && let Err(error) = record_accepted_boss_steer(
                         &task_state,
                         &task_store,
@@ -845,9 +843,13 @@ pub(super) fn forward_driver_events(
                         &data_dir.join("boss/rotation.json"),
                         session_id,
                     ) {
-                        let removed =
-                            unmirror_agent_queued_prompt(&task_state, &task_store, target, queued_id)
-                                .unwrap_or(false);
+                        let removed = unmirror_agent_queued_prompt(
+                            &task_state,
+                            &task_store,
+                            target,
+                            queued_id,
+                        )
+                        .unwrap_or(false);
                         if removed && sessions.lock().contains_key(&target) {
                             send_agent_queue_changed(&task_state, &events, target);
                         }

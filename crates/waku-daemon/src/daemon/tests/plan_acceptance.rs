@@ -186,7 +186,11 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
                             assert!(
                                 backend
                                     .boss
-                                    .set_employee_plan(session, Some(Some(replacement.plan_file)), None)
+                                    .set_employee_plan(
+                                        session,
+                                        Some(Some(replacement.plan_file)),
+                                        None
+                                    )
                                     .is_err()
                             );
                             assert_eq!(
@@ -197,10 +201,7 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
                         _ => {}
                     }
                     driver.prompt(MUTATE.into());
-                    let gate = backend.sessions.lock()[&session]
-                        .plan_gate
-                        .clone()
-                        .unwrap();
+                    let gate = backend.sessions.lock()[&session].plan_gate.clone().unwrap();
                     match fault {
                         "none" | "unconfirmed" | "revision-switch" => {
                             // The complete input carries exact approved bytes

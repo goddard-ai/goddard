@@ -1346,14 +1346,16 @@ impl Waku {
                 self.right_panel_active_surface,
                 |preview| {
                     preview.panel_active.as_ref().and_then(|surface| {
-                        self.right_panel_surfaces.iter().position(|candidate| candidate == surface)
+                        self.right_panel_surfaces
+                            .iter()
+                            .position(|candidate| candidate == surface)
                     })
                 },
             );
-            let fullscreen = self.terminal_drag_preview.as_ref().map_or(
-                &self.fullscreen_surface,
-                |preview| &preview.fullscreen,
-            );
+            let fullscreen = self
+                .terminal_drag_preview
+                .as_ref()
+                .map_or(&self.fullscreen_surface, |preview| &preview.fullscreen);
             panels.insert(
                 session_id,
                 persist_right_panel_state(
@@ -3538,12 +3540,11 @@ impl Waku {
         match current_project {
             Some((_, true)) => self.create_projectless_session(cx),
             Some((project_id, false)) => {
-                if let Some(session_id) = self
-                    .session_navigation
-                    .remembered_new_task(&self.state.sessions, project_id, |session| {
-                        self.session_is_boss_managed(session)
-                    })
-                {
+                if let Some(session_id) = self.session_navigation.remembered_new_task(
+                    &self.state.sessions,
+                    project_id,
+                    |session| self.session_is_boss_managed(session),
+                ) {
                     self.select_session(session_id, cx);
                 } else {
                     self.create_session_for(project_id, self.state.last_provider, cx);

@@ -2456,12 +2456,10 @@ impl TextInput {
         // Selecting a whole chip with Shift+Arrow makes Enter its keyboard
         // equivalent of a click; an ordinary caret still submits/inserts.
         if self.content.get(self.selected_range.clone()) == Some("\u{FFF9}")
-            && self
-                .marker_atoms()
-                .any(|(marker, atom)| {
-                    marker == self.selected_range.start
-                        && atom.is_some_and(|atom| atom.tooltip.is_some())
-                })
+            && self.marker_atoms().any(|(marker, atom)| {
+                marker == self.selected_range.start
+                    && atom.is_some_and(|atom| atom.tooltip.is_some())
+            })
         {
             cx.emit(InputEvent::InlineAtomClicked(self.selected_range.start));
             return;
@@ -4744,7 +4742,7 @@ mod tests {
         point, prelude::*, px,
     };
 
-    use super::{atom_ref_icon, ATOM_ICON_SLOT, AtomPaint, TokenClass};
+    use super::{ATOM_ICON_SLOT, AtomPaint, TokenClass, atom_ref_icon};
     use super::{
         AnnotationPaint, ComposerEvent, ComposerInput, DeleteToLineEnd, DeleteToLineStart,
         DeleteToParagraphEnd, EditHistory, FieldMode, InputEvent, Paste, SearchPaint, TextInput,

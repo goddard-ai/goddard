@@ -1336,7 +1336,9 @@ pub(super) enum SidebarRow {
     /// Spacing between date groups.
     GroupSpacer,
     /// Spacing after a collapsible group, compact while its rows are hidden.
-    CollapsibleGroupSpacer { collapsed: bool },
+    CollapsibleGroupSpacer {
+        collapsed: bool,
+    },
 }
 
 /// A sidebar multi-selection member — a task row or a deliverable row.
@@ -1361,9 +1363,7 @@ enum SidebarFold {
 /// by daemon key plus record id.
 fn sidebar_row_selection(row: &SidebarRow) -> Option<SidebarSelection> {
     match row {
-        SidebarRow::Session(id) | SidebarRow::Planning(id) => {
-            Some(SidebarSelection::Session(*id))
-        }
+        SidebarRow::Session(id) | SidebarRow::Planning(id) => Some(SidebarSelection::Session(*id)),
         SidebarRow::Deliverable(key, id) => Some(SidebarSelection::Deliverable(*key, *id)),
         _ => None,
     }
@@ -4194,20 +4194,20 @@ impl Waku {
         // boss-state revision cannot see it flip; the session loop above
         // skips boss-managed sessions outright. Mix each rostered id's flag
         // order-independently like the collapsed-set fold.
-        let archived_employees = self
-            .boss_ui
-            .recent
-            .values()
-            .flatten()
-            .fold(0u64, |combined, id| {
-                let archived = self
-                    .state
-                    .sessions
-                    .iter()
-                    .find(|session| session.id == *id)
-                    .is_some_and(|session| session.archived_at.is_some());
-                combined.wrapping_add(mix_uuid(u64::from(archived), *id))
-            });
+        let archived_employees =
+            self.boss_ui
+                .recent
+                .values()
+                .flatten()
+                .fold(0u64, |combined, id| {
+                    let archived = self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == *id)
+                        .is_some_and(|session| session.archived_at.is_some());
+                    combined.wrapping_add(mix_uuid(u64::from(archived), *id))
+                });
         fingerprint = mix(fingerprint, archived_employees);
         // The Terminals group reads its ids in list order plus each row's
         // pin state — pinned rows survive the fold, so both feed the rows.
@@ -4359,7 +4359,9 @@ impl Waku {
             &dormant_deliverables,
         );
         if !recent_deliverables.is_empty() || !dormant_deliverables.is_empty() {
-            let collapsed = self.sidebar_collapsed_groups.contains(&SidebarGroup::Deliverables);
+            let collapsed = self
+                .sidebar_collapsed_groups
+                .contains(&SidebarGroup::Deliverables);
             if collapsed {
                 collapsed_members.insert(
                     SidebarGroup::Deliverables,
@@ -4431,7 +4433,8 @@ impl Waku {
                 append_sidebar_planning_group(
                     &mut rows,
                     &planning_ids,
-                    self.sidebar_collapsed_groups.contains(&SidebarGroup::Planning),
+                    self.sidebar_collapsed_groups
+                        .contains(&SidebarGroup::Planning),
                 );
                 for group in [
                     SidebarGroup::Outcomes,
@@ -4948,7 +4951,10 @@ impl Waku {
                 // The employee groups' dot answers only to the boss-flagged
                 // attention set — an ordinary finished turn is not unread,
                 // so `unseen_completions` never feeds it.
-                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees => self
+                SidebarGroup::Errands
+                | SidebarGroup::Outcomes
+                | SidebarGroup::Waiting
+                | SidebarGroup::Employees => self
                     .sidebar_collapsed_group_members
                     .borrow()
                     .get(&group)
@@ -4966,7 +4972,8 @@ impl Waku {
                         members.iter().any(|session_id| {
                             self.state.unseen_completions.contains_key(session_id)
                                 && self.state.sessions.iter().any(|session| {
-                                    session.id == *session_id && session.status == SessionStatus::Idle
+                                    session.id == *session_id
+                                        && session.status == SessionStatus::Idle
                                 })
                         })
                     }),
@@ -4978,17 +4985,18 @@ impl Waku {
         // whose header uses the hourglass instead of the running spinner.
         let has_working = collapsed
             && match group {
-                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees => self
+                SidebarGroup::Errands
+                | SidebarGroup::Outcomes
+                | SidebarGroup::Waiting
+                | SidebarGroup::Employees => self
                     .sidebar_collapsed_group_members
                     .borrow()
                     .get(&group)
                     .is_some_and(|members| {
-                        members
-                            .iter()
-                            .any(|session_id| {
-                                self.boss_ui.working.contains(session_id)
-                                    && !self.boss_ui.queued.contains_key(session_id)
-                            })
+                        members.iter().any(|session_id| {
+                            self.boss_ui.working.contains(session_id)
+                                && !self.boss_ui.queued.contains_key(session_id)
+                        })
                     }),
                 SidebarGroup::Planning => self
                     .sidebar_collapsed_group_members
@@ -5010,9 +5018,11 @@ impl Waku {
         let queued_count = if collapsed
             && matches!(
                 group,
-                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees
-            )
-        {
+                SidebarGroup::Errands
+                    | SidebarGroup::Outcomes
+                    | SidebarGroup::Waiting
+                    | SidebarGroup::Employees
+            ) {
             self.sidebar_collapsed_group_members
                 .borrow()
                 .get(&group)
@@ -5031,7 +5041,10 @@ impl Waku {
         let member_strip = (collapsed
             && matches!(
                 group,
-                SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees
+                SidebarGroup::Errands
+                    | SidebarGroup::Outcomes
+                    | SidebarGroup::Waiting
+                    | SidebarGroup::Employees
             ))
         .then(|| {
             self.sidebar_collapsed_group_members
@@ -5318,9 +5331,7 @@ impl Waku {
                             .justify_center()
                             .cursor_default()
                             .opacity(0.0)
-                            .group_hover(group_name.clone(), |style| {
-                                style.w(px(20.0)).opacity(1.0)
-                            })
+                            .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
                             .focus_visible(|style| {
                                 style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight())
                             })
@@ -5329,9 +5340,7 @@ impl Waku {
                             .aria_label(tr!("sidebar.deliverables_view_all"))
                             .tooltip(Tooltip::text(tr!("sidebar.deliverables_view_all")))
                             .child(icon("icons/brain.svg", 14.0, theme.text_secondary))
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                cx.stop_propagation()
-                            })
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
                                 this.open_boss_page(key, boss::BossTab::Deliverables, window, cx);
@@ -5447,9 +5456,7 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(2.0))
-                        .when(action_row, |element| {
-                            element.items_baseline().gap(px(4.0))
-                        })
+                        .when(action_row, |element| element.items_baseline().gap(px(4.0)))
                         .child(div().min_w_0().truncate().child(label))
                         .when_some(collapsed_count, |element, count| {
                             element.child(
@@ -5539,46 +5546,55 @@ impl Waku {
         // A folded employee group reports work in flight with the spinner
         // its hidden rows would carry, in the same accent a working row
         // earns from `status_color`.
-        .when(header_status == SidebarGroupHeaderStatus::Working, |element| {
-            element.child(
-                div()
-                    .flex_none()
-                    .size(px(12.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(motion::spin_slow(icon(
-                        "icons/loader-circle.svg",
-                        12.0,
-                        theme.accent,
-                    ))),
-            )
-        })
-        .when(header_status == SidebarGroupHeaderStatus::Queued, |element| {
-            element.child(
-                div()
-                    .flex_none()
-                    .size(px(12.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(icon("icons/hourglass.svg", 12.0, theme.text_secondary)),
-            )
-        })
+        .when(
+            header_status == SidebarGroupHeaderStatus::Working,
+            |element| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .size(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(motion::spin_slow(icon(
+                            "icons/loader-circle.svg",
+                            12.0,
+                            theme.accent,
+                        ))),
+                )
+            },
+        )
+        .when(
+            header_status == SidebarGroupHeaderStatus::Queued,
+            |element| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .size(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(icon("icons/hourglass.svg", 12.0, theme.text_secondary)),
+                )
+            },
+        )
         // The folded group's unread dot takes the same right-edge slot a
         // session row's indicator does, past the always-reserved compose
         // box so it stays put whether or not hover reveals the button.
-        .when(header_status == SidebarGroupHeaderStatus::Unread, |element| {
-            element.child(
-                div()
-                    .flex_none()
-                    .size(px(12.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
-            )
-        })
+        .when(
+            header_status == SidebarGroupHeaderStatus::Unread,
+            |element| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .size(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
+                )
+            },
+        )
         .when(first, |element| {
             element.child(self.render_sidebar_header_actions(cx))
         })
@@ -5727,9 +5743,11 @@ impl Waku {
         // "Show more". The age is minute-granular like every
         // sidebar time label; it never counts seconds.
         let label = {
-            let visible = self.sidebar_employee_reveals(group).get(&key)
-            .copied()
-            .unwrap_or(0);
+            let visible = self
+                .sidebar_employee_reveals(group)
+                .get(&key)
+                .copied()
+                .unwrap_or(0);
             let no_active = self
                 .boss_ui
                 .active
@@ -7683,11 +7701,7 @@ impl Waku {
                                         .items_center()
                                         .justify_center()
                                         .bg(theme.overlay)
-                                        .child(icon(
-                                            "icons/ghost.svg",
-                                            11.0,
-                                            theme.text_secondary,
-                                        ))
+                                        .child(icon("icons/ghost.svg", 11.0, theme.text_secondary))
                                         .tooltip(Tooltip::text(tr!("session.incognito"))),
                                 )
                             },
@@ -8636,12 +8650,7 @@ mod tests {
         let mut states = HashMap::new();
         states.insert(
             waku_client::DaemonKey::Local,
-            boss_state_with_deliverables(vec![
-                ordinary.clone(),
-                plan_doc,
-                pinned_plan,
-                swept_plan,
-            ]),
+            boss_state_with_deliverables(vec![ordinary.clone(), plan_doc, pinned_plan, swept_plan]),
         );
         let (live, dormant) = sidebar_recent_deliverables(&states, now);
         assert_eq!(live, vec![(waku_client::DaemonKey::Local, ordinary.id)]);
@@ -8863,15 +8872,7 @@ mod tests {
         // An all-finished group still shows its freshest employee ahead of
         // the fold.
         rows.clear();
-        append_sidebar_employee_group(
-            &mut rows,
-            SidebarGroup::Outcomes,
-            key,
-            &[],
-            &idle,
-            false,
-            0,
-        );
+        append_sidebar_employee_group(&mut rows, SidebarGroup::Outcomes, key, &[], &idle, false, 0);
         assert_eq!(
             rows,
             vec![
@@ -8884,15 +8885,7 @@ mod tests {
 
         // An empty Waiting group emits nothing at all.
         rows.clear();
-        append_sidebar_employee_group(
-            &mut rows,
-            SidebarGroup::Waiting,
-            key,
-            &[],
-            &[],
-            false,
-            0,
-        );
+        append_sidebar_employee_group(&mut rows, SidebarGroup::Waiting, key, &[], &[], false, 0);
         assert!(rows.is_empty());
 
         assert_eq!(
@@ -9054,10 +9047,30 @@ mod tests {
         let sessions = [listed_session, archived_session];
         let dismissed_set = std::collections::BTreeSet::from([dismissed]);
 
-        assert!(sidebar_employee_shown(&listed, &sessions, &dismissed_set, false));
-        assert!(!sidebar_employee_shown(&archived, &sessions, &dismissed_set, false));
-        assert!(!sidebar_employee_shown(&dismissed, &sessions, &dismissed_set, false));
-        assert!(sidebar_employee_shown(&missing, &sessions, &dismissed_set, false));
+        assert!(sidebar_employee_shown(
+            &listed,
+            &sessions,
+            &dismissed_set,
+            false
+        ));
+        assert!(!sidebar_employee_shown(
+            &archived,
+            &sessions,
+            &dismissed_set,
+            false
+        ));
+        assert!(!sidebar_employee_shown(
+            &dismissed,
+            &sessions,
+            &dismissed_set,
+            false
+        ));
+        assert!(sidebar_employee_shown(
+            &missing,
+            &sessions,
+            &dismissed_set,
+            false
+        ));
     }
 
     #[test]

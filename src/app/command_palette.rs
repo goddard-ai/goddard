@@ -291,7 +291,10 @@ enum PaletteAction {
     OpenEmployeeChats,
     /// A resolved employee-chat hit: open its record on the matched
     /// passage.
-    OpenEmployeeChat { task_id: Uuid, message_id: Uuid },
+    OpenEmployeeChat {
+        task_id: Uuid,
+        message_id: Uuid,
+    },
     DoubleCheck,
     SavePromptAs(String),
     RevealPromptTemplates,
@@ -439,10 +442,7 @@ struct ScoredPaletteItem {
 /// repo-less, or still probing). Each band keeps the order it came in
 /// with, so recency still ranks within a band. `counts` holds `(ahead,
 /// behind)` per project, probed snapshots only.
-fn sync_branch_project_order(
-    ordered: Vec<Uuid>,
-    counts: &HashMap<Uuid, (u64, u64)>,
-) -> Vec<Uuid> {
+fn sync_branch_project_order(ordered: Vec<Uuid>, counts: &HashMap<Uuid, (u64, u64)>) -> Vec<Uuid> {
     let mut ahead = Vec::new();
     let mut behind = Vec::new();
     let mut rest = Vec::new();
@@ -1044,8 +1044,10 @@ impl Waku {
         self.command_palette.employee_hits.clear();
         self.command_palette.employee_search_pending = false;
         self.command_palette.employee_search_error = None;
-        self.command_palette.employee_search_generation =
-            self.command_palette.employee_search_generation.wrapping_add(1);
+        self.command_palette.employee_search_generation = self
+            .command_palette
+            .employee_search_generation
+            .wrapping_add(1);
         let focus_generation = self.command_palette.focus_generation;
         self.command_palette
             .search
@@ -1114,8 +1116,10 @@ impl Waku {
         self.command_palette.issue_generation =
             self.command_palette.issue_generation.wrapping_add(1);
         self.command_palette.employee_search_pending = false;
-        self.command_palette.employee_search_generation =
-            self.command_palette.employee_search_generation.wrapping_add(1);
+        self.command_palette.employee_search_generation = self
+            .command_palette
+            .employee_search_generation
+            .wrapping_add(1);
         self.command_palette.code_block_run = None;
         self.command_palette.code_block_candidates.clear();
         if let Some(previous_focus) = self.command_palette.previous_focus.take() {
@@ -1654,10 +1658,7 @@ impl Waku {
         self.command_palette.employee_search_pending = false;
         self.command_palette.employee_search_error = None;
         self.command_palette.search.update(cx, |input, cx| {
-            input.set_placeholder(
-                tr!("command_palette.employee_search_placeholder"),
-                cx,
-            );
+            input.set_placeholder(tr!("command_palette.employee_search_placeholder"), cx);
             input.clear(cx);
         });
         self.schedule_employee_chat_search("", cx);
@@ -2226,9 +2227,8 @@ impl Waku {
                 let result = cx
                     .background_executor()
                     .spawn(async move {
-                        client.request(waku_client::WorkspaceOperation::InspectBranches {
-                            cwd: path,
-                        })
+                        client
+                            .request(waku_client::WorkspaceOperation::InspectBranches { cwd: path })
                     })
                     .await;
                 let _ = waku.update(cx, |waku, cx| {
@@ -5034,10 +5034,7 @@ impl Waku {
                 return;
             }
             CommandPaletteView::CodeBlockProjects => {
-                self.refresh_command_palette_code_block_project_results(
-                    query,
-                    preserve_selection,
-                );
+                self.refresh_command_palette_code_block_project_results(query, preserve_selection);
                 return;
             }
             CommandPaletteView::IssueTemplates => {
@@ -6622,22 +6619,24 @@ impl Waku {
                                         ]
                                         .into_iter()
                                         .filter(|(count, _)| *count > 0)
-                                        .map(|(count, icon_path)| {
-                                            div()
-                                                .flex_none()
-                                                .flex()
-                                                .items_center()
-                                                .gap(px(2.0))
-                                                .text_size(sp(12.0))
-                                                .text_color(theme.text_tertiary)
-                                                .child(icon(
-                                                    icon_path,
-                                                    10.0,
-                                                    theme.text_tertiary,
-                                                ))
-                                                .child(count.to_string())
-                                                .into_any_element()
-                                        }),
+                                        .map(
+                                            |(count, icon_path)| {
+                                                div()
+                                                    .flex_none()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap(px(2.0))
+                                                    .text_size(sp(12.0))
+                                                    .text_color(theme.text_tertiary)
+                                                    .child(icon(
+                                                        icon_path,
+                                                        10.0,
+                                                        theme.text_tertiary,
+                                                    ))
+                                                    .child(count.to_string())
+                                                    .into_any_element()
+                                            },
+                                        ),
                                     ),
                             )
                         })
@@ -6960,9 +6959,9 @@ mod tests {
         let id = |n: u128| Uuid::from_u128(n);
         let ordered = vec![id(0), id(1), id(2), id(3), id(4)];
         let counts = HashMap::from([
-            (id(1), (0_u64, 2_u64)),   // behind only
-            (id(3), (5_u64, 1_u64)),   // ahead and behind — ahead wins the band
-            (id(4), (1_u64, 0_u64)),   // ahead only
+            (id(1), (0_u64, 2_u64)), // behind only
+            (id(3), (5_u64, 1_u64)), // ahead and behind — ahead wins the band
+            (id(4), (1_u64, 0_u64)), // ahead only
         ]);
         assert_eq!(
             sync_branch_project_order(ordered, &counts),
@@ -7047,10 +7046,7 @@ mod tests {
         assert_eq!(employee_chat_search_after(100, 3), 0);
     }
 
-    fn employee_hit(
-        task: u8,
-        message: u8,
-    ) -> waku_protocol::model::AgentHistorySearchHit {
+    fn employee_hit(task: u8, message: u8) -> waku_protocol::model::AgentHistorySearchHit {
         waku_protocol::model::AgentHistorySearchHit {
             task_id: Uuid::from_u128(task as u128),
             kind: waku_protocol::model::HistorySourceKind::Employee,

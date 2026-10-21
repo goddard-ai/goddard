@@ -2296,8 +2296,7 @@ fn dispatch_prompt(
     retries_left: usize,
 ) -> agent_client_protocol::Result<()> {
     dispatch.stream_state.lock().produced_content = false;
-    let mut request =
-        PromptRequest::new(dispatch.session_id.clone(), dispatch.prompt.clone());
+    let mut request = PromptRequest::new(dispatch.session_id.clone(), dispatch.prompt.clone());
     if let Some(extension_id) = dispatch.extension_id.as_ref() {
         let mut meta = serde_json::Map::new();
         meta.insert("promptId".into(), Value::String(extension_id.clone()));
@@ -2337,11 +2336,7 @@ fn dispatch_prompt(
         if retries_left > 0
             && matches!(&result, Err(error) if session_error_retryable(error))
             && !callback.prompt_requests.lock().cancel_requested
-            && schedule_prompt_retry(
-                callback.clone(),
-                callback_request_id.clone(),
-                retries_left,
-            )
+            && schedule_prompt_retry(callback.clone(), callback_request_id.clone(), retries_left)
         {
             return Ok(());
         }
@@ -3772,23 +3767,42 @@ mod tests {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn memory_guard_registration_survives_the_sdk_spawn_path() {
-        let directory = std::env::temp_dir().join(format!("acp-memory-guard-{}", uuid::Uuid::new_v4()));
+        let directory =
+            std::env::temp_dir().join(format!("acp-memory-guard-{}", uuid::Uuid::new_v4()));
         waku_base::fs_ext::create_private_dir_all(&directory).unwrap();
         let anchor = directory.join("process");
         let agent = sdk_agent(
-            Path::new("/bin/sleep"), &directory,
-            AcpLaunch { args: vec!["1".to_owned()], env: Vec::new() },
-            None, Arc::new(Mutex::new(Vec::new())), Some(&anchor),
-        ).unwrap();
+            Path::new("/bin/sleep"),
+            &directory,
+            AcpLaunch {
+                args: vec!["1".to_owned()],
+                env: Vec::new(),
+            },
+            None,
+            Arc::new(Mutex::new(Vec::new())),
+            Some(&anchor),
+        )
+        .unwrap();
         let (stdin, stdout, stderr, mut child) = agent.spawn_process().unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         loop {
-            if std::fs::read_to_string(&anchor).ok().and_then(|pid| pid.trim().parse::<u32>().ok()) == Some(child.id()) { break; }
-            assert!(std::time::Instant::now() < deadline, "SDK guardian did not register its process");
+            if std::fs::read_to_string(&anchor)
+                .ok()
+                .and_then(|pid| pid.trim().parse::<u32>().ok())
+                == Some(child.id())
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "SDK guardian did not register its process"
+            );
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert!(waku_base::process_identity::has_argument(i32::try_from(child.id()).unwrap(),
-            &format!("goddard-runtime:{}", anchor.display())));
+        assert!(waku_base::process_identity::has_argument(
+            i32::try_from(child.id()).unwrap(),
+            &format!("goddard-runtime:{}", anchor.display())
+        ));
         assert!(smol::block_on(child.status()).unwrap().success());
         drop((stdin, stdout, stderr));
         std::fs::remove_dir_all(directory).unwrap();
@@ -4040,9 +4054,7 @@ mod tests {
 
     type ScriptedTransport = agent_client_protocol::Lines<
         std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send + 'static>>,
-        std::pin::Pin<
-            Box<dyn futures::Stream<Item = std::io::Result<String>> + Send + 'static>,
-        >,
+        std::pin::Pin<Box<dyn futures::Stream<Item = std::io::Result<String>> + Send + 'static>>,
     >;
 
     /// A line-level ACP peer the test scripts: every `session/prompt`
@@ -4063,9 +4075,8 @@ mod tests {
         use futures::{SinkExt, StreamExt};
         let (request_tx, request_rx) = futures::channel::mpsc::channel::<String>(16);
         let (response_tx, response_rx) = futures::channel::mpsc::channel::<String>(16);
-        let outgoing: std::pin::Pin<
-            Box<dyn futures::Sink<String, Error = std::io::Error> + Send>,
-        > = Box::pin(request_tx.sink_map_err(std::io::Error::other));
+        let outgoing: std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>> =
+            Box::pin(request_tx.sink_map_err(std::io::Error::other));
         let incoming: std::pin::Pin<
             Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>,
         > = Box::pin(response_rx.map(Ok::<String, std::io::Error>));
@@ -4139,10 +4150,9 @@ mod tests {
                 let _ = done_tx.send_blocking(seen);
             })
             .unwrap();
-        let run = Client
-            .builder()
-            .name("waku-test")
-            .connect_with(transport, async move |connection: ConnectionTo<Agent>| {
+        let run = Client.builder().name("waku-test").connect_with(
+            transport,
+            async move |connection: ConnectionTo<Agent>| {
                 send_prompt(
                     &connection,
                     &SessionId::new("session"),
@@ -4163,7 +4173,8 @@ mod tests {
                 }
                 let seen = done_rx.recv().await.unwrap_or_default();
                 Ok(seen)
-            });
+            },
+        );
         smol::block_on(run).expect("the scripted connection runs")
     }
 
@@ -4209,7 +4220,9 @@ mod tests {
         );
         assert_eq!(turn_finished(&events), [true]);
         assert!(
-            !events.iter().any(|event| matches!(event, DriverEvent::Error(_))),
+            !events
+                .iter()
+                .any(|event| matches!(event, DriverEvent::Error(_))),
             "a settled-after-retry turn reports no failure: {events:?}"
         );
     }
@@ -4233,10 +4246,8 @@ mod tests {
 
     #[test]
     fn retryable_prompt_errors_settle_failed_once_the_retry_budget_ends() {
-        let (transport, prompts, _) = scripted_prompt_peer(
-            vec![retryable_unavailable(); ACP_PROMPT_RETRIES + 1],
-            false,
-        );
+        let (transport, prompts, _) =
+            scripted_prompt_peer(vec![retryable_unavailable(); ACP_PROMPT_RETRIES + 1], false);
         let events = prompt_events_against(transport, None, None);
         assert_eq!(
             prompts.load(Ordering::Relaxed),
@@ -5275,9 +5286,11 @@ mod tests {
             )
             .unwrap();
         }
-        assert!(!event_rx
-            .try_iter()
-            .any(|event| matches!(event, DriverEvent::TurnStarted)));
+        assert!(
+            !event_rx
+                .try_iter()
+                .any(|event| matches!(event, DriverEvent::TurnStarted))
+        );
 
         // The first turn-scoped update is provider-side acceptance — the
         // provider's own echo of the submitted message counts. Further
@@ -5371,10 +5384,7 @@ mod tests {
         assert!(matches!(seen[0], DriverEvent::TurnStarted));
         assert!(matches!(
             seen[1],
-            DriverEvent::TurnFinished {
-                success: false,
-                ..
-            }
+            DriverEvent::TurnFinished { success: false, .. }
         ));
     }
 

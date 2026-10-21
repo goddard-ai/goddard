@@ -41,28 +41,30 @@ pub enum ConnectAuth {
     },
     /// Narrow local authority: status and emergency stop while no daemon
     /// control exists.
-    Emergency {
-        credential: String,
-    },
+    Emergency { credential: String },
     /// Session-scoped agent ingress — the grant is the whole authority; it
     /// can never acquire controller power or another session's traffic.
-    Agent {
-        grant: SessionGrant,
-    },
+    Agent { grant: SessionGrant },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(
-    tag = "op",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
+#[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum WireRequest {
-    Hello { client: ClientHello },
-    AcquireControl { client: ClientHello },
-    Reconcile { epoch: u64 },
-    Execute { envelope: Box<ActionEnvelope> },
-    Command { command_id: Uuid },
+    Hello {
+        client: ClientHello,
+    },
+    AcquireControl {
+        client: ClientHello,
+    },
+    Reconcile {
+        epoch: u64,
+    },
+    Execute {
+        envelope: Box<ActionEnvelope>,
+    },
+    Command {
+        command_id: Uuid,
+    },
     /// Ordered replay from a durable applied cursor. `wait_ms` long-polls
     /// for new events; `0` returns immediately.
     Events {
@@ -71,17 +73,31 @@ pub enum WireRequest {
         #[serde(default)]
         wait_ms: u64,
     },
-    Acknowledge { epoch: u64, cursor: EventCursor },
+    Acknowledge {
+        epoch: u64,
+        cursor: EventCursor,
+    },
     Status,
-    Drain { epoch: u64, policy: DrainPolicy },
-    EmergencyStop { session_id: Uuid },
+    Drain {
+        epoch: u64,
+        policy: DrainPolicy,
+    },
+    EmergencyStop {
+        session_id: Uuid,
+    },
     IssueGrant {
         epoch: u64,
         session: SessionRef,
         ttl_ms: u64,
     },
-    RegisterClaim { epoch: u64, claim: ResourceClaim },
-    ReleaseClaim { epoch: u64, claim_id: Uuid },
+    RegisterClaim {
+        epoch: u64,
+        claim: ResourceClaim,
+    },
+    ReleaseClaim {
+        epoch: u64,
+        claim_id: Uuid,
+    },
     /// The daemon service asking for forwarded agent traffic.
     /// `wait_ms` long-polls; `0` returns immediately.
     ServiceDrain {
@@ -96,9 +112,13 @@ pub enum WireRequest {
         outcome: ForwardedOutcome,
     },
     /// An agent submitting one request under its session grant.
-    Ingress { request: IngressRequest },
+    Ingress {
+        request: IngressRequest,
+    },
     /// An agent reading one of its own requests.
-    IngressQuery { request_id: Uuid },
+    IngressQuery {
+        request_id: Uuid,
+    },
     /// An agent waiting for its request to reach an outcome.
     /// `wait_ms` long-polls; `0` returns immediately.
     IngressWait {
@@ -115,20 +135,46 @@ pub enum WireRequest {
     rename_all_fields = "camelCase"
 )]
 pub enum WireResponse {
-    Hello { hello: Box<Hello> },
-    Control { grant: ControlGrant },
-    Inventory { inventory: Box<Inventory> },
-    Receipt { receipt: CommandReceipt },
-    Command { receipt: Option<CommandReceipt> },
-    Page { page: Box<EventPage> },
+    Hello {
+        hello: Box<Hello>,
+    },
+    Control {
+        grant: ControlGrant,
+    },
+    Inventory {
+        inventory: Box<Inventory>,
+    },
+    Receipt {
+        receipt: CommandReceipt,
+    },
+    Command {
+        receipt: Option<CommandReceipt>,
+    },
+    Page {
+        page: Box<EventPage>,
+    },
     Ok,
-    Status { status: Box<HostStatus> },
-    SessionStatus { status: SessionStatus },
-    Drain { report: DrainReport },
-    Grant { grant: Box<SessionGrant> },
-    Forwarded { requests: Vec<ForwardedRequest> },
-    Ingress { record: Box<IngressRecord> },
+    Status {
+        status: Box<HostStatus>,
+    },
+    SessionStatus {
+        status: SessionStatus,
+    },
+    Drain {
+        report: DrainReport,
+    },
+    Grant {
+        grant: Box<SessionGrant>,
+    },
+    Forwarded {
+        requests: Vec<ForwardedRequest>,
+    },
+    Ingress {
+        record: Box<IngressRecord>,
+    },
     /// Authorization, fencing, and precondition truth — never transport
     /// failure. A torn connection is an IO error at the client instead.
-    Error { error: HostError },
+    Error {
+        error: HostError,
+    },
 }

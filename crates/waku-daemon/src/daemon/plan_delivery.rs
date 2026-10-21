@@ -361,11 +361,8 @@ impl PlanGate {
         if Self::delivered_phase(review.receipt.phase) {
             let pending = review.pending.clone();
             for (prompt, attachments) in pending {
-                let sent = (self.dispatch)(
-                    &self.driver,
-                    review.followup_input(&prompt),
-                    attachments,
-                );
+                let sent =
+                    (self.dispatch)(&self.driver, review.followup_input(&prompt), attachments);
                 if let Err(error) = sent {
                     self.block(review, error);
                     return;
@@ -502,8 +499,10 @@ impl PlanGate {
                 self.block(&mut review, error);
             }
         }
-        if matches!(event, DriverEvent::TurnFinished { .. } | DriverEvent::TurnStarted)
-            && let Some(error) = review.receipt.reported_failure(&review.response)
+        if matches!(
+            event,
+            DriverEvent::TurnFinished { .. } | DriverEvent::TurnStarted
+        ) && let Some(error) = review.receipt.reported_failure(&review.response)
         {
             self.block(&mut review, error);
         }
@@ -1382,11 +1381,7 @@ mod tests {
             if fault != "persistence" {
                 // The withheld brief survives every failure durably —
                 // the persistence fault holds it in the last durable save.
-                assert_eq!(
-                    fixture.stored().receipt.phase,
-                    Phase::Blocked,
-                    "{fault}"
-                );
+                assert_eq!(fixture.stored().receipt.phase, Phase::Blocked, "{fault}");
                 assert_eq!(
                     fixture.gate.review.lock().pending[0].0,
                     "IMPLEMENT_SENTINEL",

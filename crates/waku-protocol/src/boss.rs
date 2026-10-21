@@ -400,22 +400,20 @@ const RESEARCHER_PERSONA_REVISIONS: &[PersonaDefaultRevision] = &[PersonaDefault
 /// through its documented mechanism.
 const FEATURE_DEVELOPER_DEFAULT_V1: &str = "Implement the assigned change in the assigned project or workspace. Trace the relevant behavior and its dependencies before editing. Follow nearby patterns, keep the change focused, and verify the requested behavior with the project's appropriate checks. Report material defects in a consumed framework through its documented feedback mechanism, preserving the expected behavior and evidence.";
 
-const FEATURE_DEVELOPER_PERSONA_REVISIONS: &[PersonaDefaultRevision] =
-    &[PersonaDefaultRevision {
-        revision: 1,
-        markdown: FEATURE_DEVELOPER_DEFAULT_V1,
-    }];
+const FEATURE_DEVELOPER_PERSONA_REVISIONS: &[PersonaDefaultRevision] = &[PersonaDefaultRevision {
+    revision: 1,
+    markdown: FEATURE_DEVELOPER_DEFAULT_V1,
+}];
 
 /// Revision 1: the failure-diagnosis role — evidence before editing, an
 /// explicit account when reproduction is unavailable, and no fix unless
 /// the assignment authorizes one.
 const BUG_INVESTIGATOR_DEFAULT_V1: &str = "Investigate the assigned failure before changing code. Reproduce it when possible, trace the relevant path, and identify the root cause with evidence. If reproduction is unavailable, distinguish the evidence you have from the behavior you could not observe. Fix only when the assignment authorizes a fix; add regression coverage appropriate to the failure. If the cause remains ambiguous, report supported findings and the smallest next diagnostic step rather than guessing.";
 
-const BUG_INVESTIGATOR_PERSONA_REVISIONS: &[PersonaDefaultRevision] =
-    &[PersonaDefaultRevision {
-        revision: 1,
-        markdown: BUG_INVESTIGATOR_DEFAULT_V1,
-    }];
+const BUG_INVESTIGATOR_PERSONA_REVISIONS: &[PersonaDefaultRevision] = &[PersonaDefaultRevision {
+    revision: 1,
+    markdown: BUG_INVESTIGATOR_DEFAULT_V1,
+}];
 
 /// Revision 1: the check-running role — no code edits, actual results
 /// over claims, and a failed check distinguished from a broken
@@ -463,10 +461,7 @@ pub fn shipped_persona_revision(role: PersonaDefaultRole, markdown: &str) -> Opt
 /// ending at a line boundary — plus the remainder. `None` means the
 /// text starts with nothing shipped, so its whole content is
 /// customization (or is of unknown origin).
-pub fn shipped_persona_prefix(
-    role: PersonaDefaultRole,
-    markdown: &str,
-) -> Option<(u32, &str)> {
+pub fn shipped_persona_prefix(role: PersonaDefaultRole, markdown: &str) -> Option<(u32, &str)> {
     shipped_persona_revisions(role)
         .iter()
         .rev()
@@ -2238,16 +2233,14 @@ impl BossState {
     /// while a custom role's whole text is the custom layer. Empty
     /// layers drop out exactly like empty text does in the composed
     /// prompt, so an unresolved base means no inherited layer.
-    pub fn persona_instruction_layers(
-        &self,
-        persona_id: Uuid,
-    ) -> Vec<PersonaInstructionLayer> {
+    pub fn persona_instruction_layers(&self, persona_id: Uuid) -> Vec<PersonaInstructionLayer> {
         let Some(persona) = self.personas.iter().find(|entry| entry.id == persona_id) else {
             return Vec::new();
         };
         let role = self.persona_default_role(persona_id);
         let mut layers = Vec::new();
-        if role != Some(PersonaDefaultRole::Boss) && self.employee_persona_id != Some(persona_id)
+        if role != Some(PersonaDefaultRole::Boss)
+            && self.employee_persona_id != Some(persona_id)
             && let Some(base) = self
                 .employee_persona_id
                 .and_then(|id| self.personas.iter().find(|entry| entry.id == id))
@@ -2953,7 +2946,9 @@ pub enum BossOperation {
         action: crate::instruction_pins::InstructionPinOperation,
     },
     /// Phase 1 stores safety contracts; provider dispatch remains disabled.
-    Chain { action: crate::chains::ChainOperation },
+    Chain {
+        action: crate::chains::ChainOperation,
+    },
     View,
     /// A compact text summary of employee state, without session transcripts.
     Roster,

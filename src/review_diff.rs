@@ -888,7 +888,13 @@ index 1111111..2222222 100644
     #[test]
     fn full_context_collapses_around_changes_and_label_expands_everything() {
         let patch = full_patch(30, &[8, 17]);
-        let mut snapshot = parse(Source::Uncommitted, "2\t2\tsrc/lib.rs\n", &patch, true, None);
+        let mut snapshot = parse(
+            Source::Uncommitted,
+            "2\t2\tsrc/lib.rs\n",
+            &patch,
+            true,
+            None,
+        );
         let gaps = snapshot
             .lines
             .iter()
@@ -926,7 +932,13 @@ index 1111111..2222222 100644
     #[test]
     fn directional_expansion_reveals_one_hundred_lines_from_the_gap_edge() {
         let patch = full_patch(230, &[221]);
-        let mut snapshot = parse(Source::Uncommitted, "1\t1\tsrc/lib.rs\n", &patch, true, None);
+        let mut snapshot = parse(
+            Source::Uncommitted,
+            "1\t1\tsrc/lib.rs\n",
+            &patch,
+            true,
+            None,
+        );
         let gap_index = snapshot
             .lines
             .iter()
@@ -963,7 +975,13 @@ index 1111111..2222222 100644
     #[test]
     fn count_expansion_reveals_one_hundred_lines_from_both_edges() {
         let patch = full_patch(230, &[221]);
-        let mut snapshot = parse(Source::Uncommitted, "1\t1\tsrc/lib.rs\n", &patch, true, None);
+        let mut snapshot = parse(
+            Source::Uncommitted,
+            "1\t1\tsrc/lib.rs\n",
+            &patch,
+            true,
+            None,
+        );
         let gap_index = snapshot
             .lines
             .iter()

@@ -2648,7 +2648,11 @@ mod queue_tests {
         promote_briefing_gate(&mut gates, waited);
         // The eager-off retain keeps the promoted gate and drops the rest.
         gates.retain(|_, pending| pending.work != BriefingWork::Eager);
-        assert!(gates.get(&waited).is_some_and(|p| p.work == BriefingWork::Arrival));
+        assert!(
+            gates
+                .get(&waited)
+                .is_some_and(|p| p.work == BriefingWork::Arrival)
+        );
         assert!(!gates.contains_key(&other));
         // Promoting twice, or a gate that is not eager, is a no-op.
         promote_briefing_gate(&mut gates, waited);
@@ -2672,24 +2676,27 @@ mod queue_tests {
         state.store_prepared_summary(turn12, "turn twelve".to_owned());
         state.store_prepared_summary(turn10, "turn ten".to_owned());
         assert_eq!(
-            state.summary.as_ref().map(|(id, text)| (*id, text.as_str())),
+            state
+                .summary
+                .as_ref()
+                .map(|(id, text)| (*id, text.as_str())),
             Some((turn12, "turn twelve"))
         );
         // The same reply refreshes and a newer completion displaces.
         state.store_prepared_summary(turn12, "turn twelve revised".to_owned());
         state.store_prepared_summary(turn14, "turn fourteen".to_owned());
         assert_eq!(
-            state.summary.as_ref().map(|(id, text)| (*id, text.as_str())),
+            state
+                .summary
+                .as_ref()
+                .map(|(id, text)| (*id, text.as_str())),
             Some((turn14, "turn fourteen"))
         );
         // A reply with no candidate ordering — a manual pipeline — still
         // lands its text.
         let manual = Uuid::new_v4();
         state.store_prepared_summary(manual, "manual".to_owned());
-        assert_eq!(
-            state.summary.as_ref().map(|(id, _)| *id),
-            Some(manual)
-        );
+        assert_eq!(state.summary.as_ref().map(|(id, _)| *id), Some(manual));
     }
 
     #[test]

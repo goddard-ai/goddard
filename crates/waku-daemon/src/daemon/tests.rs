@@ -8703,8 +8703,7 @@ fn summon_attention_flag_is_persisted_on_employee() {
         *needs_attention = true;
     }
 
-    let result = backend
-        .handle_boss_operation(Some(boss), operation, &EventSink::detached());
+    let result = backend.handle_boss_operation(Some(boss), operation, &EventSink::detached());
     assert!(
         result.is_err(),
         "the test backend deliberately has no Codex executable"
@@ -8717,7 +8716,10 @@ fn summon_attention_flag_is_persisted_on_employee() {
         .expect("the summon persists an employee record before launch");
     assert!(employee.needs_attention);
     assert_eq!(employee.attention_viewed_at, None);
-    assert!(employee.expired, "the deliberately missing provider failed launch");
+    assert!(
+        employee.expired,
+        "the deliberately missing provider failed launch"
+    );
 }
 
 /// The summon-time Boss grant crosses the daemon boundary only for the
@@ -8759,8 +8761,7 @@ fn summon_boss_authority_is_a_boss_only_grant() {
         if let BossOperation::Summon { boss_authority, .. } = &mut claim {
             *boss_authority = true;
         }
-        let result = backend
-            .handle_boss_operation(Some(caller), claim, &EventSink::detached());
+        let result = backend.handle_boss_operation(Some(caller), claim, &EventSink::detached());
         let error = result.expect_err("the grant request must be refused");
         assert!(
             error.to_string().contains("only the boss or a human"),
@@ -9470,8 +9471,7 @@ fn archiving_a_queued_employee_drops_its_ticket() {
 #[test]
 fn an_archived_queued_employee_stays_expired_after_restart() {
     use waku_protocol::boss::{BossResult, EmployeeLifecycle, ExpiryCause};
-    let root =
-        std::env::temp_dir().join(format!("summon-archived-restart-{}", Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("summon-archived-restart-{}", Uuid::new_v4()));
     let (backend, boss) = summon_test_backend(&root);
     set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
     let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
@@ -9535,8 +9535,7 @@ fn a_stopped_queued_employee_stays_expired_after_restart() {
     use waku_protocol::boss::{
         BossOperation, BossResult, EmployeeControl, EmployeeLifecycle, ExpiryCause,
     };
-    let root =
-        std::env::temp_dir().join(format!("summon-stopped-restart-{}", Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("summon-stopped-restart-{}", Uuid::new_v4()));
     let (backend, boss) = summon_test_backend(&root);
     set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
     let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
@@ -9606,8 +9605,7 @@ fn a_stopped_queued_employee_stays_expired_after_restart() {
 #[test]
 fn a_removed_queued_employee_stays_expired_after_restart() {
     use waku_protocol::boss::{BossResult, EmployeeLifecycle, ExpiryCause};
-    let root =
-        std::env::temp_dir().join(format!("summon-removed-restart-{}", Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("summon-removed-restart-{}", Uuid::new_v4()));
     let (backend, boss) = summon_test_backend(&root);
     set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
     let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
@@ -9648,12 +9646,14 @@ fn a_removed_queued_employee_stays_expired_after_restart() {
         Some(ExpiryCause::Stopped)
     );
     assert!(backend.boss.queued_heads().is_empty());
-    assert!(backend
-        .task_state
-        .lock()
-        .sessions
-        .iter()
-        .all(|session| session.id != session_id));
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .all(|session| session.id != session_id)
+    );
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -9663,8 +9663,7 @@ fn a_removed_queued_employee_stays_expired_after_restart() {
 #[test]
 fn a_queued_ticket_expires_when_its_project_checkout_is_gone() {
     use waku_protocol::boss::{BossOperation, BossResult, EmployeeLifecycle, ExpiryCause};
-    let root =
-        std::env::temp_dir().join(format!("summon-gone-project-{}", Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("summon-gone-project-{}", Uuid::new_v4()));
     let (backend, boss) = summon_test_backend(&root);
     set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
     let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
@@ -9716,8 +9715,7 @@ fn a_queued_ticket_expires_when_its_project_checkout_is_gone() {
 #[test]
 fn a_queued_ticket_dispatches_after_restart() {
     use waku_protocol::boss::{BossResult, EmployeeLifecycle};
-    let root =
-        std::env::temp_dir().join(format!("summon-restart-dispatch-{}", Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("summon-restart-dispatch-{}", Uuid::new_v4()));
     let (backend, boss) = summon_test_backend(&root);
     set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
     let (held_task, held) = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
@@ -10118,12 +10116,10 @@ fn start_now_dispatches_a_queued_ticket_through_burst_headroom() {
     };
     assert_eq!(state, EmployeeLifecycle::Queued);
     assert!(
-        admission
-            .as_ref()
-            .is_some_and(|admission| admission.blocked_by.iter().any(|blocker| matches!(
-                blocker,
-                AdmissionBlocker::ModelLimit { used: 1, limit: 1 }
-            ))),
+        admission.as_ref().is_some_and(|admission| admission
+            .blocked_by
+            .iter()
+            .any(|blocker| matches!(blocker, AdmissionBlocker::ModelLimit { used: 1, limit: 1 }))),
         "the ticket should report the full live pool: {:?}",
         admission
     );
@@ -10196,11 +10192,7 @@ fn start_now_dispatches_a_queued_ticket_through_burst_headroom() {
         panic!("startNow answers with the employee's settled state")
     };
     assert_eq!(state, EmployeeLifecycle::Working);
-    assert_eq!(
-        *launches.lock(),
-        1,
-        "repeat presses cannot double-dispatch"
-    );
+    assert_eq!(*launches.lock(), 1, "repeat presses cannot double-dispatch");
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -10276,7 +10268,10 @@ fn start_now_takes_the_queue_head_but_never_crosses_the_hard_cap() {
     };
     assert_eq!(state, EmployeeLifecycle::Queued);
     let admission = admission.expect("a queued result carries its admission");
-    assert!(admission.force_start, "the committed flag reports to clients");
+    assert!(
+        admission.force_start,
+        "the committed flag reports to clients"
+    );
     assert!(
         admission
             .blocked_by
@@ -10354,8 +10349,7 @@ fn start_now_flag_survives_restart_and_never_steals_held_resources() {
         AdmissionBlocker, BossOperation, BossResult, EmployeeControl, EmployeeLifecycle,
     };
     use waku_protocol::resources::{ResourceOperation, ResourceSet};
-    let root =
-        std::env::temp_dir().join(format!("summon-startnow-restart-{}", Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("summon-startnow-restart-{}", Uuid::new_v4()));
     let (backend, boss) = summon_test_backend(&root);
     // The model lane reads full at live but has burst headroom, and the
     // one native-build slot is held — two independent holds to clear.
@@ -10454,7 +10448,10 @@ fn start_now_flag_survives_restart_and_never_steals_held_resources() {
     let employee = backend.boss.employee(session_id).unwrap();
     assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
     assert!(
-        employee.ticket.as_ref().is_some_and(|ticket| ticket.force_start),
+        employee
+            .ticket
+            .as_ref()
+            .is_some_and(|ticket| ticket.force_start),
         "the restart must not drop the committed force intent"
     );
 
@@ -13133,7 +13130,10 @@ fn a_resumed_employee_reads_connecting_once_dispatched() {
             .iter()
             .position(|session| session.id == employee_id)
             .unwrap();
-        backend.task_store.hydrate(&mut state.sessions[index]).unwrap();
+        backend
+            .task_store
+            .hydrate(&mut state.sessions[index])
+            .unwrap();
         state.sessions[index].clone()
     };
     assert_eq!(session.status, SessionStatus::Connecting);
@@ -13927,8 +13927,7 @@ fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
 fn outcome_reminder_dedupes_across_boss_rotation() {
     use waku_boss::rotation_continuity::ContinuityLedger;
     for delivered in [false, true] {
-        let root =
-            std::env::temp_dir().join(format!("reminder-rotation-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("reminder-rotation-{}", Uuid::new_v4()));
         let (mut backend, _) = surface_test_backend(&root);
         let predecessor = rotation_boss(&backend);
         backend.set_daemon_address("http://127.0.0.1:1".into());
@@ -13952,8 +13951,7 @@ fn outcome_reminder_dedupes_across_boss_rotation() {
         let grace = waku_protocol::boss::OUTCOME_UNATTENDED_GRACE;
         // The first scan arms the grace clock; nothing queues yet.
         backend.deliver_outcome_reminders(now).unwrap();
-        let batch =
-            summon::outcome_reminder_batch(&backend.boss.document().outcomes, &[task.id]);
+        let batch = summon::outcome_reminder_batch(&backend.boss.document().outcomes, &[task.id]);
         let text = "These tasks have no active assignment or recorded waiting reason:\n• Keep reminders honest";
         if delivered {
             // The batch row landed on the predecessor's transcript while
@@ -14017,9 +14015,7 @@ fn outcome_reminder_dedupes_across_boss_rotation() {
         // The rescan sees the identical batch — the parked chip or the
         // delivered row on the retired chat both count as landed — and
         // only marks; nothing new queues and nothing new is written.
-        backend
-            .deliver_outcome_reminders(now + grace + 2)
-            .unwrap();
+        backend.deliver_outcome_reminders(now + grace + 2).unwrap();
         let successor_detail = backend
             .task_store
             .load_session_detail(successor)
@@ -14111,9 +14107,7 @@ fn outcome_reminder_stays_suppressed_while_wait_or_assignment_covers_it() {
         )
         .unwrap();
     backend.deliver_outcome_reminders(now).unwrap();
-    backend
-        .deliver_outcome_reminders(now + grace + 1)
-        .unwrap();
+    backend.deliver_outcome_reminders(now + grace + 1).unwrap();
     assert_eq!(parked(), 0, "a recorded wait never queues a reminder");
 
     // Clearing the wait re-arms; a live assignment then takes over the
@@ -16789,11 +16783,10 @@ fn a_boss_steer_arriving_for_a_rotated_chat_is_queued_on_the_successor() {
     let predecessor = rotation_boss(&backend);
     {
         let mut state = backend.task_state.lock();
-        state.session_mut(predecessor).unwrap().context_usage =
-            Some(crate::model::ContextUsage {
-                tokens: 76,
-                window: Some(100),
-            });
+        state.session_mut(predecessor).unwrap().context_usage = Some(crate::model::ContextUsage {
+            tokens: 76,
+            window: Some(100),
+        });
         backend.task_store.save(&mut state).unwrap();
     }
     install_legacy_boss_rotation(&backend, crate::model::unix_time()).unwrap();
@@ -17006,7 +16999,10 @@ fn active_boss_archive_is_rejected_from_client_saves_and_bulk_archive() {
     let active = rotation_boss(&backend);
     {
         let mut state = backend.task_state.lock();
-        state.session_mut(active).unwrap().begin_turn("Prior conversation");
+        state
+            .session_mut(active)
+            .unwrap()
+            .begin_turn("Prior conversation");
         state.mark_session_dirty(active);
         backend.task_store.save(&mut state).unwrap();
     }
@@ -17069,7 +17065,10 @@ fn archived_active_boss_recovers_on_open_send_and_reconciliation() {
     let active = rotation_boss(&backend);
     {
         let mut state = backend.task_state.lock();
-        state.session_mut(active).unwrap().begin_turn("Prior conversation");
+        state
+            .session_mut(active)
+            .unwrap()
+            .begin_turn("Prior conversation");
         state.mark_session_dirty(active);
         backend.task_store.save(&mut state).unwrap();
     }
@@ -21109,7 +21108,9 @@ fn plan_delivery_runtime_delivers_before_execution_and_recovers_exact_revision()
     // delivery contract — no fresh approval is required while the original
     // approved binding is valid.
     let storage_root = dunce::canonicalize(backend.task_store.path().parent().unwrap()).unwrap();
-    let attempt_dir = storage_root.join("plan-delivery").join(session_id.to_string());
+    let attempt_dir = storage_root
+        .join("plan-delivery")
+        .join(session_id.to_string());
     let attempt: Uuid = std::fs::read_to_string(attempt_dir.join("current-attempt"))
         .unwrap()
         .trim()
@@ -21592,9 +21593,11 @@ fn boss_projects_discovery_exposes_canonical_identity() {
     assert_eq!(entry.name, "alpha");
     assert_eq!(entry.path, alpha_path);
     assert!(!entry.temporary);
-    assert!(projects
-        .iter()
-        .any(|entry| entry.name == "adhoc" && entry.temporary));
+    assert!(
+        projects
+            .iter()
+            .any(|entry| entry.name == "adhoc" && entry.temporary)
+    );
     // The human client (no session) reads the same catalog.
     assert!(list(None).is_ok());
 
@@ -21677,11 +21680,13 @@ fn boss_projects_discovery_exposes_canonical_identity() {
     assert_eq!(error.code, ProjectSelectionErrorCode::ProjectAmbiguous);
     assert_eq!(error.candidates.len(), 2);
     // The id selection still reaches the record directly.
-    assert!(resolve(
-        Some(supervisor),
-        ProjectSelector::Bare(alpha_id.to_string())
-    )
-    .is_ok());
+    assert!(
+        resolve(
+            Some(supervisor),
+            ProjectSelector::Bare(alpha_id.to_string())
+        )
+        .is_ok()
+    );
 
     // Non-authority callers — employees included — are refused discovery.
     assert!(list(Some(Uuid::new_v4())).is_err());

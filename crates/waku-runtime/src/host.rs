@@ -1087,9 +1087,15 @@ impl RuntimeHost {
     /// and authority is never renewed.
     pub fn check_grant(&self, grant: &SessionGrant) -> Result<SessionRef, HostError> {
         let target = self.check_recorded_grant(grant)?;
-        let session = self.sessions.get(&target.session_id).ok_or(HostError::Unauthorized)?;
+        let session = self
+            .sessions
+            .get(&target.session_id)
+            .ok_or(HostError::Unauthorized)?;
         let generation = session.current();
-        if session.generation() != target.generation || generation.fence.is_some() || generation.ended {
+        if session.generation() != target.generation
+            || generation.fence.is_some()
+            || generation.ended
+        {
             return Err(HostError::Unauthorized);
         }
         Ok(target)
@@ -2658,8 +2664,13 @@ impl RuntimeHost {
             for g in &session.gens {
                 for record in g.ingress.values() {
                     if matches!(record.disposition, IngressDisposition::Pending)
-                        && (session.generation() != g.number || g.fence.is_some() || g.ended
-                            || !g.grants.get(&record.grant_id).is_some_and(|grant| now < grant.expires_at_ms))
+                        && (session.generation() != g.number
+                            || g.fence.is_some()
+                            || g.ended
+                            || !g
+                                .grants
+                                .get(&record.grant_id)
+                                .is_some_and(|grant| now < grant.expires_at_ms))
                     {
                         stale.push((record.request_id, IngressDisposition::Refused {
                             detail: "original ingress authority expired or was revoked before dispatch".into(),

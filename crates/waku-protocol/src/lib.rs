@@ -82,9 +82,9 @@ pub use protocol::{
     DaemonSessionSample, DaemonStatsSample, MAX_WIRE_MESSAGE_BYTES, PLAN_FINALIZE_REQUEST_PREFIX,
     PROTOCOL_VERSION, RUNTIME_INGRESS_ENV, ReplayCursor, Request, RequestCommandSample,
     RequestPoolSample, ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage,
-    SessionDetailTail,
-    SubprocessLabelSample, TASK_LINK_PREFIX, WhistleWord, WireComputerToolRequest, WireDriverEvent,
-    WireDriverStartOptions, WireSessionOptions, is_daemon_request,
+    SessionDetailTail, SubprocessLabelSample, TASK_LINK_PREFIX, WhistleWord,
+    WireComputerToolRequest, WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
+    is_daemon_request,
 };
 pub use protocol::{KeyedError, WireTranslation};
 pub use settings::DaemonSettings;

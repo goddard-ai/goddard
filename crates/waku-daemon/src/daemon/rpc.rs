@@ -32,7 +32,11 @@ impl WakuBackend {
             "Boss chat is archived; reopen the active Boss chat"
         );
 
-        if let Some(existing) = session.messages.iter().find(|message| message.id == queued.id) {
+        if let Some(existing) = session
+            .messages
+            .iter()
+            .find(|message| message.id == queued.id)
+        {
             anyhow::ensure!(
                 existing.role == crate::model::MessageRole::User
                     && existing.content == queued.content,
@@ -56,7 +60,9 @@ impl WakuBackend {
         }
 
         session.queued_messages.push(queued.clone());
-        session.queued_messages.sort_by_key(|message| message.created_at);
+        session
+            .queued_messages
+            .sort_by_key(|message| message.created_at);
         session.updated_at = crate::model::unix_time();
         state.mark_session_dirty(session_id);
         self.task_store.save(&mut state)?;
@@ -373,14 +379,10 @@ impl Backend for WakuBackend {
                 "plan approval belongs to a different or stopped runtime"
             );
         }
-        let boss_steer_command = matches!(
-            &request.command,
-            Command::Steer { hidden: false, .. }
-        );
+        let boss_steer_command = matches!(&request.command, Command::Steer { hidden: false, .. });
         let boss_chat_command = matches!(
             &request.command,
-            Command::Start { .. } | Command::Prompt { .. }
-                | Command::Steer { hidden: false, .. }
+            Command::Start { .. } | Command::Prompt { .. } | Command::Steer { hidden: false, .. }
         ) && {
             let identity = self.boss.identity_and_session().0.id;
             self.task_state.lock().sessions.iter().any(|session| {
@@ -398,9 +400,7 @@ impl Backend for WakuBackend {
                 self.boss
                     .try_operation_guard(std::time::Duration::from_secs(30))
                     .ok_or_else(|| {
-                        anyhow!(
-                            "the Boss is busy applying a background operation; retry shortly"
-                        )
+                        anyhow!("the Boss is busy applying a background operation; retry shortly")
                     })?,
             )
         } else {
@@ -410,11 +410,9 @@ impl Backend for WakuBackend {
             self.recover_archived_active_boss_chat()?;
             if !boss_steer_command {
                 anyhow::ensure!(
-                    self.task_state
-                        .lock()
-                        .sessions
-                        .iter()
-                        .any(|session| { session.id == session_id && session.archived_at.is_none() }),
+                    self.task_state.lock().sessions.iter().any(|session| {
+                        session.id == session_id && session.archived_at.is_none()
+                    }),
                     "Boss chat is archived; reopen the active Boss chat"
                 );
             }
@@ -1209,9 +1207,8 @@ impl Backend for WakuBackend {
                                     .reasoning_effort
                                     .clone_from(&existing.reasoning_effort);
                             }
-                            session.config_activation = existing
-                                .config_activation
-                                .max(session.config_activation);
+                            session.config_activation =
+                                existing.config_activation.max(session.config_activation);
                             *existing = session;
                             true
                         }
@@ -2078,8 +2075,7 @@ impl Backend for WakuBackend {
                 // A granted lease for a runtime-owned session anchors on the
                 // surviving host, so a later daemon detachment cannot
                 // silently release provider-held work.
-                if let (Some(anchor), Some(id)) =
-                    (self.stable_anchor_pid(owner), status.request_id)
+                if let (Some(anchor), Some(id)) = (self.stable_anchor_pid(owner), status.request_id)
                     && status.reservations.iter().any(|reservation| {
                         reservation.id == id
                             && reservation.granted_at.is_some()
@@ -2381,8 +2377,7 @@ impl Backend for WakuBackend {
                         },
                     );
                 }
-                if matches!(command, Command::Compact) && self.boss.is_boss_principal(session_id)
-                {
+                if matches!(command, Command::Compact) && self.boss.is_boss_principal(session_id) {
                     // A manual compact on a Boss principal is telemetry,
                     // never a successful rotation — the journal correlates
                     // it to the session's generation.

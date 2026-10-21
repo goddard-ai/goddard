@@ -153,10 +153,14 @@ fn spawned_host_end_to_end_and_crash_recovery() {
             deadline_ms: u64::MAX / 2,
         })
         .unwrap();
-    let mut service =
-        RuntimeClient::service(root.path(), &creds.controller, grant1.epoch, &ClientHello::current())
-            .unwrap()
-            .0;
+    let mut service = RuntimeClient::service(
+        root.path(),
+        &creds.controller,
+        grant1.epoch,
+        &ClientHello::current(),
+    )
+    .unwrap()
+    .0;
     let forwarded = service.service_drain(grant1.epoch, 0).unwrap();
     assert_eq!(forwarded.len(), 1);
     service
@@ -189,7 +193,10 @@ fn spawned_host_end_to_end_and_crash_recovery() {
         .spawn()
         .expect("usurper spawns");
     let status = usurper.wait().expect("usurper exits");
-    assert!(!status.success(), "second instance must refuse the namespace");
+    assert!(
+        !status.success(),
+        "second instance must refuse the namespace"
+    );
 
     // Kill the runtime itself — the honest crash path.
     host1.kill();
@@ -226,9 +233,7 @@ fn spawned_host_end_to_end_and_crash_recovery() {
 
     // The completed agent request kept its recorded truth across the
     // crash — durable before it ever mattered.
-    let grant_check = daemon2
-        .command(Uuid::new_v4())
-        .unwrap();
+    let grant_check = daemon2.command(Uuid::new_v4()).unwrap();
     assert!(grant_check.is_none());
     let record = daemon2
         .status()

@@ -140,13 +140,11 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
             fs::write(resolve_workspace_path(&root, &relative_path)?, content)?;
             WorkspaceResult::Ack
         }
-        WorkspaceOperation::ListProjectFiles {
-            root,
-            cap,
-            listing,
-        } => WorkspaceResult::ProjectFiles {
-            entries: crate::composer_complete::list_project_files(&root, cap, &listing),
-        },
+        WorkspaceOperation::ListProjectFiles { root, cap, listing } => {
+            WorkspaceResult::ProjectFiles {
+                entries: crate::composer_complete::list_project_files(&root, cap, &listing),
+            }
+        }
         WorkspaceOperation::SearchDirectories {
             roots,
             max_depth,

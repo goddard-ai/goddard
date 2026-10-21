@@ -4636,10 +4636,8 @@ impl Waku {
             // presentation — a draft keeps only what was typed, and the
             // structured set returning to the stores re-chips on resubmit.
             if let Some(display) = submission.display_content.as_mut()
-                && let Some(typed) = display.strip_prefix(&annotation_bubble_content(
-                    &submission.annotations,
-                    "",
-                ))
+                && let Some(typed) =
+                    display.strip_prefix(&annotation_bubble_content(&submission.annotations, ""))
             {
                 *display = typed.to_owned();
             }
@@ -4743,10 +4741,8 @@ impl Waku {
             // Same split as the main restore — a draft keeps the typed
             // text, not the bubble's quote blocks.
             if let Some(display) = submission.display_content.as_mut()
-                && let Some(typed) = display.strip_prefix(&annotation_bubble_content(
-                    &submission.annotations,
-                    "",
-                ))
+                && let Some(typed) =
+                    display.strip_prefix(&annotation_bubble_content(&submission.annotations, ""))
             {
                 *display = typed.to_owned();
             }
@@ -6350,10 +6346,9 @@ impl Waku {
                 .group_drag_over::<SidebarSessionDrag>(SESSION_DROP_GROUP, move |style| {
                     style.bg(drop_wash).border_color(drop_ring)
                 })
-                .group_drag_over::<SidebarDeliverableDrag>(
-                    SESSION_DROP_GROUP,
-                    move |style| style.bg(drop_wash).border_color(drop_ring),
-                )
+                .group_drag_over::<SidebarDeliverableDrag>(SESSION_DROP_GROUP, move |style| {
+                    style.bg(drop_wash).border_color(drop_ring)
+                })
                 .on_drop(cx.listener(
                     |this, paths: &ExternalPaths, window, cx| {
                         this.stage_dropped_files(paths, window, cx);
@@ -9866,29 +9861,32 @@ fn queued_preview_body(message: &QueuedMessage, fallback: &str, theme: &Theme) -
         .line_height(sp(18.0))
         .text_size(sp(12.5))
         .text_color(theme.text)
-        .children(queued_preview_items(&parts).into_iter().enumerate().map(
-            |(index, item)| match item {
-                // Keep each word as its own flex item. A whole text run is
-                // measured as one item and can consume the row before a
-                // following chip gets a chance to flow beside it.
-                QueuedPreviewItem::Word(word) => div()
-                    .flex_none()
-                    .max_w_full()
-                    .child(SharedString::from(word))
+        .children(
+            queued_preview_items(&parts)
+                .into_iter()
+                .enumerate()
+                .map(|(index, item)| match item {
+                    // Keep each word as its own flex item. A whole text run is
+                    // measured as one item and can consume the row before a
+                    // following chip gets a chance to flow beside it.
+                    QueuedPreviewItem::Word(word) => div()
+                        .flex_none()
+                        .max_w_full()
+                        .child(SharedString::from(word))
+                        .into_any_element(),
+                    // A source newline ends the row outright — a full-width
+                    // item wraps the flow, and its zero height keeps the break
+                    // from adding a blank row of its own.
+                    QueuedPreviewItem::Break => div().w_full().h(px(0.0)).into_any_element(),
+                    QueuedPreviewItem::Chip { icon, label } => queued_preview_chip(
+                        SharedString::from(format!("queued-preview-chip-{}-{index}", message.id)),
+                        icon,
+                        label,
+                        theme,
+                    )
                     .into_any_element(),
-                // A source newline ends the row outright — a full-width
-                // item wraps the flow, and its zero height keeps the break
-                // from adding a blank row of its own.
-                QueuedPreviewItem::Break => div().w_full().h(px(0.0)).into_any_element(),
-                QueuedPreviewItem::Chip { icon, label } => queued_preview_chip(
-                    SharedString::from(format!("queued-preview-chip-{}-{index}", message.id)),
-                    icon,
-                    label,
-                    theme,
-                )
-                .into_any_element(),
-            },
-        ))
+                }),
+        )
 }
 
 /// One laid-out item in a chip-bearing queued preview's flow: a word of
@@ -9920,11 +9918,7 @@ pub(super) fn queued_preview_items(parts: &[QueuedPreviewPart]) -> Vec<QueuedPre
                 label: label.clone(),
             }),
             QueuedPreviewPart::Text(text) => {
-                for (index, line) in text
-                    .replace("\r\n", "\n")
-                    .split(['\n', '\r'])
-                    .enumerate()
-                {
+                for (index, line) in text.replace("\r\n", "\n").split(['\n', '\r']).enumerate() {
                     if index > 0 {
                         items.push(QueuedPreviewItem::Break);
                     }

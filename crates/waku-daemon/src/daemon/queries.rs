@@ -200,7 +200,14 @@ impl WakuBackend {
         Ok(ResponsePayload::AgentHistorySearch {
             result: self.history_search_scoped(
                 Some(caller),
-                query, project, person, after, before, kind, limit, offset,
+                query,
+                project,
+                person,
+                after,
+                before,
+                kind,
+                limit,
+                offset,
             )?,
         })
     }

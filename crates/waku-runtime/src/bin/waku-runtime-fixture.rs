@@ -23,12 +23,7 @@ fn run() -> ExitCode {
         match arg.as_str() {
             "--root" => root = args.next().map(PathBuf::from),
             "--namespace" => namespace = args.next().unwrap_or(namespace),
-            "--pump-ms" => {
-                pump_ms = args
-                    .next()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(pump_ms)
-            }
+            "--pump-ms" => pump_ms = args.next().and_then(|v| v.parse().ok()).unwrap_or(pump_ms),
             // Deterministic-harness seam: real provider adapters register
             // here as their stages land; the fake is explicit opt-in only.
             "--enable-fake-adapter" => fake = true,
@@ -47,7 +42,10 @@ fn run() -> ExitCode {
     };
     let mut registry = AdapterRegistry::new();
     if fake {
-        registry.register("fake", Arc::new(FakeFactory::new()) as Arc<dyn AdapterFactory>);
+        registry.register(
+            "fake",
+            Arc::new(FakeFactory::new()) as Arc<dyn AdapterFactory>,
+        );
     }
     let host = match RuntimeHost::open(
         &root,

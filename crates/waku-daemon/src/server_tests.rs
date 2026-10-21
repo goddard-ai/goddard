@@ -708,20 +708,40 @@ fn a_scoped_agent_token_reaches_only_agent_commands() {
 
     // UI interaction intent is not an agent capability, even for a Boss
     // credential. Supplied human-looking fields cannot change authentication.
-    let error = agent.request(target_id, Uuid::nil(), Command::EmployeeComposerPrompt {
-        viewed_employee_id: target_id,
-        submission_id: Uuid::new_v4(),
-        prompt: "bypass".into(),
-        delivery: crate::AgentPromptDelivery::Queue,
-    }).unwrap_err();
-    assert!(error.to_string().contains("may only run agent commands"), "{error}");
-    let error = human.request(target_id, Uuid::nil(), Command::EmployeeComposerPrompt {
-        viewed_employee_id: Uuid::new_v4(),
-        submission_id: Uuid::new_v4(),
-        prompt: "wrong view".into(),
-        delivery: crate::AgentPromptDelivery::Queue,
-    }).unwrap_err();
-    assert!(error.to_string().contains("composer target differs from viewed employee"), "{error}");
+    let error = agent
+        .request(
+            target_id,
+            Uuid::nil(),
+            Command::EmployeeComposerPrompt {
+                viewed_employee_id: target_id,
+                submission_id: Uuid::new_v4(),
+                prompt: "bypass".into(),
+                delivery: crate::AgentPromptDelivery::Queue,
+            },
+        )
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("may only run agent commands"),
+        "{error}"
+    );
+    let error = human
+        .request(
+            target_id,
+            Uuid::nil(),
+            Command::EmployeeComposerPrompt {
+                viewed_employee_id: Uuid::new_v4(),
+                submission_id: Uuid::new_v4(),
+                prompt: "wrong view".into(),
+                delivery: crate::AgentPromptDelivery::Queue,
+            },
+        )
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("composer target differs from viewed employee"),
+        "{error}"
+    );
 
     // Unknown targets are refused rather than queued.
     let error = agent

@@ -66,7 +66,11 @@ impl RuntimeClient {
             return Err(HostError::Unauthorized.into());
         }
         let agent = matches!(&auth, ConnectAuth::Agent { .. });
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(if agent { 10 } else { 35 })))?;
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(if agent {
+            10
+        } else {
+            35
+        })))?;
         stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
         ipc::send(
             &mut stream,
@@ -178,10 +182,13 @@ impl RuntimeClient {
     /// Long-poll waits must fit inside this bound; zero is refused.
     pub fn set_request_timeout(&mut self, timeout: std::time::Duration) -> Result<(), ClientError> {
         if timeout.is_zero() {
-            return Err(ClientError::Protocol("request timeout must be positive".into()));
+            return Err(ClientError::Protocol(
+                "request timeout must be positive".into(),
+            ));
         }
         self.stream.set_read_timeout(Some(timeout))?;
-        self.stream.set_write_timeout(Some(timeout.min(std::time::Duration::from_secs(5))))?;
+        self.stream
+            .set_write_timeout(Some(timeout.min(std::time::Duration::from_secs(5))))?;
         Ok(())
     }
 

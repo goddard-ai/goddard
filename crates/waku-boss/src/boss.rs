@@ -26,8 +26,8 @@ use waku_protocol::boss::{
     PersonaDefaultUndo, PersonaDefaultsState, PersonaPermissions, PlanActor, PlanItem,
     PlanItemInput, PlanItemState, PlanItemTransition, PlanOutcome, PlanTransition, SummonTicket,
     WaveMember, WaveMemberOutcome, WaveNotification, compose_persona_default, instruction_diff,
-    shipped_persona_default, shipped_persona_prefix,
-    shipped_persona_revision, shipped_persona_revisions,
+    shipped_persona_default, shipped_persona_prefix, shipped_persona_revision,
+    shipped_persona_revisions,
 };
 
 /// What an employee's settle did to its task — the daemon's finish tail
@@ -158,11 +158,11 @@ struct MemoryFeedProject<'a> {
 }
 
 /// A note kind as the protocol labels it.
-fn memory_feed_note_kind(kind: waku_memory_engine::buckets::NoteKind) -> waku_protocol::boss::MemoryNoteKind {
+fn memory_feed_note_kind(
+    kind: waku_memory_engine::buckets::NoteKind,
+) -> waku_protocol::boss::MemoryNoteKind {
     match kind {
-        waku_memory_engine::buckets::NoteKind::Fact => {
-            waku_protocol::boss::MemoryNoteKind::Fact
-        }
+        waku_memory_engine::buckets::NoteKind::Fact => waku_protocol::boss::MemoryNoteKind::Fact,
         waku_memory_engine::buckets::NoteKind::Observation => {
             waku_protocol::boss::MemoryNoteKind::Observation
         }
@@ -3177,10 +3177,15 @@ impl BossService {
                             | EmployeeLifecycle::Working
                     )
             }) {
-                let plan_blocked = entry.plan_readiness.as_ref().is_some_and(|r|
-                    r.phase == waku_protocol::boss::PlanReadinessPhase::Blocked);
+                let plan_blocked = entry
+                    .plan_readiness
+                    .as_ref()
+                    .is_some_and(|r| r.phase == waku_protocol::boss::PlanReadinessPhase::Blocked);
                 if plan_blocked {
-                    entry.blocker = entry.plan_readiness.as_ref().and_then(|r| r.failure.as_ref())
+                    entry.blocker = entry
+                        .plan_readiness
+                        .as_ref()
+                        .and_then(|r| r.failure.as_ref())
                         .map(|error| error.detail.clone());
                 }
                 let lifecycle = entry.lifecycle();
@@ -4072,7 +4077,11 @@ impl BossService {
                 if persona_id == state.persona_id {
                     bail!("the Boss persona cannot be the Employee base");
                 }
-                if state.specialist_persona_ids.values().any(|id| *id == persona_id) {
+                if state
+                    .specialist_persona_ids
+                    .values()
+                    .any(|id| *id == persona_id)
+                {
                     bail!("a shipped specialist role cannot be the Employee base");
                 }
                 if !state
@@ -4156,8 +4165,7 @@ impl BossService {
                     // reconciler applies — an old base in the undo text
                     // upgrades to the current shipped revision while the
                     // customization returns verbatim.
-                    state.personas[index].markdown =
-                        compose_persona_default(role, &undo.markdown);
+                    state.personas[index].markdown = compose_persona_default(role, &undo.markdown);
                     let defaults = state.persona_defaults.get_mut(role);
                     defaults.starting_revision = Some(shipped.revision);
                     defaults.reviewed_revision = Some(shipped.revision);
@@ -5279,8 +5287,11 @@ impl BossService {
                                     members
                                         .iter()
                                         .min_by(|a, b| {
-                                            (a.created_at, &a.name, &a.path)
-                                                .cmp(&(b.created_at, &b.name, &b.path))
+                                            (a.created_at, &a.name, &a.path).cmp(&(
+                                                b.created_at,
+                                                &b.name,
+                                                &b.path,
+                                            ))
                                         })
                                         .map(|rep| MemoryFeedProject {
                                             key,
@@ -7336,9 +7347,8 @@ fn reconcile_persona_defaults(state: &mut BossState) {
                 && !persona_is_referenced(state, persona.id)
                 && PersonaDefaultRole::SPECIALISTS.iter().copied().any(|role| {
                     persona_matches_seed(persona, role)
-                        && default_persona_index(state, role).is_some_and(|index| {
-                            persona_matches_seed(&state.personas[index], role)
-                        })
+                        && default_persona_index(state, role)
+                            .is_some_and(|index| persona_matches_seed(&state.personas[index], role))
                 })
         })
         .map(|persona| persona.id)
@@ -7373,8 +7383,7 @@ fn reconcile_persona_defaults(state: &mut BossState) {
         if changed {
             state.personas[index].markdown = normalized;
         }
-        let upgrade =
-            defaults.seen_revision != 0 && shipped.revision > defaults.seen_revision;
+        let upgrade = defaults.seen_revision != 0 && shipped.revision > defaults.seen_revision;
         defaults.seen_revision = defaults.seen_revision.max(shipped.revision);
         defaults.starting_revision = Some(shipped.revision);
         defaults.reviewed_revision = Some(shipped.revision);
@@ -7402,10 +7411,9 @@ fn reconcile_persona_defaults(state: &mut BossState) {
         let mut updates = notice.updates.clone();
         updates.retain(|update| {
             let resolved = default_persona_index(state, update.role).is_some_and(|index| {
-                shipped_persona_prefix(update.role, &state.personas[index].markdown)
-                    .is_some_and(|(revision, _)| {
-                        revision == shipped_persona_default(update.role).revision
-                    })
+                shipped_persona_prefix(update.role, &state.personas[index].markdown).is_some_and(
+                    |(revision, _)| revision == shipped_persona_default(update.role).revision,
+                )
             });
             if !resolved {
                 return true;
@@ -8032,27 +8040,33 @@ mod tests {
         let employee = reopened.employee(session_id).unwrap();
         assert!(employee.needs_attention);
         assert_eq!(employee.attention_viewed_at, None);
-        assert!(reopened
-            .retire_expired(100 + EMPLOYEE_RETIREMENT_SECONDS + 1)
-            .unwrap()
-            .is_empty());
+        assert!(
+            reopened
+                .retire_expired(100 + EMPLOYEE_RETIREMENT_SECONDS + 1)
+                .unwrap()
+                .is_empty()
+        );
         assert!(reopened.is_employee(session_id));
 
-        assert!(reopened
-            .handle(
-                Some(Uuid::new_v4()),
-                BossOperation::MarkEmployeeViewed { session_id },
-            )
-            .is_err());
-        assert!(reopened
-            .handle(
-                Some(Uuid::new_v4()),
-                BossOperation::SetEmployeeAttention {
-                    session_id,
-                    needs_attention: false,
-                },
-            )
-            .is_err());
+        assert!(
+            reopened
+                .handle(
+                    Some(Uuid::new_v4()),
+                    BossOperation::MarkEmployeeViewed { session_id },
+                )
+                .is_err()
+        );
+        assert!(
+            reopened
+                .handle(
+                    Some(Uuid::new_v4()),
+                    BossOperation::SetEmployeeAttention {
+                        session_id,
+                        needs_attention: false,
+                    },
+                )
+                .is_err()
+        );
         assert!(reopened.employee(session_id).unwrap().needs_attention);
         reopened
             .handle(None, BossOperation::MarkEmployeeViewed { session_id })
@@ -8069,7 +8083,10 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(reopened.employee(session_id).unwrap().attention_viewed_at, None);
+        assert_eq!(
+            reopened.employee(session_id).unwrap().attention_viewed_at,
+            None
+        );
         reopened
             .handle(
                 None,
@@ -8427,10 +8444,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(service.document().revision, revision + 1);
-        assert_eq!(
-            notifications.load(std::sync::atomic::Ordering::Relaxed),
-            1
-        );
+        assert_eq!(notifications.load(std::sync::atomic::Ordering::Relaxed), 1);
         service
             .handle(
                 None,
@@ -8440,10 +8454,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(service.document().revision, revision + 2);
-        assert_eq!(
-            notifications.load(std::sync::atomic::Ordering::Relaxed),
-            2
-        );
+        assert_eq!(notifications.load(std::sync::atomic::Ordering::Relaxed), 2);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -9164,8 +9175,7 @@ mod tests {
         let service = BossService::open(root.clone()).unwrap();
         let boss = Uuid::new_v4();
         let persona = service.document().personas[0].id;
-        let researcher = service.document().specialist_persona_ids
-            [&PersonaDefaultRole::Researcher];
+        let researcher = service.document().specialist_persona_ids[&PersonaDefaultRole::Researcher];
         service
             .update(|state| {
                 state.session_id = Some(boss);
@@ -9247,7 +9257,11 @@ mod tests {
             })
             .unwrap();
         assert!(service.has_boss_authority(deputy_id));
-        assert!(service.authorize_transcript(Some(deputy_id), plain_id).is_ok());
+        assert!(
+            service
+                .authorize_transcript(Some(deputy_id), plain_id)
+                .is_ok()
+        );
         assert!(
             service
                 .set_resource_policy(Some(deputy_id), 0, Vec::new(), None)
@@ -9298,7 +9312,13 @@ mod tests {
             )
             .unwrap();
         assert!(service.employee(deputy_id).unwrap().boss_authority);
-        assert!(service.employee(deputy_id).unwrap().permissions.computer_use);
+        assert!(
+            service
+                .employee(deputy_id)
+                .unwrap()
+                .permissions
+                .computer_use
+        );
         // Expiry suspends the grant in place; re-admission clears it, so
         // the revived employee runs its next assignment without it.
         service.expire(deputy_id).unwrap();
@@ -9309,7 +9329,11 @@ mod tests {
         let revived = service.employee(deputy_id).unwrap();
         assert!(!revived.boss_authority);
         assert!(!service.has_boss_authority(deputy_id));
-        assert!(service.authorize_transcript(Some(deputy_id), plain_id).is_err());
+        assert!(
+            service
+                .authorize_transcript(Some(deputy_id), plain_id)
+                .is_err()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -11224,12 +11248,14 @@ mod memory_op_tests {
 
         let prompt = service.prompt_with_context(planning, "start planning".into());
         assert!(prompt.contains("identify which items can run in parallel"));
-        assert!(prompt.contains(
-            "Do not serialize independent work merely to avoid merge conflicts"
-        ));
-        assert!(prompt.contains(
-            "Mark dependencies only for real prerequisites or shared-state constraints"
-        ));
+        assert!(
+            prompt.contains("Do not serialize independent work merely to avoid merge conflicts")
+        );
+        assert!(
+            prompt.contains(
+                "Mark dependencies only for real prerequisites or shared-state constraints"
+            )
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -13122,7 +13148,8 @@ mod memory_op_tests {
     /// queue a direct completion reports.
     #[test]
     fn a_complete_outcome_decision_stops_its_queued_tickets() {
-        let root = std::env::temp_dir().join(format!("boss-outcome-handoff-queue-{}", Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("boss-outcome-handoff-queue-{}", Uuid::new_v4()));
         let (service, boss) = outcome_fixture(&root);
         let task = service
             .create_outcome(None, "Make transfers fail cleanly", "criteria")
@@ -13130,8 +13157,7 @@ mod memory_op_tests {
         let worker = admit_on(&service, boss, task.id, false, Some("verify next"));
         let queued = admit_ticketed(&service, boss, task.id, "Follow-up once open");
         let worker = settle_ok(&service, worker.session_id);
-        let AssignmentFinish::Handoff { id, .. } =
-            service.assignment_finished(&worker).unwrap()
+        let AssignmentFinish::Handoff { id, .. } = service.assignment_finished(&worker).unwrap()
         else {
             panic!("expected a handoff")
         };
@@ -13984,7 +14010,14 @@ mod memory_op_tests {
                     .handle(caller, BossOperation::DeletePersona { persona_id })
                     .is_err()
             );
-            assert!(!BossService::open(root.clone()).unwrap().document().personas.iter().any(|persona| persona.id == persona_id));
+            assert!(
+                !BossService::open(root.clone())
+                    .unwrap()
+                    .document()
+                    .personas
+                    .iter()
+                    .any(|persona| persona.id == persona_id)
+            );
         }
         fs::remove_dir_all(root).unwrap();
     }
@@ -14244,7 +14277,14 @@ mod memory_op_tests {
             .unwrap();
         assert_eq!(custom.name, "Researcher (2)");
         assert_eq!(state.persona_default_role(custom.id), None);
-        assert_eq!(state.personas.iter().filter(|p| p.name == "Researcher").count(), 1);
+        assert_eq!(
+            state
+                .personas
+                .iter()
+                .filter(|p| p.name == "Researcher")
+                .count(),
+            1
+        );
         // Seeding is not an update — nothing for the boss to report.
         assert!(state.persona_default_notice.is_none());
         fs::remove_dir_all(root).unwrap();
@@ -14257,9 +14297,8 @@ mod memory_op_tests {
     fn specialist_persona_customization_is_preserved_and_resettable() {
         let root = std::env::temp_dir().join(format!("boss-defaults-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
-        let researcher_id = service
-            .document()
-            .specialist_persona_ids[&PersonaDefaultRole::Researcher];
+        let researcher_id =
+            service.document().specialist_persona_ids[&PersonaDefaultRole::Researcher];
         service
             .update(|state| {
                 state
@@ -14330,9 +14369,8 @@ mod memory_op_tests {
         let service = BossService::open(root.clone()).unwrap();
         let boss = Uuid::new_v4();
         service.set_session_id(boss).unwrap();
-        let researcher_id = service
-            .document()
-            .specialist_persona_ids[&PersonaDefaultRole::Researcher];
+        let researcher_id =
+            service.document().specialist_persona_ids[&PersonaDefaultRole::Researcher];
         let employee = service
             .prepare_employee(
                 boss,
@@ -14358,10 +14396,7 @@ mod memory_op_tests {
             .unwrap();
         assert_eq!(prompt.matches(base_text).count(), 1);
         assert!(prompt.contains("Additional role — Researcher:"));
-        assert!(prompt.contains(shipped_persona_default(
-            PersonaDefaultRole::Researcher
-        )
-        .markdown));
+        assert!(prompt.contains(shipped_persona_default(PersonaDefaultRole::Researcher).markdown));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -14760,8 +14795,7 @@ mod memory_op_tests {
             .personas
             .iter()
             .filter(|persona| {
-                persona.id != state.persona_id
-                    && state.persona_default_role(persona.id).is_none()
+                persona.id != state.persona_id && state.persona_default_role(persona.id).is_none()
             })
             .collect();
         assert_eq!(non_boss.len(), 2);
@@ -15341,8 +15375,7 @@ mod memory_op_tests {
         let service = BossService::open(root.clone()).unwrap();
         let boss = Uuid::new_v4();
         service.set_session_id(boss).unwrap();
-        let researcher = service.document().specialist_persona_ids
-            [&PersonaDefaultRole::Researcher];
+        let researcher = service.document().specialist_persona_ids[&PersonaDefaultRole::Researcher];
         service
             .update(|state| {
                 let record = state
@@ -15515,8 +15548,7 @@ mod memory_op_tests {
     fn persona_upsert_customization_lands_in_the_custom_layer() {
         let root = std::env::temp_dir().join(format!("boss-layers-{}", Uuid::new_v4()));
         let service = BossService::open(root.clone()).unwrap();
-        let researcher = service.document().specialist_persona_ids
-            [&PersonaDefaultRole::Researcher];
+        let researcher = service.document().specialist_persona_ids[&PersonaDefaultRole::Researcher];
         service
             .handle(
                 None,

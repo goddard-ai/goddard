@@ -28,25 +28,26 @@ use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use crate::{Command, Request};
 use anyhow::{Context, anyhow, bail};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use waku_protocol::model::RuntimeEventCursor;
-use crate::{Command, Request};
 use waku_runtime::client::{ClientError, RuntimeClient};
 use waku_runtime::contract::{
     ActionEnvelope, AgentIngress, CanonicalAction, ClientHello, ControlGrant, EventCursor,
-    EventEnvelope, ForwardedOutcome, ForwardedRequest, INGRESS_DESCRIPTOR_VERSION, IngressDescriptor,
-    Inventory, ProviderEvent, RequestClass, ResourceClaim, SessionRef, SessionStatus,
+    EventEnvelope, ForwardedOutcome, ForwardedRequest, INGRESS_DESCRIPTOR_VERSION,
+    IngressDescriptor, Inventory, ProviderEvent, RequestClass, ResourceClaim, SessionRef,
+    SessionStatus,
 };
 use waku_runtime::host::load_credentials;
 
+use crate::Backend;
 use crate::daemon::WakuBackend;
 use crate::driver::{DriverControl, DriverEventSender, DriverHandle, DriverStartOptions};
 use crate::model::{DriverEvent, PermissionOption, ProviderKind, UserInputQuestion};
 use crate::persistence::{StableLinkRow, StableReceipt, StateStore};
-use crate::Backend;
 
 /// The namespace the Goddard daemon's controller owns on the host.
 pub(crate) const STABLE_NAMESPACE: &str = "goddard";
@@ -82,9 +83,12 @@ pub(crate) fn enabled(
     data_dir: &Path,
     test_root: Option<&PathBuf>,
 ) -> Option<PathBuf> {
-    let root = test_root
-        .cloned()
-        .or_else(|| std::env::var(ROOT_ENV).ok().filter(|v| !v.is_empty()).map(PathBuf::from));
+    let root = test_root.cloned().or_else(|| {
+        std::env::var(ROOT_ENV)
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    });
     let list = std::env::var(PROVIDERS_ENV).ok();
     let allowed = match list.as_deref() {
         // A root alone opts in for every provider the host can serve.
@@ -288,14 +292,18 @@ pub(super) fn start_link(
     root: &Path,
     service_override: Option<Arc<dyn IngressService>>,
 ) -> anyhow::Result<(DriverHandle, StableLink)> {
-    waku_runtime::ipc::private_root(root).context("could not verify the private runtime namespace root")?;
-    let verified_root = root.canonicalize().context("could not resolve the runtime namespace")?;
+    waku_runtime::ipc::private_root(root)
+        .context("could not verify the private runtime namespace root")?;
+    let verified_root = root
+        .canonicalize()
+        .context("could not resolve the runtime namespace")?;
     let root = verified_root.as_path();
     ensure_host(root)?;
     let creds = load_credentials(root).context("the runtime host's identity is unreadable")?;
-    let (mut client, hello) = RuntimeClient::controller(root, &creds.controller, &ClientHello::current())
-        .map_err(link_error)
-        .context("could not attach to the runtime host")?;
+    let (mut client, hello) =
+        RuntimeClient::controller(root, &creds.controller, &ClientHello::current())
+            .map_err(link_error)
+            .context("could not attach to the runtime host")?;
     let instance = hello.runtime_instance;
     let host_pid = waku_runtime::ipc::Endpoint::load(root)
         .map(|endpoint| endpoint.pid)
@@ -303,11 +311,16 @@ pub(super) fn start_link(
     let controller = {
         let mut leases = backend.stable_controllers.lock().unwrap();
         if let Some(lease) = leases.get(root) {
-            anyhow::ensure!(lease.instance == instance, "the runtime instance changed; reconciliation is required before admission");
+            anyhow::ensure!(
+                lease.instance == instance,
+                "the runtime instance changed; reconciliation is required before admission"
+            );
             lease.clone()
         } else {
-            let grant = client.acquire_control(&ClientHello::current())
-                .map_err(link_error).context("the runtime host refused control")?;
+            let grant = client
+                .acquire_control(&ClientHello::current())
+                .map_err(link_error)
+                .context("the runtime host refused control")?;
             let lease = Arc::new(ControllerLease {
                 instance,
                 grant,
@@ -406,7 +419,13 @@ pub(super) fn start_link(
             row.generation = 1;
             row.applied_seq = 0;
             row.status = "live".into();
-            (SessionRef { session_id: runtime_id, generation: 1 }, row)
+            (
+                SessionRef {
+                    session_id: runtime_id,
+                    generation: 1,
+                },
+                row,
+            )
         }
     };
     row.session_id = session_id;
@@ -421,8 +440,17 @@ pub(super) fn start_link(
     let anchored = reanchor_task_claims(backend, session_id, host_pid);
     #[cfg(unix)]
     if let (Some(env), Some(prepared)) = (&options.agent, &prepared) {
-        provision_agent(&mut client, grant.epoch, root, sref, env, prepared, &anchored, reattaching)
-            .context("could not provision the session's agent ingress")?;
+        provision_agent(
+            &mut client,
+            grant.epoch,
+            root,
+            sref,
+            env,
+            prepared,
+            &anchored,
+            reattaching,
+        )
+        .context("could not provision the session's agent ingress")?;
     }
 
     let service: Arc<dyn IngressService> = service_override.unwrap_or_else(|| {
@@ -450,7 +478,13 @@ pub(super) fn start_link(
         store: task_store.clone(),
         sender,
         service,
-        active_turn: Mutex::new(inventory.sessions.iter().find(|inv| inv.session == sref).and_then(|inv| inv.open_turns.first().copied())),
+        active_turn: Mutex::new(
+            inventory
+                .sessions
+                .iter()
+                .find(|inv| inv.session == sref)
+                .and_then(|inv| inv.open_turns.first().copied()),
+        ),
         // An inherited open turn may be a prior owner's settling
         // cancellation — it gates the release until its terminal event
         // arrives. A recorded held delivery is owed that release.
@@ -461,9 +495,8 @@ pub(super) fn start_link(
                     .map(|inv| inv.open_turns.iter().copied().collect())
                     .unwrap_or_default(),
                 cancelling: BTreeSet::new(),
-                release_pending: inv.is_some_and(|inv| {
-                    inv.status == SessionStatus::Live && inv.held_commands > 0
-                }),
+                release_pending: inv
+                    .is_some_and(|inv| inv.status == SessionStatus::Live && inv.held_commands > 0),
             }
         }),
         config_revision: Mutex::new(inventory_config_revision(&inventory, &sref)),
@@ -473,7 +506,9 @@ pub(super) fn start_link(
             (true, _) => crate::driver::AgentSurfaceDelivery::Silent,
             (false, _) => crate::driver::AgentSurfaceDelivery::Absent,
         },
-        agent_descriptor: prepared.as_ref().map(|prepared| prepared.descriptor.clone()),
+        agent_descriptor: prepared
+            .as_ref()
+            .map(|prepared| prepared.descriptor.clone()),
         stop: Arc::new(AtomicBool::new(false)),
         threads: Mutex::new(Vec::new()),
     });
@@ -488,7 +523,11 @@ pub(super) fn start_link(
         shared: shared.clone(),
         _lifetime: Arc::new(LinkLifetime(shared.stop.clone())),
     };
-    controller.routes.lock().unwrap().insert(sref.session_id, Arc::downgrade(&shared));
+    controller
+        .routes
+        .lock()
+        .unwrap()
+        .insert(sref.session_id, Arc::downgrade(&shared));
     spawn_pump(&shared);
     spawn_service(&shared);
     // A prior owner may have left a delivery held behind an already
@@ -503,8 +542,13 @@ pub(super) fn start_link(
 /// instance is an attach. Interrupted/replaced owners require explicit
 /// recovery; only an unbound task can make a fresh admission.
 enum Attachment {
-    Reattach { sref: SessionRef, row: StableLinkRow },
-    Admit { row: StableLinkRow },
+    Reattach {
+        sref: SessionRef,
+        row: StableLinkRow,
+    },
+    Admit {
+        row: StableLinkRow,
+    },
 }
 
 fn resolve_attachment(
@@ -600,8 +644,10 @@ fn launch_payload(
                 // `thread/start`'s developer instructions are this
                 // provider's announcement channel for the CLI surface.
                 if let Some(env) = &options.agent {
-                    payload["developerInstructions"] =
-                        json!(crate::agent::surface_instruction("goddard-agent", &env.scope()));
+                    payload["developerInstructions"] = json!(crate::agent::surface_instruction(
+                        "goddard-agent",
+                        &env.scope()
+                    ));
                 }
             }
             Ok(payload)
@@ -638,7 +684,10 @@ fn inventory_config_revision(inventory: &Inventory, sref: &SessionRef) -> u64 {
         .sessions
         .iter()
         .find(|inv| inv.session == *sref)
-        .map(|inv| inv.requested_revision.max(inv.effective.as_ref().map_or(0, |config| config.revision)))
+        .map(|inv| {
+            inv.requested_revision
+                .max(inv.effective.as_ref().map_or(0, |config| config.revision))
+        })
         .unwrap_or(0)
 }
 
@@ -720,18 +769,27 @@ fn provision_agent(
     let grant = if reattaching {
         use std::io::Read;
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-        let mut file = std::fs::OpenOptions::new().read(true)
-            .custom_flags(libc::O_NOFOLLOW).open(&prepared.descriptor)
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&prepared.descriptor)
             .context("original ingress grant is unavailable; attachment blocked")?;
         let metadata = file.metadata()?;
         // SAFETY: geteuid has no preconditions and reads this process's identity.
         let current_uid = unsafe { libc::geteuid() };
-        anyhow::ensure!(metadata.is_file() && metadata.uid() == current_uid
-            && metadata.mode() & 0o077 == 0 && metadata.len() <= 64 * 1024,
-            "original ingress evidence is not a bounded private file");
+        anyhow::ensure!(
+            metadata.is_file()
+                && metadata.uid() == current_uid
+                && metadata.mode() & 0o077 == 0
+                && metadata.len() <= 64 * 1024,
+            "original ingress evidence is not a bounded private file"
+        );
         let mut bytes = Vec::new();
         (&mut file).take(64 * 1024 + 1).read_to_end(&mut bytes)?;
-        anyhow::ensure!(bytes.len() <= 64 * 1024, "original ingress evidence is oversized");
+        anyhow::ensure!(
+            bytes.len() <= 64 * 1024,
+            "original ingress evidence is oversized"
+        );
         let descriptor: IngressDescriptor = serde_json::from_slice(&bytes)
             .context("original ingress grant is invalid; attachment blocked")?;
         anyhow::ensure!(
@@ -743,17 +801,28 @@ fn provision_agent(
             "original ingress grant scope disagrees with attachment"
         );
         let inventory = client.reconcile(epoch).map_err(link_error)?;
-        let original = inventory.sessions.iter().find(|session| session.session == sref)
-            .and_then(|session| session.claims.iter().find(|claim| claim.claim_id == agent_claim_id(sref)))
+        let original = inventory
+            .sessions
+            .iter()
+            .find(|session| session.session == sref)
+            .and_then(|session| {
+                session
+                    .claims
+                    .iter()
+                    .find(|claim| claim.claim_id == agent_claim_id(sref))
+            })
             .and_then(|claim| claim.detail.get("grantId"));
-        anyhow::ensure!(original == Some(&json!(descriptor.grant.grant_id)),
-            "original ingress lease evidence is missing or disagrees with the descriptor");
+        anyhow::ensure!(
+            original == Some(&json!(descriptor.grant.grant_id)),
+            "original ingress lease evidence is missing or disagrees with the descriptor"
+        );
         RuntimeClient::agent(root, &descriptor.grant)
             .map_err(link_error)
             .context("original ingress authority expired or was revoked; attachment blocked")?;
         descriptor.grant
     } else {
-        client.issue_grant(epoch, sref, GRANT_TTL_MS)
+        client
+            .issue_grant(epoch, sref, GRANT_TTL_MS)
             .map_err(link_error)
             .context("the runtime host refused a session grant")?
     };
@@ -791,7 +860,11 @@ fn provision_agent(
 fn agent_claim_id(session: SessionRef) -> Uuid {
     Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
-        format!("agent-ingress:{}:{}", session.session_id, session.generation).as_bytes(),
+        format!(
+            "agent-ingress:{}:{}",
+            session.session_id, session.generation
+        )
+        .as_bytes(),
     )
 }
 
@@ -843,8 +916,8 @@ fn pin_helper(root: &Path, cli: &Path) -> anyhow::Result<PathBuf> {
 #[cfg(unix)]
 fn file_sha256(path: &Path) -> anyhow::Result<String> {
     use std::io::Read;
-    let mut file = std::fs::File::open(path)
-        .with_context(|| format!("could not open {}", path.display()))?;
+    let mut file =
+        std::fs::File::open(path).with_context(|| format!("could not open {}", path.display()))?;
     let mut hash = Sha256::new();
     let mut chunk = [0u8; 64 * 1024];
     loop {
@@ -934,10 +1007,7 @@ fn reanchor_task_claims(backend: &WakuBackend, task: Uuid, owner_pid: u32) -> Ve
     };
     let mut anchored = Vec::new();
     for reservation in status.reservations {
-        if reservation.task != task
-            || reservation.cancelled
-            || reservation.released
-        {
+        if reservation.task != task || reservation.cancelled || reservation.released {
             continue;
         }
         if reservation.owner_pid == Some(owner_pid) {
@@ -978,7 +1048,10 @@ fn ensure_host(root: &Path) -> anyhow::Result<()> {
                 .and_then(|exe| exe.parent().map(|dir| dir.join("waku-runtime-host")))
         });
     let Some(binary) = binary.filter(|path| path.is_file()) else {
-        bail!("no live runtime host answers at {} and no waku-runtime-host binary is available", root.display());
+        bail!(
+            "no live runtime host answers at {} and no waku-runtime-host binary is available",
+            root.display()
+        );
     };
     std::process::Command::new(binary)
         .arg("--root")
@@ -994,7 +1067,10 @@ fn ensure_host(root: &Path) -> anyhow::Result<()> {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    bail!("the runtime host never published its endpoint at {}", root.display())
+    bail!(
+        "the runtime host never published its endpoint at {}",
+        root.display()
+    )
 }
 
 fn host_answers(root: &Path) -> bool {
@@ -1016,14 +1092,19 @@ fn translate(env: &EventEnvelope) -> Option<DriverEvent> {
             let _ = turn_id;
             DriverEvent::TurnStarted
         }
-        ProviderEvent::TurnDelta { delta, .. } => DriverEvent::TextDelta(delta.as_str()?.to_owned()),
+        ProviderEvent::TurnDelta { delta, .. } => {
+            DriverEvent::TextDelta(delta.as_str()?.to_owned())
+        }
         ProviderEvent::TurnCompleted { result, .. } => DriverEvent::TurnFinished {
             success: result.as_str().is_some()
                 || result.pointer("/turn/status").and_then(Value::as_str) == Some("completed")
                 || result.get("stopReason").and_then(Value::as_str) == Some("end_turn")
                 || result.get("status").and_then(Value::as_str) == Some("done"),
-            summary: result.pointer("/turn/error/message").and_then(Value::as_str)
-                .or_else(|| result.as_str()).map(str::to_owned),
+            summary: result
+                .pointer("/turn/error/message")
+                .and_then(Value::as_str)
+                .or_else(|| result.as_str())
+                .map(str::to_owned),
             summary_i18n: None,
         },
         ProviderEvent::TurnCancelled { .. } => DriverEvent::TurnFinished {
@@ -1040,7 +1121,10 @@ fn translate(env: &EventEnvelope) -> Option<DriverEvent> {
             RequestClass::Input => DriverEvent::UserInputRequested {
                 request_id: request_id.clone(),
                 questions: serde_json::from_value::<Vec<UserInputQuestion>>(
-                    subject.get("questions").cloned().unwrap_or(Value::Array(vec![])),
+                    subject
+                        .get("questions")
+                        .cloned()
+                        .unwrap_or(Value::Array(vec![])),
                 )
                 .unwrap_or_default(),
             },
@@ -1193,16 +1277,19 @@ impl LinkShared {
     fn permit_dispatch(&self) -> bool {
         let permission = {
             let mut client = self.client.lock().unwrap();
-            execute_safe(&mut client, &self.envelope(Uuid::new_v4(), CanonicalAction::PermitDispatch))
+            execute_safe(
+                &mut client,
+                &self.envelope(Uuid::new_v4(), CanonicalAction::PermitDispatch),
+            )
         };
         let confirmed = matches!(permission, Ok(ref receipt) if matches!(receipt.disposition,
-            waku_runtime::contract::CommandDisposition::Terminal {
-                outcome: waku_runtime::contract::TerminalOutcome::Completed, ..
-            }));
+        waku_runtime::contract::CommandDisposition::Terminal {
+            outcome: waku_runtime::contract::TerminalOutcome::Completed, ..
+        }));
         if !confirmed {
-            let _ = self.sender.send(DriverEvent::Error(
-                format!("runtime dispatch permission was not confirmed: {permission:?}"),
-            ));
+            let _ = self.sender.send(DriverEvent::Error(format!(
+                "runtime dispatch permission was not confirmed: {permission:?}"
+            )));
         }
         confirmed
     }
@@ -1797,23 +1884,22 @@ impl DriverControl for StableLink {
                         .as_ref()
                         .and_then(|schema| schema.get("properties"))
                         .and_then(|properties| properties.get(&answer.question_id));
-                    let value = match field
-                        .and_then(|field| field.get("type").and_then(Value::as_str))
-                    {
-                        Some("boolean") => text
-                            .parse::<bool>()
-                            .map(Value::Bool)
-                            .unwrap_or_else(|_| Value::String(text.clone())),
-                        Some("number") => text
-                            .parse::<f64>()
-                            .map(Value::from)
-                            .unwrap_or_else(|_| Value::String(text.clone())),
-                        Some("integer") => text
-                            .parse::<i64>()
-                            .map(Value::from)
-                            .unwrap_or_else(|_| Value::String(text.clone())),
-                        _ => Value::String(text.clone()),
-                    };
+                    let value =
+                        match field.and_then(|field| field.get("type").and_then(Value::as_str)) {
+                            Some("boolean") => text
+                                .parse::<bool>()
+                                .map(Value::Bool)
+                                .unwrap_or_else(|_| Value::String(text.clone())),
+                            Some("number") => text
+                                .parse::<f64>()
+                                .map(Value::from)
+                                .unwrap_or_else(|_| Value::String(text.clone())),
+                            Some("integer") => text
+                                .parse::<i64>()
+                                .map(Value::from)
+                                .unwrap_or_else(|_| Value::String(text.clone())),
+                            _ => Value::String(text.clone()),
+                        };
                     content.insert(answer.question_id, value);
                 }
                 json!({"action": "accept", "content": Value::Object(content)})
@@ -1952,8 +2038,8 @@ mod tests {
     use waku_runtime::server::RuntimeServer;
 
     fn temp_root(tag: &str) -> PathBuf {
-        let root = std::env::temp_dir()
-            .join(format!("waku-stable-{tag}-{}", Uuid::new_v4().simple()));
+        let root =
+            std::env::temp_dir().join(format!("waku-stable-{tag}-{}", Uuid::new_v4().simple()));
         waku_runtime::ipc::private_root(&root).unwrap();
         root
     }
@@ -1979,10 +2065,7 @@ mod tests {
         let factory = FakeFactory::new();
         let mut registry = AdapterRegistry::new();
         for name in adapters {
-            registry.register(
-                *name,
-                Arc::new(factory.clone()) as Arc<dyn AdapterFactory>,
-            );
+            registry.register(*name, Arc::new(factory.clone()) as Arc<dyn AdapterFactory>);
         }
         let host = RuntimeHost::open(
             &runtime_root,
@@ -2098,7 +2181,11 @@ mod tests {
             match rx.recv_timeout(Duration::from_millis(50)) {
                 Ok(DriverEvent::RuntimeEventCursorAdvanced(_)) => {}
                 Ok(event) => events.push(event),
-                Err(_) => assert!(Instant::now() < deadline, "only {} events arrived", events.len()),
+                Err(_) => assert!(
+                    Instant::now() < deadline,
+                    "only {} events arrived",
+                    events.len()
+                ),
             }
         }
         events
@@ -2106,13 +2193,9 @@ mod tests {
 
     /// A controller client for the host, independent of any link.
     fn controller(rig: &Rig) -> RuntimeClient {
-        RuntimeClient::controller(
-            &rig.runtime_root,
-            &rig.controller,
-            &ClientHello::current(),
-        )
-        .expect("controller connects")
-        .0
+        RuntimeClient::controller(&rig.runtime_root, &rig.controller, &ClientHello::current())
+            .expect("controller connects")
+            .0
     }
 
     /// An admission wires the link row, pumps host events into the driver
@@ -2291,12 +2374,13 @@ mod tests {
         let second = link.serve_request(&request);
         assert_eq!(first, second);
         assert_eq!(counting.0.load(AtomicOrdering::SeqCst), 1);
-        assert!(rig
-            .backend
-            .task_store()
-            .stable_receipt(request.request_id)
-            .unwrap()
-            .is_some());
+        assert!(
+            rig.backend
+                .task_store()
+                .stable_receipt(request.request_id)
+                .unwrap()
+                .is_some()
+        );
     }
 
     /// The runtime-to-daemon ingress round-trip over real sockets: a scoped
@@ -2424,26 +2508,23 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700))
-                .unwrap();
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
         // Seed the override into the settings file so the backend's own
         // store observes it at open.
         {
-            let settings = crate::DaemonSettingsStore::open(backend_root.join("settings.json"))
-                .unwrap();
+            let settings =
+                crate::DaemonSettingsStore::open(backend_root.join("settings.json")).unwrap();
             let mut document = settings.get();
             document.agent_tools_enabled = false;
             document.agent_settings_enabled = false;
             document.subagents_enabled = false;
-            document.provider_binary_overrides.insert(
-                ProviderKind::Codex,
-                binary.display().to_string(),
-            );
+            document
+                .provider_binary_overrides
+                .insert(ProviderKind::Codex, binary.display().to_string());
             settings.replace(document).unwrap();
         }
-        let (mut backend, session_id) =
-            crate::daemon::tests::surface_test_backend(&backend_root);
+        let (mut backend, session_id) = crate::daemon::tests::surface_test_backend(&backend_root);
         backend.set_daemon_address("http://127.0.0.1:1".into());
         backend.stable_test_root = Some(runtime_root.clone());
         let backend = Arc::new(backend);
@@ -2483,8 +2564,8 @@ mod tests {
 
         // The daemon is replaced wholesale — the host session survives.
         drop(backend);
-        let settings = crate::DaemonSettingsStore::open(backend_root.join("settings.json"))
-            .unwrap();
+        let settings =
+            crate::DaemonSettingsStore::open(backend_root.join("settings.json")).unwrap();
         let mut successor = WakuBackend::new(
             settings,
             crate::persistence::StateStore::daemon(backend_root.join("app.db")),
@@ -2546,7 +2627,9 @@ mod tests {
             fn execute(&self, request: &ForwardedRequest) -> ForwardedOutcome {
                 assert_eq!(request.session.session_id, self.0);
                 self.1.fetch_add(1, AtomicOrdering::SeqCst);
-                ForwardedOutcome::Completed { result: json!(self.0) }
+                ForwardedOutcome::Completed {
+                    result: json!(self.0),
+                }
             }
         }
         let rig = rig(&["codex"]);
@@ -2557,31 +2640,74 @@ mod tests {
         let (first_handle, first, first_rx) = link(&rig, first_id, Some(first_service.clone()));
         let second_task = Uuid::new_v4();
         let (sender, second_rx) = crate::driver::test_event_channel();
-        let (second_handle, second) = start_link(&rig.backend, rig.backend.task_store(), second_task,
-            second_id, ProviderKind::Codex, &options(), sender, &rig.runtime_root, Some(second_service.clone())).unwrap();
+        let (second_handle, second) = start_link(
+            &rig.backend,
+            rig.backend.task_store(),
+            second_task,
+            second_id,
+            ProviderKind::Codex,
+            &options(),
+            sender,
+            &rig.runtime_root,
+            Some(second_service.clone()),
+        )
+        .unwrap();
         assert_eq!(first.shared.epoch, second.shared.epoch);
         first_handle.prompt("one".into());
         second_handle.prompt("two".into());
-        assert_eq!(rig.factory.for_session(first_id).unwrap().dispatched().len(), 1);
-        assert_eq!(rig.factory.for_session(second_id).unwrap().dispatched().len(), 1);
+        assert_eq!(
+            rig.factory
+                .for_session(first_id)
+                .unwrap()
+                .dispatched()
+                .len(),
+            1
+        );
+        assert_eq!(
+            rig.factory
+                .for_session(second_id)
+                .unwrap()
+                .dispatched()
+                .len(),
+            1
+        );
         for (link, expected) in [(&first, first_id), (&second, second_id)] {
             let grant = link.issue_agent_grant(120_000).unwrap();
             let mut agent = RuntimeClient::agent(&rig.runtime_root, &grant).unwrap();
             let id = Uuid::new_v4();
-            agent.ingress(IngressRequest { request_id: id, class: IngressKind::Cli,
-                subject: json!({"test": true}), deadline_ms: u64::MAX / 2 }).unwrap();
+            agent
+                .ingress(IngressRequest {
+                    request_id: id,
+                    class: IngressKind::Cli,
+                    subject: json!({"test": true}),
+                    deadline_ms: u64::MAX / 2,
+                })
+                .unwrap();
             let record = agent.ingress_wait(id, 10_000).unwrap();
-            assert!(matches!(record.disposition, IngressDisposition::Completed { result } if result == json!(expected)));
+            assert!(
+                matches!(record.disposition, IngressDisposition::Completed { result } if result == json!(expected))
+            );
         }
         assert_eq!(first_service.1.load(AtomicOrdering::SeqCst), 1);
         assert_eq!(second_service.1.load(AtomicOrdering::SeqCst), 1);
-        assert!(!first_rx.try_iter().any(|event| matches!(event, DriverEvent::Error(_))));
-        assert!(!second_rx.try_iter().any(|event| matches!(event, DriverEvent::Error(_))));
+        assert!(
+            !first_rx
+                .try_iter()
+                .any(|event| matches!(event, DriverEvent::Error(_)))
+        );
+        assert!(
+            !second_rx
+                .try_iter()
+                .any(|event| matches!(event, DriverEvent::Error(_)))
+        );
     }
 
     #[test]
     fn stable_ingress_effect_without_result_receipt_is_not_reexecuted() {
-        struct LostResult { store: Arc<StateStore>, count: AtomicUsize }
+        struct LostResult {
+            store: Arc<StateStore>,
+            count: AtomicUsize,
+        }
         impl IngressService for LostResult {
             fn execute(&self, _request: &ForwardedRequest) -> ForwardedOutcome {
                 self.count.fetch_add(1, AtomicOrdering::SeqCst);
@@ -2590,31 +2716,72 @@ mod tests {
                     "CREATE TRIGGER fail_runtime_result BEFORE UPDATE ON stable_runtime_receipts
                      BEGIN SELECT RAISE(FAIL, 'injected receipt write failure'); END;"
                 ).unwrap();
-                ForwardedOutcome::Completed { result: json!("external effect succeeded") }
+                ForwardedOutcome::Completed {
+                    result: json!("external effect succeeded"),
+                }
             }
         }
         let rig = rig(&["codex"]);
-        let service = Arc::new(LostResult { store: rig.backend.task_store().clone(), count: AtomicUsize::new(0) });
+        let service = Arc::new(LostResult {
+            store: rig.backend.task_store().clone(),
+            count: AtomicUsize::new(0),
+        });
         let (_handle, original, _rx) = link(&rig, Uuid::new_v4(), Some(service.clone()));
-        let request = ForwardedRequest { request_id: Uuid::new_v4(), session: original.sref(), grant_id: Uuid::new_v4(),
-            class: IngressKind::Cli, subject: json!("downstream operation"), deadline_ms: u64::MAX / 2 };
-        assert!(matches!(original.serve_request(&request), ForwardedOutcome::Uncertain { .. }));
-        assert!(matches!(original.serve_request(&request), ForwardedOutcome::Uncertain { .. }));
+        let request = ForwardedRequest {
+            request_id: Uuid::new_v4(),
+            session: original.sref(),
+            grant_id: Uuid::new_v4(),
+            class: IngressKind::Cli,
+            subject: json!("downstream operation"),
+            deadline_ms: u64::MAX / 2,
+        };
+        assert!(matches!(
+            original.serve_request(&request),
+            ForwardedOutcome::Uncertain { .. }
+        ));
+        assert!(matches!(
+            original.serve_request(&request),
+            ForwardedOutcome::Uncertain { .. }
+        ));
         assert_eq!(service.count.load(AtomicOrdering::SeqCst), 1);
         let mut foreign = request.clone();
         foreign.session.session_id = Uuid::new_v4();
-        assert!(matches!(original.serve_request(&foreign), ForwardedOutcome::Failed { .. }));
+        assert!(matches!(
+            original.serve_request(&foreign),
+            ForwardedOutcome::Failed { .. }
+        ));
         assert_eq!(service.count.load(AtomicOrdering::SeqCst), 1);
     }
 
     #[test]
     fn stable_completion_uses_native_verdict() {
-        for (result, success) in [(json!({"turn":{"status":"completed"}}), true),
-            (json!({"turn":{"status":"failed","error":{"message":"provider failed"}}}), false),
-            (json!({"stopReason":"end_turn"}), true), (json!({"stopReason":"max_tokens"}), false), (json!({}), false)] {
-            let env = EventEnvelope { runtime_instance: Uuid::new_v4(), session_id: Uuid::new_v4(), generation: 1, sequence: 1, delivery_id: None, turn_id: None, request_id: None, config_revision: None,
-                event: ProviderEvent::TurnCompleted { turn_id: Uuid::new_v4(), result } };
-            assert!(matches!(translate(&env), Some(DriverEvent::TurnFinished { success: actual, .. }) if actual == success));
+        for (result, success) in [
+            (json!({"turn":{"status":"completed"}}), true),
+            (
+                json!({"turn":{"status":"failed","error":{"message":"provider failed"}}}),
+                false,
+            ),
+            (json!({"stopReason":"end_turn"}), true),
+            (json!({"stopReason":"max_tokens"}), false),
+            (json!({}), false),
+        ] {
+            let env = EventEnvelope {
+                runtime_instance: Uuid::new_v4(),
+                session_id: Uuid::new_v4(),
+                generation: 1,
+                sequence: 1,
+                delivery_id: None,
+                turn_id: None,
+                request_id: None,
+                config_revision: None,
+                event: ProviderEvent::TurnCompleted {
+                    turn_id: Uuid::new_v4(),
+                    result,
+                },
+            };
+            assert!(
+                matches!(translate(&env), Some(DriverEvent::TurnFinished { success: actual, .. }) if actual == success)
+            );
         }
     }
 
@@ -2638,17 +2805,42 @@ mod tests {
         let adapter = rig.factory.for_session(link.sref().session_id).unwrap();
         adapter.emit_live();
         let marker = loop {
-            if let DriverEvent::RuntimeEventCursorAdvanced(marker) = rx.recv_timeout(Duration::from_secs(10)).unwrap() { break marker; }
+            if let DriverEvent::RuntimeEventCursorAdvanced(marker) =
+                rx.recv_timeout(Duration::from_secs(10)).unwrap()
+            {
+                break marker;
+            }
         };
-        rusqlite::Connection::open(rig.backend.task_store().path()).unwrap().execute_batch(
-            "CREATE TRIGGER fail_runtime_cursor BEFORE UPDATE ON stable_runtime_links
-             BEGIN SELECT RAISE(FAIL, 'injected cursor write failure'); END;"
-        ).unwrap();
+        rusqlite::Connection::open(rig.backend.task_store().path())
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_runtime_cursor BEFORE UPDATE ON stable_runtime_links
+             BEGIN SELECT RAISE(FAIL, 'injected cursor write failure'); END;",
+            )
+            .unwrap();
         link.note_applied(&marker);
-        let inventory = link.shared.client.lock().unwrap().reconcile(link.shared.epoch).unwrap();
-        let session = inventory.sessions.iter().find(|session| session.session == link.sref()).unwrap();
+        let inventory = link
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(link.shared.epoch)
+            .unwrap();
+        let session = inventory
+            .sessions
+            .iter()
+            .find(|session| session.session == link.sref())
+            .unwrap();
         assert_eq!(session.acknowledged, 0);
-        assert_eq!(rig.backend.task_store().stable_link(rig.session_id).unwrap().unwrap().applied_seq, 0);
+        assert_eq!(
+            rig.backend
+                .task_store()
+                .stable_link(rig.session_id)
+                .unwrap()
+                .unwrap()
+                .applied_seq,
+            0
+        );
     }
 
     #[test]
@@ -2658,9 +2850,18 @@ mod tests {
         handle.prompt("original input".into());
         let turn = original.shared.active_turn.lock().unwrap().unwrap();
         let adapter = rig.factory.for_session(original.sref().session_id).unwrap();
-        adapter.emit(ProviderEvent::TurnStarted { turn_id: turn, delivery_id: Uuid::new_v4() });
+        adapter.emit(ProviderEvent::TurnStarted {
+            turn_id: turn,
+            delivery_id: Uuid::new_v4(),
+        });
         // Reconcile drains the deterministic emitted event before replacement.
-        original.shared.client.lock().unwrap().reconcile(original.shared.epoch).unwrap();
+        original
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(original.shared.epoch)
+            .unwrap();
         let (successor, replacement, _rx2) = link(&rig, Uuid::new_v4(), None);
         assert_eq!(*replacement.shared.active_turn.lock().unwrap(), Some(turn));
         successor.cancel();
@@ -2672,8 +2873,10 @@ mod tests {
         assert_eq!(adapter.dispatched().len(), 1);
         adapter.emit(ProviderEvent::TurnCancelled { turn_id: turn });
         wait_until(|| adapter.dispatched().len() == 2);
-        assert!(matches!(adapter.dispatched().last(), Some(CanonicalAction::Submit { input, .. })
-            if input == &Value::String("correction after cancellation".into())));
+        assert!(
+            matches!(adapter.dispatched().last(), Some(CanonicalAction::Submit { input, .. })
+            if input == &Value::String("correction after cancellation".into()))
+        );
     }
 
     /// An uncertain cancellation answer retains the hold: only the
@@ -2754,8 +2957,10 @@ mod tests {
         adapter.emit(ProviderEvent::TurnCancelled { turn_id: turn });
         let (_handle2, _link2, _rx2) = link(&rig, Uuid::new_v4(), None);
         wait_until(|| adapter.dispatched().len() == 2);
-        assert!(matches!(adapter.dispatched().last(), Some(CanonicalAction::Submit { input, .. })
-            if input == &Value::String("queued behind cancellation".into())));
+        assert!(
+            matches!(adapter.dispatched().last(), Some(CanonicalAction::Submit { input, .. })
+            if input == &Value::String("queued behind cancellation".into()))
+        );
     }
 
     /// A cancellation that settled under a detached owner leaves only an
@@ -2789,8 +2994,10 @@ mod tests {
         let (handle2, _link2, _rx2) = link(&rig, Uuid::new_v4(), None);
         handle2.prompt("after settled cancellation".into());
         wait_until(|| adapter.dispatched().len() == 2);
-        assert!(matches!(adapter.dispatched().last(), Some(CanonicalAction::Submit { input, .. })
-            if input == &Value::String("after settled cancellation".into())));
+        assert!(
+            matches!(adapter.dispatched().last(), Some(CanonicalAction::Submit { input, .. })
+            if input == &Value::String("after settled cancellation".into()))
+        );
     }
 
     #[test]
@@ -2798,18 +3005,30 @@ mod tests {
         let mut opts = options();
         for (mode, policy, sandbox) in [
             (crate::model::RuntimeMode::Ask, "untrusted", "read-only"),
-            (crate::model::RuntimeMode::AutoAcceptEdits, "on-request", "workspace-write"),
-            (crate::model::RuntimeMode::FullAccess, "never", "danger-full-access"),
+            (
+                crate::model::RuntimeMode::AutoAcceptEdits,
+                "on-request",
+                "workspace-write",
+            ),
+            (
+                crate::model::RuntimeMode::FullAccess,
+                "never",
+                "danger-full-access",
+            ),
         ] {
             opts.mode = mode;
-            let launch: waku_runtime_codex::CodexLaunch = serde_json::from_value(launch_payload(ProviderKind::Codex, &opts, None).unwrap()).unwrap();
+            let launch: waku_runtime_codex::CodexLaunch =
+                serde_json::from_value(launch_payload(ProviderKind::Codex, &opts, None).unwrap())
+                    .unwrap();
             assert_eq!(launch.approval_policy, policy);
             assert_eq!(launch.sandbox, sandbox);
         }
         opts.mode = crate::model::RuntimeMode::Auto;
         assert!(launch_payload(ProviderKind::Codex, &opts, None).is_err());
         opts.mode = crate::model::RuntimeMode::Ask;
-        opts.provider_cursor = Some(crate::model::ProviderResumeCursor::Codex { thread_id: "legacy".into() });
+        opts.provider_cursor = Some(crate::model::ProviderResumeCursor::Codex {
+            thread_id: "legacy".into(),
+        });
         assert!(launch_payload(ProviderKind::Codex, &opts, None).is_err());
     }
 
@@ -2847,11 +3066,20 @@ for line in sys.stdin:
 "#).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let host = RuntimeHost::open(&runtime_root,
-            HostOptions { namespace: STABLE_NAMESPACE.into(), budgets: Budgets::default(), journal_fault: None },
-            Arc::new(waku_runtime_codex::CodexFactory), Box::new(SystemClock)).unwrap();
+        let host = RuntimeHost::open(
+            &runtime_root,
+            HostOptions {
+                namespace: STABLE_NAMESPACE.into(),
+                budgets: Budgets::default(),
+                journal_fault: None,
+            },
+            Arc::new(waku_runtime_codex::CodexFactory),
+            Box::new(SystemClock),
+        )
+        .unwrap();
         let server = RuntimeServer::bind(host, &runtime_root, Duration::from_millis(5)).unwrap();
-        let (backend, task) = crate::daemon::tests::surface_test_backend(&temp_root("native-backend"));
+        let (backend, task) =
+            crate::daemon::tests::surface_test_backend(&temp_root("native-backend"));
         let backend = Arc::new(backend);
         backend.install_weak_self();
         let mut opts = options();
@@ -2859,8 +3087,18 @@ for line in sys.stdin:
         opts.cwd = provider_root.clone();
         opts.mode = crate::model::RuntimeMode::Ask;
         let (sender, rx) = crate::driver::test_event_channel();
-        let (handle, link) = start_link(&backend, backend.task_store(), task, Uuid::new_v4(),
-            ProviderKind::Codex, &opts, sender, &runtime_root, None).unwrap();
+        let (handle, link) = start_link(
+            &backend,
+            backend.task_store(),
+            task,
+            Uuid::new_v4(),
+            ProviderKind::Codex,
+            &opts,
+            sender,
+            &runtime_root,
+            None,
+        )
+        .unwrap();
         handle.prompt("native input".into());
         let mut text = String::new();
         let mut reasoning = String::new();
@@ -2871,13 +3109,26 @@ for line in sys.stdin:
                 DriverEvent::TurnStarted => started += 1,
                 DriverEvent::TextDelta(delta) => text.push_str(&delta),
                 DriverEvent::ReasoningDelta(delta) => reasoning.push_str(&delta),
-                DriverEvent::Permission { request_id, options, .. } => {
-                    assert_eq!(request_id, serde_json::to_string("native-approval").unwrap());
-                    assert!(options.iter().any(|option| option.id == "decline" && !option.allow));
+                DriverEvent::Permission {
+                    request_id,
+                    options,
+                    ..
+                } => {
+                    assert_eq!(
+                        request_id,
+                        serde_json::to_string("native-approval").unwrap()
+                    );
+                    assert!(
+                        options
+                            .iter()
+                            .any(|option| option.id == "decline" && !option.allow)
+                    );
                     approval = true;
                     handle.respond(request_id, "decline".into());
                 }
-                DriverEvent::TurnFinished { success, summary, .. } => {
+                DriverEvent::TurnFinished {
+                    success, summary, ..
+                } => {
                     assert!(!success);
                     assert_eq!(summary.as_deref(), Some("controlled failure"));
                     break;
@@ -2900,17 +3151,43 @@ for line in sys.stdin:
     fn stable_link_retirement_preserves_replacement_owner() {
         let rig = rig(&["codex"]);
         let (old_handle, original, _rx) = link(&rig, Uuid::new_v4(), None);
-        let mut replacement = rig.backend.task_store().stable_link(rig.session_id).unwrap().unwrap();
+        let mut replacement = rig
+            .backend
+            .task_store()
+            .stable_link(rig.session_id)
+            .unwrap()
+            .unwrap();
         replacement.runtime_instance = Uuid::new_v4();
         replacement.runtime_session_id = Uuid::new_v4();
         replacement.generation += 1;
-        rig.backend.task_store().stable_link_save(&replacement).unwrap();
+        rig.backend
+            .task_store()
+            .stable_link_save(&replacement)
+            .unwrap();
         // The old stop is confirmed, but its delayed local cleanup is fenced
         // at the actual SQLite deletion boundary.
         old_handle.delete_provider_session();
-        assert_eq!(rig.backend.task_store().stable_link(rig.session_id).unwrap(), Some(replacement));
-        let inventory = original.shared.client.lock().unwrap().reconcile(original.shared.epoch).unwrap();
-        assert!(inventory.sessions.iter().any(|session| session.session == original.sref() && session.status == SessionStatus::Terminated));
+        assert_eq!(
+            rig.backend
+                .task_store()
+                .stable_link(rig.session_id)
+                .unwrap(),
+            Some(replacement)
+        );
+        let inventory = original
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(original.shared.epoch)
+            .unwrap();
+        assert!(
+            inventory
+                .sessions
+                .iter()
+                .any(|session| session.session == original.sref()
+                    && session.status == SessionStatus::Terminated)
+        );
     }
 
     /// A Devin elicitation subject (`requestedSchema`) projects a real
@@ -2950,7 +3227,10 @@ for line in sys.stdin:
         });
         let events = collect_events(&rx, 1);
         match &events[0] {
-            DriverEvent::UserInputRequested { request_id, questions } => {
+            DriverEvent::UserInputRequested {
+                request_id,
+                questions,
+            } => {
                 assert_eq!(request_id, "elic-1");
                 assert_eq!(questions[0].id, "label");
                 assert_eq!(questions[0].question, "Label?");
@@ -3043,12 +3323,11 @@ for line in sys.stdin:
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700))
-                .unwrap();
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
         {
-            let settings = crate::DaemonSettingsStore::open(backend_root.join("settings.json"))
-                .unwrap();
+            let settings =
+                crate::DaemonSettingsStore::open(backend_root.join("settings.json")).unwrap();
             let mut document = settings.get();
             document.agent_tools_enabled = false;
             document.agent_settings_enabled = false;
@@ -3058,8 +3337,7 @@ for line in sys.stdin:
                 .insert(ProviderKind::Codex, binary.display().to_string());
             settings.replace(document).unwrap();
         }
-        let (mut backend, session_id) =
-            crate::daemon::tests::surface_test_backend(&backend_root);
+        let (mut backend, session_id) = crate::daemon::tests::surface_test_backend(&backend_root);
         backend.set_daemon_address("http://127.0.0.1:1".into());
         backend.stable_test_root = Some(runtime_root.clone());
         let backend = Arc::new(backend);
@@ -3222,8 +3500,14 @@ for line in sys.stdin:
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, Some(reservation_id)));
         let (_handle, link, _rx) = link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
         // An already reanchored row must remain in reconciliation inventory.
-        assert!(reanchor_task_claims(&rig.backend, rig.session_id, link.shared.controller.host_pid)
-            .contains(&reservation_id));
+        assert!(
+            reanchor_task_claims(
+                &rig.backend,
+                rig.session_id,
+                link.shared.controller.host_pid
+            )
+            .contains(&reservation_id)
+        );
 
         // The admit payload carried paths, never the daemon credential.
         let launch = rig
@@ -3231,10 +3515,8 @@ for line in sys.stdin:
             .for_session(link.sref().session_id)
             .unwrap()
             .launch();
-        let env: std::collections::HashMap<String, String> = serde_json::from_value(
-            launch["agent"]["env"].clone(),
-        )
-        .unwrap();
+        let env: std::collections::HashMap<String, String> =
+            serde_json::from_value(launch["agent"]["env"].clone()).unwrap();
         assert!(env.contains_key(waku_protocol::RUNTIME_INGRESS_ENV));
         assert_eq!(
             env[waku_protocol::AGENT_TASK_ENV],
@@ -3247,15 +3529,20 @@ for line in sys.stdin:
         assert!(!env.contains_key(waku_protocol::AGENT_TOKEN_ENV));
         assert!(!env.contains_key(waku_protocol::DAEMON_ADDRESS_ENV));
         // The announcement channel carries the surface instruction.
-        assert!(launch["developerInstructions"]
-            .as_str()
-            .unwrap()
-            .contains("goddard-agent"));
+        assert!(
+            launch["developerInstructions"]
+                .as_str()
+                .unwrap()
+                .contains("goddard-agent")
+        );
 
         // The pinned helper is a mode-0500 copy under the runtime root.
         let cli_dir = PathBuf::from(launch["agent"]["cliDir"].as_str().unwrap());
         let pinned = cli_dir.join("goddard-agent");
-        assert_eq!(std::fs::read(&pinned).unwrap(), b"#!/bin/sh\n# pinned test helper\n");
+        assert_eq!(
+            std::fs::read(&pinned).unwrap(),
+            b"#!/bin/sh\n# pinned test helper\n"
+        );
         assert_eq!(
             std::fs::metadata(&pinned).unwrap().permissions().mode() & 0o777,
             0o500
@@ -3263,8 +3550,7 @@ for line in sys.stdin:
 
         // The private descriptor parses through the shared contract and
         // its grant authenticates an agent connection.
-        let descriptor_path =
-            PathBuf::from(env[waku_protocol::RUNTIME_INGRESS_ENV].clone());
+        let descriptor_path = PathBuf::from(env[waku_protocol::RUNTIME_INGRESS_ENV].clone());
         assert_eq!(descriptor_path, agent_dir.join(DESCRIPTOR_NAME));
         assert_eq!(
             std::fs::metadata(&descriptor_path)
@@ -3277,13 +3563,9 @@ for line in sys.stdin:
         let descriptor: IngressDescriptor =
             serde_json::from_slice(&std::fs::read(&descriptor_path).unwrap()).unwrap();
         assert_eq!(descriptor.version, INGRESS_DESCRIPTOR_VERSION);
-        assert_eq!(
-            descriptor.root,
-            rig.runtime_root.canonicalize().unwrap()
-        );
+        assert_eq!(descriptor.root, rig.runtime_root.canonicalize().unwrap());
         assert_eq!(descriptor.task_id, rig.session_id);
-        let mut agent_client =
-            RuntimeClient::agent(&rig.runtime_root, &descriptor.grant).unwrap();
+        let mut agent_client = RuntimeClient::agent(&rig.runtime_root, &descriptor.grant).unwrap();
 
         // The pre-existing lease now answers liveness through the host.
         let status = broker
@@ -3330,10 +3612,12 @@ for line in sys.stdin:
             .find(|c| c.claim_id == agent_claim_id(link.sref()))
             .expect("the ingress lease claim is recorded");
         assert_eq!(claim.detail["grantId"], json!(descriptor.grant.grant_id));
-        assert!(claim.detail["reservations"]
-            .as_array()
-            .unwrap()
-            .contains(&json!(reservation_id)));
+        assert!(
+            claim.detail["reservations"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(reservation_id))
+        );
     }
 
     /// Replacement preserves the original authorization identity and expiry.
@@ -3345,8 +3629,7 @@ for line in sys.stdin:
         let agent_dir = temp_root("agent");
         let mut opts = options();
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
-        let (_h1, link1, _rx1) =
-            link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        let (_h1, link1, _rx1) = link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
         let descriptor_path = agent_dir.join(DESCRIPTOR_NAME);
         let first: IngressDescriptor =
             serde_json::from_slice(&std::fs::read(&descriptor_path).unwrap()).unwrap();
@@ -3356,8 +3639,7 @@ for line in sys.stdin:
 
         let mut opts = options();
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
-        let (_h2, link2, _rx2) =
-            link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        let (_h2, link2, _rx2) = link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
         let second: IngressDescriptor =
             serde_json::from_slice(&std::fs::read(&descriptor_path).unwrap()).unwrap();
         // Reattachment must not create a later authorization window.
@@ -3391,7 +3673,9 @@ for line in sys.stdin:
             json!(second.grant.grant_id)
         );
         // Even another authentic grant for this session is not the original lease.
-        let replacement_grant = daemon.issue_grant(link2.shared.epoch, link2.sref(), GRANT_TTL_MS).unwrap();
+        let replacement_grant = daemon
+            .issue_grant(link2.shared.epoch, link2.sref(), GRANT_TTL_MS)
+            .unwrap();
         let mut substituted = second.clone();
         substituted.grant = replacement_grant;
         write_descriptor(&descriptor_path, &substituted).unwrap();
@@ -3399,9 +3683,15 @@ for line in sys.stdin:
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
         let (sender, _) = crate::driver::test_event_channel();
         let rejected = start_link(
-            &rig.backend, rig.backend.task_store(), rig.session_id,
-            Uuid::new_v4(), ProviderKind::Codex, &opts, sender,
-            &rig.runtime_root, None,
+            &rig.backend,
+            rig.backend.task_store(),
+            rig.session_id,
+            Uuid::new_v4(),
+            ProviderKind::Codex,
+            &opts,
+            sender,
+            &rig.runtime_root,
+            None,
         );
         assert!(format!("{:#}", rejected.err().unwrap()).contains("lease evidence"));
         write_descriptor(&descriptor_path, &second).unwrap();
@@ -3413,20 +3703,35 @@ for line in sys.stdin:
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
         let (sender, _) = crate::driver::test_event_channel();
         let result = start_link(
-            &rig.backend, rig.backend.task_store(), rig.session_id,
-            Uuid::new_v4(), ProviderKind::Codex, &opts, sender,
-            &rig.runtime_root, None,
+            &rig.backend,
+            rig.backend.task_store(),
+            rig.session_id,
+            Uuid::new_v4(),
+            ProviderKind::Codex,
+            &opts,
+            sender,
+            &rig.runtime_root,
+            None,
         );
         assert!(format!("{:#}", result.err().unwrap()).contains("authority expired"));
         assert!(RuntimeClient::agent(&rig.runtime_root, &second.grant).is_err());
         // Lost recovery evidence also fails closed, even if a daemon is live.
         std::fs::remove_file(&descriptor_path).unwrap();
         let (sender, _) = crate::driver::test_event_channel();
-        assert!(start_link(
-            &rig.backend, rig.backend.task_store(), rig.session_id,
-            Uuid::new_v4(), ProviderKind::Codex, &opts, sender,
-            &rig.runtime_root, None,
-        ).is_err());
+        assert!(
+            start_link(
+                &rig.backend,
+                rig.backend.task_store(),
+                rig.session_id,
+                Uuid::new_v4(),
+                ProviderKind::Codex,
+                &opts,
+                sender,
+                &rig.runtime_root,
+                None,
+            )
+            .is_err()
+        );
         assert!(!descriptor_path.exists());
     }
 
@@ -3439,8 +3744,7 @@ for line in sys.stdin:
         let agent_dir = temp_root("agent");
         let mut opts = options();
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
-        let (handle, link, _rx) =
-            link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        let (handle, link, _rx) = link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
         let descriptor_path = agent_dir.join(DESCRIPTOR_NAME);
         assert!(descriptor_path.is_file());
 
@@ -3452,13 +3756,11 @@ for line in sys.stdin:
         let mut daemon = controller(&rig);
         let grant = daemon.acquire_control(&ClientHello::current()).unwrap();
         let inventory = daemon.reconcile(grant.epoch).unwrap();
-        assert!(inventory
-            .sessions
-            .iter()
-            .all(|inv| inv
-                .claims
+        assert!(inventory.sessions.iter().all(|inv| {
+            inv.claims
                 .iter()
-                .all(|c| c.claim_id != agent_claim_id(link.sref()))));
+                .all(|c| c.claim_id != agent_claim_id(link.sref()))
+        }));
     }
 
     /// Without an agent surface no descriptor or claim materializes.
@@ -3483,5 +3785,4 @@ for line in sys.stdin:
             .unwrap();
         assert!(inv.claims.is_empty());
     }
-
 }

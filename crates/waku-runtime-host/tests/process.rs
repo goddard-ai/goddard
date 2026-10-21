@@ -817,7 +817,10 @@ fn actual_codex_scoped_cli_ingress_and_native_request_boundaries() {
         .find_map(|e| match &e.event {
             ProviderEvent::ConfigActivated { effective, .. } => Some((
                 effective.options["ownerGroupPid"].as_u64().unwrap() as i32,
-                effective.options["codexThreadId"].as_str().unwrap().to_owned(),
+                effective.options["codexThreadId"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
             )),
             _ => None,
         })
@@ -838,7 +841,9 @@ fn actual_codex_scoped_cli_ingress_and_native_request_boundaries() {
             CanonicalAction::Submit {
                 delivery_id: uuid::Uuid::new_v4(),
                 turn_id: uuid::Uuid::new_v4(),
-                input: serde_json::json!("Call runtime_probe exactly once and wait for its result."),
+                input: serde_json::json!(
+                    "Call runtime_probe exactly once and wait for its result."
+                ),
             },
         ))
         .unwrap();
@@ -918,10 +923,14 @@ fn actual_codex_scoped_cli_ingress_and_native_request_boundaries() {
     }
     // The new epoch's service drains the original request identity and
     // deadline exactly once; a repeated drain cannot re-dispatch it.
-    let mut service =
-        RuntimeClient::service(&host.root, &host.token, grant.epoch, &ClientHello::current())
-            .unwrap()
-            .0;
+    let mut service = RuntimeClient::service(
+        &host.root,
+        &host.token,
+        grant.epoch,
+        &ClientHello::current(),
+    )
+    .unwrap()
+    .0;
     let forwarded = service.service_drain(grant.epoch, 0).unwrap();
     let forwarded = forwarded
         .iter()
@@ -1108,7 +1117,11 @@ fn actual_codex_scoped_cli_ingress_and_native_request_boundaries() {
         .unwrap()
         .events;
     assert_eq!(first, second);
-    assert!(second.windows(2).all(|w| w[1].sequence == w[0].sequence + 1));
+    assert!(
+        second
+            .windows(2)
+            .all(|w| w[1].sequence == w[0].sequence + 1)
+    );
     // Turn B: the model executes the pinned goddard-agent inside the
     // provider's own environment. A write op makes the exec require a
     // native approval under the on-request policy; accepting escalates it,
@@ -1135,10 +1148,14 @@ fn actual_codex_scoped_cli_ingress_and_native_request_boundaries() {
     let approval_wait = Instant::now();
     let deadline = Instant::now() + Duration::from_secs(180);
     let mut resolved_requests: Vec<String> = Vec::new();
-    let mut service =
-        RuntimeClient::service(&host.root, &host.token, grant.epoch, &ClientHello::current())
-            .unwrap()
-            .0;
+    let mut service = RuntimeClient::service(
+        &host.root,
+        &host.token,
+        grant.epoch,
+        &ClientHello::current(),
+    )
+    .unwrap()
+    .0;
     while in_provider_cli.is_none() {
         let events = client
             .events(
@@ -1281,7 +1298,9 @@ fn actual_codex_scoped_cli_ingress_and_native_request_boundaries() {
             })
             .collect();
         let ran_cli = exec_items.iter().find(|item| {
-            item["command"].as_str().is_some_and(|c| c.contains("goddard-agent"))
+            item["command"]
+                .as_str()
+                .is_some_and(|c| c.contains("goddard-agent"))
         });
         let Some(item) = ran_cli else {
             let methods: Vec<String> = events
@@ -1316,9 +1335,11 @@ fn actual_codex_scoped_cli_ingress_and_native_request_boundaries() {
             client = host.client();
             grant = client.acquire_control(&ClientHello::current()).unwrap();
             let inventory = client.reconcile(grant.epoch).unwrap();
-            assert!(inventory.sessions[0]
-                .pending_ingress
-                .contains(&in_provider_id));
+            assert!(
+                inventory.sessions[0]
+                    .pending_ingress
+                    .contains(&in_provider_id)
+            );
             service = RuntimeClient::service(
                 &host.root,
                 &host.token,

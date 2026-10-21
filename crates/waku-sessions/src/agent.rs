@@ -1774,6 +1774,9 @@ mod tests {
         assert!(state.user_stopped(next));
         assert!(!state.user_stopped(old));
         state.clear_user_stop(next);
-        assert_eq!(state.pop_queued(next).map(|entry| entry.prompt).as_deref(), Some("held"));
+        assert_eq!(
+            state.pop_queued(next).map(|entry| entry.prompt).as_deref(),
+            Some("held")
+        );
     }
 }

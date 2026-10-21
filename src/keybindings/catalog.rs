@@ -3134,8 +3134,7 @@ mod ctx {
     pub const DockedTerminal: &str = "DockedTerminal";
     /// The floating terminal card — Escape hides it, but an open command
     /// bar or context menu inside keeps its own dismiss first.
-    pub const DockedTerminalNotCommandBar: &str =
-        "DockedTerminal && !TerminalCommandBar && !Menu";
+    pub const DockedTerminalNotCommandBar: &str = "DockedTerminal && !TerminalCommandBar && !Menu";
     pub const StandaloneTerminal: &str = "StandaloneTerminal";
     pub const NotTerminal: &str = "!Terminal";
     /// The ⌘⌥←/⌘⌥→ session sweep — the experiment flag keeps a disabled Big

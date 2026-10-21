@@ -142,8 +142,7 @@ impl WakuBackend {
             .map(|journal| {
                 journal.active_session_id == Some(session_id)
                     || journal.intent.as_ref().is_some_and(|intent| {
-                        intent.old_session_id == session_id
-                            || intent.new_session_id == session_id
+                        intent.old_session_id == session_id || intent.new_session_id == session_id
                     })
                     || journal.rotations.iter().any(|rotation| {
                         rotation.old_session_id == session_id
@@ -404,32 +403,23 @@ impl WakuBackend {
         intent: &crate::boss_rotation::RotationIntent,
         stage: RotationLifecycleStage,
     ) {
-        self.record_rotation_observation(RotationObservation::Lifecycle(
-            LifecycleObservation {
-                rotation_id: intent.new_session_id,
-                old_session_id: intent.old_session_id,
-                new_session_id: intent.new_session_id,
-                old_generation: intent.old_generation,
-                new_generation: intent.old_generation.saturating_add(1),
-                stage,
-            },
-        ));
+        self.record_rotation_observation(RotationObservation::Lifecycle(LifecycleObservation {
+            rotation_id: intent.new_session_id,
+            old_session_id: intent.old_session_id,
+            new_session_id: intent.new_session_id,
+            old_generation: intent.old_generation,
+            new_generation: intent.old_generation.saturating_add(1),
+            stage,
+        }));
     }
 
     #[cfg(test)]
-    fn observe_rotation_ownership(
-        &self,
-        session_id: Uuid,
-        generation: u64,
-        state: OwnershipState,
-    ) {
-        self.record_rotation_observation(RotationObservation::Ownership(
-            OwnershipObservation {
-                session_id,
-                generation,
-                state,
-            },
-        ));
+    fn observe_rotation_ownership(&self, session_id: Uuid, generation: u64, state: OwnershipState) {
+        self.record_rotation_observation(RotationObservation::Ownership(OwnershipObservation {
+            session_id,
+            generation,
+            state,
+        }));
     }
 
     #[cfg(test)]
@@ -441,21 +431,19 @@ impl WakuBackend {
         owner_generation: Option<u64>,
         kind: DurableActionKind,
     ) {
-        self.record_rotation_observation(RotationObservation::DurableAction(
-            DurableAction {
-                action_id: format!("boss-rotation:{}:{action}", intent.new_session_id),
-                session_id,
-                owner_generation,
-                kind,
-                status: DurableActionStatus::Committed,
-            },
-        ));
+        self.record_rotation_observation(RotationObservation::DurableAction(DurableAction {
+            action_id: format!("boss-rotation:{}:{action}", intent.new_session_id),
+            session_id,
+            owner_generation,
+            kind,
+            status: DurableActionStatus::Committed,
+        }));
     }
 
     #[cfg(test)]
     fn boss_rotation_ownership(&self, session_id: Uuid) -> Option<OwnershipObservation> {
-        let journal = RotationJournal::load(&self.data_dir.join("boss/rotation.json"))
-            .unwrap_or_default();
+        let journal =
+            RotationJournal::load(&self.data_dir.join("boss/rotation.json")).unwrap_or_default();
         let (_, active) = self.boss.identity_and_session();
         if let Some(intent) = &journal.intent {
             if intent.new_session_id == session_id {
@@ -484,14 +472,9 @@ impl WakuBackend {
                 state: OwnershipState::Active,
             });
         }
-        if let Some(rotation) = journal
-            .rotations
-            .iter()
-            .rev()
-            .find(|rotation| {
-                rotation.old_session_id == session_id || rotation.new_session_id == session_id
-            })
-        {
+        if let Some(rotation) = journal.rotations.iter().rev().find(|rotation| {
+            rotation.old_session_id == session_id || rotation.new_session_id == session_id
+        }) {
             if rotation.new_session_id == session_id {
                 return Some(OwnershipObservation {
                     session_id,
@@ -1323,12 +1306,10 @@ impl WakuBackend {
                 .collect()
         };
         if let Err(error) = ContinuityLedger::update(&continuity_path, |latest| {
-            latest.deliveries.retain(|delivery| {
-                !retired.contains(&delivery.session_id)
-            });
-            if latest.rotation_request == ledger.rotation_request
-                && !latest.has_incident(new_id)
-            {
+            latest
+                .deliveries
+                .retain(|delivery| !retired.contains(&delivery.session_id));
+            if latest.rotation_request == ledger.rotation_request && !latest.has_incident(new_id) {
                 latest.resolve_rotation_request();
             }
         }) {
@@ -1410,22 +1391,20 @@ struct RotationObservedDriver {
 #[cfg(test)]
 impl RotationObservedDriver {
     fn admit(&self, boundary: AdmissionBoundary) {
-        (self.observer)(RotationObservation::ProviderAdmission(
-            ProviderAdmission {
-                operation_id: format!(
-                    "boss-driver:{}:{}:{boundary:?}:{}",
-                    self.session_id,
-                    self.runtime_id,
-                    self.next_operation
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-                ),
-                session_id: self.session_id,
-                runtime_id: self.runtime_id,
-                owner_generation: self.owner_generation,
-                boundary,
-                decision: AdmissionDecision::Unguarded,
-            },
-        ));
+        (self.observer)(RotationObservation::ProviderAdmission(ProviderAdmission {
+            operation_id: format!(
+                "boss-driver:{}:{}:{boundary:?}:{}",
+                self.session_id,
+                self.runtime_id,
+                self.next_operation
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            ),
+            session_id: self.session_id,
+            runtime_id: self.runtime_id,
+            owner_generation: self.owner_generation,
+            boundary,
+            decision: AdmissionDecision::Unguarded,
+        }));
     }
 }
 
@@ -1478,11 +1457,7 @@ impl crate::driver::DriverControl for RotationObservedDriver {
         self.inner.refresh_background_work();
     }
 
-    fn stop_background_work(
-        &self,
-        key: crate::model::BackgroundWorkKey,
-        control_id: String,
-    ) {
+    fn stop_background_work(&self, key: crate::model::BackgroundWorkKey, control_id: String) {
         self.inner.stop_background_work(key, control_id);
     }
 
@@ -1491,11 +1466,7 @@ impl crate::driver::DriverControl for RotationObservedDriver {
         self.inner.respond(request_id, option_id);
     }
 
-    fn respond_user_input(
-        &self,
-        request_id: String,
-        answers: Vec<crate::model::UserInputAnswer>,
-    ) {
+    fn respond_user_input(&self, request_id: String, answers: Vec<crate::model::UserInputAnswer>) {
         self.admit(AdmissionBoundary::Continuation);
         self.inner.respond_user_input(request_id, answers);
     }
@@ -1553,18 +1524,12 @@ impl crate::driver::DriverControl for RotationObservedDriver {
         self.inner.apply_options(options)
     }
 
-    fn rollback(
-        &self,
-        turns: usize,
-    ) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
+    fn rollback(&self, turns: usize) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
         self.admit(AdmissionBoundary::Resume);
         self.inner.rollback(turns)
     }
 
-    fn fork(
-        &self,
-        turns_to_remove: usize,
-    ) -> anyhow::Result<crate::model::ProviderResumeCursor> {
+    fn fork(&self, turns_to_remove: usize) -> anyhow::Result<crate::model::ProviderResumeCursor> {
         self.admit(AdmissionBoundary::Resume);
         self.inner.fork(turns_to_remove)
     }
@@ -1716,19 +1681,15 @@ impl BossOwnershipDriver {
         if self.boss.is_boss(self.session_id) {
             return Some(journal.generation);
         }
-        journal
-            .rotations
-            .iter()
-            .rev()
-            .find_map(|rotation| {
-                if rotation.new_session_id == self.session_id {
-                    Some(rotation.old_generation.saturating_add(1))
-                } else if rotation.old_session_id == self.session_id {
-                    Some(rotation.old_generation)
-                } else {
-                    None
-                }
-            })
+        journal.rotations.iter().rev().find_map(|rotation| {
+            if rotation.new_session_id == self.session_id {
+                Some(rotation.old_generation.saturating_add(1))
+            } else if rotation.old_session_id == self.session_id {
+                Some(rotation.old_generation)
+            } else {
+                None
+            }
+        })
     }
 
     /// `true` for the pointed Boss chat or a registered planning session

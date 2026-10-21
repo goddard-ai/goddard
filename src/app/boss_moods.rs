@@ -568,9 +568,7 @@ impl<'a> Renderer<'a> {
                         name != "shape"
                             || match self.split {
                                 GazeSplit::Full => true,
-                                GazeSplit::Body => {
-                                    element.kind.as_deref() != Some("component")
-                                }
+                                GazeSplit::Body => element.kind.as_deref() != Some("component"),
                                 GazeSplit::Eyes { .. } => {
                                     element.kind.as_deref() == Some("component")
                                 }
@@ -677,11 +675,7 @@ pub(super) fn gaze_layers(seed: &str) -> GazeLayers {
     GazeLayers {
         body: dicebear_svg_split(AvatarStyle::Gaze, seed, GazeSplit::Body),
         eyes: dicebear_svg_split(AvatarStyle::Gaze, seed, GazeSplit::Eyes { squash: false }),
-        eyes_closed: dicebear_svg_split(
-            AvatarStyle::Gaze,
-            seed,
-            GazeSplit::Eyes { squash: true },
-        ),
+        eyes_closed: dicebear_svg_split(AvatarStyle::Gaze, seed, GazeSplit::Eyes { squash: true }),
     }
 }
 

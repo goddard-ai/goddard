@@ -158,8 +158,7 @@ impl Daemon {
                             }
                         }
                     }
-                    ResourceOperation::Admission { .. }
-                    | ResourceOperation::Reanchor { .. } => {
+                    ResourceOperation::Admission { .. } | ResourceOperation::Reanchor { .. } => {
                         unreachable!("admission reservations are daemon-internal")
                     }
                 }
@@ -305,7 +304,15 @@ fn cancellation_terminates_only_the_owned_simulated_process_group() {
     let daemon = Daemon::start();
     let child = daemon
         .cli()
-        .args(["resource", "run", "--json", PAYLOAD, "--", "/bin/sleep", "30"])
+        .args([
+            "resource",
+            "run",
+            "--json",
+            PAYLOAD,
+            "--",
+            "/bin/sleep",
+            "30",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

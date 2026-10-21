@@ -29,8 +29,8 @@ use std::time::Duration;
 use uuid::Uuid;
 use waku_runtime::adapter::*;
 use waku_runtime::contract::{
-    ActivationBoundary, AgentIngress, CanonicalAction, ProviderEvent, RequestClass, RequestedConfig,
-    TerminateReason, agent_ingress_env,
+    ActivationBoundary, AgentIngress, CanonicalAction, ProviderEvent, RequestClass,
+    RequestedConfig, TerminateReason, agent_ingress_env,
 };
 
 /// Trusted executable selection belongs to the pinned runtime, not admission data.

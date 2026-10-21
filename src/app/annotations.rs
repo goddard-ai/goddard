@@ -357,8 +357,7 @@ fn boss_history_source(
     message_id: Uuid,
     author: Option<String>,
 ) -> HistorySource {
-    let message = session
-        .and_then(|session| session.messages.iter().find(|m| m.id == message_id));
+    let message = session.and_then(|session| session.messages.iter().find(|m| m.id == message_id));
     HistorySource {
         session_id,
         turn: message
@@ -393,8 +392,10 @@ fn retarget_annotations_to_history(
             continue;
         }
         let live_row = format!("message-{}", annotation.message_id);
-        let history_row =
-            format!("boss-history-message-{}:{}", retired.id, annotation.message_id);
+        let history_row = format!(
+            "boss-history-message-{}:{}",
+            retired.id, annotation.message_id
+        );
         for span in &mut annotation.spans {
             if *span.key.row == *live_row {
                 span.key.row = history_row.as_str().into();
@@ -429,8 +430,10 @@ fn retarget_draft_annotations_to_history(
             continue;
         }
         let live_row = format!("message-{}", annotation.message_id);
-        let history_row =
-            format!("boss-history-message-{}:{}", retired.id, annotation.message_id);
+        let history_row = format!(
+            "boss-history-message-{}:{}",
+            retired.id, annotation.message_id
+        );
         for span in &mut annotation.spans {
             if span.row == live_row {
                 span.row = history_row.clone();
@@ -4203,11 +4206,7 @@ mod tests {
             checkpoint: None,
         });
         let message_id = session.push_message(MessageRole::Assistant, "the quoted answer");
-        session
-            .messages
-            .last_mut()
-            .expect("pushed message")
-            .turn_id = Some(turn_id);
+        session.messages.last_mut().expect("pushed message").turn_id = Some(turn_id);
         (session, message_id)
     }
 
@@ -4309,9 +4308,7 @@ mod tests {
             },
         ];
         assert!(retarget_draft_annotations_to_history(
-            &mut items,
-            &retired,
-            &None
+            &mut items, &retired, &None
         ));
         assert_eq!(
             items[0].spans[0].row,
@@ -4453,7 +4450,9 @@ mod tests {
         cx.run_until_parked();
         assert!(cx.debug_bounds("rotation-editor").is_some());
         cx.update(|window, cx| assert!(input.read(cx).focus().is_focused(window)));
-        cx.read_entity(&input, |input, _| assert_eq!(input.content(), "partial draftx"));
+        cx.read_entity(&input, |input, _| {
+            assert_eq!(input.content(), "partial draftx")
+        });
         // The alias cannot attach the staged pin to another chat's message
         // or to a different text element within the same message.
         view.read_with(cx, |view, _| {

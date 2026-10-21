@@ -51,10 +51,7 @@ fn serve() -> Rig {
     let root = TestRoot::new();
     let factory = FakeFactory::new();
     let mut registry = AdapterRegistry::new();
-    registry.register(
-        "fake",
-        Arc::new(factory.clone()) as Arc<dyn AdapterFactory>,
-    );
+    registry.register("fake", Arc::new(factory.clone()) as Arc<dyn AdapterFactory>);
     let host = RuntimeHost::open(
         root.path(),
         HostOptions {
@@ -68,8 +65,8 @@ fn serve() -> Rig {
     .expect("host opens");
     let controller = host.credentials().controller.clone();
     let emergency = host.credentials().emergency.clone();
-    let server = RuntimeServer::bind(host, root.path(), Duration::from_millis(5))
-        .expect("server binds");
+    let server =
+        RuntimeServer::bind(host, root.path(), Duration::from_millis(5)).expect("server binds");
     Rig {
         root,
         factory,
@@ -81,12 +78,9 @@ fn serve() -> Rig {
 
 impl Rig {
     fn controller(&self) -> RuntimeClient {
-        let (client, _) = RuntimeClient::controller(
-            self.root.path(),
-            &self.controller,
-            &ClientHello::current(),
-        )
-        .expect("controller connects");
+        let (client, _) =
+            RuntimeClient::controller(self.root.path(), &self.controller, &ClientHello::current())
+                .expect("controller connects");
         client
     }
     fn env(&self, grant: &ControlGrant, command: Uuid, action: CanonicalAction) -> ActionEnvelope {
@@ -140,11 +134,8 @@ impl Rig {
 fn wrong_credential_and_foreign_namespace_are_refused() {
     let rig = serve();
     // Bad token: handshake fails before any request exists.
-    let result = RuntimeClient::controller(
-        rig.root.path(),
-        "wrong-credential",
-        &ClientHello::current(),
-    );
+    let result =
+        RuntimeClient::controller(rig.root.path(), "wrong-credential", &ClientHello::current());
     assert!(matches!(
         result,
         Err(ClientError::Host(HostError::Unauthorized))
@@ -225,12 +216,10 @@ fn detach_reattach_replays_each_event_once() {
     fake.emit_live();
     let turn = Uuid::new_v4();
     daemon1
-        .execute(
-            ActionEnvelope {
-                session: Some(rig.sref(session)),
-                ..rig.env(&grant1, Uuid::new_v4(), submit(turn, Uuid::new_v4(), "go"))
-            },
-        )
+        .execute(ActionEnvelope {
+            session: Some(rig.sref(session)),
+            ..rig.env(&grant1, Uuid::new_v4(), submit(turn, Uuid::new_v4(), "go"))
+        })
         .unwrap();
     fake.emit(ProviderEvent::TurnStarted {
         turn_id: turn,
@@ -294,10 +283,14 @@ fn ingress_round_trip_agent_to_daemon_service() {
     assert_eq!(record.disposition, IngressDisposition::Pending);
 
     // The daemon's service drains, executes, and reports the outcome.
-    let mut service =
-        RuntimeClient::service(rig.root.path(), &rig.controller, grant.epoch, &ClientHello::current())
-            .unwrap()
-            .0;
+    let mut service = RuntimeClient::service(
+        rig.root.path(),
+        &rig.controller,
+        grant.epoch,
+        &ClientHello::current(),
+    )
+    .unwrap()
+    .0;
     let forwarded = service.service_drain(grant.epoch, 0).unwrap();
     assert_eq!(forwarded.len(), 1);
     assert_eq!(forwarded[0].request_id, request_id);
@@ -337,10 +330,20 @@ fn service_binds_the_epoch_it_serves() {
     let rig = serve();
     let mut daemon = rig.controller();
     let grant1 = daemon.acquire_control(&ClientHello::current()).unwrap();
-    let mut old_service = RuntimeClient::service(rig.root.path(), &rig.controller, grant1.epoch, &ClientHello::current()).unwrap().0;
+    let mut old_service = RuntimeClient::service(
+        rig.root.path(),
+        &rig.controller,
+        grant1.epoch,
+        &ClientHello::current(),
+    )
+    .unwrap()
+    .0;
     // Epoch 2 takes over — epoch 1's service can no longer connect.
     let grant2 = daemon.acquire_control(&ClientHello::current()).unwrap();
-    assert!(matches!(old_service.service_drain(grant2.epoch, 0), Err(ClientError::Host(HostError::StaleEpoch { .. }))));
+    assert!(matches!(
+        old_service.service_drain(grant2.epoch, 0),
+        Err(ClientError::Host(HostError::StaleEpoch { .. }))
+    ));
     let stale = RuntimeClient::service(
         rig.root.path(),
         &rig.controller,
@@ -436,9 +439,7 @@ fn claims_and_pending_ingress_reconcile_over_ipc() {
         resources: vec!["native_builds:1".into()],
         detail: json!({ "purpose": "surviving cli worker" }),
     };
-    daemon1
-        .register_claim(grant1.epoch, claim.clone())
-        .unwrap();
+    daemon1.register_claim(grant1.epoch, claim.clone()).unwrap();
     let mut agent = RuntimeClient::agent(rig.root.path(), &agent_grant).unwrap();
     agent
         .ingress(IngressRequest {
@@ -469,13 +470,21 @@ fn large_detached_history_pages_without_skipping_or_acknowledging_unseen_events(
     let fake = rig.factory.for_session(session).unwrap();
     fake.emit_live();
     let turn = Uuid::new_v4();
-    for _ in 0..13 { fake.emit_delta(turn, &"x".repeat(750_000)); }
-    let first = daemon.events(grant.epoch, rig.cursor(session, 0), 0).unwrap();
+    for _ in 0..13 {
+        fake.emit_delta(turn, &"x".repeat(750_000));
+    }
+    let first = daemon
+        .events(grant.epoch, rig.cursor(session, 0), 0)
+        .unwrap();
     assert!(first.events.len() < 14);
     let applied = first.events.last().unwrap().sequence;
     assert!(applied < first.high_water);
-    daemon.acknowledge(grant.epoch, rig.cursor(session, applied)).unwrap();
-    let next = daemon.events(grant.epoch, rig.cursor(session, applied), 0).unwrap();
+    daemon
+        .acknowledge(grant.epoch, rig.cursor(session, applied))
+        .unwrap();
+    let next = daemon
+        .events(grant.epoch, rig.cursor(session, applied), 0)
+        .unwrap();
     assert_eq!(next.events.first().unwrap().sequence, applied + 1);
     assert_eq!(next.events.last().unwrap().sequence, first.high_water);
     assert_eq!(first.events.len() + next.events.len(), 14);

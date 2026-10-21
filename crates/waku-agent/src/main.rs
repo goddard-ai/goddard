@@ -839,7 +839,9 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         _ => unreachable!("missing input schema for executable leaf `{path}`"),
     };
-    let mut help = format!("{example}; output defaults to readable text, including when piped; --output json selects structured output.");
+    let mut help = format!(
+        "{example}; output defaults to readable text, including when piped; --output json selects structured output."
+    );
     if let Some(description) = inputs
         .get("description")
         .and_then(serde_json::Value::as_str)
@@ -1495,7 +1497,14 @@ fn flags(
         if let Some(key) = arg.strip_prefix("--") {
             if matches!(
                 key,
-                "all" | "new" | "clear" | "reference" | "allow-burst" | "finishes-outcome" | "needs-attention" | "boss-authority"
+                "all"
+                    | "new"
+                    | "clear"
+                    | "reference"
+                    | "allow-burst"
+                    | "finishes-outcome"
+                    | "needs-attention"
+                    | "boss-authority"
             ) && value_flags.contains(&key)
             {
                 if values.insert(key.to_owned(), String::new()).is_some() {
@@ -3835,12 +3844,8 @@ mod tests {
         )
         .unwrap();
         assert!(attention.contains_key("needs-attention"));
-        let (_, authority) = flags(
-            vec!["--boss-authority".into()],
-            &["boss-authority"],
-            false,
-        )
-        .unwrap();
+        let (_, authority) =
+            flags(vec!["--boss-authority".into()], &["boss-authority"], false).unwrap();
         assert!(authority.contains_key("boss-authority"));
         assert!(flags(vec!["--boss-authority".into()], &["text"], false).is_err());
 

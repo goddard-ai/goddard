@@ -248,8 +248,7 @@ mod tests {
             released: false,
             admission: None,
             waiting_on: Some(
-                "device ios:00000000-0000-0000-0000-000000000001 is running outside Goddard"
-                    .into(),
+                "device ios:00000000-0000-0000-0000-000000000001 is running outside Goddard".into(),
             ),
         };
         assert_eq!(

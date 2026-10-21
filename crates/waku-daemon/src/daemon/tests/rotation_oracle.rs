@@ -1237,16 +1237,25 @@ fn guarded_lifecycle_unqualified_refresh_never_attempts_capacity_bypass() {
     let count = launches.clone();
     backend.runtime_test_start = Some(Arc::new(move |_, _, _| {
         count.fetch_add(1, Ordering::SeqCst);
-        Err(anyhow::anyhow!("fixture: hard capacity exhausted or provider unavailable"))
+        Err(anyhow::anyhow!(
+            "fixture: hard capacity exhausted or provider unavailable"
+        ))
     }));
     let old = rotation_boss(&backend);
     {
         let mut state = backend.task_state.lock();
-        state.session_mut(old).unwrap().context_usage = Some(crate::model::ContextUsage { tokens: 76, window: Some(100) });
+        state.session_mut(old).unwrap().context_usage = Some(crate::model::ContextUsage {
+            tokens: 76,
+            window: Some(100),
+        });
         backend.task_store.save(&mut state).unwrap();
     }
     for _ in 0..3 {
-        assert!(backend.reconcile_boss_rotation(crate::model::unix_time()).is_err());
+        assert!(
+            backend
+                .reconcile_boss_rotation(crate::model::unix_time())
+                .is_err()
+        );
         assert_eq!(backend.boss.identity_and_session().1, Some(old));
     }
     assert_eq!(launches.load(Ordering::SeqCst), 0);

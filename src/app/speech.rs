@@ -63,8 +63,7 @@ const VOICE_CONSENT_RESTARTS: u8 = 3;
 /// device gains input channels in place, the exact move a Bluetooth
 /// headset makes flipping into HFP. Press-to-talk retries a refused
 /// engine start on the same cadence.
-pub(super) const VOICE_INPUT_RETRY: std::time::Duration =
-    std::time::Duration::from_millis(500);
+pub(super) const VOICE_INPUT_RETRY: std::time::Duration = std::time::Duration::from_millis(500);
 /// An input gap shorter than this never raises the "microphone
 /// unavailable" row — a Bluetooth profile switch crosses it routinely.
 const VOICE_INPUT_GRACE: std::time::Duration = std::time::Duration::from_millis(1_500);
@@ -472,9 +471,7 @@ fn voice_input_verdict(ready: bool, down_for: Option<std::time::Duration>) -> Vo
 /// a full grace-plus-poll window rather than inheriting a stale verdict
 /// that ends every future poll after one sample. A cleared clock stays
 /// cleared. Pure so the retirement rule is testable.
-fn voice_input_poll_clock(
-    down_for: Option<std::time::Duration>,
-) -> Option<std::time::Duration> {
+fn voice_input_poll_clock(down_for: Option<std::time::Duration>) -> Option<std::time::Duration> {
     down_for.filter(|elapsed| *elapsed < VOICE_INPUT_POLL_CAP)
 }
 
@@ -1120,7 +1117,10 @@ impl Waku {
             self.voice_listener_wanted(),
             crate::platform::voice_listener_running(),
         );
-        match voice_input_verdict(ready, self.voice_input_down_since.map(|since| since.elapsed())) {
+        match voice_input_verdict(
+            ready,
+            self.voice_input_down_since.map(|since| since.elapsed()),
+        ) {
             VoiceInputVerdict::Ready => {
                 self.voice_input_down_since = None;
                 self.set_voice_input_unavailable(false, cx);

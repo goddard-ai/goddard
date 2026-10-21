@@ -87,7 +87,9 @@ fn acquire(mut payload: Acquire, holder_pid: u32) -> Result<(Uuid, bool)> {
                 );
             }
             Err(_) => {
-                bail!("reservation ended before it was granted (cancelled or holder exited) [request {id}]")
+                bail!(
+                    "reservation ended before it was granted (cancelled or holder exited) [request {id}]"
+                )
             }
         };
         if r.cancelled || r.released {
@@ -169,7 +171,9 @@ pub fn command(mut arguments: impl Iterator<Item = String>) -> Result<()> {
                 #[cfg(not(unix))]
                 let holder = std::process::id();
                 let (id, borrowed) = acquire(payload, holder)?;
-                super::print_output(&serde_json::json!({"id": id, "borrowed": borrowed}).to_string());
+                super::print_output(
+                    &serde_json::json!({"id": id, "borrowed": borrowed}).to_string(),
+                );
             } else {
                 if arguments.next().as_deref() != Some("--") {
                     bail!("resource run requires -- followed by an executable and arguments");

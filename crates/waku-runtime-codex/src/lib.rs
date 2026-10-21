@@ -185,9 +185,7 @@ impl CodexAdapter {
         // Only the launch-provisioned ingress pairs may re-enter — never an
         // inherited daemon token or descriptor a caller smuggled in.
         if let Some(agent) = &launch.agent {
-            for (name, value) in
-                agent_ingress_env(agent, std::env::var_os("PATH").as_deref())
-            {
+            for (name, value) in agent_ingress_env(agent, std::env::var_os("PATH").as_deref()) {
                 command.env(name, value);
             }
         }

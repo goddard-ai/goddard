@@ -1850,104 +1850,109 @@ impl WakuBackend {
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         use waku_protocol::boss::{BossResult, EmployeeComposerReceipt, EmployeeLifecycle};
-        anyhow::ensure!(self.settings.get().boss_experiment_enabled,
-            "Boss is disabled by the experiment setting");
+        anyhow::ensure!(
+            self.settings.get().boss_experiment_enabled,
+            "Boss is disabled by the experiment setting"
+        );
         self.boss.activate()?;
         anyhow::ensure!(
             !prompt.trim().is_empty(),
             "employee prompts cannot be empty"
         );
-        let queued = self
-            .boss
-            .with_operation_lock(|| -> anyhow::Result<bool> {
-                let lifecycle = self.runtime_lifecycles.session(session_id);
-                let _owner = lifecycle.lock();
-                self.boss.require_control(None, session_id)?;
-                let employee = self
-                    .boss
-                    .employee_including_retired(session_id)
-                    .ok_or_else(|| anyhow!("{session_id} is not a Boss employee"))?;
-                let ticket = employee
-                    .ticket
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("employee has no admission ticket"))?;
-                if let Some(receipt) = ticket
-                    .composer_receipts
-                    .iter()
-                    .find(|receipt| receipt.submission_id == submission_id)
-                {
-                    anyhow::ensure!(
-                        receipt.prompt == prompt && receipt.delivery == delivery,
-                        "composer submission id was reused with different content"
-                    );
-                    anyhow::ensure!(
-                        receipt.accepted,
-                        "composer submission delivery is uncertain; it will not be replayed"
-                    );
-                    return Ok(false);
-                }
+        let queued = self.boss.with_operation_lock(|| -> anyhow::Result<bool> {
+            let lifecycle = self.runtime_lifecycles.session(session_id);
+            let _owner = lifecycle.lock();
+            self.boss.require_control(None, session_id)?;
+            let employee = self
+                .boss
+                .employee_including_retired(session_id)
+                .ok_or_else(|| anyhow!("{session_id} is not a Boss employee"))?;
+            let ticket = employee
+                .ticket
+                .as_ref()
+                .ok_or_else(|| anyhow!("employee has no admission ticket"))?;
+            if let Some(receipt) = ticket
+                .composer_receipts
+                .iter()
+                .find(|receipt| receipt.submission_id == submission_id)
+            {
                 anyhow::ensure!(
-                    employee.lifecycle() != EmployeeLifecycle::Finishing,
-                    "employee is finishing; try again once it has settled"
+                    receipt.prompt == prompt && receipt.delivery == delivery,
+                    "composer submission id was reused with different content"
                 );
-                let mut receipt = EmployeeComposerReceipt {
-                    submission_id,
-                    prompt: prompt.clone(),
-                    delivery,
-                    accepted: true,
-                };
-                match employee.lifecycle() {
-                    EmployeeLifecycle::Queued => {
-                        self.boss.update_employee_ticket(session_id, |ticket| {
-                            ticket.pending_prompts.push(prompt.clone());
-                            ticket.human_interaction = true;
-                            ticket.composer_receipts.push(receipt);
-                        })?;
-                        Ok(true)
-                    }
-                    EmployeeLifecycle::Expired => {
-                        self.requeue_employee(session_id, |ticket, started| {
-                            if started {
-                                ticket.prompt.clear();
-                                ticket.pending_prompts.push(prompt.clone());
-                            } else {
-                                ticket.prompt = prompt.clone();
-                                ticket.pending_prompts.clear();
-                            }
-                            ticket.human_interaction = true;
-                            ticket.composer_receipts.push(receipt);
-                        })?;
-                        Ok(true)
-                    }
-                    _ => {
-                        // Preserve live steering/queue delivery. Intent precedes
-                        // provider contact: a crash in the forwarding window is
-                        // uncertain, never an automatic duplicate provider call.
-                        let driver = self.steerable_driver(session_id);
-                        if delivery == AgentPromptDelivery::Steer && driver.is_none() {
-                            bail!("employee has no steerable running turn");
-                        }
-                        receipt.accepted = false;
-                        self.boss.update_employee_ticket(session_id, |ticket| {
-                            ticket.composer_receipts.push(receipt);
-                        })?;
-                        match (delivery, driver) {
-                            (AgentPromptDelivery::Interrupt | AgentPromptDelivery::Steer, Some(driver)) => {
-                                self.send_agent_steer(&driver, session_id, prompt.clone(), None);
-                            }
-                            _ => self.queue_agent_prompt(session_id, prompt.clone(), None, events)?,
-                        }
-                        self.boss.update_employee_ticket(session_id, |ticket| {
-                            if let Some(receipt) = ticket.composer_receipts.iter_mut()
-                                .find(|receipt| receipt.submission_id == submission_id)
-                            {
-                                receipt.accepted = true;
-                            }
-                        })?;
-                        Ok(false)
-                    }
+                anyhow::ensure!(
+                    receipt.accepted,
+                    "composer submission delivery is uncertain; it will not be replayed"
+                );
+                return Ok(false);
+            }
+            anyhow::ensure!(
+                employee.lifecycle() != EmployeeLifecycle::Finishing,
+                "employee is finishing; try again once it has settled"
+            );
+            let mut receipt = EmployeeComposerReceipt {
+                submission_id,
+                prompt: prompt.clone(),
+                delivery,
+                accepted: true,
+            };
+            match employee.lifecycle() {
+                EmployeeLifecycle::Queued => {
+                    self.boss.update_employee_ticket(session_id, |ticket| {
+                        ticket.pending_prompts.push(prompt.clone());
+                        ticket.human_interaction = true;
+                        ticket.composer_receipts.push(receipt);
+                    })?;
+                    Ok(true)
                 }
-            })?;
+                EmployeeLifecycle::Expired => {
+                    self.requeue_employee(session_id, |ticket, started| {
+                        if started {
+                            ticket.prompt.clear();
+                            ticket.pending_prompts.push(prompt.clone());
+                        } else {
+                            ticket.prompt = prompt.clone();
+                            ticket.pending_prompts.clear();
+                        }
+                        ticket.human_interaction = true;
+                        ticket.composer_receipts.push(receipt);
+                    })?;
+                    Ok(true)
+                }
+                _ => {
+                    // Preserve live steering/queue delivery. Intent precedes
+                    // provider contact: a crash in the forwarding window is
+                    // uncertain, never an automatic duplicate provider call.
+                    let driver = self.steerable_driver(session_id);
+                    if delivery == AgentPromptDelivery::Steer && driver.is_none() {
+                        bail!("employee has no steerable running turn");
+                    }
+                    receipt.accepted = false;
+                    self.boss.update_employee_ticket(session_id, |ticket| {
+                        ticket.composer_receipts.push(receipt);
+                    })?;
+                    match (delivery, driver) {
+                        (
+                            AgentPromptDelivery::Interrupt | AgentPromptDelivery::Steer,
+                            Some(driver),
+                        ) => {
+                            self.send_agent_steer(&driver, session_id, prompt.clone(), None);
+                        }
+                        _ => self.queue_agent_prompt(session_id, prompt.clone(), None, events)?,
+                    }
+                    self.boss.update_employee_ticket(session_id, |ticket| {
+                        if let Some(receipt) = ticket
+                            .composer_receipts
+                            .iter_mut()
+                            .find(|receipt| receipt.submission_id == submission_id)
+                        {
+                            receipt.accepted = true;
+                        }
+                    })?;
+                    Ok(false)
+                }
+            }
+        })?;
         if queued {
             // Attempt this employee now, independently of the summon queue's
             // model ordering. The broker still owns resource FIFO.
@@ -1978,8 +1983,10 @@ impl WakuBackend {
             let lifecycle = self.runtime_lifecycles.session(session_id);
             let _owner = lifecycle.lock();
             self.boss.require_control(caller, session_id)?;
-            Ok(self.boss.employee_lifecycle(session_id) == Some(EmployeeLifecycle::Queued)
-                && self.boss.force_start_employee(session_id)?)
+            Ok(
+                self.boss.employee_lifecycle(session_id) == Some(EmployeeLifecycle::Queued)
+                    && self.boss.force_start_employee(session_id)?,
+            )
         })?;
         if queued {
             if let Some(employee) = self.boss.employee(session_id) {

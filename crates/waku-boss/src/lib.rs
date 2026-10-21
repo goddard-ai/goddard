@@ -4,9 +4,9 @@ pub mod boss;
 pub mod boss_context;
 pub mod boss_eval;
 pub mod boss_rotation;
+pub mod chains;
 pub mod coordinator_contract;
 pub mod guarded_lifecycle;
-pub mod chains;
 pub mod instruction_pins;
 pub mod provider_budget;
 pub mod replacement_lease;
@@ -23,11 +23,7 @@ pub type TaskNotifier = Arc<dyn Fn() + Send + Sync>;
 /// Narrow callback into the daemon for completing or recovering one
 /// employee — the settle signal classifies the expiry it drives.
 pub type FinishEmployee = Arc<
-    dyn Fn(
-            uuid::Uuid,
-            uuid::Uuid,
-            waku_protocol::boss::EmployeeSettle,
-        ) -> anyhow::Result<()>
+    dyn Fn(uuid::Uuid, uuid::Uuid, waku_protocol::boss::EmployeeSettle) -> anyhow::Result<()>
         + Send
         + Sync,
 >;

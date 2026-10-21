@@ -22,8 +22,7 @@ use crate::model::{
     BackgroundWorkEvent, Checkpoint, CheckpointStatus, ConfigActivation, DriverEvent,
     PermissionOption, Project, ProjectKind, ProjectMapIntent, ProjectMapRanking, ProviderKind,
     ProviderModelOption, ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus,
-    SessionWorkspace,
-    TurnStatus, UserInputQuestion, detail_prefix_signature,
+    SessionWorkspace, TurnStatus, UserInputQuestion, detail_prefix_signature,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -483,8 +482,7 @@ type RuntimeForwardHook = Arc<
         + Sync,
 >;
 #[cfg(test)]
-type RotationObserver =
-    Arc<dyn Fn(waku_boss::rotation_oracle::RotationObservation) + Send + Sync>;
+type RotationObserver = Arc<dyn Fn(waku_boss::rotation_oracle::RotationObservation) + Send + Sync>;
 
 #[derive(Default)]
 struct RuntimeLifecycles {

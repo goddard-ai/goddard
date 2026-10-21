@@ -2696,9 +2696,10 @@ fn handle_codex_message(
                         .pointer("/error/additionalDetails")
                         .and_then(Value::as_str)
                         .filter(|details| !details.is_empty() && *details != message)
-                        .map_or_else(|| message.to_owned(), |details| {
-                            format!("{message}: {details}")
-                        });
+                        .map_or_else(
+                            || message.to_owned(),
+                            |details| format!("{message}: {details}"),
+                        );
                     let scope = params
                         .get("turnId")
                         .or_else(|| params.get("threadId"))

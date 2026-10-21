@@ -1127,11 +1127,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if retries == 0 {
-            self.press_to_talk_startup_failed(
-                generation,
-                tr!("press_to_talk.mic_unavailable"),
-                cx,
-            );
+            self.press_to_talk_startup_failed(generation, tr!("press_to_talk.mic_unavailable"), cx);
             return;
         }
         let weak = cx.weak_entity();

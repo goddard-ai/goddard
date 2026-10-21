@@ -213,7 +213,13 @@ fn catalog_merge_carries_the_confirmed_activation_mark_forward() {
         generation: 1,
         revision: 2,
     });
-    merge_remote_session_catalog(&mut client, vec![stale_projection], |_| true, |_| false, true);
+    merge_remote_session_catalog(
+        &mut client,
+        vec![stale_projection],
+        |_| true,
+        |_| false,
+        true,
+    );
     assert_eq!(client[0].model.as_deref(), Some("gpt-6"));
     assert_eq!(client[0].reasoning_effort.as_deref(), Some("low"));
     assert_eq!(
@@ -233,7 +239,13 @@ fn catalog_merge_carries_the_confirmed_activation_mark_forward() {
         generation: 1,
         revision: 6,
     });
-    merge_remote_session_catalog(&mut client, vec![newer.list_projection()], |_| true, |_| false, true);
+    merge_remote_session_catalog(
+        &mut client,
+        vec![newer.list_projection()],
+        |_| true,
+        |_| false,
+        true,
+    );
     assert_eq!(client[0].model.as_deref(), Some("gpt-6.1"));
     assert_eq!(client[0].reasoning_effort.as_deref(), Some("high"));
     assert_eq!(
@@ -1000,11 +1012,30 @@ fn voice_pad_appends_composer_annotations_atoms_and_attachments() {
         Some(composer),
     );
 
-    assert!(submission.prompt.starts_with("spoken words\n\nAnnotation 1:"));
+    assert!(
+        submission
+            .prompt
+            .starts_with("spoken words\n\nAnnotation 1:")
+    );
     assert!(submission.prompt.contains("typed draft [session \"Big refactor\" (task_id: 00000000-0000-0000-0000-000000000000)] @src/main.rs"));
-    assert!(submission.display_content.as_deref().unwrap().starts_with("spoken words\n\n"));
-    assert!(submission.display_content.as_deref().unwrap().contains("Big refactor"));
-    assert_eq!(submission.human_content.as_deref(), Some("spoken words\n\ntyped draft"));
+    assert!(
+        submission
+            .display_content
+            .as_deref()
+            .unwrap()
+            .starts_with("spoken words\n\n")
+    );
+    assert!(
+        submission
+            .display_content
+            .as_deref()
+            .unwrap()
+            .contains("Big refactor")
+    );
+    assert_eq!(
+        submission.human_content.as_deref(),
+        Some("spoken words\n\ntyped draft")
+    );
     assert_eq!(submission.attachments.len(), 1);
     assert_eq!(submission.message_atoms.len(), 1);
     assert_eq!(submission.atoms.len(), 1);
@@ -1085,7 +1116,10 @@ fn queued_preview_items_turn_line_breaks_into_row_breaks() {
     // flow's rows unevenly.
     for item in queued_preview_items(&parts) {
         if let Word(word) = item {
-            assert!(!word.contains(['\n', '\r']), "word carries a break: {word:?}");
+            assert!(
+                !word.contains(['\n', '\r']),
+                "word carries a break: {word:?}"
+            );
         }
     }
 }
@@ -1164,8 +1198,7 @@ fn queued_edit_reseats_atom_spans_as_composer_chips() {
 fn queued_edit_splices_spans_that_cannot_rebuild_a_chip() {
     use super::composer::atom_marker_content;
     use waku_protocol::model::{
-        MESSAGE_ATOM_END as END, MESSAGE_ATOM_OPEN as OPEN, MessageAtom,
-        encode_atom_session_id,
+        MESSAGE_ATOM_END as END, MESSAGE_ATOM_OPEN as OPEN, MessageAtom, encode_atom_session_id,
     };
 
     // A span past the atom list keeps its label as text, the same
@@ -5307,14 +5340,15 @@ fn expired_employee_submissions_map_to_roster_operations() {
     use waku_client::boss::{BossOperation, EmployeeControl};
 
     let session_id = Uuid::new_v4();
-    match expired_employee_operation(session_id, &ComposerSubmission::plain("  keep going  ".into()))
-    {
+    match expired_employee_operation(
+        session_id,
+        &ComposerSubmission::plain("  keep going  ".into()),
+    ) {
         Some(BossOperation::Control {
             session_id: target,
-            action:
-                EmployeeControl::Prompt {
-                    prompt, delivery, ..
-                },
+            action: EmployeeControl::Prompt {
+                prompt, delivery, ..
+            },
         }) => {
             assert_eq!(target, session_id);
             assert_eq!(prompt, "keep going");

@@ -1233,9 +1233,9 @@ impl Waku {
                 let Some(editor) = self.right_panel_file_editors.get(&path) else {
                     continue;
                 };
-                editor
-                    .state
-                    .update(cx, |state, cx| state.set_syntax(Some(language.as_ref()), cx));
+                editor.state.update(cx, |state, cx| {
+                    state.set_syntax(Some(language.as_ref()), cx)
+                });
             }
         }
         if let Some(root) = self.selected_workspace_path().map(Path::to_path_buf) {
@@ -1255,9 +1255,9 @@ impl Waku {
                 let Some(editor) = self.right_panel_ref_editors.get(&key) else {
                     continue;
                 };
-                editor
-                    .state
-                    .update(cx, |state, cx| state.set_syntax(Some(language.as_ref()), cx));
+                editor.state.update(cx, |state, cx| {
+                    state.set_syntax(Some(language.as_ref()), cx)
+                });
             }
         }
     }
@@ -1548,7 +1548,10 @@ fn ensure_boss_tasks_tab(
 }
 
 fn right_panel_surface_is_closable(surface: &RightPanelSurface) -> bool {
-    !matches!(surface, RightPanelSurface::Plan { .. } | RightPanelSurface::Goals)
+    !matches!(
+        surface,
+        RightPanelSurface::Plan { .. } | RightPanelSurface::Goals
+    )
 }
 
 fn right_panel_tab_label(surface: &RightPanelSurface, files_selected_path: Option<&str>) -> String {
@@ -1984,9 +1987,7 @@ fn boss_member_status(
 /// The member an outcome's collapsed row speaks for — the live assignee
 /// with attention first, then the newest live admission. `None` when no
 /// member holds running or starting work.
-fn boss_outcome_live_member(
-    row: &boss::BossOutcomeRow,
-) -> Option<&boss::BossOutcomeMember> {
+fn boss_outcome_live_member(row: &boss::BossOutcomeRow) -> Option<&boss::BossOutcomeMember> {
     use waku_protocol::boss::EmployeeLifecycle;
     let live = |member: &&boss::BossOutcomeMember| {
         !member.employee.cancelled
@@ -2012,9 +2013,7 @@ fn boss_outcome_queued(member: &boss::BossOutcomeMember) -> bool {
 
 /// The member whose session the collapsed outcome row names — the active
 /// member, then the next queued admission, then the latest recorded attempt.
-fn boss_outcome_speaker_member(
-    row: &boss::BossOutcomeRow,
-) -> Option<&boss::BossOutcomeMember> {
+fn boss_outcome_speaker_member(row: &boss::BossOutcomeRow) -> Option<&boss::BossOutcomeMember> {
     boss_outcome_live_member(row).or_else(|| {
         row.members
             .iter()
@@ -2061,10 +2060,7 @@ fn boss_wait_time_label(at: u64) -> String {
 /// snooze's own expiry, which is the outcome's other deliberate pause.
 /// `None` once a defer-until or snooze has elapsed: an expired timestamp
 /// no longer explains the pause.
-fn boss_outcome_wait_label(
-    outcome: &waku_protocol::boss::BossOutcome,
-    now: u64,
-) -> Option<String> {
+fn boss_outcome_wait_label(outcome: &waku_protocol::boss::BossOutcome, now: u64) -> Option<String> {
     let until = |at: u64| tr!("boss.goals_wait_until", time = boss_wait_time_label(at));
     match &outcome.waiting {
         Some(waku_protocol::boss::OutcomeWait::Dependency { note }) => {
@@ -2663,41 +2659,38 @@ fn boss_goal_panel_row_element(
                     )
                 }),
         )
-        .when(
-            row.reason.is_some() || row.queued_extra > 0,
-            |element| {
-                element.child(
-                    div()
-                        .flex()
-                        .min_w_0()
-                        .pl(px(18.0))
-                        .items_center()
-                        .gap(px(5.0))
-                        .line_height(sp(15.0))
-                        .text_color(theme.text_secondary)
-                        .when(row.queued_extra > 0, |element| {
-                            element.child(
-                                div()
-                                    .flex_none()
-                                    .text_size(sp(11.0))
-                                    .text_color(theme.text_tertiary)
-                                    .child(tr!("boss.goals_more_queued", count = row.queued_extra)),
-                            )
-                        })
-                        .when_some(row.reason.clone(), |element, reason| {
-                            element.child(
-                                div()
-                                    .min_w_0()
-                                    .flex_1()
-                                    .truncate()
-                                    .text_size(sp(11.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(reason),
-                            )
-                        }),
-                )
-            },
-        )
+        .when(row.reason.is_some() || row.queued_extra > 0, |element| {
+            element.child(
+                div()
+                    .flex()
+                    .min_w_0()
+                    .pl(px(18.0))
+                    .items_center()
+                    .gap(px(5.0))
+                    .line_height(sp(15.0))
+                    .text_color(theme.text_secondary)
+                    .when(row.queued_extra > 0, |element| {
+                        element.child(
+                            div()
+                                .flex_none()
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("boss.goals_more_queued", count = row.queued_extra)),
+                        )
+                    })
+                    .when_some(row.reason.clone(), |element, reason| {
+                        element.child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .truncate()
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_secondary)
+                                .child(reason),
+                        )
+                    }),
+            )
+        })
 }
 
 /// One line inside an expanded outcome — an indented status marker, the
@@ -2721,10 +2714,7 @@ fn boss_goal_entry_element(
     let session = entry.session;
     let activate_waku = waku.clone();
     div()
-        .id(SharedString::from(format!(
-            "boss-goal-entry-{}",
-            entry.key
-        )))
+        .id(SharedString::from(format!("boss-goal-entry-{}", entry.key)))
         .when_some(entry.focus.clone(), |element, focus| {
             element.track_focus(&focus)
         })
@@ -2831,9 +2821,10 @@ fn boss_goal_employee_element(
             .flex()
             .items_center()
             .justify_center()
-            .when_some(employee.status.as_ref().map(|(label, _)| label.clone()), |element, label| {
-                element.tooltip(Tooltip::text(label))
-            })
+            .when_some(
+                employee.status.as_ref().map(|(label, _)| label.clone()),
+                |element, label| element.tooltip(Tooltip::text(label)),
+            )
             .child(marker)
             .into_any_element()
     });
@@ -2959,10 +2950,18 @@ mod tests {
             let boundary = now - GOALS_PANEL_STALE_AGE_SECS;
             let stale = now - GOALS_PANEL_STALE_AGE_SECS - 1;
             // Fresh rows keep their place; stale ones fold in place.
-            let rows = vec![row(cx, stale), row(cx, fresh), row(cx, boundary), row(cx, stale)];
+            let rows = vec![
+                row(cx, stale),
+                row(cx, fresh),
+                row(cx, boundary),
+                row(cx, stale),
+            ];
             let (visible, hidden) = boss_goals_section_fold(&rows, now, usize::MAX);
             assert_eq!(
-                visible.iter().map(|row| row.updated_sort).collect::<Vec<_>>(),
+                visible
+                    .iter()
+                    .map(|row| row.updated_sort)
+                    .collect::<Vec<_>>(),
                 vec![fresh, boundary]
             );
             assert_eq!(hidden, 2);
@@ -2973,8 +2972,7 @@ mod tests {
             assert_eq!(hidden, 2);
             // The cap bounds how many fresh rows a section shows.
             let rows: Vec<_> = (0..8).map(|index| row(cx, now - index)).collect();
-            let (visible, hidden) =
-                boss_goals_section_fold(&rows, now, GOALS_PANEL_RECENT_LIMIT);
+            let (visible, hidden) = boss_goals_section_fold(&rows, now, GOALS_PANEL_RECENT_LIMIT);
             assert_eq!(visible.len(), GOALS_PANEL_RECENT_LIMIT);
             assert_eq!(hidden, 3);
         });
@@ -3213,24 +3211,24 @@ mod tests {
                         items.get(index).map_or_else(
                             || div().into_any_element(),
                             |item| match item {
-                            BossOutcomeItem::Row(row) => {
-                                let tracked = row.outcome;
-                                boss_goal_panel_row_element(row, key, &weak, cx)
-                                    .debug_selector(move || {
-                                        if tracked == TRACKED_OUTCOME {
-                                            "tracked-goal-row".into()
-                                        } else {
-                                            format!("goals-row-{tracked}")
-                                        }
-                                    })
-                                    .into_any_element()
-                            }
-                            BossOutcomeItem::HistoryToggle { .. } => div()
-                                .h(px(28.0))
-                                .debug_selector(|| "goals-history-toggle".into())
-                                .child("Show more")
-                                .into_any_element(),
-                            _ => div().into_any_element(),
+                                BossOutcomeItem::Row(row) => {
+                                    let tracked = row.outcome;
+                                    boss_goal_panel_row_element(row, key, &weak, cx)
+                                        .debug_selector(move || {
+                                            if tracked == TRACKED_OUTCOME {
+                                                "tracked-goal-row".into()
+                                            } else {
+                                                format!("goals-row-{tracked}")
+                                            }
+                                        })
+                                        .into_any_element()
+                                }
+                                BossOutcomeItem::HistoryToggle { .. } => div()
+                                    .h(px(28.0))
+                                    .debug_selector(|| "goals-history-toggle".into())
+                                    .child("Show more")
+                                    .into_any_element(),
+                                _ => div().into_any_element(),
                             },
                         )
                     })
@@ -3314,9 +3312,7 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(cx.update(|window, _| !tracked.is_focused(window)));
-        assert!(cx.update(|window, cx| {
-            view.read(cx).fallback_focus.is_focused(window)
-        }));
+        assert!(cx.update(|window, cx| { view.read(cx).fallback_focus.is_focused(window) }));
     }
 
     #[gpui::test]
@@ -3341,7 +3337,13 @@ mod tests {
         cx.run_until_parked();
 
         assert!(
-            cx.read(|app| view.read(app).boss_ui.goals_list.logical_scroll_top().item_ix) >= 6
+            cx.read(|app| view
+                .read(app)
+                .boss_ui
+                .goals_list
+                .logical_scroll_top()
+                .item_ix)
+                >= 6
         );
     }
 
@@ -4400,7 +4402,11 @@ mod tests {
         let (finished, finished_session) = make_row(OutcomeState::Completed, false);
         let archived_finished_session = make_session(finished_session, Some(10));
         let archived_sessions = HashMap::from([(finished_session, &archived_finished_session)]);
-        assert!(!hide_archived_outcome_row(&finished, &archived_sessions, now));
+        assert!(!hide_archived_outcome_row(
+            &finished,
+            &archived_sessions,
+            now
+        ));
     }
 
     #[test]
@@ -4419,10 +4425,7 @@ mod tests {
         };
         let waits = HashMap::from([(queued_id, "Waiting for an available slot".to_owned())]);
 
-        assert_eq!(
-            boss_outcome_row_reason(Some(&blocked), &waits),
-            None
-        );
+        assert_eq!(boss_outcome_row_reason(Some(&blocked), &waits), None);
         assert_eq!(
             boss_outcome_row_reason(Some(&queued), &waits).as_deref(),
             Some("Waiting for an available slot")
@@ -4551,7 +4554,6 @@ mod tests {
         );
     }
 
-
     /// The section rules: terminal state owns Finished; needs-attention
     /// evidence and owed decisions read Blocked; a healthy live member
     /// owns In progress over queued or waiting work; and the member-less
@@ -4613,17 +4615,19 @@ mod tests {
 
         // A recorded wait reads Pending · Waiting, not ordinary queueing.
         let mut row = outcome_row(OutcomeState::Open, Vec::new());
-        row.outcome.assignments.push(waku_protocol::boss::OutcomeAssignment {
-            session: Uuid::new_v4(),
-            generation: 1,
-            identity: None,
-            job_title: None,
-            finishes_outcome: None,
-            after_success: None,
-            prerequisites: Vec::new(),
-            assigned_at: Some(10),
-            settled: None,
-        });
+        row.outcome
+            .assignments
+            .push(waku_protocol::boss::OutcomeAssignment {
+                session: Uuid::new_v4(),
+                generation: 1,
+                identity: None,
+                job_title: None,
+                finishes_outcome: None,
+                after_success: None,
+                prerequisites: Vec::new(),
+                assigned_at: Some(10),
+                settled: None,
+            });
         row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Until { at: now + 600 });
         assert_eq!(
             boss_outcome_status(&row, &sessions, now),
@@ -4639,14 +4643,16 @@ mod tests {
         // An owed handoff reads Blocked · Needs follow-up — a decision the
         // boss still owes is an attention item.
         let mut row = outcome_row(OutcomeState::Open, Vec::new());
-        row.outcome.handoffs.push(waku_protocol::boss::OutcomeHandoff {
-            id: Uuid::new_v4(),
-            assignment: Uuid::new_v4(),
-            attempt: 1,
-            intent: "Review the result".into(),
-            created_at: 10,
-            resolution: None,
-        });
+        row.outcome
+            .handoffs
+            .push(waku_protocol::boss::OutcomeHandoff {
+                id: Uuid::new_v4(),
+                assignment: Uuid::new_v4(),
+                attempt: 1,
+                intent: "Review the result".into(),
+                created_at: 10,
+                resolution: None,
+            });
         assert_eq!(
             boss_outcome_status(&row, &sessions, now),
             (BossGoalBucket::Blocked, BossGoalStatus::FollowUp)
@@ -4848,9 +4854,7 @@ mod tests {
     /// verdict and stamp without the blocked or mid-turn exit reason.
     #[test]
     fn outcome_attempt_history_collapses_to_lines() {
-        use waku_protocol::boss::{
-            AssignmentSettle, AssignmentVerdict, ExpiryCause, OutcomeState,
-        };
+        use waku_protocol::boss::{AssignmentSettle, AssignmentVerdict, ExpiryCause, OutcomeState};
         let now = 1_000u64;
         let session_id = Uuid::new_v4();
         let other = Uuid::new_v4();
@@ -4884,8 +4888,7 @@ mod tests {
             fields
                 .iter()
                 .find(|fields| {
-                    fields.session_id == session
-                        && fields.key.ends_with(&format!(":{generation}"))
+                    fields.session_id == session && fields.key.ends_with(&format!(":{generation}"))
                 })
                 .unwrap()
         };
@@ -5699,10 +5702,7 @@ impl Waku {
     /// issue/PR details and files rooted at the project, and pages without
     /// their own surface take nothing.
     fn right_panel_owner_allows(&self, surface: &RightPanelSurface) -> bool {
-        self.right_panel_owner_allows_with_commit(
-            surface,
-            self.right_panel_diff_commit.is_some(),
-        )
+        self.right_panel_owner_allows_with_commit(surface, self.right_panel_diff_commit.is_some())
     }
 
     /// Absolute File tabs are reserved for local published copies. Relative
@@ -10516,9 +10516,7 @@ impl Waku {
                 };
                 // Blank lines belong to the following rendered block; an
                 // offset at EOF lands on the final block.
-                if source_offset < range.end
-                    || view.block_source_range(block_index + 1).is_none()
-                {
+                if source_offset < range.end || view.block_source_range(block_index + 1).is_none() {
                     break block_index;
                 }
                 block_index += 1;
@@ -12079,9 +12077,7 @@ impl Waku {
                 div()
                     .w_full()
                     .min_w_0()
-                    .when(centered, |element| {
-                        element.max_w(px(CONTENT_MAX_WIDTH))
-                    })
+                    .when(centered, |element| element.max_w(px(CONTENT_MAX_WIDTH)))
                     .px(px(16.0))
                     .when(index == 0, |element| element.pt(px(14.0)))
                     .pb(if index + 1 == count {
@@ -12134,8 +12130,8 @@ impl Waku {
         // ⌘S saves a visible file, or opens "Sync branch…" when no file
         // editor is active (plan documents keep their existing no-op
         // behavior).
-        let composer_focused = self.composer_mounted()
-            && self.composer_focus(cx).contains_focused(window, cx);
+        let composer_focused =
+            self.composer_mounted() && self.composer_focus(cx).contains_focused(window, cx);
         if should_park_composer_on_save_shortcut(composer_focused, self.composer_is_empty(cx)) {
             self.create_saved_draft(window, cx);
             return;
@@ -12904,8 +12900,11 @@ impl Waku {
         // the next queued admission. Only queued admission wait text earns
         // the row's third line; blocker causes and outcome wait labels stay
         // out of Tasks rows.
-        let queued: Vec<&boss::BossOutcomeMember> =
-            row.members.iter().filter(|member| boss_outcome_queued(member)).collect();
+        let queued: Vec<&boss::BossOutcomeMember> = row
+            .members
+            .iter()
+            .filter(|member| boss_outcome_queued(member))
+            .collect();
         let speaker_member = boss_outcome_speaker_member(row);
         let pending = bucket == BossGoalBucket::Pending;
         let reason = (!pending)
@@ -13157,9 +13156,7 @@ fn boss_outcome_employee_fields(
     // can never repeat across a session's retries.
     let mut latest_generation: HashMap<Uuid, u64> = HashMap::new();
     for assignment in &row.outcome.assignments {
-        let latest = latest_generation
-            .entry(assignment.session)
-            .or_default();
+        let latest = latest_generation.entry(assignment.session).or_default();
         *latest = (*latest).max(assignment.generation);
     }
     let mut fields: Vec<BossOutcomeEmployeeFields> = row
@@ -13284,8 +13281,7 @@ fn boss_outcome_employee_fields(
                 status,
                 reasons,
                 current: assignment.settled.is_none()
-                    || latest_generation.get(&assignment.session)
-                        == Some(&assignment.generation),
+                    || latest_generation.get(&assignment.session) == Some(&assignment.generation),
                 stamp,
                 sort_key: member
                     .and_then(|member| member.employee.created_at)
@@ -13319,10 +13315,7 @@ fn boss_outcome_employee_fields(
 /// verdict up front, then attempt context and age. Blocker text and the
 /// mid-turn exit cause stay out of Tasks rows. Only the current attempt
 /// keeps the full card, so retries read as one card plus quiet lines.
-fn boss_outcome_attempt_entry(
-    fields: &BossOutcomeEmployeeFields,
-    now: u64,
-) -> BossOutcomeEntry {
+fn boss_outcome_attempt_entry(fields: &BossOutcomeEmployeeFields, now: u64) -> BossOutcomeEntry {
     let (icon, tone, spin) = fields.status.marker();
     let mut detail = fields.detail.clone();
     for reason in &fields.reasons {
@@ -14729,12 +14722,12 @@ impl Waku {
                     let commit = commit.clone();
                     async move {
                         let result = match &commit {
-                            Some(commit) => workspace.request(
-                                waku_client::WorkspaceOperation::CommitDiff {
+                            Some(commit) => {
+                                workspace.request(waku_client::WorkspaceOperation::CommitDiff {
                                     cwd: project_path.clone(),
                                     sha: commit.sha.clone(),
-                                },
-                            )?,
+                                })?
+                            }
                             None => workspace.request(
                                 waku_client::WorkspaceOperation::CollectReviewDiff {
                                     cwd: project_path.clone(),
@@ -14767,13 +14760,14 @@ impl Waku {
                     && waku.right_panel_diff_generation == generation
                     && waku.right_panel_diff_source == source
                     && match &commit {
-                        Some(commit) => waku
-                            .right_panel_diff_commit
-                            .as_ref()
-                            .is_some_and(|current| {
-                                current.sha == commit.sha
-                                    && current.workspace == commit.workspace
-                            }),
+                        Some(commit) => {
+                            waku.right_panel_diff_commit
+                                .as_ref()
+                                .is_some_and(|current| {
+                                    current.sha == commit.sha
+                                        && current.workspace == commit.workspace
+                                })
+                        }
                         None => waku
                             .selected_workspace_path()
                             .is_some_and(|path| path == project_path),

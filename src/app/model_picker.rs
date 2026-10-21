@@ -1501,11 +1501,7 @@ static DRAG_AUTOSCROLL_ACTIVE: std::sync::atomic::AtomicBool =
 /// Frames keep coming while the pointer rests there, so a single loop — started
 /// by the first drag move and ended with the drag — drives the scroll, scaled
 /// by frame time and by how deep into the edge zone the pointer is.
-fn start_drag_autoscroll(
-    list_state: &ListState,
-    bounds: Bounds<Pixels>,
-    window: &mut Window,
-) {
+fn start_drag_autoscroll(list_state: &ListState, bounds: Bounds<Pixels>, window: &mut Window) {
     use std::sync::atomic::Ordering;
     if DRAG_AUTOSCROLL_ACTIVE.swap(true, Ordering::Relaxed) {
         return;

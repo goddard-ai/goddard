@@ -2546,16 +2546,12 @@ impl ScratchpadTranscript {
         };
         self.paragraphs.remove(index);
         let reseat = |pos: Option<CaretPos>| {
-            pos.filter(|pos| {
-                match pos.node {
-                    ScratchpadNode::Paragraph(p) | ScratchpadNode::Bullet(p, _) => p != index,
-                }
+            pos.filter(|pos| match pos.node {
+                ScratchpadNode::Paragraph(p) | ScratchpadNode::Bullet(p, _) => p != index,
             })
             .map(|mut pos| {
                 match &mut pos.node {
-                    ScratchpadNode::Paragraph(p) | ScratchpadNode::Bullet(p, _)
-                        if *p > index =>
-                    {
+                    ScratchpadNode::Paragraph(p) | ScratchpadNode::Bullet(p, _) if *p > index => {
                         *p -= 1;
                     }
                     _ => {}
@@ -9824,5 +9820,4 @@ mod tests {
             row.origin
         );
     }
-
 }

@@ -2203,13 +2203,14 @@ impl Waku {
                         }));
                     }
                     if message.role == MessageRole::User {
-                        ctx = ctx.with_file_link_root(
-                            self.selected_workspace_path()
-                                .map(std::path::Path::to_path_buf),
-                        )
-                        // Tables in a user bubble fade into its raised fill,
-                        // not the transcript surface.
-                        .with_surface(theme.raised);
+                        ctx = ctx
+                            .with_file_link_root(
+                                self.selected_workspace_path()
+                                    .map(std::path::Path::to_path_buf),
+                            )
+                            // Tables in a user bubble fade into its raised fill,
+                            // not the transcript surface.
+                            .with_surface(theme.raised);
                     }
                     // Planning chips paint the compass everywhere. On a
                     // boss surface — the chat, a planning session, a
@@ -2507,10 +2508,7 @@ impl Waku {
                     .w_full()
                     .max_w(px(CONTENT_MAX_WIDTH))
                     .min_w_0()
-                    .when_some(
-                        new_content_dot,
-                        |column, dot| column.relative().child(dot),
-                    )
+                    .when_some(new_content_dot, |column, dot| column.relative().child(dot))
                     .child(inner)
                     .when_some(match_flash_overlay, |column, overlay| {
                         column.relative().child(overlay)
@@ -5281,12 +5279,16 @@ impl Waku {
             toggle: Rc::new(move |_, cx| {
                 let _ = toggle_waku.update(cx, |this, cx| {
                     if this.state.selected_session == Some(owner_session)
-                        || this.boss_history_session(owner_session).is_some() {
+                        || this.boss_history_session(owner_session).is_some()
+                    {
                         this.pin_transcript_for_disclosure();
                     }
                     if let Some(state) = this.memory_cards.borrow_mut().get_mut(&toggle_id) {
                         state.expanded = !state.expanded;
-                        state.viewport.scroll_handle.set_offset(gpui::Point::default());
+                        state
+                            .viewport
+                            .scroll_handle
+                            .set_offset(gpui::Point::default());
                     }
                     this.remeasure_memory_card(owner_session, block_index);
                     cx.notify();
@@ -6119,8 +6121,8 @@ mod margin_gesture_tests {
     use std::rc::Rc;
 
     use gpui::{
-        Context, DispatchPhase, HitboxBehavior, IntoElement, ListAlignment, ListState,
-        MouseButton, MouseDownEvent, Render, TestAppContext, Window, canvas, div, list, point, px,
+        Context, DispatchPhase, HitboxBehavior, IntoElement, ListAlignment, ListState, MouseButton,
+        MouseDownEvent, Render, TestAppContext, Window, canvas, div, list, point, px,
     };
 
     use super::*;
@@ -6248,7 +6250,8 @@ mod margin_gesture_tests {
     fn margin_double_click_covers_the_whole_chat_column(cx: &mut TestAppContext) {
         let hits = Rc::new(RefCell::new(Vec::new()));
         let sidebar = 200.0;
-        let rows = ListState::new(40, ListAlignment::Top, px(24.0)).with_uniform_item_height(px(24.0));
+        let rows =
+            ListState::new(40, ListAlignment::Top, px(24.0)).with_uniform_item_height(px(24.0));
         let (harness, cx) = cx.add_window_view({
             let hits = hits.clone();
             move |_, cx| MarginGestureHarness {

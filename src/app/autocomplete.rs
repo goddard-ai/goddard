@@ -220,7 +220,11 @@ pub(super) fn project_reference_target(payload: &str) -> Option<&str> {
 pub(super) fn recent_project_targets_in_messages(messages: &[Message]) -> Vec<String> {
     let mut targets = Vec::new();
     let mut seen = HashSet::new();
-    for message in messages.iter().rev().filter(|message| message.role == MessageRole::User) {
+    for message in messages
+        .iter()
+        .rev()
+        .filter(|message| message.role == MessageRole::User)
+    {
         for atom in message.atoms.iter().rev() {
             if let Some(target) = project_reference_target(&atom.payload)
                 && seen.insert(target.to_owned())
@@ -808,10 +812,7 @@ impl Waku {
     /// refresh so either consumer picks up the arrival.
     pub(super) fn fetch_mention_files(
         &mut self,
-        token: crate::query::FetchToken<(
-            PathBuf,
-            waku_protocol::workspace::ProjectFilesListing,
-        )>,
+        token: crate::query::FetchToken<(PathBuf, waku_protocol::workspace::ProjectFilesListing)>,
         key: (PathBuf, waku_protocol::workspace::ProjectFilesListing),
         cx: &mut Context<Self>,
     ) {
@@ -858,8 +859,7 @@ impl Waku {
             let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
             self.slash_commands
                 .invalidate(&(provider, path.clone(), binary_override));
-            self.mention_files
-                .invalidate_where(|key| key.0 == path);
+            self.mention_files.invalidate_where(|key| key.0 == path);
         }
         self.refresh_composer_sources(cx);
     }
@@ -921,10 +921,7 @@ impl Waku {
     /// The boss owning `surface`'s workspace — the surface's project is the
     /// boss-minted project id, so the boss chat, its planning sessions, and
     /// its deliverable page all resolve to the same daemon.
-    pub(super) fn surface_boss_key(
-        &self,
-        surface: &composer::ComposerCard,
-    ) -> Option<DaemonKey> {
+    pub(super) fn surface_boss_key(&self, surface: &composer::ComposerCard) -> Option<DaemonKey> {
         let project = self.surface_project_id(surface)?;
         self.boss_key_for_project(project)
     }

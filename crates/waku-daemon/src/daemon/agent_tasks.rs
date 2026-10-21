@@ -628,7 +628,9 @@ impl WakuBackend {
         self.boss.reset_context(plan.session_id);
         // Approval hands implementation to the boss. Deliver into an open
         // turn immediately; otherwise the hidden prompt is parked durably.
-        if plan.finalized_at.is_none() && let Some(boss_session) = self.boss.document().session_id {
+        if plan.finalized_at.is_none()
+            && let Some(boss_session) = self.boss.document().session_id
+        {
             let handoff = format!(
                 "Planning session \"{}\" ({}) finalized its design at {} — the document is approved and frozen. Immediately confirm to the human that you received the finalized plan, then coordinate its implementation from here: summon employees for the work and keep the human posted. The planning session stays open during its grace period to answer questions about the design.",
                 finalized.idea, plan.session_id, finalized.plan_file,

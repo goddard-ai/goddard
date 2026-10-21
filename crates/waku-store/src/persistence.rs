@@ -3451,7 +3451,12 @@ pub struct StableLinkRow {
 
 impl StableLinkRow {
     /// A fresh link for a session the daemon is about to admit.
-    pub fn admit(namespace: &str, session_id: Uuid, runtime_session_id: Uuid, runtime_instance: Uuid) -> Self {
+    pub fn admit(
+        namespace: &str,
+        session_id: Uuid,
+        runtime_session_id: Uuid,
+        runtime_instance: Uuid,
+    ) -> Self {
         Self {
             session_id,
             namespace: namespace.to_string(),
@@ -3565,8 +3570,12 @@ impl StateStore {
             .execute(
                 "DELETE FROM stable_runtime_links WHERE session_id = ?1
                  AND runtime_instance = ?2 AND runtime_session_id = ?3 AND generation = ?4",
-                params![session_id.to_string(), runtime_instance.to_string(),
-                    runtime_session_id.to_string(), generation as i64],
+                params![
+                    session_id.to_string(),
+                    runtime_instance.to_string(),
+                    runtime_session_id.to_string(),
+                    generation as i64
+                ],
             )
             .map_err(to_io_error)?;
         Ok(removed == 1)
@@ -3637,9 +3646,16 @@ impl StateStore {
 
     /// Replace only this execution's acceptance receipt with its outcome.
     /// A stale executor cannot overwrite a reconciled result or another owner.
-    pub fn stable_receipt_finish(&self, pending: &StableReceipt, completed: &StableReceipt) -> io::Result<()> {
-        if pending.request_id != completed.request_id || pending.session_id != completed.session_id
-            || pending.generation != completed.generation || pending.class != completed.class {
+    pub fn stable_receipt_finish(
+        &self,
+        pending: &StableReceipt,
+        completed: &StableReceipt,
+    ) -> io::Result<()> {
+        if pending.request_id != completed.request_id
+            || pending.session_id != completed.session_id
+            || pending.generation != completed.generation
+            || pending.class != completed.class
+        {
             return Err(io::Error::other("stable receipt owner mismatch"));
         }
         let connection = self.open()?;
@@ -3650,7 +3666,9 @@ impl StateStore {
                 pending.request_id.to_string(), pending.session_id.to_string(), pending.generation as i64,
                 pending.class, serde_json::to_string(&pending.outcome).map_err(io::Error::other)?],
         ).map_err(to_io_error)?;
-        if changed != 1 { return Err(io::Error::other("stable receipt changed before completion")); }
+        if changed != 1 {
+            return Err(io::Error::other("stable receipt changed before completion"));
+        }
         Ok(())
     }
 }

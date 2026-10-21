@@ -280,9 +280,7 @@ fn matching_action_ids(query: &str, target: ProjectSwitcherTarget) -> Vec<Uuid> 
             } else {
                 tr!("project.temporary_chat")
             };
-            search
-                .score(&label, &mut matcher, &mut utf32)
-                .is_some()
+            search.score(&label, &mut matcher, &mut utf32).is_some()
         })
         .collect()
 }
@@ -1041,8 +1039,7 @@ impl Waku {
                             &self.state.sessions,
                             project_id,
                             |session| self.session_is_boss_managed(session),
-                        )
-                        {
+                        ) {
                             self.select_session(session_id, cx);
                         } else {
                             self.create_session_for(project_id, self.state.last_provider, cx);

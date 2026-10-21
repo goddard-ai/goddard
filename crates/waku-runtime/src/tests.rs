@@ -1386,10 +1386,7 @@ fn expired_command_tombstones_stay_bounded_and_keep_rejecting() {
         session,
         submit(turn, Uuid::new_v4(), "live"),
     );
-    let receipt = rig
-        .host
-        .execute(&rig.creds().0, live_env.clone())
-        .unwrap();
+    let receipt = rig.host.execute(&rig.creds().0, live_env.clone()).unwrap();
     assert_eq!(*disposition(&receipt), CommandDisposition::ProviderAccepted);
 
     // Past the window the resolved commands tombstone; past the bound the
@@ -1416,7 +1413,10 @@ fn expired_command_tombstones_stay_bounded_and_keep_rejecting() {
         .unwrap_err();
     assert_eq!(err, HostError::ExpiredWindow(tombstoned[0]));
     assert!(matches!(
-        rig.host.command(&rig.creds().0, tombstoned[0]).unwrap().disposition,
+        rig.host
+            .command(&rig.creds().0, tombstoned[0])
+            .unwrap()
+            .disposition,
         CommandDisposition::Rejected {
             code: RejectCode::Stale,
             ..
@@ -1599,7 +1599,9 @@ fn agent_ingress_env_pins_the_cli_on_path_and_carries_pairs() {
             .iter()
             .find(|(name, _)| name == "PATH")
             .map(|(_, value)| value.as_os_str()),
-        Some(std::ffi::OsStr::new("/pinned/helpers:/usr/bin:/bin:/usr/local/bin"))
+        Some(std::ffi::OsStr::new(
+            "/pinned/helpers:/usr/bin:/bin:/usr/local/bin"
+        ))
     );
 }
 

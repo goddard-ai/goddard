@@ -10,8 +10,8 @@ use waku_client::DaemonKey;
 use waku_client::boss::{
     BossEmployee, BossFile, BossIdentity, BossOperation, BossPersona, BossPersonaUpsert,
     BossResult, BossState, MemoryOperation, PersonaDefaultAction, PersonaDefaultRole,
-    PersonaInstructionLayer, PersonaPermissions,
-    instruction_diff, shipped_persona_default, shipped_persona_prefix, shipped_persona_revision,
+    PersonaInstructionLayer, PersonaPermissions, instruction_diff, shipped_persona_default,
+    shipped_persona_prefix, shipped_persona_revision,
 };
 use waku_protocol::boss::AvatarStyle;
 use waku_protocol::custom_commands::CustomCommandIcon;
@@ -449,7 +449,10 @@ fn memory_project_options(records: &[MemoryFeedRecord]) -> Vec<(MemoryProjectFil
             .then_with(|| a.cmp(b))
     });
     if has_none {
-        options.push((MemoryProjectFilter::NoProject, tr!("project.no_project_name")));
+        options.push((
+            MemoryProjectFilter::NoProject,
+            tr!("project.no_project_name"),
+        ));
     }
     if has_unknown {
         options.push((MemoryProjectFilter::Unknown, tr!("sidebar.unknown_project")));
@@ -720,7 +723,8 @@ pub(super) struct BossUi {
     /// Explicit Boss -> Employee switches made inside that employee's chat.
     pub(super) employee_composer_interactions: HashMap<DaemonKey, Uuid>,
     /// Keep the submission identity through a lost reply and restored draft.
-    pub(super) employee_composer_submissions: HashMap<Uuid, (Uuid, String, waku_client::AgentPromptDelivery)>,
+    pub(super) employee_composer_submissions:
+        HashMap<Uuid, (Uuid, String, waku_client::AgentPromptDelivery)>,
     /// The deliverable whose row click is still navigating to its task page —
     /// the boss chat. Session activation clears `command_deliverable` as stale
     /// context, so the click parks its deliverable here and the finish reapplies
@@ -1173,9 +1177,9 @@ fn boss_outcome_attention(
     members: &[BossOutcomeMember],
 ) -> bool {
     if outcome.completion_conflict.is_some()
-        || members.iter().any(|member| {
-            waku_protocol::boss::BossOutcome::assignment_unresolved(&member.employee)
-        })
+        || members
+            .iter()
+            .any(|member| waku_protocol::boss::BossOutcome::assignment_unresolved(&member.employee))
     {
         return true;
     }
@@ -1258,7 +1262,9 @@ enum BossItem {
     MemoryRecord(usize),
     /// The feed's "show more" affordance, drawn after the revealed records
     /// with the filtered count still hidden behind it.
-    MemoryFooter { remaining: usize },
+    MemoryFooter {
+        remaining: usize,
+    },
 }
 
 /// An armed composer command: the boss chat that answers the next
@@ -1317,7 +1323,8 @@ pub(super) fn employee_composer_interaction(
     target: Option<Uuid>,
     switched: bool,
 ) -> bool {
-    switched && matches!(context, BossCommandContext::Employee(viewed)
+    switched
+        && matches!(context, BossCommandContext::Employee(viewed)
         if selected == Some(*viewed) && target == Some(*viewed))
 }
 
@@ -1330,7 +1337,8 @@ impl BossUi {
         prompt: &str,
         delivery: waku_client::AgentPromptDelivery,
     ) -> Uuid {
-        self.employee_composer_submissions.remove(&employee)
+        self.employee_composer_submissions
+            .remove(&employee)
             .filter(|stored| stored.1 == prompt && stored.2 == delivery)
             .map(|stored| stored.0)
             .unwrap_or_else(Uuid::new_v4)
@@ -1343,11 +1351,16 @@ impl BossUi {
         prompt: String,
         delivery: waku_client::AgentPromptDelivery,
     ) {
-        self.employee_composer_submissions.insert(employee, (id, prompt, delivery));
+        self.employee_composer_submissions
+            .insert(employee, (id, prompt, delivery));
     }
 
     pub(super) fn accept_employee_composer_submission(&mut self, employee: Uuid, id: Uuid) {
-        if self.employee_composer_submissions.get(&employee).is_some_and(|stored| stored.0 == id) {
+        if self
+            .employee_composer_submissions
+            .get(&employee)
+            .is_some_and(|stored| stored.0 == id)
+        {
             self.employee_composer_submissions.remove(&employee);
         }
     }
@@ -1706,11 +1719,9 @@ fn queued_boss_open_still_applies(
     selected: Option<Uuid>,
 ) -> bool {
     selected == from
-        || from
-            .zip(selected)
-            .is_some_and(|(from, selected)| {
-                live_boss_chat_session(sessions, identities, rotated, from) == selected
-            })
+        || from.zip(selected).is_some_and(|(from, selected)| {
+            live_boss_chat_session(sessions, identities, rotated, from) == selected
+        })
 }
 
 fn viewed_plan_just_finalized(
@@ -1781,9 +1792,10 @@ impl Waku {
                             .iter()
                             .chain(state.retired_employees.iter())
                             .filter(|employee| {
-                                employee.assignment.as_ref().is_some_and(|assignment| {
-                                    assignment.outcome_id == outcome.id
-                                })
+                                employee
+                                    .assignment
+                                    .as_ref()
+                                    .is_some_and(|assignment| assignment.outcome_id == outcome.id)
                             })
                             .map(|employee| BossOutcomeMember {
                                 queue_rank: queue_rank.get(&employee.session_id).copied(),
@@ -2509,8 +2521,7 @@ impl Waku {
                         cx,
                     );
                 } else {
-                    self.boss_ui.queued_open =
-                        Some((key, operation, self.state.selected_session));
+                    self.boss_ui.queued_open = Some((key, operation, self.state.selected_session));
                 }
             } else if let BossOperation::HistorySearch { .. } = operation {
                 // A lookup submitted mid-flight parks instead of dropping —
@@ -2627,11 +2638,7 @@ impl Waku {
             self.boss_ui.plan_finalizing.insert(session_id);
         }
         if feed_request {
-            let feed = self
-                .boss_ui
-                .memory_feed
-                .entry(key)
-                .or_default();
+            let feed = self.boss_ui.memory_feed.entry(key).or_default();
             feed.loading = true;
             feed.error = None;
         }
@@ -2738,7 +2745,10 @@ impl Waku {
                                 signal_event_pump(&this.event_wake_tx);
                             }
                             BossResult::Session { session, project }
-                                if matches!(reply, BossReply::Open | BossReply::Clear | BossReply::List) =>
+                                if matches!(
+                                    reply,
+                                    BossReply::Open | BossReply::Clear | BossReply::List
+                                ) =>
                             {
                                 this.daemons.claim_project(project.id, key);
                                 this.boss_ui.projects.insert(project.id, *project);
@@ -2815,8 +2825,7 @@ impl Waku {
                             BossResult::HistorySearch { result }
                                 if matches!(reply, BossReply::HistorySearch) =>
                             {
-                                let search =
-                                    this.boss_ui.history_search.entry(key).or_default();
+                                let search = this.boss_ui.history_search.entry(key).or_default();
                                 let offset = search.pending_offset.take().unwrap_or(0);
                                 if offset == 0 {
                                     search.hits = result.hits;
@@ -2828,9 +2837,7 @@ impl Waku {
                                 search.error = None;
                                 this.sync_boss_page_rows();
                             }
-                            BossResult::Memory { feed, .. }
-                                if reply == BossReply::MemoryFeed =>
-                            {
+                            BossResult::Memory { feed, .. } if reply == BossReply::MemoryFeed => {
                                 let records = feed
                                     .as_ref()
                                     .and_then(|feed| feed.get("records"))
@@ -2925,11 +2932,7 @@ impl Waku {
                     Err(error) => {
                         let error = error.to_string();
                         if reply == BossReply::MemoryFeed {
-                            let feed = this
-                                .boss_ui
-                                .memory_feed
-                                .entry(key)
-                                .or_default();
+                            let feed = this.boss_ui.memory_feed.entry(key).or_default();
                             feed.loading = false;
                             feed.error = Some(error);
                         } else if reply == BossReply::HistorySearch {
@@ -2971,8 +2974,7 @@ impl Waku {
                 // handling already started another request, the parked op
                 // stays parked and the next completion retries.
                 if !this.boss_ui.pending
-                    && let Some((queued_key, operation, from)) =
-                        this.boss_ui.queued_open.take()
+                    && let Some((queued_key, operation, from)) = this.boss_ui.queued_open.take()
                 {
                     // The click that parked this open was issued on a surface
                     // the user has since left — re-issuing would yank them
@@ -2996,14 +2998,12 @@ impl Waku {
                     }
                 }
                 if !this.boss_ui.pending
-                    && let Some((queued_key, operation)) =
-                        this.boss_ui.queued_history_search.take()
+                    && let Some((queued_key, operation)) = this.boss_ui.queued_history_search.take()
                 {
                     this.boss_request(queued_key, operation, BossReply::HistorySearch, cx);
                 }
                 if !this.boss_ui.pending
-                    && let Some((queued_key, operation)) =
-                        this.boss_ui.queued_memory_feed.take()
+                    && let Some((queued_key, operation)) = this.boss_ui.queued_memory_feed.take()
                 {
                     this.boss_request(queued_key, operation, BossReply::MemoryFeed, cx);
                 }
@@ -3077,10 +3077,7 @@ impl Waku {
             let search = self.boss_ui.history_search.entry(key).or_default();
             (search.project, search.kind, search.range)
         };
-        if query.is_empty()
-            && project.is_none()
-            && kind.is_none()
-            && range == HistoryDateRange::Any
+        if query.is_empty() && project.is_none() && kind.is_none() && range == HistoryDateRange::Any
         {
             // Nothing to ask — the view falls back to the finished roster.
             let search = self.boss_ui.history_search.entry(key).or_default();
@@ -3128,13 +3125,9 @@ impl Waku {
         if !history_view || !self.boss_history_search_active(key) {
             return;
         }
-        let needs = self
-            .boss_ui
-            .history_search
-            .get(&key)
-            .is_none_or(|search| {
-                !search.searching && search.coverage.is_none() && search.error.is_none()
-            });
+        let needs = self.boss_ui.history_search.get(&key).is_none_or(|search| {
+            !search.searching && search.coverage.is_none() && search.error.is_none()
+        });
         if needs {
             self.run_boss_history_search(key, 0, cx);
         }
@@ -3200,11 +3193,7 @@ impl Waku {
         {
             return;
         }
-        self.boss_ui
-            .memory_feed
-            .entry(key)
-            .or_default()
-            .loading = true;
+        self.boss_ui.memory_feed.entry(key).or_default().loading = true;
         self.boss_request(
             key,
             BossOperation::Memory {
@@ -3297,8 +3286,7 @@ impl Waku {
                 feed.records = fresh;
                 feed.loaded = true;
             } else {
-                let fresh_keys: HashSet<String> =
-                    fresh.iter().map(MemoryFeedRecord::key).collect();
+                let fresh_keys: HashSet<String> = fresh.iter().map(MemoryFeedRecord::key).collect();
                 let current_keys: HashSet<String> =
                     feed.records.iter().map(MemoryFeedRecord::key).collect();
                 if fresh_keys == current_keys {
@@ -3354,12 +3342,10 @@ impl Waku {
         }
         self.prune_memory_feedback(key, cx);
         self.sync_boss_page_rows();
-        self.boss_ui
-            .list
-            .scroll_to(gpui::ListOffset {
-                item_ix: 0,
-                offset_in_item: px(0.0),
-            });
+        self.boss_ui.list.scroll_to(gpui::ListOffset {
+            item_ix: 0,
+            offset_in_item: px(0.0),
+        });
         cx.notify();
     }
 
@@ -3377,12 +3363,10 @@ impl Waku {
             feed.filter_notice = None;
         }
         self.sync_boss_page_rows();
-        self.boss_ui
-            .list
-            .scroll_to(gpui::ListOffset {
-                item_ix: 0,
-                offset_in_item: px(0.0),
-            });
+        self.boss_ui.list.scroll_to(gpui::ListOffset {
+            item_ix: 0,
+            offset_in_item: px(0.0),
+        });
         cx.notify();
     }
 
@@ -3666,8 +3650,13 @@ impl Waku {
         let interaction = self.composer_boss_command().and_then(|command| {
             let was_boss = matches!(self.composer_target(&command), ComposerTarget::Boss);
             employee_composer_interaction(
-                &command.context, self.state.selected_session, target, was_boss,
-            ).then_some(target).flatten()
+                &command.context,
+                self.state.selected_session,
+                target,
+                was_boss,
+            )
+            .then_some(target)
+            .flatten()
         });
         self.boss_ui.employee_composer_interactions.remove(&key);
         if let Some(employee) = interaction {
@@ -3693,10 +3682,7 @@ impl Waku {
     /// facing prompt while the chip lands in the boss transcript's bubble.
     /// Memory feedback carries none — its notes ride the submission's
     /// annotations instead.
-    fn boss_command_attachment(
-        &self,
-        context: &BossCommandContext,
-    ) -> Option<MessageAttachment> {
+    fn boss_command_attachment(&self, context: &BossCommandContext) -> Option<MessageAttachment> {
         Some(match context {
             BossCommandContext::Employee(session_id) => {
                 let name = self
@@ -3880,10 +3866,8 @@ impl Waku {
                 )
                 .trim_end()
                 .to_owned();
-                submission.display_content = Some(annotation_bubble_content(
-                    &submission.annotations,
-                    &body,
-                ));
+                submission.display_content =
+                    Some(annotation_bubble_content(&submission.annotations, &body));
                 submission.human_content = if body.is_empty() {
                     Some(annotation_display_content(&submission.annotations))
                 } else {
@@ -4059,11 +4043,7 @@ impl Waku {
                         (true, true) => tr!("boss.employee_finished"),
                         _ => job_title,
                     };
-                    Some((
-                        *employee,
-                        identity,
-                        (!detail.is_empty()).then_some(detail),
-                    ))
+                    Some((*employee, identity, (!detail.is_empty()).then_some(detail)))
                 })
                 .collect(),
         };
@@ -5083,12 +5063,12 @@ impl Waku {
         // The row drags like a task row once the boss chat exists — the
         // reference names its session, so an unopened chat has nothing to
         // carry.
-        let session_drag = state.session_id.map(|session_id| {
-            composer::SidebarSessionDrag {
+        let session_drag = state
+            .session_id
+            .map(|session_id| composer::SidebarSessionDrag {
                 session_id,
                 title: SharedString::from(state.identity.name.clone()),
-            }
-        });
+            });
         div()
             .id(format!("boss-{key:?}"))
             .tab_index(0)
@@ -5810,9 +5790,7 @@ impl Waku {
                 .cursor_default()
                 .opacity(0.0)
                 .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
-                .focus_visible(|style| {
-                    style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight())
-                })
+                .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
                 .hover(|style| style.bg(theme.overlay))
                 .active(|style| style.bg(theme.overlay_strong))
                 .tooltip(Tooltip::text_with_action(
@@ -6382,7 +6360,11 @@ impl Waku {
                 if !all_dormant {
                     items.push(
                         MenuItem::new(
-                            item_label("session.sweep", "deliverable.sweep_many", sweep_targets.len()),
+                            item_label(
+                                "session.sweep",
+                                "deliverable.sweep_many",
+                                sweep_targets.len(),
+                            ),
                             move |_, cx| {
                                 let _ = sweep_waku.update(cx, |waku, cx| {
                                     for (key, id) in sweep_targets.iter().copied() {
@@ -7156,9 +7138,8 @@ impl Waku {
         let visible_rows = self.boss_ui.rows.clone();
         let weak = cx.entity().downgrade();
         let on_memory = self.boss_ui.page.map(|(_, tab)| tab) == Some(BossTab::Memory);
-        let frame_reset = on_memory.then(|| {
-            md::render::frame_reset(self.memory_feedback_selection()).into_any_element()
-        });
+        let frame_reset = on_memory
+            .then(|| md::render::frame_reset(self.memory_feedback_selection()).into_any_element());
         let listeners = on_memory.then(|| {
             let selection = self.memory_feedback_selection();
             let weak = cx.entity().downgrade();
@@ -7194,9 +7175,7 @@ impl Waku {
                 &self.boss_ui.list,
                 &self.boss_ui.scrollbar,
             ))
-            .when_some(listeners, |element, listeners| {
-                element.child(listeners)
-            })
+            .when_some(listeners, |element, listeners| element.child(listeners))
     }
 
     // ── Memory ───────────────────────────────────────────────────────────
@@ -7227,9 +7206,12 @@ impl Waku {
                 feed.visible = feed.visible.max(index + 1);
                 feed.filter_notice = None;
                 self.sync_boss_page_rows();
-                if let Some(row_index) = self.boss_ui.rows.iter().position(|item| {
-                    matches!(item, BossItem::MemoryRecord(i) if *i == index)
-                }) {
+                if let Some(row_index) = self
+                    .boss_ui
+                    .rows
+                    .iter()
+                    .position(|item| matches!(item, BossItem::MemoryRecord(i) if *i == index))
+                {
                     self.boss_ui.list.scroll_to(gpui::ListOffset {
                         item_ix: row_index,
                         offset_in_item: px(0.0),
@@ -7286,9 +7268,7 @@ impl Waku {
                     let weak = weak.clone();
                     MenuItem::new(name.clone(), move |_, cx| {
                         let _ = weak.update(cx, |this, cx| {
-                            this.boss_ui
-                                .memory_project
-                                .insert(key, option.clone());
+                            this.boss_ui.memory_project.insert(key, option.clone());
                             this.reset_boss_memory_view(cx);
                         });
                     })
@@ -7346,21 +7326,19 @@ impl Waku {
                             .child(tr!("boss.memory_new_available")),
                     )
                     .child(
-                        boss_button(
-                            "boss-memory-refresh",
-                            tr!("boss.memory_refresh"),
-                            &theme,
-                        )
-                        .child(icon("icons/rotate-cw.svg", 12.0, theme.text_secondary))
-                        .child(tr!("boss.memory_refresh"))
-                        .on_activation(cx, move |this, _, cx| {
-                            this.apply_pending_memory_feed(key, cx);
-                        }),
+                        boss_button("boss-memory-refresh", tr!("boss.memory_refresh"), &theme)
+                            .child(icon("icons/rotate-cw.svg", 12.0, theme.text_secondary))
+                            .child(tr!("boss.memory_refresh"))
+                            .on_activation(cx, move |this, _, cx| {
+                                this.apply_pending_memory_feed(key, cx);
+                            }),
                     ),
             );
         }
         if let Some(error) = feed.and_then(|feed| {
-            (!feed.records.is_empty()).then(|| feed.error.clone()).flatten()
+            (!feed.records.is_empty())
+                .then(|| feed.error.clone())
+                .flatten()
         }) {
             notices = notices.child(
                 div()
@@ -7379,11 +7357,7 @@ impl Waku {
                             .min_w_0()
                             .text_size(sp(12.0))
                             .text_color(theme.text_secondary)
-                            .child(format!(
-                                "{}{}",
-                                tr!("boss.memory_stale_results"),
-                                error
-                            )),
+                            .child(format!("{}{}", tr!("boss.memory_stale_results"), error)),
                     )
                     .child(
                         boss_button("boss-memory-retry-inline", tr!("boss.retry"), &theme)
@@ -7487,11 +7461,14 @@ impl Waku {
                                     &theme,
                                 )
                                 .child(tr!("boss.memory_clear_search"))
-                                .on_activation(cx, move |this, _, cx| {
-                                    this.boss_memory_search.update(cx, |input, cx| {
-                                        input.set_content(String::new(), cx);
-                                    });
-                                }),
+                                .on_activation(
+                                    cx,
+                                    move |this, _, cx| {
+                                        this.boss_memory_search.update(cx, |input, cx| {
+                                            input.set_content(String::new(), cx);
+                                        });
+                                    },
+                                ),
                             );
                     } else {
                         empty = empty
@@ -7509,10 +7486,13 @@ impl Waku {
                                     &theme,
                                 )
                                 .child(tr!("boss.memory_all_projects"))
-                                .on_activation(cx, move |this, _, cx| {
-                                    this.boss_ui.memory_project.remove(&key);
-                                    this.reset_boss_memory_view(cx);
-                                }),
+                                .on_activation(
+                                    cx,
+                                    move |this, _, cx| {
+                                        this.boss_ui.memory_project.remove(&key);
+                                        this.reset_boss_memory_view(cx);
+                                    },
+                                ),
                             );
                     }
                     empty.into_any_element()
@@ -7655,8 +7635,7 @@ impl Waku {
                 cx.notify();
             },
         );
-        let searching =
-            view == BossEmployeesView::History && self.boss_history_search_active(key);
+        let searching = view == BossEmployeesView::History && self.boss_history_search_active(key);
         let body: AnyElement = if searching {
             self.render_boss_history_body(key, &theme, cx)
         } else if self.boss_ui.rows.is_empty() {
@@ -7760,11 +7739,7 @@ impl Waku {
                         let weak = weak.clone();
                         move |_, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.boss_ui
-                                    .history_search
-                                    .entry(key)
-                                    .or_default()
-                                    .project = None;
+                                this.boss_ui.history_search.entry(key).or_default().project = None;
                                 this.run_boss_history_search(key, 0, cx);
                             });
                         }
@@ -7776,11 +7751,7 @@ impl Waku {
                     let weak = weak.clone();
                     MenuItem::new(name.clone(), move |_, cx| {
                         let _ = weak.update(cx, |this, cx| {
-                            this.boss_ui
-                                .history_search
-                                .entry(key)
-                                .or_default()
-                                .project = Some(id);
+                            this.boss_ui.history_search.entry(key).or_default().project = Some(id);
                             this.run_boss_history_search(key, 0, cx);
                         });
                     })
@@ -7836,11 +7807,7 @@ impl Waku {
                         let weak = weak.clone();
                         MenuItem::new(label.clone(), move |_, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.boss_ui
-                                    .history_search
-                                    .entry(key)
-                                    .or_default()
-                                    .kind = kind;
+                                this.boss_ui.history_search.entry(key).or_default().kind = kind;
                                 this.run_boss_history_search(key, 0, cx);
                             });
                         })
@@ -7884,11 +7851,7 @@ impl Waku {
                         let weak = weak.clone();
                         MenuItem::new(label.clone(), move |_, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.boss_ui
-                                    .history_search
-                                    .entry(key)
-                                    .or_default()
-                                    .range = option;
+                                this.boss_ui.history_search.entry(key).or_default().range = option;
                                 this.run_boss_history_search(key, 0, cx);
                             });
                         })
@@ -7996,7 +7959,12 @@ impl Waku {
     /// A History hit: source kind, subject, person, project and date up
     /// top, archive state labelled, and the excerpt that earned the row —
     /// flagged as orientation when the title matched instead of a passage.
-    fn render_boss_history_hit(&self, key: DaemonKey, index: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn render_boss_history_hit(
+        &self,
+        key: DaemonKey,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(hit) = self
             .boss_ui
@@ -8010,9 +7978,7 @@ impl Waku {
         use waku_protocol::model::HistorySourceKind;
         let (kind_label, kind_icon) = match hit.kind {
             HistorySourceKind::Task => (tr!("boss.history_kind_task"), "icons/message-square.svg"),
-            HistorySourceKind::Employee => {
-                (tr!("boss.history_kind_employee"), "icons/bot.svg")
-            }
+            HistorySourceKind::Employee => (tr!("boss.history_kind_employee"), "icons/bot.svg"),
             HistorySourceKind::Boss => (tr!("boss.history_kind_boss"), "icons/goddard-logo.svg"),
             HistorySourceKind::Plan => (tr!("boss.history_kind_plan"), "icons/file-text.svg"),
         };
@@ -9123,16 +9089,14 @@ impl Waku {
             )
             .when(
                 self.boss_ui.states.get(&key).is_some_and(|state| {
-                    state
-                        .persona_default_role(persona.id)
-                        .is_some_and(|role| {
-                            state.persona_default_notice.as_ref().is_some_and(|notice| {
-                                notice
-                                    .updates
-                                    .iter()
-                                    .any(|update| update.role == role && !update.adopted)
-                            })
+                    state.persona_default_role(persona.id).is_some_and(|role| {
+                        state.persona_default_notice.as_ref().is_some_and(|notice| {
+                            notice
+                                .updates
+                                .iter()
+                                .any(|update| update.role == role && !update.adopted)
                         })
+                    })
                 }),
                 |row| {
                     // The quiet upgrade indicator — text, not color alone.
@@ -9365,39 +9329,45 @@ impl Waku {
                                 } else {
                                     tr!("boss.persona_delete")
                                 };
-                                header.child(
-                                    boss_button("boss-delete-persona", label.clone(), &theme)
-                                        .child(icon(
-                                            "icons/trash.svg",
-                                            13.0,
-                                            theme.text_secondary,
-                                        ))
-                                        .child(label)
-                                        .on_activation(cx, move |this, _, cx| {
-                                            if confirming {
-                                                this.boss_ui.persona_delete_confirmation = None;
-                                                this.boss_request(
-                                                    key,
-                                                    BossOperation::DeletePersona { persona_id },
-                                                    BossReply::Saved,
-                                                    cx,
-                                                );
-                                            } else {
-                                                this.boss_ui.persona_delete_confirmation =
-                                                    Some((key, persona_id));
-                                                cx.notify();
-                                            }
-                                        }),
-                                ).when(confirming, |header| {
-                                    header.child(
-                                        boss_button("boss-delete-persona-cancel", tr!("common.cancel"), &theme)
+                                header
+                                    .child(
+                                        boss_button("boss-delete-persona", label.clone(), &theme)
+                                            .child(icon(
+                                                "icons/trash.svg",
+                                                13.0,
+                                                theme.text_secondary,
+                                            ))
+                                            .child(label)
+                                            .on_activation(cx, move |this, _, cx| {
+                                                if confirming {
+                                                    this.boss_ui.persona_delete_confirmation = None;
+                                                    this.boss_request(
+                                                        key,
+                                                        BossOperation::DeletePersona { persona_id },
+                                                        BossReply::Saved,
+                                                        cx,
+                                                    );
+                                                } else {
+                                                    this.boss_ui.persona_delete_confirmation =
+                                                        Some((key, persona_id));
+                                                    cx.notify();
+                                                }
+                                            }),
+                                    )
+                                    .when(confirming, |header| {
+                                        header.child(
+                                            boss_button(
+                                                "boss-delete-persona-cancel",
+                                                tr!("common.cancel"),
+                                                &theme,
+                                            )
                                             .child(tr!("common.cancel"))
                                             .on_activation(cx, |this, _, cx| {
                                                 this.boss_ui.persona_delete_confirmation = None;
                                                 cx.notify();
                                             }),
-                                    )
-                                })
+                                        )
+                                    })
                             })
                             .child(
                                 boss_button("boss-edit-persona", tr!("boss.edit"), &theme)
@@ -10771,9 +10741,7 @@ impl Waku {
                     .gap(px(6.0))
                     .child(
                         div()
-                            .id(SharedString::from(format!(
-                                "boss-memory-time-{record_key}"
-                            )))
+                            .id(SharedString::from(format!("boss-memory-time-{record_key}")))
                             .flex_1()
                             .min_w_0()
                             .truncate()
@@ -12344,12 +12312,14 @@ mod tests {
                             .id("deliverable-layout-archive")
                             .debug_selector(|| "deliverable-layout-archive".into()),
                     )
-                    .child(sidebar_deliverable_unread_status_slot(
-                        group,
-                        SharedString::from("deliverable-layout-status"),
-                        div().size(px(7.0)).rounded_full(),
-                    )
-                    .debug_selector(|| "deliverable-layout-status".into())),
+                    .child(
+                        sidebar_deliverable_unread_status_slot(
+                            group,
+                            SharedString::from("deliverable-layout-status"),
+                            div().size(px(7.0)).rounded_full(),
+                        )
+                        .debug_selector(|| "deliverable-layout-status".into()),
+                    ),
             )
         }
     }
@@ -12718,11 +12688,7 @@ mod tests {
         // Phase 0 is the rest pose — the frame a reduce-motion render and a
         // non-leasing tick both have to match.
         for phase in [0.0, 0.08, 0.15, 0.95, 0.999, 1.0, 7.05] {
-            assert_eq!(
-                gaze_look_offset(phase, 24.0),
-                (0.0, 0.0),
-                "phase {phase}"
-            );
+            assert_eq!(gaze_look_offset(phase, 24.0), (0.0, 0.0), "phase {phase}");
         }
     }
 
@@ -12782,7 +12748,10 @@ mod tests {
             AvatarStyle::Avvvatars,
             AvatarStyle::Mascots,
         ] {
-            assert!(!gaze_animates(style, false), "{style:?} keeps its static raster");
+            assert!(
+                !gaze_animates(style, false),
+                "{style:?} keeps its static raster"
+            );
         }
         assert!(gaze_animates(AvatarStyle::Gaze, false));
         assert!(!gaze_animates(AvatarStyle::Gaze, true));
@@ -13024,23 +12993,21 @@ mod tests {
 
         // A failed attempt with no roster record left still needs attention.
         let mut task = outcome(1);
-        task.assignments.push(settled_row(9, AssignmentVerdict::Failed, false));
+        task.assignments
+            .push(settled_row(9, AssignmentVerdict::Failed, false));
         assert!(boss_outcome_attention(&task, &[]));
 
         // A flagged blocker reads as failed evidence the same way.
-        task.assignments[0].settled.as_mut().unwrap().verdict =
-            AssignmentVerdict::Finished;
+        task.assignments[0].settled.as_mut().unwrap().verdict = AssignmentVerdict::Finished;
         task.assignments[0].settled.as_mut().unwrap().blocked = true;
         assert!(boss_outcome_attention(&task, &[]));
 
         // Clean finishes and deliberate cancels leave nothing owed.
         task.assignments[0].settled.as_mut().unwrap().blocked = false;
         assert!(!boss_outcome_attention(&task, &[]));
-        task.assignments[0].settled.as_mut().unwrap().verdict =
-            AssignmentVerdict::Cancelled;
+        task.assignments[0].settled.as_mut().unwrap().verdict = AssignmentVerdict::Cancelled;
         assert!(!boss_outcome_attention(&task, &[]));
-        task.assignments[0].settled.as_mut().unwrap().verdict =
-            AssignmentVerdict::Superseded;
+        task.assignments[0].settled.as_mut().unwrap().verdict = AssignmentVerdict::Superseded;
         assert!(!boss_outcome_attention(&task, &[]));
 
         // A rostered member's clean record answers for its own settled
@@ -13735,12 +13702,7 @@ mod tests {
         // An archived employee keeps its own id — its project is not a
         // boss workspace, so a live colleague in it is not a replacement.
         assert_eq!(
-            live_boss_chat_session(
-                &sessions,
-                &identities,
-                &HashMap::new(),
-                archived_employee
-            ),
+            live_boss_chat_session(&sessions, &identities, &HashMap::new(), archived_employee),
             archived_employee
         );
         // A live recorded chat answers itself even with a stale rotation
@@ -13760,12 +13722,7 @@ mod tests {
         });
         let sessions = vec![planning, boss_chat_session(project, chat, false)];
         assert_eq!(
-            live_boss_chat_session(
-                &sessions,
-                &identities,
-                &HashMap::new(),
-                sessions[0].id
-            ),
+            live_boss_chat_session(&sessions, &identities, &HashMap::new(), sessions[0].id),
             sessions[0].id
         );
     }
@@ -13806,8 +13763,7 @@ mod tests {
         // pointer — activating it would land the click on the archive.
         let sessions = vec![boss_chat_session(project, old, true)];
         assert!(
-            pending_boss_open_session(&sessions, &identities, &HashMap::new(), Some(old))
-                .is_none()
+            pending_boss_open_session(&sessions, &identities, &HashMap::new(), Some(old)).is_none()
         );
         // A recorded swap alone cannot make the retired pointer safe: the
         // replacement's row must be in the catalog first.
@@ -13826,9 +13782,7 @@ mod tests {
             pending_boss_open_session(&sessions, &identities, &HashMap::new(), Some(next))
                 .is_none()
         );
-        assert!(
-            pending_boss_open_session(&sessions, &identities, &HashMap::new(), None).is_none()
-        );
+        assert!(pending_boss_open_session(&sessions, &identities, &HashMap::new(), None).is_none());
     }
 
     #[test]
@@ -13960,7 +13914,10 @@ mod tests {
     fn history_lookup_engages_on_text_or_any_filter() {
         // An empty field over default filters keeps the finished roster.
         assert!(!boss_history_search_active("", None));
-        assert!(!boss_history_search_active("  ", Some(&BossHistorySearch::default())));
+        assert!(!boss_history_search_active(
+            "  ",
+            Some(&BossHistorySearch::default())
+        ));
 
         // Field text alone engages the lookup — the query names what the
         // human remembers, not an employee.
@@ -13999,8 +13956,7 @@ mod tests {
             boss_history_rows(&BossHistorySearch {
                 searching: true,
                 ..Default::default()
-            })
-                == vec![BossItem::HistoryFooter]
+            }) == vec![BossItem::HistoryFooter]
         );
 
         // Hits list in order; the footer follows while anything —
@@ -14115,10 +14071,7 @@ mod tests {
         let chat = Uuid::new_v4();
         let project_draft = Uuid::new_v4();
         let projectless_draft = Uuid::new_v4();
-        assert!(!boss_open_reply_navigates(
-            Some(chat),
-            Some(project_draft)
-        ));
+        assert!(!boss_open_reply_navigates(Some(chat), Some(project_draft)));
         assert!(!boss_open_reply_navigates(
             Some(chat),
             Some(projectless_draft)
@@ -14189,16 +14142,25 @@ mod tests {
         let repeated = ui.employee_composer_submission(employee, "original", delivery);
         assert_ne!(first, repeated); // distinct fresh sends, including in flight
         ui.restore_employee_composer_submission(employee, first, "original".into(), delivery);
-        assert_eq!(first, ui.employee_composer_submission(employee, "original", delivery));
+        assert_eq!(
+            first,
+            ui.employee_composer_submission(employee, "original", delivery)
+        );
         ui.restore_employee_composer_submission(employee, first, "original".into(), delivery);
         let edited = ui.employee_composer_submission(employee, "edited", delivery);
         assert_ne!(first, edited);
         ui.restore_employee_composer_submission(employee, edited, "edited".into(), delivery);
         ui.accept_employee_composer_submission(employee, first);
-        assert_eq!(edited, ui.employee_composer_submission(employee, "edited", delivery));
+        assert_eq!(
+            edited,
+            ui.employee_composer_submission(employee, "edited", delivery)
+        );
         ui.restore_employee_composer_submission(employee, edited, "edited".into(), delivery);
         ui.accept_employee_composer_submission(employee, edited);
-        assert_ne!(edited, ui.employee_composer_submission(employee, "edited", delivery));
+        assert_ne!(
+            edited,
+            ui.employee_composer_submission(employee, "edited", delivery)
+        );
     }
 
     #[test]
@@ -14206,20 +14168,34 @@ mod tests {
         let viewed = Uuid::new_v4();
         let other = Uuid::new_v4();
         let context = BossCommandContext::Employee(viewed);
-        assert!(employee_composer_interaction(&context, Some(viewed), Some(viewed), true));
+        assert!(employee_composer_interaction(
+            &context,
+            Some(viewed),
+            Some(viewed),
+            true
+        ));
         for (selected, target, switched) in [
             (Some(viewed), Some(viewed), false), // ordinary/global pick
-            (Some(other), Some(viewed), true), // another chat
-            (Some(viewed), Some(other), true), // another employee
-            (Some(viewed), None, true), // switched back to Boss
+            (Some(other), Some(viewed), true),   // another chat
+            (Some(viewed), Some(other), true),   // another employee
+            (Some(viewed), None, true),          // switched back to Boss
             (None, Some(viewed), true),
         ] {
-            assert!(!employee_composer_interaction(&context, selected, target, switched));
+            assert!(!employee_composer_interaction(
+                &context, selected, target, switched
+            ));
         }
         let deliverable = BossCommandContext::Deliverable {
-            path: PathBuf::from("report.md"), name: "Report".into(), directory: false,
+            path: PathBuf::from("report.md"),
+            name: "Report".into(),
+            directory: false,
         };
-        assert!(!employee_composer_interaction(&deliverable, Some(viewed), Some(viewed), true));
+        assert!(!employee_composer_interaction(
+            &deliverable,
+            Some(viewed),
+            Some(viewed),
+            true
+        ));
     }
 
     /// An employee chat's composer names only the boss and its own
@@ -14249,10 +14225,7 @@ mod tests {
         ));
         // A colleague's pick — live or stale — reads unpicked on this page.
         assert!(matches!(
-            composer_target_pick_for_context(
-                &employee_context,
-                ComposerTargetPick::Live(coworker)
-            ),
+            composer_target_pick_for_context(&employee_context, ComposerTargetPick::Live(coworker)),
             ComposerTargetPick::Unpicked
         ));
         assert!(matches!(

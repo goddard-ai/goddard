@@ -183,15 +183,15 @@ fn grant_not_issued_for_fenced_generation() {
         receipt.disposition,
         CommandDisposition::Terminal { .. } | CommandDisposition::Uncertain { .. }
     ));
-    let result = rig.host.issue_grant(
-        &rig.creds().0,
-        control.epoch,
-        rig.sref(session),
-        60_000,
-    );
+    let result = rig
+        .host
+        .issue_grant(&rig.creds().0, control.epoch, rig.sref(session), 60_000);
     assert!(matches!(result, Err(HostError::Malformed(_))));
     let _replacement = rig.control();
-    assert_eq!(rig.host.check_grant(&original), Err(HostError::Unauthorized));
+    assert_eq!(
+        rig.host.check_grant(&original),
+        Err(HostError::Unauthorized)
+    );
 }
 
 // -- ingress dedup and forwarding ------------------------------------------
@@ -328,7 +328,10 @@ fn forwarded_but_unresolved_survives_controller_replacement() {
 
     // Daemon 1 drains and dies before answering. Daemon 2's epoch still
     // owes the request — the daemon dedups by identity on its side.
-    let _ = rig.host.ingress_drain(&rig.creds().0, control1.epoch).unwrap();
+    let _ = rig
+        .host
+        .ingress_drain(&rig.creds().0, control1.epoch)
+        .unwrap();
     let control2 = rig.control();
     let forwarded = rig
         .host
@@ -373,10 +376,7 @@ fn runtime_restart_uncertains_forwarded_and_refuses_pending() {
     assert_eq!(inventory.sessions[0].status, SessionStatus::Interrupted);
 
     // The forwarded request is uncertain — never silently replayed.
-    let record = rig
-        .host
-        .ingress_query(&grant, request_forwarded)
-        .unwrap();
+    let record = rig.host.ingress_query(&grant, request_forwarded).unwrap();
     assert!(matches!(
         record.disposition,
         IngressDisposition::Uncertain { .. }
@@ -388,8 +388,13 @@ fn runtime_restart_uncertains_forwarded_and_refuses_pending() {
         .ingress_drain(&rig.creds().0, control.epoch)
         .unwrap();
     assert!(drained.is_empty());
-    assert!(matches!(rig.host.ingress_query(&grant, request_pending).unwrap().disposition,
-        IngressDisposition::Refused { .. }));
+    assert!(matches!(
+        rig.host
+            .ingress_query(&grant, request_pending)
+            .unwrap()
+            .disposition,
+        IngressDisposition::Refused { .. }
+    ));
 }
 
 // -- claims -----------------------------------------------------------------
@@ -477,7 +482,10 @@ fn ingress_on_fenced_session_rejects_revoked_authority() {
         )
         .unwrap();
     let request = rig.request(2_000_000);
-    assert_eq!(rig.host.ingress_submit(&grant, request), Err(HostError::Unauthorized));
+    assert_eq!(
+        rig.host.ingress_submit(&grant, request),
+        Err(HostError::Unauthorized)
+    );
     // Nothing fenced reaches a service drain.
     let drained = rig
         .host
@@ -513,7 +521,12 @@ fn pending_ingress_cannot_outlive_original_grant_on_reattach() {
     rig.clock.advance(60_000);
     let replacement = rig.control();
     assert_eq!(rig.host.check_grant(&grant), Err(HostError::Unauthorized));
-    assert!(rig.host.ingress_drain(&rig.creds().0, replacement.epoch).unwrap().is_empty());
+    assert!(
+        rig.host
+            .ingress_drain(&rig.creds().0, replacement.epoch)
+            .unwrap()
+            .is_empty()
+    );
     // A later wall-clock rollback cannot renew the original grant.
     rig.clock.set(1_000_000);
     assert_eq!(rig.host.check_grant(&grant), Err(HostError::Unauthorized));
@@ -565,7 +578,9 @@ fn terminal_ingress_records_reclaim_past_their_horizon() {
         1
     );
     let undispatched = rig.request(1_200_000);
-    rig.host.ingress_submit(&grant, undispatched.clone()).unwrap();
+    rig.host
+        .ingress_submit(&grant, undispatched.clone())
+        .unwrap();
     assert_eq!(rig.host.status(&rig.creds().0).unwrap().ingress_records, 3);
 
     // Past its deadline but inside the query horizon the never-dispatched

@@ -96,7 +96,9 @@ fn plan_acceptance_dispatch_and_projection_failures_preserve_work() {
                         if accepted_first {
                             driver.prompt_with_attachments(prompt, files);
                         }
-                        anyhow::bail!("plan delivery unconfirmed: injected runtime submission failure");
+                        anyhow::bail!(
+                            "plan delivery unconfirmed: injected runtime submission failure"
+                        );
                     }
                     driver.prompt_with_attachments(prompt, files);
                     Ok(())
@@ -191,7 +193,13 @@ fn plan_acceptance_oversized_artifact_read_denial_withholds_execution() {
     assert!(!fixture.gate.delivered());
     let stored = fixture.stored();
     assert_eq!(stored.receipt.phase, Phase::Blocked);
-    assert!(stored.receipt.failure.unwrap().contains("Permission denied"));
+    assert!(
+        stored
+            .receipt
+            .failure
+            .unwrap()
+            .contains("Permission denied")
+    );
     assert_eq!(stored.withheld[0].0, BRIEF);
 }
 
@@ -207,10 +215,7 @@ fn plan_acceptance_symlink_substitution_never_releases_private_bytes() {
     std::os::unix::fs::symlink(&private, artifact).unwrap();
     fixture.accept();
     assert!(!fixture.gate.delivered());
-    assert_eq!(
-        fixture.gate.review.lock().receipt.phase,
-        Phase::Blocked
-    );
+    assert_eq!(fixture.gate.review.lock().receipt.phase, Phase::Blocked);
     assert!(
         !fixture
             .capture
@@ -234,10 +239,7 @@ fn plan_acceptance_concurrent_retirement_fences_stale_attempt() {
         .unwrap();
     fixture.accept();
     assert!(!fixture.gate.delivered());
-    assert_eq!(
-        fixture.gate.review.lock().receipt.phase,
-        Phase::Blocked
-    );
+    assert_eq!(fixture.gate.review.lock().receipt.phase, Phase::Blocked);
     fixture.gate.submit("RETRY_SENTINEL".into(), Vec::new());
     assert_eq!(mutations(&fixture), 1);
 }
@@ -270,9 +272,7 @@ fn plan_acceptance_attachments_reach_the_execution_input_exactly_once() {
         pasted_text_preview: None,
         session_id: None,
     };
-    fixture
-        .gate
-        .submit(BRIEF.into(), vec![attachment.clone()]);
+    fixture.gate.submit(BRIEF.into(), vec![attachment.clone()]);
     assert_eq!(files.0.lock().len(), 1);
     assert_eq!(files.0.lock()[0][0].path, attachment.path);
     fixture.accept();
@@ -284,7 +284,9 @@ fn plan_acceptance_attachments_reach_the_execution_input_exactly_once() {
         path: fixture.root.join("task-input-2"),
         ..attachment
     };
-    fixture.gate.submit("followup".into(), vec![followup.clone()]);
+    fixture
+        .gate
+        .submit("followup".into(), vec![followup.clone()]);
     assert_eq!(files.0.lock().len(), 2);
     assert_eq!(files.0.lock()[1][0].path, followup.path);
 }
@@ -298,10 +300,7 @@ fn plan_acceptance_intentional_interrupt_mid_submission_holds_uncertain_input() 
     fixture.gate.submit(BRIEF.into(), Vec::new());
     fixture.gate.interrupt_delivery();
     assert!(!fixture.gate.delivered());
-    assert_eq!(
-        fixture.gate.review.lock().receipt.phase,
-        Phase::Blocked
-    );
+    assert_eq!(fixture.gate.review.lock().receipt.phase, Phase::Blocked);
     let stored = fixture.stored();
     assert_eq!(stored.receipt.phase, Phase::Blocked);
     assert_eq!(stored.withheld[0].0, BRIEF);

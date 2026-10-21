@@ -750,7 +750,8 @@ mod display_message_content_tests {
 
     #[test]
     fn display_message_content_hides_boss_rotation_context_only_for_users() {
-        let prompt = "Before\n<boss-session-rotation>private context</boss-session-rotation>\nAfter";
+        let prompt =
+            "Before\n<boss-session-rotation>private context</boss-session-rotation>\nAfter";
         let user = Message::new(MessageRole::User, prompt);
         assert_eq!(display_message_content(&user), "Before\n\nAfter");
         assert_eq!(user.content, prompt, "stored content remains unchanged");

@@ -706,9 +706,8 @@ pub fn agent_ingress_env(
             "/usr/bin:/bin:/usr/local/bin"
         });
         let path = std::env::join_paths(
-            std::iter::once(cli_dir.clone()).chain(std::env::split_paths(
-                base_path.unwrap_or(fallback),
-            )),
+            std::iter::once(cli_dir.clone())
+                .chain(std::env::split_paths(base_path.unwrap_or(fallback))),
         )
         .unwrap_or_else(|_| cli_dir.clone().into_os_string());
         if let Some(existing) = pairs

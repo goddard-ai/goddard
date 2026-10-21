@@ -635,25 +635,22 @@ impl WakuBackend {
     /// the caller skips the control, which demands a retry for sealed
     /// attempts.
     pub(super) fn chain_resume_recheck(&self, chain_id: Uuid) -> anyhow::Result<bool> {
-        let gate_paused = self
-            .boss
-            .document()
-            .chains
-            .iter()
-            .find(|chain| chain.id == chain_id)
-            .filter(|chain| chain.status == ChainStatus::Paused)
-            .and_then(|chain| chain.steps[chain.current_step].attempts.last())
-            .filter(|attempt| {
-                attempt.sealed.is_some()
-                    && !attempt.handoff_accepted
-                    && attempt
-                        .terminal
-                        .as_ref()
-                        .is_some_and(|terminal| {
+        let gate_paused =
+            self.boss
+                .document()
+                .chains
+                .iter()
+                .find(|chain| chain.id == chain_id)
+                .filter(|chain| chain.status == ChainStatus::Paused)
+                .and_then(|chain| chain.steps[chain.current_step].attempts.last())
+                .filter(|attempt| {
+                    attempt.sealed.is_some()
+                        && !attempt.handoff_accepted
+                        && attempt.terminal.as_ref().is_some_and(|terminal| {
                             terminal.disposition == ResultDisposition::Success
                         })
-            })
-            .map(|attempt| (attempt.id, attempt.definition_version));
+                })
+                .map(|attempt| (attempt.id, attempt.definition_version));
         let Some((attempt_id, version)) = gate_paused else {
             return Ok(false);
         };

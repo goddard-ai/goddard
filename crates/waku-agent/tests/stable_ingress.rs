@@ -146,7 +146,10 @@ impl Rig {
 fn actual_cli_survives_controller_replacement_and_retries_original_identity() {
     let mut rig = Rig::new();
     let id = Uuid::new_v4();
-    let child = rig.cli(id, &["models", "--output", "json"]).spawn().unwrap();
+    let child = rig
+        .cli(id, &["models", "--output", "json"])
+        .spawn()
+        .unwrap();
     let original = rig.recorded(id);
     assert_eq!(original.class, IngressKind::Cli);
     assert_eq!(original.disposition, IngressDisposition::Pending);
@@ -192,7 +195,10 @@ fn actual_cli_survives_controller_replacement_and_retries_original_identity() {
             .join(format!("{id}.json")),
     )
     .unwrap();
-    let replay = rig.cli(id, &["models", "--output", "json"]).output().unwrap();
+    let replay = rig
+        .cli(id, &["models", "--output", "json"])
+        .output()
+        .unwrap();
     assert!(replay.status.success());
     assert_eq!(replay.stdout, output.stdout);
     assert_eq!(

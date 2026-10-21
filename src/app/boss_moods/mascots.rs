@@ -134,9 +134,9 @@ pub(crate) fn avatar_image(seed: &str, bucket: u32) -> anyhow::Result<Arc<gpui::
     } else {
         decoded
     };
-    Ok(Arc::new(gpui::RenderImage::new(vec![
-        image::Frame::new(frame),
-    ])))
+    Ok(Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
+        frame,
+    )])))
 }
 
 /// Stable mascot pick per seed — verified by the module test so the same

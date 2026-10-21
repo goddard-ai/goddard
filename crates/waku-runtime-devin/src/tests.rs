@@ -1307,7 +1307,10 @@ fn devin_child_env_carries_only_the_provisioned_ingress_pairs() {
     let env_path = root.join("agent-env.json");
     let deadline = Instant::now() + Duration::from_secs(10);
     while !env_path.exists() {
-        assert!(Instant::now() < deadline, "the child never recorded its env");
+        assert!(
+            Instant::now() < deadline,
+            "the child never recorded its env"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
     let dump: serde_json::Value =

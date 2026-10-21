@@ -183,14 +183,12 @@ impl Broker {
                 // idle simulator service remains resident outside the process group.
                 r.resources.native_builds = 0;
                 r.resources.desktop_input = 0;
-                r.resources.exclusive.retain(|key| {
-                    resident_device(key) && retained_device(key, &observation)
-                });
+                r.resources
+                    .exclusive
+                    .retain(|key| resident_device(key) && retained_device(key, &observation));
                 r.resources.resident_devices = r.resources.exclusive.len() as u32;
             }
-            live_work
-                || live_device
-                || (!r.cancelled && !r.released && holder_alive)
+            live_work || live_device || (!r.cancelled && !r.released && holder_alive)
         });
         let request_id;
         let mut borrowed = false;
@@ -406,15 +404,15 @@ impl Broker {
                 && !reservation.cancelled
                 && !reservation.released)
                 .then(|| {
-                wait_reason(
-                    reservation,
-                    index,
-                    &ledger,
-                    &policy,
-                    &observation,
-                    &external_devices,
-                )
-            });
+                    wait_reason(
+                        reservation,
+                        index,
+                        &ledger,
+                        &policy,
+                        &observation,
+                        &external_devices,
+                    )
+                });
             ledger.reservations[index].waiting_on = waiting_on;
         }
         // Rename under a stable separate lock: a killed writer leaves either old or new complete JSON.
@@ -890,10 +888,7 @@ fn wait_reason(
             .find(|held| held.granted_at.is_some() && held.resources.exclusive.contains(key))
             .map(|held| (key, held))
     }) {
-        return format!(
-            "device {key} held by {}",
-            holder_label(holder, observation)
-        );
+        return format!("device {key} held by {}", holder_label(holder, observation));
     }
     if let Some(earlier) = ledger.reservations[..position].iter().find(|earlier| {
         earlier.granted_at.is_none()
@@ -1877,7 +1872,11 @@ mod tests {
         ] {
             assert!(
                 h.broker
-                    .transaction(Uuid::new_v4(), acquisition(resources, None), Observation::default())
+                    .transaction(
+                        Uuid::new_v4(),
+                        acquisition(resources, None),
+                        Observation::default()
+                    )
                     .is_err()
             );
         }
@@ -2107,7 +2106,13 @@ mod tests {
         // An ordinary admission honors the waiter's place in line.
         let queued = h
             .broker
-            .try_admission(Uuid::new_v4(), Uuid::new_v4(), build(), "queued".into(), claim(false))
+            .try_admission(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                build(),
+                "queued".into(),
+                claim(false),
+            )
             .unwrap();
         assert!(!queued.granted);
         assert!(
@@ -2123,7 +2128,13 @@ mod tests {
         // order; the waiter stays parked, its held set untouched.
         let forced = h
             .broker
-            .try_admission(Uuid::new_v4(), Uuid::new_v4(), build(), "forced".into(), claim(true))
+            .try_admission(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                build(),
+                "forced".into(),
+                claim(true),
+            )
             .unwrap();
         assert!(
             forced.granted,
@@ -2163,7 +2174,8 @@ mod tests {
         assert!(admitted.granted);
 
         let path = h.broker.root.join("state.json");
-        let mut state: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let mut state: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         state["reservations"][0]["admission"]["newer_admission_field"] =
             serde_json::json!("ignored by older daemons");
         fs::write(&path, serde_json::to_vec(&state).unwrap()).unwrap();
@@ -2307,11 +2319,7 @@ mod tests {
         );
         // The transacting daemon dies — the lease stays live on its owner.
         h.mutate(|ledger| {
-            let row = ledger
-                .reservations
-                .iter_mut()
-                .find(|r| r.id == id)
-                .unwrap();
+            let row = ledger.reservations.iter_mut().find(|r| r.id == id).unwrap();
             assert_eq!(row.owner_pid, Some(owner.0.id()));
             row.daemon_pid = u32::MAX / 2;
         });
@@ -2321,11 +2329,12 @@ mod tests {
 
         // A lease whose owner also dies ends honestly.
         owner.stop();
-        assert!(h
-            .op(task, ResourceOperation::Status { id: None })
-            .reservations
-            .iter()
-            .all(|r| r.id != id));
+        assert!(
+            h.op(task, ResourceOperation::Status { id: None })
+                .reservations
+                .iter()
+                .all(|r| r.id != id)
+        );
     }
 
     #[test]
@@ -2377,22 +2386,28 @@ mod tests {
             }
         });
         let status = h.op(task, ResourceOperation::Status { id: None });
-        assert!(status
-            .reservations
-            .iter()
-            .any(|r| r.id == held_id && !r.cancelled));
-        assert!(status
-            .reservations
-            .iter()
-            .any(|r| r.id == agent_id && !r.cancelled));
+        assert!(
+            status
+                .reservations
+                .iter()
+                .any(|r| r.id == held_id && !r.cancelled)
+        );
+        assert!(
+            status
+                .reservations
+                .iter()
+                .any(|r| r.id == agent_id && !r.cancelled)
+        );
         // Agent holder death still ends its own row even under a live owner.
         workload.stop();
         let status = h.op(task, ResourceOperation::Status { id: None });
         assert!(status.reservations.iter().all(|r| r.id != agent_id));
-        assert!(status
-            .reservations
-            .iter()
-            .any(|r| r.id == held_id && !r.cancelled));
+        assert!(
+            status
+                .reservations
+                .iter()
+                .any(|r| r.id == held_id && !r.cancelled)
+        );
     }
 
     #[test]
@@ -2402,42 +2417,45 @@ mod tests {
         let first = h.acquire(task, build());
         let id = id(&first);
         // A dead pid can never become a surviving owner.
-        assert!(h
-            .broker
-            .transaction(
-                task,
-                ResourceOperation::Reanchor {
-                    id,
-                    owner_pid: u32::MAX / 2
-                },
-                Observation::default()
-            )
-            .is_err());
+        assert!(
+            h.broker
+                .transaction(
+                    task,
+                    ResourceOperation::Reanchor {
+                        id,
+                        owner_pid: u32::MAX / 2
+                    },
+                    Observation::default()
+                )
+                .is_err()
+        );
         // Ownership fencing — no other task may touch the lease.
-        assert!(h
-            .broker
-            .transaction(
-                Uuid::new_v4(),
-                ResourceOperation::Reanchor {
-                    id,
-                    owner_pid: std::process::id()
-                },
-                Observation::default()
-            )
-            .is_err());
+        assert!(
+            h.broker
+                .transaction(
+                    Uuid::new_v4(),
+                    ResourceOperation::Reanchor {
+                        id,
+                        owner_pid: std::process::id()
+                    },
+                    Observation::default()
+                )
+                .is_err()
+        );
         // Cancelled or released rows stay dead.
         h.op(task, ResourceOperation::Cancel { id });
-        assert!(h
-            .broker
-            .transaction(
-                task,
-                ResourceOperation::Reanchor {
-                    id,
-                    owner_pid: std::process::id()
-                },
-                Observation::default()
-            )
-            .is_err());
+        assert!(
+            h.broker
+                .transaction(
+                    task,
+                    ResourceOperation::Reanchor {
+                        id,
+                        owner_pid: std::process::id()
+                    },
+                    Observation::default()
+                )
+                .is_err()
+        );
     }
 
     /// A wait reason names the real blockers: the granted row holding an
@@ -2556,7 +2574,9 @@ mod tests {
         assert!(!granted(&again, again_id));
         assert_eq!(
             row(&again, again_id).waiting_on.as_deref(),
-            Some(format!("device {IOS} held by task {b} (released; device {IOS} retained)").as_str())
+            Some(
+                format!("device {IOS} held by task {b} (released; device {IOS} retained)").as_str()
+            )
         );
         workload.stop();
     }

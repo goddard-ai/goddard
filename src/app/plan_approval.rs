@@ -128,23 +128,45 @@ impl Waku {
     /// Explicit human reconfirmation creates a new revision for a legacy
     /// approval without claiming to recover its historical bytes.
     pub(super) fn request_plan_reconfirmation(
-        &mut self, key: waku_client::DaemonKey, session_id: Uuid, cx: &mut Context<Self>,
+        &mut self,
+        key: waku_client::DaemonKey,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
     ) {
-        let Some(plan) = self.boss_ui.states.get(&key)
-            .and_then(|state| state.planning.iter().find(|plan| plan.session_id == session_id))
+        let Some(plan) = self
+            .boss_ui
+            .states
+            .get(&key)
+            .and_then(|state| {
+                state
+                    .planning
+                    .iter()
+                    .find(|plan| plan.session_id == session_id)
+            })
             .filter(|plan| plan.finalized_at.is_some() && plan.approved_revisions.is_empty())
             .cloned()
-        else { return; };
-        let Some(reviewed) = self.plan_docs.get(&session_id)
+        else {
+            return;
+        };
+        let Some(reviewed) = self
+            .plan_docs
+            .get(&session_id)
             .filter(|doc| doc.key == key && matches!(&doc.content, Some(Ok(_))))
             .and_then(|doc| doc.displayed_reviewed.clone())
         else {
             self.ensure_plan_doc(key, session_id, &plan.plan_file, true, cx);
             return;
         };
-        self.boss_request(key, waku_client::boss::BossOperation::FinalizePlan {
-            plan_file: Some(plan.plan_file), items: None, reviewed: Some(reviewed),
-        }, super::boss::BossReply::Finalize(session_id), cx);
+        self.boss_request(
+            key,
+            waku_client::boss::BossOperation::FinalizePlan {
+                plan_file: Some(plan.plan_file),
+                items: None,
+                reviewed: Some(reviewed),
+            },
+            super::boss::BossReply::Finalize(session_id),
+            cx,
+        );
     }
 
     /// The "Finalize plan" approval chip — suggestion-chip shell, same as

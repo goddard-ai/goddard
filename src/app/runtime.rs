@@ -4301,9 +4301,11 @@ impl Waku {
             .is_some_and(|session| {
                 session.incognito
                     && !session.has_started()
-                    && self.state.projects.iter().any(|project| {
-                        project.id == session.project_id && project.is_projectless()
-                    })
+                    && self
+                        .state
+                        .projects
+                        .iter()
+                        .any(|project| project.id == session.project_id && project.is_projectless())
             })
     }
 
@@ -7100,7 +7102,8 @@ impl Waku {
         self.unarchive_session(session_id, false, cx);
         let was_expired = self.boss_ui.expired.contains(&session_id);
         let submission_id = interaction.then(|| {
-            self.boss_ui.employee_composer_submission(session_id, &prompt, delivery)
+            self.boss_ui
+                .employee_composer_submission(session_id, &prompt, delivery)
         });
         let request = if let Some(submission_id) = submission_id {
             waku_client::Command::EmployeeComposerPrompt {
@@ -7129,7 +7132,8 @@ impl Waku {
                 match result {
                     Ok(_) => {
                         if let Some(id) = submission_id {
-                            waku.boss_ui.accept_employee_composer_submission(session_id, id);
+                            waku.boss_ui
+                                .accept_employee_composer_submission(session_id, id);
                         }
                         if was_expired && !interaction {
                             let name = waku
@@ -7147,7 +7151,10 @@ impl Waku {
                     Err(error) => {
                         if let Some(id) = submission_id {
                             waku.boss_ui.restore_employee_composer_submission(
-                                session_id, id, submission.prompt.clone(), delivery,
+                                session_id,
+                                id,
+                                submission.prompt.clone(),
+                                delivery,
                             );
                         }
                         waku.restore_composer_submission(restore_session, submission, cx);
@@ -7218,10 +7225,7 @@ impl Waku {
                             })
                             .filter(|name| !name.is_empty())
                             .unwrap_or_else(|| tr!("boss.trigger_employee"));
-                        waku.show_success_toast(tr!(
-                            "boss.employee_resume_queued",
-                            name = name
-                        ));
+                        waku.show_success_toast(tr!("boss.employee_resume_queued", name = name));
                     }
                     Err(error) => {
                         waku.restore_composer_submission(session_id, submission, cx);
