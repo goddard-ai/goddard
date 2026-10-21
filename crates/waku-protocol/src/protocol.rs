@@ -683,7 +683,7 @@ pub enum Command {
     AgentWireframe {
         path: String,
     },
-    /// Set the title of the calling agent's own task. Requires a per-task grant.
+    /// Set the calling task's title with single-use user approval, requesting it if needed.
     AgentRenameSelf {
         title: String,
     },

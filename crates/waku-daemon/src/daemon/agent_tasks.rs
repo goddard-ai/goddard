@@ -80,8 +80,8 @@ impl WakuBackend {
         Ok(ResponsePayload::Ack)
     }
 
-    /// A scoped `rename` either applies outright — the task holds a stored
-    /// grant — or parks a permission request on the session until the user
+    /// A scoped `rename` consumes the user's single-use `/rename` grant
+    /// or parks a permission request on the session until the user
     /// answers. The request survives the turn that raised it: it is parked
     /// on the session, not the turn, so a folded turn cannot hide it.
     pub(super) fn agent_rename_self(
@@ -104,9 +104,12 @@ impl WakuBackend {
                 .session_mut(caller)
                 .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
             if session.agent_rename_allowed {
-                if session.set_title(title) {
-                    self.task_store.save(&mut state)?;
-                }
+                // Consume even when the proposed title is unchanged. Otherwise
+                // one user request could authorize unlimited future renames.
+                session.set_title_from_user(title);
+                self.task_store.save(&mut state)?;
+                drop(state);
+                self.notify_task_state();
                 return Ok(ResponsePayload::Ack);
             }
         }
@@ -140,7 +143,6 @@ impl WakuBackend {
             detail_i18n: Some(detail_i18n),
             options: vec![
                 PermissionOption::keyed("once", localized!("session.agent_rename_once"), true),
-                PermissionOption::keyed("always", localized!("session.agent_rename_always"), true),
                 PermissionOption::keyed("deny", localized!("common.deny"), false),
             ],
         })?;
@@ -171,16 +173,13 @@ impl WakuBackend {
                 let session = state
                     .session_mut(caller)
                     .ok_or_else(|| anyhow!("task {caller} is unknown to the daemon"))?;
-                // Set the title first — `granted || set_title` would skip the
-                // rename entirely on an "always" answer.
-                let renamed = session.set_title(title);
-                let granted = option.as_deref() == Some("always") && !session.agent_rename_allowed;
-                if granted {
-                    session.agent_rename_allowed = true;
-                }
-                if renamed || granted {
+                // Old clients may still answer an already-visible "always"
+                // option. It approves this title only, never future renames.
+                if session.set_title_from_user(title) {
                     self.task_store.save(&mut state)?;
                 }
+                drop(state);
+                self.notify_task_state();
                 Ok(ResponsePayload::Ack)
             }
             Some(_) => bail!("the rename to {title:?} was declined"),

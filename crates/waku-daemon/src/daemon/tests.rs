@@ -2295,7 +2295,7 @@ fn computer_use_through_the_built_cli_and_scoped_daemon_connection() {
 }
 
 #[test]
-fn agent_rename_requires_own_task_grant_and_persists_title() {
+fn agent_rename_consumes_own_task_grant_and_persists_title() {
     let root = std::env::temp_dir().join(format!("waku-agent-rename-{}", Uuid::new_v4()));
     let (backend, session_id, side_id) = read_scope_test_backend(&root);
     let events = EventSink::detached();
@@ -2321,9 +2321,38 @@ fn agent_rename_requires_own_task_grant_and_persists_title() {
             .agent_rename_self(Some(session_id), " ", &events)
             .is_err()
     );
+    // Invalid input preserves approval, but even an unchanged valid title
+    // uses it up. A second call must ask the user again.
+    let current_title = backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .unwrap()
+        .title
+        .clone();
+    backend
+        .agent_rename_self(Some(session_id), &current_title, &events)
+        .unwrap();
+    assert!(
+        backend
+            .agent_rename_self(Some(session_id), "Unapproved title", &events)
+            .is_err()
+    );
+    {
+        let mut state = backend.task_state.lock();
+        state.session_mut(session_id).unwrap().agent_rename_allowed = true;
+        backend.task_store.save(&mut state).unwrap();
+    }
     backend
         .agent_rename_self(Some(session_id), "  My title  ", &events)
         .unwrap();
+    assert!(
+        backend
+            .agent_rename_self(Some(session_id), "Another unapproved title", &events)
+            .is_err()
+    );
     let state = backend.task_state.lock();
     assert_eq!(
         state
@@ -2351,13 +2380,13 @@ fn agent_rename_requires_own_task_grant_and_persists_title() {
         .find(|session| session.id == session_id)
         .unwrap();
     assert_eq!(own.title, "My title");
-    assert!(own.agent_rename_allowed);
+    assert!(!own.agent_rename_allowed);
     let _ = std::fs::remove_dir_all(root);
 }
 
 /// Without a stored grant the rename parks a permission request on the
-/// session; the answer — here "always" — applies the title and records
-/// the grant. A finished turn never drains the wait.
+/// session; even a legacy "always" answer approves only that title.
+/// A finished turn never drains the wait.
 #[test]
 fn an_ungranted_agent_rename_parks_a_request_until_answered() {
     let root = std::env::temp_dir().join(format!("waku-agent-rename-req-{}", Uuid::new_v4()));
@@ -2377,52 +2406,55 @@ fn an_ungranted_agent_rename_parks_a_request_until_answered() {
         },
     );
     let events = EventSink::detached();
-    std::thread::scope(|scope| {
-        let rename =
-            scope.spawn(|| backend.agent_rename_self(Some(session_id), "Fresh title", &events));
-        let request_id = loop {
-            if let Some(request_id) = backend.agent.parked_permission_request(session_id) {
-                break request_id;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        };
-        assert!(request_id.starts_with(waku_protocol::AGENT_RENAME_REQUEST_PREFIX));
-        // A finished turn does not drain the request — the card outlives
-        // the fold so it stays answerable.
-        backend.agent.note_driver_event(
-            session_id,
-            &DriverEvent::TurnFinished {
-                success: true,
-                summary: None,
-                summary_i18n: None,
-            },
-        );
-        assert!(
-            backend
-                .agent
-                .parked_permission_request(session_id)
-                .is_some()
-        );
-        assert_eq!(
-            backend.agent.resolve_permission(
+    for (title, option) in [("Fresh title", "always"), ("Next title", "once")] {
+        std::thread::scope(|scope| {
+            let rename =
+                scope.spawn(|| backend.agent_rename_self(Some(session_id), title, &events));
+            let request_id = loop {
+                if let Some(request_id) = backend.agent.parked_permission_request(session_id) {
+                    break request_id;
+                }
+                assert!(!rename.is_finished(), "each rename must wait for approval");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            };
+            assert!(request_id.starts_with(waku_protocol::AGENT_RENAME_REQUEST_PREFIX));
+            // A finished turn does not drain the request — the card outlives
+            // the fold so it stays answerable.
+            backend.agent.note_driver_event(
                 session_id,
-                &Command::Respond {
-                    request_id: request_id.clone(),
-                    option_id: "always".into(),
+                &DriverEvent::TurnFinished {
+                    success: true,
+                    summary: None,
+                    summary_i18n: None,
                 },
-            ),
-            Some(request_id)
-        );
-        assert!(matches!(rename.join().unwrap(), Ok(ResponsePayload::Ack)));
-    });
+            );
+            assert!(
+                backend
+                    .agent
+                    .parked_permission_request(session_id)
+                    .is_some()
+            );
+            assert_eq!(
+                backend.agent.resolve_permission(
+                    session_id,
+                    &Command::Respond {
+                        request_id: request_id.clone(),
+                        option_id: option.into(),
+                    },
+                ),
+                Some(request_id)
+            );
+            assert!(matches!(rename.join().unwrap(), Ok(ResponsePayload::Ack)));
+        });
+    }
     let state = backend.task_state.lock();
     let session = state
         .sessions
         .iter()
         .find(|session| session.id == session_id)
         .unwrap();
-    assert_eq!(session.title, "Fresh title");
-    assert!(session.agent_rename_allowed);
+    assert_eq!(session.title, "Next title");
+    assert!(!session.agent_rename_allowed);
     let _ = std::fs::remove_dir_all(root);
 }
 

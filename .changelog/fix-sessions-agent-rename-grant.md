@@ -1,1 +1,1 @@
-- Manually renaming a task now revokes the standing "always allow" agent-rename grant, so a human-chosen title stays human-owned and the next `goddard-agent rename` asks for permission again.
+- Agents now need user approval for each task rename. `/rename` approves one rename; later renames ask again, and manually choosing a title clears any pending approval.

@@ -1928,7 +1928,7 @@ pub struct AgentSession {
     /// `provider_cursor`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub incognito: bool,
-    /// The user has allowed this task's agent to set its own title.
+    /// The user has approved one agent rename via `/rename`. Consumed when used.
     #[serde(default, skip_serializing_if = "is_false")]
     pub agent_rename_allowed: bool,
     /// Stamped when the session belongs to a boss — its own chat or a
@@ -2615,7 +2615,7 @@ impl AgentSession {
     }
 
     /// Sets a title the user typed — a sidebar inline rename or
-    /// `/rename <title>`. A human-chosen title revokes the standing
+    /// `/rename <title>`. A human-chosen title revokes the pending
     /// agent-rename grant, so the next `goddard-agent rename` parks a fresh
     /// permission request. Returns whether anything changed.
     pub fn set_title_from_user(&mut self, title: impl AsRef<str>) -> bool {
@@ -7514,7 +7514,7 @@ mod tests {
         assert!(!session.agent_rename_allowed);
         assert_eq!(session.title, "My title");
 
-        // An agent-approved rename is not a user title and keeps the grant.
+        // Low-level title updates leave approval management to the caller.
         session.agent_rename_allowed = true;
         assert!(session.set_title("Agent title"));
         assert!(session.agent_rename_allowed);

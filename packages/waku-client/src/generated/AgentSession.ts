@@ -179,7 +179,7 @@ landed_at?: number | null,
  */
 incognito?: boolean,
 /**
- * The user has allowed this task's agent to set its own title.
+ * The user has approved one agent rename via `/rename`. Consumed when used.
  */
 agent_rename_allowed?: boolean,
 /**
