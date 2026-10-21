@@ -250,8 +250,8 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
         WorkspaceOperation::GitCommonDir { cwd } => WorkspaceResult::GitCommonDir {
             dir: crate::repo::common_git_dir(&cwd)?,
         },
-        WorkspaceOperation::ListWorktrees { cwd } => WorkspaceResult::RepoWorktrees {
-            entries: crate::repo::list_worktrees(&cwd)?,
+        WorkspaceOperation::ListWorktrees { cwd, skip_status } => WorkspaceResult::RepoWorktrees {
+            entries: crate::repo::list_worktrees(&cwd, !skip_status)?,
         },
         WorkspaceOperation::ListRepoBranches { cwd } => WorkspaceResult::RepoBranches {
             entries: crate::repo::list_repo_branches(&cwd)?,
@@ -1290,6 +1290,46 @@ mod tests {
             files += 1;
         }
         (files, additions, deletions)
+    }
+
+    #[test]
+    fn worktree_picker_skips_status_while_legacy_requests_keep_it() {
+        let root = repository();
+        let linked = root.with_extension("linked");
+        git_ok(
+            &root,
+            &["worktree", "add", "--detach", linked.to_str().unwrap()],
+        );
+        fs::write(linked.join("dirty.txt"), "dirty\n").unwrap();
+
+        for skip_status in [false, true] {
+            let mut request = serde_json::json!({"type": "listWorktrees", "cwd": linked});
+            if skip_status {
+                request["skip_status"] = serde_json::json!(true);
+            }
+            let operation = serde_json::from_value(request).unwrap();
+            let WorkspaceResult::RepoWorktrees {
+                entries: Some(entries),
+            } = execute(operation, "qa").unwrap()
+            else {
+                panic!("expected worktrees");
+            };
+            assert_eq!(entries.len(), 2);
+            assert!(entries[0].is_main);
+            let checkout = &entries[1];
+            assert!(!checkout.is_main);
+            assert_eq!(checkout.path, dunce::canonicalize(&linked).unwrap());
+            assert!(
+                checkout.branch.is_none(),
+                "detached worktrees remain selectable"
+            );
+            assert_eq!(checkout.head, entries[0].head);
+            assert_eq!(checkout.dirty_files, (!skip_status).then_some(1));
+            assert_eq!(checkout.last_commit_at.is_some(), !skip_status);
+        }
+
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(linked).unwrap();
     }
 
     #[test]

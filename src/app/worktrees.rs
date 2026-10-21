@@ -1476,9 +1476,10 @@ impl Waku {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    match workspace
-                        .request(waku_client::WorkspaceOperation::ListWorktrees { cwd })?
-                    {
+                    match workspace.request(waku_client::WorkspaceOperation::ListWorktrees {
+                        cwd,
+                        skip_status: true,
+                    })? {
                         waku_client::WorkspaceResult::RepoWorktrees {
                             entries: Some(entries),
                         } => Ok(entries),

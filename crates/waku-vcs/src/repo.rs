@@ -35,7 +35,12 @@ pub fn common_git_dir(cwd: &Path) -> anyhow::Result<Option<PathBuf>> {
 /// ones — enriched with per-checkout status. `Ok(None)` means `cwd` is not
 /// inside a Git repository. A read that fails for one worktree degrades that
 /// entry's optional fields to `None` rather than failing the whole list.
-pub fn list_worktrees(cwd: &Path) -> anyhow::Result<Option<Vec<RepoWorktree>>> {
+/// With `include_status` disabled, only the worktree registry is read and
+/// status and commit-time fields remain `None`.
+pub fn list_worktrees(
+    cwd: &Path,
+    include_status: bool,
+) -> anyhow::Result<Option<Vec<RepoWorktree>>> {
     // `worktree list` resolves the repository from anywhere inside it,
     // including a linked worktree, and reports the main checkout first.
     let output = crate::command_env::search_path_command("git")
@@ -62,7 +67,7 @@ pub fn list_worktrees(cwd: &Path) -> anyhow::Result<Option<Vec<RepoWorktree>>> {
                 last_commit_at: None,
             };
             // A bare repository has no working tree to take the status of.
-            if !parsed.bare {
+            if include_status && !parsed.bare {
                 enrich_worktree(&mut entry);
             }
             entry
@@ -444,7 +449,7 @@ mod tests {
         fs::write(repository.join("dirty.txt"), "dirty\n").unwrap();
         fs::write(linked.join("notes.txt"), "notes\n").unwrap();
 
-        let entries = list_worktrees(&repository).unwrap().unwrap();
+        let entries = list_worktrees(&repository, true).unwrap().unwrap();
         assert_eq!(entries.len(), 2);
         let main = &entries[0];
         assert!(main.is_main);
@@ -461,11 +466,11 @@ mod tests {
         assert_eq!(linked_entry.head, main.head);
 
         // The same list answers from inside a linked worktree.
-        assert_eq!(list_worktrees(&linked).unwrap().unwrap().len(), 2);
+        assert_eq!(list_worktrees(&linked, true).unwrap().unwrap().len(), 2);
 
         // Outside a repository the read reports `None`.
         let outside = non_repository();
-        assert!(list_worktrees(&outside).unwrap().is_none());
+        assert!(list_worktrees(&outside, true).unwrap().is_none());
         fs::remove_dir_all(&outside).ok();
 
         fs::remove_dir_all(repository.parent().unwrap()).ok();

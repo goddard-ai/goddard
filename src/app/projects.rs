@@ -956,6 +956,7 @@ impl Waku {
                     let worktrees = workspace
                         .request(waku_client::WorkspaceOperation::ListWorktrees {
                             cwd: cwd.clone(),
+                            skip_status: false,
                         })
                         .ok()
                         .and_then(|result| match result {

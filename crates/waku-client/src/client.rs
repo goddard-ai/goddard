@@ -1154,7 +1154,10 @@ mod tests {
         // Reads and ordinary requests keep the short bound.
         assert_eq!(
             request_timeout(&Command::Workspace {
-                operation: WorkspaceOperation::ListWorktrees { cwd: cwd.clone() }
+                operation: WorkspaceOperation::ListWorktrees {
+                    cwd: cwd.clone(),
+                    skip_status: false
+                }
             }),
             REQUEST_TIMEOUT
         );

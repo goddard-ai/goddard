@@ -1282,6 +1282,7 @@ impl Waku {
                             workspace
                                 .request(waku_client::WorkspaceOperation::ListWorktrees {
                                     cwd: root.clone(),
+                                    skip_status: false,
                                 })
                                 .ok()
                         })

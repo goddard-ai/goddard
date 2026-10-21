@@ -44,7 +44,12 @@ name?: string | null, } | { "type": "removeWorktree", path: string,
 /**
  * `false` matches older clients that did not send the field.
  */
-force: boolean, } | { "type": "ensureWorktree", project_path: string, path: string, branch?: string | null, base_ref?: string | null, } | { "type": "gitCommonDir", cwd: string, } | { "type": "listWorktrees", cwd: string, } | { "type": "listRepoBranches", cwd: string, } | { "type": "fetchRemote", cwd: string, remote: string, } | { "type": "deleteBranches", cwd: string, names: Array<string>,
+force: boolean, } | { "type": "ensureWorktree", project_path: string, path: string, branch?: string | null, base_ref?: string | null, } | { "type": "gitCommonDir", cwd: string, } | { "type": "listWorktrees", cwd: string,
+/**
+ * Skip per-checkout status and commit-time reads for pickers.
+ * Absent on older clients, which retain the enriched table listing.
+ */
+skip_status: boolean, } | { "type": "listRepoBranches", cwd: string, } | { "type": "fetchRemote", cwd: string, remote: string, } | { "type": "deleteBranches", cwd: string, names: Array<string>,
 /**
  * `false` matches older clients that did not send the field.
  */

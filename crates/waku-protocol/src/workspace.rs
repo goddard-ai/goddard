@@ -814,6 +814,10 @@ pub enum WorkspaceOperation {
     ListWorktrees {
         #[ts(type = "string")]
         cwd: PathBuf,
+        /// Skip per-checkout status and commit-time reads for pickers.
+        /// Absent on older clients, which retain the enriched table listing.
+        #[serde(default)]
+        skip_status: bool,
     },
     /// Local branches and remote-tracking refs for the Projects page's
     /// branch table. Returns `RepoBranches`; `None` outside a Git

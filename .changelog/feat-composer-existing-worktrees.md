@@ -1,1 +1,1 @@
-- Choose an existing Git worktree from the composer's workspace selector, with search and a quick way back to Local.
+- Choose an existing Git worktree from the composer's workspace selector, with search and a quick way back to Local. The picker lists worktrees without waiting for status scans of every checkout.
