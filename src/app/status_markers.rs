@@ -320,6 +320,19 @@ fn suggested_actions(evaluation: &Evaluation) -> Vec<StatusSuggestedAction> {
     }
 }
 
+/// Match the displayed ending, including Partial's continuation subtype.
+fn session_awaits_continue(session: &AgentSession, evaluation: Option<&Evaluation>) -> bool {
+    composer::session_awaits_continue(session)
+        || (!session.status.is_busy()
+            && session
+                .turns
+                .last()
+                .is_some_and(|turn| turn.status == TurnStatus::Completed)
+            && evaluation
+                .and_then(|evaluation| cleared_subtype(evaluation, ENDING_QUESTION, ENDING_MARKERS))
+                .is_some_and(|(marker, _)| marker.id == "partial"))
+}
+
 fn waiting_for_user_input(evaluation: &Evaluation) -> bool {
     cleared_markers(evaluation).iter().any(|(marker, _)| {
         matches!(
@@ -972,6 +985,14 @@ fn sidebar_marker(evaluation: &Evaluation) -> Option<SidebarStatusMarker> {
 }
 
 impl Waku {
+    pub(super) fn session_awaits_continue(&self, session: &AgentSession) -> bool {
+        let evaluation = session
+            .turns
+            .last()
+            .and_then(|turn| self.turn_status_markers.get(&turn.id));
+        session_awaits_continue(session, evaluation)
+    }
+
     /// Status-driven actions take the composer suggestion slot when the
     /// latest settled turn clearly asks for a response from the user.
     pub(super) fn render_status_suggestion(
@@ -1713,6 +1734,48 @@ mod tests {
                 .map(|(id, probability)| (id.to_string(), *probability))
                 .collect(),
         }
+    }
+
+    #[test]
+    fn partial_turns_offer_continue_only_when_the_latest_ending_qualifies() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("finish the work");
+        session.finish_active_turn(TurnStatus::Completed);
+        session.status = SessionStatus::Idle;
+        let mut verdict = evaluation(BTreeMap::from([(
+            ENDING_QUESTION.to_owned(),
+            ending_choice("partial", &[("partial", 0.8)]),
+        )]));
+        assert!(session_awaits_continue(&session, Some(&verdict)));
+
+        verdict.answers.insert(
+            PARTIAL_QUESTION.to_owned(),
+            ending_choice("needs-continuation", &[("needs-continuation", 0.8)]),
+        );
+        assert!(session_awaits_continue(&session, Some(&verdict)));
+        assert!(!session_awaits_continue(&session, None));
+
+        for (ending, score) in [
+            ("partial", 0.49),
+            ("complete", 0.9),
+            ("awaiting-input", 0.9),
+        ] {
+            verdict.answers.insert(
+                ENDING_QUESTION.to_owned(),
+                ending_choice(ending, &[(ending, score)]),
+            );
+            assert!(!session_awaits_continue(&session, Some(&verdict)));
+        }
+        verdict.answers.insert(
+            ENDING_QUESTION.to_owned(),
+            ending_choice("partial", &[("partial", 0.8)]),
+        );
+        session.begin_turn("next request");
+        session.status = SessionStatus::Working;
+        assert!(!session_awaits_continue(&session, Some(&verdict)));
+        // Even a transient idle status must not let a running turn continue.
+        session.status = SessionStatus::Idle;
+        assert!(!session_awaits_continue(&session, Some(&verdict)));
     }
 
     #[test]

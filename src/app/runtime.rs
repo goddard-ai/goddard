@@ -6651,7 +6651,7 @@ impl Waku {
             .sessions
             .iter()
             .find(|session| session.id == session_id)?;
-        if !composer::session_awaits_continue(session) {
+        if !self.session_awaits_continue(session) {
             return None;
         }
         let resend = composer::undelivered_turn_resend(session);

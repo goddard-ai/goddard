@@ -5946,7 +5946,10 @@ impl Waku {
             return composer_submit_action(session, preparing, has_draft);
         }
         if !has_draft
-            && session.is_some_and(|session| self.quarantine_handoff_transfer(session).is_some())
+            && session.is_some_and(|session| {
+                self.session_awaits_continue(session)
+                    || self.quarantine_handoff_transfer(session).is_some()
+            })
         {
             return ComposerSubmitAction::Continue;
         }

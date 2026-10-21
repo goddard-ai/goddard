@@ -1,0 +1,1 @@
+- Resume turns labeled Partial by Jev with Enter on an empty composer or the submit button’s play icon.

@@ -6441,13 +6441,13 @@ impl Waku {
                             && this.composer_inline_atoms.is_empty()
                             && !this.has_annotations()
                             && this.selected_session().is_some_and(|session| {
-                                composer::session_awaits_continue(session)
+                                this.session_awaits_continue(session)
                                     || this.quarantine_handoff_transfer(session).is_some()
                             })
                         {
-                            // Enter on an empty composer over a stopped turn
-                            // or an unstarted quarantined transfer is the
-                            // same affordance as the play button.
+                            // Empty-composer Enter uses the play button's
+                            // Continue flow for stopped or Partial turns
+                            // and unstarted quarantined transfers.
                             this.continue_interrupted_session(cx);
                         } else if let Some(submission) =
                             this.submission_with_attachments(prompt, cx)
@@ -6479,10 +6479,10 @@ impl Waku {
                                 // the chord.
                             } else if this
                                 .composer_session()
-                                .is_some_and(composer::session_awaits_continue)
+                                .is_some_and(|session| this.session_awaits_continue(session))
                             {
                                 // Cmd+Enter on an empty composer continues a
-                                // stopped turn too; its queued follow-ups
+                                // stopped or Partial turn too; queued follow-ups
                                 // still drain once that turn settles.
                                 this.continue_interrupted_session(cx);
                             } else {
