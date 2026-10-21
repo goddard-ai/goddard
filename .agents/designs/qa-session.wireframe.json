@@ -3,202 +3,339 @@
   "name": "QA session \u2014 setup and review workspace",
   "screens": [
     {
-      "name": "1 \u00b7 First-use setup",
-      "width": 760,
-      "height": 790,
+      "name": "1 \u00b7 First-use setup \u00b7 settings cards",
+      "width": 960,
+      "height": 920,
       "root": {
         "type": "frame",
-        "direction": "column",
-        "padding": 28,
-        "gap": 20,
+        "direction": "row",
+        "align": "start",
+        "padding": {
+          "x": 24,
+          "y": 40
+        },
         "children": [
           {
             "type": "frame",
-            "direction": "row",
-            "align": "center",
-            "children": [
-              {
-                "type": "text",
-                "text": "Start QA Session",
-                "role": "title",
-                "tone": "primary",
-                "width": "fill"
-              },
-              {
-                "type": "text",
-                "text": "1 \u00b7 Setup",
-                "role": "caption",
-                "tone": "secondary"
-              }
-            ]
-          },
-          {
-            "type": "text",
-            "text": "Confirm once for this project. Edit these settings later.",
-            "role": "body",
-            "tone": "secondary"
-          },
-          {
-            "type": "divider"
+            "direction": "column",
+            "width": "fill",
+            "children": []
           },
           {
             "type": "frame",
             "direction": "column",
-            "gap": 8,
+            "width": 800,
+            "gap": 24,
             "children": [
               {
-                "type": "text",
-                "text": "Project",
-                "role": "label",
-                "tone": "primary"
+                "type": "frame",
+                "direction": "row",
+                "align": "center",
+                "gap": 20,
+                "children": [
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "gap": 8,
+                    "width": "fill",
+                    "children": [
+                      {
+                        "type": "text",
+                        "text": "QA setup",
+                        "role": "title",
+                        "tone": "primary"
+                      },
+                      {
+                        "type": "text",
+                        "text": "Set up Acme Web for isolated QA sessions.",
+                        "role": "body",
+                        "tone": "secondary"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "rect",
+                    "label": "Acme Web  \u25be",
+                    "height": 34,
+                    "cornerRadius": 6,
+                    "width": 152,
+                    "fill": "overlay"
+                  }
+                ]
               },
               {
-                "type": "rect",
-                "label": "Acme Web  \u25be",
-                "height": 36,
-                "cornerRadius": 6,
-                "fill": "inset",
-                "width": "fill"
-              },
-              {
                 "type": "text",
-                "text": "Choose a registered local project.",
+                "text": "Saved for this project. You can change these settings before any session.",
                 "role": "caption",
                 "tone": "secondary"
+              },
+              {
+                "type": "frame",
+                "direction": "column",
+                "gap": 10,
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Review source",
+                    "role": "label",
+                    "tone": "primary"
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "row",
+                    "align": "center",
+                    "gap": 12,
+                    "padding": {
+                      "x": 20,
+                      "y": 16
+                    },
+                    "fill": "surface",
+                    "cornerRadius": 16,
+                    "annotations": "Use the same leading branch icon and inline input placement as the existing QA branch settings card.",
+                    "children": [
+                      {
+                        "type": "rect",
+                        "label": "\u2442",
+                        "height": 20,
+                        "cornerRadius": 6,
+                        "width": 20
+                      },
+                      {
+                        "type": "frame",
+                        "direction": "column",
+                        "width": "fill",
+                        "gap": 9,
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "QA branch",
+                            "role": "label",
+                            "tone": "primary"
+                          },
+                          {
+                            "type": "text",
+                            "text": "Take the next commit from this local branch. The default branch is excluded.",
+                            "role": "caption",
+                            "tone": "secondary"
+                          },
+                          {
+                            "type": "rect",
+                            "label": "dev",
+                            "height": 34,
+                            "cornerRadius": 6,
+                            "width": 360,
+                            "fill": "inset"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "frame",
+                "direction": "column",
+                "gap": 10,
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Development server",
+                    "role": "label",
+                    "tone": "primary"
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "row",
+                    "align": "center",
+                    "gap": 12,
+                    "padding": {
+                      "x": 20,
+                      "y": 16
+                    },
+                    "fill": "surface",
+                    "cornerRadius": 16,
+                    "children": [
+                      {
+                        "type": "rect",
+                        "label": ">_",
+                        "height": 20,
+                        "cornerRadius": 6,
+                        "width": 20
+                      },
+                      {
+                        "type": "frame",
+                        "direction": "column",
+                        "width": "fill",
+                        "gap": 9,
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "Dev server command",
+                            "role": "label",
+                            "tone": "primary"
+                          },
+                          {
+                            "type": "text",
+                            "text": "Run after dependencies are installed. Suggested from package.json.",
+                            "role": "caption",
+                            "tone": "secondary"
+                          },
+                          {
+                            "type": "rect",
+                            "label": "pnpm run dev",
+                            "height": 34,
+                            "cornerRadius": 6,
+                            "width": 360,
+                            "fill": "inset"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "row",
+                    "align": "center",
+                    "gap": 12,
+                    "padding": {
+                      "x": 20,
+                      "y": 16
+                    },
+                    "fill": "surface",
+                    "cornerRadius": 16,
+                    "children": [
+                      {
+                        "type": "rect",
+                        "label": "\u2193",
+                        "height": 20,
+                        "cornerRadius": 6,
+                        "width": 20
+                      },
+                      {
+                        "type": "frame",
+                        "direction": "column",
+                        "width": "fill",
+                        "gap": 9,
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "Install command \u00b7 optional",
+                            "role": "label",
+                            "tone": "primary"
+                          },
+                          {
+                            "type": "text",
+                            "text": "Suggested from pnpm-lock.yaml. Leave blank to skip installation.",
+                            "role": "caption",
+                            "tone": "secondary"
+                          },
+                          {
+                            "type": "rect",
+                            "label": "pnpm install --frozen-lockfile",
+                            "height": 34,
+                            "cornerRadius": 6,
+                            "width": 360,
+                            "fill": "inset"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "frame",
+                "direction": "column",
+                "gap": 10,
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Ready to review",
+                    "role": "label",
+                    "tone": "primary"
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "row",
+                    "align": "center",
+                    "gap": 12,
+                    "padding": {
+                      "x": 20,
+                      "y": 16
+                    },
+                    "fill": "surface",
+                    "cornerRadius": 16,
+                    "annotations": "Refresh the remote default branch before selecting the candidate from the local QA branch.",
+                    "children": [
+                      {
+                        "type": "rect",
+                        "label": "\u2442",
+                        "height": 20,
+                        "cornerRadius": 6,
+                        "width": 20
+                      },
+                      {
+                        "type": "frame",
+                        "direction": "column",
+                        "width": "fill",
+                        "gap": 6,
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "a7c92d1 \u00b7 Fix checkout validation",
+                            "role": "label",
+                            "tone": "primary"
+                          },
+                          {
+                            "type": "text",
+                            "text": "Local dev \u2192 origin/main + 1 commit",
+                            "role": "caption",
+                            "tone": "secondary"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "frame",
+                "direction": "row",
+                "align": "center",
+                "gap": 12,
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Creates a temporary worktree and starts the server.",
+                    "role": "caption",
+                    "tone": "secondary",
+                    "width": "fill"
+                  },
+                  {
+                    "type": "rect",
+                    "label": "Cancel",
+                    "height": 34,
+                    "cornerRadius": 6,
+                    "width": 80,
+                    "fill": "overlay"
+                  },
+                  {
+                    "type": "rect",
+                    "label": "Save & start QA",
+                    "height": 34,
+                    "cornerRadius": 6,
+                    "width": 156,
+                    "fill": "accent"
+                  }
+                ]
               }
             ]
           },
           {
             "type": "frame",
             "direction": "column",
-            "gap": 8,
-            "children": [
-              {
-                "type": "text",
-                "text": "Dev server command",
-                "role": "label",
-                "tone": "primary"
-              },
-              {
-                "type": "rect",
-                "label": "pnpm run dev",
-                "height": 36,
-                "cornerRadius": 6,
-                "fill": "inset",
-                "width": "fill"
-              },
-              {
-                "type": "text",
-                "text": "Suggested from package.json and pnpm-lock.yaml \u00b7 editable",
-                "role": "caption",
-                "tone": "secondary"
-              }
-            ]
-          },
-          {
-            "type": "frame",
-            "direction": "column",
-            "gap": 8,
-            "children": [
-              {
-                "type": "text",
-                "text": "Install command \u00b7 optional",
-                "role": "label",
-                "tone": "primary"
-              },
-              {
-                "type": "rect",
-                "label": "pnpm install --frozen-lockfile",
-                "height": 36,
-                "cornerRadius": 6,
-                "fill": "inset",
-                "width": "fill"
-              },
-              {
-                "type": "text",
-                "text": "Leave blank to skip installation.",
-                "role": "caption",
-                "tone": "secondary"
-              }
-            ]
-          },
-          {
-            "type": "frame",
-            "direction": "column",
-            "gap": 8,
-            "children": [
-              {
-                "type": "text",
-                "text": "QA branch",
-                "role": "label",
-                "tone": "primary"
-              },
-              {
-                "type": "rect",
-                "label": "dev",
-                "height": 36,
-                "cornerRadius": 6,
-                "fill": "inset",
-                "width": "fill"
-              },
-              {
-                "type": "text",
-                "text": "A local branch other than the default branch.",
-                "role": "caption",
-                "tone": "secondary"
-              }
-            ]
-          },
-          {
-            "type": "frame",
-            "direction": "column",
-            "padding": 16,
-            "gap": 8,
-            "fill": "surface",
-            "cornerRadius": 8,
-            "children": [
-              {
-                "type": "text",
-                "text": "Next commit",
-                "role": "label",
-                "tone": "primary"
-              },
-              {
-                "type": "text",
-                "text": "a7c92d1  Fix checkout validation",
-                "role": "body",
-                "tone": "primary"
-              },
-              {
-                "type": "text",
-                "text": "Local dev \u2192 origin/main + 1 commit",
-                "role": "caption",
-                "tone": "secondary"
-              }
-            ]
-          },
-          {
-            "type": "frame",
-            "direction": "row",
-            "align": "center",
-            "gap": 16,
-            "children": [
-              {
-                "type": "text",
-                "text": "Fetch \u2192 worktree \u2192 install \u2192 start server",
-                "role": "caption",
-                "tone": "secondary",
-                "width": "fill"
-              },
-              {
-                "type": "rect",
-                "label": "Save & start QA",
-                "height": 36,
-                "cornerRadius": 6,
-                "width": 156,
-                "fill": "accent"
-              }
-            ]
+            "width": "fill",
+            "children": []
           }
         ]
       }
