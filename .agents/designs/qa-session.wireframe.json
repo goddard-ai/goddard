@@ -1,0 +1,663 @@
+{
+  "version": 1,
+  "name": "QA session \u2014 setup and review workspace",
+  "screens": [
+    {
+      "name": "1 \u00b7 First-use setup",
+      "width": 760,
+      "height": 790,
+      "root": {
+        "type": "frame",
+        "direction": "column",
+        "padding": 28,
+        "gap": 20,
+        "children": [
+          {
+            "type": "frame",
+            "direction": "row",
+            "align": "center",
+            "children": [
+              {
+                "type": "text",
+                "text": "Start QA Session",
+                "role": "title",
+                "tone": "primary",
+                "width": "fill"
+              },
+              {
+                "type": "text",
+                "text": "1 \u00b7 Setup",
+                "role": "caption",
+                "tone": "secondary"
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": "Confirm once for this project. Edit these settings later.",
+            "role": "body",
+            "tone": "secondary"
+          },
+          {
+            "type": "divider"
+          },
+          {
+            "type": "frame",
+            "direction": "column",
+            "gap": 8,
+            "children": [
+              {
+                "type": "text",
+                "text": "Project",
+                "role": "label",
+                "tone": "primary"
+              },
+              {
+                "type": "rect",
+                "label": "Acme Web  \u25be",
+                "height": 36,
+                "cornerRadius": 6,
+                "fill": "inset",
+                "width": "fill"
+              },
+              {
+                "type": "text",
+                "text": "Choose a registered local project.",
+                "role": "caption",
+                "tone": "secondary"
+              }
+            ]
+          },
+          {
+            "type": "frame",
+            "direction": "column",
+            "gap": 8,
+            "children": [
+              {
+                "type": "text",
+                "text": "Dev server command",
+                "role": "label",
+                "tone": "primary"
+              },
+              {
+                "type": "rect",
+                "label": "pnpm run dev",
+                "height": 36,
+                "cornerRadius": 6,
+                "fill": "inset",
+                "width": "fill"
+              },
+              {
+                "type": "text",
+                "text": "Suggested from package.json and pnpm-lock.yaml \u00b7 editable",
+                "role": "caption",
+                "tone": "secondary"
+              }
+            ]
+          },
+          {
+            "type": "frame",
+            "direction": "column",
+            "gap": 8,
+            "children": [
+              {
+                "type": "text",
+                "text": "Install command \u00b7 optional",
+                "role": "label",
+                "tone": "primary"
+              },
+              {
+                "type": "rect",
+                "label": "pnpm install --frozen-lockfile",
+                "height": 36,
+                "cornerRadius": 6,
+                "fill": "inset",
+                "width": "fill"
+              },
+              {
+                "type": "text",
+                "text": "Leave blank to skip installation.",
+                "role": "caption",
+                "tone": "secondary"
+              }
+            ]
+          },
+          {
+            "type": "frame",
+            "direction": "column",
+            "gap": 8,
+            "children": [
+              {
+                "type": "text",
+                "text": "QA branch",
+                "role": "label",
+                "tone": "primary"
+              },
+              {
+                "type": "rect",
+                "label": "dev",
+                "height": 36,
+                "cornerRadius": 6,
+                "fill": "inset",
+                "width": "fill"
+              },
+              {
+                "type": "text",
+                "text": "A local branch other than the default branch.",
+                "role": "caption",
+                "tone": "secondary"
+              }
+            ]
+          },
+          {
+            "type": "frame",
+            "direction": "column",
+            "padding": 16,
+            "gap": 8,
+            "fill": "surface",
+            "cornerRadius": 8,
+            "children": [
+              {
+                "type": "text",
+                "text": "Next commit",
+                "role": "label",
+                "tone": "primary"
+              },
+              {
+                "type": "text",
+                "text": "a7c92d1  Fix checkout validation",
+                "role": "body",
+                "tone": "primary"
+              },
+              {
+                "type": "text",
+                "text": "Local dev \u2192 origin/main + 1 commit",
+                "role": "caption",
+                "tone": "secondary"
+              }
+            ]
+          },
+          {
+            "type": "frame",
+            "direction": "row",
+            "align": "center",
+            "gap": 16,
+            "children": [
+              {
+                "type": "text",
+                "text": "Fetch \u2192 worktree \u2192 install \u2192 start server",
+                "role": "caption",
+                "tone": "secondary",
+                "width": "fill"
+              },
+              {
+                "type": "rect",
+                "label": "Save & start QA",
+                "height": 36,
+                "cornerRadius": 6,
+                "width": 156,
+                "fill": "accent"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "2 \u00b7 QA workspace \u00b7 server running",
+      "width": 1200,
+      "height": 820,
+      "root": {
+        "type": "frame",
+        "direction": "column",
+        "children": [
+          {
+            "type": "frame",
+            "direction": "row",
+            "align": "center",
+            "padding": {
+              "x": 20,
+              "y": 14
+            },
+            "gap": 12,
+            "children": [
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "fill",
+                "gap": 5,
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "Acme Web \u00b7 QA",
+                    "role": "label",
+                    "tone": "primary"
+                  },
+                  {
+                    "type": "text",
+                    "text": "a7c92d1  Fix checkout validation",
+                    "role": "caption",
+                    "tone": "secondary"
+                  }
+                ]
+              },
+              {
+                "type": "rect",
+                "label": "Edit QA setup",
+                "height": 36,
+                "cornerRadius": 6,
+                "width": 124,
+                "fill": "overlay"
+              },
+              {
+                "type": "rect",
+                "label": "Approve & push to main",
+                "height": 36,
+                "cornerRadius": 6,
+                "width": 210,
+                "fill": "accent",
+                "annotations": "Recheck the remote base, record approval, and push exactly this SHA. Disable if files change or the base moved."
+              }
+            ]
+          },
+          {
+            "type": "divider"
+          },
+          {
+            "type": "frame",
+            "direction": "row",
+            "align": "center",
+            "padding": {
+              "x": 20,
+              "y": 10
+            },
+            "gap": 20,
+            "children": [
+              {
+                "type": "text",
+                "text": "Detached HEAD \u00b7 a7c92d1",
+                "role": "caption",
+                "tone": "primary"
+              },
+              {
+                "type": "text",
+                "text": "Local dev \u2192 origin/main + 1 commit",
+                "role": "caption",
+                "tone": "secondary",
+                "width": "fill"
+              },
+              {
+                "type": "text",
+                "text": "Temporary worktree",
+                "role": "caption",
+                "tone": "secondary"
+              }
+            ]
+          },
+          {
+            "type": "divider"
+          },
+          {
+            "type": "frame",
+            "direction": "row",
+            "align": "center",
+            "height": "fill",
+            "children": [
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": 440,
+                "height": "fill",
+                "padding": 20,
+                "gap": 12,
+                "children": [
+                  {
+                    "type": "frame",
+                    "direction": "row",
+                    "align": "center",
+                    "children": [
+                      {
+                        "type": "text",
+                        "text": "QA conversation",
+                        "role": "label",
+                        "tone": "primary",
+                        "width": "fill"
+                      },
+                      {
+                        "type": "text",
+                        "text": "New session",
+                        "role": "caption",
+                        "tone": "secondary"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "divider"
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "padding": 16,
+                    "gap": 10,
+                    "fill": "surface",
+                    "cornerRadius": 8,
+                    "children": [
+                      {
+                        "type": "text",
+                        "text": "Reviewing a7c92d1",
+                        "role": "label",
+                        "tone": "primary"
+                      },
+                      {
+                        "type": "text",
+                        "text": "Fix checkout validation",
+                        "role": "body",
+                        "tone": "primary"
+                      },
+                      {
+                        "type": "text",
+                        "text": "Base: origin/main \u00b7 4b20e8a",
+                        "role": "caption",
+                        "tone": "secondary"
+                      },
+                      {
+                        "type": "rect",
+                        "label": "Open originating task \u2197",
+                        "height": 36,
+                        "cornerRadius": 6,
+                        "fill": "overlay",
+                        "width": "fill",
+                        "annotations": "Shown only when the originating task is known. The new QA agent receives a reference to its transcript."
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "text": "QA agent",
+                    "role": "label",
+                    "tone": "primary"
+                  },
+                  {
+                    "type": "text",
+                    "text": "The app is running. This commit updates",
+                    "role": "body",
+                    "tone": "primary"
+                  },
+                  {
+                    "type": "text",
+                    "text": "checkout validation and its error message.",
+                    "role": "body",
+                    "tone": "primary"
+                  },
+                  {
+                    "type": "text",
+                    "text": "Test plan",
+                    "role": "label",
+                    "tone": "primary"
+                  },
+                  {
+                    "type": "text",
+                    "text": "1. Submit an empty delivery address.",
+                    "role": "body",
+                    "tone": "primary"
+                  },
+                  {
+                    "type": "text",
+                    "text": "2. Correct it and complete checkout.",
+                    "role": "body",
+                    "tone": "primary"
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "height": "fill",
+                    "children": []
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "padding": 14,
+                    "gap": 8,
+                    "fill": "surface",
+                    "cornerRadius": 8,
+                    "children": [
+                      {
+                        "type": "text",
+                        "text": "You",
+                        "role": "caption",
+                        "tone": "secondary"
+                      },
+                      {
+                        "type": "text",
+                        "text": "What else should I test?",
+                        "role": "body",
+                        "tone": "primary"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "padding": 14,
+                    "gap": 18,
+                    "fill": "inset",
+                    "cornerRadius": 8,
+                    "annotations": "Existing agent composer. Inline diff comments are deferred for v1.",
+                    "children": [
+                      {
+                        "type": "text",
+                        "text": "Ask about this commit or report a problem\u2026",
+                        "role": "body",
+                        "tone": "secondary"
+                      },
+                      {
+                        "type": "frame",
+                        "direction": "row",
+                        "align": "center",
+                        "gap": 8,
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "Attach file or line references",
+                            "role": "caption",
+                            "tone": "secondary",
+                            "width": "fill"
+                          },
+                          {
+                            "type": "rect",
+                            "label": "Send",
+                            "height": 36,
+                            "cornerRadius": 6,
+                            "width": 64,
+                            "fill": "accent"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "divider"
+              },
+              {
+                "type": "frame",
+                "direction": "column",
+                "width": "fill",
+                "height": "fill",
+                "padding": 20,
+                "gap": 14,
+                "children": [
+                  {
+                    "type": "frame",
+                    "direction": "row",
+                    "align": "center",
+                    "gap": 8,
+                    "children": [
+                      {
+                        "type": "rect",
+                        "label": "Commit diff",
+                        "height": 36,
+                        "cornerRadius": 6,
+                        "width": 120,
+                        "fill": "surface"
+                      },
+                      {
+                        "type": "rect",
+                        "label": "Terminal",
+                        "height": 36,
+                        "cornerRadius": 6,
+                        "width": 100,
+                        "fill": "overlay",
+                        "annotations": "Switch to install and dev server logs; retry failed startup here."
+                      },
+                      {
+                        "type": "text",
+                        "text": "2 files \u00b7 +18 \u22124",
+                        "role": "caption",
+                        "tone": "secondary",
+                        "width": "fill",
+                        "align": "end"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "divider"
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "row",
+                    "align": "center",
+                    "gap": 12,
+                    "children": [
+                      {
+                        "type": "text",
+                        "text": "Server process running",
+                        "role": "label",
+                        "tone": "primary",
+                        "width": "fill"
+                      },
+                      {
+                        "type": "text",
+                        "text": "pnpm run dev",
+                        "role": "caption",
+                        "tone": "secondary"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "padding": 16,
+                    "gap": 16,
+                    "fill": "inset",
+                    "cornerRadius": 8,
+                    "height": "fill",
+                    "children": [
+                      {
+                        "type": "text",
+                        "text": "src/checkout/validate.ts",
+                        "role": "label",
+                        "tone": "primary"
+                      },
+                      {
+                        "type": "divider"
+                      },
+                      {
+                        "type": "text",
+                        "text": "  18    function validateAddress(address) {",
+                        "role": "caption",
+                        "tone": "primary"
+                      },
+                      {
+                        "type": "frame",
+                        "direction": "column",
+                        "fill": "overlay",
+                        "padding": 12,
+                        "gap": 10,
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "\u2212 19      return Boolean(address);",
+                            "role": "caption",
+                            "tone": "primary"
+                          },
+                          {
+                            "type": "text",
+                            "text": "+ 19      return address.trim().length > 0;",
+                            "role": "caption",
+                            "tone": "primary"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "text": "  20    }",
+                        "role": "caption",
+                        "tone": "primary"
+                      },
+                      {
+                        "type": "text",
+                        "text": "src/checkout/form.tsx",
+                        "role": "label",
+                        "tone": "primary"
+                      },
+                      {
+                        "type": "divider"
+                      },
+                      {
+                        "type": "text",
+                        "text": "  42    if (!validateAddress(address)) {",
+                        "role": "caption",
+                        "tone": "primary"
+                      },
+                      {
+                        "type": "frame",
+                        "direction": "column",
+                        "fill": "overlay",
+                        "padding": 12,
+                        "gap": 10,
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "\u2212 43      setError(\"Invalid input\");",
+                            "role": "caption",
+                            "tone": "primary"
+                          },
+                          {
+                            "type": "text",
+                            "text": "+ 43      setError(\"Enter a delivery address\");",
+                            "role": "caption",
+                            "tone": "primary"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "text",
+                        "text": "  44      return;",
+                        "role": "caption",
+                        "tone": "primary"
+                      },
+                      {
+                        "type": "text",
+                        "text": "  45    }",
+                        "role": "caption",
+                        "tone": "primary"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "text": "Pinned commit \u00b7 working tree clean",
+                    "role": "caption",
+                    "tone": "secondary"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
