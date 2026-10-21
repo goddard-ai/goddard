@@ -8,6 +8,8 @@ packages:
 # transitive deps (@tsrx/core etc.) must sit at top-level node_modules.
 # NativeScript's bundler wants a flat tree for the same reason.
 nodeLinker: hoisted
+# Keep temporary local links when pnpm run/exec checks the published lockfile.
+verifyDepsBeforeRun: false
 #
 # esbuild + @parcel/watcher need install scripts to place binaries;
 # nativescript's postinstall sets up the local CLI. @nativescript/core's
