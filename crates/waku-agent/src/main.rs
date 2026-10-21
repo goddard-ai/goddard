@@ -24,7 +24,6 @@ mod instruction_pins;
 mod resources;
 mod transport;
 
-use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -58,7 +57,8 @@ goddard-agent — scoped task and Boss commands
 Invoke operations with command paths, positionals, and flags. Whole-operation
 JSON payload invocation is retired. JSON remains valid for documented structured
 input data, machine schemas, and --output json. Help is local, read-only, and
-complete when piped; it never requires a daemon or credential.
+complete when piped; it never requires a daemon or credential. Operation output
+defaults to readable text everywhere; use --output json for structured output.
 
 Use create or prompt only when the human explicitly asked. There is no per-call approval
 gate for ordinary task/settings writes; role grants and human-review requirements
@@ -170,10 +170,16 @@ const BOSS_ACTIONS: &[&str] = &[
 
 macro_rules! println {
     ($($arg:tt)*) => {{
-        let value = format!($($arg)*);
-        let output = if JSON_OUTPUT.load(Ordering::Relaxed) { value.clone() } else { text_output(&value) };
-        std::println!("{output}");
+        print_output(&format!($($arg)*));
     }};
+}
+
+fn print_output(value: &str) {
+    if JSON_OUTPUT.load(Ordering::Relaxed) {
+        std::println!("{value}");
+    } else {
+        std::println!("{}", text_output(value));
+    }
 }
 
 fn text_output(value: &str) -> String {
@@ -833,11 +839,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         _ => unreachable!("missing input schema for executable leaf `{path}`"),
     };
-    let mut help = if path == "map" {
-        format!("{example}; output defaults to readable text, including when piped; --output json selects structured output.")
-    } else {
-        format!("{example}; output defaults to text on a terminal and JSON when piped.")
-    };
+    let mut help = format!("{example}; output defaults to readable text, including when piped; --output json selects structured output.");
     if let Some(description) = inputs
         .get("description")
         .and_then(serde_json::Value::as_str)
@@ -1230,12 +1232,7 @@ fn run() -> anyhow::Result<()> {
         }
     }
     JSON_OUTPUT.store(
-        explicit_output
-            .as_deref()
-            .map(|s| s == "json")
-            .unwrap_or_else(|| {
-                raw_args.first().is_none_or(|arg| arg != "map") && !std::io::stdout().is_terminal()
-            }),
+        explicit_output.as_deref() == Some("json"),
         Ordering::Relaxed,
     );
     HELP_JSON_OUTPUT.store(

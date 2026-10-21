@@ -868,7 +868,7 @@ fn actual_codex_scoped_cli_ingress_and_native_request_boundaries() {
     // the native request is still pending.
     let cli_id = uuid::Uuid::new_v4();
     let cli = Command::new(&helper)
-        .args(["models"])
+        .args(["models", "--output", "json"])
         .env("GODDARD_RUNTIME_INGRESS", &descriptor)
         .env("GODDARD_TASK_ID", task.to_string())
         .env("GODDARD_RUNTIME_REQUEST_ID", cli_id.to_string())

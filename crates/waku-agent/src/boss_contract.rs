@@ -79,7 +79,7 @@ pub(super) fn enrich_leaf(path: &str, mut leaf: Value) -> Value {
     leaf["contractFormat"] = json!("goddard-agent.command-contract");
     leaf["contractVersion"] = json!(VERSION);
     leaf["availability"] = availability(path);
-    leaf["errors"] = json!({"exitStatus":2,"jsonTo":"stderr when --output json or stdout is piped","shape":{"error":{"code":"invalid_input","command":"goddard-agent","message":"string; includes daemon rejection as well as parse errors","hint":"Run the command with --help or --schema."}},"conditions":["Missing required input","Unknown or duplicate option","Malformed typed input or unsupported enum","Cross-field constraint violation","Unauthorized role or inaccessible target","Daemon unavailable or operation rejected"]});
+    leaf["errors"] = json!({"exitStatus":2,"jsonTo":"stderr only when --output json","shape":{"error":{"code":"invalid_input","command":"goddard-agent","message":"string; includes daemon rejection as well as parse errors","hint":"Run the command with --help or --schema."}},"conditions":["Missing required input","Unknown or duplicate option","Malformed typed input or unsupported enum","Cross-field constraint violation","Unauthorized role or inaccessible target","Daemon unavailable or operation rejected"]});
     leaf["inputConventions"] = json!({"wholeOperationJson":false,"content":"Exactly one --text or --file; --file - reads UTF-8 stdin","structuredData":"Only explicitly documented JSON data arguments; no generic operation passthrough","helpAndSchema":"Local, read-only; no daemon or credential required"});
     if path == "search" {
         leaf["inputConventions"]["content"] =

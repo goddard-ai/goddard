@@ -127,10 +127,9 @@ pub fn command(mut arguments: impl Iterator<Item = String>) -> Result<()> {
             if arguments.next().is_some() {
                 bail!("resource status takes no arguments");
             }
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&request(ResourceOperation::Status { id: None })?)?
-            );
+            super::print_output(&serde_json::to_string_pretty(&request(
+                ResourceOperation::Status { id: None },
+            )?)?);
         }
         "release" | "cancel" => {
             let payload = Id {
@@ -152,7 +151,7 @@ pub fn command(mut arguments: impl Iterator<Item = String>) -> Result<()> {
             } else {
                 ResourceOperation::Cancel { id: payload.id }
             };
-            println!("{}", serde_json::to_string_pretty(&request(operation)?)?);
+            super::print_output(&serde_json::to_string_pretty(&request(operation)?)?);
         }
         "acquire" | "run" => {
             let all: Vec<String> = arguments.collect();
@@ -170,7 +169,7 @@ pub fn command(mut arguments: impl Iterator<Item = String>) -> Result<()> {
                 #[cfg(not(unix))]
                 let holder = std::process::id();
                 let (id, borrowed) = acquire(payload, holder)?;
-                println!("{}", serde_json::json!({"id": id, "borrowed": borrowed}));
+                super::print_output(&serde_json::json!({"id": id, "borrowed": borrowed}).to_string());
             } else {
                 if arguments.next().as_deref() != Some("--") {
                     bail!("resource run requires -- followed by an executable and arguments");

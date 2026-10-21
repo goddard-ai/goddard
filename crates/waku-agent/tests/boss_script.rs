@@ -89,6 +89,8 @@ fn boss_script_cli_returns_small_acknowledgements_for_multiple_committed_ops() {
     });
     let output = Command::new(env!("CARGO_BIN_EXE_goddard-agent"))
         .args([
+            "--output",
+            "json",
             "boss",
             "script",
             "--text",

@@ -57,7 +57,7 @@ fn steer_supervisor_sends_an_unaddressed_prompt_with_the_employee_credential() {
             .unwrap();
     });
     let output = Command::new(env!("CARGO_BIN_EXE_goddard-agent"))
-        .args(["steer-supervisor", "--text", prompt])
+        .args(["steer-supervisor", "--text", prompt, "--output", "json"])
         .env("GODDARD_DAEMON_ADDRESS", address)
         .env("GODDARD_AGENT_TOKEN", "test-task-token")
         .env("GODDARD_TASK_ID", employee.to_string())

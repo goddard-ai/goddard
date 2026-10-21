@@ -100,6 +100,12 @@ fn cli_closes_cleanly_after_success_and_failure_without_waiting_for_a_stalled_pe
             "unexpected CLI status: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+        if success {
+            assert_eq!(output.stdout, b"options: \n");
+        } else {
+            assert!(String::from_utf8_lossy(&output.stderr)
+                .starts_with("goddard-agent: diagnostic RPC failure"));
+        }
         server.join().unwrap();
     }
 }
