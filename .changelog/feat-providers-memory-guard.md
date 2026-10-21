@@ -1,1 +1,1 @@
-- Local Codex, Claude, Amp, Pi, and ACP tasks now pause when their process tree exceeds 4 GiB for 30 seconds; the task explains the interruption.
+- Local Codex, Claude, Amp, Pi, and ACP tasks reclaim idle providers before pausing active work under memory pressure; the default 4 GiB budget allows larger tasks while the host has headroom.

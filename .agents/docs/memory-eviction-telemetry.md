@@ -25,6 +25,29 @@ runtime UUIDs, initial tree bytes and budget when available, initial process
 count, up to 64 initial PIDs, and monotonic elapsed milliseconds. They contain
 no prompts, command lines, or paths. `schemaVersion` is currently `1`.
 
+## Containment policy
+
+On macOS and Linux, the guard samples every five seconds and selects at most
+one tree at a time. During elevated or critical pressure it reclaims safely
+resumable idle runtimes first, largest observed tree first. Shutdown is lazy:
+the provider reopens on the next prompt, rather than reopening immediately.
+Unregistered drivers can still be reclaimed while idle, with an unobserved
+process outcome. Known trees get the guard's normal termination escalation if
+provider shutdown fails to stop them.
+
+The default 4096 MiB budget requires 30 seconds of continuous overage while
+host pressure is elevated or critical. A healthy host or an unavailable signal
+resets that interval. An explicit nonzero `agent_memory_limit_mb` remains a
+hard budget with the same sustained interval, regardless of pressure.
+Critical pressure can still interrupt the largest eligible active tree using
+at least 256 MiB without waiting for overage. `agent_memory_limit_mb: 0`
+disables budget and emergency containment; idle reclamation remains controlled
+by `runtime_idle_timeout_secs` (`0` disables it).
+
+No additional tree is selected until containment finishes and a fresh pressure
+sample is available. Interrupted active work still requires explicit review;
+it is never replayed automatically. Normal age-based idle cleanup is separate.
+
 ## Count interventions
 
 Set `eviction_log` to the running daemon's log path. With `jq`, count starts
@@ -60,7 +83,9 @@ not a kernel-confirmed exit cause for each process. A tree can contain multiple
 processes with different exit causes. Provider teardown may also send signals.
 An `escalated` record alone does not establish that the tree exited.
 
-The idle reaper delegates shutdown to the provider driver. Its outcome is
+Idle reclamation starts by delegating shutdown to the provider driver. The
+pressure guard can then escalate known trees, producing `terminated` or
+`force_killed` outcomes as above. Otherwise the outcome is
 `exited_after_shutdown` when the captured identities disappear, `unobserved`
 when no registered process tree can be captured or observation is unsupported,
 or `observation_timed_out` after 60 seconds without establishing exit. Failed

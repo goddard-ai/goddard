@@ -166,9 +166,11 @@ wireframes_experiment_enabled: boolean,
  */
 runtime_idle_timeout_secs?: number | null,
 /**
- * MiB allowed for one agent and its descendant processes for 30 seconds
- * before cancellation and containment. `None` uses 4096 MiB; `0`
- * disables the per-agent limit. Critical host pressure still holds new launches.
+ * MiB allowed for one agent and its descendants for 30 seconds before
+ * containment. An explicit nonzero value is enforced even on a healthy host.
+ * `None` uses a soft 4096 MiB budget enforced only under host pressure;
+ * `0` disables budget and emergency containment. Idle reclamation is separate.
+ * Critical host pressure still holds new launches.
  */
 agent_memory_limit_mb?: number,
 /**

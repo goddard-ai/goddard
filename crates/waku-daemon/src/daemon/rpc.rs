@@ -188,7 +188,13 @@ impl Backend for WakuBackend {
         // reaper shed safely evictable runtimes ahead of the age cutoff —
         // before contention becomes a daemon restart. `None` on platforms
         // without a signal or when setup failed keeps the ordinary cadence.
-        let pressure = crate::pressure::watch();
+        // On macOS/Linux the memory guard owns pressure shedding so it can
+        // reclaim one tree and resample before interrupting more work.
+        let pressure = if cfg!(any(target_os = "macos", target_os = "linux")) {
+            None
+        } else {
+            crate::pressure::watch()
+        };
         let backend = self.weak_self();
         let _ = std::thread::Builder::new()
             .name("waku-idle-reaper".into())

@@ -1,14 +1,8 @@
-//! Platform memory-pressure signals for the daemon's idle-runtime shed.
+//! Platform memory-pressure signals for runtime reclamation and containment.
 //!
-//! Each supported platform runs one watcher that reports on a channel when
-//! the OS says memory is tight; the daemon's reaper treats an event as
-//! "shed every safely evictable runtime now", independent of idle age.
-//! Detection is deliberately separate from eligibility — the watcher knows
-//! nothing about sessions, and a runtime is never evicted for pressure
-//! unless it would be safe under the ordinary rules.
-//!
-//! `watch` returns `None` when the platform has no usable signal or setup
-//! failed — callers keep ordinary age-based eviction.
+//! The guard samples normal/elevated/critical pressure on macOS and Linux.
+//! Event watchers let other platforms shed idle runtimes early. Detection is
+//! separate from runtime eligibility; unavailable signals remain explicit.
 
 use crossbeam_channel::Receiver;
 
@@ -19,20 +13,57 @@ pub fn watch() -> Option<Receiver<()>> {
     platform::watch()
 }
 
-/// Emergency admission/containment signal; sampled off the UI thread.
-pub fn critical() -> Option<bool> {
+/// Host pressure sampled off the UI thread. `None` means unavailable, not healthy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    Normal,
+    Elevated,
+    Critical,
+}
+
+/// Read one host-pressure observation without spawning a watcher.
+pub fn sample() -> Option<Level> {
     #[cfg(target_os = "macos")]
     {
-        platform::level().map(|level| level < 15)
+        platform::level().map(macos_level)
     }
     #[cfg(target_os = "linux")]
     {
         let contents = std::fs::read_to_string("/proc/pressure/memory").ok()?;
-        Some(psi_some_avg10(&contents)? >= 50.0)
+        psi_some_avg10(&contents).map(linux_level)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         None
+    }
+}
+
+/// Emergency admission/containment signal; sampled off the UI thread.
+pub fn critical() -> Option<bool> {
+    sample().map(|level| level == Level::Critical)
+}
+
+#[cfg(any(target_os = "macos", test))]
+// Shed below 25% usable memory; keep the existing 15% emergency threshold.
+fn macos_level(usable_percent: i32) -> Level {
+    if usable_percent < 15 {
+        Level::Critical
+    } else if usable_percent < 25 {
+        Level::Elevated
+    } else {
+        Level::Normal
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+// PSI some avg10 measures the percentage of time tasks stalled on memory.
+fn linux_level(some_avg10: f64) -> Level {
+    if some_avg10 >= 50.0 {
+        Level::Critical
+    } else if some_avg10 > 20.0 {
+        Level::Elevated
+    } else {
+        Level::Normal
     }
 }
 
@@ -71,15 +102,10 @@ fn poll(signal: impl Fn() -> Option<bool> + Send + 'static) -> Option<Receiver<(
 
 #[cfg(target_os = "macos")]
 mod platform {
-    use super::poll;
+    use super::{Level, poll, sample};
     use crossbeam_channel::Receiver;
 
-    /// `kern.memorystatus_level` — the percentage of memory the system
-    /// still considers usable — is the same signal jetsam reads. Below
-    /// ~25% the system is warn-level pressure, ~15% it starts killing.
-    /// Shedding at warn keeps the daemon out of the kill band.
-    const WARN_LEVEL: i32 = 25;
-
+    /// `kern.memorystatus_level`: percentage of usable memory.
     pub(super) fn level() -> Option<i32> {
         let mut level: i32 = 0;
         let mut len = std::mem::size_of::<i32>();
@@ -96,7 +122,7 @@ mod platform {
     }
 
     pub fn watch() -> Option<Receiver<()>> {
-        poll(|| level().map(|level| level < WARN_LEVEL))
+        poll(|| sample().map(|level| level != Level::Normal))
     }
 }
 
@@ -116,21 +142,11 @@ fn psi_some_avg10(contents: &str) -> Option<f64> {
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use super::{poll, psi_some_avg10};
+    use super::{Level, poll, sample};
     use crossbeam_channel::Receiver;
 
-    /// PSI `some avg10`: the percent of the last ten seconds any task
-    /// stalled on memory. Above ~20% the box is thrashing — shed idle
-    /// runtimes before the OOM killer picks one with a live turn.
-    const SOME_AVG10_THRESHOLD: f64 = 20.0;
-
-    fn under_pressure() -> Option<bool> {
-        let contents = std::fs::read_to_string("/proc/pressure/memory").ok()?;
-        Some(psi_some_avg10(&contents)? > SOME_AVG10_THRESHOLD)
-    }
-
     pub fn watch() -> Option<Receiver<()>> {
-        poll(under_pressure)
+        poll(|| sample().map(|level| level != Level::Normal))
     }
 }
 
@@ -191,6 +207,19 @@ mod platform {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pressure_severity_preserves_warning_and_emergency_boundaries() {
+        use super::{Level::*, linux_level, macos_level};
+        assert_eq!(macos_level(25), Normal);
+        assert_eq!(macos_level(24), Elevated);
+        assert_eq!(macos_level(15), Elevated);
+        assert_eq!(macos_level(14), Critical);
+        assert_eq!(linux_level(20.0), Normal);
+        assert_eq!(linux_level(20.1), Elevated);
+        assert_eq!(linux_level(49.9), Elevated);
+        assert_eq!(linux_level(50.0), Critical);
+    }
+
     #[test]
     fn psi_some_avg10_reads_the_some_line() {
         let body = "some avg10=24.56 avg60=9.10 avg300=3.21 total=123\n\

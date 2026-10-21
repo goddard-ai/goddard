@@ -1,4 +1,5 @@
 use super::*;
+use crate::pressure::Level;
 use std::time::{Duration, Instant};
 
 mod telemetry;
@@ -345,7 +346,8 @@ impl WakuBackend {
 
     #[cfg(unix)]
     fn memory_guard_tick(&self, watches: &mut HashMap<Uuid, Watch>, now: Instant) {
-        let critical = crate::pressure::critical().unwrap_or(false);
+        let pressure = crate::pressure::sample();
+        let critical = pressure == Some(Level::Critical);
         self.memory_guard
             .critical
             .store(critical, std::sync::atomic::Ordering::Release);
@@ -355,7 +357,7 @@ impl WakuBackend {
         let Some(table) = table else {
             return;
         };
-        self.memory_guard_sample(watches, now, &table, critical);
+        self.memory_guard_sample(watches, now, &table, pressure);
     }
 
     #[cfg(unix)]
@@ -364,8 +366,10 @@ impl WakuBackend {
         watches: &mut HashMap<Uuid, Watch>,
         now: Instant,
         table: &HashMap<i32, crate::stats::ProcEntry>,
-        critical: bool,
+        pressure: Option<Level>,
     ) {
+        let critical = pressure == Some(Level::Critical);
+        let pressured = matches!(pressure, Some(Level::Elevated | Level::Critical));
         self.memory_guard
             .critical
             .store(critical, std::sync::atomic::Ordering::Release);
@@ -398,34 +402,89 @@ impl WakuBackend {
                 );
             }
         }
-        let limit_mb = self
-            .settings
-            .get()
-            .agent_memory_limit_mb
-            .unwrap_or(DEFAULT_LIMIT_MB);
+        let settings = self.settings.get();
+        let limit_mb = settings.agent_memory_limit_mb.unwrap_or(DEFAULT_LIMIT_MB);
         let limit = limit_mb.saturating_mul(1 << 20);
-        for watch in watches.values_mut() {
+        // Only an explicit budget is hard while the host is healthy (or its
+        // pressure signal is unavailable). Default overage needs real pressure.
+        let enforce_budget = limit != 0 && (settings.agent_memory_limit_mb.is_some() || pressured);
+        let mut over_budget = HashSet::new();
+        for (&runtime, watch) in watches.iter_mut() {
             watch.bytes = refresh_tree(&mut watch.owned, &table);
+            if watch
+                .sustained
+                .observe(now, enforce_budget && watch.bytes > limit)
+            {
+                over_budget.insert(runtime);
+            }
         }
-        // One emergency victim at a time lets its cancellation reclaim memory
-        // before another task is interrupted. Budget breaches remain independent.
+        let idle: HashMap<_, _> = if settings.runtime_idle_timeout_secs != Some(0) {
+            let state = self.task_state.lock();
+            let sessions = self.sessions.lock();
+            sessions
+                .iter()
+                .filter(|(session, entry)| runtime_evictable(&state, **session, entry, &self.agent))
+                .map(|(&session, entry)| (entry.runtime_id, session))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        // Every intervention waits for the preceding tree to exit. Even an
+        // exit observed this tick gets a fresh host sample before another victim.
         let containing = watches.values().any(|w| {
             matches!(
                 w.phase,
                 Phase::Cancelling { .. } | Phase::Terminating { .. }
             )
         });
-        let victim = (critical && !containing && limit != 0)
+        let victim = (!containing)
             .then(|| {
-                watches
-                    .iter()
-                    .filter(|(_, w)| {
-                        matches!(w.phase, Phase::Watching) && w.bytes >= 256 * (1 << 20)
-                    })
-                    .max_by_key(|(_, w)| w.bytes)
-                    .map(|(&id, _)| id)
+                let watching = || {
+                    watches
+                        .iter()
+                        .filter(|(_, w)| matches!(w.phase, Phase::Watching) && !w.owned.is_empty())
+                };
+                if pressured {
+                    if let Some((&runtime, _)) = idle
+                        .iter()
+                        .filter(|(runtime, _)| {
+                            watches
+                                .get(*runtime)
+                                .is_none_or(|w| matches!(w.phase, Phase::Watching))
+                        })
+                        .max_by_key(|(runtime, _)| watches.get(*runtime).map_or(0, |w| w.bytes))
+                    {
+                        return Some((runtime, Reason::IdlePressure));
+                    }
+                }
+                let emergency = if critical && limit != 0 {
+                    watching()
+                        .filter(|(_, w)| w.bytes >= 256 * (1 << 20))
+                        .max_by_key(|(_, w)| w.bytes)
+                        .map(|(&runtime, _)| (runtime, Reason::CriticalPressure))
+                } else {
+                    None
+                };
+                emergency.or_else(|| {
+                    watching()
+                        .filter(|(runtime, _)| over_budget.contains(*runtime))
+                        .max_by_key(|(runtime, w)| (idle.contains_key(*runtime), w.bytes))
+                        .map(|(&runtime, _)| (runtime, Reason::MemoryLimit))
+                })
             })
             .flatten();
+        // Stable links and drivers without a registered local process tree
+        // still get idle reclamation. Their process exit remains unobserved;
+        // never invent identities or signal an unowned tree.
+        if let Some((runtime, Reason::IdlePressure)) = victim
+            && !watches.contains_key(&runtime)
+            && let Some(&session) = idle.get(&runtime)
+            && let Some(driver) = self.take_idle_runtime(session, runtime)
+        {
+            self.memory_guard
+                .track_idle_eviction(session, runtime, true, Some(table));
+            evict_idle_runtime(session, runtime, driver, &self.event_source());
+        }
         let mut retire = Vec::new();
         for (&runtime, watch) in watches.iter_mut() {
             match watch.phase {
@@ -434,30 +493,37 @@ impl WakuBackend {
                         retire.push(runtime);
                         continue;
                     }
-                    let sustained = watch
-                        .sustained
-                        .observe(now, limit != 0 && watch.bytes > limit);
-                    if !sustained && victim != Some(runtime) {
+                    let Some((_, reason)) = victim.filter(|(id, _)| *id == runtime) else {
                         continue;
-                    }
+                    };
                     let incident = Eviction::new(
                         watch.session,
                         runtime,
-                        if victim == Some(runtime) {
-                            Reason::CriticalPressure
-                        } else {
-                            Reason::MemoryLimit
-                        },
+                        reason,
                         Some(watch.bytes),
                         Some(limit_mb),
                         &watch.owned,
                         now,
                     );
+                    if idle.contains_key(&runtime) {
+                        let Some(driver) = self.take_idle_runtime(watch.session, runtime) else {
+                            continue;
+                        };
+                        self.memory_guard
+                            .record_eviction(&incident, "started", None, now);
+                        watch.incident = Some(incident);
+                        watch.outcome = Outcome::ExitedAfterShutdown;
+                        evict_idle_runtime(watch.session, runtime, driver, &self.event_source());
+                        watch.phase = Phase::Cancelling {
+                            at: if critical { now - CANCEL_GRACE } else { now },
+                        };
+                        continue;
+                    }
+                    let lifecycle = self.runtime_lifecycles.session(watch.session);
+                    let _owner = lifecycle.lock();
                     self.memory_guard
                         .record_eviction(&incident, "started", None, now);
                     watch.incident = Some(incident);
-                    let lifecycle = self.runtime_lifecycles.session(watch.session);
-                    let _owner = lifecycle.lock();
                     let entry = self
                         .sessions
                         .lock()
@@ -486,6 +552,7 @@ impl WakuBackend {
                             .find(|s| s.id == watch.session)
                             .is_some_and(|s| {
                                 !s.status.is_busy()
+                                    && s.active_turn_id().is_none()
                                     && s.queued_messages.is_empty()
                                     && s.provider_cursor.is_some()
                             });
@@ -499,7 +566,7 @@ impl WakuBackend {
                     watch.paused_task = true;
                     self.agent.note_user_stop(watch.session);
                     driver.cancel();
-                    let reason = if victim == Some(runtime) {
+                    let reason = if matches!(reason, Reason::CriticalPressure) {
                         "critical host memory pressure"
                     } else {
                         "a sustained memory limit breach"
@@ -607,6 +674,342 @@ mod tests {
         let path = std::env::temp_dir().join(format!("memory-guard-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[cfg(unix)]
+    #[derive(Default)]
+    struct PolicyDriver {
+        cancels: std::sync::atomic::AtomicUsize,
+        shutdowns: std::sync::atomic::AtomicUsize,
+    }
+
+    #[cfg(unix)]
+    impl driver::DriverControl for PolicyDriver {
+        fn prompt(&self, _: String) {
+            panic!("policy must not replay work");
+        }
+        fn cancel(&self) {
+            self.cancels
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        fn begin_shutdown(&self) {
+            self.shutdowns
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        fn respond(&self, _: String, _: String) {}
+        fn rollback(&self, _: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
+            Ok(None)
+        }
+    }
+
+    #[cfg(unix)]
+    struct PolicyFixture {
+        root: PathBuf,
+        backend: WakuBackend,
+        table: HashMap<i32, crate::stats::ProcEntry>,
+        watches: HashMap<Uuid, Watch>,
+        start: Instant,
+    }
+
+    #[cfg(unix)]
+    impl PolicyFixture {
+        fn new(limit: Option<u64>) -> Self {
+            let root = directory();
+            let (backend, _) = super::super::tests::surface_test_backend(&root);
+            let mut settings = backend.settings.get();
+            settings.agent_memory_limit_mb = limit;
+            backend.settings.replace(settings).unwrap();
+            Self {
+                root,
+                backend,
+                table: HashMap::new(),
+                watches: HashMap::new(),
+                start: Instant::now(),
+            }
+        }
+
+        fn add(&mut self, mb: u64, busy: bool) -> (Uuid, Uuid, i32, Arc<PolicyDriver>) {
+            let session = {
+                let mut state = self.backend.task_state.lock();
+                let project = state.projects[0].id;
+                let mut session = state.new_session(project, ProviderKind::Codex);
+                session.begin_turn("seed");
+                session.provider_cursor = Some(ProviderResumeCursor::Codex {
+                    thread_id: "thread".into(),
+                });
+                session.finish_active_turn(TurnStatus::Completed);
+                if busy {
+                    session.begin_turn("working");
+                }
+                let id = session.id;
+                state.push_session(session);
+                id
+            };
+            let runtime = Uuid::new_v4();
+            let driver = Arc::new(PolicyDriver::default());
+            self.backend.sessions.lock().insert(
+                session,
+                RuntimeEntry {
+                    plan_gate: None,
+                    runtime_id: runtime,
+                    driver: DriverHandle::from_control(driver.clone()),
+                    stable: None,
+                    last_active: self.start,
+                    resumable: true,
+                    computer_use_available: false,
+                    provider: ProviderKind::Codex,
+                    cwd: self.root.clone(),
+                },
+            );
+            self.backend
+                .runtime_lifecycles
+                .session(session)
+                .lock()
+                .set(Some(runtime));
+            // Deliberately outside supported hosts' PID ranges: these synthetic
+            // samples must never authorize a signal to a real process.
+            let pid = i32::MAX - i32::try_from(self.table.len()).unwrap();
+            self.table.insert(
+                pid,
+                crate::stats::ProcEntry {
+                    ppid: i32::try_from(std::process::id()).unwrap(),
+                    rss: mb * (1 << 20),
+                    birth: 1,
+                    name: "fixture".into(),
+                },
+            );
+            std::fs::write(
+                self.backend.memory_guard.anchor(runtime),
+                format!("{pid} 1"),
+            )
+            .unwrap();
+            (session, runtime, pid, driver)
+        }
+
+        fn tick(&mut self, seconds: u64, pressure: Option<Level>) {
+            self.backend.memory_guard_sample(
+                &mut self.watches,
+                self.start + Duration::from_secs(seconds),
+                &self.table,
+                pressure,
+            );
+        }
+
+        fn records(&self) -> Vec<serde_json::Value> {
+            std::fs::read_to_string(self.root.join("memory-guard/evictions.jsonl"))
+                .unwrap_or_default()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect()
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for PolicyFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn memory_guard_default_is_soft_but_explicit_limits_and_emergency_remain_strict() {
+        use std::sync::atomic::Ordering::Relaxed;
+        for (limit, pressure, expected) in [
+            (None, Some(Level::Normal), false),
+            (None, None, false),
+            (None, Some(Level::Elevated), true),
+            (Some(DEFAULT_LIMIT_MB), Some(Level::Normal), true),
+            (Some(DEFAULT_LIMIT_MB), None, true),
+            (Some(0), Some(Level::Critical), false),
+        ] {
+            let mut fixture = PolicyFixture::new(limit);
+            let (session, _, _, driver) = fixture.add(DEFAULT_LIMIT_MB + 1, true);
+            for seconds in (0..=30).step_by(5) {
+                fixture.tick(seconds, pressure);
+                assert_eq!(
+                    driver.cancels.load(Relaxed),
+                    usize::from(expected && seconds == 30)
+                );
+            }
+            assert_eq!(fixture.backend.memory_guard.paused(session), expected);
+            assert_eq!(fixture.records().len(), usize::from(expected));
+        }
+        let mut fixture = PolicyFixture::new(Some(1));
+        let (_, _, _, driver) = fixture.add(2, true);
+        for seconds in (0..=30).step_by(5) {
+            fixture.tick(seconds, Some(Level::Critical));
+        }
+        assert_eq!(
+            driver.cancels.load(Relaxed),
+            1,
+            "the emergency size floor must not suppress an explicit budget"
+        );
+        let mut fixture = PolicyFixture::new(None);
+        let (_, _, _, driver) = fixture.add(256, true);
+        fixture.tick(0, Some(Level::Critical));
+        assert_eq!(
+            driver.cancels.load(Relaxed),
+            1,
+            "critical pressure bypasses sustained overage"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn memory_guard_serializes_budget_breaches_and_resamples_after_exit() {
+        use std::sync::atomic::Ordering::Relaxed;
+        for hard_limit in [false, true] {
+            let mut fixture = PolicyFixture::new(hard_limit.then_some(DEFAULT_LIMIT_MB));
+            let (_, _, _, smaller) = fixture.add(5000, true);
+            let (largest_session, _, largest_pid, largest) = fixture.add(6000, true);
+            for seconds in (0..=35).step_by(5) {
+                fixture.tick(seconds, Some(Level::Elevated));
+            }
+            assert_eq!(largest.cancels.load(Relaxed), 1);
+            assert_eq!(
+                smaller.cancels.load(Relaxed),
+                0,
+                "one containment at a time"
+            );
+            fixture.table.remove(&largest_pid);
+            fixture.tick(40, Some(Level::Normal));
+            fixture.tick(45, Some(Level::Normal));
+            assert_eq!(
+                smaller.cancels.load(Relaxed),
+                0,
+                "the completion sample cannot choose another victim"
+            );
+            fixture.tick(50, Some(Level::Normal));
+            assert!(
+                !fixture
+                    .backend
+                    .sessions
+                    .lock()
+                    .contains_key(&largest_session),
+                "an interrupted running turn must not be reopened automatically"
+            );
+            assert_eq!(
+                smaller.cancels.load(Relaxed),
+                usize::from(hard_limit),
+                "relieved pressure protects the next task unless its limit is explicit"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn memory_guard_reclaims_largest_idle_first_without_pausing_or_reopening_it() {
+        use std::sync::atomic::Ordering::Relaxed;
+        for relieved in [false, true] {
+            let mut fixture = PolicyFixture::new(None);
+            let (small_session, _, small_pid, small) = fixture.add(512, false);
+            let (idle_session, _, idle_pid, idle) = fixture.add(1024, false);
+            let (_, _, _, busy) = fixture.add(8000, true);
+            fixture.tick(0, Some(Level::Critical));
+            assert_eq!(idle.shutdowns.load(Relaxed), 1);
+            assert_eq!(idle.cancels.load(Relaxed), 0);
+            assert_eq!(small.shutdowns.load(Relaxed), 0);
+            assert_eq!(busy.cancels.load(Relaxed), 0);
+            assert!(!fixture.backend.sessions.lock().contains_key(&idle_session));
+            assert!(!fixture.backend.memory_guard.paused(idle_session));
+            fixture.table.remove(&idle_pid);
+            let pressure = Some(if relieved {
+                Level::Normal
+            } else {
+                Level::Critical
+            });
+            fixture.tick(5, pressure);
+            fixture.tick(10, pressure);
+            assert_eq!(small.shutdowns.load(Relaxed), 0);
+            fixture.tick(15, pressure);
+            assert_eq!(small.shutdowns.load(Relaxed), usize::from(!relieved));
+            assert_eq!(busy.cancels.load(Relaxed), 0);
+            assert!(
+                !fixture.backend.sessions.lock().contains_key(&idle_session),
+                "idle reclamation must not immediately reopen a provider"
+            );
+            if !relieved {
+                fixture.table.remove(&small_pid);
+                fixture.tick(20, pressure);
+                fixture.tick(25, pressure);
+                assert_eq!(busy.cancels.load(Relaxed), 0);
+                fixture.tick(30, pressure);
+                assert_eq!(
+                    busy.cancels.load(Relaxed),
+                    1,
+                    "critical pressure can interrupt active work after idle reclamation"
+                );
+            } else {
+                assert!(fixture.backend.sessions.lock().contains_key(&small_session));
+            }
+            let records = fixture.records();
+            assert_eq!(records[0]["eviction"]["reason"], "idle_pressure");
+            assert!(
+                records
+                    .iter()
+                    .any(|r| r["event"] == "completed" && r["outcome"] == "exited_after_shutdown")
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn memory_guard_idle_reclamation_rechecks_activity_and_supports_unregistered_drivers() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut fixture = PolicyFixture::new(None);
+        let (session, runtime, _, idle) = fixture.add(512, false);
+        let (_, _, _, busy) = fixture.add(8000, true);
+        std::fs::remove_file(fixture.backend.memory_guard.anchor(runtime)).unwrap();
+        assert!(
+            fixture
+                .backend
+                .take_idle_runtime(session, Uuid::new_v4())
+                .is_none(),
+            "a replacement generation cannot be removed"
+        );
+        {
+            let mut state = fixture.backend.task_state.lock();
+            state
+                .sessions
+                .iter_mut()
+                .find(|s| s.id == session)
+                .unwrap()
+                .begin_turn("new prompt");
+        }
+        assert!(
+            fixture
+                .backend
+                .take_idle_runtime(session, runtime)
+                .is_none(),
+            "a task that started working after selection is protected"
+        );
+        {
+            let mut state = fixture.backend.task_state.lock();
+            state
+                .sessions
+                .iter_mut()
+                .find(|s| s.id == session)
+                .unwrap()
+                .finish_active_turn(TurnStatus::Completed);
+        }
+        fixture.tick(0, Some(Level::Critical));
+        assert_eq!(idle.shutdowns.load(Relaxed), 1);
+        assert_eq!(busy.cancels.load(Relaxed), 0);
+        assert_eq!(fixture.records()[1]["outcome"], "unobserved");
+        assert!(!fixture.backend.memory_guard.paused(session));
+
+        let mut fixture = PolicyFixture::new(None);
+        let mut settings = fixture.backend.settings.get();
+        settings.runtime_idle_timeout_secs = Some(0);
+        fixture.backend.settings.replace(settings).unwrap();
+        let (_, _, _, idle) = fixture.add(512, false);
+        fixture.tick(0, Some(Level::Elevated));
+        assert_eq!(
+            idle.shutdowns.load(Relaxed),
+            0,
+            "idle eviction opt-out is preserved"
+        );
     }
 
     #[test]
@@ -840,6 +1243,9 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             };
             let (backend, session) = super::super::tests::surface_test_backend(&root);
+            let mut settings = backend.settings.get();
+            settings.agent_memory_limit_mb = Some(DEFAULT_LIMIT_MB);
+            backend.settings.replace(settings).unwrap();
             {
                 let mut state = backend.task_state.lock();
                 state
@@ -870,7 +1276,15 @@ mod tests {
                 .session(session)
                 .lock()
                 .set(Some(runtime));
-            let sibling_session = Uuid::new_v4();
+            let sibling_session = {
+                let mut state = backend.task_state.lock();
+                let project = state.projects[0].id;
+                let mut sibling = state.new_session(project, ProviderKind::Codex);
+                sibling.begin_turn("independent busy work");
+                let id = sibling.id;
+                state.push_session(sibling);
+                id
+            };
             let sibling_runtime = Uuid::new_v4();
             let sibling_driver = Arc::new(Driver::default());
             backend.sessions.lock().insert(
@@ -912,7 +1326,11 @@ mod tests {
                     &mut watches,
                     start + Duration::from_secs(seconds),
                     &table,
-                    emergency,
+                    Some(if emergency {
+                        Level::Critical
+                    } else {
+                        Level::Normal
+                    }),
                 );
             }
             assert_eq!(backend.memory_guard.host_critical(), emergency);
@@ -927,13 +1345,13 @@ mod tests {
                 &mut watches,
                 start + Duration::from_secs(40),
                 &table,
-                false,
+                Some(Level::Normal),
             );
             backend.memory_guard_sample(
                 &mut watches,
                 start + Duration::from_secs(45),
                 &table,
-                false,
+                Some(Level::Normal),
             );
             let deadline = Instant::now() + Duration::from_secs(3);
             while process.0.try_wait().unwrap().is_none() {
@@ -958,13 +1376,13 @@ mod tests {
                 &mut watches,
                 start + Duration::from_secs(50),
                 &table,
-                false,
+                Some(Level::Normal),
             );
             backend.memory_guard_sample(
                 &mut watches,
                 start + Duration::from_secs(55),
                 &table,
-                false,
+                Some(Level::Normal),
             );
             let records: Vec<serde_json::Value> =
                 std::fs::read_to_string(backend.memory_guard.directory.join("evictions.jsonl"))

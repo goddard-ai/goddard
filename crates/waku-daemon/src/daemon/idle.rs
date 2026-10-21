@@ -48,6 +48,28 @@ pub(super) fn reap_idle_runtimes(
         .collect()
 }
 
+impl WakuBackend {
+    /// Recheck idle eligibility under the ownership gate before pressure-driven
+    /// reclamation. A prompt or replacement since selection makes this a no-op.
+    pub(super) fn take_idle_runtime(&self, session: Uuid, runtime: Uuid) -> Option<DriverHandle> {
+        let lifecycle = self.runtime_lifecycles.session(session);
+        let owner = lifecycle.lock();
+        let state = self.task_state.lock();
+        let mut sessions = self.sessions.lock();
+        let entry = sessions.get(&session)?;
+        if entry.runtime_id != runtime || !runtime_evictable(&state, session, entry, &self.agent) {
+            return None;
+        }
+        let entry = sessions.remove(&session)?;
+        drop(sessions);
+        drop(state);
+        owner.set(None);
+        self.agent.clear_session(session);
+        self.repo_maps.0.lock().sessions.remove(&session);
+        Some(entry.driver)
+    }
+}
+
 /// Finish teardown of a runtime whose bookkeeping the reaper already cleared:
 /// shut the captured provider down, then tell attached
 /// clients the runtime ended. The notification must run before
@@ -69,9 +91,8 @@ pub(super) fn evict_idle_runtime(
 }
 
 /// Whether killing this task's provider process loses nothing the next
-/// prompt cannot rebuild. Busy is checked twice — the persisted status and
-/// the forwarder's turn bookkeeping — because either can be the fresher
-/// signal when they disagree. Resumability comes from the runtime entry,
+/// prompt cannot rebuild. Persisted status, the running turn, and forwarder
+/// bookkeeping all protect active work because any can be the fresher signal. Resumability comes from the runtime entry,
 /// not the catalog row: a skeletonized session reads `provider_cursor:
 /// None` until its next hydrate.
 pub(super) fn runtime_evictable(
@@ -85,6 +106,7 @@ pub(super) fn runtime_evictable(
         return true;
     };
     if session.status.is_busy()
+        || session.active_turn_id().is_some()
         || agent.has_open_turn(session_id)
         || agent.has_queued(session_id)
         || (session.detail_loaded && !session.queued_messages.is_empty())

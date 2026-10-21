@@ -146,9 +146,11 @@ pub struct DaemonSettings {
     /// whose session is busy or cannot resume are never evicted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_idle_timeout_secs: Option<u64>,
-    /// MiB allowed for one agent and its descendant processes for 30 seconds
-    /// before cancellation and containment. `None` uses 4096 MiB; `0`
-    /// disables the per-agent limit. Critical host pressure still holds new launches.
+    /// MiB allowed for one agent and its descendants for 30 seconds before
+    /// containment. An explicit nonzero value is enforced even on a healthy host.
+    /// `None` uses a soft 4096 MiB budget enforced only under host pressure;
+    /// `0` disables budget and emergency containment. Idle reclamation is separate.
+    /// Critical host pressure still holds new launches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub agent_memory_limit_mb: Option<u64>,
