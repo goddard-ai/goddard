@@ -3941,15 +3941,18 @@ mod tests {
         let reference = guide["formatGuide"].as_str().unwrap();
         assert_eq!(contracts["commands"]["wireframe"]["formatGuide"], reference);
         assert!(help::render(&guide).contains(reference));
-        let example = reference
-            .split_once("```json\n")
-            .unwrap()
-            .1
-            .split_once("```")
-            .unwrap()
-            .0;
-        let document = waku_protocol::wireframe::Wireframe::parse(example).unwrap();
-        assert!(!document.screens.is_empty());
+        let lf = reference.replace("\r\n", "\n");
+        for reference in [lf.clone(), lf.replace('\n', "\r\n")] {
+            let example = reference
+                .split_once("```json")
+                .unwrap()
+                .1
+                .split_once("```")
+                .unwrap()
+                .0;
+            let document = waku_protocol::wireframe::Wireframe::parse(example).unwrap();
+            assert!(!document.screens.is_empty());
+        }
     }
 
     #[test]

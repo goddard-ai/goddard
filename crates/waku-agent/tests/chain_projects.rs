@@ -30,15 +30,20 @@ fn chain_guide_create_and_revise_preserve_selectors_and_actionable_errors() {
             .contains(&Value::String("projectId".into()))
     );
     let guide = include_str!("../../../docs/boss-projects.md");
-    let examples: Vec<Value> = guide
-        .split("```json\n")
-        .skip(1)
-        .filter_map(|block| {
-            let block = block.split("```").next().unwrap();
-            let value: Value = serde_json::from_str(block).unwrap();
-            matches!(value["type"].as_str(), Some("create" | "revise")).then_some(value)
-        })
-        .collect();
+    let examples_from = |guide: &str| -> Vec<Value> {
+        guide
+            .split("```json")
+            .skip(1)
+            .filter_map(|block| {
+                let block = block.split("```").next().unwrap();
+                let value: Value = serde_json::from_str(block).unwrap();
+                matches!(value["type"].as_str(), Some("create" | "revise")).then_some(value)
+            })
+            .collect()
+    };
+    let examples = examples_from(guide);
+    let crlf = guide.replace("\r\n", "\n").replace('\n', "\r\n");
+    assert_eq!(examples_from(&crlf), examples);
     assert_eq!(examples.len(), 2);
     for example in examples {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
