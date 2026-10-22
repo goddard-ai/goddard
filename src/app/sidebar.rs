@@ -593,9 +593,6 @@ const SIDEBAR_ALT_PEEK_DELAY: Duration = Duration::from_millis(300);
 const SIDEBAR_SHORTCUT_TARGET_COUNT: usize = 9;
 /// Width of the gradient that dissolves row content ahead of a ⌘n chip.
 const SIDEBAR_SHORTCUT_CHIP_FADE_WIDTH: f32 = 28.0;
-/// Git status drifts without any session-set change, so checkout-status scans
-/// rerun on this cadence in addition to path-set fingerprint changes.
-const SIDEBAR_CHECKOUT_STATUS_RESCAN: Duration = Duration::from_secs(30);
 
 /// Resting diameter of a dock button.
 const DOCK_ITEM_REST: f32 = 66.0;
@@ -3180,220 +3177,105 @@ impl Waku {
         }
     }
 
-    /// Drop the fingerprints behind [`ensure_sidebar_branch_labels`] and
-    /// [`ensure_sidebar_checkout_statuses`] so the next sidebar frame re-reads
-    /// every row. In-flight passes retire with the generations, so a scan that
-    /// started before the invalidation cannot write back older answers.
-    ///
-    /// [`ensure_sidebar_branch_labels`]: Self::ensure_sidebar_branch_labels
-    /// [`ensure_sidebar_checkout_statuses`]: Self::ensure_sidebar_checkout_statuses
-    pub(super) fn invalidate_sidebar_git_scans(&self) {
+    /// Invalidate only the affected checkout. Hidden rows are refreshed when
+    /// they are rendered again; a turn must never enqueue all session history.
+    pub(super) fn invalidate_sidebar_git_scans(&self, owner: waku_client::DaemonKey, path: &Path) {
         self.sidebar_branch_scan_fingerprint.set(None);
         self.sidebar_branch_scan_generation
             .set(self.sidebar_branch_scan_generation.get().wrapping_add(1));
-        self.sidebar_checkout_scan_fingerprint.set(None);
-        self.sidebar_checkout_scan_generation
-            .set(self.sidebar_checkout_scan_generation.get().wrapping_add(1));
+        self.sidebar_checkout_refresh
+            .borrow_mut()
+            .invalidate(owner, path, Instant::now());
     }
 
-    /// Dirty flag + unpushed commit count for every started session's checkout
-    /// or worktree, resolved in one background pass like the branch labels.
-    /// Rows read only `sidebar_checkout_statuses`.
-    fn ensure_sidebar_checkout_statuses(&self, cx: &mut Context<Self>) {
-        // Group by owning daemon so remote checkouts resolve on their host.
-        // Each path carries the session's recorded base branch: a commit
-        // whose patch reached the base under a rewritten SHA — the base was
-        // rebased — is not unpushed.
-        let mut by_owner: HashMap<waku_client::DaemonKey, Vec<(PathBuf, Option<String>)>> =
-            HashMap::new();
-        let mut archived_paths = HashSet::new();
-        for session in &self.state.sessions {
-            if !session.has_started() {
-                continue;
-            }
-            let Some(path) = self.workspace_path_for_session(session) else {
-                continue;
-            };
-            if session.archived_at.is_some() {
-                archived_paths.insert(path.to_path_buf());
-                continue;
-            }
-            let base = match &session.workspace {
+    /// A virtualized row supplies demand; this method only touches memory and
+    /// schedules background work. At most two checkout requests run at once.
+    fn sidebar_checkout_status_for(
+        &self,
+        session: &AgentSession,
+        cx: &mut Context<Self>,
+    ) -> Option<crate::git_commit::CheckoutStatus> {
+        if !session.has_started() {
+            return None;
+        }
+        let path = self.workspace_path_for_session(session)?;
+        let key = super::checkout_status::CheckoutKey {
+            owner: self.session_host(session.id),
+            path: path.to_path_buf(),
+            base: match &session.workspace {
                 SessionWorkspace::Worktree { base_branch, .. } => base_branch.clone(),
                 _ => None,
-            };
-            by_owner
-                .entry(self.session_host(session.id))
-                .or_default()
-                .push((path.to_path_buf(), base));
+            },
+        };
+        let previous = self.sidebar_checkout_refresh.borrow().peek(&key);
+        if session.archived_at.is_some() {
+            return previous;
         }
-        for paths in by_owner.values_mut() {
-            // A shared path keeps whichever session recorded a base.
-            paths.sort_by(|left, right| left.0.cmp(&right.0).then(right.1.cmp(&left.1)));
-            paths.dedup_by(|candidate, kept| candidate.0 == kept.0);
-        }
-
-        // Sort by owner so the fingerprint is independent of map order.
-        let mut owned_paths: Vec<(waku_client::DaemonKey, Vec<(PathBuf, Option<String>)>)> =
-            by_owner.into_iter().collect();
-        owned_paths.sort_by_key(|(owner, _)| *owner);
-        let checkout_count = owned_paths
-            .iter()
-            .map(|(_, paths)| paths.len())
-            .sum::<usize>();
-        let owner_count = owned_paths.len();
-        let mut fingerprint = 0xc8ec_07a7_5a7a_5ca1;
-        for (owner, paths) in &owned_paths {
-            match owner {
-                waku_client::DaemonKey::Local => fingerprint = mix(fingerprint, 0),
-                waku_client::DaemonKey::Remote(host) => {
-                    fingerprint = mix(fingerprint, 1);
-                    fingerprint = mix_uuid(fingerprint, *host);
-                }
-            }
-            for (path, base) in paths {
-                for byte in path.as_os_str().as_encoded_bytes() {
-                    fingerprint = mix(fingerprint, u64::from(*byte));
-                }
-                if let Some(base) = base {
-                    for byte in base.as_bytes() {
-                        fingerprint = mix(fingerprint, u64::from(*byte));
-                    }
-                }
-                fingerprint = mix(fingerprint, 0xff);
-            }
-        }
-        let rescan_due = self
-            .sidebar_checkout_scanned_at
-            .get()
-            .is_none_or(|instant| instant.elapsed() >= SIDEBAR_CHECKOUT_STATUS_RESCAN);
-        if self.sidebar_checkout_scan_in_flight.get() {
-            // Keep the active fingerprint unchanged. When this scan finishes,
-            // the next render compares against current state and folds any
-            // intervening refresh requests into one follow-up pass.
-            return;
-        }
-        if self.sidebar_checkout_scan_fingerprint.get() == Some(fingerprint) && !rescan_due {
-            return;
-        }
-        self.sidebar_checkout_scan_fingerprint
-            .set(Some(fingerprint));
-        let generation = self.sidebar_checkout_scan_generation.get().wrapping_add(1);
-        self.sidebar_checkout_scan_generation.set(generation);
-
-        if owned_paths.is_empty() {
-            self.sidebar_checkout_statuses
-                .borrow_mut()
-                .retain(|path, _| archived_paths.contains(path));
-            self.sidebar_checkout_scanned_at.set(Some(Instant::now()));
-            return;
-        }
-
-        let mut scans = Vec::new();
-        let mut offline = HashSet::new();
-        for (owner, paths) in owned_paths {
-            match self.daemons.supervisor(owner) {
-                Some(supervisor) => scans.push((supervisor, paths)),
-                None => offline.extend(paths.into_iter().map(|(path, _)| path)),
-            }
-        }
-        let offline_count = offline.len();
-        self.sidebar_checkout_scan_in_flight.set(true);
+        let Some(supervisor) = self.daemons.supervisor(key.owner) else {
+            return previous;
+        };
+        let Some(generation) = self
+            .sidebar_checkout_refresh
+            .borrow_mut()
+            .claim(&key, Instant::now())
+        else {
+            return previous;
+        };
+        let demand = self.sidebar_checkout_refresh.borrow_mut().take_metrics();
         cx.spawn(async move |waku, cx| {
-            let statuses = cx
+            let fetch_key = key.clone();
+            let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let scan_started = Instant::now();
-                    let mut statuses = HashMap::new();
-                    let mut request_count = 0usize;
-                    let mut failed_count = 0usize;
-                    let mut empty_count = 0usize;
-                    let mut timeout_count = 0usize;
-                    let mut request_total_ms = 0u64;
-                    let mut request_max_ms = 0u64;
-                    for (supervisor, paths) in scans {
-                        let workspace = waku_client::WorkspaceClient::new(supervisor.client());
-                        for (path, base) in paths {
-                            request_count += 1;
-                            let request_started = Instant::now();
-                            match workspace.request(
-                                waku_client::WorkspaceOperation::InspectCheckoutStatus {
-                                    cwd: path.clone(),
-                                    base,
-                                },
-                            ) {
-                                Ok(waku_client::WorkspaceResult::CheckoutStatus {
-                                    status: Some(status),
-                                }) => {
-                                    statuses.insert(path, status);
-                                }
-                                Ok(waku_client::WorkspaceResult::CheckoutStatus {
-                                    status: None,
-                                }) => {
-                                    empty_count += 1;
-                                }
-                                Ok(_) => failed_count += 1,
-                                Err(error) => {
-                                    failed_count += 1;
-                                    let message = error.to_string().to_ascii_lowercase();
-                                    if message.contains("timed out") || message.contains("deadline")
-                                    {
-                                        timeout_count += 1;
-                                    }
-                                }
-                            }
-                            let request_ms = u64::try_from(request_started.elapsed().as_millis())
-                                .unwrap_or(u64::MAX);
-                            request_total_ms = request_total_ms.saturating_add(request_ms);
-                            request_max_ms = request_max_ms.max(request_ms);
-                        }
-                    }
-                    let scan_duration_ms =
-                        u64::try_from(scan_started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                    let started = Instant::now();
+                    let workspace = waku_client::WorkspaceClient::new(supervisor.client());
+                    let response =
+                        workspace.request(waku_client::WorkspaceOperation::InspectCheckoutStatus {
+                            cwd: fetch_key.path,
+                            base: fetch_key.base,
+                        });
+                    let timeout = response.as_ref().err().is_some_and(|error| {
+                        let message = error.to_string().to_ascii_lowercase();
+                        message.contains("timed out") || message.contains("deadline")
+                    });
+                    let result = match response {
+                        Ok(waku_client::WorkspaceResult::CheckoutStatus { status }) => Ok(status),
+                        _ => Err(()),
+                    };
+                    let elapsed = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
                     crate::diagnostics::record_sidebar_checkout_scan(
                         crate::diagnostics::SidebarCheckoutScanMetrics {
-                            duration_ms: scan_duration_ms,
-                            checkout_count,
-                            owner_count,
-                            offline_count,
-                            request_count,
-                            result_count: statuses.len(),
-                            failed_count,
-                            empty_count,
-                            timeout_count,
-                            request_total_ms,
-                            request_max_ms,
+                            duration_ms: elapsed,
+                            checkout_count: 1,
+                            owner_count: 1,
+                            offline_count: 0,
+                            request_count: 1,
+                            result_count: usize::from(matches!(result, Ok(Some(_)))),
+                            failed_count: usize::from(result.is_err()),
+                            empty_count: usize::from(matches!(result, Ok(None))),
+                            timeout_count: usize::from(timeout),
+                            request_total_ms: elapsed,
+                            request_max_ms: elapsed,
+                            cached_count: demand.cached,
+                            deferred_count: demand.deferred,
+                            retry_count: demand.retries,
                         },
                     );
-                    statuses
+                    result
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
-                if waku.sidebar_checkout_scan_generation.get() == generation {
-                    // Rows whose host is offline or whose session is archived
-                    // keep their last-known status.
-                    let archived_paths: HashSet<PathBuf> = waku
-                        .state
-                        .sessions
-                        .iter()
-                        .filter(|session| session.has_started() && session.archived_at.is_some())
-                        .filter_map(|session| {
-                            waku.workspace_path_for_session(session)
-                                .map(Path::to_path_buf)
-                        })
-                        .collect();
-                    let mut merged = waku.sidebar_checkout_statuses.borrow().clone();
-                    merged
-                        .retain(|path, _| offline.contains(path) || archived_paths.contains(path));
-                    merged.extend(statuses);
-                    *waku.sidebar_checkout_statuses.borrow_mut() = merged;
-                }
-                waku.sidebar_checkout_scan_in_flight.set(false);
-                waku.sidebar_checkout_scanned_at.set(Some(Instant::now()));
+                waku.sidebar_checkout_refresh.borrow_mut().finish(
+                    &key,
+                    generation,
+                    result,
+                    Instant::now(),
+                );
                 cx.notify();
             });
         })
         .detach();
+        previous
     }
 
     /// Resolves each started session's pull requests on a background executor
@@ -3573,7 +3455,11 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         self.ensure_sidebar_branch_labels(cx);
-        self.ensure_sidebar_checkout_statuses(cx);
+        // Give the selected task first claim on capacity, even when its row
+        // is outside the virtual list's viewport.
+        if let Some(session) = self.selected_session() {
+            self.sidebar_checkout_status_for(session, cx);
+        }
         self.ensure_sidebar_pull_requests(cx);
         self.ensure_dormant_worktree_sweeps(cx);
         self.ensure_sidebar_terminal_repo_roots(cx);
@@ -6918,12 +6804,7 @@ impl Waku {
             }
             _ => (detail_label, false),
         };
-        let checkout_status = if session.has_started() {
-            self.workspace_path_for_session(session)
-                .and_then(|path| self.sidebar_checkout_statuses.borrow().get(path).copied())
-        } else {
-            None
-        };
+        let checkout_status = self.sidebar_checkout_status_for(session, cx);
         let detail_icon = if session.friend_peer_id.is_some() {
             "icons/user-round.svg"
         } else if grouped_by_project {

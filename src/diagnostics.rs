@@ -88,6 +88,9 @@ pub(crate) struct SidebarCheckoutScanMetrics {
     pub(crate) timeout_count: usize,
     pub(crate) request_total_ms: u64,
     pub(crate) request_max_ms: u64,
+    pub(crate) cached_count: usize,
+    pub(crate) deferred_count: usize,
+    pub(crate) retry_count: usize,
 }
 
 /// Keep a bounded, path-free record of each completed sidebar checkout scan.
@@ -115,6 +118,9 @@ pub(crate) fn record_sidebar_checkout_scan(metrics: SidebarCheckoutScanMetrics) 
         "timeouts": metrics.timeout_count,
         "requestTotalMs": metrics.request_total_ms,
         "requestMaxMs": metrics.request_max_ms,
+        "cached": metrics.cached_count,
+        "deferred": metrics.deferred_count,
+        "retries": metrics.retry_count,
     });
     let _ = append_capped_line(&path, &record.to_string());
 }

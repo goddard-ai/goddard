@@ -1771,7 +1771,10 @@ impl Waku {
         self.invalidate_base_push_state(&workspace_path);
         self.mention_files
             .invalidate_where(|key| key.0 == workspace_path);
-        self.invalidate_sidebar_git_scans();
+        self.invalidate_sidebar_git_scans(
+            self.daemon_key_for_path(&workspace_path),
+            &workspace_path,
+        );
         self.refresh_workspace_surfaces(cx);
         self.invalidate_composer_sources(cx);
         if self.file_finder.is_open() {
@@ -1785,13 +1788,12 @@ impl Waku {
 
     /// The turn-settle version of [`invalidate_workspace_queries`] for a
     /// session that is not necessarily on screen: its own checkout's cached
-    /// answers drop and the sidebar's git rows re-scan, whichever workspace
+    /// answers drop and its sidebar status becomes stale, whichever workspace
     /// the right panel is showing. The visible workspace's surfaces stay
     /// untouched — `workspace_queries_stale` handles the selected session.
     ///
     /// [`invalidate_workspace_queries`]: Self::invalidate_workspace_queries
     pub(super) fn invalidate_session_workspace_queries(&mut self, session_id: Uuid) {
-        self.invalidate_sidebar_git_scans();
         let Some(path) = self
             .state
             .sessions
@@ -1802,6 +1804,7 @@ impl Waku {
         else {
             return;
         };
+        self.invalidate_sidebar_git_scans(self.session_host(session_id), &path);
         self.branch_snapshots.invalidate(&path);
         self.invalidate_workspace_remote_files(&path);
         self.invalidate_base_push_state(&path);

@@ -3432,8 +3432,7 @@ pub struct Waku {
     /// already snapshotted and removed — re-checked only when a session
     /// leaves dormancy. In-flight entries also dedupe a pass's spawns.
     dormant_worktrees_swept: RefCell<HashSet<Uuid>>,
-    /// Throttle for the dormant-worktree sweep pass, like
-    /// `sidebar_checkout_scanned_at`.
+    /// Throttle for the dormant-worktree sweep pass.
     dormant_sweep_scanned_at: Cell<Option<Instant>>,
     /// A pass keeps at most two background jobs active and cannot overlap
     /// another pass, even when a remote inspection outlasts the rescan delay.
@@ -4056,15 +4055,8 @@ pub struct Waku {
     sidebar_terminal_locations: RefCell<HashMap<PathBuf, terminals::TerminalLocation>>,
     sidebar_terminal_repo_scan_fingerprint: Cell<Option<u64>>,
     sidebar_terminal_repo_scan_generation: Cell<u64>,
-    /// Dirty flag + unpushed commit count per session checkout or worktree
-    /// path, resolved together on a background executor so sidebar rows only
-    /// read memory. Git state drifts without any session-set change, so the
-    /// scan also reruns on a cadence — `sidebar_checkout_scanned_at`.
-    sidebar_checkout_statuses: RefCell<HashMap<PathBuf, crate::git_commit::CheckoutStatus>>,
-    sidebar_checkout_scan_fingerprint: Cell<Option<u64>>,
-    sidebar_checkout_scan_generation: Cell<u64>,
-    sidebar_checkout_scanned_at: Cell<Option<Instant>>,
-    sidebar_checkout_scan_in_flight: Cell<bool>,
+    /// Bounded, per-checkout status cache driven by rendered rows.
+    sidebar_checkout_refresh: RefCell<checkout_status::CheckoutStatuses>,
     /// Pull requests resolved per session on a background executor, keyed by
     /// session id. A session absent from the map means "not known yet" — the
     /// row renders no badge, same as a session with no pull requests.
@@ -4459,6 +4451,7 @@ mod boss;
 mod boss_history;
 mod boss_moods;
 mod branches;
+mod checkout_status;
 mod close_dialog;
 mod command_palette;
 mod commit_dialog;
@@ -7911,11 +7904,7 @@ impl Waku {
                 sidebar_terminal_locations: RefCell::new(HashMap::new()),
                 sidebar_terminal_repo_scan_fingerprint: Cell::new(None),
                 sidebar_terminal_repo_scan_generation: Cell::new(0),
-                sidebar_checkout_statuses: RefCell::new(HashMap::new()),
-                sidebar_checkout_scan_fingerprint: Cell::new(None),
-                sidebar_checkout_scan_generation: Cell::new(0),
-                sidebar_checkout_scanned_at: Cell::new(None),
-                sidebar_checkout_scan_in_flight: Cell::new(false),
+                sidebar_checkout_refresh: RefCell::default(),
                 sidebar_pull_requests: RefCell::new(HashMap::new()),
                 sidebar_pull_request_scan_fingerprint: Cell::new(None),
                 sidebar_pull_request_scan_generation: Cell::new(0),
