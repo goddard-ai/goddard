@@ -466,9 +466,12 @@ impl WakuBackend {
         cols: u16,
         rows: u16,
         events: EventSink,
+        command: Option<&waku_protocol::custom_commands::CustomCommand>,
     ) -> anyhow::Result<crate::terminal::DaemonTerminal> {
         #[cfg(all(test, unix))]
-        if let Some(shell) = &self.terminal_shell {
+        if command.is_none()
+            && let Some(shell) = &self.terminal_shell
+        {
             return crate::terminal::DaemonTerminal::open_with_shell(
                 cwd,
                 cols,
@@ -478,6 +481,16 @@ impl WakuBackend {
             );
         }
         ensure_shell_environment();
+        if let Some(command) = command {
+            return crate::terminal::DaemonTerminal::open_command(
+                cwd,
+                cols,
+                rows,
+                events,
+                command,
+                &self.task_store.path().with_file_name("commands"),
+            );
+        }
         crate::terminal::DaemonTerminal::open(cwd, cols, rows, events)
     }
 

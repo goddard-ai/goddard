@@ -41,6 +41,7 @@ pub mod checkpoint;
 pub mod composer;
 pub mod computer_use;
 pub mod custom_commands;
+pub mod terminal_command;
 mod driver_wire;
 pub mod eval;
 pub mod exposure;

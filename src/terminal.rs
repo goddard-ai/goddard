@@ -801,6 +801,7 @@ impl TerminalSession {
         channel_id: Uuid,
         working_directory: &Path,
         owner: Option<Uuid>,
+        command: Option<crate::persistence::CustomCommand>,
         columns: usize,
         rows: usize,
         restored_scrollback: Option<String>,
@@ -814,17 +815,23 @@ impl TerminalSession {
         let client = daemon.client();
         let events = client.subscribe(channel_id, channel_id);
         let initial_size = *parts.window_size.lock();
+        let request = match command {
+            Some(command) => waku_client::Command::OpenCommandTerminal {
+                cwd: working_directory.to_path_buf(),
+                cols: initial_size.num_cols,
+                rows: initial_size.num_lines,
+                owner,
+                command,
+            },
+            None => waku_client::Command::OpenTerminal {
+                cwd: working_directory.to_path_buf(),
+                cols: initial_size.num_cols,
+                rows: initial_size.num_lines,
+                owner,
+            },
+        };
         client
-            .request(
-                channel_id,
-                channel_id,
-                waku_client::Command::OpenTerminal {
-                    cwd: working_directory.to_path_buf(),
-                    cols: initial_size.num_cols,
-                    rows: initial_size.num_lines,
-                    owner,
-                },
-            )
+            .request(channel_id, channel_id, request)
             .context("open terminal on the remote host")?;
         let remote = RemoteTerminalIo {
             client: Arc::new(std::sync::RwLock::new(client)),
@@ -1613,7 +1620,15 @@ impl TerminalView {
         owner: Option<Uuid>,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::remote_with_scrollback(daemon, terminal_id, working_directory, owner, None, cx)
+        Self::remote_with_scrollback(
+            daemon,
+            terminal_id,
+            working_directory,
+            owner,
+            None,
+            None,
+            cx,
+        )
     }
 
     pub fn remote_with_scrollback(
@@ -1621,11 +1636,26 @@ impl TerminalView {
         terminal_id: Uuid,
         working_directory: PathBuf,
         owner: Option<Uuid>,
+        command: Option<crate::persistence::CustomCommand>,
         scrollback_path: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let default_title = tr!("right_panel.terminal");
-        let shell_name = "ssh".to_owned();
+        let default_title = command
+            .as_ref()
+            .map(|command| command.display_name().to_owned())
+            .unwrap_or_else(|| tr!("right_panel.terminal"));
+        // An explicit override names a shell on the remote host. Never
+        // resolve a missing override to the desktop's default shell.
+        let shell_name = command
+            .as_ref()
+            .and_then(|command| command.shell.as_deref())
+            .map(str::trim)
+            .filter(|shell| !shell.is_empty())
+            .and_then(|shell| Path::new(shell).file_name())
+            .and_then(|name| name.to_str())
+            .unwrap_or("ssh")
+            .to_owned();
+        let runs_a_command = command.is_some();
         let terminal_cwd = working_directory.clone();
         let restore_path = scrollback_path.clone();
         Self::spawn_session(
@@ -1640,6 +1670,7 @@ impl TerminalView {
                     terminal_id,
                     &terminal_cwd,
                     owner,
+                    command,
                     52,
                     36,
                     restored_scrollback,
@@ -1664,10 +1695,10 @@ impl TerminalView {
             spawn_directory: working_directory.clone(),
             working_directory,
             shell_name,
-            command_running: false,
+            command_running: runs_a_command,
             command_began_seen: false,
             last_command_exit: None,
-            last_command_started_at: None,
+            last_command_started_at: runs_a_command.then(crate::model::unix_time),
             exited: false,
             scrollback_path,
             scrollback_snapshot_pending: false,

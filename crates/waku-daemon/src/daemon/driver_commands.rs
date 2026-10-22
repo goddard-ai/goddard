@@ -125,6 +125,7 @@ pub(super) fn handle_driver_command(
         | Command::ForkProviderSession { .. }
         | Command::Workspace { .. }
         | Command::OpenTerminal { .. }
+        | Command::OpenCommandTerminal { .. }
         | Command::WriteTerminal { .. }
         | Command::ResizeTerminal { .. }
         | Command::CloseTerminal

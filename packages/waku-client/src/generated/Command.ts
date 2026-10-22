@@ -113,7 +113,7 @@ project?: string | null, candidates: Array<RouteCandidate>, lastUsed?: RouteTarg
  * `cwd` — is removed; `None` terminals leave only with their cwd's
  * workspace or an explicit `CloseTerminal`.
  */
-owner?: string | null, } | { "type": "writeTerminal", data: string, } | { "type": "resizeTerminal", cols: number, rows: number, } | { "type": "closeTerminal" } | { "type": "closeSession" } | { "type": "agentCreateSession",
+owner?: string | null, } | { "type": "openCommandTerminal", cwd: string, cols: number, rows: number, owner?: string | null, command: CustomCommand, } | { "type": "writeTerminal", data: string, } | { "type": "resizeTerminal", cols: number, rows: number, } | { "type": "closeTerminal" } | { "type": "closeSession" } | { "type": "agentCreateSession",
 /**
  * Any provider Waku can drive. `None` inherits the sending task's
  * provider; the daemon rejects the command when no sending task is

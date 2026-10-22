@@ -1,0 +1,1 @@
+- Run saved custom commands in remote project terminals using the remote host's shell and environment, with completion notifications and close-on-success behavior.

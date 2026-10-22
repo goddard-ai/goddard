@@ -1118,6 +1118,7 @@ impl Waku {
                     terminal_id,
                     launch_directory.clone(),
                     owner,
+                    command.cloned(),
                     scrollback_path,
                     cx,
                 )
@@ -1462,11 +1463,10 @@ impl Waku {
         pane_of: Option<Uuid>,
         cx: &mut Context<Self>,
     ) -> Option<Uuid> {
-        // A remote working directory hosts a plain shell on that host's
-        // daemon; commands and program launches carry local paths and
-        // scripts, so they stay local-only.
+        // Custom commands carry script text for the host to prepare.
+        // Arbitrary program launches still carry desktop-local paths.
         if self.is_remote_path(&working_directory)
-            && !matches!(launch, None | Some(TerminalLaunch::Shell))
+            && matches!(launch, Some(TerminalLaunch::Program { .. }))
         {
             return None;
         }

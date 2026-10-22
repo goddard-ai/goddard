@@ -68,6 +68,37 @@ mod platform {
             )
         }
 
+        /// Prepare and source a command on this host, retaining the shell
+        /// for inspection unless the command requests a successful close.
+        pub fn open_command(
+            cwd: &std::path::Path,
+            cols: u16,
+            rows: u16,
+            events: impl TerminalEventSink,
+            command: &waku_protocol::custom_commands::CustomCommand,
+            scripts_directory: &std::path::Path,
+        ) -> anyhow::Result<Self> {
+            let shell = crate::terminal_command::command_shell(command);
+            let script_path =
+                crate::terminal_command::ensure_script(scripts_directory, &command.script)
+                    .context("materialize custom command on the terminal host")?;
+            let line = waku_protocol::terminal_command::source_line(
+                &shell,
+                &script_path,
+                command.close_on_success,
+            );
+            let shell_args = crate::command_env::default_terminal_shell_args(&shell);
+            let terminal = Self::open_with_shell(
+                cwd,
+                cols,
+                rows,
+                events,
+                Shell::new(shell.to_string_lossy().into_owned(), shell_args),
+            )?;
+            terminal.write(format!("{line}\n").into_bytes())?;
+            Ok(terminal)
+        }
+
         pub fn open_with_shell(
             cwd: &std::path::Path,
             cols: u16,
@@ -290,6 +321,17 @@ impl DaemonTerminal {
     }
 
     pub fn write(&self, _data: Vec<u8>) -> anyhow::Result<()> {
+        bail!("daemon terminals are not supported on this platform")
+    }
+
+    pub fn open_command(
+        _cwd: &Path,
+        _cols: u16,
+        _rows: u16,
+        _events: impl TerminalEventSink,
+        _command: &waku_protocol::custom_commands::CustomCommand,
+        _scripts_directory: &Path,
+    ) -> anyhow::Result<Self> {
         bail!("daemon terminals are not supported on this platform")
     }
 

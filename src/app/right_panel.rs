@@ -8246,7 +8246,7 @@ impl Waku {
                 .insert(terminal_id, command.clone());
         }
         if cfg!(windows)
-            || self
+            && !self
                 .selected_workspace_path()
                 .is_some_and(|path| self.is_remote_path(path))
         {

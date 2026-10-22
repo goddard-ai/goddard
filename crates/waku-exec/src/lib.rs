@@ -15,3 +15,4 @@ pub mod capture;
 pub mod command_env;
 pub mod sandbox;
 pub mod terminal;
+mod terminal_command;

@@ -597,6 +597,18 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         owner: Option<Uuid>,
     },
+    /// Launch a custom command in a host-owned interactive terminal. A
+    /// separate operation makes older daemons reject the launch instead
+    /// of ignoring the command and silently opening a plain shell.
+    OpenCommandTerminal {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        cols: u16,
+        rows: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<Uuid>,
+        command: CustomCommand,
+    },
     WriteTerminal {
         #[serde(with = "base64_bytes")]
         #[ts(type = "string")]

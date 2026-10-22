@@ -2488,6 +2488,7 @@ fn command_targets_runtime(command: &Command) -> bool {
             | Command::ForkSessionFromResponse { .. }
             | Command::RewindSessionToMessage { .. }
             | Command::OpenTerminal { .. }
+            | Command::OpenCommandTerminal { .. }
             | Command::WriteTerminal { .. }
             | Command::ResizeTerminal { .. }
             | Command::CloseTerminal
@@ -2574,7 +2575,9 @@ fn run_runtime_mailbox(
         let runtime_id = dispatched.request.runtime_id;
         let starts_runtime = matches!(
             &dispatched.request.command,
-            Command::Start { .. } | Command::OpenTerminal { .. }
+            Command::Start { .. }
+                | Command::OpenTerminal { .. }
+                | Command::OpenCommandTerminal { .. }
         );
         let closes_runtime = matches!(
             &dispatched.request.command,
@@ -2697,7 +2700,7 @@ fn handle_request(
     let command_kind = notification.then(|| command_kind(&request.command));
     let starts_runtime = matches!(
         &request.command,
-        Command::Start { .. } | Command::OpenTerminal { .. }
+        Command::Start { .. } | Command::OpenTerminal { .. } | Command::OpenCommandTerminal { .. }
     );
     let (outcome, executed) = if agent.is_some() && !is_agent_command(&request.command) {
         // A scoped credential is confined to the agent command surface no
@@ -2861,6 +2864,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::ForkProviderSession { .. } => "forkProviderSession",
         Command::Workspace { .. } => "workspace",
         Command::OpenTerminal { .. } => "openTerminal",
+        Command::OpenCommandTerminal { .. } => "openCommandTerminal",
         Command::WriteTerminal { .. } => "writeTerminal",
         Command::ResizeTerminal { .. } => "resizeTerminal",
         Command::CloseTerminal => "closeTerminal",

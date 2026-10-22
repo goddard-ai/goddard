@@ -893,6 +893,192 @@ fn websocket_terminal_round_trip_streams_input_and_output() {
     websocket_terminal_round_trip(false);
 }
 
+/// Custom command text crosses the wire; all paths, shell startup, and
+/// script state belong to the daemon host's interactive shell.
+#[cfg(unix)]
+#[test]
+fn websocket_command_terminal_runs_on_host_and_reports_completion() {
+    use std::os::unix::fs::PermissionsExt as _;
+    use waku_protocol::custom_commands::CustomCommand;
+    use waku_protocol::terminal_command::{script_path, shell_quote};
+
+    let root = std::env::temp_dir().join(format!("goddard-command-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(root.join("workspace/nested directory")).unwrap();
+    let root = root.canonicalize().unwrap();
+    let workspace = root.join("workspace");
+    let shell = root.join("host-shell");
+    let rc = root.join("host-rc");
+    std::fs::write(
+        &rc,
+        "export GODDARD_REMOTE_COMMAND_VALUE=host-value\nhost_function() { printf 'function:%s\\n' ready; }\n",
+    )
+    .unwrap();
+    // The wrapper is an explicit host-side shell override. It ignores the
+    // login flag and supplies a fixture rc file, never the user's profile.
+    std::fs::write(
+        &shell,
+        format!(
+            "#!/bin/sh\nexport ENV={}\nunset BASH_ENV\nexec /bin/sh -i\n",
+            shell_quote(&rc)
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let backend = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        StateStore::daemon(root.join("app.db")),
+    )
+    .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let server = std::thread::spawn(move || {
+        serve(
+            listener,
+            "secret".into(),
+            Arc::new(backend),
+            server_shutdown,
+            ServerOptions::default(),
+        )
+        .unwrap()
+    });
+    struct Fixture {
+        root: PathBuf,
+        shutdown: Arc<AtomicBool>,
+        server: Option<std::thread::JoinHandle<()>>,
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.shutdown.store(true, Ordering::Release);
+            if let Some(server) = self.server.take() {
+                let _ = server.join();
+            }
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+    let _fixture = Fixture {
+        root: root.clone(),
+        shutdown,
+        server: Some(server),
+    };
+    let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+    let bystander = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+
+    for (exit_code, close_on_success) in [(0, false), (7, true), (0, true)] {
+        let terminal_id = Uuid::new_v4();
+        let events = client.subscribe(terminal_id, terminal_id);
+        let tapped = bystander.subscribe(terminal_id, terminal_id);
+        let script = format!(
+            "remote_command_value=kept\ncd 'nested directory'\nhost_function\nprintf 'host:%s:%s\\n' \"$GODDARD_REMOTE_COMMAND_VALUE\" \"$PWD\"\n(exit {exit_code})\n"
+        );
+        let mut command = CustomCommand::new(script.clone());
+        command.shell = Some(shell.to_string_lossy().into_owned());
+        command.close_on_success = close_on_success;
+        assert!(matches!(
+            client
+                .request(
+                    terminal_id,
+                    terminal_id,
+                    Command::OpenCommandTerminal {
+                        cwd: workspace.clone(),
+                        cols: 80,
+                        rows: 24,
+                        owner: None,
+                        command,
+                    },
+                )
+                .unwrap(),
+            ResponsePayload::Ack
+        ));
+        let marker = format!("\x1b]2;goddard-command-exit:{exit_code}\x1b\\");
+        let output = terminal_output_until(&events, marker.as_bytes());
+        let output = String::from_utf8_lossy(&output);
+        assert!(output.contains("function:ready"), "{output}");
+        assert!(
+            output.contains(&format!(
+                "host:host-value:{}",
+                workspace.join("nested directory").display()
+            )),
+            "{output}"
+        );
+        let materialized = script_path(&root.join("commands"), &script);
+        assert_eq!(std::fs::read_to_string(&materialized).unwrap(), script);
+        assert_eq!(
+            std::fs::metadata(&materialized)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert!(tapped.recv_timeout(Duration::from_millis(100)).is_err());
+
+        if close_on_success && exit_code == 0 {
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            loop {
+                let event = events
+                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .expect("successful command did not close its terminal");
+                if event.event.kind == "terminalExited" {
+                    break;
+                }
+            }
+        } else {
+            client
+                .request(
+                    terminal_id,
+                    terminal_id,
+                    Command::ResizeTerminal {
+                        cols: 100,
+                        rows: 30,
+                    },
+                )
+                .unwrap();
+            client
+                .request(
+                    terminal_id,
+                    terminal_id,
+                    Command::WriteTerminal {
+                        data: b"printf 'retained:%s:%s\\n' \"$remote_command_value\" \"$PWD\"\n"
+                            .to_vec(),
+                    },
+                )
+                .unwrap();
+            let marker = format!(
+                "retained:kept:{}",
+                workspace.join("nested directory").display()
+            );
+            terminal_output_until(&events, marker.as_bytes());
+        }
+        client
+            .request(terminal_id, terminal_id, Command::CloseTerminal)
+            .unwrap();
+    }
+
+    let terminal_id = Uuid::new_v4();
+    let mut command = CustomCommand::new("printf should-not-run".into());
+    command.shell = Some(root.join("missing-shell").to_string_lossy().into_owned());
+    assert!(
+        client
+            .request(
+                terminal_id,
+                terminal_id,
+                Command::OpenCommandTerminal {
+                    cwd: workspace,
+                    cols: 80,
+                    rows: 24,
+                    owner: None,
+                    command,
+                }
+            )
+            .is_err(),
+        "an invalid host shell must fail, not fall back to a plain terminal"
+    );
+    client.shutdown();
+    bystander.shutdown();
+}
+
 /// Terminal bytes are private to the connection that opened the PTY: a
 /// second client subscribed to the same channel hears nothing until it
 /// issues a terminal command, which claims the channel and replays the

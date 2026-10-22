@@ -1767,16 +1767,27 @@ impl Backend for WakuBackend {
                 }
                 Ok(ResponsePayload::Workspace { result })
             }
-            Command::OpenTerminal {
-                cwd,
-                cols,
-                rows,
-                owner,
-            } => {
+            command @ (Command::OpenTerminal { .. } | Command::OpenCommandTerminal { .. }) => {
+                let (cwd, cols, rows, owner, command) = match command {
+                    Command::OpenTerminal {
+                        cwd,
+                        cols,
+                        rows,
+                        owner,
+                    } => (cwd, cols, rows, owner, None),
+                    Command::OpenCommandTerminal {
+                        cwd,
+                        cols,
+                        rows,
+                        owner,
+                        command,
+                    } => (cwd, cols, rows, owner, Some(command)),
+                    _ => unreachable!(),
+                };
                 // Claim before spawning so the shell's startup output can
                 // never broadcast to subscribers that didn't open it.
                 events.claim_terminal_channel(Vec::new());
-                match self.open_terminal(&cwd, cols, rows, events.clone()) {
+                match self.open_terminal(&cwd, cols, rows, events.clone(), command.as_ref()) {
                     Ok(terminal) => {
                         let previous = self.terminals.lock().insert(
                             session_id,
