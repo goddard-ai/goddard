@@ -8,9 +8,16 @@ Use a checkout compatible with Octane Xplat `0.16.1`, the version this app pins.
 The app imports routing and stores from `@octane-xplat/ui/routing` and
 `@octane-xplat/ui/data`. Unreleased checkouts may change these contracts.
 
+Prepare the checkout's submodules, declarations, and CLI tools before linking.
+Without generated UI declarations, the app checks framework implementation
+sources directly and can report platform typing errors. [Octane PR #43](https://github.com/octane-xplat/octane-xplat/pull/43)
+also fixes a keyboard type cycle under web-first suffix resolution.
+
 ```sh
+git -C /path/to/octane-xplat submodule update --init --recursive
 pnpm -C /path/to/octane-xplat install
-pnpm -C /path/to/octane-xplat --filter @octane-xplat/cli --filter @octane-xplat/lint build
+pnpm -C /path/to/octane-xplat exec turbo run typegen --filter=@octane-xplat/ui
+pnpm -C /path/to/octane-xplat exec turbo run build --filter=@octane-xplat/cli --filter=@octane-xplat/lint
 ln -s /path/to/octane-xplat links/octane-xplat
 pnpm dev:octane
 ```

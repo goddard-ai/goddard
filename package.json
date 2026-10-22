@@ -14,7 +14,10 @@
 		"build:android": "ns build android --disable-npm-install",
 		"lint": "xplat-lint",
 		"lint:fix": "xplat-lint --fix",
-		"typecheck": "tsrx-tsc --noEmit && tsrx-tsc --noEmit -p tsconfig.native.json"
+		"typecheck": "tsrx-tsc --noEmit && tsrx-tsc --noEmit -p tsconfig.native.json",
+		"test": "bun test ./src ./packages/waku-client/src && node --test scripts/test-vite-package-imports.mjs",
+		"verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+		"smoke:ios": "node scripts/smoke-ios.mjs"
 	},
 	"dependencies": {
 		"@nativescript-community/gesturehandler": "2.0.45",
