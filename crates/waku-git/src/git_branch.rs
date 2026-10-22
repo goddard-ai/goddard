@@ -14,6 +14,7 @@ use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt as _;
 
+use crate::process::GitCommand as _;
 use anyhow::{Context as _, anyhow, bail};
 const MAX_UNTRACKED_FILES: usize = 2_048;
 const MAX_UNTRACKED_FILE_BYTES: u64 = 8 * 1_024 * 1_024;
@@ -28,11 +29,18 @@ pub use waku_protocol::git::{
 /// Inspect branch metadata, upstream divergence, and worktree change counts.
 /// Use [`inspect_metadata`] for branch pickers and labels that need no counts.
 pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
+    crate::process::with_deadline(
+        std::time::Instant::now() + crate::process::READ_TIMEOUT,
+        || inspect_inner(cwd),
+    )
+}
+
+fn inspect_inner(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
     let Some(metadata) = inspect_metadata(cwd)? else {
         return Ok(None);
     };
     let upstream = upstream_status(cwd);
-    let (additions, deletions) = worktree_line_counts(&metadata.repository);
+    let (additions, deletions) = worktree_line_counts(&metadata.repository)?;
     Ok(Some(BranchSnapshot {
         repository: metadata.repository,
         current: metadata.current,
@@ -51,7 +59,7 @@ fn repository_root(cwd: &Path) -> anyhow::Result<Option<PathBuf>> {
     let repository_output = crate::command_env::search_path_command("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if !repository_output.status.success() {
         return Ok(None);
@@ -79,6 +87,13 @@ fn branch_identity(cwd: &Path) -> anyhow::Result<(Option<String>, Option<String>
 /// Does not inspect worktree contents or traverse commit history.
 /// `Ok(None)` means `cwd` is not inside a Git repository.
 pub fn inspect_metadata(cwd: &Path) -> anyhow::Result<Option<BranchMetadata>> {
+    crate::process::with_deadline(
+        std::time::Instant::now() + crate::process::READ_TIMEOUT,
+        || inspect_metadata_inner(cwd),
+    )
+}
+
+fn inspect_metadata_inner(cwd: &Path) -> anyhow::Result<Option<BranchMetadata>> {
     let Some(repository) = repository_root(cwd)? else {
         return Ok(None);
     };
@@ -160,6 +175,13 @@ pub fn inspect_metadata(cwd: &Path) -> anyhow::Result<Option<BranchMetadata>> {
 /// Inspect upstream divergence and checkout identity without reading worktree
 /// changes or enumerating every local branch.
 pub fn inspect_upstream(cwd: &Path) -> anyhow::Result<Option<BranchUpstreamSnapshot>> {
+    crate::process::with_deadline(
+        std::time::Instant::now() + crate::process::READ_TIMEOUT,
+        || inspect_upstream_inner(cwd),
+    )
+}
+
+fn inspect_upstream_inner(cwd: &Path) -> anyhow::Result<Option<BranchUpstreamSnapshot>> {
     if repository_root(cwd)?.is_none() {
         return Ok(None);
     }
@@ -182,7 +204,7 @@ fn upstream_name(cwd: &Path) -> Option<String> {
             "@{upstream}",
         ])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .ok()
         .filter(|output| output.status.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
@@ -199,7 +221,7 @@ pub fn upstream_status(cwd: &Path) -> Option<UpstreamStatus> {
     let counts = crate::command_env::search_path_command("git")
         .args(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .ok()
         .filter(|output| output.status.success())?;
     let counts = String::from_utf8_lossy(&counts.stdout);
@@ -233,7 +255,7 @@ pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRe
             &format!(":(literal){path}"),
         ])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if !listed.status.success() {
         return Ok(None);
@@ -270,7 +292,7 @@ pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRe
             let exists = crate::command_env::search_path_command("git")
                 .args(["rev-parse", "--verify", "--quiet", &refname])
                 .current_dir(cwd)
-                .output()
+                .git_read_output()
                 .ok()?
                 .status
                 .success();
@@ -287,7 +309,7 @@ pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRe
             let contained = crate::command_env::search_path_command("git")
                 .args(["for-each-ref", "--contains", "HEAD", "refs/remotes/origin"])
                 .current_dir(cwd)
-                .output()
+                .git_read_output()
                 .ok()
                 .filter(|output| output.status.success())
                 .map(|output| !output.stdout.is_empty())
@@ -310,7 +332,7 @@ pub fn remote_file(cwd: &Path, path: &str) -> anyhow::Result<Option<RemoteFileRe
     let object_type = crate::command_env::search_path_command("git")
         .args(["cat-file", "-t", &format!("{refname}:{repo_path}")])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if !object_type.status.success()
         || String::from_utf8_lossy(&object_type.stdout).trim() != "blob"
@@ -331,7 +353,7 @@ pub fn remote_url(cwd: &Path, remote: &str) -> anyhow::Result<Option<String>> {
     let output = crate::command_env::search_path_command("git")
         .args(["remote", "get-url", remote])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if !output.status.success() {
         return Ok(None);
@@ -342,18 +364,22 @@ pub fn remote_url(cwd: &Path, remote: &str) -> anyhow::Result<Option<String>> {
     )
 }
 
-fn worktree_line_counts(cwd: &Path) -> (u64, u64) {
-    let tracked = crate::command_env::search_path_command("git")
+fn worktree_line_counts(cwd: &Path) -> anyhow::Result<(u64, u64)> {
+    let output = crate::command_env::search_path_command("git")
         .args(["diff", "--numstat", "HEAD", "--"])
         .current_dir(cwd)
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map_or((0, 0), |output| numstat_line_counts(&output.stdout));
-    (
-        tracked.0.saturating_add(untracked_line_additions(cwd)),
+        .git_read_output()
+        .context("could not read worktree line counts")?;
+    // HEAD may not exist yet in a newly initialized checkout.
+    let tracked = if output.status.success() {
+        numstat_line_counts(&output.stdout)
+    } else {
+        (0, 0)
+    };
+    Ok((
+        tracked.0.saturating_add(untracked_line_additions(cwd)?),
         tracked.1,
-    )
+    ))
 }
 
 fn numstat_line_counts(output: &[u8]) -> (u64, u64) {
@@ -378,8 +404,8 @@ fn numstat_line_counts(output: &[u8]) -> (u64, u64) {
 /// lines as additions so the compact status agrees with the Uncommitted review
 /// source that opens when it is clicked. Bounds keep generated trees from
 /// turning a background metadata refresh into unbounded work.
-fn untracked_line_additions(repository: &Path) -> u64 {
-    let Ok(output) = crate::command_env::search_path_command("git")
+fn untracked_line_additions(repository: &Path) -> anyhow::Result<u64> {
+    let output = crate::command_env::search_path_command("git")
         .args([
             "ls-files",
             "--others",
@@ -389,12 +415,13 @@ fn untracked_line_additions(repository: &Path) -> u64 {
             "--",
         ])
         .current_dir(repository)
-        .output()
-    else {
-        return 0;
-    };
+        .git_read_output()
+        .context("could not list untracked files")?;
     if !output.status.success() {
-        return 0;
+        bail!(
+            "could not list untracked files: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     let mut remaining_bytes = MAX_UNTRACKED_TOTAL_BYTES;
@@ -414,7 +441,7 @@ fn untracked_line_additions(repository: &Path) -> u64 {
         additions = additions.saturating_add(lines);
         remaining_bytes = remaining_bytes.saturating_sub(bytes_read);
     }
-    additions
+    Ok(additions)
 }
 
 fn untracked_text_line_count(path: &Path, maximum_bytes: u64) -> (u64, u64) {
@@ -466,7 +493,7 @@ pub fn checkout(cwd: &Path, branch: &str) -> anyhow::Result<BranchSnapshot> {
         .args(["switch", "--"])
         .arg(branch)
         .current_dir(cwd)
-        .output()
+        .git_mutation_output()
         .context("failed to execute git switch")?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
@@ -483,7 +510,7 @@ pub fn create_and_checkout(cwd: &Path, branch: &str) -> anyhow::Result<BranchSna
         .args(["check-ref-format", "--branch"])
         .arg(branch)
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to validate the branch name")?;
     if !validation.status.success() {
         bail!("{}", command_error(&validation));
@@ -492,7 +519,7 @@ pub fn create_and_checkout(cwd: &Path, branch: &str) -> anyhow::Result<BranchSna
         .args(["switch", "-c"])
         .arg(branch)
         .current_dir(cwd)
-        .output()
+        .git_mutation_output()
         .context("failed to execute git switch")?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
@@ -512,12 +539,12 @@ pub fn reset_to_base(cwd: &Path, base: &str) -> anyhow::Result<BranchSnapshot> {
     let detach = crate::command_env::search_path_command("git")
         .args(["switch", "--detach", "HEAD"])
         .current_dir(cwd)
-        .output()
+        .git_mutation_output()
         .context("failed to execute git switch")?;
     if !detach.status.success() {
         bail!("{}", command_error(&detach));
     }
-    git_stdout(cwd, &["reset", "--quiet", "--hard", base])?;
+    crate::git_commit::git_success(cwd, &["reset", "--quiet", "--hard", base])?;
     inspect(cwd)?.ok_or_else(|| anyhow!("the workspace is no longer a Git repository"))
 }
 
@@ -525,7 +552,7 @@ fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     let output = crate::command_env::search_path_command("git")
         .args(args)
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
@@ -537,7 +564,7 @@ fn optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<Option<String>> 
     let output = crate::command_env::search_path_command("git")
         .args(args)
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if output.status.success() {
         return Ok(Some(

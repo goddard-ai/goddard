@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use anyhow::{Context as _, bail};
+use waku_git::process::GitCommand as _;
 
 pub use waku_protocol::workspace::{BranchDeleteFailure, RepoBranch, RepoWorktree};
 
@@ -21,7 +22,7 @@ pub fn common_git_dir(cwd: &Path) -> anyhow::Result<Option<PathBuf>> {
     let output = crate::command_env::search_path_command("git")
         .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if !output.status.success() {
         return Ok(None);
@@ -46,7 +47,7 @@ pub fn list_worktrees(
     let output = crate::command_env::search_path_command("git")
         .args(["worktree", "list", "--porcelain"])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if !output.status.success() {
         return Ok(None);
@@ -149,7 +150,7 @@ fn worktree_stdout(path: &Path, args: &[&str]) -> Option<String> {
         .arg("-C")
         .arg(path)
         .args(args)
-        .output()
+        .git_read_output()
         .ok()?;
     output
         .status
@@ -199,7 +200,7 @@ pub fn list_repo_branches(cwd: &Path) -> anyhow::Result<Option<Vec<RepoBranch>>>
         .args(["for-each-ref", &format!("--format={FORMAT}")])
         .args(["refs/heads", "refs/remotes"])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if !output.status.success() {
         return Ok(None);
@@ -286,7 +287,7 @@ pub fn fetch_remote(cwd: &Path, remote: &str) -> anyhow::Result<()> {
         .args(["fetch", "--prune"])
         .arg(remote)
         .current_dir(cwd)
-        .output()
+        .git_mutation_output()
         .context("failed to execute git fetch")?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
@@ -310,7 +311,7 @@ pub fn delete_branches(
             .args(["branch", flag, "--"])
             .arg(name)
             .current_dir(cwd)
-            .output()
+            .git_mutation_output()
             .context("failed to execute git branch")?;
         if !output.status.success() {
             failures.push(BranchDeleteFailure {
@@ -341,7 +342,7 @@ pub fn repair_worktrees(cwd: &Path, paths: &[PathBuf]) -> anyhow::Result<()> {
             .arg("repair")
             .args(&existing)
             .current_dir(cwd)
-            .output()
+            .git_mutation_output()
             .context("failed to execute git worktree repair")?;
         if !output.status.success() {
             bail!("{}", command_error(&output));
@@ -350,7 +351,7 @@ pub fn repair_worktrees(cwd: &Path, paths: &[PathBuf]) -> anyhow::Result<()> {
     let output = crate::command_env::search_path_command("git")
         .args(["worktree", "repair"])
         .current_dir(cwd)
-        .output()
+        .git_mutation_output()
         .context("failed to execute git worktree repair")?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
@@ -364,7 +365,7 @@ pub fn prune_worktrees(cwd: &Path) -> anyhow::Result<()> {
     let output = crate::command_env::search_path_command("git")
         .args(["worktree", "prune"])
         .current_dir(cwd)
-        .output()
+        .git_mutation_output()
         .context("failed to execute git worktree prune")?;
     if !output.status.success() {
         bail!("{}", command_error(&output));

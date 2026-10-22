@@ -5,7 +5,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 use std::sync::{Arc, OnceLock};
@@ -416,6 +415,18 @@ fn capture_worktree_commit_from_turn_start(
 }
 
 fn capture_worktree_commit_with_base(
+    cwd: &Path,
+    head: Option<&str>,
+    message: &str,
+    parents: &[String],
+    start_ref: Option<&str>,
+) -> anyhow::Result<String> {
+    with_turn_capture_deadline(|| {
+        capture_worktree_commit_with_base_inner(cwd, head, message, parents, start_ref)
+    })
+}
+
+fn capture_worktree_commit_with_base_inner(
     cwd: &Path,
     head: Option<&str>,
     message: &str,
@@ -1662,46 +1673,29 @@ fn timed_git_input_output(
     input: Option<&[u8]>,
 ) -> anyhow::Result<Output> {
     let started = std::time::Instant::now();
-    let output = match remaining_capture_time()? {
-        Some(timeout) => {
-            let result = match input {
-                Some(input) => {
-                    crate::git_commit::run_capture_unbounded_with_input(command, timeout, input)
-                }
-                None => crate::git_commit::run_capture_unbounded(command, timeout),
-            };
-            match result {
-                Ok(output) => Output {
-                    status: output.status,
-                    stdout: output.stdout,
-                    stderr: output.stderr,
-                },
-                Err(error)
-                    if error
-                        .downcast_ref::<crate::git_commit::ProcessTimedOut>()
-                        .is_some() =>
-                {
-                    log_git_timing(command, started);
-                    return Err(TurnCaptureDeadlineExceeded.into());
-                }
-                Err(error) => {
-                    log_git_timing(command, started);
-                    return Err(error);
-                }
-            }
+    let remaining = remaining_capture_time()?;
+    let deadline = started + remaining.unwrap_or(crate::process::MUTATION_TIMEOUT);
+    let diagnostic = command.get_args().next().is_some_and(|arg| {
+        matches!(
+            arg.to_str(),
+            Some("add" | "read-tree" | "update-ref" | "reset" | "checkout")
+        )
+    });
+    let stdout = if diagnostic {
+        crate::process::OutputLimit::Prefix(crate::process::MAX_DIAGNOSTIC_BYTES)
+    } else {
+        crate::process::OutputLimit::Exact(crate::process::MAX_METADATA_BYTES)
+    };
+    let output = match crate::process::output(command, deadline, stdout, input) {
+        Ok(output) => output,
+        Err(crate::process::CaptureError::Deadline) if remaining.is_some() => {
+            log_git_timing(command, started);
+            return Err(TurnCaptureDeadlineExceeded.into());
         }
-        None => match input {
-            None => command.output().context("failed to execute git")?,
-            Some(input) => {
-                let mut child = command.spawn_bounded().context("failed to execute git")?;
-                child
-                    .stdin()
-                    .ok_or_else(|| anyhow!("git stdin is unavailable"))?
-                    .write_all(input)
-                    .context("failed to write git stdin")?;
-                child.wait_with_output().context("failed to wait for git")?
-            }
-        },
+        Err(error) => {
+            log_git_timing(command, started);
+            return Err(error.into());
+        }
     };
     log_git_timing(command, started);
     Ok(output)

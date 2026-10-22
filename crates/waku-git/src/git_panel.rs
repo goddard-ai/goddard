@@ -201,7 +201,20 @@ pub fn discard(cwd: &Path, path: &str) -> anyhow::Result<()> {
 /// of a committed version.
 pub fn file_at_ref(cwd: &Path, path: &str, git_ref: &str) -> anyhow::Result<String> {
     ensure_repository(cwd)?;
-    git_stdout(cwd, &["show", &format!("{git_ref}:{path}")])
+    let output = crate::process::read_until(
+        crate::command_env::search_path_command("git")
+            .args(["show", &format!("{git_ref}:{path}")])
+            .current_dir(cwd),
+        std::time::Instant::now() + crate::process::READ_TIMEOUT,
+        32 * 1024 * 1024,
+    )?;
+    if !output.status.success() {
+        bail!(
+            "Git file read failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8(output.stdout)?)
 }
 
 /// Append `path` to the repository root's `.gitignore`, once. Status paths

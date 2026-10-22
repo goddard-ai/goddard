@@ -1,0 +1,1 @@
+- Bounded Git output and process cleanup so slow or noisy commands consume fewer resources and failed reads cannot return partial results.

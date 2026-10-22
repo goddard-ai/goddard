@@ -8,4 +8,5 @@ pub mod checkout_history;
 pub mod git_branch;
 pub mod git_commit;
 pub mod git_panel;
+pub mod process;
 pub mod worktree;

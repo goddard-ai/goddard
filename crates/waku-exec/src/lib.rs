@@ -11,6 +11,7 @@ pub(crate) use waku_base::subprocess;
 pub mod runtime_resources;
 pub use runtime_resources::agent_cli_path;
 
+pub mod capture;
 pub mod command_env;
 pub mod sandbox;
 pub mod terminal;

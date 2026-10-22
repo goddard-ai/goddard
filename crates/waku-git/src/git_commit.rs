@@ -6,11 +6,9 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{ExitStatus, Stdio};
+use std::process::ExitStatus;
 use std::sync::{Mutex, OnceLock};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow, bail};
@@ -26,7 +24,6 @@ use waku_protocol::model::ProviderKind;
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 const CHECKOUT_STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const AGENT_TIMEOUT: Duration = Duration::from_secs(180);
-const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(40);
 const MAX_DIFF_BYTES: usize = 96 * 1024;
 const MAX_STDOUT_BYTES: usize = 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 256 * 1024;
@@ -262,8 +259,8 @@ pub(crate) fn checkout_only_subjects(
 }
 
 /// Metadata and history must be complete before they can become cache keys or
-/// successful counts. The ordinary command helper intentionally bounds output
-/// for display; reaching that bound is an error for these machine reads.
+/// successful counts. Exact capture rejects overflow before a partial result
+/// can be interpreted as a valid count or cache key.
 pub(crate) fn complete_git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     complete_git_optional_stdout(cwd, args)?
         .ok_or_else(|| anyhow!("Git metadata command did not succeed"))
@@ -273,15 +270,12 @@ pub(crate) fn complete_git_optional_stdout(
     cwd: &Path,
     args: &[&str],
 ) -> anyhow::Result<Option<String>> {
-    let output = git_capture(cwd, args)?;
+    let output = git_capture_exact(cwd, args)?;
     if !output.status.success() {
         if output.status.code() == Some(1) {
             return Ok(None);
         }
         bail!("Git command failed: {}", command_error(&output));
-    }
-    if output.stdout.len() >= MAX_STDOUT_BYTES {
-        bail!("Git metadata output exceeded the capture limit");
     }
     Ok(Some(
         String::from_utf8(output.stdout)?.trim_end().to_owned(),
@@ -924,14 +918,17 @@ pub(crate) fn push_target(cwd: &Path, branch: &str) -> anyhow::Result<Option<Str
 }
 
 pub fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
-    let output = git_success(cwd, args)?;
+    let output = git_capture_exact(cwd, args)?;
+    if !output.status.success() {
+        bail!("Git command failed: {}", command_error(&output));
+    }
     Ok(String::from_utf8_lossy(&output.stdout)
         .trim_end()
         .to_owned())
 }
 
 pub fn git_optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<Option<String>> {
-    let output = git_capture(cwd, args)?;
+    let output = git_capture_exact(cwd, args)?;
     if output.status.success() {
         return Ok(Some(
             String::from_utf8_lossy(&output.stdout).trim().to_owned(),
@@ -952,156 +949,93 @@ pub fn git_success(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> 
     }
 }
 
+/// Status/diagnostic output for mutations and exit-code probes. Verbose
+/// diagnostics never stop a mutation before its ordinary completion.
 pub fn git_capture(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> {
-    let mut command = crate::command_env::command("git");
-    command
-        .args(args)
-        .current_dir(cwd)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_EDITOR", "true");
-    let timeout = GIT_DEADLINE.with(|deadline| {
-        deadline.get().map_or(GIT_TIMEOUT, |deadline| {
-            deadline
-                .saturating_duration_since(Instant::now())
-                .min(GIT_TIMEOUT)
-        })
-    });
-    if timeout.is_zero() {
-        bail!("checkout status Git deadline expired");
+    capture_git(
+        cwd,
+        args,
+        waku_exec::capture::OutputLimit::Prefix(MAX_STDOUT_BYTES),
+        GIT_TIMEOUT,
+    )
+}
+
+fn git_capture_exact(cwd: &Path, args: &[&str]) -> anyhow::Result<CapturedOutput> {
+    capture_git(
+        cwd,
+        args,
+        waku_exec::capture::OutputLimit::Exact(crate::process::MAX_METADATA_BYTES),
+        crate::process::READ_TIMEOUT,
+    )
+}
+
+fn capture_git(
+    cwd: &Path,
+    args: &[&str],
+    stdout: waku_exec::capture::OutputLimit,
+    timeout: Duration,
+) -> anyhow::Result<CapturedOutput> {
+    let mut command = crate::command_env::search_path_command("git");
+    command.args(args).current_dir(cwd);
+    if matches!(stdout, waku_exec::capture::OutputLimit::Exact(_)) {
+        command.env("GIT_OPTIONAL_LOCKS", "0");
     }
-    run_capture(&mut command, timeout)
+    let limit = Instant::now() + timeout;
+    let deadline =
+        GIT_DEADLINE.with(|deadline| deadline.get().map_or(limit, |parent| parent.min(limit)));
+    let output = crate::process::output(&mut command, deadline, stdout, None)?;
+    Ok(CapturedOutput {
+        status: output.status,
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
 }
 
 pub(crate) fn run_capture(
     command: &mut crate::command_env::Proc,
     timeout: Duration,
 ) -> anyhow::Result<CapturedOutput> {
-    run_capture_inner(command, timeout, None, MAX_STDOUT_BYTES, MAX_STDERR_BYTES)
-}
-
-pub(crate) fn run_capture_unbounded(
-    command: &mut crate::command_env::Proc,
-    timeout: Duration,
-) -> anyhow::Result<CapturedOutput> {
-    run_capture_inner(command, timeout, None, usize::MAX, usize::MAX)
-}
-
-pub(crate) fn run_capture_unbounded_with_input(
-    command: &mut crate::command_env::Proc,
-    timeout: Duration,
-    input: &[u8],
-) -> anyhow::Result<CapturedOutput> {
-    run_capture_inner(command, timeout, Some(input), usize::MAX, usize::MAX)
+    run_capture_inner(
+        command,
+        timeout,
+        None,
+        waku_exec::capture::OutputLimit::Prefix(MAX_STDOUT_BYTES),
+    )
 }
 
 fn run_capture_inner(
     command: &mut crate::command_env::Proc,
     timeout: Duration,
     input: Option<&[u8]>,
-    stdout_limit: usize,
-    stderr_limit: usize,
+    stdout: waku_exec::capture::OutputLimit,
 ) -> anyhow::Result<CapturedOutput> {
-    #[cfg(unix)]
-    {
-        // Agent CLIs can start helpers. Give the invocation its own group so
-        // a timeout does not leave those descendants running in the workspace.
-        command.process_group(0);
-    }
-    command
-        .stdin(if input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn_bounded().context("could not start process")?;
-    let stdout = child.stdout().context("process stdout unavailable")?;
-    let stderr = child.stderr().context("process stderr unavailable")?;
-    let stdout_reader = thread::spawn(move || read_bounded(stdout, stdout_limit));
-    let stderr_reader = thread::spawn(move || read_bounded(stderr, stderr_limit));
-    let stdin_writer = input.map(|input| {
-        let mut stdin = child.stdin().expect("piped stdin requested");
-        let input = input.to_vec();
-        thread::spawn(move || stdin.write_all(&input))
-    });
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child.try_wait().context("could not wait for process")? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            terminate_process_tree(&mut child);
-            let _ = child.wait();
-            let _ = stdout_reader.join();
-            let _ = stderr_reader.join();
-            if let Some(writer) = stdin_writer {
-                let _ = writer.join();
-            }
+    let options = waku_exec::capture::CaptureOptions {
+        deadline: Instant::now() + timeout,
+        stdout,
+        stderr: waku_exec::capture::OutputLimit::Prefix(MAX_STDERR_BYTES),
+    };
+    let mut output = match waku_exec::capture::capture(command, options, input) {
+        Ok(output) => output,
+        Err(waku_exec::capture::CaptureError::Deadline) => {
             return Err(ProcessTimedOut(timeout).into());
         }
-        thread::sleep(PROCESS_POLL_INTERVAL);
+        Err(error) => return Err(error.into()),
     };
-    if let Some(writer) = stdin_writer {
-        writer
-            .join()
-            .map_err(|_| anyhow!("process stdin writer panicked"))?
-            .context("failed to write process stdin")?;
+    if output.stdout_truncated {
+        output
+            .stdout
+            .extend_from_slice(b"\n[diagnostic output truncated]\n");
+    }
+    if output.stderr_truncated {
+        output
+            .stderr
+            .extend_from_slice(b"\n[diagnostic output truncated]\n");
     }
     Ok(CapturedOutput {
-        status,
-        stdout: stdout_reader.join().unwrap_or_default(),
-        stderr: stderr_reader.join().unwrap_or_default(),
+        status: output.status,
+        stdout: output.stdout,
+        stderr: output.stderr,
     })
-}
-
-fn terminate_process_tree(child: &mut crate::command_env::BoundedChild) {
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(-(child.id() as i32), libc::SIGKILL);
-    }
-    #[cfg(windows)]
-    {
-        let mut command = std::process::Command::new("taskkill");
-        command
-            .arg("/PID")
-            .arg(child.id().to_string())
-            .args(["/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        if let Ok(mut killer) = crate::command_env::spawn(&mut command) {
-            let deadline = Instant::now() + Duration::from_secs(2);
-            loop {
-                match killer.try_wait() {
-                    Ok(Some(_)) | Err(_) => break,
-                    Ok(None) if Instant::now() >= deadline => {
-                        let _ = killer.kill();
-                        let _ = killer.wait();
-                        break;
-                    }
-                    Ok(None) => thread::sleep(PROCESS_POLL_INTERVAL),
-                }
-            }
-        }
-    }
-    let _ = child.kill();
-}
-
-fn read_bounded(mut reader: impl Read, limit: usize) -> Vec<u8> {
-    let mut kept = Vec::new();
-    let mut chunk = [0u8; 8192];
-    loop {
-        let Ok(read) = reader.read(&mut chunk) else {
-            break;
-        };
-        if read == 0 {
-            break;
-        }
-        let remaining = limit.saturating_sub(kept.len());
-        kept.extend_from_slice(&chunk[..read.min(remaining)]);
-    }
-    kept
 }
 
 pub fn command_error(output: &CapturedOutput) -> String {

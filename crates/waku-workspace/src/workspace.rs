@@ -9,6 +9,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Output;
 
 use anyhow::{Context as _, anyhow, bail};
+use waku_git::process::GitCommand as _;
 
 const MAX_HYDRATED_PATCH_BYTES: usize = 32 * 1024 * 1024;
 /// Binary reads base64-encode on the wire; 32 MiB stays well under
@@ -51,7 +52,7 @@ fn reference_file(context: &waku_protocol::model::ReferenceContext, path: &Path)
         && let Ok(output) = crate::command_env::search_path_command("git")
             .args(["rev-parse", "--show-toplevel"])
             .current_dir(parent)
-            .output()
+            .git_read_output()
         && output.status.success()
     {
         let root = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
@@ -729,7 +730,7 @@ fn reclaimable_dirs(cwd: &Path) -> Vec<PathBuf> {
             "-z",
         ])
         .current_dir(cwd)
-        .output();
+        .git_read_output();
     let Ok(output) = output else {
         return Vec::new();
     };
@@ -1133,7 +1134,7 @@ fn index_tree(cwd: &Path) -> anyhow::Result<String> {
     let output = crate::command_env::search_path_command("git")
         .args(["write-tree"])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to snapshot the Git index")?;
     if output.status.success() {
         let tree = String::from_utf8_lossy(&output.stdout).trim().to_owned();
@@ -1176,7 +1177,7 @@ fn ensure_repository(cwd: &Path) -> anyhow::Result<()> {
     let output = crate::command_env::search_path_command("git")
         .args(["rev-parse", "--is-inside-work-tree"])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to inspect Git workspace")?;
     if output.status.success() {
         Ok(())
@@ -1189,7 +1190,7 @@ fn resolve(cwd: &Path, revision: &str) -> Option<String> {
     let output = crate::command_env::search_path_command("git")
         .args(["rev-parse", "--verify", &format!("{revision}^{{commit}}")])
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .ok()?;
     output
         .status
@@ -1206,7 +1207,7 @@ where
     let output = crate::command_env::search_path_command("git")
         .args(args)
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())

@@ -8,6 +8,8 @@
 //! basename-derived labels (terminal directories, editor project names) show
 //! the project while the worktree name namespaces it one level up.
 
+use crate::process::GitCommand as _;
+
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -340,7 +342,7 @@ fn cleanup_failed_add(repository: &Path, worktree: &Path) {
         let _ = crate::command_env::search_path_command("git")
             .args(args)
             .current_dir(repository)
-            .output();
+            .git_mutation_output();
     };
     let worktree_arg = worktree.to_string_lossy().into_owned();
     run_git(&["worktree", "remove", "--force", &worktree_arg]);
@@ -393,7 +395,7 @@ pub fn remove(path: &Path, force: bool) -> anyhow::Result<()> {
         arguments.push("--force");
     }
     arguments.push(&worktree_root_arg);
-    git_stdout(&repository, &arguments)
+    git_mutation(&repository, &arguments)
         .with_context(|| format!("could not remove worktree {}", worktree_root.display()))?;
     // A nested checkout leaves its name directory empty once Git removes it;
     // drop it so the name frees up, but never remove the repository's
@@ -454,7 +456,7 @@ pub fn ensure(
     }
     // A directory deleted by hand leaves a registration that would make
     // `git worktree add` refuse the path.
-    git_stdout(&repository, &["worktree", "prune"])
+    git_mutation(&repository, &["worktree", "prune"])
         .context("could not prune stale Git worktree registrations")?;
     let branch = branch.map(str::trim).filter(|branch| !branch.is_empty());
     // A snapshot captured by `checkpoint::capture_ref` records the checkout's
@@ -596,7 +598,8 @@ fn carry_state(worktree: &Path, snapshot: &str) -> anyhow::Result<bool> {
         return Err(anyhow::anyhow!(command_error(&output))
             .context("could not carry the checkout's changes into the worktree"));
     }
-    git_stdout(worktree, &["reset", "--quiet"]).context("could not unstage the carried changes")?;
+    git_mutation(worktree, &["reset", "--quiet"])
+        .context("could not unstage the carried changes")?;
     Ok(lfs_skipped)
 }
 
@@ -654,7 +657,7 @@ fn git_with_lfs_fallback(
             ]);
         }
         configure(&mut command);
-        command.current_dir(cwd).output()
+        command.current_dir(cwd).git_mutation_output()
     };
     let output = run(false).context("failed to execute git")?;
     if output.status.success() || !lfs_filter_failed(&output) {
@@ -683,7 +686,7 @@ fn ref_is_commit(repository: &Path, reference: &str) -> anyhow::Result<bool> {
     let output = crate::command_env::search_path_command("git")
         .args(["rev-parse", "--verify", &format!("{reference}^{{commit}}")])
         .current_dir(repository)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     Ok(output.status.success())
 }
@@ -770,7 +773,7 @@ fn sync_base_branch(
     // `<branch>:<local>` is a fast-forward-only update of the local branch;
     // Git refuses it for a checked-out branch or a non-fast-forward, so a
     // failure here simply keeps the existing base.
-    let _ = git_stdout(
+    let _ = git_mutation(
         repository,
         &["fetch", remote, &format!("{branch}:{base_ref}")],
     );
@@ -802,7 +805,7 @@ fn local_branch_exists(repository: &Path, branch: &str) -> anyhow::Result<bool> 
         .args(["show-ref", "--verify", "--quiet"])
         .arg(format!("refs/heads/{branch}"))
         .current_dir(repository)
-        .output()
+        .git_read_output()
         .context("failed to inspect Git branches")?;
     match output.status.code() {
         Some(0) => Ok(true),
@@ -815,7 +818,7 @@ fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     let output = crate::command_env::search_path_command("git")
         .args(args)
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
@@ -823,11 +826,23 @@ fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+fn git_mutation(cwd: &Path, args: &[&str]) -> anyhow::Result<()> {
+    let output = crate::command_env::search_path_command("git")
+        .args(args)
+        .current_dir(cwd)
+        .git_mutation_output()
+        .context("failed to execute git")?;
+    if !output.status.success() {
+        bail!("{}", command_error(&output));
+    }
+    Ok(())
+}
+
 fn git_optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<Option<String>> {
     let output = crate::command_env::search_path_command("git")
         .args(args)
         .current_dir(cwd)
-        .output()
+        .git_read_output()
         .context("failed to execute git")?;
     if output.status.success() {
         return Ok(Some(
