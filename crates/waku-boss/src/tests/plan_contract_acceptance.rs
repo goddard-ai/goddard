@@ -208,8 +208,6 @@ fn plan_acceptance_prerequisite_wait_does_not_change_approved_binding() {
         .service
         .complete_expiry(worker.session_id, None)
         .unwrap();
-    let settled = fixture.service.employee(worker.session_id).unwrap();
-    fixture.service.assignment_finished(&settled).unwrap();
     assert!(fixture.service.assignment_ready(&dependent));
     fixture.service.validate_plan_binding(&dependent).unwrap();
     assert_eq!(

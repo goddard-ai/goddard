@@ -49,6 +49,13 @@ pub enum AssignmentFinish {
     /// carries the recorded conflict's reason.
     Conflict { reason: String },
 }
+/// The effects the daemon applies after expiry and outcome bookkeeping commit.
+#[derive(Debug)]
+pub struct EmployeeCompletion {
+    pub reservations: Vec<Uuid>,
+    pub assignment: AssignmentFinish,
+}
+
 use waku_protocol::model::ProviderKind;
 
 pub fn validate_browse_url(url: &str) -> anyhow::Result<()> {
@@ -1891,18 +1898,23 @@ impl BossService {
         })
     }
 
-    /// The task bookkeeping an employee's settle performs, after
-    /// `complete_expiry` committed the record. Called once per winning
-    /// finish — a re-driven tail for the same attempt returns `Quiet`.
-    pub fn assignment_finished(&self, employee: &BossEmployee) -> anyhow::Result<AssignmentFinish> {
+    /// Apply outcome bookkeeping inside the employee's expiry transaction.
+    fn finish_assignment(
+        state: &mut BossState,
+        employee: &BossEmployee,
+        now: u64,
+    ) -> AssignmentFinish {
         let Some(assignment) = &employee.assignment else {
-            return Ok(AssignmentFinish::Quiet);
+            return AssignmentFinish::Quiet;
         };
-        let outcome_id = assignment.outcome_id;
-        // An accepted success is the only settle the task cares about:
-        // clean finish, no flagged blocker, not cancelled. Failures and
-        // blockers take the ordinary report path instead — the task's
-        // attention state derives them from the record itself.
+        let Some(task) = state
+            .outcomes
+            .iter_mut()
+            .find(|task| task.id == assignment.outcome_id)
+        else {
+            return AssignmentFinish::Quiet;
+        };
+        task.last_activity_at = now;
         let succeeded = employee.expired
             && !employee.cancelled
             && employee.blocker.is_none()
@@ -1910,102 +1922,65 @@ impl BossService {
                 .expiry
                 .as_ref()
                 .is_some_and(|expiry| expiry.cause == ExpiryCause::Finished);
-        let now = waku_protocol::model::unix_time();
-        if !succeeded {
-            // A result still counts as activity — but only one the task
-            // surface can see, so failures keep their needs-attention
-            // mark without pretending coordination happened.
-            self.update(|state| {
-                if let Some(task) = state.outcomes.iter_mut().find(|task| task.id == outcome_id) {
-                    task.last_activity_at = now;
-                }
-                Ok(())
-            })?;
-            return Ok(AssignmentFinish::Quiet);
+        if !succeeded || task.terminal() {
+            return AssignmentFinish::Quiet;
         }
         let attempt = employee
             .ticket
             .as_ref()
             .map(|ticket| ticket.generation)
             .unwrap_or(0);
-        let mut outcome = AssignmentFinish::Quiet;
-        self.update(|state| {
-            let Some(task) = state.outcomes.iter_mut().find(|task| task.id == outcome_id) else {
-                return Ok(());
-            };
-            // A late success on a completed or cancelled task is history —
-            // no handoff, no transition, and no power to revive it.
-            if task.terminal() {
-                return Ok(());
+        if !assignment.finishes_outcome {
+            if task.handoffs.iter().any(|handoff| {
+                handoff.assignment == employee.session_id && handoff.attempt == attempt
+            }) {
+                return AssignmentFinish::Quiet;
             }
-            if !assignment.finishes_outcome {
-                if task.handoffs.iter().any(|handoff| {
-                    handoff.assignment == employee.session_id && handoff.attempt == attempt
-                }) {
-                    return Ok(());
-                }
-                let id = Uuid::new_v4();
-                task.handoffs.push(OutcomeHandoff {
-                    id,
-                    assignment: employee.session_id,
-                    attempt,
-                    intent: assignment.after_success.clone(),
-                    created_at: now,
-                    resolution: None,
-                });
-                outcome = AssignmentFinish::Handoff {
-                    id,
-                    intent: assignment.after_success.clone(),
-                };
-                return Ok(());
-            }
-            // Only the live designation completes — a replaced or
-            // abandoned finisher's success preserves its result without
-            // a transition.
-            if task.finishing_assignment != Some(employee.session_id) {
-                return Ok(());
-            }
-            let outstanding = task.completion_outstanding(
-                &state.employees,
-                &state.retired_employees,
-                employee.session_id,
-            );
-            if outstanding.is_empty() {
-                task.state = OutcomeState::Completed;
-                task.completed_at = Some(now);
-                task.completion_conflict = None;
-                task.evidence = Some(format!(
-                    "Finishing assignment {} ({}) finished with the task's criteria met.",
-                    employee.identity.name, employee.session_id
-                ));
-                task.history.push(OutcomeTransition {
-                    state: OutcomeState::Completed,
-                    at: now,
-                    actor: PlanActor::Boss,
-                });
-                outcome = AssignmentFinish::Completed;
-                return Ok(());
-            }
-            let reason = outstanding.join("; ");
-            task.completion_conflict = Some(CompletionConflict {
+            let id = Uuid::new_v4();
+            task.handoffs.push(OutcomeHandoff {
+                id,
                 assignment: employee.session_id,
                 attempt,
-                reason: reason.clone(),
-                at: now,
+                intent: assignment.after_success.clone(),
+                created_at: now,
+                resolution: None,
             });
-            outcome = AssignmentFinish::Conflict { reason };
-            Ok(())
-        })?;
-        // Meaningful activity on any accepted result — the task's
-        // unattended clock restarts when a result lands, whether or not
-        // it closed anything.
-        self.update(|state| {
-            if let Some(task) = state.outcomes.iter_mut().find(|task| task.id == outcome_id) {
-                task.last_activity_at = now;
-            }
-            Ok(())
-        })?;
-        Ok(outcome)
+            return AssignmentFinish::Handoff {
+                id,
+                intent: assignment.after_success.clone(),
+            };
+        }
+        if task.finishing_assignment != Some(employee.session_id) {
+            return AssignmentFinish::Quiet;
+        }
+        let outstanding = task.completion_outstanding(
+            &state.employees,
+            &state.retired_employees,
+            employee.session_id,
+        );
+        if outstanding.is_empty() {
+            task.state = OutcomeState::Completed;
+            task.completed_at = Some(now);
+            task.completion_conflict = None;
+            task.evidence = Some(format!(
+                "Finishing assignment {} ({}) finished with the task's criteria met.",
+                employee.identity.name, employee.session_id
+            ));
+            task.history.push(OutcomeTransition {
+                state: OutcomeState::Completed,
+                at: now,
+                actor: PlanActor::Boss,
+            });
+            return AssignmentFinish::Completed;
+        }
+        let reason = outstanding.join("; ");
+        task.completion_conflict = Some(CompletionConflict {
+            assignment: employee.session_id,
+            attempt,
+            reason: reason.clone(),
+            at: now,
+        });
+        AssignmentFinish::Conflict { reason }
     }
 
     /// The reminder scan's eligibility maintenance: refresh every task's
@@ -3267,8 +3242,8 @@ impl BossService {
         Ok(employee)
     }
 
-    /// Close out a finishing (or cancelled queued) employee: mark the
-    /// record expired and hand back the reservation ids still owed a
+    /// Commit expiry, assignment history, and the outcome decision together.
+    /// Hand back the assignment result and reservation ids still owed a
     /// broker release — the held admission plus a parked update's id —
     /// empty when the slot is already free, so the caller releases
     /// exactly once. `expiry` is the tail's refined settle record —
@@ -3277,9 +3252,12 @@ impl BossService {
         &self,
         session: Uuid,
         expiry: Option<EmployeeExpiry>,
-    ) -> anyhow::Result<Vec<Uuid>> {
+    ) -> anyhow::Result<EmployeeCompletion> {
         let now = waku_protocol::model::unix_time();
-        let mut reservations = Vec::new();
+        let mut completion = EmployeeCompletion {
+            reservations: Vec::new(),
+            assignment: AssignmentFinish::Quiet,
+        };
         self.update(|state| {
             let Some(entry) = state
                 .employees
@@ -3293,15 +3271,18 @@ impl BossService {
                 entry.expiry = Some(expiry);
             }
             if let Some(ticket) = &mut entry.ticket {
-                reservations.extend(ticket.reservation.take());
-                reservations.extend(ticket.pending_reservation.take());
+                completion.reservations.extend(ticket.reservation.take());
+                completion
+                    .reservations
+                    .extend(ticket.pending_reservation.take());
                 ticket.pending_resources = None;
             }
             let employee = entry.clone();
             record_assignment_settle(state, &employee, now);
+            completion.assignment = Self::finish_assignment(state, &employee, now);
             Ok(())
         })?;
-        Ok(reservations)
+        Ok(completion)
     }
 
     /// Whether the daemon loaded durable Boss state — a disabled service
@@ -11885,7 +11866,7 @@ mod memory_op_tests {
         service
             .begin_finishing(session, false, false, ExpiryCause::Finished)
             .unwrap();
-        let released = service.complete_expiry(session, None).unwrap();
+        let released = service.complete_expiry(session, None).unwrap().reservations;
         assert!(released.contains(&held_two));
         assert!(released.contains(&parked));
         fs::remove_dir_all(root).unwrap();
@@ -12830,12 +12811,60 @@ mod memory_op_tests {
         employee
     }
 
-    fn settle_ok(service: &BossService, session: Uuid) -> BossEmployee {
+    fn settle_ok(service: &BossService, session: Uuid) -> AssignmentFinish {
         service
             .begin_finishing(session, false, false, ExpiryCause::Finished)
             .unwrap();
-        service.complete_expiry(session, None).unwrap();
-        service.employee(session).unwrap()
+        service.complete_expiry(session, None).unwrap().assignment
+    }
+
+    #[test]
+    fn expiry_publishes_assignment_completion_atomically() {
+        for finishes in [false, true] {
+            let root = std::env::temp_dir().join(format!("boss-atomic-finish-{}", Uuid::new_v4()));
+            let (service, boss) = outcome_fixture(&root);
+            let task = service
+                .create_outcome(None, "Ship the repair", "Checks pass")
+                .unwrap();
+            let employee = admit_on(&service, boss, task.id, finishes, None);
+            service
+                .begin_finishing(employee.session_id, false, false, ExpiryCause::Finished)
+                .unwrap();
+            let snapshots = std::sync::Arc::new(Mutex::new(Vec::<BossState>::new()));
+            let saved = snapshots.clone();
+            let path = root.join("boss.json");
+            service.set_task_notifier(std::sync::Arc::new(move || {
+                saved
+                    .lock()
+                    .push(serde_json::from_slice(&fs::read(&path).unwrap()).unwrap());
+            }));
+            service.complete_expiry(employee.session_id, None).unwrap();
+            assert_eq!(snapshots.lock().len(), 1);
+            let snapshot = snapshots.lock().pop().unwrap();
+            assert!(snapshot.employees[0].expired);
+            let task = &snapshot.outcomes[0];
+            if finishes {
+                assert_eq!(
+                    task.state,
+                    OutcomeState::Completed,
+                    "expiry must publish the completed outcome in the same write"
+                );
+            } else {
+                assert_eq!(
+                    task.handoffs.len(),
+                    1,
+                    "expiry must publish the pending handoff in the same write"
+                );
+                assert_eq!(task.handoffs[0].assignment, employee.session_id);
+            }
+            let reopened = BossService::open(root.clone()).unwrap();
+            assert_eq!(reopened.document().outcomes[0].state, task.state);
+            assert_eq!(
+                reopened.document().outcomes[0].handoffs.len(),
+                task.handoffs.len()
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     fn outcome(service: &BossService, id: Uuid) -> BossOutcome {
@@ -12909,8 +12938,7 @@ mod memory_op_tests {
             false,
             Some("Use the diagnosis to assign the repair"),
         );
-        let employee = settle_ok(&service, employee.session_id);
-        let finish = service.assignment_finished(&employee).unwrap();
+        let finish = settle_ok(&service, employee.session_id);
         let AssignmentFinish::Handoff { id, intent } = finish else {
             panic!("expected a handoff, got {finish:?}")
         };
@@ -12923,7 +12951,10 @@ mod memory_op_tests {
         assert!(handoff.pending());
         assert_eq!(handoff.intent, intent);
         // A re-driven finish for the same attempt writes no second handoff.
-        let again = service.assignment_finished(&employee).unwrap();
+        let again = service
+            .complete_expiry(employee.session_id, None)
+            .unwrap()
+            .assignment;
         assert_eq!(again, AssignmentFinish::Quiet);
         assert_eq!(outcome(&service, task.id).handoffs.len(), 1);
         drop(service);
@@ -12962,8 +12993,7 @@ mod memory_op_tests {
                 .is_err()
         );
         let employee = admit_on(&service, boss, task.id, true, None);
-        let employee = settle_ok(&service, employee.session_id);
-        let finish = service.assignment_finished(&employee).unwrap();
+        let finish = settle_ok(&service, employee.session_id);
         assert_eq!(finish, AssignmentFinish::Completed);
         let task = outcome(&service, task.id);
         assert_eq!(task.state, OutcomeState::Completed);
@@ -12997,9 +13027,7 @@ mod memory_op_tests {
         );
         // Finish the sibling but leave its handoff pending — the decision
         // is still outstanding work.
-        let worker = settle_ok(&service, worker.session_id);
-        let AssignmentFinish::Handoff { id, .. } = service.assignment_finished(&worker).unwrap()
-        else {
+        let AssignmentFinish::Handoff { id, .. } = settle_ok(&service, worker.session_id) else {
             panic!("expected a handoff")
         };
         assert!(
@@ -13007,8 +13035,7 @@ mod memory_op_tests {
             "a pending handoff holds the finisher"
         );
         // A success landing while unmet records the conflict, not a close.
-        let finisher = settle_ok(&service, finisher.session_id);
-        let finish = service.assignment_finished(&finisher).unwrap();
+        let finish = settle_ok(&service, finisher.session_id);
         let AssignmentFinish::Conflict { reason } = finish else {
             panic!("expected a conflict, got {finish:?}")
         };
@@ -13061,9 +13088,8 @@ mod memory_op_tests {
         drop(service);
         let service = BossService::open(root.clone()).unwrap();
         assert!(service.assignment_ready(&finisher));
-        let finisher = settle_ok(&service, finisher.session_id);
         assert!(matches!(
-            service.assignment_finished(&finisher).unwrap(),
+            settle_ok(&service, finisher.session_id),
             AssignmentFinish::Conflict { .. }
         ));
         assert_eq!(outcome(&service, task.id).state, OutcomeState::Open);
@@ -13105,18 +13131,18 @@ mod memory_op_tests {
         service
             .begin_finishing(finisher.session_id, false, true, ExpiryCause::Stopped)
             .unwrap();
-        service.complete_expiry(finisher.session_id, None).unwrap();
-        let settled = service.employee(finisher.session_id).unwrap();
         assert_eq!(
-            service.assignment_finished(&settled).unwrap(),
+            service
+                .complete_expiry(finisher.session_id, None)
+                .unwrap()
+                .assignment,
             AssignmentFinish::Quiet
         );
         assert!(outcome(&service, task.id).finishing_assignment.is_none());
         // A replacement admits and completes.
         let replacement = admit_on(&service, boss, task.id, true, None);
-        let replacement = settle_ok(&service, replacement.session_id);
         assert_eq!(
-            service.assignment_finished(&replacement).unwrap(),
+            settle_ok(&service, replacement.session_id),
             AssignmentFinish::Completed
         );
         assert_eq!(outcome(&service, task.id).state, OutcomeState::Completed);
@@ -13134,9 +13160,7 @@ mod memory_op_tests {
             .create_outcome(None, "Make transfers fail cleanly", "criteria")
             .unwrap();
         let employee = admit_on(&service, boss, task.id, false, Some("verify next"));
-        let employee = settle_ok(&service, employee.session_id);
-        let AssignmentFinish::Handoff { id, .. } = service.assignment_finished(&employee).unwrap()
-        else {
+        let AssignmentFinish::Handoff { id, .. } = settle_ok(&service, employee.session_id) else {
             panic!("expected a handoff")
         };
         assert!(
@@ -13215,9 +13239,7 @@ mod memory_op_tests {
             .unwrap();
         let worker = admit_on(&service, boss, task.id, false, Some("verify next"));
         let queued = admit_ticketed(&service, boss, task.id, "Follow-up once open");
-        let worker = settle_ok(&service, worker.session_id);
-        let AssignmentFinish::Handoff { id, .. } = service.assignment_finished(&worker).unwrap()
-        else {
+        let AssignmentFinish::Handoff { id, .. } = settle_ok(&service, worker.session_id) else {
             panic!("expected a handoff")
         };
         let (closed, stop) = service
@@ -13327,8 +13349,7 @@ mod memory_op_tests {
             admit(&service, boss, "Dependent", Some(assignment))
         };
         assert!(!service.assignment_ready(&dependent));
-        let worker = settle_ok(&service, worker.session_id);
-        service.assignment_finished(&worker).unwrap();
+        settle_ok(&service, worker.session_id);
         // The prerequisite succeeded — the dependent may dispatch even
         // while the handoff is still pending.
         assert!(service.assignment_ready(&dependent));
@@ -13348,10 +13369,11 @@ mod memory_op_tests {
         service
             .begin_finishing(dependent.session_id, false, true, ExpiryCause::Stopped)
             .unwrap();
-        service.complete_expiry(dependent.session_id, None).unwrap();
-        let settled = service.employee(dependent.session_id).unwrap();
         assert_eq!(
-            service.assignment_finished(&settled).unwrap(),
+            service
+                .complete_expiry(dependent.session_id, None)
+                .unwrap()
+                .assignment,
             AssignmentFinish::Quiet
         );
         assert_eq!(outcome(&service, task.id).state, OutcomeState::Cancelled);
@@ -13471,8 +13493,7 @@ mod memory_op_tests {
             .set_outcome_waiting(None, task.id, None, None)
             .unwrap();
         let employee = admit_on(&service, boss, task.id, false, None);
-        let employee = settle_ok(&service, employee.session_id);
-        service.assignment_finished(&employee).unwrap();
+        settle_ok(&service, employee.session_id);
         service.scan_outcome_reminders(now + 10_000).unwrap();
         let _ = service.scan_outcome_reminders(now + 20_000).unwrap();
         assert!(

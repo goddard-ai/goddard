@@ -1873,10 +1873,10 @@ impl WakuBackend {
         // the winning expiry, and the broker's release keeps resident
         // devices under their own retention rules. Waking the scheduler
         // is what pulls the next queued ticket forward.
-        for reservation in self
+        let completion = self
             .boss
-            .complete_expiry(session_id, Some(expiry.clone()))?
-        {
+            .complete_expiry(session_id, Some(expiry.clone()))?;
+        for reservation in completion.reservations {
             if let Ok(broker) = self.resource_broker() {
                 broker.release_admission(session_id, reservation);
             }
@@ -1924,7 +1924,7 @@ impl WakuBackend {
         // A cancelled record expired on a supervisor's stop — intentional,
         // already visible on the record, and not a failure. It never wakes
         // the supervisor: whoever stopped it already knows.
-        let assignment_finish = self.boss.assignment_finished(&employee)?;
+        let assignment_finish = completion.assignment;
         let continuation = self.boss.plan_continuation_context(&employee);
         // A linked assignment's success semantics sit above the work-kind
         // switch: an ordinary success always hands off with its intent, a
