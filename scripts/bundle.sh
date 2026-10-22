@@ -72,10 +72,14 @@ if [ "$profile" = "debug" ] && [ "$codesign_identity_from_environment" = "0" ] &
 fi
 debug_adhoc_requirement="=designated => identifier \"$bundle_identifier\""
 if [ "${GODDARD_SKIP_CARGO_BUILD:-0}" != "1" ]; then
+  cargo_runner=cargo
+  if command -v mbx >/dev/null 2>&1; then
+    cargo_runner=mbx
+  fi
   if [ "$profile" != "debug" ]; then
-    mbx build --profile "$profile" --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-agent --bin goddard-agent
+    "$cargo_runner" build --profile "$profile" --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --bin goddard-daemon --package waku-agent --bin goddard-agent
   else
-    mbx build --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --features dev-binary --bin goddard-debug-daemon --package waku-agent --bin goddard-agent
+    "$cargo_runner" build --package waku --bin goddard --bin goddard_js_repl --package waku-daemon --features dev-binary --bin goddard-debug-daemon --package waku-agent --bin goddard-agent
   fi
 fi
 
