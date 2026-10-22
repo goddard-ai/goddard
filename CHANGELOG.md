@@ -251,6 +251,7 @@ Changes specific to the mobile app are in
 ### Fixed
 
 - **Sessions**
+  - Automation webhooks no longer intermittently fail when a trigger request arrives in multiple network packets.
   - Agents now need user approval for each task rename. `/rename` approves one rename; later renames ask again, and manually choosing a title clears any pending approval.
   - Automation run history now survives daemon restarts, queued runs wait for their own prompt to finish, and unsaved outcomes are reported without automatically repeating provider work.
   - Queued messages from other agents now resume delivery when their recipient is idle, even if the sender is no longer active.
@@ -318,6 +319,7 @@ Changes specific to the mobile app are in
   - The Nightly dev watcher (`bun run dev --serve`) no longer quits when a build fails — it reports the failure, keeps the update feed and daemon running, and retries on the next source change.
   - Japanese and Simplified Chinese translations now include recent controls across the app instead of falling back to English.
   - Fixed duplicate project registrations causing project names to expand into absolute paths, including on Windows.
+- Split terminal is available in keyboard shortcut settings, and the shortcut reference lists Focus Terminal and Push Base Branch with their current context restrictions.
 - Pass a search query directly to `goddard-agent search "your query"`; the existing `--text` and `--file` forms remain available.
 - Spinners retry redraws while idle so a missed frame does not immediately stop their animation.
 - Computer Use can start or reset its JavaScript kernel after a cancelled call. Connection failures now distinguish disconnects from timeouts and provide a private diagnostic log path.
