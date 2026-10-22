@@ -3066,6 +3066,11 @@ impl Waku {
         if self.state.sidebar_grouping != SidebarGrouping::Project {
             return;
         }
+        // Keep the active fingerprint until this pass finishes. Completion
+        // repaints so changes during the scan become one follow-up pass.
+        if self.sidebar_branch_scan_in_flight.get() {
+            return;
+        }
 
         let mut fingerprint = 0xb4a7_c4e5_51de_ba11;
         for session in &self.state.sessions {
@@ -3124,6 +3129,7 @@ impl Waku {
                 None => offline.extend(paths),
             }
         }
+        self.sidebar_branch_scan_in_flight.set(true);
         cx.spawn(async move |waku, cx| {
             let labels = cx
                 .background_executor()
@@ -3151,6 +3157,8 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
+                waku.sidebar_branch_scan_in_flight.set(false);
+                cx.notify();
                 if waku.sidebar_branch_scan_generation.get() != generation {
                     return;
                 }
@@ -3162,7 +3170,6 @@ impl Waku {
                         .map(|(path, branch)| (path, SharedString::from(branch))),
                 );
                 *waku.sidebar_branch_labels.borrow_mut() = merged;
-                cx.notify();
             });
         })
         .detach();
@@ -3293,6 +3300,9 @@ impl Waku {
         if !self.state.github.task_discovery_enabled() {
             return;
         }
+        if self.sidebar_pull_request_scan_in_flight.get() {
+            return;
+        }
 
         let mut fingerprint = 0xf1f9_9d5e_c7a3_b21d;
         // Managed membership rides the boss document, not any session field
@@ -3366,6 +3376,7 @@ impl Waku {
                 None => offline.extend(sessions.iter().map(|(session_id, _, _)| *session_id)),
             }
         }
+        self.sidebar_pull_request_scan_in_flight.set(true);
         cx.spawn(async move |waku, cx| {
             let resolved =
                 cx.background_executor()
@@ -3426,6 +3437,8 @@ impl Waku {
                     })
                     .await;
             let _ = waku.update(cx, |waku, cx| {
+                waku.sidebar_pull_request_scan_in_flight.set(false);
+                cx.notify();
                 if waku.sidebar_pull_request_scan_generation.get() != generation
                     || !waku.state.github.task_discovery_enabled()
                 {
@@ -3441,7 +3454,6 @@ impl Waku {
                 );
                 *waku.sidebar_pull_requests.borrow_mut() = merged;
                 waku.resolve_open_pr_predictions();
-                cx.notify();
             });
         })
         .detach();

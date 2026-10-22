@@ -651,6 +651,9 @@ impl Waku {
     /// pass. Rows read only the store — the ancestor walk is a filesystem
     /// probe, and a miss just means "not known yet".
     pub(super) fn ensure_sidebar_terminal_repo_roots(&self, cx: &mut Context<Self>) {
+        if self.sidebar_terminal_repo_scan_in_flight.get() {
+            return;
+        }
         let mut fingerprint = 0x7e0e_5a1d_1e0c_a710;
         let mut directories = HashSet::new();
         for terminal_id in self.sidebar_terminal_ids() {
@@ -677,6 +680,7 @@ impl Waku {
             return;
         }
         let workspace = waku_client::WorkspaceClient::new(self.daemons.local().client());
+        self.sidebar_terminal_repo_scan_in_flight.set(true);
         cx.spawn(async move |waku, cx| {
             let roots = cx
                 .background_executor()
@@ -708,6 +712,8 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
+                waku.sidebar_terminal_repo_scan_in_flight.set(false);
+                cx.notify();
                 if waku.sidebar_terminal_repo_scan_generation.get() != generation {
                     return;
                 }
@@ -720,7 +726,6 @@ impl Waku {
                     .map(|(cwd, (_, location))| (cwd, location))
                     .collect();
                 waku.sync_standalone_terminal_git_panel(cx);
-                cx.notify();
             });
         })
         .detach();

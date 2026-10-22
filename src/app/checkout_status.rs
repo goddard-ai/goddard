@@ -31,6 +31,8 @@ struct Entry {
     value: Option<CheckoutStatus>,
     generation: u64,
     running: bool,
+    deferred: bool,
+    attempted: bool,
     refresh_at: Instant,
     failures: u32,
     last_used: u64,
@@ -56,7 +58,7 @@ impl CheckoutStatuses {
         let previous_use = self
             .entries
             .get(key)
-            .filter(|entry| entry.value.is_some())
+            .filter(|entry| entry.attempted)
             .map(|entry| entry.last_used);
         if let Some(entry) = self.entries.get_mut(key) {
             entry.last_used = self.clock;
@@ -64,6 +66,9 @@ impl CheckoutStatuses {
                 self.metrics.cached += 1;
                 return None;
             }
+            // Only capacity-blocked demand gets priority. A fairness yield
+            // must not make two due cached rows keep yielding to each other.
+            entry.deferred = false;
         }
         if !self.entries.contains_key(key) && self.entries.len() >= CACHE_CAPACITY {
             let oldest = self
@@ -83,6 +88,7 @@ impl CheckoutStatuses {
             self.entries.iter().any(|(other_key, entry)| {
                 other_key != key
                     && !entry.running
+                    && entry.deferred
                     && entry.refresh_at <= now
                     && entry.last_used > previous
             })
@@ -91,11 +97,18 @@ impl CheckoutStatuses {
             value: None,
             generation: 0,
             running: false,
+            deferred: false,
+            attempted: false,
             refresh_at: now,
             failures: 0,
             last_used: self.clock,
         });
-        if self.running >= MAX_RUNNING || yield_to_later_demand {
+        if self.running >= MAX_RUNNING {
+            entry.deferred = true;
+            self.metrics.deferred += 1;
+            return None;
+        }
+        if yield_to_later_demand {
             self.metrics.deferred += 1;
             return None;
         }
@@ -103,6 +116,7 @@ impl CheckoutStatuses {
             self.metrics.retries += 1;
         }
         entry.running = true;
+        entry.attempted = true;
         self.running += 1;
         Some(entry.generation)
     }
@@ -269,6 +283,53 @@ mod tests {
         cache.finish(&key(1), second, Ok(Some(dirty())), later);
         assert_eq!(cache.claim(&key(0), later), None);
         assert!(cache.claim(&key(2), later).is_some());
+    }
+
+    #[test]
+    fn due_cached_rows_do_not_keep_yielding_to_each_other() {
+        let mut cache = CheckoutStatuses::default();
+        let now = Instant::now();
+        for index in 0..MAX_RUNNING {
+            let generation = cache.claim(&key(index), now).unwrap();
+            cache.finish(&key(index), generation, Ok(Some(dirty())), now);
+        }
+        let later = now + REFRESH_INTERVAL;
+        for index in 0..MAX_RUNNING {
+            assert!(cache.claim(&key(index), later).is_some());
+        }
+        assert_eq!(cache.running, MAX_RUNNING);
+    }
+
+    #[test]
+    fn hidden_deferred_demand_only_delays_a_visible_row_once() {
+        let mut cache = CheckoutStatuses::default();
+        let now = Instant::now();
+        let first = cache.claim(&key(0), now).unwrap();
+        let second = cache.claim(&key(1), now).unwrap();
+        assert_eq!(cache.claim(&key(2), now), None);
+        cache.finish(&key(0), first, Ok(Some(dirty())), now);
+        cache.finish(&key(1), second, Ok(Some(dirty())), now);
+        // Row 2 has left the viewport. Its old demand can yield one pass,
+        // but cannot reserve capacity or keep a visible row stale forever.
+        let later = now + REFRESH_INTERVAL;
+        assert_eq!(cache.claim(&key(0), later), None);
+        assert!(cache.claim(&key(0), later).is_some());
+        assert_eq!(cache.running, 1);
+        assert!(!cache.entries.get(&key(0)).unwrap().deferred);
+    }
+
+    #[test]
+    fn invalidated_first_load_yields_to_deferred_rows() {
+        let mut cache = CheckoutStatuses::default();
+        let now = Instant::now();
+        let first = cache.claim(&key(0), now).unwrap();
+        cache.claim(&key(1), now).unwrap();
+        assert_eq!(cache.claim(&key(2), now), None);
+        cache.invalidate(DaemonKey::Local, &key(0).path, now);
+        cache.finish(&key(0), first, Ok(Some(dirty())), now);
+        assert_eq!(cache.peek(&key(0)), None);
+        assert_eq!(cache.claim(&key(0), now), None);
+        assert!(cache.claim(&key(2), now).is_some());
     }
 
     #[test]

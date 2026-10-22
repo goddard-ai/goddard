@@ -181,6 +181,9 @@ impl Waku {
                         .await;
                     let _ = waku.update(cx, |waku, cx| {
                         if !waku.branch_snapshots.fulfill(token, result.clone()) {
+                            // A dirty in-flight query now releases its claim;
+                            // repaint so the latest request gets one follow-up.
+                            cx.notify();
                             return;
                         }
                         match &result {

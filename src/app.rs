@@ -4047,6 +4047,7 @@ pub struct Waku {
     sidebar_branch_labels: RefCell<HashMap<PathBuf, SharedString>>,
     sidebar_branch_scan_fingerprint: Cell<Option<u64>>,
     sidebar_branch_scan_generation: Cell<u64>,
+    sidebar_branch_scan_in_flight: Cell<bool>,
     /// Nearest repository root per terminal working directory — `None` for
     /// a directory outside any checkout — resolved together on a
     /// background executor so sidebar rows only read memory.
@@ -4055,6 +4056,7 @@ pub struct Waku {
     sidebar_terminal_locations: RefCell<HashMap<PathBuf, terminals::TerminalLocation>>,
     sidebar_terminal_repo_scan_fingerprint: Cell<Option<u64>>,
     sidebar_terminal_repo_scan_generation: Cell<u64>,
+    sidebar_terminal_repo_scan_in_flight: Cell<bool>,
     /// Bounded, per-checkout status cache driven by rendered rows.
     sidebar_checkout_refresh: RefCell<checkout_status::CheckoutStatuses>,
     /// Pull requests resolved per session on a background executor, keyed by
@@ -4064,6 +4066,7 @@ pub struct Waku {
         RefCell<HashMap<Uuid, Rc<Vec<waku_protocol::workspace::PullRequestSummary>>>>,
     sidebar_pull_request_scan_fingerprint: Cell<Option<u64>>,
     sidebar_pull_request_scan_generation: Cell<u64>,
+    sidebar_pull_request_scan_in_flight: Cell<bool>,
     /// GitHub list/detail state keyed by project id, backing the Projects
     /// page's Issues and Pull Requests tabs — state survives the view
     /// toggling back to the transcript.
@@ -7451,9 +7454,9 @@ impl Waku {
                 project_picker_highlight: None,
                 project_picker_list_state,
                 project_picker_row_cache: RefCell::new(Vec::new()),
-                branch_snapshots: QueryCache::new(MAX_CACHED_WORKSPACES),
+                branch_snapshots: QueryCache::coalescing(MAX_CACHED_WORKSPACES),
                 remote_files: QueryCache::new(4 * MAX_CACHED_WORKSPACES),
-                base_push_states: RefCell::new(QueryCache::new(MAX_CACHED_WORKSPACES)),
+                base_push_states: RefCell::new(QueryCache::coalescing(MAX_CACHED_WORKSPACES)),
                 base_push_state_fallbacks: RefCell::new(HashMap::new()),
                 upstream_fetch_times: RefCell::new(HashMap::new()),
                 upstream_fetches: RefCell::new(HashSet::new()),
@@ -7899,15 +7902,18 @@ impl Waku {
                 sidebar_branch_labels: RefCell::new(HashMap::new()),
                 sidebar_branch_scan_fingerprint: Cell::new(None),
                 sidebar_branch_scan_generation: Cell::new(0),
+                sidebar_branch_scan_in_flight: Cell::new(false),
                 friends_probe_generation: Cell::new(0),
                 sidebar_terminal_repo_roots: RefCell::new(HashMap::new()),
                 sidebar_terminal_locations: RefCell::new(HashMap::new()),
                 sidebar_terminal_repo_scan_fingerprint: Cell::new(None),
                 sidebar_terminal_repo_scan_generation: Cell::new(0),
+                sidebar_terminal_repo_scan_in_flight: Cell::new(false),
                 sidebar_checkout_refresh: RefCell::default(),
                 sidebar_pull_requests: RefCell::new(HashMap::new()),
                 sidebar_pull_request_scan_fingerprint: Cell::new(None),
                 sidebar_pull_request_scan_generation: Cell::new(0),
+                sidebar_pull_request_scan_in_flight: Cell::new(false),
                 github_browsers: HashMap::new(),
                 notifications: notifications::Inbox::new(window, cx),
                 projects_page: None,

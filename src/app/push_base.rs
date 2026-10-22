@@ -204,9 +204,10 @@ impl Waku {
                         })
                         .await;
                     let _ = waku.update(cx, |waku, cx| {
-                        if waku.base_push_states.borrow_mut().fulfill(token, result) {
-                            cx.notify();
-                        }
+                        waku.base_push_states.borrow_mut().fulfill(token, result);
+                        // Rejected stale completions release a dirty query's
+                        // claim too; the next read starts its one follow-up.
+                        cx.notify();
                     });
                 })
                 .detach();
@@ -262,6 +263,9 @@ impl Waku {
             return;
         }
         let key = (workspace.to_path_buf(), base.to_owned());
+        if self.upstream_fetches.borrow().contains(&key) {
+            return;
+        }
         {
             let mut times = self.upstream_fetch_times.borrow_mut();
             if times

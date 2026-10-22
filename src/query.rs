@@ -61,7 +61,7 @@ pub enum Query<K, V> {
 
 #[derive(Debug)]
 enum Slot<V> {
-    Loading,
+    Loading { invalidated: bool },
     Ready(Arc<V>),
 }
 
@@ -82,6 +82,7 @@ pub struct QueryCache<K, V> {
     capacity: usize,
     clock: u64,
     generation: u64,
+    coalesce_in_flight: bool,
 }
 
 impl<K: Clone + Eq + Hash, V> QueryCache<K, V> {
@@ -93,6 +94,17 @@ impl<K: Clone + Eq + Hash, V> QueryCache<K, V> {
             capacity: capacity.max(1),
             clock: 0,
             generation: 0,
+            coalesce_in_flight: false,
+        }
+    }
+
+    /// Keep invalidated fetches claimed until they finish, then let the next
+    /// read claim one follow-up. Callers must notify on rejected completion.
+    /// Opt-in for expensive Git queries; ordinary query invalidation is unchanged.
+    pub fn coalescing(capacity: usize) -> Self {
+        Self {
+            coalesce_in_flight: true,
+            ..Self::new(capacity)
         }
     }
 
@@ -107,14 +119,14 @@ impl<K: Clone + Eq + Hash, V> QueryCache<K, V> {
             cached.last_used = clock;
             return match &cached.slot {
                 Slot::Ready(value) => Query::Ready(Arc::clone(value)),
-                Slot::Loading => Query::Pending,
+                Slot::Loading { .. } => Query::Pending,
             };
         }
         let generation = self.generation;
         self.entries.insert(
             key.clone(),
             Cached {
-                slot: Slot::Loading,
+                slot: Slot::Loading { invalidated: false },
                 generation,
                 last_used: clock,
             },
@@ -131,7 +143,7 @@ impl<K: Clone + Eq + Hash, V> QueryCache<K, V> {
     pub fn is_loading(&self, key: &K) -> bool {
         matches!(
             self.entries.get(key).map(|cached| &cached.slot),
-            Some(Slot::Loading)
+            Some(Slot::Loading { .. })
         )
     }
 
@@ -160,6 +172,10 @@ impl<K: Clone + Eq + Hash, V> QueryCache<K, V> {
         if entry.get().generation != token.generation {
             return false;
         }
+        if matches!(entry.get().slot, Slot::Loading { invalidated: true }) {
+            entry.remove();
+            return false;
+        }
         self.clock += 1;
         entry.get_mut().slot = Slot::Ready(Arc::new(value));
         entry.get_mut().last_used = self.clock;
@@ -186,6 +202,15 @@ impl<K: Clone + Eq + Hash, V> QueryCache<K, V> {
     /// Drops a key's value and invalidates any fetch in flight for it.
     pub fn invalidate(&mut self, key: &K) {
         self.generation += 1;
+        if self.coalesce_in_flight
+            && let Some(Cached {
+                slot: Slot::Loading { invalidated },
+                ..
+            }) = self.entries.get_mut(key)
+        {
+            *invalidated = true;
+            return;
+        }
         self.entries.remove(key);
     }
 
@@ -196,13 +221,23 @@ impl<K: Clone + Eq + Hash, V> QueryCache<K, V> {
     /// [`invalidate`]: Self::invalidate
     pub fn invalidate_where(&mut self, mut predicate: impl FnMut(&K) -> bool) {
         self.generation += 1;
-        self.entries.retain(|key, _| !predicate(key));
+        self.entries.retain(|key, cached| {
+            if !predicate(key) {
+                return true;
+            }
+            if self.coalesce_in_flight
+                && let Slot::Loading { invalidated } = &mut cached.slot
+            {
+                *invalidated = true;
+                return true;
+            }
+            false
+        });
     }
 
     /// Drops every cached value and invalidates all fetches in flight.
     pub fn clear(&mut self) {
-        self.generation += 1;
-        self.entries.clear();
+        self.invalidate_where(|_| true);
     }
 
     #[cfg(test)]
@@ -301,6 +336,58 @@ mod tests {
             matches!(cache.read(&"a"), Query::Missing(_)),
             "a failed fetch must not leave the key pending forever"
         );
+    }
+
+    #[test]
+    fn coalescing_invalidations_wait_for_one_followup() {
+        let mut cache = QueryCache::coalescing(4);
+        let Query::Missing(first) = cache.read(&"repo") else {
+            panic!()
+        };
+        for _ in 0..100 {
+            cache.invalidate(&"repo");
+            assert!(matches!(cache.read(&"repo"), Query::Pending));
+        }
+        assert!(!cache.fulfill(first, "stale"));
+        let Query::Missing(second) = cache.read(&"repo") else {
+            panic!()
+        };
+        assert!(matches!(cache.read(&"repo"), Query::Pending));
+        assert!(cache.fulfill(second, "fresh"));
+        assert_eq!(*cache.peek(&"repo").unwrap(), "fresh");
+    }
+
+    #[test]
+    fn coalescing_scoped_invalidation_preserves_other_queries() {
+        let mut cache = QueryCache::coalescing(4);
+        let Query::Missing(local) = cache.read(&("local", "repo")) else {
+            panic!()
+        };
+        let Query::Missing(remote) = cache.read(&("remote", "repo")) else {
+            panic!()
+        };
+        cache.invalidate_where(|(host, _)| *host == "local");
+        assert!(cache.fulfill(remote, "remote value"));
+        assert!(!cache.fulfill(local, "stale"));
+        assert_eq!(*cache.peek(&("remote", "repo")).unwrap(), "remote value");
+        assert!(matches!(cache.read(&("local", "repo")), Query::Missing(_)));
+    }
+
+    #[test]
+    fn coalescing_clear_and_abandon_release_claims() {
+        let mut cache = QueryCache::coalescing(4);
+        let Query::Missing(first) = cache.read(&"repo") else {
+            panic!()
+        };
+        cache.clear();
+        assert!(matches!(cache.read(&"repo"), Query::Pending));
+        cache.abandon(first.clone());
+        let Query::Missing(second) = cache.read(&"repo") else {
+            panic!()
+        };
+        // A late completion cannot consume the replacement's claim.
+        assert!(!cache.fulfill(first, "late"));
+        assert!(cache.fulfill(second, "fresh"));
     }
 
     #[test]
