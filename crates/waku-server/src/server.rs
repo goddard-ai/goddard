@@ -2307,18 +2307,25 @@ fn answer_automation_webhook(
     dispatcher: &RequestDispatcher,
 ) -> anyhow::Result<bool> {
     let mut buffer = [0u8; MAX_REQUEST_LINE_BYTES];
-    let mut filled = 0usize;
+    let started = Instant::now();
     let line = loop {
-        match stream.peek(&mut buffer[filled..]) {
+        // Peeking leaves the bytes in the socket: each attempt must replace
+        // the previous prefix rather than append another copy of it.
+        match stream.peek(&mut buffer) {
             Ok(0) => return Ok(false),
             Ok(read) => {
-                filled += read;
-                if let Some(end) = buffer[..filled].windows(2).position(|pair| pair == b"\r\n") {
+                if let Some(end) = buffer[..read].windows(2).position(|pair| pair == b"\r\n") {
                     break String::from_utf8_lossy(&buffer[..end]).into_owned();
                 }
-                if filled == buffer.len() {
+                if read == buffer.len() {
                     return Ok(false);
                 }
+                // A partial prefix makes peek return immediately even with a
+                // socket read timeout, so bound and yield this wait too.
+                if started.elapsed() >= Duration::from_secs(5) {
+                    bail!("timed out waiting for the daemon request line");
+                }
+                std::thread::sleep(SOCKET_POLL_INTERVAL);
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(error) => return Err(error).context("could not peek at the daemon request"),

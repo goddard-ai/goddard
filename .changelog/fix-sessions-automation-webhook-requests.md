@@ -1,0 +1,1 @@
+- Automation webhooks no longer intermittently fail when a trigger request arrives in multiple network packets.
