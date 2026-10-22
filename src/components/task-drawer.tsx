@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'octane/jsx-runtime';
 import type { AgentSession } from '@waku/client';
 import {
   memo,
@@ -9,19 +10,9 @@ import {
   type ReactNode,
 } from 'octane';
 
-import {
-  Absolute,
-  Spinner,
-  createStore,
-  Pressable,
-  pushRoute,
-  Text,
-  TextInput,
-  useRoute,
-  useSafeAreaInsets,
-  useStore,
-  View,
-} from '@octane-xplat/ui';
+import { Absolute, Spinner, Pressable, Text, TextInput, useSafeAreaInsets, View } from '@octane-xplat/ui';
+import { createStore, useStore } from '@octane-xplat/ui/data';
+import { pushRoute, useRoute } from '@octane-xplat/ui/routing';
 
 import { useWindowSize } from '@octane-xplat/platform';
 
@@ -464,12 +455,12 @@ function TaskDrawerContent({
   }
 
   return (
-    <View style={[styles.screen, { backgroundColor: theme.background }]}>
-      <Absolute style={[styles.daemonFloat, { top: insets.top + 8 }]}>
+    <View style={{ ...styles.screen, backgroundColor: theme.background }}>
+      <Absolute style={{ ...styles.daemonFloat, top: insets.top + 8 }}>
         <DaemonPill onPress={() => setDaemonPickerOpen(true)} />
       </Absolute>
       {daemon.phase === 'connected' && (
-        <Absolute style={[styles.inboxFloat, { top: insets.top + 8 }]}>
+        <Absolute style={{ ...styles.inboxFloat, top: insets.top + 8 }}>
           <InboxButton
             enabled={open}
             onPress={() => {
@@ -505,7 +496,7 @@ function TaskDrawerContent({
               onClose={onClose}
             />
           ) : null}
-          {bossState.data ? <Pressable accessibilityRole="button" onPress={() => { onClose(); pushRoute({ stack: 'root', name: 'plans', params: {} }); }} style={{ paddingHorizontal: 24, paddingVertical: 12 }}>
+          {bossState.data ? <Pressable accessibilityRole="button" onPress={() => { onClose(); pushRoute({ stack: 'root', name: 'plans', params: {} }); }} style={{ paddingLeft: 24, paddingRight: 24, paddingTop: 12, paddingBottom: 12 }}>
             <Text style={{ color: theme.textSecondary }}>Brain · Plans</Text>
           </Pressable> : null}
           {rows.map(renderRow)}
@@ -514,13 +505,11 @@ function TaskDrawerContent({
 
       {!hasRows && (
         <Absolute
-          style={[
-            styles.emptyOverlay,
-            {
-              paddingBottom: insets.bottom + 90,
-              paddingTop: insets.top + DaemonPickerHeight + 20,
-            },
-          ]}>
+          style={{
+            ...styles.emptyOverlay,
+            paddingBottom: insets.bottom + 90,
+            paddingTop: insets.top + DaemonPickerHeight + 20,
+          }}>
           <TaskListEmpty
             error={taskState.error}
             notice={notice}
@@ -532,7 +521,7 @@ function TaskDrawerContent({
 
       {(daemon.profiles.length > 0 || daemon.phase === 'booting') && (
         <Absolute
-          style={[styles.searchDockAvoider, { bottom: insets.bottom + SearchDockGap }]}>
+          style={{ ...styles.searchDockAvoider, bottom: insets.bottom + SearchDockGap }}>
           <View style={styles.searchDock}>
             <GlassSurface interactive style={styles.searchCapsule}>
               <View style={styles.searchCapsuleInner}>
@@ -543,7 +532,7 @@ function TaskDrawerContent({
                 />
                 <TextInput
                   placeholder="Search"
-                  style={[styles.searchInput, { color: theme.text }]}
+                  style={{ ...styles.searchInput, color: theme.text }}
                   value={search}
                   onChange={setSearch}
                 />
@@ -616,7 +605,7 @@ function DaemonPill({ onPress }: { onPress: () => void }) {
             tintColor={theme.text}
           />
         )}
-        <Text numberOfLines={1} style={[styles.daemonButtonText, { color: theme.text }]}>
+        <Text numberOfLines={1} style={{ ...styles.daemonButtonText, color: theme.text }}>
           {daemon.activeProfile?.name ?? 'Add daemon'}
         </Text>
         <AppSymbol
@@ -666,7 +655,7 @@ function InboxButton({
         />
         {hasUnread ? (
           <Absolute style={{ right: 8, top: 8 }}>
-            <View style={[styles.inboxBadge, { backgroundColor: theme.accent }]} />
+            <View style={{ ...styles.inboxBadge, backgroundColor: theme.accent }} />
           </Absolute>
         ) : null}
       </Pressable>
@@ -693,7 +682,7 @@ function TaskListEmpty({
     return (
       <View style={styles.emptyState}>
         <Spinner busy />
-        <Text style={[styles.emptyTitle, { color: theme.textSecondary }]}>
+        <Text style={{ ...styles.emptyTitle, color: theme.textSecondary }}>
           {phase === 'reconnecting' ? 'Reconnecting…' : 'Connecting to daemon…'}
         </Text>
       </View>
@@ -703,8 +692,8 @@ function TaskListEmpty({
   if (searching) {
     return (
       <View style={styles.emptyState}>
-        <Text style={[styles.emptyTitle, { color: theme.text }]}>No matching tasks</Text>
-        <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>Try another title, project, or agent.</Text>
+        <Text style={{ ...styles.emptyTitle, color: theme.text }}>No matching tasks</Text>
+        <Text style={{ ...styles.emptyBody, color: theme.textSecondary }}>Try another title, project, or agent.</Text>
       </View>
     );
   }
@@ -712,8 +701,8 @@ function TaskListEmpty({
   if (error) {
     return (
       <View style={styles.emptyState}>
-        <Text style={[styles.emptyTitle, { color: theme.text }]}>Couldn’t load tasks</Text>
-        <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>
+        <Text style={{ ...styles.emptyTitle, color: theme.text }}>Couldn’t load tasks</Text>
+        <Text style={{ ...styles.emptyBody, color: theme.textSecondary }}>
           {error instanceof Error ? error.message : String(error)}
         </Text>
       </View>
@@ -722,23 +711,23 @@ function TaskListEmpty({
 
   return (
     <View style={styles.emptyState}>
-      <View style={[styles.emptyIcon, { backgroundColor: theme.overlayStrong }]}>
+      <View style={{ ...styles.emptyIcon, backgroundColor: theme.overlayStrong }}>
         <AppSymbol
           name={{ ios: 'text.bubble', android: 'chat_bubble', web: 'chat' }}
           size={25}
           tintColor={theme.textTertiary}
         />
       </View>
-      <Text style={[styles.emptyTitle, { color: theme.text }]}>No tasks yet</Text>
-      <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>
+      <Text style={{ ...styles.emptyTitle, color: theme.text }}>No tasks yet</Text>
+      <Text style={{ ...styles.emptyBody, color: theme.textSecondary }}>
         Start an agent on anything — a bug, a feature, a question about the code.
       </Text>
       {phase === 'connected' && (
         <Pressable
           accessibilityRole="button"
           onPress={onNewTask}
-          style={[styles.emptyAction, { backgroundColor: theme.inverse }]}>
-          <Text style={[styles.emptyActionText, { color: theme.onInverse }]}>New task</Text>
+          style={{ ...styles.emptyAction, backgroundColor: theme.inverse }}>
+          <Text style={{ ...styles.emptyActionText, color: theme.onInverse }}>New task</Text>
         </Pressable>
       )}
     </View>
@@ -748,7 +737,7 @@ function TaskListEmpty({
 const SectionHeader = memo(function SectionHeader({ title }: { title: string }) {
   const theme = useTheme();
   return (
-    <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
+    <Text style={{ ...styles.sectionTitle, color: theme.textTertiary }}>
       {title}
     </Text>
   );
@@ -799,16 +788,16 @@ const SessionRow = memo(function SessionRow({
       onTogglePin={() => onTogglePin(session)}
       renderTrigger={(pressed) => (
         <View
-          style={[
-            styles.sessionRow,
-            {
-              backgroundColor: pressed
-                ? theme.surfaceMuted
-                : selected ? theme.backgroundSelected : 'transparent',
-              opacity: archived ? 0.55 : 1,
-              width: rowWidth,
-            },
-          ]}>
+          style={{
+            ...styles.sessionRow,
+            backgroundColor: pressed
+              ? theme.surfaceMuted
+              : selected
+                ? theme.backgroundSelected
+                : 'transparent',
+            opacity: archived ? 0.55 : 1,
+            width: rowWidth,
+          }}>
           <View style={styles.sessionHeading}>
             {pinned && (
               <AppSymbol
@@ -817,7 +806,7 @@ const SessionRow = memo(function SessionRow({
                 tintColor={theme.textTertiary}
               />
             )}
-            <Text numberOfLines={1} style={[styles.sessionTitle, { color: theme.text }]}>
+            <Text numberOfLines={1} style={{ ...styles.sessionTitle, color: theme.text }}>
               {displaySessionTitle(session)}
             </Text>
             {running && (
@@ -825,7 +814,7 @@ const SessionRow = memo(function SessionRow({
             )}
             {!running && unseen && (
               <View
-                style={[styles.unseenDot, { backgroundColor: theme.info }]}
+                style={{ ...styles.unseenDot, backgroundColor: theme.info }}
               />
             )}
           </View>
@@ -833,13 +822,13 @@ const SessionRow = memo(function SessionRow({
             <ProviderIcon color={theme.textTertiary} provider={session.provider} size={12} />
             <Text
               numberOfLines={1}
-              style={[styles.sessionProject, { color: theme.textTertiary }]}>
+              style={{ ...styles.sessionProject, color: theme.textTertiary }}>
               {projectName}
             </Text>
             {lastReplyLabel !== null && (
               <Text
                 numberOfLines={1}
-                style={[styles.sessionTime, { color: theme.textTertiary }]}>
+                style={{ ...styles.sessionTime, color: theme.textTertiary }}>
                 {lastReplyLabel}
               </Text>
             )}
@@ -847,7 +836,7 @@ const SessionRow = memo(function SessionRow({
         </View>
       )}
       selected={selected}
-      style={[styles.sessionMenu, { width: rowWidth }]}
+      style={{ ...styles.sessionMenu, width: rowWidth }}
     />
   );
 });
@@ -902,7 +891,7 @@ const styles = {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 10,
-    paddingHorizontal: Spacing.three,
+    paddingLeft: Spacing.three, paddingRight: Spacing.three,
   },
   searchCapsule: { borderRadius: Radius.pill, flex: '1 1' },
   searchCapsuleInner: {
@@ -910,9 +899,9 @@ const styles = {
     flexDirection: 'row',
     gap: 9,
     minHeight: 50,
-    paddingHorizontal: 16,
+    paddingLeft: 16, paddingRight: 16,
   },
-  searchInput: { flex: '1 1', fontSize: 17.5, paddingVertical: 10 },
+  searchInput: { flex: '1 1', fontSize: 17.5, paddingTop: 10, paddingBottom: 10 },
   composeButton: { borderRadius: Radius.pill, height: 50, width: 50 },
   daemonButton: { borderRadius: Radius.pill, maxWidth: 176 },
   daemonButtonInner: {
@@ -920,7 +909,7 @@ const styles = {
     flexDirection: 'row',
     gap: 6,
     minHeight: DaemonPickerHeight,
-    paddingHorizontal: 12,
+    paddingLeft: 12, paddingRight: 12,
   },
   daemonButtonText: { flexShrink: 1, fontSize: 14, fontWeight: '600' },
   listContent: { paddingBottom: 96 },
@@ -938,7 +927,7 @@ const styles = {
     fontWeight: '500',
     letterSpacing: 0,
     marginBottom: 4,
-    marginHorizontal: 24,
+    marginLeft: 24, marginRight: 24,
     marginTop: 14,
   },
   emptyState: {
@@ -946,7 +935,7 @@ const styles = {
     flex: '1 1',
     justifyContent: 'center',
     minHeight: 360,
-    paddingHorizontal: 40,
+    paddingLeft: 40, paddingRight: 40,
   },
   emptyIcon: {
     alignItems: 'center',
@@ -963,22 +952,22 @@ const styles = {
     justifyContent: 'center',
     marginTop: 18,
     minHeight: 42,
-    paddingHorizontal: 18,
+    paddingLeft: 18, paddingRight: 18,
   },
   emptyActionText: { fontSize: 15, fontWeight: '700' },
-  sessionMenu: { height: 62, marginHorizontal: 12 },
+  sessionMenu: { height: 62, marginLeft: 12, marginRight: 12 },
   sessionRow: {
     borderRadius: 10,
     gap: 3,
     height: 62,
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingLeft: 12, paddingRight: 12,
   },
   sessionHeading: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   sessionMetadata: { alignItems: 'center', flexDirection: 'row', gap: 5 },
   sessionProject: { flex: '1 1', fontSize: 13.5, lineHeight: '17px' },
   sessionTime: { flexShrink: 0, fontSize: 13.5, lineHeight: '17px', marginLeft: 3 },
-  sessionSpinner: { height: 14, transform: [{ scale: 0.72 }], width: 14 },
+  sessionSpinner: { height: 14, transform: 'scale(0.72)', width: 14 },
   unseenDot: { borderRadius: 4, height: 8, width: 8 },
   sessionTitle: {
     flex: '1 1',
@@ -987,4 +976,4 @@ const styles = {
     letterSpacing: -0.2,
     lineHeight: '22px',
   },
-};
+} satisfies Record<string, CSSProperties>;

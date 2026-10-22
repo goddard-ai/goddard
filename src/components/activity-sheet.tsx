@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'octane/jsx-runtime';
 
 import type { ActivityFileChange, ActivityItem, AgentSession } from '@waku/client';
 import { activitiesForBlock } from '@waku/client/event-reducer';
@@ -20,17 +21,8 @@ import {
   type ReactNode,
 } from 'octane';
 
-import { createStore, useStore } from '@octane-xplat/ui';
-import {
-  Image,
-  Pressable,
-  RichText,
-  RichTextSpan,
-  ScrollableArea,
-  Text,
-  useSafeAreaInsets,
-  View,
-} from '@octane-xplat/ui';
+import { createStore, useStore } from '@octane-xplat/ui/data';
+import { Image, Pressable, RichText, RichTextSpan, ScrollableArea, Text, useSafeAreaInsets, View } from '@octane-xplat/ui';
 
 import { BottomSheet as XSheet } from '@octane-xplat/ui';
 
@@ -48,14 +40,14 @@ import { RowVeil, splitRunAtSpans } from '@/md/veil';
 
 type OpenActivityGroup = (target: ActivityGroupTarget) => void;
 
-const activitySheetOpener = createStore<OpenActivityGroup>(noop);
+const activitySheetOpener = createStore<{ open: OpenActivityGroup }>({ open: noop });
 
 function noop() {}
 
 /** The opener for the activity sheet. Outside a host (tests) it is a no-op,
  * so transcript rows never need to know whether a sheet is mounted. */
 export function useActivitySheet(): OpenActivityGroup {
-  return useStore(activitySheetOpener);
+  return useStore(activitySheetOpener).open;
 }
 
 /** Whether the detail page would have anything to show for this activity —
@@ -94,8 +86,8 @@ export function ActivitySheetHost({
   }, []);
 
   useEffect(() => {
-    activitySheetOpener.set(open);
-    return () => activitySheetOpener.set(noop);
+    activitySheetOpener.set({ open });
+    return () => activitySheetOpener.set({ open: noop });
   }, [open]);
 
   const block = target ? findActivityBlock(session, target) : null;
@@ -135,7 +127,7 @@ export function ActivitySheetHost({
                     size={14}
                     tintColor={NativeTint as string}
                   />
-                  <Text style={[styles.backLabel, { color: NativeTint as string }]}>Back</Text>
+                  <Text style={{ ...styles.backLabel, color: NativeTint as string }}>Back</Text>
                 </Pressable>
                 <ActivityDetail activity={selected} />
               </>
@@ -187,15 +179,15 @@ function GroupRow({ activity, onPress }: { activity: ActivityItem; onPress: () =
       disabled={!hasDetail}
       onPress={onPress}
       style={styles.row}>
-      <View style={[styles.rowIcon, { backgroundColor: theme.overlay }]}>
+      <View style={{ ...styles.rowIcon, backgroundColor: theme.overlay }}>
         <AppSymbol
           name={ACTIVITY_ICONS[activity.kind]}
           size={14}
           tintColor={theme.textSecondary}
         />
       </View>
-      <RichText style={[styles.rowLabel, { color: theme.text }]}>
-        <RichTextSpan style={[styles.rowAction, { color: activity.failed ? theme.danger : theme.text }]}>
+      <RichText style={{ ...styles.rowLabel, color: theme.text }}>
+        <RichTextSpan style={{ ...styles.rowAction, color: activity.failed ? theme.danger : theme.text }}>
           {activityActionLabel(activity)}
         </RichTextSpan>
         {detail ? <RichTextSpan text={`  ${detail}`} style={{ color: theme.textSecondary }} /> : null}
@@ -239,7 +231,7 @@ function RowState({ activity, hasDetail }: { activity: ActivityItem; hasDetail: 
   }
 
   if (activity.complete) {return null;}
-  return <View accessibilityLabel="Running" style={[styles.runningDot, { backgroundColor: NativeTint }]} />;
+  return <View accessibilityLabel="Running" style={{ ...styles.runningDot, backgroundColor: String(NativeTint) }} />;
 }
 
 /** Page two: everything the desktop shows in an expanded card. */
@@ -255,7 +247,7 @@ function ActivityDetail({ activity }: { activity: ActivityItem }) {
     <ScrollableArea
            style={styles.fill}>
       <View style={styles.header}>
-        <View style={[styles.iconWell, { backgroundColor: theme.overlayStrong }]}>
+        <View style={{ ...styles.iconWell, backgroundColor: theme.overlayStrong }}>
           <AppSymbol
             name={ACTIVITY_ICONS[activity.kind]}
             size={17}
@@ -266,7 +258,7 @@ function ActivityDetail({ activity }: { activity: ActivityItem }) {
           <Text
             accessibilityRole="heading"
             numberOfLines={3}
-            style={[styles.title, { color: theme.text }]}>
+            style={{ ...styles.title, color: theme.text }}>
             {title}
           </Text>
           <ActivityStatus activity={activity} />
@@ -289,7 +281,7 @@ function ActivityDetail({ activity }: { activity: ActivityItem }) {
           {images.map((url) => (
             <Image
               src={url}
-              style={[styles.image, { backgroundColor: theme.inset }]}
+              style={{ ...styles.image, backgroundColor: theme.inset }}
               ios={{ stretch: 'aspectFit' }}
               web={{ style: { objectFit: 'contain' } }}
             />
@@ -312,7 +304,7 @@ function ActivityStatus({ activity }: { activity: ActivityItem }) {
           size={12}
           tintColor={theme.danger}
         />
-        <Text style={[styles.statusText, { color: theme.danger }]}>Failed</Text>
+        <Text style={{ ...styles.statusText, color: theme.danger }}>Failed</Text>
       </View>
     );
   }
@@ -321,8 +313,8 @@ function ActivityStatus({ activity }: { activity: ActivityItem }) {
   if (!activity.complete && !activity.reasoning) {
     return (
       <View accessibilityLiveRegion="polite" style={styles.status}>
-        <View style={[styles.runningDot, { backgroundColor: NativeTint }]} />
-        <Text style={[styles.statusText, { color: theme.textTertiary }]}>In progress</Text>
+        <View style={{ ...styles.runningDot, backgroundColor: String(NativeTint) }} />
+        <Text style={{ ...styles.statusText, color: theme.textTertiary }}>In progress</Text>
       </View>
     );
   }
@@ -330,7 +322,7 @@ function ActivityStatus({ activity }: { activity: ActivityItem }) {
   const stats = activityFileChangeStats(activity);
   if (stats) {
     return (
-      <RichText style={[styles.statusText, styles.stats]}>
+      <RichText style={{ ...styles.statusText, ...styles.stats }}>
         <RichTextSpan style={{ color: theme.success }}>+{stats.additions}</RichTextSpan>
         <RichTextSpan text=" " style={{ color: theme.textGhost }} />
         <RichTextSpan style={{ color: theme.danger }}>−{stats.deletions}</RichTextSpan>
@@ -354,17 +346,17 @@ function DetailSection({
   return (
     <View style={styles.section}>
       {label ? (
-        <Text style={[styles.sectionLabel, { color: theme.textTertiary }]}>{label}</Text>
+        <Text style={{ ...styles.sectionLabel, color: theme.textTertiary }}>{label}</Text>
       ) : null}
       {content ? (
         mono ? (
-          <View style={[styles.well, { backgroundColor: theme.inset, borderColor: theme.border }]}>
-            <Text style={[styles.monoText, { color: theme.textSecondary }]}>
+          <View style={{ ...styles.well, backgroundColor: theme.inset, borderColor: theme.border }}>
+            <Text style={{ ...styles.monoText, color: theme.textSecondary }}>
               {boundedText(content)}
             </Text>
           </View>
         ) : (
-          <Text style={[styles.bodyText, { color: theme.textSecondary }]}>
+          <Text style={{ ...styles.bodyText, color: theme.textSecondary }}>
             {boundedText(content)}
           </Text>
         )
@@ -387,12 +379,12 @@ function FileChange({ change }: { change: ActivityFileChange }) {
   return (
     <View style={styles.fileChange}>
       <View accessible accessibilityLabel={`${statusWord} ${change.path}`} style={styles.fileRow}>
-        <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-        <Text numberOfLines={1} style={[styles.filePath, { color: theme.text }]}>
+        <View style={{ ...styles.statusDot, backgroundColor: statusColor }} />
+        <Text numberOfLines={1} style={{ ...styles.filePath, color: theme.text }}>
           {change.path}
         </Text>
         {(change.additions != null || change.deletions != null) && (
-          <RichText style={[styles.statusText, styles.stats]}>
+          <RichText style={{ ...styles.statusText, ...styles.stats }}>
             <RichTextSpan style={{ color: theme.success }}>+{change.additions ?? 0}</RichTextSpan>
             <RichTextSpan text=" " style={{ color: theme.textGhost }} />
             <RichTextSpan style={{ color: theme.danger }}>−{change.deletions ?? 0}</RichTextSpan>
@@ -421,7 +413,7 @@ function ReasoningText({ content, live }: { content: string; live: boolean }) {
   });
 
   return (
-    <RichText style={[styles.bodyText, { color: theme.textSecondary }]}>
+    <RichText style={{ ...styles.bodyText, color: theme.textSecondary }}>
       {splitRunAtSpans(0, content.length, spans).map(([start, end, opacity]) => (
         <RichTextSpan
           text={content.slice(start, end)}
@@ -455,15 +447,15 @@ const styles = {
   pagerTrack: { flex: '1 1', flexDirection: 'row', width: '200%' },
   page: { width: '50%' },
   // ── Page one: the list ──────────────────────────────────────────────────
-  listContent: { paddingHorizontal: Spacing.two, paddingTop: 6 },
+  listContent: { paddingLeft: Spacing.two, paddingRight: Spacing.two, paddingTop: 6 },
   row: {
     alignItems: 'center',
     borderRadius: Radius.medium,
     flexDirection: 'row',
     gap: 11,
     minHeight: 46,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingLeft: 12, paddingRight: 12,
+    paddingTop: 8, paddingBottom: 8,
   },
   rowIcon: {
     alignItems: 'center',
@@ -474,19 +466,19 @@ const styles = {
   },
   rowLabel: { flex: '1 1', fontSize: 16, minWidth: 0 },
   rowAction: { fontWeight: '600' },
-  rowStats: { fontSize: 13, fontVariant: ['tabular-nums'], fontWeight: '600' },
+  rowStats: { fontSize: 13, fontVariant: 'tabular-nums', fontWeight: '600' },
   runningDot: { borderRadius: 3, height: 6, width: 6 },
   // ── Page two: the detail ────────────────────────────────────────────────
   backRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 5,
-    marginHorizontal: Spacing.two,
+    marginLeft: Spacing.two, marginRight: Spacing.two,
     minHeight: 40,
-    paddingHorizontal: 10,
+    paddingLeft: 10, paddingRight: 10,
   },
   backLabel: { fontSize: 16, fontWeight: '600' },
-  content: { gap: 14, paddingHorizontal: Spacing.three, paddingTop: 6 },
+  content: { gap: 14, paddingLeft: Spacing.three, paddingRight: Spacing.three, paddingTop: 6 },
   header: { alignItems: 'flex-start', flexDirection: 'row', gap: 12 },
   iconWell: {
     alignItems: 'center',
@@ -499,7 +491,7 @@ const styles = {
   title: { fontSize: 18, fontWeight: '600', lineHeight: '22px' },
   status: { alignItems: 'center', flexDirection: 'row', gap: 6 },
   statusText: { fontSize: 14 },
-  stats: { fontVariant: ['tabular-nums'], fontWeight: '600' },
+  stats: { fontVariant: 'tabular-nums', fontWeight: '600' },
   section: { gap: 6 },
   sectionLabel: {
     fontSize: 12.5,
@@ -510,8 +502,8 @@ const styles = {
   well: {
     borderRadius: Radius.small,
     borderWidth: hairline,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingLeft: 10, paddingRight: 10,
+    paddingTop: 8, paddingBottom: 8,
   },
   monoText: { fontFamily: MonoFont, fontSize: 13, lineHeight: '17.5px' },
   bodyText: { fontSize: 15.5, lineHeight: '21px' },
@@ -520,4 +512,4 @@ const styles = {
   statusDot: { borderRadius: 3, height: 6, width: 6 },
   filePath: { flex: '1 1', fontFamily: MonoFont, fontSize: 13 },
   image: { borderRadius: Radius.small, height: 240, width: '100%' },
-};
+} satisfies Record<string, CSSProperties>;

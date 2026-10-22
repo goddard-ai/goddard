@@ -24,7 +24,7 @@ export function GlassSurface({
 }) {
   const theme = useTheme();
   return (
-    <View style={[{ backgroundColor: fallbackColor ?? theme.overlayStrong }, style]}>
+    <View style={{ backgroundColor: fallbackColor ?? theme.overlayStrong, ...style }}>
       {children}
     </View>
   );

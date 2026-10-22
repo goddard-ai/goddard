@@ -1,15 +1,7 @@
 /** @jsxImportSource @nativescript-community/octane */
 import type { MessageAttachment } from '@waku/client';
 import { memo, useCallback, useState } from 'octane';
-import {
-  Absolute,
-  Spinner,
-  Image,
-  Pressable,
-  BottomSheet as XSheet,
-  Text,
-  View,
-} from '@octane-xplat/ui';
+import { Absolute, Spinner, Image, Pressable, BottomSheet as XSheet, Text, View } from '@octane-xplat/ui';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { dismissKeyboard } from '@/lib/keyboard';
@@ -118,7 +110,14 @@ export const AttachmentTile = memo(function AttachmentTile({
         {source ? (
           <AttachmentImage source={source} onError={onImageError} />
         ) : (
-          <View style={{ flex: '1 1', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 7 }}>
+          <View style={{
+            flex: '1 1',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 7,
+            paddingLeft: 7,
+            paddingRight: 7,
+          }}>
             {image.isFetching ? <Spinner busy /> : (
               <AppSymbol
                 name={attachment.is_dir
@@ -223,8 +222,10 @@ function AttachmentImagePreview({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 12,
-          paddingHorizontal: 16,
-          paddingVertical: 8,
+          paddingLeft: 16,
+          paddingRight: 16,
+          paddingTop: 8,
+          paddingBottom: 8,
         }}>
           <Text numberOfLines={1} style={{ flex: '1 1', fontSize: 16, fontWeight: '600', color: theme.text }}>{name}</Text>
           <Pressable

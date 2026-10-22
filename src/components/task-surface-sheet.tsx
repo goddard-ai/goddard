@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'octane/jsx-runtime';
 import type {
   AgentInvocation,
   AgentSession,
@@ -18,22 +19,7 @@ import {
   type ReactNode,
 } from 'octane';
 
-import {
-  Spinner,
-  DropdownMenu,
-  Image,
-  Pressable,
-  ScrollableArea,
-  BottomSheet,
-  Text,
-  TextArea,
-  TextInput,
-  useColorScheme,
-  useSafeAreaInsets,
-  View,
-  RichText,
-  RichTextSpan,
-} from '@octane-xplat/ui';
+import { Spinner, DropdownMenu, Image, Pressable, ScrollableArea, BottomSheet, Text, TextArea, TextInput, useColorScheme, useSafeAreaInsets, View, RichText, RichTextSpan } from '@octane-xplat/ui';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { DiffView } from '@/components/diff-view';
@@ -199,8 +185,8 @@ function SurfaceHeader({
   const theme = useTheme();
   const details = SURFACE_DETAILS[surface];
   return (
-    <View style={[styles.header, { borderBottomColor: theme.border }]}>
-      <View style={[styles.headerIcon, { backgroundColor: theme.overlay }]}>
+    <View style={{ ...styles.header, borderBottomColor: theme.border }}>
+      <View style={{ ...styles.headerIcon, backgroundColor: theme.overlay }}>
         <AppSymbol
           name={details.icon}
           size={15}
@@ -210,13 +196,13 @@ function SurfaceHeader({
       <View style={styles.headerCopy}>
         <Text
           numberOfLines={1}
-          style={[styles.headerTitle, { color: theme.text }]}
+          style={{ ...styles.headerTitle, color: theme.text }}
         >
           {details.title}
         </Text>
         <Text
           numberOfLines={1}
-          style={[styles.headerSubtitle, { color: theme.textTertiary }]}
+          style={{ ...styles.headerSubtitle, color: theme.textTertiary }}
         >
           {subtitle ?? details.subtitle}
         </Text>
@@ -235,7 +221,7 @@ function TerminalSurface({
 }) {
   const theme = useTheme();
   return (
-    <View style={[styles.fill, { backgroundColor: theme.surface }]}>
+    <View style={{ ...styles.fill, backgroundColor: theme.surface }}>
       <SurfaceHeader surface="terminal" />
       {root ? (
         <TerminalSession root={root} sessionId={sessionId} />
@@ -349,14 +335,12 @@ function TerminalSession({ root, sessionId }: { root: string; sessionId: string 
       {status ? (
         <Text
           numberOfLines={2}
-          style={[
-            styles.terminalStatus,
-            {
-              backgroundColor: theme.surface,
-              borderTopColor: theme.border,
-              color: error ? theme.danger : theme.textSecondary,
-            },
-          ]}
+          style={{
+            ...styles.terminalStatus,
+            backgroundColor: theme.surface,
+            borderTopColor: theme.border,
+            color: error ? theme.danger : theme.textSecondary,
+          }}
         >
           {status}
         </Text>
@@ -507,7 +491,7 @@ function FilesSurface({ root }: { root: string | null }) {
             size={13}
             tintColor={NativeTint as string}
           />
-          <Text style={[styles.backLabel, { color: NativeTint as string }]}>Files</Text>
+          <Text style={{ ...styles.backLabel, color: NativeTint as string }}>Files</Text>
         </Pressable>
         {imageMime ? (
           image.isPending ? (
@@ -538,17 +522,17 @@ function FilesSurface({ root }: { root: string | null }) {
           <ScrollableArea style={styles.fileContent}>
             <TextArea
               onChange={setDraft}
-              style={[styles.fileText, styles.fileEditor, { color: theme.text }]}
+              style={{ ...styles.fileText, ...styles.fileEditor, color: theme.text }}
               value={draft}
             />
           </ScrollableArea>
         ) : (
           <ScrollableArea style={styles.fileContent}>
-            <Text style={[styles.fileText, { color: theme.text }]}>
+            <Text style={{ ...styles.fileText, color: theme.text }}>
               {(file.data ?? '').slice(0, MAX_FILE_CHARACTERS)}
             </Text>
             {truncated ? (
-              <Text style={[styles.truncated, { color: theme.textTertiary }]}>
+              <Text style={{ ...styles.truncated, color: theme.textTertiary }}>
                 File truncated in this viewer.
               </Text>
             ) : null}
@@ -599,10 +583,7 @@ function FilesSurface({ root }: { root: string | null }) {
                     : [...current, item.absolutePath].sort(),
                 );
               }}
-              style={[
-                styles.fileRow,
-                { paddingLeft: 14 + Math.min(item.depth, 12) * 16 },
-              ]}
+              style={{ ...styles.fileRow, paddingLeft: 14 + Math.min(item.depth, 12) * 16 }}
             >
               <AppSymbol
                 name={
@@ -621,7 +602,7 @@ function FilesSurface({ root }: { root: string | null }) {
               />
               <Text
                 numberOfLines={1}
-                style={[styles.fileRowLabel, { color: theme.text }]}
+                style={{ ...styles.fileRowLabel, color: theme.text }}
               >
                 {item.name}
               </Text>
@@ -701,18 +682,20 @@ function ReviewSurface({
         surface="review"
       />
       <View
-        style={[styles.reviewControls, { borderBottomColor: theme.border }]}
+        style={{ ...styles.reviewControls, borderBottomColor: theme.border }}
       >
         <DropdownMenu
           items={[
             ...(lastTurn
               ? [{
+                  type: 'action' as const,
                   key: 'last-turn',
                   label: reviewDiffSourceLabel(lastTurn),
                   onSelect: () => setSource(lastTurn),
                 }]
               : []),
             ...STANDARD_REVIEW_SOURCES.map((item) => ({
+              type: 'action' as const,
               key: item.id,
               label: reviewDiffSourceLabel(item.source),
               onSelect: () => setSource(item.source),
@@ -722,9 +705,9 @@ function ReviewSurface({
             <View
               accessibilityLabel="Choose review source"
               accessibilityRole="button"
-              style={[styles.sourceButton, { backgroundColor: theme.overlay }]}
+              style={{ ...styles.sourceButton, backgroundColor: theme.overlay }}
             >
-              <Text style={[styles.sourceLabel, { color: theme.text }]}>
+              <Text style={{ ...styles.sourceLabel, color: theme.text }}>
                 {reviewDiffSourceLabel(source)}
               </Text>
               <AppSymbol
@@ -759,10 +742,11 @@ function ReviewSurface({
         <ScrollableArea style={styles.reviewList}>
           {!diff.data?.completeContext ? (
             <Text
-              style={[
-                styles.contextNote,
-                { color: theme.warning, backgroundColor: theme.warningSoft },
-              ]}
+              style={{
+                ...styles.contextNote,
+                color: theme.warning,
+                backgroundColor: theme.warningSoft,
+              }}
             >
               This comparison has partial context.
             </Text>
@@ -776,13 +760,11 @@ function ReviewSurface({
           {files.map((file) => (
             <View>
               <View
-                style={[
-                  styles.diffFileHeader,
-                  {
-                    backgroundColor: theme.surface,
-                    borderBottomColor: theme.border,
-                  },
-                ]}
+                style={{
+                  ...styles.diffFileHeader,
+                  backgroundColor: theme.surface,
+                  borderBottomColor: theme.border,
+                }}
               >
                 <AppSymbol
                   name={{ ios: 'doc', android: 'draft', web: 'draft' }}
@@ -791,16 +773,13 @@ function ReviewSurface({
                 />
                 <Text
                   numberOfLines={1}
-                  style={[styles.diffPath, { color: theme.textSecondary }]}
+                  style={{ ...styles.diffPath, color: theme.textSecondary }}
                 >
                   {file.path}
                 </Text>
               </View>
               <View
-                style={[
-                  styles.diffSection,
-                  { borderBottomColor: theme.border },
-                ]}
+                style={{ ...styles.diffSection, borderBottomColor: theme.border }}
               >
                 <DiffView diff={file.patch} mode="review" />
               </View>
@@ -990,7 +969,7 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
       ) : (
         <>
           {behind > 0 || snapshot.can_push ? (
-            <View style={[styles.gitSyncRow, { borderBottomColor: theme.border }]}>
+            <View style={{ ...styles.gitSyncRow, borderBottomColor: theme.border }}>
               {behind > 0 ? (
                 <HeaderTextButton
                   label={pending === 'pull' ? 'Pulling…' : `Pull ↓${behind}`}
@@ -1023,27 +1002,28 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
             {sections.map((section) => (
               <View>
                 <View
-                  style={[
-                    styles.diffFileHeader,
-                    { backgroundColor: theme.surface, borderBottomColor: theme.border },
-                  ]}
+                  style={{
+                    ...styles.diffFileHeader,
+                    backgroundColor: theme.surface,
+                    borderBottomColor: theme.border,
+                  }}
                 >
-                  <Text style={[styles.diffPath, { color: theme.textSecondary }]}>
+                  <Text style={{ ...styles.diffPath, color: theme.textSecondary }}>
                     {section.title} ({section.data.length})
                   </Text>
                 </View>
                 {section.data.map((item) => (
-                  <View style={[styles.gitFileRow, { borderBottomColor: theme.border }]}>
-                    <View style={[styles.gitStatusBadge, { backgroundColor: theme.overlay }]}>
-                      <Text style={[styles.gitStatusText, { color: theme.textTertiary }]}>
+                  <View style={{ ...styles.gitFileRow, borderBottomColor: theme.border }}>
+                    <View style={{ ...styles.gitStatusBadge, backgroundColor: theme.overlay }}>
+                      <Text style={{ ...styles.gitStatusText, color: theme.textTertiary }}>
                         {item.untracked ? '??' : item.status}
                       </Text>
                     </View>
                     <View style={styles.gitFileCopy}>
-                      <Text numberOfLines={1} style={[styles.gitFilePath, { color: theme.text }]}>
+                      <Text numberOfLines={1} style={{ ...styles.gitFilePath, color: theme.text }}>
                         {item.path}
                       </Text>
-                      <Text style={[styles.gitFileMeta, { color: theme.textGhost }]}>
+                      <Text style={{ ...styles.gitFileMeta, color: theme.textGhost }}>
                         {gitStatusLabel(item.status, item.untracked)}
                         {item.additions || item.deletions
                           ? ` · +${item.additions} −${item.deletions}`
@@ -1071,7 +1051,7 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
                           onPress={() => discard(item)}
                           style={styles.textButton}
                         >
-                          <Text style={[styles.textButtonLabel, { color: theme.danger }]}>
+                          <Text style={{ ...styles.textButtonLabel, color: theme.danger }}>
                             Discard
                           </Text>
                         </Pressable>
@@ -1083,17 +1063,15 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
             ))}
           </ScrollableArea>
           {opError ? (
-            <Text style={[styles.gitError, { color: theme.danger }]}>{opError}</Text>
+            <Text style={{ ...styles.gitError, color: theme.danger }}>{opError}</Text>
           ) : null}
           <View
-            style={[
-              styles.commitBar,
-              {
-                backgroundColor: theme.surface,
-                borderTopColor: theme.border,
-                paddingBottom: Math.max(_insets.bottom, 10),
-              },
-            ]}
+            style={{
+              ...styles.commitBar,
+              backgroundColor: theme.surface,
+              borderTopColor: theme.border,
+              paddingBottom: Math.max(_insets.bottom, 10),
+            }}
           >
             <TextInput
               isReadOnly={pending != null}
@@ -1102,10 +1080,11 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
                 invocation ? 'Message (blank generates one)' : 'Commit message'
               }
               placeholderTextColor={theme.textGhost}
-              style={[
-                styles.commitInput,
-                { backgroundColor: theme.overlay, color: theme.text },
-              ]}
+              style={{
+                ...styles.commitInput,
+                backgroundColor: theme.overlay,
+                color: theme.text,
+              }}
               value={message}
             />
             <Pressable
@@ -1119,11 +1098,11 @@ function GitSurface({ root, session }: { root: string | null; session: AgentSess
               accessibilityState={{ disabled: !canCommit || pending != null }}
               disabled={!canCommit || pending != null}
               onPress={confirmCommit}
-              style={[
-                styles.commitButton,
-                { backgroundColor: theme.accent },
-                (!canCommit || pending != null) && { opacity: 0.5 },
-              ]}
+              style={{
+                ...styles.commitButton,
+                backgroundColor: theme.accent,
+                ...((!canCommit || pending != null) && { opacity: 0.5 }),
+              }}
             >
               {pending === 'commit' ? (
                 <Spinner busy />
@@ -1241,10 +1220,10 @@ function QueueSurface({ root }: { root: string | null }) {
         <>
           {snapshot.frontier ? (
             <View
-              style={[styles.gitSyncRow, { borderBottomColor: theme.border }]}
+              style={{ ...styles.gitSyncRow, borderBottomColor: theme.border }}
             >
               <Text
-                style={[styles.queueFrontier, { color: theme.textSecondary }]}
+                style={{ ...styles.queueFrontier, color: theme.textSecondary }}
               >
                 {`Promotable to ${snapshot.baseBranch ?? 'main'}`}
               </Text>
@@ -1263,17 +1242,17 @@ function QueueSurface({ root }: { root: string | null }) {
             ) : null}
             {snapshot.entries.map((item) => (
               <View
-                style={[styles.gitFileRow, { borderBottomColor: theme.border }]}
+                style={{ ...styles.gitFileRow, borderBottomColor: theme.border }}
               >
                 <View style={styles.gitFileCopy}>
                   <Text
                     numberOfLines={2}
-                    style={[styles.gitFilePath, { color: theme.text }]}
+                    style={{ ...styles.gitFilePath, color: theme.text }}
                   >
                     {item.commit.subject}
                   </Text>
                   <Text
-                    style={[styles.gitFileMeta, { color: theme.textGhost }]}
+                    style={{ ...styles.gitFileMeta, color: theme.textGhost }}
                   >
                     {[
                       item.commit.short_sha,
@@ -1293,7 +1272,7 @@ function QueueSurface({ root }: { root: string | null }) {
                   </Text>
                   {item.reviews.length > 0 ? (
                     <Text
-                      style={[styles.gitFileMeta, { color: theme.textGhost }]}
+                      style={{ ...styles.gitFileMeta, color: theme.textGhost }}
                     >
                       {item.reviews
                         .map(
@@ -1329,15 +1308,13 @@ function QueueSurface({ root }: { root: string | null }) {
                       style={styles.textButton}
                     >
                       <Text
-                        style={[
-                          styles.textButtonLabel,
-                          {
-                            color:
-                              pending === `reject:${item.commit.sha}`
-                                ? theme.textGhost
-                                : theme.danger,
-                          },
-                        ]}
+                        style={{
+                          ...styles.textButtonLabel,
+                          color:
+                            pending === `reject:${item.commit.sha}`
+                              ? theme.textGhost
+                              : theme.danger,
+                        }}
                       >
                         Reject
                       </Text>
@@ -1348,7 +1325,7 @@ function QueueSurface({ root }: { root: string | null }) {
             ))}
           </ScrollableArea>
           {opError ? (
-            <Text style={[styles.gitError, { color: theme.danger }]}>
+            <Text style={{ ...styles.gitError, color: theme.danger }}>
               {opError}
             </Text>
           ) : null}
@@ -1371,7 +1348,7 @@ function HeaderTextButton({
       onPress={onPress}
       style={styles.textButton}
     >
-      <Text style={[styles.textButtonLabel, { color: NativeTint as string }]}>
+      <Text style={{ ...styles.textButtonLabel, color: NativeTint as string }}>
         {label}
       </Text>
     </Pressable>
@@ -1383,7 +1360,7 @@ function LoadingMessage() {
   return (
     <View style={styles.loading}>
       <Spinner busy />
-      <Text style={[styles.loadingText, { color: theme.textTertiary }]}>
+      <Text style={{ ...styles.loadingText, color: theme.textTertiary }}>
         Loading…
       </Text>
     </View>
@@ -1394,8 +1371,8 @@ function PanelMessage({ title, detail }: { title: string; detail: string }) {
   const theme = useTheme();
   return (
     <View style={styles.message}>
-      <Text style={[styles.messageTitle, { color: theme.text }]}>{title}</Text>
-      <Text style={[styles.messageDetail, { color: theme.textTertiary }]}>
+      <Text style={{ ...styles.messageTitle, color: theme.text }}>{title}</Text>
+      <Text style={{ ...styles.messageDetail, color: theme.textTertiary }}>
         {detail}
       </Text>
     </View>
@@ -1421,8 +1398,8 @@ const styles = {
     flexDirection: 'row',
     gap: 10,
     minHeight: 54,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingLeft: 14, paddingRight: 14,
+    paddingTop: 8, paddingBottom: 8,
   },
   headerIcon: {
     alignItems: 'center',
@@ -1434,27 +1411,27 @@ const styles = {
   headerCopy: { flex: '1 1', minWidth: 0 },
   headerTitle: { fontSize: 16, fontWeight: '600' },
   headerSubtitle: { fontSize: 12.5, marginTop: 1 },
-  textButton: { justifyContent: 'center', minHeight: 36, paddingHorizontal: 4 },
+  textButton: { justifyContent: 'center', minHeight: 36, paddingLeft: 4, paddingRight: 4 },
   textButtonLabel: { fontSize: 15, fontWeight: '500' },
   backRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 5,
     minHeight: 38,
-    paddingHorizontal: 15,
+    paddingLeft: 15, paddingRight: 15,
   },
   backLabel: { fontSize: 15.5, fontWeight: '500' },
   terminalBody: { flex: '1 1', minHeight: 0 },
   terminalStatus: {
     borderTopWidth: hairline,
     fontSize: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingLeft: 14, paddingRight: 14,
+    paddingTop: 8, paddingBottom: 8,
   },
   headerActions: { alignItems: 'center', flexDirection: 'row', gap: 14 },
-  fileContent: { flex: '1 1', paddingHorizontal: 14, paddingTop: 4 },
+  fileContent: { flex: '1 1', paddingLeft: 14, paddingRight: 14, paddingTop: 4 },
   fileText: { fontFamily: MonoFont, fontSize: 12.5, lineHeight: '17px' },
-  fileEditor: { minHeight: 200, textAlignVertical: 'top' },
+  fileEditor: { minHeight: 200 },
   truncated: { fontSize: 12, marginTop: 14 },
   fileRow: {
     alignItems: 'center',
@@ -1470,7 +1447,7 @@ const styles = {
     flexDirection: 'row',
     justifyContent: 'space-between',
     minHeight: 48,
-    paddingHorizontal: 14,
+    paddingLeft: 14, paddingRight: 14,
   },
   sourceButton: {
     alignItems: 'center',
@@ -1478,7 +1455,7 @@ const styles = {
     flexDirection: 'row',
     gap: 8,
     minHeight: 32,
-    paddingHorizontal: 10,
+    paddingLeft: 10, paddingRight: 10,
   },
   sourceLabel: { fontSize: 14, fontWeight: '500' },
   reviewStats: { fontSize: 12.5 },
@@ -1499,7 +1476,7 @@ const styles = {
     flexDirection: 'row',
     gap: 8,
     minHeight: 36,
-    paddingHorizontal: 12,
+    paddingLeft: 12, paddingRight: 12,
   },
   diffPath: { flex: '1 1', fontSize: 13.5, fontWeight: '500' },
   gitSyncRow: {
@@ -1509,7 +1486,7 @@ const styles = {
     gap: 18,
     justifyContent: 'flex-end',
     minHeight: 40,
-    paddingHorizontal: 14,
+    paddingLeft: 14, paddingRight: 14,
   },
   gitFileRow: {
     alignItems: 'center',
@@ -1517,14 +1494,14 @@ const styles = {
     flexDirection: 'row',
     gap: 10,
     minHeight: 46,
-    paddingHorizontal: 14,
+    paddingLeft: 14, paddingRight: 14,
   },
   gitStatusBadge: {
     alignItems: 'center',
     borderRadius: Radius.small,
     minWidth: 28,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
+    paddingLeft: 5, paddingRight: 5,
+    paddingTop: 2, paddingBottom: 2,
   },
   gitStatusText: { fontFamily: MonoFont, fontSize: 11, fontWeight: '600' },
   gitFileCopy: { flex: '1 1', minWidth: 0 },
@@ -1534,15 +1511,15 @@ const styles = {
   gitError: {
     borderTopWidth: hairline,
     fontSize: 12.5,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingLeft: 14, paddingRight: 14,
+    paddingTop: 8, paddingBottom: 8,
   },
   commitBar: {
     alignItems: 'center',
     borderTopWidth: hairline,
     flexDirection: 'row',
     gap: 10,
-    paddingHorizontal: 14,
+    paddingLeft: 14, paddingRight: 14,
     paddingTop: 10,
   },
   commitInput: {
@@ -1550,8 +1527,8 @@ const styles = {
     flex: '1 1',
     fontSize: 14.5,
     minHeight: 38,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
+    paddingLeft: 11, paddingRight: 11,
+    paddingTop: 8, paddingBottom: 8,
   },
   commitButton: {
     alignItems: 'center',
@@ -1559,7 +1536,7 @@ const styles = {
     justifyContent: 'center',
     minHeight: 38,
     minWidth: 88,
-    paddingHorizontal: 14,
+    paddingLeft: 14, paddingRight: 14,
   },
   commitButtonLabel: { color: '#fff', fontSize: 14.5, fontWeight: '600' },
   queueFrontier: { flex: '1 1', fontSize: 13.5 },
@@ -1585,4 +1562,4 @@ const styles = {
     marginTop: 5,
     textAlign: 'center',
   },
-};
+} satisfies Record<string, CSSProperties>;

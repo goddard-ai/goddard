@@ -2,7 +2,7 @@ import type { AgentSession, BossState } from '@waku/client';
 
 import { loadBossState, markDeliverableViewed } from '@waku/client/boss';
 
-import { pushRoute } from '@octane-xplat/ui';
+import { pushRoute } from '@octane-xplat/ui/routing';
 
 import { armDeliverable } from './deliverable-arm';
 import {
@@ -71,7 +71,7 @@ export function installAttentionFeed(): void {
 }
 
 function syncDaemon() {
-  const { phase, activeProfile, client, outage } = daemonState.get();
+  const { phase, activeProfile, client, outage } = daemonState.getSnapshot();
   const profileId = activeProfile?.id;
 
   // Connection lost/regained on the active daemon — the banner handles the
@@ -82,7 +82,7 @@ function syncDaemon() {
     const since = outage?.since ?? Date.now();
     outageTimer = setTimeout(() => {
       outageTimer = null;
-      const current = daemonState.get();
+      const current = daemonState.getSnapshot();
       if (foreground || (current.phase !== 'reconnecting' && current.phase !== 'error')) {return;}
       outageAnnounced = true;
       fire(`connection:lost@${since}`, {
@@ -146,8 +146,8 @@ function subscribeDaemon(profileId: string): Array<() => void> {
   );
 
   return [
-    bossEntry.subscribe(() => onBossState(memory, bossEntry.get().data)),
-    taskEntry.subscribe(() => onTaskState(memory, taskEntry.get().data)),
+    bossEntry.subscribe(() => onBossState(memory, bossEntry.getSnapshot().data)),
+    taskEntry.subscribe(() => onTaskState(memory, taskEntry.getSnapshot().data)),
   ];
 }
 
@@ -218,7 +218,7 @@ function openAttentionTarget(target: LocalNoticeTarget): void {
   }
 
   if (target.kind === 'deliverable') {
-    const { activeProfile, client } = daemonState.get();
+    const { activeProfile, client } = daemonState.getSnapshot();
     const state = activeProfile
       ? getDaemonQueryData<BossState | null>(daemonKeys.bossState(activeProfile.id))
       : undefined;
@@ -242,7 +242,7 @@ function openAttentionTarget(target: LocalNoticeTarget): void {
 }
 
 function requireClient() {
-  const client = daemonState.get().client;
+  const client = daemonState.getSnapshot().client;
   if (!client) {throw new Error('Goddard daemon is disconnected');}
   return client;
 }

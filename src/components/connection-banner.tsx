@@ -1,13 +1,6 @@
 import { useEffect, useRef, useState } from 'octane';
-import {
-  Spinner,
-  HStack,
-  Pressable,
-  pushRoute,
-  Text,
-  useAnimation,
-  View,
-} from '@octane-xplat/ui';
+import { Spinner, HStack, Pressable, Text, useAnimation, View } from '@octane-xplat/ui';
+import { pushRoute } from '@octane-xplat/ui/routing';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { NativeTint } from '@/lib/theme-platform';
@@ -166,11 +159,18 @@ function NoticeCard({ floating, notice }: { floating: boolean; notice: Connectio
         alignItems: 'center',
         borderRadius: Radius.large,
         gap: 10,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
+        paddingLeft: 14,
+        paddingRight: 14,
+        paddingTop: 12,
+        paddingBottom: 12,
         ...(floating
           ? { backgroundColor: theme.surface, borderColor: theme.borderStrong, borderWidth: 1 }
-          : { marginBottom: 10, marginHorizontal: Spacing.three, backgroundColor: soft }),
+          : {
+              marginBottom: 10,
+              marginLeft: Spacing.three,
+              marginRight: Spacing.three,
+              backgroundColor: soft,
+            }),
       }}
     >
       <View style={{ alignItems: 'center', justifyContent: 'center', width: 18 }}>
@@ -250,7 +250,13 @@ function BannerAction({
       disabled={disabled}
       hitSlop={8}
       onPress={onPress}
-      style={{ justifyContent: 'center', minHeight: 32, paddingHorizontal: 4, opacity: disabled ? 0.45 : 1 }}
+      style={{
+        justifyContent: 'center',
+        minHeight: 32,
+        paddingLeft: 4,
+        paddingRight: 4,
+        opacity: disabled ? 0.45 : 1,
+      }}
     >
       <Text style={{ fontSize: 14, fontWeight: '700', color: String(NativeTint) }}>{label}</Text>
     </Pressable>

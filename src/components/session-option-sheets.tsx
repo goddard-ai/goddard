@@ -1,13 +1,6 @@
 import type { ProviderKind, ProviderModel, RuntimeMode } from '@waku/client';
 import { useEffect, useMemo, useState } from 'octane';
-import {
-  Spinner,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-  VirtualList,
-} from '@octane-xplat/ui';
+import { Spinner, Pressable, Text, TextInput, View, VirtualList } from '@octane-xplat/ui';
 
 import { AppSymbol } from './app-symbol';
 import { ProviderIcon } from './provider-icon';
@@ -39,13 +32,13 @@ export function modelDisplayName(
   return models?.find((item) => item.id === model)?.name ?? model;
 }
 
-const noteStyle = { fontSize: 14, lineHeight: '18px', paddingHorizontal: 12, paddingVertical: 10 };
+const noteStyle = { fontSize: 14, lineHeight: '18px', paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10 };
 const sectionTitleStyle = {
   fontSize: 13,
   fontWeight: '600',
   letterSpacing: 0.4,
   marginBottom: 6,
-  marginHorizontal: 12,
+  marginLeft: 12, marginRight: 12,
   marginTop: 14,
 };
 
@@ -95,11 +88,11 @@ export function ModelSheet({
       visible={visible}>
       <ModelSearchField onChangeText={setSearch} value={search} />
       {probe.isPending ? (
-        <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 40 }}>
+        <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 40, paddingBottom: 40 }}>
           <Spinner busy />
         </View>
       ) : probe.error ? (
-        <Text style={[noteStyle, { color: theme.danger }]}>
+        <Text style={{ ...noteStyle, color: theme.danger }}>
           {probe.error instanceof Error ? probe.error.message : String(probe.error)}
         </Text>
       ) : (
@@ -116,7 +109,7 @@ export function ModelSheet({
           )}
           style={{ height: listHeight }}
           renderEmpty={() => (
-            <Text style={[noteStyle, { color: theme.textTertiary }]}>
+            <Text style={{ ...noteStyle, color: theme.textTertiary }}>
               {search.trim()
                 ? 'No models match your search.'
                 : 'This agent doesn’t expose a model list; it will use its own default.'}
@@ -156,7 +149,7 @@ export function ModelTraitsSheet({
     <Sheet onDismiss={onDismiss} visible={visible}>
       {model.reasoning_efforts.length ? (
         <>
-          <Text style={[sectionTitleStyle, { color: theme.textSecondary }]}>
+          <Text style={{ ...sectionTitleStyle, color: theme.textSecondary }}>
             REASONING EFFORT
           </Text>
           {model.reasoning_efforts.map((option) => (
@@ -179,7 +172,7 @@ export function ModelTraitsSheet({
       />
       {model.context_windows.length ? (
         <>
-          <Text style={[sectionTitleStyle, { color: theme.textSecondary }]}>
+          <Text style={{ ...sectionTitleStyle, color: theme.textSecondary }}>
             CONTEXT WINDOW
           </Text>
           {model.context_windows.map((option) => (
@@ -216,7 +209,7 @@ function ServiceTierOptions({
 
   return (
     <>
-      <Text style={[sectionTitleStyle, { color: theme.textSecondary }]}>
+      <Text style={{ ...sectionTitleStyle, color: theme.textSecondary }}>
         SERVICE TIER
       </Text>
       <SheetRow
@@ -330,7 +323,7 @@ export function ModelPickerSheet({
           )}
           style={{ height: listHeight }}
           renderEmpty={() => (
-            <Text style={[noteStyle, { color: theme.textTertiary }]}>
+            <Text style={{ ...noteStyle, color: theme.textTertiary }}>
               No agents are installed on this daemon host.
             </Text>
           )}
@@ -347,7 +340,8 @@ export function ModelPickerSheet({
               flexDirection: 'row',
               gap: 5,
               minHeight: 40,
-              paddingHorizontal: 10,
+              paddingLeft: 10,
+              paddingRight: 10,
             }}
           >
             <AppSymbol
@@ -361,7 +355,7 @@ export function ModelPickerSheet({
           </Pressable>
           <ModelSearchField onChangeText={setSearch} value={search} />
           {entry?.isPending ? (
-            <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 40, height: listHeight }}>
+            <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 40, paddingBottom: 40, height: listHeight }}>
               <Spinner busy />
             </View>
           ) : (
@@ -379,7 +373,7 @@ export function ModelPickerSheet({
               )}
               style={{ height: listHeight }}
               renderEmpty={() => (
-                <Text style={[noteStyle, { color: theme.textTertiary }]}>
+                <Text style={{ ...noteStyle, color: theme.textTertiary }}>
                   {search.trim()
                     ? 'No models match your search.'
                     : 'This agent doesn’t expose a model list; it will use its own default.'}
@@ -419,9 +413,11 @@ function ModelSearchField({
       flexDirection: 'row',
       gap: 7,
       marginBottom: 8,
-      marginHorizontal: 4,
+      marginLeft: 4,
+      marginRight: 4,
       minHeight: 38,
-      paddingHorizontal: 10,
+      paddingLeft: 10,
+      paddingRight: 10,
       backgroundColor: theme.overlayStrong,
     }}>
       <AppSymbol
@@ -431,7 +427,7 @@ function ModelSearchField({
       />
       <TextInput
         placeholder="Search models"
-        style={{ flex: '1 1', fontSize: 16, paddingVertical: 7, color: theme.text }}
+        style={{ flex: '1 1', fontSize: 16, paddingTop: 7, paddingBottom: 7, color: theme.text }}
         value={value}
         onChange={onChangeText}
       />

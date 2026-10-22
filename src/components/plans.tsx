@@ -1,6 +1,7 @@
 import type { AgentSession, BossPlan } from '@waku/client';
 import { useEffect, useRef, useState } from 'octane';
-import { Pressable, pushRoute, Text, useSafeAreaInsets, View } from '@octane-xplat/ui';
+import { Pressable, Text, useSafeAreaInsets, View } from '@octane-xplat/ui';
+import { pushRoute } from '@octane-xplat/ui/routing';
 import { bossReadPlanDocument, bossRequest } from '@waku/client/boss';
 import { Sheet } from '@/components/sheet';
 import { MdBlockSettled, useMarkdownStyles } from '@/components/md-block-row';
@@ -145,7 +146,7 @@ export function PlanningComposer({ session, onSubmitted }: { key?: string; sessi
     <Sheet title="Plan" visible={open} onDismiss={() => setOpen(false)}>
       {planDoc.error ? <Text style={{ color: theme.danger }}>Couldn’t load plan: {String(planDoc.error)}</Text> : null}
       <PlanDocument content={planDoc.data ?? ''} />
-      <Text style={{ color: theme.textTertiary, paddingVertical: 12 }}>Selection comments are coming in v1.1. Discuss changes in the planning chat; the approved document stays frozen.</Text>
+      <Text style={{ color: theme.textTertiary, paddingTop: 12, paddingBottom: 12 }}>Selection comments are coming in v1.1. Discuss changes in the planning chat; the approved document stays frozen.</Text>
     </Sheet>
   </View>;
 }

@@ -5,7 +5,7 @@
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"jsx": "preserve",
-		"jsxImportSource": "octane",
+		"jsxImportSource": "@octane-xplat/jsx/dom",
 		"moduleSuffixes": [".web", ""],
 		"customConditions": ["web"],
 		"lib": ["ESNext", "DOM", "DOM.Iterable"],
@@ -13,6 +13,7 @@
 		"paths": { "@/*": ["./src/*"] },
 		"types": ["vite/client"],
 		"noEmit": true,
+		"allowImportingTsExtensions": true,
 		"skipLibCheck": true
 	},
 	"include": ["src/**/*"],

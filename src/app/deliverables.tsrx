@@ -2,13 +2,7 @@
 import type { BossDeliverable } from '@waku/client';
 
 import { useMemo, useState } from 'octane';
-import {
-  Pressable,
-  ScrollableArea,
-  SegmentedControl,
-  Text,
-  View,
-} from '@octane-xplat/ui';
+import { Pressable, ScrollableArea, SegmentedControl, Text, View } from '@octane-xplat/ui';
 
 import { AppSymbol } from '@/components/app-symbol';
 import {
@@ -75,14 +69,21 @@ export default function DeliverablesScreen() {
           flexDirection: 'row',
           gap: 6,
           height: 44,
-          paddingHorizontal: 6,
+          paddingLeft: 6,
+          paddingRight: 6,
         }}
       >
         <Pressable
           accessibilityLabel="Back"
           accessibilityRole="button"
           onPress={navigateBack}
-          style={{ alignItems: 'center', flexDirection: 'row', minHeight: 36, paddingHorizontal: 8 }}
+          style={{
+            alignItems: 'center',
+            flexDirection: 'row',
+            minHeight: 36,
+            paddingLeft: 8,
+            paddingRight: 8,
+          }}
         >
           <AppSymbol
             name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
@@ -111,7 +112,7 @@ export default function DeliverablesScreen() {
         />
       ) : (
         <View style={{ flex: '1 1' }}>
-          <View style={{ paddingHorizontal: 14, paddingVertical: 8 }}>
+          <View style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8 }}>
             <SegmentedControl
               accessibilityLabel="Filter deliverables"
               onValueChange={(value) => setFilter(value as DeliverablesFilter)}
@@ -184,8 +185,10 @@ function LibraryMessage({ title, detail }: { title: string; detail: string }) {
         flex: '1 1',
         gap: 6,
         justifyContent: 'center',
-        paddingHorizontal: 32,
-        paddingVertical: 48,
+        paddingLeft: 32,
+        paddingRight: 32,
+        paddingTop: 48,
+        paddingBottom: 48,
       }}
     >
       <Text style={{ color: theme.text, fontSize: 15, fontWeight: '600', textAlign: 'center' }}>

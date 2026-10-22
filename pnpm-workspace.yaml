@@ -26,16 +26,8 @@ allowUnusedPatches: true
 # applied via pnpm patchedDependencies. Managed upstream by @octane-xplat/cli (`xplat
 # patches apply` refreshes, `xplat patches check` verifies); do not edit by hand.
 patchedDependencies:
-  # Published 0.10.2 ships async/generator non-component helper compilation and Descriptor
-  # lexical/ancestor ownership, so the helper hunks are removed and the old four-hunk
-  # instance ownership fix becomes one declaring-owner reader fallback per distribution.
-  # Retains renderer-owned Children.toArray/map with explicit universal-native re-exports
-  # for older runtimes, universal signal-read tracking and local hooks, root event-error
-  # forwarding, and the complete universal imperative-ref lifecycle. Connects universal
-  # signal-owner identities to the upstream enclosingOwner chain so child reads reuse
-  # instance declarations. Verified against the registry 0.10.2 tarball and the patched
-  # 0.6.3 output.
-  octane@0.10.2: patches/octane@0.10.2.patch
+  # Runtime compatibility fixes supplied by the pinned Octane Xplat release.
+  octane@0.11.0: node_modules/.pnpm-config/@octane-xplat/patches/patches/octane@0.11.0.patch
   # Published 9.1.3 ships the #11446 nested-tab-frame lifecycle fix and iOS explicit-size
   # flex alignment, so those hunks are removed. Retains the unshipped parent-padding
   # measure-spec fix and Android explicit-size flex alignment, iOS continuous corner
@@ -73,7 +65,7 @@ patchedDependencies:
   # listeners. Aligns intrinsic ref types with Octane callback cleanup and nested arrays
   # with optional entries. Advertises the implemented visibility capability so committed
   # suspense bodies can be retained while pending.
-  "@nativescript-community/octane@0.2.4": node_modules/.pnpm-config/@octane-xplat/patches/patches/@nativescript-community__octane@0.2.4.patch
+  "@nativescript-community/octane@0.2.5": node_modules/.pnpm-config/@octane-xplat/patches/patches/@nativescript-community__octane@0.2.5.patch
   # octaneServerStrategy's SCRIPT_FILE_RE only covers [jt]sx? — .tsrx edits never emit the
   # deferred ns:hmr-delta broadcast, so component HMR silently never reaches the device.
   # Also counts open /ns-hmr sockets so the update summary stops reporting recipients=0 for
@@ -117,10 +109,24 @@ patchedDependencies:
   nativescript@9.1.1: patches/nativescript@9.1.1.patch
   micromark-util-character@2.1.1: patches/micromark-util-character@2.1.1.patch
   mdast-util-gfm-autolink-literal@2.0.1: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
-  # Backport octane-xplat f318f8dfe: the tap-to-blur member must match the exposed
-  # Objective-C selector verbatim, or the first tap terminates the iOS app.
-  '@octane-xplat/ui@0.11.1': patches/@octane-xplat__ui@0.11.1.patch
+  # @nativescript/doctor's Android runtime check reads the app's raw devDependencies
+  # specifier and npm dist-tag resolves anything that isn't a semver range — a pnpm
+  # `catalog:` pin throws 'The determined Android runtime version ... is not valid' and
+  # kills `ns build android` before toolchain checks. Resolve catalog specifiers through the
+  # installed package's manifest, reusing the existing tgz-branch mechanism.
+  "@nativescript/doctor@2.0.18": node_modules/.pnpm-config/@octane-xplat/patches/patches/@nativescript__doctor@2.0.18.patch
+  # list/index.ios.js assigns `ObjCProtocols = [MasonListDelegate]` at module scope.
+  # MasonListDelegate is declared in Mason-Swift.h, which the app's metadata generation does
+  # not surface as a runtime global — importing masonkit on iOS throws `MasonListDelegate is
+  # not defined` during bundle eval and kills the app at boot. Guard the binding; actual
+  # List delegate conformance when the protocol is absent is a separate gap.
+  "@triniwiz/nativescript-masonkit@1.0.0-beta.110": node_modules/.pnpm-config/@octane-xplat/patches/patches/@triniwiz__nativescript-masonkit@1.0.0-beta.110.patch
 configDependencies:
-  "@octane-xplat/patches": 0.11.1
+  "@octane-xplat/patches": 0.16.1
 minimumReleaseAgeExclude:
-  - octane@0.10.2
+  - octane@0.11.0
+
+overrides:
+  "@nativescript/vite>esbuild": 0.27.7
+  "@nativescript-community/vite-octane>esbuild": 0.27.7
+  vite>esbuild: 0.27.7

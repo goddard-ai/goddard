@@ -1,5 +1,5 @@
 import { useRef } from 'octane';
-import { popRoute, pushRoute } from '@octane-xplat/ui';
+import { popRoute, pushRoute } from '@octane-xplat/ui/routing';
 
 import { QrScanner } from '../components/qr-scanner';
 import { showAlert } from '../lib/alert';

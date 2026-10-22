@@ -13,7 +13,8 @@ export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
         flex: '1 1',
         justifyContent: 'center',
         paddingBottom: 48,
-        paddingHorizontal: 34,
+        paddingLeft: 34,
+        paddingRight: 34,
         backgroundColor: theme.background,
       }}
     >
@@ -51,7 +52,8 @@ export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
           gap: 8,
           marginTop: 28,
           minHeight: 50,
-          paddingHorizontal: 22,
+          paddingLeft: 22,
+          paddingRight: 22,
           backgroundColor: theme.inverse,
         }}
       >

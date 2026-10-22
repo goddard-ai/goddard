@@ -1,12 +1,12 @@
 import type { ReactNode } from 'octane';
-import { ContextMenu, Pressable } from '@octane-xplat/ui';
+import { ContextMenu, Pressable, type StyleProp } from '@octane-xplat/ui';
 
 export interface TaskRowMenuProps {
   accessibilityLabel?: string;
   archived?: boolean;
   pinned?: boolean;
   selected?: boolean;
-  style?: unknown;
+  style?: StyleProp;
   onSelect: () => void;
   onRename: () => void;
   onDelete: () => void;
@@ -33,19 +33,21 @@ export function TaskRowMenu({
     <ContextMenu
       items={[
         ...(archived || !onTogglePin ? [] : [{
+          type: 'action' as const,
           key: 'pin',
           label: pinned ? 'Unpin task' : 'Pin task',
           icon: pinned ? 'pin.slash' : 'pin',
           onSelect: onTogglePin,
         }]),
         ...(!onToggleArchive ? [] : [{
+          type: 'action' as const,
           key: 'archive',
           label: archived ? 'Unarchive task' : 'Archive task',
           icon: archived ? 'arrow.up.bin' : 'archivebox',
           onSelect: onToggleArchive,
         }]),
-        { key: 'rename', label: 'Rename task', icon: 'pencil', onSelect: onRename },
-        { key: 'delete', label: 'Delete task', icon: 'trash', onSelect: onDelete },
+        { type: 'action' as const, key: 'rename', label: 'Rename task', icon: 'pencil', onSelect: onRename },
+        { type: 'action' as const, key: 'delete', label: 'Delete task', icon: 'trash', onSelect: onDelete },
       ]}>
       <Pressable
         accessibilityHint="Long press for actions"

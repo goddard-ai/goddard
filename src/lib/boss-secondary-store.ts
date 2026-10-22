@@ -1,5 +1,5 @@
 import type { BossBrowseRequest, BossSpeechRequest, BossTerminalIntent, WakuClient } from '@waku/client';
-import { createStore } from '@octane-xplat/ui';
+import { createStore } from '@octane-xplat/ui/data';
 import { storage } from '@octane-xplat/platform';
 import { browseDaemonDirectory } from './daemon-api';
 import { subscribeAppForeground } from './app-foreground';
@@ -42,12 +42,12 @@ let terminalIntents: string[] = [];
 const storageKey = (profileId: string) => `waku.mobile.boss-terminals.v1.${profileId}`;
 
 function saveTerminals() {
-  const state = bossSecondary.get();
+  const state = bossSecondary.getSnapshot();
   if (state.profileId) {storage.setString(storageKey(state.profileId), JSON.stringify(state.terminals));}
 }
 
 function updateTerminal(id: string, update: Partial<PinnedBossTerminal>) {
-  bossSecondary.set((state) => ({ ...state, terminals: state.terminals.map((item) => item.id === id ? { ...item, ...update } : item) }));
+  bossSecondary.update((state) => ({ ...state, terminals: state.terminals.map((item) => item.id === id ? { ...item, ...update } : item) }));
   saveTerminals();
 }
 
@@ -61,7 +61,7 @@ export function bindBossSecondary(next: WakuClient, profileId: string): () => vo
   terminalSubscriptions.clear();
   client = next;
   opening.clear();
-  if (bossSecondary.get().profileId !== profileId) {
+  if (bossSecondary.getSnapshot().profileId !== profileId) {
     let terminals: PinnedBossTerminal[] = [];
     try {
       const parsed: unknown = JSON.parse(storage.getString(storageKey(profileId)) ?? '[]');
@@ -80,17 +80,17 @@ export function bindBossSecondary(next: WakuClient, profileId: string): () => vo
 
     tails.clear();
     terminalListeners.clear();
-    bossSecondary.set((state) => ({ ...state, profileId, browse: [], speech: [], terminals, readySessionId: null, notice: null }));
+    bossSecondary.update((state) => ({ ...state, profileId, browse: [], speech: [], terminals, readySessionId: null, notice: null }));
   }
 
   subscriptions.push(next.subscribeBossBrowse((request) => {
     if (!safeBrowseRequest(request) || !requests.accept(profileId, `browse:${request.requestId}`)) {return;}
-    bossSecondary.set((state) => ({ ...state, browse: [...state.browse.slice(-31), request] }));
+    bossSecondary.update((state) => ({ ...state, browse: [...state.browse.slice(-31), request] }));
   }));
 
   subscriptions.push(next.subscribeBossSpeech((request) => {
     if (!requests.accept(profileId, `speech:${request.requestId}`)) {return;}
-    bossSecondary.set((state) => ({ ...state, speech: [...state.speech, request] }));
+    bossSecondary.update((state) => ({ ...state, speech: [...state.speech, request] }));
   }));
 
   subscriptions.push(next.subscribeConnectionState((phase) => {
@@ -102,7 +102,7 @@ export function bindBossSecondary(next: WakuClient, profileId: string): () => vo
     }
 
     if (phase === 'connected') {
-      for (const terminal of bossSecondary.get().terminals) {
+      for (const terminal of bossSecondary.getSnapshot().terminals) {
         if (!terminal.exited) {void openPinnedTerminal(terminal.id);}
       }
     }
@@ -115,30 +115,30 @@ export function bindBossSecondary(next: WakuClient, profileId: string): () => vo
     terminalSubscriptions.forEach((unsubscribe) => unsubscribe());
     terminalSubscriptions.clear();
     client = null;
-    bossSecondary.set((state) => ({ ...state, readySessionId: null, notice: null }));
+    bossSecondary.update((state) => ({ ...state, readySessionId: null, notice: null }));
   };
 }
 
 export function dismissSecondaryNotice() {
-  bossSecondary.set((state) => ({ ...state, notice: null }));
+  bossSecondary.update((state) => ({ ...state, notice: null }));
 }
 
 export function setBossChatReady(sessionId: string | null) {
-  if (bossSecondary.get().readySessionId === sessionId) {return;}
-  bossSecondary.set((state) => ({ ...state, readySessionId: sessionId }));
+  if (bossSecondary.getSnapshot().readySessionId === sessionId) {return;}
+  bossSecondary.update((state) => ({ ...state, readySessionId: sessionId }));
 }
 
 export function consumeBrowse(requestId: string) {
-  bossSecondary.set((state) => ({ ...state, browse: state.browse.filter((item) => item.requestId !== requestId) }));
+  bossSecondary.update((state) => ({ ...state, browse: state.browse.filter((item) => item.requestId !== requestId) }));
 }
 
 export function consumeSpeech(requestId: string, profileId: string) {
-  if (bossSecondary.get().profileId !== profileId) {return;}
-  bossSecondary.set((state) => ({ ...state, speech: state.speech.filter((item) => item.requestId !== requestId) }));
+  if (bossSecondary.getSnapshot().profileId !== profileId) {return;}
+  bossSecondary.update((state) => ({ ...state, speech: state.speech.filter((item) => item.requestId !== requestId) }));
 }
 
 export function pinBossTerminal(intent: BossTerminalIntent, sessionId: string, identity: string, fallback: string | null) {
-  const state = bossSecondary.get();
+  const state = bossSecondary.getSnapshot();
   if (!state.profileId || terminalIntents.includes(identity) || state.terminals.some((item) => item.intentIdentity === identity)
     || !requests.accept(state.profileId, `terminal:${identity}`)) {return;}
 
@@ -148,19 +148,19 @@ export function pinBossTerminal(intent: BossTerminalIntent, sessionId: string, i
     ...intent, id: randomUUID(), intentIdentity: identity, sessionId, commandSent: false, notice: null, error: null, exited: false,
   };
 
-  bossSecondary.set((current) => ({ ...current, terminals: [...current.terminals, record] }));
+  bossSecondary.update((current) => ({ ...current, terminals: [...current.terminals, record] }));
   saveTerminals();
   void openPinnedTerminal(record.id, fallback);
 }
 
 export async function openPinnedTerminal(id: string, fallback: string | null = null) {
-  const current = bossSecondary.get().terminals.find((item) => item.id === id);
+  const current = bossSecondary.getSnapshot().terminals.find((item) => item.id === id);
   const activeClient = client;
   const attempt = generation;
   if (!current || !activeClient || opening.has(id)) {return;}
   opening.add(id);
   const live = () => attempt === generation && client === activeClient
-    && bossSecondary.get().terminals.some((item) => item.id === id);
+    && bossSecondary.getSnapshot().terminals.some((item) => item.id === id);
 
   try {
     let cwd = current.cwd.trim();
@@ -171,7 +171,7 @@ export async function openPinnedTerminal(id: string, fallback: string | null = n
       if (!live()) {return;}
       const notice = `Directory ${current.cwd || '(empty)'} unavailable. Using ${cwd}.`;
       updateTerminal(id, { cwd, notice });
-      bossSecondary.set((state) => ({ ...state, notice }));
+      bossSecondary.update((state) => ({ ...state, notice }));
     }
 
     if (!live()) {return;}
@@ -246,7 +246,7 @@ export async function closePinnedTerminal(id: string) {
   }
 
   if (client !== activeClient) {return;}
-  bossSecondary.set((state) => ({ ...state, terminals: state.terminals.filter((item) => item.id !== id) }));
+  bossSecondary.update((state) => ({ ...state, terminals: state.terminals.filter((item) => item.id !== id) }));
   tails.delete(id);
   terminalSubscriptions.get(id)?.();
   terminalSubscriptions.delete(id);
@@ -254,4 +254,4 @@ export async function closePinnedTerminal(id: string) {
   saveTerminals();
 }
 
-subscribeAppForeground((foreground) => bossSecondary.set((state) => ({ ...state, foreground })));
+subscribeAppForeground((foreground) => bossSecondary.update((state) => ({ ...state, foreground })));

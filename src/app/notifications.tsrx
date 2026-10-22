@@ -1,13 +1,8 @@
 /** @jsxImportSource @nativescript-community/octane */
+import type { CSSProperties } from 'octane/jsx-runtime';
 import type { NotificationThread } from '@waku/client';
 import { useCallback, useMemo, useState } from 'octane';
-import {
-  Spinner,
-  Pressable,
-  ScrollableArea,
-  Text,
-  View,
-} from '@octane-xplat/ui';
+import { Spinner, Pressable, ScrollableArea, Text, View } from '@octane-xplat/ui';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { NativeTint } from '@/lib/theme-platform';
@@ -130,23 +125,23 @@ export default function NotificationsScreen() {
   return (
     <View style={{ flex: '1 1', backgroundColor: theme.background }}>
       <View style={{ height: headerInset }} />
-      <View style={[styles.controls, { borderBottomColor: theme.border }]}>
-        <View style={[styles.scopeToggle, { backgroundColor: theme.overlay }]}>
+      <View style={{ ...styles.controls, borderBottomColor: theme.border }}>
+        <View style={{ ...styles.scopeToggle, backgroundColor: theme.overlay }}>
           {([false, true] as const).map((all) => (
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ selected: showAll === all }}
               onPress={() => setShowAll(all)}
-              style={[
-                styles.scopeOption,
-                showAll === all && { backgroundColor: theme.surface },
-              ]}
+              style={{
+                ...styles.scopeOption,
+                ...(showAll === all && { backgroundColor: theme.surface }),
+              }}
             >
               <Text
-                style={[
-                  styles.scopeLabel,
-                  { color: showAll === all ? theme.text : theme.textTertiary },
-                ]}
+                style={{
+                  ...styles.scopeLabel,
+                  color: showAll === all ? theme.text : theme.textTertiary,
+                }}
               >
                 {all ? 'All' : 'Unread'}
               </Text>
@@ -160,9 +155,9 @@ export default function NotificationsScreen() {
           onPress={() =>
             runOp('all', () => markAllNotificationsRead(daemon.client!))
           }
-          style={[styles.textButton, { opacity: busy != null ? 0.5 : 1 }]}
+          style={{ ...styles.textButton, opacity: busy != null ? 0.5 : 1 }}
         >
-          <Text style={[styles.textButtonLabel, { color: NativeTint as string }]}>
+          <Text style={{ ...styles.textButtonLabel, color: NativeTint as string }}>
             Mark all read
           </Text>
         </Pressable>
@@ -209,17 +204,15 @@ export default function NotificationsScreen() {
           {sections.map((section) => (
             <View>
               <View
-                style={[
-                  styles.repoHeader,
-                  {
-                    backgroundColor: theme.background,
-                    borderBottomColor: theme.border,
-                  },
-                ]}
+                style={{
+                  ...styles.repoHeader,
+                  backgroundColor: theme.background,
+                  borderBottomColor: theme.border,
+                }}
               >
                 <Text
                   numberOfLines={1}
-                  style={[styles.repoTitle, { color: theme.textSecondary }]}
+                  style={{ ...styles.repoTitle, color: theme.textSecondary }}
                 >
                   {section.title}
                 </Text>
@@ -233,7 +226,7 @@ export default function NotificationsScreen() {
                   }
                   style={styles.textButton}
                 >
-                  <Text style={[styles.repoAction, { color: NativeTint as string }]}>
+                  <Text style={{ ...styles.repoAction, color: NativeTint as string }}>
                     Mark read
                   </Text>
                 </Pressable>
@@ -243,22 +236,22 @@ export default function NotificationsScreen() {
                   accessibilityHint="Opens the thread on GitHub"
                   accessibilityRole="button"
                   onPress={() => open(item)}
-                  style={[styles.row, { borderBottomColor: theme.border }]}
+                  style={{ ...styles.row, borderBottomColor: theme.border }}
                 >
                   <View
-                    style={[
-                      styles.unreadDot,
-                      { backgroundColor: item.unread ? theme.accent : 'transparent' },
-                    ]}
+                    style={{
+                      ...styles.unreadDot,
+                      backgroundColor: item.unread ? theme.accent : 'transparent',
+                    }}
                   />
                   <View style={styles.rowCopy}>
                     <Text
                       numberOfLines={2}
-                      style={[styles.rowTitle, { color: theme.text }]}
+                      style={{ ...styles.rowTitle, color: theme.text }}
                     >
                       {item.title}
                     </Text>
-                    <Text style={[styles.rowMeta, { color: theme.textTertiary }]}>
+                    <Text style={{ ...styles.rowMeta, color: theme.textTertiary }}>
                       {[
                         SUBJECT_LABELS[item.subjectType],
                         item.number != null ? `#${item.number}` : null,
@@ -325,8 +318,8 @@ function InboxMessage({ title, detail }: { title: string; detail: string }) {
   const theme = useTheme();
   return (
     <View style={styles.message}>
-      <Text style={[styles.messageTitle, { color: theme.text }]}>{title}</Text>
-      <Text style={[styles.messageDetail, { color: theme.textTertiary }]}>
+      <Text style={{ ...styles.messageTitle, color: theme.text }}>{title}</Text>
+      <Text style={{ ...styles.messageDetail, color: theme.textTertiary }}>
         {detail}
       </Text>
     </View>
@@ -342,7 +335,7 @@ const styles = {
     flexDirection: 'row',
     justifyContent: 'space-between',
     minHeight: 48,
-    paddingHorizontal: 14,
+    paddingLeft: 14, paddingRight: 14,
   },
   scopeToggle: {
     borderRadius: Radius.small,
@@ -353,10 +346,10 @@ const styles = {
     borderRadius: Radius.small - 2,
     minHeight: 28,
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingLeft: 12, paddingRight: 12,
   },
   scopeLabel: { fontSize: 13.5, fontWeight: '500' },
-  textButton: { justifyContent: 'center', minHeight: 36, paddingHorizontal: 4 },
+  textButton: { justifyContent: 'center', minHeight: 36, paddingLeft: 4, paddingRight: 4 },
   textButtonLabel: { fontSize: 14.5, fontWeight: '500' },
   list: { flex: '1 1' },
   repoHeader: {
@@ -364,8 +357,8 @@ const styles = {
     borderBottomWidth: hairline,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingLeft: 14, paddingRight: 14,
+    paddingTop: 7, paddingBottom: 7,
   },
   repoTitle: { flex: '1 1', fontSize: 12.5, fontWeight: '600', marginRight: 10 },
   repoAction: { fontSize: 13, fontWeight: '500' },
@@ -375,8 +368,8 @@ const styles = {
     flexDirection: 'row',
     gap: 10,
     minHeight: 54,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingLeft: 14, paddingRight: 14,
+    paddingTop: 9, paddingBottom: 9,
   },
   unreadDot: { borderRadius: 4, height: 8, width: 8 },
   rowCopy: { flex: '1 1', minWidth: 0 },
@@ -393,8 +386,8 @@ const styles = {
     flex: '1 1',
     gap: 8,
     justifyContent: 'center',
-    paddingHorizontal: 32,
+    paddingLeft: 32, paddingRight: 32,
   },
   messageTitle: { fontSize: 16, fontWeight: '600' },
   messageDetail: { fontSize: 13.5, textAlign: 'center' },
-};
+} satisfies Record<string, CSSProperties>;

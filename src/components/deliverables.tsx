@@ -12,17 +12,9 @@ import {
 } from '@waku/client/boss';
 
 import { memo, useCallback, useMemo, useState } from 'octane';
-import {
-  Spinner,
-  ContextMenu,
-  Image,
-  Pressable,
-  pushRoute,
-  Text,
-  useRoute,
-  useStore,
-  View,
-} from '@octane-xplat/ui';
+import { type MenuOption, Spinner, ContextMenu, Image, Pressable, Text, View } from '@octane-xplat/ui';
+import { pushRoute, useRoute } from '@octane-xplat/ui/routing';
+import { useStore } from '@octane-xplat/ui/data';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { MdBlockSettled, useMarkdownStyles } from '@/components/md-block-row';
@@ -63,7 +55,7 @@ import { parseBlocks } from '@/md/parse';
 /** Subscribed read of the armed deliverable — the boss chat's composer and
  * preview sheet both read it. */
 export function useDeliverableArm(): DeliverableArm | null {
-  return useStore(deliverableArm);
+  return useStore<DeliverableArm | null>(deliverableArm);
 }
 
 /** A deliverable row's tap: stamps the record viewed on the daemon, opens
@@ -130,12 +122,7 @@ export function useOpenDeliverable(
  * mutation is a boss operation on the owning daemon, returning through the
  * usual `taskStateChanged` refetch. */
 export function useDeliverableActions(deliverable: BossDeliverable): {
-  menuItems: Array<{
-    key: string;
-    label: string;
-    icon?: string;
-    onSelect: () => void;
-  }>;
+  menuItems: MenuOption[];
 } {
   const daemon = useDaemon();
 
@@ -186,32 +173,37 @@ export function useDeliverableActions(deliverable: BossDeliverable): {
       });
     };
 
-    const menuItems: Array<{ key: string; label: string; icon?: string; onSelect: () => void }> = [
+    const menuItems: MenuOption[] = [
       {
+        type: 'action' as const,
         key: 'pin',
         label: pinned ? 'Unpin' : 'Pin',
         icon: pinned ? 'pin.slash' : 'pin',
         onSelect: () => run('Couldn’t update pin', (client) => pinDeliverable(client, deliverable.id, !pinned)),
       },
       {
+        type: 'action' as const,
         key: 'sweep',
         label: dormant ? 'Restore' : 'Sweep',
         icon: dormant ? 'arrow.uturn.left' : 'tray.and.arrow.down',
         onSelect: () => run('Couldn’t update deliverable', (client) => sweepDeliverable(client, deliverable.id, !dormant)),
       },
       {
+        type: 'action' as const,
         key: 'archive',
         label: archived ? 'Unarchive' : 'Archive',
         icon: archived ? 'arrow.up.bin' : 'archivebox',
         onSelect: () => run('Couldn’t update archive', (client) => archiveDeliverable(client, deliverable.id, !archived)),
       },
       {
+        type: 'action' as const,
         key: 'share',
         label: 'Share',
         icon: 'square.and.arrow.up',
         onSelect: shareDeliverable,
       },
       {
+        type: 'action' as const,
         key: 'dismiss',
         label: 'Dismiss',
         icon: 'trash',
@@ -256,7 +248,7 @@ export const DeliverableRow = memo(function DeliverableRow({
   /** Library rows name their lifecycle state since no fold explains it. */
   statusTag?: string | null;
   onPress: () => void;
-  menuItems: Array<{ key: string; label: string; icon?: string; onSelect: () => void }>;
+  menuItems: MenuOption[];
 }) {
   const theme = useTheme();
   const unread = deliverableUnread(deliverable);
@@ -280,10 +272,13 @@ export const DeliverableRow = memo(function DeliverableRow({
         style={{
           borderRadius: Radius.medium,
           gap: 3,
-          marginHorizontal: 6,
+          marginLeft: 6,
+          marginRight: 6,
           minHeight: 46,
-          paddingHorizontal: 8,
-          paddingVertical: 7,
+          paddingLeft: 8,
+          paddingRight: 8,
+          paddingTop: 7,
+          paddingBottom: 7,
         }}
       >
         <View style={{ alignItems: 'center', flexDirection: 'row', gap: 6 }}>
@@ -373,7 +368,8 @@ export function DeliverablesSection({
           flexDirection: 'row',
           marginTop: 10,
           marginBottom: 4,
-          paddingHorizontal: 14,
+          paddingLeft: 14,
+          paddingRight: 14,
         }}
       >
         <Text
@@ -415,7 +411,14 @@ export function DeliverablesSection({
           accessibilityRole="button"
           className="vx-pressable"
           onPress={openLibrary}
-          style={{ marginHorizontal: 6, paddingHorizontal: 8, paddingVertical: 8 }}
+          style={{
+            marginLeft: 6,
+            marginRight: 6,
+            paddingLeft: 8,
+            paddingRight: 8,
+            paddingTop: 8,
+            paddingBottom: 8,
+          }}
         >
           <Text style={{ color: theme.textTertiary, fontSize: 13.5 }}>
             Nothing recent — browse the library
@@ -437,7 +440,7 @@ export function DeliverablesSection({
           accessibilityRole="button"
           className="vx-pressable"
           onPress={() => setShowMore(true)}
-          style={{ paddingHorizontal: 14, paddingVertical: 8 }}
+          style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8 }}
         >
           <Text style={{ color: theme.textSecondary, fontSize: 13.5, fontWeight: '500' }}>
             Show more ({hiddenCount} older)
@@ -449,7 +452,7 @@ export function DeliverablesSection({
           accessibilityRole="button"
           className="vx-pressable"
           onPress={() => setShowMore(false)}
-          style={{ paddingHorizontal: 14, paddingVertical: 8 }}
+          style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8 }}
         >
           <Text style={{ color: theme.textSecondary, fontSize: 13.5, fontWeight: '500' }}>
             Show less
@@ -463,7 +466,7 @@ export function DeliverablesSection({
             accessibilityRole="button"
             className="vx-pressable"
             onPress={() => setShowDormant((current) => !current)}
-            style={{ paddingHorizontal: 14, paddingVertical: 8 }}
+            style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8 }}
           >
             <Text style={{ color: theme.textSecondary, fontSize: 13.5, fontWeight: '500' }}>
               {showDormant
@@ -708,7 +711,7 @@ function DeliverablePreview({
 
 function PreviewLoading() {
   return (
-    <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+    <View style={{ alignItems: 'center', paddingTop: 24, paddingBottom: 24 }}>
       <Spinner busy />
     </View>
   );

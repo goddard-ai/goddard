@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'octane/jsx-runtime';
 import type { TranscriptBlock } from '@waku/client';
 import {
   bossSummonCard,
@@ -8,7 +9,8 @@ import {
 import { activitiesForBlock } from '@waku/client/event-reducer';
 import { activityHeaderTitle, atomVisibleText } from '@waku/client/transcript-presentation';
 import { memo, useEffect } from 'octane';
-import { Pressable, Text, pushRoute, View } from '@octane-xplat/ui';
+import { Pressable, Text, View } from '@octane-xplat/ui';
+import { pushRoute } from '@octane-xplat/ui/routing';
 
 import { useActivitySheet } from './activity-sheet';
 import { AppSymbol } from './app-symbol';
@@ -75,7 +77,7 @@ export const ActivityGroup = memo(function ActivityGroup({
             afterMessage: block.after_message,
           })}
           style={styles.header}>
-          <Text numberOfLines={1} style={[styles.title, { color: theme.textSecondary }]}>
+          <Text numberOfLines={1} style={{ ...styles.title, color: theme.textSecondary }}>
             {activityHeaderTitle(
               activities.filter((activity) => bossSummonSessionId(activity) == null),
               live,
@@ -175,25 +177,25 @@ function SummonCard({ card }: { card: BossSummonCard }) {
       accessibilityLabel={`${name}${jobTitle ? `, ${jobTitle}` : ''}, ${status.label}`}
       accessibilityRole="button"
       onPress={() => pushRoute({ stack: 'root', name: 'session/:id', params: { id: card.sessionId } })}
-      style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      style={{ ...styles.card, backgroundColor: theme.surface, borderColor: theme.border }}>
       <View style={styles.cardHeader}>
         <BossAvatar identity={identity} size={28} />
         <View style={styles.cardNames}>
-          <Text numberOfLines={1} style={[styles.cardName, { color: theme.text }]}>
+          <Text numberOfLines={1} style={{ ...styles.cardName, color: theme.text }}>
             {name}
           </Text>
           {jobTitle ? (
             <View style={styles.cardJob}>
               <AppSymbol name={{ ios: symbol, android: 'work', web: 'work' }} size={10} tintColor={theme.textTertiary} />
-              <Text numberOfLines={1} style={[styles.cardJobText, { color: theme.textTertiary }]}>
+              <Text numberOfLines={1} style={{ ...styles.cardJobText, color: theme.textTertiary }}>
                 {jobTitle}
               </Text>
             </View>
           ) : null}
         </View>
-        <Text style={[styles.cardStatus, { color: theme.textSecondary }]}>{status.label}</Text>
+        <Text style={{ ...styles.cardStatus, color: theme.textSecondary }}>{status.label}</Text>
       </View>
-      <Text numberOfLines={2} style={[styles.cardCommentary, { color: theme.textTertiary }]}>
+      <Text numberOfLines={2} style={{ ...styles.cardCommentary, color: theme.textTertiary }}>
         {commentary || '…'}
       </Text>
     </Pressable>
@@ -212,8 +214,8 @@ const styles = {
     borderRadius: Radius.medium,
     borderWidth: 0.5,
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingLeft: 10, paddingRight: 10,
+    paddingTop: 8, paddingBottom: 8,
   },
   cardHeader: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   cardNames: { flex: '1 1', minWidth: 0 },
@@ -222,4 +224,4 @@ const styles = {
   cardJobText: { flexShrink: 1, fontSize: 12, lineHeight: '15px' },
   cardStatus: { fontSize: 12, lineHeight: '15px' },
   cardCommentary: { fontSize: 12.5, lineHeight: '15px', paddingLeft: 36 },
-};
+} satisfies Record<string, CSSProperties>;

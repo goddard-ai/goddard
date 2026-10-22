@@ -4,7 +4,7 @@
  * (reference/mobile/src/components/transcript-list.tsx) ported to raw
  * NativeScript intrinsics.
  *
- *   RN ScrollView                     NativeScript <scrollview>
+ *   RN ScrollView                     NativeScript <transcriptscroll>
  *   onScroll                          scroll event ({ scrollY })
  *   scrollTo({ y, animated })         scrollToVerticalOffset
  *   onContentSizeChange               content column layoutChanged → getActualSize
@@ -29,15 +29,30 @@ import {
   useState,
 } from 'octane';
 
-import type {
-  EventData,
+import { registerElement } from '@nativescript-community/octane';
+import type { Attributes } from '@nativescript-community/octane/intrinsics';
+import {
   FlexboxLayout,
-  ScrollEventData,
   ScrollView as NativeScrollView,
   StackLayout,
-  TouchGestureEventData,
-  View as NativeView,
+  type EventData,
+  type ScrollEventData,
+  type TouchGestureEventData,
+  type View as NativeView,
 } from '@nativescript/core';
+
+// Preserve the native scroll and measurement engines behind app-owned tags.
+registerElement('transcriptscroll', NativeScrollView);
+registerElement('transcriptcolumn', StackLayout);
+registerElement('transcriptrow', FlexboxLayout);
+
+declare module '@nativescript-community/octane/intrinsics' {
+  interface NativeScriptElements {
+    transcriptscroll: Attributes<typeof NativeScrollView>;
+    transcriptcolumn: Attributes<typeof StackLayout>;
+    transcriptrow: Attributes<typeof FlexboxLayout>;
+  }
+}
 
 import { Absolute, Pressable, useAnimation, View } from '@octane-xplat/ui';
 
@@ -415,7 +430,7 @@ export function TranscriptScrollView({
 
   return (
     <View style={{ flex: '1 1' }}>
-      <scrollview
+      <transcriptscroll
         ref={scrollRef}
         flexGrow={1}
         iosContentInsetAdjustmentBehavior="never"
@@ -425,22 +440,22 @@ export function TranscriptScrollView({
         onScroll={onScroll}
         onTouch={onTouch}>
         {/* Content column: native top is the visual bottom. */}
-        <stacklayout
+        <transcriptcolumn
           style={{ paddingLeft: 16, paddingRight: 16, paddingTop: 12 }}
           onLayoutChanged={onContentLayout}>
           {/* Child 0, always mounted: the native anchor while pinned. */}
-          <flexboxlayout
+          <transcriptrow
             flexDirection="column"
             scaleY={-1}
             onLayoutChanged={(event: EventData) => {
               stripHeight.current = (event.object as NativeView).getActualSize().height;
             }}>
             {strip}
-          </flexboxlayout>
+          </transcriptrow>
           {rows.map((_, reversed) => {
             const row = rows[rows.length - 1 - reversed]!;
             return (
-              <flexboxlayout
+              <transcriptrow
                 key={row.key}
                 ref={(view: FlexboxLayout | null) => {
                   if (view) {rowViews.current.set(row.key, view);}
@@ -456,16 +471,16 @@ export function TranscriptScrollView({
                   tryReveal();
                 }}>
                 {renderRow(row, { keepRowTop })}
-              </flexboxlayout>
+              </transcriptrow>
             );
           })}
           {/* Last child: the visual top, just under the header strip the
            * frame inset leaves clear. */}
-          <flexboxlayout flexDirection="column" scaleY={-1} style={{ paddingTop: 2 }}>
+          <transcriptrow flexDirection="column" scaleY={-1} style={{ paddingTop: 2 }}>
             {hasEarlier && <EarlierIndicator />}
-          </flexboxlayout>
-        </stacklayout>
-      </scrollview>
+          </transcriptrow>
+        </transcriptcolumn>
+      </transcriptscroll>
       {jumpMounted && (
         <Absolute style={{ bottom: 12, right: 14 }}>
           <View ref={jumpOpacity.ref}>

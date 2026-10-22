@@ -3,12 +3,7 @@ import type { AgentSession, BossState, Project } from '@waku/client';
 import { markBossGoalsViewed } from '@waku/client/boss';
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'octane';
-import {
-  Spinner,
-  Pressable,
-  Text,
-  View,
-} from '@octane-xplat/ui';
+import { Spinner, Pressable, Text, View } from '@octane-xplat/ui';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { BossAvatar } from '@/components/boss-roster';
@@ -156,14 +151,26 @@ export function GoalsSheet({
     <Sheet onDismiss={onDismiss} title="Goals" visible={visible}>
       {!connected ? (
         <Text
-          style={{ color: theme.textTertiary, fontSize: 12, marginBottom: 6, paddingHorizontal: 8 }}
+          style={{
+            color: theme.textTertiary,
+            fontSize: 12,
+            marginBottom: 6,
+            paddingLeft: 8,
+            paddingRight: 8,
+          }}
         >
           Offline · last known state
         </Text>
       ) : null}
 
       {empty ? (
-        <View style={{ alignItems: 'center', paddingHorizontal: 24, paddingVertical: 28 }}>
+        <View style={{
+          alignItems: 'center',
+          paddingLeft: 24,
+          paddingRight: 24,
+          paddingTop: 28,
+          paddingBottom: 28,
+        }}>
           <Text style={{ color: theme.text, fontSize: 14, fontWeight: '600' }}>
             No goals yet
           </Text>
@@ -192,7 +199,7 @@ export function GoalsSheet({
               accessibilityRole="button"
               className="vx-pressable"
               onPress={() => setHistoryExpanded((current) => !current)}
-              style={{ paddingHorizontal: 26, paddingVertical: 8 }}
+              style={{ paddingLeft: 26, paddingRight: 26, paddingTop: 8, paddingBottom: 8 }}
             >
               <Text style={{ color: theme.textSecondary, fontSize: 13.5, fontWeight: '500' }}>
                 {historyExpanded ? 'Show less' : `Show more (${olderCount} older)`}
@@ -264,7 +271,8 @@ function GoalSectionHeader({
         gap: 6,
         marginTop: topGap ? 12 : 4,
         minHeight: 28,
-        paddingHorizontal: 8,
+        paddingLeft: 8,
+        paddingRight: 8,
       }}
     >
       <Text
@@ -359,7 +367,8 @@ function GoalPlanGroupView({
           flexDirection: 'row',
           gap: 6,
           minHeight: 28,
-          paddingHorizontal: 8,
+          paddingLeft: 8,
+          paddingRight: 8,
         }}
       >
         <AppSymbol
@@ -402,7 +411,8 @@ function GoalPlanGroupView({
                   flexDirection: 'row',
                   gap: 6,
                   minHeight: 26,
-                  paddingHorizontal: 8,
+                  paddingLeft: 8,
+                  paddingRight: 8,
                 }}
               >
                 <AppSymbol
@@ -469,10 +479,13 @@ const GoalRowView = memo(function GoalRowView({
       style={{
         borderRadius: Radius.medium,
         gap: 3,
-        marginHorizontal: 6,
+        marginLeft: 6,
+        marginRight: 6,
         minHeight: 46,
-        paddingHorizontal: 8,
-        paddingVertical: 7,
+        paddingLeft: 8,
+        paddingRight: 8,
+        paddingTop: 7,
+        paddingBottom: 7,
       }}
     >
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: 6 }}>

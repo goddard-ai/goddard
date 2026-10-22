@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'octane';
-import { Absolute, Pressable, ScrollableArea, BottomSheet, Text, View, pushRoute, useRoute, useStore, useSafeAreaInsets } from '@octane-xplat/ui';
+import { Absolute, Pressable, ScrollableArea, BottomSheet, Text, View, useSafeAreaInsets } from '@octane-xplat/ui';
+import { pushRoute, useRoute } from '@octane-xplat/ui/routing';
+import { useStore } from '@octane-xplat/ui/data';
 import { useDaemon } from '@/lib/daemon-hooks';
 import { useBossState, useSession } from '@/lib/daemon-queries';
 import { useTheme } from '@/lib/use-theme';
@@ -46,7 +48,7 @@ export function BossSecondaryHost() {
       recording.add(key);
       void runtime.recordBossSpeech(boss.sessionId, speech)
         .then(() => consumeSpeech(speech.requestId, profileId!))
-        .catch((cause) => {if (bossSecondary.get().profileId === profileId) {setError(`Couldn’t save spoken receipt: ${String(cause)}`);}})
+        .catch((cause) => {if (bossSecondary.getSnapshot().profileId === profileId) {setError(`Couldn’t save spoken receipt: ${String(cause)}`);}})
         .finally(() => recording.delete(key));
     }
   }, [current, boss?.sessionId, daemon.phase, profileId, state.speech]);
@@ -65,7 +67,7 @@ export function BossSecondaryHost() {
 
     if (state.readySessionId !== visibleSessionId || !browseReady(request, visibleSessionId, boss?.sessionId ?? null, state.foreground)) {return;}
     // Claim before opening: native retained pages can share the route store.
-    if (!bossSecondary.get().browse.some((item) => item.requestId === request.requestId)) {return;}
+    if (!bossSecondary.getSnapshot().browse.some((item) => item.requestId === request.requestId)) {return;}
     consumeBrowse(request.requestId);
     openUrl(request.url);
   }, [request, visibleSessionId, boss?.sessionId, state.foreground, state.readySessionId, daemon.phase, profileId]);

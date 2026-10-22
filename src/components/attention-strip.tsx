@@ -1,7 +1,8 @@
 import type { AgentSession, BossState } from '@waku/client';
 
 import { useCallback, useMemo, useState } from 'octane';
-import { Pressable, pushRoute, Text, useRoute, View } from '@octane-xplat/ui';
+import { Pressable, Text, View } from '@octane-xplat/ui';
+import { pushRoute, useRoute } from '@octane-xplat/ui/routing';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { useOpenDeliverable } from '@/components/deliverables';
@@ -143,7 +144,7 @@ export function AttentionJumpButton() {
         tintColor={theme.accent}
       />
       {remaining > 1 ? (
-        <Text style={{ color: theme.accent, fontSize: 12, fontVariant: ['tabular-nums'], fontWeight: '700' }}>
+        <Text style={{ color: theme.accent, fontSize: 12, fontVariant: 'tabular-nums', fontWeight: '700' }}>
           {remaining}
         </Text>
       ) : null}
@@ -210,7 +211,7 @@ export function BossAttentionStrip({
         borderRadius: Radius.large,
         borderWidth: 1,
         gap: 2,
-        paddingVertical: 6,
+        paddingTop: 6, paddingBottom: 6,
       }}
     >
       {items.map((item) => (
@@ -245,7 +246,8 @@ function AttentionItemRow({ item, onPress }: { item: AttentionItem; onPress: () 
         flexDirection: 'row',
         gap: 8,
         minHeight: 34,
-        paddingHorizontal: 12,
+        paddingLeft: 12,
+        paddingRight: 12,
       }}
     >
       <AppSymbol name={KIND_ICON[item.kind]} size={14} tintColor={tint} />

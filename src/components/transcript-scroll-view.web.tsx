@@ -19,13 +19,13 @@ export function TranscriptScrollView({
   const theme = useTheme();
   return (
     <ScrollableArea style={{ flex: '1 1' }}>
-      <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+      <View style={{ paddingLeft: 16, paddingRight: 16, paddingBottom: 12 }}>
         {hasEarlier && (
           <Pressable
             accessibilityLabel="Load earlier messages"
             accessibilityRole="button"
             onPress={onExtendTail}
-            style={{ alignItems: 'center', paddingVertical: 10 }}>
+            style={{ alignItems: 'center', paddingTop: 10, paddingBottom: 10 }}>
             <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textTertiary }}>
               Earlier messages…
             </Text>

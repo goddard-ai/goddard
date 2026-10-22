@@ -1,14 +1,7 @@
 import { Haptics } from '../lib/haptics';
 import { useEffect, useRef, useState } from 'octane';
-import {
-  Spinner,
-  HStack,
-  popRoute,
-  Pressable,
-  pushRoute,
-  Text,
-  VStack,
-} from '@octane-xplat/ui';
+import { Spinner, HStack, Pressable, Text, VStack } from '@octane-xplat/ui';
+import { popRoute, pushRoute } from '@octane-xplat/ui/routing';
 
 import { AppSymbol } from '../components/app-symbol';
 import { NativeTint } from '../lib/theme-platform';
@@ -94,7 +87,8 @@ export default function ConnectScreen(props: {
                 borderRadius: Radius.medium,
                 justifyContent: 'center',
                 minHeight: 44,
-                paddingHorizontal: 18,
+                paddingLeft: 18,
+                paddingRight: 18,
                 backgroundColor: String(NativeTint),
               }}
             >
@@ -109,7 +103,8 @@ export default function ConnectScreen(props: {
                 borderRadius: Radius.medium,
                 justifyContent: 'center',
                 minHeight: 44,
-                paddingHorizontal: 18,
+                paddingLeft: 18,
+                paddingRight: 18,
                 backgroundColor: theme.overlay,
               }}
             >

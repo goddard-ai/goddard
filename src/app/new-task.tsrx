@@ -8,15 +8,8 @@ import {
 } from '@waku/client/composer-preferences';
 
 import { useEffect, useMemo, useRef, useState } from 'octane';
-import {
-  Absolute,
-  Spinner,
-  Pressable,
-  pushRoute,
-  Text,
-  useSafeAreaInsets,
-  View,
-} from '@octane-xplat/ui';
+import { Absolute, Spinner, Pressable, Text, useSafeAreaInsets, View } from '@octane-xplat/ui';
+import { pushRoute } from '@octane-xplat/ui/routing';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { AttentionJumpButton } from '@/components/attention-strip';
@@ -422,7 +415,12 @@ export default function NewTaskScreen() {
         <AttentionJumpButton />
       </Absolute>
 
-      <View style={{ gap: 2, paddingBottom: 8, paddingHorizontal: Spacing.three }}>
+      <View style={{
+        gap: 2,
+        paddingBottom: 8,
+        paddingLeft: Spacing.three,
+        paddingRight: Spacing.three,
+      }}>
         <SelectorRow
           icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
           label="Daemon"
@@ -465,7 +463,7 @@ export default function NewTaskScreen() {
         )}
       </View>
 
-      <View style={[{ paddingHorizontal: 12 }, composerPadding]}>
+      <View style={{ paddingLeft: 12, paddingRight: 12, ...composerPadding }}>
         {error && (
           <View
             accessibilityLiveRegion="polite"
@@ -579,15 +577,31 @@ export default function NewTaskScreen() {
 
       <Sheet onDismiss={() => setOpenSheet(null)} title="Base branch" visible={openSheet === 'branch'}>
         {branches.isPending ? (
-          <View style={{ alignItems: 'center', paddingVertical: 14 }}>
+          <View style={{ alignItems: 'center', paddingTop: 14, paddingBottom: 14 }}>
             <Spinner busy />
           </View>
         ) : branches.error ? (
-          <Text style={{ fontSize: 14, lineHeight: '18px', paddingHorizontal: 12, paddingVertical: 10, color: theme.danger }}>
+          <Text style={{
+            fontSize: 14,
+            lineHeight: '18px',
+            paddingLeft: 12,
+            paddingRight: 12,
+            paddingTop: 10,
+            paddingBottom: 10,
+            color: theme.danger,
+          }}>
             {branches.error instanceof Error ? branches.error.message : String(branches.error)}
           </Text>
         ) : !branches.data ? (
-          <Text style={{ fontSize: 14, lineHeight: '18px', paddingHorizontal: 12, paddingVertical: 10, color: theme.textTertiary }}>
+          <Text style={{
+            fontSize: 14,
+            lineHeight: '18px',
+            paddingLeft: 12,
+            paddingRight: 12,
+            paddingTop: 10,
+            paddingBottom: 10,
+            color: theme.textTertiary,
+          }}>
             This project isn’t a Git repository.
           </Text>
         ) : (
@@ -639,7 +653,8 @@ function SelectorRow({
         flexDirection: 'row',
         gap: 14,
         minHeight: 52,
-        paddingHorizontal: 6,
+        paddingLeft: 6,
+        paddingRight: 6,
       }}>
       <AppSymbol name={icon} size={19} tintColor={theme.textSecondary} />
       {loading ? (

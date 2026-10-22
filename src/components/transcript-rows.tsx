@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'octane/jsx-runtime';
 const hairline = 0.5;
 
 import type {
@@ -22,7 +23,8 @@ import {
 
 import { atomSegments, atomVisibleText, formatMessageTime } from '@waku/client/transcript-presentation';
 import { memo, useEffect, useState } from 'octane';
-import { Spinner, Pressable, RichText, RichTextSpan, Text, pushRoute, View } from '@octane-xplat/ui';
+import { Spinner, Pressable, RichText, RichTextSpan, Text, View } from '@octane-xplat/ui';
+import { pushRoute } from '@octane-xplat/ui/routing';
 
 import { setStringAsync as copyToClipboard } from '@/lib/clipboard';
 import { Haptics } from '@/lib/haptics';
@@ -97,7 +99,11 @@ export const TranscriptRowView = memo(function TranscriptRowView({
     case 'system':
       return (
         <View style={styles.systemFrame}>
-          <Text style={[styles.systemMessage, { backgroundColor: theme.overlay, color: theme.textTertiary }]}>
+          <Text style={{
+            ...styles.systemMessage,
+            backgroundColor: theme.overlay,
+            color: theme.textTertiary,
+          }}>
             {atomVisibleText(row.message.display_content ?? row.message.content)}
           </Text>
         </View>
@@ -130,7 +136,7 @@ export const TranscriptRowView = memo(function TranscriptRowView({
           )}
           {row.footerTimestamp != null && (
             <View style={styles.messageFooterRow}>
-              <Text style={[styles.messageFooter, { color: theme.textGhost }]}>
+              <Text style={{ ...styles.messageFooter, color: theme.textGhost }}>
                 {formatMessageTime(row.footerTimestamp)}
               </Text>
               {forkTurnId && onForkTurn && (
@@ -208,8 +214,8 @@ function FoldRow({
       
             onPress={() => keepTop(() => onToggle(turnId))}
       style={styles.foldRow}>
-      <View style={[styles.foldLine, { backgroundColor: theme.border }]} />
-      <Text numberOfLines={1} style={[styles.foldLabel, { color: theme.textTertiary }]}>
+      <View style={{ ...styles.foldLine, backgroundColor: theme.border }} />
+      <Text numberOfLines={1} style={{ ...styles.foldLabel, color: theme.textTertiary }}>
         {label}
       </Text>
       <AppSymbol
@@ -219,7 +225,7 @@ function FoldRow({
         size={10}
         tintColor={theme.textGhost}
       />
-      <View style={[styles.foldLine, { backgroundColor: theme.border }]} />
+      <View style={{ ...styles.foldLine, backgroundColor: theme.border }} />
     </Pressable>
   );
 }
@@ -270,13 +276,13 @@ function BossTriggerEntry({
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
       onPress={() => openEmployee(trigger.employee)}
-      style={[styles.triggerEntry, { paddingLeft: indent }]}>
+      style={{ ...styles.triggerEntry, paddingLeft: indent }}>
       <AppSymbol
         name={triggerSymbol(trigger.kind)}
         size={12}
         tintColor={theme[TRIGGER_TONE_COLOR[bossTriggerTone(trigger.kind)] as keyof typeof theme] as string}
       />
-      <Text numberOfLines={1} style={[styles.triggerLabel, { color: theme.textSecondary }]}>
+      <Text numberOfLines={1} style={{ ...styles.triggerLabel, color: theme.textSecondary }}>
         {label}
       </Text>
       <AppSymbol
@@ -334,7 +340,7 @@ function BossTriggerRow({
           size={12}
           tintColor={theme[TRIGGER_TONE_COLOR[bossTriggerGroupTone(group.triggers)] as keyof typeof theme] as string}
         />
-        <Text numberOfLines={1} style={[styles.triggerLabel, { color: theme.textSecondary }]}>
+        <Text numberOfLines={1} style={{ ...styles.triggerLabel, color: theme.textSecondary }}>
           {bossTriggerBurstLabel(group.triggers)}
         </Text>
       </Pressable>
@@ -415,7 +421,11 @@ function LandedNoticeCard({
   const shown = showAll ? commits : commits.slice(0, LANDED_SHOWN_COMMITS);
   const unloaded = Math.max(0, ahead - commits.length);
   return (
-    <View style={[styles.noticeCard, { backgroundColor: theme.overlay, borderColor: theme.border }]}>
+    <View style={{
+      ...styles.noticeCard,
+      backgroundColor: theme.overlay,
+      borderColor: theme.border,
+    }}>
       <Pressable
         accessibilityHint={open ? 'Collapses the landed commits' : 'Shows the landed commits'}
         accessibilityLabel={`Landed on ${base}`}
@@ -427,7 +437,7 @@ function LandedNoticeCard({
           size={12}
           tintColor={theme.textTertiary}
         />
-        <Text numberOfLines={1} style={[styles.noticeTitle, { color: theme.textSecondary }]}>
+        <Text numberOfLines={1} style={{ ...styles.noticeTitle, color: theme.textSecondary }}>
           Landed on {base}
         </Text>
         <AppSymbol
@@ -439,13 +449,17 @@ function LandedNoticeCard({
         />
       </Pressable>
       {open ? (
-        <View style={[styles.noticeBody, { borderTopColor: theme.border }]}>
+        <View style={{ ...styles.noticeBody, borderTopColor: theme.border }}>
           {shown.map((commit) => (
             <View style={styles.noticeCommit}>
-              <Text style={[styles.noticeSha, { color: theme.textTertiary, fontFamily: MonoFont }]}>
+              <Text style={{
+                ...styles.noticeSha,
+                color: theme.textTertiary,
+                fontFamily: MonoFont,
+              }}>
                 {commit.short_sha}
               </Text>
-              <Text numberOfLines={1} style={[styles.noticeCommitSubject, { color: theme.textSecondary }]}>
+              <Text numberOfLines={1} style={{ ...styles.noticeCommitSubject, color: theme.textSecondary }}>
                 {commit.subject}
               </Text>
             </View>
@@ -461,7 +475,7 @@ function LandedNoticeCard({
             </Pressable>
           ) : null}
           {unloaded > 0 ? (
-            <Text style={[styles.noticeMore, { fontSize: 12.5, color: theme.textGhost }]}>
+            <Text style={{ ...styles.noticeMore, fontSize: 12.5, color: theme.textGhost }}>
               {unloaded} earlier commit{unloaded === 1 ? '' : 's'} not loaded
             </Text>
           ) : null}
@@ -485,7 +499,11 @@ function TransferNoticeCard({ message }: { message: Message }) {
     : notice.title.split('.').at(-1)?.toUpperCase() ?? 'File';
 
   return (
-    <View style={[styles.noticeCard, { backgroundColor: theme.overlay, borderColor: theme.border }]}>
+    <View style={{
+      ...styles.noticeCard,
+      backgroundColor: theme.overlay,
+      borderColor: theme.border,
+    }}>
       <View style={styles.noticeHeader}>
         <AppSymbol
           name={notice.isDir
@@ -495,7 +513,7 @@ function TransferNoticeCard({ message }: { message: Message }) {
           tintColor={theme.textTertiary}
         />
         <View style={{ flex: '1 1', minWidth: 0 }}>
-          <Text numberOfLines={1} style={[styles.noticeTitle, { color: theme.text }]}>
+          <Text numberOfLines={1} style={{ ...styles.noticeTitle, color: theme.text }}>
             {notice.title}
           </Text>
           <Text numberOfLines={1} style={{ fontSize: 12, color: theme.textTertiary }}>
@@ -504,7 +522,7 @@ function TransferNoticeCard({ message }: { message: Message }) {
         </View>
       </View>
       {notice.entries?.length ? (
-        <View style={[styles.noticeBody, { borderTopColor: theme.border }]}>
+        <View style={{ ...styles.noticeBody, borderTopColor: theme.border }}>
           {notice.entries.map((entry) => (
             <View style={styles.noticeCommit}>
               <AppSymbol
@@ -514,7 +532,7 @@ function TransferNoticeCard({ message }: { message: Message }) {
                 size={11}
                 tintColor={theme.textTertiary}
               />
-              <Text numberOfLines={1} style={[styles.noticeCommitSubject, { color: theme.textSecondary }]}>
+              <Text numberOfLines={1} style={{ ...styles.noticeCommitSubject, color: theme.textSecondary }}>
                 {entry.name}
               </Text>
               <Text style={{ fontSize: 11.5, color: theme.textGhost }}>
@@ -523,7 +541,7 @@ function TransferNoticeCard({ message }: { message: Message }) {
             </View>
           ))}
           {notice.entryCount > notice.entries.length ? (
-            <Text style={[styles.noticeMore, { fontSize: 12.5, color: theme.textGhost }]}>
+            <Text style={{ ...styles.noticeMore, fontSize: 12.5, color: theme.textGhost }}>
               +{notice.entryCount - notice.entries.length} more
             </Text>
           ) : null}
@@ -555,16 +573,16 @@ function NoticeRow({ message, provider }: { message: Message; provider: Provider
     return (
       <View style={styles.noticeStatusRow}>
         <StatusNoticeGlyph kind={status} provider={provider} size={12} />
-        <Text style={[styles.noticeStatusText, { color: theme.textTertiary }]}>{content}</Text>
+        <Text style={{ ...styles.noticeStatusText, color: theme.textTertiary }}>{content}</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.systemFrame}>
-      <View style={[styles.systemNotice, { backgroundColor: theme.overlay }]}>
+      <View style={{ ...styles.systemNotice, backgroundColor: theme.overlay }}>
         {status ? <StatusNoticeGlyph kind={status} provider={provider} size={11} /> : null}
-        <Text style={[styles.systemMessageText, { color: theme.textTertiary }]}>{content}</Text>
+        <Text style={{ ...styles.systemMessageText, color: theme.textTertiary }}>{content}</Text>
       </View>
     </View>
   );
@@ -596,10 +614,10 @@ function HistoryBoundaryRow({
         onPress={onLoad}
         style={styles.historyButton}>
         {loading ? <Spinner busy /> : null}
-        <Text style={[styles.historyLabel, { color: theme.textSecondary }]}>{label}</Text>
+        <Text style={{ ...styles.historyLabel, color: theme.textSecondary }}>{label}</Text>
       </Pressable>
       {error ? (
-        <Text style={[styles.historyError, { color: theme.textSecondary }]}>{error}</Text>
+        <Text style={{ ...styles.historyError, color: theme.textSecondary }}>{error}</Text>
       ) : null}
     </View>
   );
@@ -621,13 +639,13 @@ function UserBubbleInner({ message, onRewind }: { message: Message; onRewind?: (
   return (
     <View style={styles.userFrame}>
       {message.sent_by_task ? (
-        <View style={[styles.agentBadge, { backgroundColor: theme.overlay }]}>
+        <View style={{ ...styles.agentBadge, backgroundColor: theme.overlay }}>
           <AppSymbol
             name={{ ios: 'cpu', android: 'smart_toy', web: 'smart_toy' }}
             size={9}
             tintColor={theme.textTertiary}
           />
-          <Text style={[styles.agentBadgeText, { color: theme.textTertiary }]}>Sent by agent</Text>
+          <Text style={{ ...styles.agentBadgeText, color: theme.textTertiary }}>Sent by agent</Text>
         </View>
       ) : null}
       {message.attachments?.length ? (
@@ -643,15 +661,15 @@ function UserBubbleInner({ message, onRewind }: { message: Message; onRewind?: (
         <Pressable
           accessibilityHint="Long press to copy"
                    onLongPress={() => void copy()}
-          style={[styles.userBubble, { backgroundColor: theme.raised }]}>
+          style={{ ...styles.userBubble, backgroundColor: theme.raised }}>
           {hasAtoms ? (
-            <RichText style={[styles.userText, { color: theme.text }]}>
+            <RichText style={{ ...styles.userText, color: theme.text }}>
               {segments.map((segment) => segment.kind === 'text'
                 ? <RichTextSpan text={segment.text} />
                 : <AtomChip label={segment.label} sessionId={segment.sessionId} />)}
             </RichText>
           ) : (
-            <Text style={[styles.userText, { color: theme.text }]}>{content}</Text>
+            <Text style={{ ...styles.userText, color: theme.text }}>{content}</Text>
           )}
         </Pressable>
       ) : null}
@@ -709,7 +727,11 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
   const keepTop = useRowAnchor();
   const [open, setOpen] = useState(false);
   return (
-    <View style={[styles.changedCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <View style={{
+      ...styles.changedCard,
+      backgroundColor: theme.surface,
+      borderColor: theme.border,
+    }}>
       <Pressable
         accessibilityRole="button"
         
@@ -720,7 +742,7 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
           size={13}
           tintColor={theme.textSecondary}
         />
-        <Text style={[styles.changedTitle, { color: theme.textSecondary }]}>
+        <Text style={{ ...styles.changedTitle, color: theme.textSecondary }}>
           {checkpoint.files.length} file{checkpoint.files.length === 1 ? '' : 's'} changed
         </Text>
         <Text style={styles.changedStats}>
@@ -737,10 +759,10 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
         />
       </Pressable>
       {open && (
-        <View style={[styles.changedFiles, { borderTopColor: theme.border }]}>
+        <View style={{ ...styles.changedFiles, borderTopColor: theme.border }}>
           {checkpoint.files.map((file) => (
             <View style={styles.changedFileRow}>
-              <Text numberOfLines={1} style={[styles.changedFilePath, { color: theme.text }]}>
+              <Text numberOfLines={1} style={{ ...styles.changedFilePath, color: theme.text }}>
                 {file.path}
               </Text>
               <Text style={styles.changedStats}>
@@ -799,9 +821,9 @@ export function WorkingStrip({ session }: { session: AgentSession }) {
   return (
     <View accessibilityLiveRegion="polite" style={styles.workingStrip}>
       <GoddardThinking color={theme.textTertiary} />
-      <Text style={[styles.workingText, { color: theme.textTertiary }]}>{word}</Text>
+      <Text style={{ ...styles.workingText, color: theme.textTertiary }}>{word}</Text>
       {startedAt != null && session.status !== 'waiting' && (
-        <Text style={[styles.workingElapsed, { color: theme.textGhost }]}>
+        <Text style={{ ...styles.workingElapsed, color: theme.textGhost }}>
           {formatElapsed(elapsed)}
         </Text>
       )}
@@ -838,7 +860,7 @@ export function SessionEmpty({
     return (
       <View style={styles.empty}>
         <BossAvatar identity={boss} size={54} />
-        <Text style={[styles.emptyTitle, { color: theme.text, marginTop: 14 }]}>
+        <Text style={{ ...styles.emptyTitle, color: theme.text, marginTop: 14 }}>
           What should we do today?
         </Text>
       </View>
@@ -847,11 +869,11 @@ export function SessionEmpty({
 
   return (
     <View style={styles.empty}>
-      <Text style={[styles.emptyTitle, { color: theme.text }]}>
+      <Text style={{ ...styles.emptyTitle, color: theme.text }}>
         {missing ? 'Task not found' : error ? 'Couldn’t load this task' : 'No messages yet'}
       </Text>
       {Boolean(error) && (
-        <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>
+        <Text style={{ ...styles.emptyBody, color: theme.textSecondary }}>
           {error instanceof Error ? error.message : String(error)}
         </Text>
       )}
@@ -860,14 +882,14 @@ export function SessionEmpty({
 }
 
 const styles = {
-  earlier: { alignItems: 'center', paddingVertical: 10 },
+  earlier: { alignItems: 'center', paddingTop: 10, paddingBottom: 10 },
   userFrame: { alignItems: 'flex-end', gap: 6 },
   userBubble: {
     borderRadius: Radius.large,
     borderBottomRightRadius: 6,
     maxWidth: '88%',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingLeft: 16, paddingRight: 16,
+    paddingTop: 10, paddingBottom: 10,
   },
   userText: { fontSize: 15, lineHeight: '21px' },
   agentBadge: {
@@ -875,8 +897,8 @@ const styles = {
     borderRadius: Radius.pill,
     flexDirection: 'row',
     gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingLeft: 8, paddingRight: 8,
+    paddingTop: 2, paddingBottom: 2,
   },
   agentBadgeText: { fontSize: 11.5, lineHeight: '14px' },
   messageFooter: { fontSize: 11.5 },
@@ -889,8 +911,8 @@ const styles = {
     borderRadius: Radius.pill,
     flexDirection: 'row',
     gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingLeft: 10, paddingRight: 10,
+    paddingTop: 4, paddingBottom: 4,
   },
   systemMessageText: { fontSize: 12.5, lineHeight: '16px' },
   triggerEntry: {
@@ -898,7 +920,7 @@ const styles = {
     flexDirection: 'row',
     gap: 8,
     minHeight: 28,
-    paddingHorizontal: 4,
+    paddingLeft: 4, paddingRight: 4,
   },
   triggerEntries: { marginTop: 4 },
   triggerLabel: { flex: '1 1', fontSize: 12.5, lineHeight: '18px' },
@@ -912,29 +934,29 @@ const styles = {
     flexDirection: 'row',
     gap: 8,
     minHeight: 34,
-    paddingHorizontal: 12,
+    paddingLeft: 12, paddingRight: 12,
   },
   noticeTitle: { flex: '1 1', fontSize: 12.5, fontWeight: '600' },
   noticeBody: {
     borderTopWidth: hairline,
     gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingLeft: 12, paddingRight: 12,
+    paddingTop: 8, paddingBottom: 8,
   },
   noticeCommit: { alignItems: 'center', flexDirection: 'row', gap: 8, minHeight: 22 },
   noticeSha: { fontSize: 12 },
   noticeCommitSubject: { flex: '1 1', fontSize: 12.5 },
-  noticeMore: { paddingVertical: 4 },
-  noticeStatusRow: { alignItems: 'center', flexDirection: 'row', gap: 6, paddingVertical: 4 },
+  noticeMore: { paddingTop: 4, paddingBottom: 4 },
+  noticeStatusRow: { alignItems: 'center', flexDirection: 'row', gap: 6, paddingTop: 4, paddingBottom: 4 },
   noticeStatusText: { flex: '1 1', fontSize: 12.5, lineHeight: '16px' },
-  historyBoundary: { alignItems: 'center', gap: 4, paddingVertical: 12 },
+  historyBoundary: { alignItems: 'center', gap: 4, paddingTop: 12, paddingBottom: 12 },
   historyButton: {
     alignItems: 'center',
     borderRadius: Radius.small,
     flexDirection: 'row',
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingLeft: 12, paddingRight: 12,
+    paddingTop: 6, paddingBottom: 6,
   },
   historyLabel: { fontSize: 12.5 },
   historyError: { fontSize: 12 },
@@ -943,8 +965,8 @@ const styles = {
     fontSize: 12.5,
     lineHeight: '16px',
     overflow: 'hidden',
-    paddingHorizontal: 11,
-    paddingVertical: 5,
+    paddingLeft: 11, paddingRight: 11,
+    paddingTop: 5, paddingBottom: 5,
     textAlign: 'center',
   },
   attachments: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, maxWidth: '88%' },
@@ -966,15 +988,15 @@ const styles = {
     flexDirection: 'row',
     gap: 8,
     minHeight: 40,
-    paddingHorizontal: 11,
+    paddingLeft: 11, paddingRight: 11,
   },
   changedTitle: { flex: '1 1', fontSize: 13.5, fontWeight: '600' },
-  changedStats: { fontSize: 12.5, fontVariant: ['tabular-nums'], fontWeight: '600' },
+  changedStats: { fontSize: 12.5, fontVariant: 'tabular-nums', fontWeight: '600' },
   changedFiles: {
     borderTopWidth: hairline,
     gap: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 9,
+    paddingLeft: 11, paddingRight: 11,
+    paddingTop: 9, paddingBottom: 9,
   },
   changedFileRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   changedFilePath: { flex: '1 1', fontFamily: MonoFont, fontSize: 12 },
@@ -986,8 +1008,8 @@ const styles = {
     paddingTop: 14,
   },
   workingText: { fontSize: 13.5, fontWeight: '500' },
-  workingElapsed: { fontSize: 13, fontVariant: ['tabular-nums'] },
-  empty: { alignItems: 'center', paddingHorizontal: 32 },
+  workingElapsed: { fontSize: 13, fontVariant: 'tabular-nums' },
+  empty: { alignItems: 'center', paddingLeft: 32, paddingRight: 32 },
   emptyTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center' },
   emptyBody: { fontSize: 14.5, lineHeight: '19px', marginTop: 8, textAlign: 'center' },
-};
+} satisfies Record<string, CSSProperties>;

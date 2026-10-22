@@ -27,7 +27,7 @@ import { writeProviderProbeCache } from '@waku/client/provider-probe-cache';
 import { randomUUID } from './uuid';
 import { spokenBlock } from './boss-secondary';
 import { pinBossTerminal } from './boss-secondary-store';
-import { createStore } from '@octane-xplat/ui';
+import { createStore } from '@octane-xplat/ui/data';
 import { daemonState } from './daemon-store';
 import {
   daemonQueryEntry,
@@ -185,7 +185,7 @@ const queryClient = {
 
 /** Fresh-enough daemon snapshot — updated synchronously on every store
  * write, which is the same render-time recency the context gave callers. */
-let daemon = daemonState.get();
+let daemon = daemonState.getSnapshot();
 
 const clock = {
   nowSeconds: () => Math.floor(Date.now() / 1_000),
@@ -211,7 +211,7 @@ export const runtimeState = createStore<RuntimeState>({
 
 type SliceUpdater<T> = T | ((current: T) => T);
 function setSlice<K extends keyof RuntimeState>(key: K, update: SliceUpdater<RuntimeState[K]>) {
-  runtimeState.set((current) => ({
+  runtimeState.update((current) => ({
     ...current,
     [key]: typeof update === 'function' ? (update as (c: RuntimeState[K]) => RuntimeState[K])(current[key]) : update,
   }));
@@ -1374,7 +1374,7 @@ sendPromptRef.current = sendPrompt;
 
 function hasRecoveredDisconnectError(): boolean {
   return daemon.phase === 'connected'
-    && Object.values(runtimeState.get().errors).some(isDaemonDisconnectError);
+    && Object.values(runtimeState.getSnapshot().errors).some(isDaemonDisconnectError);
 }
 
 let lastDaemonKey: string | null = null;
@@ -1458,7 +1458,7 @@ function onDaemonSnapshot() {
 }
 
 daemonState.subscribe(() => {
-  daemon = daemonState.get();
+  daemon = daemonState.getSnapshot();
   onDaemonSnapshot();
 });
 

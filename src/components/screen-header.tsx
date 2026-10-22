@@ -1,4 +1,5 @@
-import { canGoBack, popRoute, pushRoute, useSafeAreaInsets, View } from '@octane-xplat/ui';
+import { canGoBack, popRoute, pushRoute } from '@octane-xplat/ui/routing';
+import { useSafeAreaInsets, View } from '@octane-xplat/ui';
 
 import { useTheme } from '@/lib/use-theme';
 

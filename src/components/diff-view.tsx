@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'octane/jsx-runtime';
 import { useMemo } from 'octane';
 import { ScrollableArea, Text, View } from '@octane-xplat/ui';
 
@@ -35,10 +36,11 @@ export function DiffView({
         ))}
         {truncated ? (
           <Text
-            style={[
-              styles.reviewTruncated,
-              { color: theme.textTertiary, borderColor: theme.border },
-            ]}
+            style={{
+              ...styles.reviewTruncated,
+              color: theme.textTertiary,
+              borderColor: theme.border,
+            }}
           >
             … diff truncated
           </Text>
@@ -48,14 +50,14 @@ export function DiffView({
   }
 
   return (
-    <View style={[styles.well, { backgroundColor: theme.inset, borderColor: theme.border }]}>
+    <View style={{ ...styles.well, backgroundColor: theme.inset, borderColor: theme.border }}>
       <ScrollableArea axis="inline">
         <View style={styles.lines}>
           {lines.map((line) => (
             <DiffRow line={line} />
           ))}
           {truncated && (
-            <Text style={[styles.truncated, { color: theme.textTertiary }]}>
+            <Text style={{ ...styles.truncated, color: theme.textTertiary }}>
               … diff truncated
             </Text>
           )}
@@ -74,15 +76,16 @@ function ReviewDiffRow({ line }: { line: DiffLine }) {
         : line.text;
 
     return (
-      <View style={[styles.reviewRow, { backgroundColor: theme.overlay }]}>
+      <View style={{ ...styles.reviewRow, backgroundColor: theme.overlay }}>
         <View
-          style={[
-            styles.reviewGutter,
-            { borderColor: theme.border, backgroundColor: theme.overlay },
-          ]}
+          style={{
+            ...styles.reviewGutter,
+            borderColor: theme.border,
+            backgroundColor: theme.overlay,
+          }}
         />
         <Text
-                  style={[styles.reviewMeta, { color: theme.textTertiary }]}
+                  style={{ ...styles.reviewMeta, color: theme.textTertiary }}
         >
           {label}
         </Text>
@@ -102,34 +105,30 @@ function ReviewDiffRow({ line }: { line: DiffLine }) {
   const shownLine = line.newLine ?? line.oldLine;
   return (
     <View
-      style={[
-        styles.reviewRow,
-        {
-          backgroundColor: background,
-          borderLeftColor: changed ? semanticColor : 'transparent',
-        },
-      ]}
+      style={{
+        ...styles.reviewRow,
+        backgroundColor: background,
+        borderLeftColor: changed ? semanticColor : 'transparent',
+      }}
     >
       <View
-        style={[
-          styles.reviewGutter,
-          {
-            backgroundColor: changed ? background : 'transparent',
-            borderColor: theme.border,
-          },
-        ]}
+        style={{
+          ...styles.reviewGutter,
+          backgroundColor: changed ? background : 'transparent',
+          borderColor: theme.border,
+        }}
       >
         <Text
-          style={[
-            styles.reviewLineNumber,
-            { color: changed ? semanticColor : theme.textTertiary },
-          ]}
+          style={{
+            ...styles.reviewLineNumber,
+            color: changed ? semanticColor : theme.textTertiary,
+          }}
         >
           {shownLine ?? ''}
         </Text>
       </View>
       <Text
-              style={[styles.reviewCode, { color: theme.textSecondary }]}
+              style={{ ...styles.reviewCode, color: theme.textSecondary }}
       >
         {line.text || ' '}
       </Text>
@@ -141,7 +140,7 @@ function DiffRow({ line }: { line: DiffLine }) {
   const theme = useTheme();
   if (line.kind === 'hunk') {
     return (
-      <Text style={[styles.line, styles.hunk, { color: theme.textTertiary }]}>{line.text}</Text>
+      <Text style={{ ...styles.line, ...styles.hunk, color: theme.textTertiary }}>{line.text}</Text>
     );
   }
 
@@ -159,9 +158,9 @@ function DiffRow({ line }: { line: DiffLine }) {
 
   const marker = line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' ';
   return (
-    <View style={[styles.row, { backgroundColor: background }]}>
-      <Text style={[styles.marker, { color }]}>{marker}</Text>
-      <Text style={[styles.line, { color }]}>{line.text || ' '}</Text>
+    <View style={{ ...styles.row, backgroundColor: background }}>
+      <Text style={{ ...styles.marker, color }}>{marker}</Text>
+      <Text style={{ ...styles.line, color }}>{line.text || ' '}</Text>
     </View>
   );
 }
@@ -173,13 +172,13 @@ const styles = {
     borderRadius: Radius.small,
     borderWidth: hairline,
     overflow: 'hidden',
-    paddingVertical: 6,
+    paddingTop: 6, paddingBottom: 6,
   },
-  lines: { minWidth: '100%', paddingHorizontal: 8 },
+  lines: { minWidth: '100%', paddingLeft: 8, paddingRight: 8 },
   row: { borderRadius: 3, flexDirection: 'row', paddingRight: 10 },
   marker: { fontFamily: MonoFont, fontSize: 12, lineHeight: '16.5px', width: 12 },
   line: { fontFamily: MonoFont, fontSize: 12, lineHeight: '16.5px' },
-  hunk: { fontFamily: MonoFont, fontSize: 11.5, lineHeight: '18px', marginVertical: 2 },
+  hunk: { fontFamily: MonoFont, fontSize: 11.5, lineHeight: '18px', marginTop: 2, marginBottom: 2 },
   truncated: { fontSize: 11.5, marginTop: 4 },
   reviewLines: { minWidth: '100%', overflow: 'hidden' },
   reviewRow: {
@@ -206,21 +205,21 @@ const styles = {
     fontFamily: MonoFont,
     fontSize: 12,
     lineHeight: '17px',
-    paddingHorizontal: 10,
-    paddingVertical: 2,
+    paddingLeft: 10, paddingRight: 10,
+    paddingTop: 2, paddingBottom: 2,
   },
   reviewMeta: {
     flex: '1 1',
     fontFamily: MonoFont,
     fontSize: 11.5,
     lineHeight: '17px',
-    paddingHorizontal: 10,
-    paddingVertical: 2,
+    paddingLeft: 10, paddingRight: 10,
+    paddingTop: 2, paddingBottom: 2,
   },
   reviewTruncated: {
     borderTopWidth: hairline,
     fontSize: 11.5,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingLeft: 12, paddingRight: 12,
+    paddingTop: 8, paddingBottom: 8,
   },
-};
+} satisfies Record<string, CSSProperties>;

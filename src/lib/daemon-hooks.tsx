@@ -1,4 +1,4 @@
-import { useStore } from '@octane-xplat/ui';
+import { useStore } from '@octane-xplat/ui/data';
 import { useEffect, useState } from 'octane';
 
 import { daemonState, bootstrapDaemon, reconnect, saveProfile, selectProfile, removeProfile, disconnect } from './daemon-store';
@@ -56,7 +56,7 @@ export function useDaemonQuery<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, keyId]);
 
-  const snapshot = entry.get();
+  const snapshot = entry.getSnapshot();
   return {
     data: snapshot.data,
     error: snapshot.error,

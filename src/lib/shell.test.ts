@@ -24,7 +24,7 @@ test('reconnecting a host keeps cached data and replaces the closed client fetch
   const entry = daemonQueryEntry(key, async () => 'cached');
   await entry.refetch();
   const reconnected = daemonQueryEntry(key, async () => 'fresh');
-  expect(reconnected.get().data).toBe('cached');
+  expect(reconnected.getSnapshot().data).toBe('cached');
   expect(await reconnected.refetch()).toBe('fresh');
   removeDaemonQueries('shell-test');
 });

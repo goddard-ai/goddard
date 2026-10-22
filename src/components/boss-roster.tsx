@@ -11,12 +11,7 @@ import type {
 import { bossEmployeeLifecycle, openBossSession } from '@waku/client/boss';
 
 import { memo, useCallback, useMemo, useState } from 'octane';
-import {
-  Spinner,
-  Pressable,
-  Text,
-  View,
-} from '@octane-xplat/ui';
+import { Spinner, Pressable, Text, View } from '@octane-xplat/ui';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { Sheet } from '@/components/sheet';
@@ -60,11 +55,11 @@ export function BossAvatar({
   const theme = useTheme();
   return (
     <View
+      className="vx-avatar"
       style={{
         alignItems: 'center',
         backgroundColor: theme.accentSoft,
         borderRadius: Math.min(7, size / 3.4),
-        cornerShape: 'squircle',
         height: size,
         justifyContent: 'center',
         width: size,
@@ -210,7 +205,8 @@ export function BossSection({
           fontWeight: '600',
           marginBottom: 4,
           marginTop: 10,
-          paddingHorizontal: 14,
+          paddingLeft: 14,
+          paddingRight: 14,
           textTransform: 'uppercase',
         }}
       >
@@ -231,9 +227,11 @@ export function BossSection({
             flex: '1 1',
             flexDirection: 'row',
             gap: 9,
-            marginHorizontal: 6,
+            marginLeft: 6,
+            marginRight: 6,
             minHeight: 46,
-            paddingHorizontal: 8,
+            paddingLeft: 8,
+            paddingRight: 8,
             backgroundColor: selectedSessionId === state.sessionId ? theme.overlay : 'transparent',
           }}
         >
@@ -264,7 +262,12 @@ export function BossSection({
           accessibilityRole="button"
           hitSlop={6}
           onPress={() => setCapacityOpen(true)}
-          style={{ alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 }}
+          style={{
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingLeft: 8,
+            paddingRight: 8,
+          }}
         >
           <AppSymbol
             name={{ ios: 'gauge', android: 'speed', web: 'gauge' }}
@@ -311,7 +314,7 @@ export function BossSection({
           accessibilityRole="button"
           className="vx-pressable"
           onPress={() => setShowFinished((current) => !current)}
-          style={{ paddingHorizontal: 14, paddingVertical: 8 }}
+          style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8 }}
         >
           <Text style={{ color: theme.textSecondary, fontSize: 13.5, fontWeight: '500' }}>
             {showFinished ? 'Show less' : `Show more (${roster.finished.length} older)`}
@@ -383,9 +386,10 @@ function PlanRow({
         borderRadius: Radius.medium,
         flexDirection: 'row',
         gap: 9,
-        marginHorizontal: 6,
+        marginLeft: 6,
+        marginRight: 6,
         minHeight: 40,
-        paddingHorizontal: 8,
+        paddingRight: 8,
         paddingLeft: 34,
         backgroundColor: selected ? theme.overlay : 'transparent',
       }}
@@ -460,9 +464,10 @@ const EmployeeRow = memo(function EmployeeRow({
         borderRadius: Radius.medium,
         flexDirection: 'row',
         gap: 9,
-        marginHorizontal: 6,
+        marginLeft: 6,
+        marginRight: 6,
         minHeight: 46,
-        paddingHorizontal: 8,
+        paddingRight: 8,
         paddingLeft: 34,
         backgroundColor: selected ? theme.overlay : 'transparent',
         opacity: expired ? 0.6 : 1,
@@ -545,7 +550,7 @@ export function BossCapacitySheet({
         Model slots
       </Text>
       {capacity.length === 0 ? (
-        <Text style={{ color: theme.textTertiary, fontSize: 14, paddingVertical: 8 }}>
+        <Text style={{ color: theme.textTertiary, fontSize: 14, paddingTop: 8, paddingBottom: 8 }}>
           No model limits set — every live employee runs uncapped.
         </Text>
       ) : (
@@ -557,7 +562,7 @@ export function BossCapacitySheet({
               borderBottomWidth: 1,
               flexDirection: 'row',
               justifyContent: 'space-between',
-              paddingVertical: 9,
+              paddingTop: 9, paddingBottom: 9,
             }}
           >
             <View style={{ flex: '1 1', minWidth: 0 }}>
@@ -568,7 +573,7 @@ export function BossCapacitySheet({
                 {entry.provider}
               </Text>
             </View>
-            <Text style={{ color: theme.textSecondary, fontSize: 14, fontVariant: ['tabular-nums'] }}>
+            <Text style={{ color: theme.textSecondary, fontSize: 14, fontVariant: 'tabular-nums' }}>
               {entry.liveLimit < 0 ? `${entry.used} in use` : `${entry.used}/${entry.liveLimit}`}
             </Text>
           </View>
@@ -597,7 +602,7 @@ export function BossCapacitySheet({
           ) : null}
         </View>
       ) : (
-        <Text style={{ color: theme.textTertiary, fontSize: 14, paddingVertical: 8 }}>
+        <Text style={{ color: theme.textTertiary, fontSize: 14, paddingTop: 8, paddingBottom: 8 }}>
           {resources.error instanceof Error ? resources.error.message : 'Host resource status unavailable.'}
         </Text>
       )}
@@ -615,11 +620,11 @@ function CapacityLine({ label, used, limit }: { label: string; used: number; lim
         borderBottomWidth: 1,
         flexDirection: 'row',
         justifyContent: 'space-between',
-        paddingVertical: 9,
+        paddingTop: 9, paddingBottom: 9,
       }}
     >
       <Text style={{ color: theme.text, fontSize: 15 }}>{label}</Text>
-      <Text style={{ color: theme.textSecondary, fontSize: 14, fontVariant: ['tabular-nums'] }}>
+      <Text style={{ color: theme.textSecondary, fontSize: 14, fontVariant: 'tabular-nums' }}>
         {used}/{limit}
       </Text>
     </View>
@@ -647,7 +652,7 @@ export function BossAssignmentSheet({
   return (
     <Sheet onDismiss={onDismiss} title="Assignment" visible={visible}>
       {rows.map((row) => (
-        <View style={{ paddingBottom: 10, paddingHorizontal: 4 }}>
+        <View style={{ paddingBottom: 10, paddingLeft: 4, paddingRight: 4 }}>
           <Text style={{ color: theme.textTertiary, fontSize: 12 }}>{row.label}</Text>
           <Text style={{ color: theme.textSecondary, fontSize: 14, marginTop: 2 }}>{row.value}</Text>
         </View>

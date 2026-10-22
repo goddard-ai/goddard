@@ -8,6 +8,7 @@ export function DaemonAvatar({ name, size = 42 }: { name: string; size?: number 
   const theme = useTheme();
   return (
     <View
+      className="vx-avatar"
       style={{
         width: size,
         height: size,
@@ -15,7 +16,6 @@ export function DaemonAvatar({ name, size = 42 }: { name: string; size?: number 
         backgroundColor: theme.accentSoft,
         alignItems: 'center',
         justifyContent: 'center',
-        cornerShape: 'squircle',
       }}
     >
       <Text

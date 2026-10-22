@@ -1,6 +1,6 @@
 import { WakuClient } from '@waku/client';
 import { bindBossSecondary } from './boss-secondary-store';
-import { createStore } from '@octane-xplat/ui';
+import { createStore } from '@octane-xplat/ui/data';
 import { subscribeAppForeground } from './app-foreground';
 
 import { daemonKeys, normalizeDaemonSettings } from './daemon-api';
@@ -85,12 +85,12 @@ let unsubscribeBossSecondary: (() => void) | null = null;
 let bootstrapped = false;
 
 function setStatus(status: { phase: ConnectionPhase; error: string | null; outage: DaemonOutage | null; connections: number }) {
-  daemonState.set((prev) => ({ ...prev, ...status }));
+  daemonState.update((prev) => ({ ...prev, ...status }));
 }
 
 async function commitProfiles(next: DaemonProfile[]) {
   profilesRef = next;
-  daemonState.set((prev) => ({
+  daemonState.update((prev) => ({
     ...prev,
     profiles: next,
     activeProfile: next.find((item) => item.id === activeProfileIdRef) ?? null,
@@ -110,7 +110,7 @@ function closeCurrentLink(updateState = true) {
   unsubscribeBossSecondary = null;
   const current = linkRef;
   linkRef = null;
-  if (updateState) {daemonState.set((prev) => ({ ...prev, client: null }));}
+  if (updateState) {daemonState.update((prev) => ({ ...prev, client: null }));}
   current?.close();
 }
 
@@ -122,7 +122,7 @@ function noteConnected(profileId: string, connections: number) {
   );
 
   profilesRef = updated;
-  daemonState.set((prev) => ({ ...prev, profiles: updated }));
+  daemonState.update((prev) => ({ ...prev, profiles: updated }));
   void writeDaemonProfiles(updated).catch(() => {
     // A recency metadata write must not turn a live connection into an error state.
   });
@@ -142,7 +142,7 @@ async function activate(profileId: string, candidates = profilesRef): Promise<bo
   const attempt = ++generation;
   closeCurrentLink();
   activeProfileIdRef = profile.id;
-  daemonState.set((prev) => ({
+  daemonState.update((prev) => ({
     ...prev,
     activeProfile: profile,
     ...IDLE,
@@ -201,7 +201,7 @@ async function activate(profileId: string, candidates = profilesRef): Promise<bo
   });
 
   linkRef = link;
-  daemonState.set((prev) => ({ ...prev, client: next }));
+  daemonState.update((prev) => ({ ...prev, client: next }));
   let seenConnections = 0;
   unsubscribeLink = link.subscribe((snapshot) => {
     if (
@@ -333,7 +333,7 @@ export async function removeProfile(id: string): Promise<void> {
   ++generation;
   closeCurrentLink();
   activeProfileIdRef = null;
-  daemonState.set((prev) => ({ ...prev, activeProfile: null }));
+  daemonState.update((prev) => ({ ...prev, activeProfile: null }));
   await writeActiveDaemonId(null);
   setStatus(IDLE);
   if (next.length) {await activate(next[0]!.id, next);}
@@ -359,7 +359,7 @@ export function bootstrapDaemon() {
       ]);
 
       profilesRef = savedProfiles;
-      daemonState.set((prev) => ({ ...prev, profiles: savedProfiles }));
+      daemonState.update((prev) => ({ ...prev, profiles: savedProfiles }));
       if (!savedProfiles.length) {
         setStatus(IDLE);
         return;

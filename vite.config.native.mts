@@ -5,7 +5,7 @@ import { xplatNative } from '@octane-xplat/cli/vite'
 // Keep these packages out of the dev vendor bundle (the HMR-mode esbuild
 // pass that runs before the dev server starts). The vendor pipeline cannot
 // build them, and two of them must never be bundled anyway:
-//   - @octane-xplat/platform ships `src/*.ts` that import `.tsrx` files —
+//   - @octane-xplat/ui and @octane-xplat/platform ship `src/*.ts` that import `.tsrx` files —
 //     the vendor esbuild has no `.tsrx` loader. Per-module /ns/m serving
 //     handles them correctly.
 //   - @octane-xplat/effects exports only `./ios`/`./android` subpaths — the
@@ -14,6 +14,7 @@ import { xplatNative } from '@octane-xplat/cli/vite'
 //     boot with `document is not defined`. App code reaches them only
 //     through `.web` leaves (see lib/terminal-assets).
 process.env.NS_VENDOR_EXCLUDE = [
+	'@octane-xplat/ui',
 	'@octane-xplat/platform',
 	'@octane-xplat/effects',
 	'@xterm/xterm',

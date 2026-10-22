@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'octane';
-import { WebView } from '@octane-xplat/ui';
+import { WebView, type StyleProp } from '@octane-xplat/ui';
 
 import {
   buildTerminalHtml,
@@ -37,7 +37,7 @@ export function TerminalView({
   onResize?: (cols: number, rows: number) => void;
   onReady?: () => void;
   bind?: (handle: TerminalViewHandle) => void;
-  style?: unknown;
+  style?: StyleProp;
   className?: string;
 }) {
   const propsRef = useRef({ onInput, onResize, onReady });
@@ -85,7 +85,7 @@ export function TerminalView({
     <WebView
       accessibilityLabel="Terminal"
       ref={(handle) => {
-        if (!handle) {return;}
+        if (!(handle?.native instanceof HTMLIFrameElement)) {return;}
         frameRef.current = handle.native;
         bind?.({
           write: (data) => page()?.__goddardWrite?.(data),

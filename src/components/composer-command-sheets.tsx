@@ -20,14 +20,8 @@ import {
 import { fuzzyScore } from '@waku/client/fuzzy-search';
 import { useEffect, useMemo, useState } from 'octane';
 import { useWindowSize } from '@octane-xplat/platform';
-import {
-  Spinner,
-  pushRoute,
-  SearchInput,
-  Text,
-  TextArea,
-  VirtualList,
-} from '@octane-xplat/ui';
+import { Spinner, SearchInput, Text, TextArea, VirtualList } from '@octane-xplat/ui';
+import { pushRoute } from '@octane-xplat/ui/routing';
 
 import { Sheet, SheetRow } from './sheet';
 import { Radius } from '@/lib/theme-colors';
@@ -240,9 +234,12 @@ function ResumeSessionSheet({ provider, runtimeMode, onDismiss }: {
           borderRadius: Radius.medium,
           fontSize: 16,
           minHeight: 44,
-          paddingHorizontal: 12,
-          paddingVertical: 10,
-          marginHorizontal: 6,
+          paddingLeft: 12,
+          paddingRight: 12,
+          paddingTop: 10,
+          paddingBottom: 10,
+          marginLeft: 6,
+          marginRight: 6,
           marginBottom: 8,
           color: theme.text,
           backgroundColor: theme.inset,
@@ -251,12 +248,20 @@ function ResumeSessionSheet({ provider, runtimeMode, onDismiss }: {
         onChange={setSearch}
       />
       {(error || sessions.error) && (
-        <Text style={{ fontSize: 14, lineHeight: '18px', paddingHorizontal: 12, paddingVertical: 8, color: theme.danger }}>
+        <Text style={{
+          fontSize: 14,
+          lineHeight: '18px',
+          paddingLeft: 12,
+          paddingRight: 12,
+          paddingTop: 8,
+          paddingBottom: 8,
+          color: theme.danger,
+        }}>
           {error ?? String(sessions.error)}
         </Text>
       )}
       {sessions.isPending ? (
-        <Spinner busy style={{ paddingVertical: 20 }} />
+        <Spinner busy style={{ paddingTop: 20, paddingBottom: 20 }} />
       ) : (
         <VirtualList
           items={rows}
@@ -272,7 +277,15 @@ function ResumeSessionSheet({ provider, runtimeMode, onDismiss }: {
             />
           )}
           renderEmpty={() => (
-            <Text style={{ fontSize: 14, lineHeight: '18px', paddingHorizontal: 12, paddingVertical: 8, color: theme.textTertiary }}>{
+            <Text style={{
+              fontSize: 14,
+              lineHeight: '18px',
+              paddingLeft: 12,
+              paddingRight: 12,
+              paddingTop: 8,
+              paddingBottom: 8,
+              color: theme.textTertiary,
+            }}>{
               catalog?.status === 'unsupported'
                 ? `${providerLabel(provider)} can't list its sessions`
                 : catalog?.status === 'binaryMissing'
@@ -314,7 +327,15 @@ function GoalCommandSheet({ goal, prefill, replace, onRun, onDismiss }: {
   return (
     <Sheet visible onDismiss={onDismiss} title="Goal">
       {goal && (
-        <Text style={{ fontSize: 14, lineHeight: '18px', paddingHorizontal: 12, paddingVertical: 8, color: theme.textSecondary }}>
+        <Text style={{
+          fontSize: 14,
+          lineHeight: '18px',
+          paddingLeft: 12,
+          paddingRight: 12,
+          paddingTop: 8,
+          paddingBottom: 8,
+          color: theme.textSecondary,
+        }}>
           Status: {{
             active: 'Active', paused: 'Paused', blocked: 'Stalled', usageLimited: 'Usage limit reached',
             budgetLimited: 'Budget reached', complete: 'Complete',
@@ -330,9 +351,12 @@ function GoalCommandSheet({ goal, prefill, replace, onRun, onDismiss }: {
           fontSize: 16,
           minHeight: 88,
           maxHeight: 180,
-          paddingHorizontal: 12,
-          paddingVertical: 10,
-          marginHorizontal: 6,
+          paddingLeft: 12,
+          paddingRight: 12,
+          paddingTop: 10,
+          paddingBottom: 10,
+          marginLeft: 6,
+          marginRight: 6,
           marginBottom: 8,
           color: theme.text,
           backgroundColor: theme.inset,
@@ -341,12 +365,28 @@ function GoalCommandSheet({ goal, prefill, replace, onRun, onDismiss }: {
         onChange={setObjective}
       />
       {replace && goal && (
-        <Text style={{ fontSize: 14, lineHeight: '18px', paddingHorizontal: 12, paddingVertical: 8, color: theme.textSecondary }}>
+        <Text style={{
+          fontSize: 14,
+          lineHeight: '18px',
+          paddingLeft: 12,
+          paddingRight: 12,
+          paddingTop: 8,
+          paddingBottom: 8,
+          color: theme.textSecondary,
+        }}>
           This replaces the current goal: {goal.objective}
         </Text>
       )}
       {error && (
-        <Text style={{ fontSize: 14, lineHeight: '18px', paddingHorizontal: 12, paddingVertical: 8, color: theme.danger }}>
+        <Text style={{
+          fontSize: 14,
+          lineHeight: '18px',
+          paddingLeft: 12,
+          paddingRight: 12,
+          paddingTop: 8,
+          paddingBottom: 8,
+          color: theme.danger,
+        }}>
           {error}
         </Text>
       )}

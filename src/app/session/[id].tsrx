@@ -1,5 +1,5 @@
 /** @jsxImportSource @nativescript-community/octane */
-import { useRoute } from '@octane-xplat/ui';
+import { useRoute } from '@octane-xplat/ui/routing';
 
 import { SessionView } from '@/components/session-view';
 

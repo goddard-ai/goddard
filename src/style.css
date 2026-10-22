@@ -106,3 +106,7 @@ body {
 .boss-secondary-done { padding-top: 12px; padding-bottom: 12px; }
 .boss-automation-run { padding-top: 12px; padding-bottom: 12px; border-bottom-width: 0.5px; }
 .boss-secondary-pin-row { flex-direction: row; gap: 8px; }
+
+.vx-avatar {
+  corner-shape: squircle;
+}

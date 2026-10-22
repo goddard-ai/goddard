@@ -50,7 +50,8 @@ export function DaemonList({
                   gap: 12,
                   paddingLeft: 12,
                   paddingRight: 10,
-                  paddingVertical: 9,
+                  paddingTop: 9,
+                  paddingBottom: 9,
                 }}
               >
                 <DaemonAvatar name={profile.name} size={36} />
@@ -81,7 +82,12 @@ export function DaemonList({
                   accessibilityRole="button"
                   hitSlop={6}
                   onPress={() => onEdit(profile)}
-                  style={{ alignItems: 'center', justifyContent: 'center', paddingHorizontal: 13 }}
+                  style={{
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    paddingLeft: 13,
+                    paddingRight: 13,
+                  }}
                 >
                   <AppSymbol
                     name={{ ios: 'info.circle', android: 'info', web: 'info' }}

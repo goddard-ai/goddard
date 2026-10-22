@@ -107,6 +107,43 @@ index a05696b679b3feecd1bafa267de44b59db559162..06648067a3fcf7f8c74437a82b94ec01
      }
      return ['.native', ''];
  }
+diff --git a/hmr/helpers/ast-normalizer.js b/hmr/helpers/ast-normalizer.js
+index c6113c74247db616609b87d7f365c4d4c199c934..73651a1fd1892555cc5dd57bcefb9e93d30516b6 100644
+--- a/hmr/helpers/ast-normalizer.js
++++ b/hmr/helpers/ast-normalizer.js
+@@ -86,9 +86,10 @@ export function astNormalizeModuleImportsAndHelpers(code, opts) {
+         // path (e.g. `html-entities` when not in optimizeDeps) — those must be
+         // rewritten to the bare id (see below), not removed; removing them
+         // left consumer bindings undefined (`decode is not defined`).
++        // User virtual stylesheets must reach the native CSS registration route.
+         // Exemption: oxc runtime helper virtuals are real servable URLs that
+         // downstream passes preserve/origin-prefix — keep them here too.
+-        const isViteVirtual = (src) => !!src && (/\0/.test(src) || /__x00__/.test(src)) && !src.includes('__x00__@oxc-project+runtime');
++        const isViteVirtual = (src) => !!src && (/\0/.test(src) || /__x00__/.test(src)) && !src.includes('__x00__@oxc-project+runtime') && !/\.(css|scss|sass|less|styl|stylus)(?:[?#]|$)/i.test(src);
+         const realIdPrefixed = (src) => {
+             if (!src || !src.startsWith('/@id/'))
+                 return null;
+diff --git a/hmr/server/css-device-module.js b/hmr/server/css-device-module.js
+index 0d7cd968eac690a85411cf3d6a24323a3d3a3992..98094d6ccfb918d00249d8087aebdd994b64244d 100644
+--- a/hmr/server/css-device-module.js
++++ b/hmr/server/css-device-module.js
+@@ -41,4 +41,15 @@ export function buildCssRegisterSnippet(tag, cssText) {
+ export function buildCssRegisterSnippetFromVar(tag, varName) {
+     return buildRegisterCall(JSON.stringify(tag), varName);
+ }
++/** Bridge only plugin-provided virtual stylesheets; file CSS has its own hot-update path. */
++export function virtualCssUpdates(payload) {
++    if (payload?.type !== 'update') return [];
++    return (payload.updates || []).flatMap((update) => {
++        if (update.type !== 'css-update' && update.type !== 'js-update') return [];
++        let spec = update.path?.split(/[?#]/)[0];
++        if (spec?.startsWith('\0')) spec = '/@id/' + spec.replace(/\0/g, '__x00__');
++        if (!spec?.startsWith('/@id/__x00__') || !CSS_MODULE_RE.test(spec)) return [];
++        return [{ type: 'css-update', path: '/ns/m' + spec, acceptedPath: '/ns/m' + spec, tag: spec, timestamp: update.timestamp }];
++    });
++}
+ //# sourceMappingURL=css-device-module.js.map
+\ No newline at end of file
 diff --git a/hmr/server/deps-bundle.js b/hmr/server/deps-bundle.js
 index 8f2fa15556244f7ef811b5e2ea0fc6a19bab74d3..80137262ec46d347d39a7ee12d66d649b5f909f5 100644
 --- a/hmr/server/deps-bundle.js
@@ -166,11 +203,155 @@ index 71574c48f655183af0c9601b020fd1febd63ccb3..0061d9c9e9fe9c6034576eae8449831d
      if (!imports.length) {
          return code;
      }
+diff --git a/hmr/server/process-code-for-device.js b/hmr/server/process-code-for-device.js
+index c71d457806a8add919f7e2368e7ebc349bd908e7..998eb268ed0db1200f8b5ce30fc7da211125406f 100644
+--- a/hmr/server/process-code-for-device.js
++++ b/hmr/server/process-code-for-device.js
+@@ -1,3 +1,4 @@
++import { CSS_MODULE_RE } from './css-device-module.js';
+ // Device code-transform: cleans Vite/framework noise out of a served module,
+ // injects NativeScript build globals + the process.env shim, normalizes
+ // imports/helpers for the on-device ESM runtime, and collects an importer's
+@@ -451,13 +452,13 @@ function processCodeForDevice(code, isVitePreBundled, preserveVendorImports = fa
+     // Unlike other virtual ids these are real, servable dev-server URLs returning
+     // self-contained ESM — stripping them leaves `_decorate`/`_decorateMetadata`
+     // undefined at runtime. They're origin-prefixed for the device in rewriteImports.
+-    result = result.replace(/import\s+[^;]+\s+from\s+["']\/@id\/(?!__x00__@oxc-project\+runtime)[^"']*["'];?\s*/g, '');
++    result = result.replace(/import\s+[^;]+\s+from\s+["'](\/@id\/(?!__x00__@oxc-project\+runtime)[^"']*)["'];?\s*/g, (statement, spec) => CSS_MODULE_RE.test(spec) ? statement : '');
+     // Also remove side-effect only virtual id imports like: import "/@id/__x00__vite/dynamic-import-helper.js";
+     // These can slip through and cause the NativeScript runtime to attempt resolving
+     // a non-existent physical file (e.g. /@id/__x00__vite/dynamic-import-helper.js) leading to
+     // module not found crashes during HMR evaluation.
+     if (/^[\t ]*import\s+["']\/@id\/[^"']+["'];?\s*$/m.test(result)) {
+-        result = result.replace(/^[\t ]*import\s+["']\/@id\/[^"']+["'];?\s*$/gm, '');
++        result = result.replace(/^[\t ]*import\s+["'](\/@id\/[^"']+)["'];?\s*$/gm, (statement, spec) => CSS_MODULE_RE.test(spec) ? statement : '');
+         // Inject a lightweight marker comment (harmless if left in output) so devs can confirm rewrite took place when viewing streamed artifact.
+         result = `// [hmr-sanitize] stripped virtual /@id/ side-effect imports\n${result}`;
+     }
 diff --git a/hmr/server/rewrite-imports.js b/hmr/server/rewrite-imports.js
-index 4a6575cb00a6aeecbbb7ac5ccac3268cb10d7f54..dc70055007e26117b76fbb9d2f4f17fabfd8db00 100644
+index 4a6575cb00a6aeecbbb7ac5ccac3268cb10d7f54..2876cf3694c278249b9db182e2f89df34cc464f3 100644
 --- a/hmr/server/rewrite-imports.js
 +++ b/hmr/server/rewrite-imports.js
-@@ -253,11 +253,29 @@ export function rewriteImports(code, importerPath, sfcFileMap, depFileMap, proje
+@@ -1,3 +1,4 @@
++import { CSS_MODULE_RE } from './css-device-module.js';
+ // THE SINGLE import-rewrite function — used everywhere for consistency. Maps a
+ // served module's specifiers to device-reachable forms: the unified /ns/core
+ // bridge, /ns/m node_modules + app modules, /ns/sfc for Vue, vendor bare specs,
+@@ -12,7 +13,93 @@ import { resolveAngularCoreHmrImportSource, rewriteAngularEntryRegisterOnly } fr
+ import { isNativeScriptCoreModule, isNativeScriptPluginModule, normalizeNativeScriptCoreSpecifier, normalizeNodeModulesSpecifier, resolveNodeModulesPackageBoundary, resolveVendorRouting, rewriteFsAbsoluteToNsM, shouldPreserveBareRuntimePluginSubpathImport } from './websocket-module-specifiers.js';
+ import { ensureDynamicHmrImportHelper } from './websocket-served-module-helpers.js';
+ import { collectMixedRuntimePluginHttpRootPackages, findDependencyFileName, getProjectRelativeImportPath, isApplicationImport, normalizeImportPath, stripToProjectRelative, toAppModuleBaseId, toNodeModulesHttpModuleId } from './device-transform-helpers.js';
++import { resolvePlatform } from '../../helpers/cli-flags.js';
+ const APP_ROOT_DIR = getProjectAppPath();
++// ── Package `imports` field (`#specifier`) resolution ─────────────────────
++// A `#`-prefixed specifier resolves through the `imports` field of the
++// importer's own package.json (Node "package imports" — e.g. octane's
++// `#octane/dist/signal-actions/graph`). Served node_modules files are raw-read
++// by the /ns/m route without Vite import analysis, and the bare-npm fallback
++// below rejects `#` outright (bareNpmRe requires an alphanumeric first char),
++// so the literal specifier reached the device loader as "Cannot find module".
++// Device-visible conditions: `import` (ESM), `native`, the active platform —
++// `node`, `require`, and build-time conditions like `octane-islands` are
++// intentionally absent.
++function resolveImportsConditionalTarget(value, conditions) {
++    while (value !== null && typeof value === 'object' && !Array.isArray(value)) {
++        let next;
++        for (const condition of Object.keys(value)) {
++            if (condition === 'default' || conditions.has(condition)) {
++                next = value[condition];
++                break;
++            }
++        }
++        value = next;
++    }
++    return typeof value === 'string' ? value : null;
++}
++function resolvePackageImportsSpecifier(spec, importerPath, projectRoot, verbose) {
++    let importerAbs;
++    if (importerPath.startsWith('/@fs/')) {
++        importerAbs = importerPath.slice('/@fs'.length);
++    }
++    else if (importerPath.startsWith('/')) {
++        importerAbs = path.join(projectRoot, `.${importerPath}`);
++    }
++    else {
++        return null;
++    }
++    try {
++        importerAbs = importerAbs.replace(PAT.QUERY_PATTERN, '');
++        let dir = path.dirname(importerAbs);
++        // The `imports` field is scoped to the importer's nearest enclosing
++        // package.json — the same lookup Node performs.
++        for (;;) {
++            const packageJsonPath = path.join(dir, 'package.json');
++            if (existsSync(packageJsonPath)) {
++                const pkgJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
++                const importsField = pkgJson.imports;
++                if (!importsField || typeof importsField !== 'object' || Array.isArray(importsField) || !pkgJson.name)
++                    return null;
++                const conditions = new Set(['default', 'import', 'native', resolvePlatform()].filter(Boolean));
++                const exactMatch = Object.hasOwn(importsField, spec);
++                let target = exactMatch
++                    ? resolveImportsConditionalTarget(importsField[spec], conditions)
++                    : null;
++                if (!exactMatch && target === null) {
++                    for (const key of Object.keys(importsField)) {
++                        const star = key.indexOf('*');
++                        if (star === -1)
++                            continue;
++                        const pre = key.slice(0, star);
++                        const post = key.slice(star + 1);
++                        if (spec.length < pre.length + post.length || !spec.startsWith(pre) || !spec.endsWith(post))
++                            continue;
++                        const matched = spec.slice(pre.length, spec.length - post.length);
++                        const patternTarget = resolveImportsConditionalTarget(importsField[key], conditions);
++                        target = typeof patternTarget === 'string' ? patternTarget.replaceAll('*', matched) : null;
++                        break;
++                    }
++                }
++                // Only `./`-relative targets can be expressed as a device URL
++                // (bare-specifier targets are rare and keep falling through).
++                if (typeof target !== 'string' || !target.startsWith('./'))
++                    return null;
++                const out = `/ns/m/node_modules/${pkgJson.name}/${target.slice(2)}`;
++                if (verbose)
++                    console.log(`[rewrite] imports-field specifier: ${spec} → ${out}`);
++                return out;
++            }
++            const parent = path.dirname(dir);
++            if (parent === dir)
++                return null;
++            dir = parent;
++        }
++    }
++    catch {
++        return null;
++    }
++}
+ export function prepareAngularEntryForDevice(code, importerPath, sfcFileMap, depFileMap, projectRoot, verbose = false, outputDirOverrideRel, httpOrigin, resolveVendorAsHttp = false) {
+     const rewrittenCode = rewriteImports(code, importerPath, sfcFileMap, depFileMap, projectRoot, verbose, outputDirOverrideRel, httpOrigin, resolveVendorAsHttp);
+     return rewriteAngularEntryRegisterOnly(rewrittenCode, resolveAngularCoreHmrImportSource(rewrittenCode, httpOrigin));
+@@ -236,6 +323,19 @@ export function rewriteImports(code, importerPath, sfcFileMap, depFileMap, proje
+             }
+             return `${prefix}${stub}${suffix}`;
+         }
++        // `#`-prefixed package-imports specifier (Node `imports` field, e.g.
++        // octane's `#octane/dist/signal-actions/graph`). Resolved through the
++        // importer's own package.json — the bare-npm branches below reject it.
++        if (spec.startsWith('#')) {
++            const importsOut = resolvePackageImportsSpecifier(spec, importerPath, projectRoot, verbose);
++            if (importsOut) {
++                if (httpOriginSafe) {
++                    return `${prefix}${httpOriginSafe}${importsOut}${suffix}`;
++                }
++                return `${prefix}${importsOut}${suffix}`;
++            }
++            return `${prefix}${spec}${suffix}`;
++        }
+         spec = normalizeNativeScriptCoreSpecifier(spec);
+         // Pull `/@fs/<abs-path>` URLs back into the `/ns/m/` pipeline so they
+         // hit our CJS/UMD-wrapping handler. Vite emits `/@fs/...` for any
+@@ -253,17 +353,39 @@ export function rewriteImports(code, importerPath, sfcFileMap, depFileMap, proje
                  }
                  return `${prefix}${rewritten}${suffix}`;
              }
@@ -205,17 +386,32 @@ index 4a6575cb00a6aeecbbb7ac5ccac3268cb10d7f54..dc70055007e26117b76fbb9d2f4f17fa
          }
          // Vite 8 oxc runtime helpers (decorators etc.) — emitted as
          // `/@id/__x00__@oxc-project+runtime@<ver>/helpers/<name>.js`. These are
+         // real dev-server URLs serving self-contained ESM, so just origin-prefix
+         // them for the device; no /ns/m wrapping needed (processCodeForDevice
+         // exempts them from the generic /@id/ strip for the same reason).
++        // User virtual CSS needs native compilation/registration, never the DOM module.
++        if (spec.startsWith('/@id/') && CSS_MODULE_RE.test(spec)) {
++            return `${prefix}${httpOriginSafe || ''}/ns/m${spec}${suffix}`;
++        }
+         if (spec.startsWith('/@id/__x00__@oxc-project+runtime')) {
+             if (httpOriginSafe) {
+                 return `${prefix}${httpOriginSafe}${spec}${suffix}`;
 diff --git a/hmr/server/websocket-module-specifiers.js b/hmr/server/websocket-module-specifiers.js
-index 74f50a77f48f3873aebf375a29d06b16c29440a3..cc196fb6b92d48179bf8e124ba2a2aa9b13796f9 100644
+index 74f50a77f48f3873aebf375a29d06b16c29440a3..0f06b6dc997118473e4a1ac6d3a3c48432311c71 100644
 --- a/hmr/server/websocket-module-specifiers.js
 +++ b/hmr/server/websocket-module-specifiers.js
-@@ -1,4 +1,4 @@
+@@ -1,8 +1,8 @@
 -import { existsSync, readdirSync, readFileSync, realpathSync } from 'fs';
 +import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'fs';
  import * as path from 'path';
  import * as PAT from './constants.js';
  import { getVendorManifest, resolveVendorSpecifier } from '../shared/vendor/registry.js';
-@@ -328,6 +328,60 @@ export function resolveVendorFromCandidate(specifier) {
+-import { getProjectRootPath } from '../../helpers/project.js';
++import { getMonorepoWorkspaceRoot, getProjectRootPath } from '../../helpers/project.js';
+ import { extractRootPackageName, getPackageRuntimeInfo } from '../shared/package-classifier.js';
+ import { getFlavorClientPackages } from '../framework-flavors.js';
+ const ESM_FRAMEWORK_PACKAGE_ROOTS = new Set(['@nativescript/angular', 'nativescript-angular']);
+@@ -328,6 +328,76 @@ export function resolveVendorFromCandidate(specifier) {
      }
      return null;
  }
@@ -225,7 +421,8 @@ index 74f50a77f48f3873aebf375a29d06b16c29440a3..cc196fb6b92d48179bf8e124ba2a2aa9
 + * its workspace layout — consulted when neither the project root nor the
 + * workspace root can anchor a served `/node_modules/` tail:
 + *  - `link:`/`file:`/`portal:` deps keep their own `node_modules` at the real
-+ *    target; a linked package's transitive deps never reach the app's store.
++ *    target; their workspace siblings can own transitive deps too. Reuse the
++ *    bounded workspace scan rather than recursively walking dependency trees.
 + *  - pnpm's isolated virtual store keeps every non-hoisted package under
 + *    `node_modules/.pnpm/<name>@<ver>/node_modules/`.
 + * Importer info is gone from the URL — first hit wins, same as the workspace
@@ -237,9 +434,13 @@ index 74f50a77f48f3873aebf375a29d06b16c29440a3..cc196fb6b92d48179bf8e124ba2a2aa9
 +        return cached;
 +    }
 +    const dirs = [];
++    const seen = new Set();
++    const linkedWorkspaces = new Set();
 +    const pushIfPresent = (dir) => {
-+        if (existsSync(dir))
++        if (!seen.has(dir) && existsSync(dir)) {
++            seen.add(dir);
 +            dirs.push(dir);
++        }
 +    };
 +    const pnpmStore = path.join(projectRoot, 'node_modules', '.pnpm');
 +    try {
@@ -260,8 +461,12 @@ index 74f50a77f48f3873aebf375a29d06b16c29440a3..cc196fb6b92d48179bf8e124ba2a2aa9
 +                    continue;
 +                try {
 +                    const depDir = realpathSync(path.resolve(projectRoot, target));
-+                    if (statSync(depDir).isDirectory())
++                    if (statSync(depDir).isDirectory()) {
 +                        pushIfPresent(path.join(depDir, 'node_modules'));
++                        const workspace = getMonorepoWorkspaceRoot(depDir);
++                        if (workspace)
++                            linkedWorkspaces.add(workspace);
++                    }
 +                }
 +                catch {
 +                }
@@ -270,13 +475,20 @@ index 74f50a77f48f3873aebf375a29d06b16c29440a3..cc196fb6b92d48179bf8e124ba2a2aa9
 +    }
 +    catch {
 +    }
++    // Preserve direct-dependency precedence. Scan each linked workspace once,
++    // using the existing two-level package scan and its per-workspace cache.
++    for (const workspace of linkedWorkspaces) {
++        pushIfPresent(path.join(workspace, 'node_modules'));
++        for (const dir of listWorkspaceNodeModulesDirs(workspace))
++            pushIfPresent(dir);
++    }
 +    depFallbackDirsCache.set(projectRoot, dirs);
 +    return dirs;
 +}
  const workspaceNodeModulesDirsCache = new Map();
  /**
   * `node_modules` dirs that can hold a package the served URL no longer
-@@ -428,6 +482,16 @@ export function resolveCandidateFilePath(candidate, projectRoot, workspaceRoot)
+@@ -428,6 +498,16 @@ export function resolveCandidateFilePath(candidate, projectRoot, workspaceRoot)
              }
          }
      }
@@ -293,14 +505,26 @@ index 74f50a77f48f3873aebf375a29d06b16c29440a3..cc196fb6b92d48179bf8e124ba2a2aa9
      return null;
  }
  /**
-@@ -557,22 +621,17 @@ export function filterExistingNodeModulesTransformCandidates(spec, candidates, p
+@@ -512,8 +592,8 @@ export function rewriteFsAbsoluteToNsM(spec, projectRoot, workspaceRoot) {
+  * `export const X: string = '...'`. Routing through the realpath makes
+  * Vite see a non-`node_modules` path and the TS transform applies.
+  *
+- * App-local candidates whose real path is also app-local are returned
+- * unchanged so existing behaviour is preserved bit-for-bit.
++ * Candidates are returned unchanged only when their URL addresses the file
++ * found. Fallback files need filesystem anchors even inside the app root.
+  */
+ export function filterExistingNodeModulesTransformCandidates(spec, candidates, projectRoot, workspaceRoot) {
+     const cleanedSpec = spec.replace(PAT.QUERY_PATTERN, '');
+@@ -557,22 +637,18 @@ export function filterExistingNodeModulesTransformCandidates(spec, candidates, p
              // through to the existing project/workspace logic.
          }
          if (mapped === null) {
 -            if (!hasDistinctWorkspaceRoot) {
-+            const relFromProject = path.relative(resolvedProjectRoot, resolved);
-+            const insideProjectRoot = relFromProject !== '' && !relFromProject.startsWith('..') && !path.isAbsolute(relFromProject);
-+            if (insideProjectRoot) {
++            const candidatePath = cleanedCandidate.startsWith('/@fs/')
++                ? path.resolve(cleanedCandidate.slice('/@fs'.length))
++                : path.resolve(resolvedProjectRoot, cleanedCandidate.replace(/^\/+/, ''));
++            if (candidatePath === resolved) {
                  mapped = candidate;
              }
              else {
@@ -316,10 +540,10 @@ index 74f50a77f48f3873aebf375a29d06b16c29440a3..cc196fb6b92d48179bf8e124ba2a2aa9
 -                    // hoisted package's `exports` field may refuse.
 -                    mapped = `/@fs${resolved.replace(/\\/g, '/')}${querySuffix}`;
 -                }
-+                // File resolves outside the project root — hoisted workspace
-+                // node_modules, pnpm's `.pnpm` store, or a link:/file:/portal:
-+                // dep's own node_modules. Serve the fs-anchored URL so Vite
-+                // reads it directly; the root-relative URL would miss.
++                // The candidate URL does not address the discovered file. A
++                // fallback may live inside the project (nested link: dependency
++                // or pnpm store) as well as outside it (hoisted dependency).
++                // Anchor the actual path so Vite loads the same file we found.
 +                mapped = `/@fs${resolved.replace(/\\/g, '/')}${querySuffix}`;
              }
          }
@@ -361,6 +585,80 @@ index a11fbd5d24579cdf572a91f70cb06561bfa43cd0..c887334efce2c2f6cf85c75082761094
          }
      }
      return null;
+diff --git a/hmr/server/websocket-ns-m.js b/hmr/server/websocket-ns-m.js
+index 63b5d9a4886d8da03b8e7deac8a16d53347ea5d7..0f92b3377e6d697f5e5c9eafad130d9579078d93 100644
+--- a/hmr/server/websocket-ns-m.js
++++ b/hmr/server/websocket-ns-m.js
+@@ -97,7 +97,7 @@ export function registerNsModuleServerRoute(server, options) {
+             // internal virtual modules (e.g., \0nsvite:nsconfig-json for
+             // ~/package.json) that don't exist on disk and must NOT run
+             // through the device post-processing pipeline below.
+-            if (spec.startsWith('/@id/')) {
++            if (spec.startsWith('/@id/') && !CSS_MODULE_RE.test(spec)) {
+                 try {
+                     // First try Vite's transform pipeline directly
+                     const vr = await sharedTransformRequest(spec);
+@@ -157,8 +157,21 @@ export function registerNsModuleServerRoute(server, options) {
+                     // Workspace css outside the vite root must be anchored to /@fs or
+                     // `?inline` is denied and the DOM css module (__vite__updateStyle)
+                     // is served instead.
+-                    const inlineSpec = resolveFsAnchoredSpec(spec, serverRoot, monorepoWorkspaceRoot) || spec;
+-                    const inlineRes = await sharedTransformRequest(`${inlineSpec}?inline`);
++                    const inlineSpec = spec.startsWith('/@id/')
++                        ? spec.slice('/@id/'.length).replace(/__x00__/g, '\0')
++                        : resolveFsAnchoredSpec(spec, serverRoot, monorepoWorkspaceRoot) || spec;
++                    // Keep the canonical sheet's watch edges and CSS HMR boundary alive.
++                    // The inline variant alone is not the node stylesheet plugins reload.
++                    const virtualCss = spec.startsWith('/@id/');
++                    // Plugin reloads can invalidate only the canonical sheet, not its
++                    // inline sibling or the NativeScript transform-result TTL cache.
++                    const compileCss = virtualCss ? (url) => server.transformRequest(url) : sharedTransformRequest;
++                    if (virtualCss) {
++                        await compileCss(inlineSpec);
++                        const inlineModule = server.moduleGraph.getModuleById(`${inlineSpec}?inline`);
++                        if (inlineModule) server.moduleGraph.invalidateModule(inlineModule);
++                    }
++                    const inlineRes = await compileCss(`${inlineSpec}?inline`);
+                     const inlineCode = inlineRes?.code || '';
+                     // `?inline` output is `export default "<compiled css>"`.
+                     const m = inlineCode.match(/export\s+default\s+("(?:[^"\\]|\\.)*")\s*;?/s);
+@@ -168,7 +181,14 @@ export function registerNsModuleServerRoute(server, options) {
+                             css = JSON.parse(m[1]);
+                         }
+                         catch { }
+-                        css = normalizeCssForDevice(css);
++                        css = normalizeCssForDevice(css) || '/* empty stylesheet */';
++                        // HMR fetches adapted text through this same compiler and tag.
++                        if (urlObj.searchParams.has('direct')) {
++                            res.setHeader('Content-Type', 'text/css; charset=utf-8');
++                            res.statusCode = 200;
++                            res.end(css);
++                            return;
++                        }
+                         const out = `// [ns:m][css] ${spec}\n` + `const __ns_css_text__ = ${JSON.stringify(css)};\n` + buildCssRegisterSnippetFromVar(spec, '__ns_css_text__') + `export default __ns_css_text__;\n`;
+                         res.statusCode = 200;
+                         res.end(out);
+@@ -181,7 +201,10 @@ export function registerNsModuleServerRoute(server, options) {
+                     if (verbose)
+                         console.warn('[ns:m][css] inline compile failed', spec, cssErr?.message);
+                 }
+-                // Fall through to default handling if inline compile produced nothing.
++                // Never send raw CSS or a DOM injection module to the native loader.
++                res.statusCode = 500;
++                res.end('throw new Error(' + JSON.stringify('[ns:m] CSS compilation failed: ' + spec) + ');');
++                return;
+             }
+             // Queue and dedupe transformRequest calls so heavy app graphs do not
+             // overwhelm Vite with concurrent work. Slow-transform warnings start only
+@@ -503,6 +526,8 @@ export function registerNsModuleServerRoute(server, options) {
+                                     continue;
+                                 }
+                                 else if (u.pathname.startsWith('/ns/m')) {
++                                    // The CSS route synthesizes a default string export after compilation.
++                                    if (CSS_MODULE_RE.test(u.pathname)) continue;
+                                     // Resolve the import target through the SAME
+                                     // canonical pipeline the /ns/m route itself uses
+                                     // (websocket-ns-m-request.ts) instead of a third
 diff --git a/hmr/server/websocket-served-module-helpers.js b/hmr/server/websocket-served-module-helpers.js
 index b9e3ab67eb4ae7c9b12bc4b02b9aa3660d712644..f857f4a5a5956af229e447ed04bf1a52a90c6399 100644
 --- a/hmr/server/websocket-served-module-helpers.js
@@ -385,6 +683,30 @@ index b9e3ab67eb4ae7c9b12bc4b02b9aa3660d712644..f857f4a5a5956af229e447ed04bf1a52
              .map((node) => ({
              start: node.start,
              end: node.end,
+diff --git a/hmr/server/websocket.js b/hmr/server/websocket.js
+index e6a14437f8990e2c631f23eb8db21aa0b28b5759..2b9fb450511b6e114b6e7e7ac8a48831b4a09dc9 100644
+--- a/hmr/server/websocket.js
++++ b/hmr/server/websocket.js
+@@ -1,3 +1,5 @@
++import { virtualCssUpdates } from './css-device-module.js';
++import { buildCssUpdatesMessage } from './css-update-message.js';
+ import { readFileSync } from 'fs';
+ import { WebSocketServer } from 'ws';
+ import * as path from 'path';
+@@ -341,6 +343,13 @@ function createHmrWebSocketPlugin(opts, strategy) {
+                         // to reach the device, since they drive the
+                         // in-place `ɵɵreplaceMetadata` template-swap path.
+                         // Filter the relay to those.
++                        const cssUpdates = virtualCssUpdates(normalized);
++                        if (cssUpdates.length) {
++                            const message = JSON.stringify(buildCssUpdatesMessage(server, cssUpdates));
++                            wss?.clients.forEach((client) => {
++                                if (client?.readyState === 1) client.send(message);
++                            });
++                        }
+                         if (normalized.type !== 'custom')
+                             return;
+                         // Root-component guard. Analog's in-place
 diff --git a/hmr/shared/vendor/vendor-esbuild-plugins.js b/hmr/shared/vendor/vendor-esbuild-plugins.js
 index 4855a85322188435072c21bb72c60ea16d514b37..8b69c821e0d557c751af76ec2d74f7361e86c724 100644
 --- a/hmr/shared/vendor/vendor-esbuild-plugins.js

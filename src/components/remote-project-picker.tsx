@@ -1,15 +1,6 @@
 import type { Project, WorkingTreeEntry } from '@waku/client';
 import { useEffect, useMemo, useState } from 'octane';
-import {
-  Spinner,
-  Pressable,
-  SafeArea,
-  BottomSheet as XSheet,
-  Text,
-  TextInput,
-  View,
-  VirtualList,
-} from '@octane-xplat/ui';
+import { Spinner, Pressable, SafeArea, BottomSheet as XSheet, Text, TextInput, View, VirtualList } from '@octane-xplat/ui';
 
 import { AppSymbol } from './app-symbol';
 import { successHaptic, errorHaptic } from '@/lib/haptics';
@@ -128,13 +119,20 @@ export function RemoteProjectPicker({
           borderBottomColor: theme.separator,
           flexDirection: 'row',
           minHeight: 52,
-          paddingHorizontal: 8,
+          paddingLeft: 8,
+          paddingRight: 8,
         }}>
           <Pressable
             accessibilityRole="button"
             disabled={Boolean(submitting)}
             onPress={onDismiss}
-            style={{ justifyContent: 'center', minHeight: 44, minWidth: 64, paddingHorizontal: 8 }}
+            style={{
+              justifyContent: 'center',
+              minHeight: 44,
+              minWidth: 64,
+              paddingLeft: 8,
+              paddingRight: 8,
+            }}
           >
             <Text style={{ fontSize: 17, fontWeight: '600', color: theme.accent }}>Cancel</Text>
           </Pressable>
@@ -146,7 +144,14 @@ export function RemoteProjectPicker({
             accessibilityRole="button"
             disabled={!directory.data?.path || Boolean(submitting)}
             onPress={() => void addFolder()}
-            style={{ alignItems: 'flex-end', justifyContent: 'center', minHeight: 44, minWidth: 64, paddingHorizontal: 8 }}
+            style={{
+              alignItems: 'flex-end',
+              justifyContent: 'center',
+              minHeight: 44,
+              minWidth: 64,
+              paddingLeft: 8,
+              paddingRight: 8,
+            }}
           >
             {submitting === 'folder'
               ? <Spinner busy />
@@ -158,7 +163,12 @@ export function RemoteProjectPicker({
           </Pressable>
         </View>
 
-        <View style={{ gap: 9, paddingHorizontal: Spacing.three, paddingTop: 13 }}>
+        <View style={{
+          gap: 9,
+          paddingLeft: Spacing.three,
+          paddingRight: Spacing.three,
+          paddingTop: 13,
+        }}>
           <View style={{
             alignItems: 'center',
             borderRadius: Radius.medium,
@@ -178,7 +188,16 @@ export function RemoteProjectPicker({
               onChange={setPathDraft}
               onSubmit={() => visit(pathDraft.trim() || null)}
               placeholder="Path on daemon host"
-              style={{ flex: '1 1', fontSize: 15, minHeight: 44, paddingHorizontal: 9, paddingVertical: 8, color: theme.text }}
+              style={{
+                flex: '1 1',
+                fontSize: 15,
+                minHeight: 44,
+                paddingLeft: 9,
+                paddingRight: 9,
+                paddingTop: 8,
+                paddingBottom: 8,
+                color: theme.text,
+              }}
               value={pathDraft}
             />
             <Pressable
@@ -218,7 +237,7 @@ export function RemoteProjectPicker({
         {error || directory.error ? (
           <View accessibilityLiveRegion="polite" style={{
             borderRadius: Radius.medium,
-            marginHorizontal: Spacing.three,
+            marginLeft: Spacing.three, marginRight: Spacing.three,
             marginTop: 11,
             padding: 10,
             backgroundColor: theme.accentSoft,
@@ -248,7 +267,8 @@ export function RemoteProjectPicker({
           flexDirection: 'row',
           gap: 12,
           minHeight: 58,
-          paddingHorizontal: Spacing.three,
+          paddingLeft: Spacing.three,
+          paddingRight: Spacing.three,
         }}>
           <Pressable
             accessibilityHint="Creates a private workspace on the daemon host"
@@ -294,7 +314,8 @@ function LocationButton({
         flexDirection: 'row',
         gap: 5,
         minHeight: 32,
-        paddingHorizontal: 10,
+        paddingLeft: 10,
+        paddingRight: 10,
         backgroundColor: theme.surfaceMuted,
         opacity: disabled ? 0.35 : 1,
       }}
@@ -318,7 +339,8 @@ function FolderRow({ entry, onOpen }: { entry: WorkingTreeEntry; onOpen: () => v
         flexDirection: 'row',
         gap: 10,
         minHeight: 54,
-        paddingHorizontal: 11,
+        paddingLeft: 11,
+        paddingRight: 11,
         backgroundColor: theme.surface,
       }}
     >

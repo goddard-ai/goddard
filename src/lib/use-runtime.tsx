@@ -1,4 +1,4 @@
-import { useStore } from '@octane-xplat/ui';
+import { useStore } from '@octane-xplat/ui/data';
 
 import { runtime, runtimeState } from './runtime-store';
 

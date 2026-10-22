@@ -1,6 +1,6 @@
 import type { BossDeliverable } from '@waku/client';
 
-import { createStore } from '@octane-xplat/ui';
+import { createStore } from '@octane-xplat/ui/data';
 
 /** The deliverable a row click armed the boss composer with: the record
  * snapshot the chip and sheet render, the boss chat it armed, and whether
@@ -25,13 +25,13 @@ export function clearDeliverableArm(): void {
 
 /** Re-open the armed deliverable's preview sheet (chip tap). */
 export function showArmedDeliverablePreview(): void {
-  deliverableArm.set((current) =>
+  deliverableArm.update((current) =>
     current ? { ...current, previewOpen: true } : current,
   );
 }
 
 export function dismissDeliverablePreview(): void {
-  deliverableArm.set((current) =>
+  deliverableArm.update((current) =>
     current ? { ...current, previewOpen: false } : current,
   );
 }

@@ -1,4 +1,4 @@
-import type { Store } from '@octane-xplat/ui';
+import type { Store } from '@octane-xplat/ui/data';
 
 /** Minimal keyed query cache standing in for react-query: entries are
  * created on first subscribe, refetch when invalidated while observed, and
@@ -48,7 +48,7 @@ export function daemonQueryEntry<T>(
     observers: 0,
     fetcher,
     staleTime,
-    get: () => snapshot,
+    getSnapshot: () => snapshot,
     subscribe: (notify) => {
       listeners.add(notify);
       entry.observers = listeners.size;
@@ -59,9 +59,10 @@ export function daemonQueryEntry<T>(
       };
     },
     set: (next) => {
-      snapshot = typeof next === 'function' ? next(snapshot) : next;
+      snapshot = next;
       for (const notify of listeners) {notify();}
     },
+    update: (updater) => entry.set(updater(snapshot)),
     refetch: async () => {
       const attempt = ++generation;
       snapshot = { ...snapshot, isFetching: true };
@@ -118,7 +119,7 @@ export function setDaemonQueryData<T>(key: readonly unknown[], data: T | ((curre
   entry.set({
     status: 'success',
     data: typeof data === 'function'
-      ? (data as (c: T | undefined) => T | undefined)(entry.get().data) ?? entry.get().data
+      ? (data as (c: T | undefined) => T | undefined)(entry.getSnapshot().data) ?? entry.getSnapshot().data
       : data,
     error: undefined,
     dataUpdatedAt: Date.now(),
@@ -127,7 +128,7 @@ export function setDaemonQueryData<T>(key: readonly unknown[], data: T | ((curre
 }
 
 export function getDaemonQueryData<T>(key: readonly unknown[]): T | undefined {
-  return (entries.get(serializedKey(key)) as DaemonQueryEntry<T> | undefined)?.get().data;
+  return (entries.get(serializedKey(key)) as DaemonQueryEntry<T> | undefined)?.getSnapshot().data;
 }
 
 /** Refetch observed entries under ['daemon', profileId, kind...] matching

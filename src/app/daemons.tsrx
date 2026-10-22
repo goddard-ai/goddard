@@ -2,17 +2,8 @@ import { Haptics } from '../lib/haptics';
 import { requestPair } from '@waku/client';
 import { device } from '@octane-xplat/platform';
 import { useEffect, useState } from 'octane';
-import {
-  Spinner,
-  HStack,
-  Pressable,
-  pushRoute,
-  popRoute,
-  ScrollableArea,
-  Text,
-  View,
-  VStack,
-} from '@octane-xplat/ui';
+import { Spinner, HStack, Pressable, ScrollableArea, Text, View, VStack } from '@octane-xplat/ui';
+import { pushRoute, popRoute } from '@octane-xplat/ui/routing';
 
 import { AppSymbol } from '../components/app-symbol';
 import { ConnectionBanner } from '../components/connection-banner';
@@ -103,7 +94,7 @@ export default function DaemonsScreen() {
   return (
     <VStack style={{ flex: '1 1', backgroundColor: theme.background }}>
       <ScrollableArea style={{ flex: '1 1' }}>
-        <VStack style={{ paddingBottom: 36, paddingHorizontal: 16 }}>
+        <VStack style={{ paddingBottom: 36, paddingLeft: 16, paddingRight: 16 }}>
           <ConnectionBanner />
           {discovered.length ? (
             <>
@@ -136,8 +127,10 @@ export default function DaemonsScreen() {
                         flexDirection: 'row',
                         gap: 12,
                         minHeight: 60,
-                        paddingHorizontal: 14,
-                        paddingVertical: 10,
+                        paddingLeft: 14,
+                        paddingRight: 14,
+                        paddingTop: 10,
+                        paddingBottom: 10,
                       }}
                     >
                       <DaemonAvatar name={found.name} size={36} />
@@ -183,7 +176,7 @@ export default function DaemonsScreen() {
               <HStack style={{
                 alignItems: 'flex-start',
                 gap: 8,
-                marginHorizontal: 12,
+                marginLeft: 12, marginRight: 12,
                 marginTop: 14,
               }}>
                 <AppSymbol
@@ -198,7 +191,12 @@ export default function DaemonsScreen() {
               </HStack>
             </>
           ) : (
-            <VStack style={{ alignItems: 'center', paddingHorizontal: 40, paddingTop: 100 }}>
+            <VStack style={{
+              alignItems: 'center',
+              paddingLeft: 40,
+              paddingRight: 40,
+              paddingTop: 100,
+            }}>
               <Text style={{ fontSize: 19, fontWeight: '700', color: theme.text }}>No saved daemons</Text>
               <Text style={{ fontSize: 15, lineHeight: '20px', marginTop: 8, textAlign: 'center', color: theme.textSecondary }}>
                 Add the address and token shown in Goddard Desktop’s Daemon settings.

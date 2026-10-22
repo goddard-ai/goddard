@@ -1,15 +1,8 @@
 import { Haptics } from '@/lib/haptics';
 import { useEffect, useMemo, useRef, useState } from 'octane';
 import type { PairedClientInfo, PairingState, PairRequestInfo, WakuClient } from '@waku/client';
-import {
-  Spinner,
-  HStack,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-  pushRoute,
-} from '@octane-xplat/ui';
+import { Spinner, HStack, Pressable, Text, TextInput, View } from '@octane-xplat/ui';
+import { pushRoute } from '@octane-xplat/ui/routing';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { DaemonList } from '@/components/daemon-list';
@@ -244,7 +237,14 @@ export function DaemonEditor({
             onSubmit={() => addressInput.current?.focus()}
             placeholder="Optional"
             returnKeyType="next"
-            style={{ flex: '1 1', fontSize: 16.5, minHeight: 53, paddingHorizontal: 8, color: theme.text }}
+            style={{
+              flex: '1 1',
+              fontSize: 16.5,
+              minHeight: 53,
+              paddingLeft: 8,
+              paddingRight: 8,
+              color: theme.text,
+            }}
             value={name}
           />
         </HStack>
@@ -262,7 +262,14 @@ export function DaemonEditor({
             onSubmit={() => tokenInput.current?.focus()}
             placeholder="wss://host.example"
             returnKeyType="next"
-            style={{ flex: '1 1', fontSize: 16.5, minHeight: 53, paddingHorizontal: 8, color: theme.text }}
+            style={{
+              flex: '1 1',
+              fontSize: 16.5,
+              minHeight: 53,
+              paddingLeft: 8,
+              paddingRight: 8,
+              color: theme.text,
+            }}
             value={address}
           />
         </HStack>
@@ -280,7 +287,14 @@ export function DaemonEditor({
             placeholder={profile ? 'Unchanged' : 'Required'}
             returnKeyType="done"
             secure={!revealed}
-            style={{ flex: '1 1', fontSize: 16.5, minHeight: 53, paddingHorizontal: 8, color: theme.text }}
+            style={{
+              flex: '1 1',
+              fontSize: 16.5,
+              minHeight: 53,
+              paddingLeft: 8,
+              paddingRight: 8,
+              color: theme.text,
+            }}
             value={token}
           />
           <Pressable
@@ -305,7 +319,7 @@ export function DaemonEditor({
       <ConnectionFootnote editing={Boolean(profile)} security={security} />
 
       {localError && (
-        <HStack accessibilityLiveRegion="polite" style={{ alignItems: 'flex-start', gap: 7, marginHorizontal: 8, marginTop: 8 }}>
+        <HStack accessibilityLiveRegion="polite" style={{ alignItems: 'flex-start', gap: 7, marginLeft: 8, marginRight: 8, marginTop: 8 }}>
           <AppSymbol
             name={{ ios: 'exclamationmark.circle.fill', android: 'error', web: 'error' }}
             size={14}
@@ -330,7 +344,8 @@ export function DaemonEditor({
             gap: 7,
             justifyContent: 'center',
             minHeight: 48,
-            paddingHorizontal: 14,
+            paddingLeft: 14,
+            paddingRight: 14,
             backgroundColor: String(NativeTint),
             opacity: !canSave ? 0.35 : 1,
           }}
@@ -458,7 +473,7 @@ function PairingSection({ client }: { client: WakuClient }) {
               fontWeight: '600',
               letterSpacing: 0.4,
               marginBottom: 6,
-              marginHorizontal: 12,
+              marginLeft: 12, marginRight: 12,
               textTransform: 'uppercase',
               color: theme.textSecondary,
             }}
@@ -471,7 +486,13 @@ function PairingSection({ client }: { client: WakuClient }) {
                 {index > 0 && (
                   <View style={{ height: 1, marginLeft: 12, backgroundColor: theme.separator }} />
                 )}
-                <HStack style={{ alignItems: 'center', gap: 8, minHeight: 54, paddingHorizontal: 12 }}>
+                <HStack style={{
+                  alignItems: 'center',
+                  gap: 8,
+                  minHeight: 54,
+                  paddingLeft: 12,
+                  paddingRight: 12,
+                }}>
                   <View style={{ flex: '1 1' }}>
                     <Text numberOfLines={1} style={{ fontSize: 16.5, fontWeight: '500', color: theme.text }}>
                       {request.deviceName}
@@ -494,7 +515,8 @@ function PairingSection({ client }: { client: WakuClient }) {
                           borderRadius: Radius.small,
                           justifyContent: 'center',
                           minHeight: 36,
-                          paddingHorizontal: 12,
+                          paddingLeft: 12,
+                          paddingRight: 12,
                           backgroundColor: theme.overlayStrong,
                           opacity: busyId != null ? 0.35 : 1,
                         }}
@@ -511,7 +533,8 @@ function PairingSection({ client }: { client: WakuClient }) {
                           borderRadius: Radius.small,
                           justifyContent: 'center',
                           minHeight: 36,
-                          paddingHorizontal: 12,
+                          paddingLeft: 12,
+                          paddingRight: 12,
                           backgroundColor: String(NativeTint),
                           opacity: busyId != null ? 0.35 : 1,
                         }}
@@ -533,7 +556,7 @@ function PairingSection({ client }: { client: WakuClient }) {
           fontWeight: '600',
           letterSpacing: 0.4,
           marginBottom: 6,
-          marginHorizontal: 12,
+          marginLeft: 12, marginRight: 12,
           marginTop: pairing?.pending.length ? 16 : 0,
           textTransform: 'uppercase',
           color: theme.textSecondary,
@@ -546,8 +569,10 @@ function PairingSection({ client }: { client: WakuClient }) {
           <Text
             style={{
               fontSize: 14.5,
-              paddingHorizontal: 12,
-              paddingVertical: 14,
+              paddingLeft: 12,
+              paddingRight: 12,
+              paddingTop: 14,
+              paddingBottom: 14,
               color: theme.textTertiary,
             }}
           >
@@ -557,8 +582,10 @@ function PairingSection({ client }: { client: WakuClient }) {
           <Text
             style={{
               fontSize: 14.5,
-              paddingHorizontal: 12,
-              paddingVertical: 14,
+              paddingLeft: 12,
+              paddingRight: 12,
+              paddingTop: 14,
+              paddingBottom: 14,
               color: theme.textTertiary,
             }}
           >
@@ -570,7 +597,13 @@ function PairingSection({ client }: { client: WakuClient }) {
               {index > 0 && (
                 <View style={{ height: 1, marginLeft: 12, backgroundColor: theme.separator }} />
               )}
-              <HStack style={{ alignItems: 'center', gap: 8, minHeight: 54, paddingHorizontal: 12 }}>
+              <HStack style={{
+                alignItems: 'center',
+                gap: 8,
+                minHeight: 54,
+                paddingLeft: 12,
+                paddingRight: 12,
+              }}>
                 <View style={{ flex: '1 1' }}>
                   <Text numberOfLines={1} style={{ fontSize: 16.5, fontWeight: '500', color: theme.text }}>
                     {entry.name}
@@ -592,7 +625,8 @@ function PairingSection({ client }: { client: WakuClient }) {
                       borderRadius: Radius.small,
                       justifyContent: 'center',
                       minHeight: 36,
-                      paddingHorizontal: 12,
+                      paddingLeft: 12,
+                      paddingRight: 12,
                       backgroundColor: theme.dangerSoft,
                       opacity: busyId != null ? 0.35 : 1,
                     }}
@@ -607,7 +641,7 @@ function PairingSection({ client }: { client: WakuClient }) {
       </View>
 
       {error && (
-        <HStack accessibilityLiveRegion="polite" style={{ alignItems: 'flex-start', gap: 7, marginHorizontal: 8, marginTop: 8 }}>
+        <HStack accessibilityLiveRegion="polite" style={{ alignItems: 'flex-start', gap: 7, marginLeft: 8, marginRight: 8, marginTop: 8 }}>
           <AppSymbol
             name={{ ios: 'exclamationmark.circle.fill', android: 'error', web: 'error' }}
             size={14}
@@ -703,7 +737,7 @@ function ConnectionFootnote({
   }
 
   return (
-    <HStack style={{ alignItems: 'flex-start', gap: 7, marginHorizontal: 8, marginTop: 8 }}>
+    <HStack style={{ alignItems: 'flex-start', gap: 7, marginLeft: 8, marginRight: 8, marginTop: 8 }}>
       <AppSymbol name={icon} size={15} tintColor={color} />
       <Text style={{ flex: '1 1', fontSize: 13.5, lineHeight: '17px', color }}>{message}</Text>
     </HStack>

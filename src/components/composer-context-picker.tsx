@@ -1,10 +1,4 @@
-import {
-  Spinner,
-  Text,
-  TextInput,
-  View,
-  VirtualList,
-} from '@octane-xplat/ui';
+import { Spinner, Text, TextInput, View, VirtualList } from '@octane-xplat/ui';
 
 import { AppSymbol } from './app-symbol';
 import { BossAvatar } from './boss-roster';
@@ -42,13 +36,14 @@ export function ComposerContextPicker({
         alignItems: 'center',
         paddingLeft: 12,
         paddingRight: 8,
-        marginHorizontal: 6,
+        marginLeft: 6,
+        marginRight: 6,
         marginBottom: 8,
         backgroundColor: theme.inset,
       }}>
         <TextInput
           placeholder={commands ? 'Search commands…' : 'Search mentions and files…'}
-          style={{ flex: '1 1', fontSize: 16, minHeight: 44, paddingVertical: 10, color: theme.text }}
+          style={{ flex: '1 1', fontSize: 16, minHeight: 44, paddingTop: 10, paddingBottom: 10, color: theme.text }}
           value={query}
           onChange={onQueryChange}
         />
@@ -90,11 +85,27 @@ export function ComposerContextPicker({
           <View>
             {error ? (
               <>
-                <Text accessibilityLiveRegion="polite" style={{ fontSize: 14, lineHeight: '18px', paddingHorizontal: 12, paddingVertical: 14, color: theme.danger }}>{error}</Text>
+                <Text accessibilityLiveRegion="polite" style={{
+                  fontSize: 14,
+                  lineHeight: '18px',
+                  paddingLeft: 12,
+                  paddingRight: 12,
+                  paddingTop: 14,
+                  paddingBottom: 14,
+                  color: theme.danger,
+                }}>{error}</Text>
                 <SheetRow label="Retry" onPress={onRetry} />
               </>
             ) : (
-              <Text style={{ fontSize: 14, lineHeight: '18px', paddingHorizontal: 12, paddingVertical: 14, color: theme.textTertiary }}>
+              <Text style={{
+                fontSize: 14,
+                lineHeight: '18px',
+                paddingLeft: 12,
+                paddingRight: 12,
+                paddingTop: 14,
+                paddingBottom: 14,
+                color: theme.textTertiary,
+              }}>
                 {loading && !hasResults
                   ? commands ? 'Loading commands…' : 'Finding mentions and files…'
                   : commands ? 'No matching commands' : 'No matching mentions or files'}

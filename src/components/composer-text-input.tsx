@@ -47,7 +47,7 @@ export function ComposerTextInput({
       Utils.layout.makeMeasureSpec(0, Utils.layout.UNSPECIFIED),
     );
 
-    const padding = metrics(styleObject, 'paddingVertical') * 2;
+    const padding = metrics(styleObject, 'paddingTop') + metrics(styleObject, 'paddingBottom');
     const border = metrics(styleObject, 'borderWidth') * 2;
     const intrinsic =
       Utils.layout.toDeviceIndependentPixels(view.getMeasuredHeight())

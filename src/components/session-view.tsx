@@ -6,15 +6,8 @@ import { atomVisibleText } from '@waku/client/transcript-presentation';
 import type { AgentSession } from '@waku/client';
 import { bossEmployeeLifecycle } from '@waku/client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'octane';
-import {
-  Absolute,
-  DropdownMenu,
-  Pressable,
-  pushRoute,
-  Text,
-  TextInput,
-  View,
-} from '@octane-xplat/ui';
+import { Absolute, DropdownMenu, Pressable, Text, TextInput, View } from '@octane-xplat/ui';
+import { pushRoute } from '@octane-xplat/ui/routing';
 
 import { ActivitySheetHost } from '@/components/activity-sheet';
 import { AppSymbol } from '@/components/app-symbol';
@@ -639,6 +632,7 @@ export function SessionView({
   const taskMenuItems = useMemo(
     () => [
       ...SURFACE_MENU_COMMANDS.map((item) => ({
+        type: 'action' as const,
         key: item.id,
         label: item.title,
         icon: item.symbol,
@@ -646,6 +640,7 @@ export function SessionView({
       })),
       ...(employee
         ? [{
+            type: 'action' as const,
             key: 'assignment',
             label: 'Assignment',
             icon: 'info.circle',
@@ -655,18 +650,21 @@ export function SessionView({
       ...(isBossChat && bossData
         ? [
             {
+              type: 'action' as const,
               key: 'goals',
               label: goalsUnread > 0 ? `Goals · ${goalsUnread} new` : 'Goals',
               icon: 'target',
               onSelect: () => handleTaskMenuCommand('goals'),
             },
             {
+              type: 'action' as const,
               key: 'automation-history',
               label: 'Automation history',
               icon: 'clock',
               onSelect: () => handleTaskMenuCommand('automation-history'),
             },
             {
+              type: 'action' as const,
               key: 'capacity',
               label: 'Capacity',
               icon: 'gauge',
@@ -675,6 +673,7 @@ export function SessionView({
           ]
         : []),
       {
+        type: 'action' as const,
         key: 'model',
         label: modelLabel,
         onSelect: () => handleTaskMenuCommand('model'),
@@ -682,6 +681,7 @@ export function SessionView({
       ...TASK_MENU_COMMANDS
         .filter((item) => !employee || !EMPLOYEE_HIDDEN_COMMANDS.has(item.id))
         .map((item) => ({
+          type: 'action' as const,
           key: item.id,
           label: item.title,
           icon: item.symbol,
@@ -694,7 +694,7 @@ export function SessionView({
   const keyboardPadding = useKeyboardPadding();
 
   return (
-    <View style={[{ flex: '1 1', backgroundColor: theme.background }, keyboardPadding]}>
+    <View style={{ flex: '1 1', backgroundColor: theme.background, ...keyboardPadding }}>
       {/* Self-drawn header strip — the reference's native nav bar becomes
        * composed views (task-menu trigger, title+subtitle, new-task). */}
       <ScreenHeaderBackdrop />
@@ -703,13 +703,21 @@ export function SessionView({
         flexDirection: 'row',
         gap: 6,
         height: 44,
-        paddingHorizontal: 6,
+        paddingLeft: 6,
+        paddingRight: 6,
       }}>
         <Pressable
           accessibilityLabel="Task history"
           accessibilityRole="button"
           onPress={openTaskDrawer}
-          style={{ alignItems: 'center', flexDirection: 'row', gap: 4, minHeight: 36, paddingHorizontal: 8 }}>
+          style={{
+            alignItems: 'center',
+            flexDirection: 'row',
+            gap: 4,
+            minHeight: 36,
+            paddingLeft: 8,
+            paddingRight: 8,
+          }}>
           <AppSymbol
             name={{ ios: 'sidebar.left', android: 'menu', web: 'menu' }}
             size={19}
@@ -794,7 +802,13 @@ export function SessionView({
             />
           </ActivitySheetHost>
         ) : (
-          <View style={{ alignItems: 'center', flex: '1 1', justifyContent: 'center', paddingHorizontal: 32 }}>
+          <View style={{
+            alignItems: 'center',
+            flex: '1 1',
+            justifyContent: 'center',
+            paddingLeft: 32,
+            paddingRight: 32,
+          }}>
             <SessionEmpty
               error={query.error}
               loading={Boolean(session) || query.isPending}
@@ -840,8 +854,15 @@ export function SessionView({
         {findOpen && session && (
           <GlassSurface
             fallbackColor={theme.surface}
-            style={{ borderRadius: Radius.pill, marginHorizontal: 12, marginTop: headerInset + 8 }}>
-            <View style={{ alignItems: 'center', flexDirection: 'row', gap: 8, minHeight: 40, paddingHorizontal: 12 }}>
+            style={{ borderRadius: Radius.pill, marginLeft: 12, marginRight: 12, marginTop: headerInset + 8 }}>
+            <View style={{
+              alignItems: 'center',
+              flexDirection: 'row',
+              gap: 8,
+              minHeight: 40,
+              paddingLeft: 12,
+              paddingRight: 12,
+            }}>
               <AppSymbol
                 name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
                 size={14}
@@ -852,10 +873,10 @@ export function SessionView({
                 onChange={setFindQuery}
                 placeholder="Find in transcript"
                 placeholderTextColor={theme.textGhost}
-                style={{ flex: '1 1', fontSize: 15, paddingVertical: 6, color: theme.text }}
+                style={{ flex: '1 1', fontSize: 15, paddingTop: 6, paddingBottom: 6, color: theme.text }}
                 value={findQuery}
               />
-              <Text style={{ fontSize: 12, fontVariant: ['tabular-nums'], color: theme.textTertiary }}>
+              <Text style={{ fontSize: 12, fontVariant: 'tabular-nums', color: theme.textTertiary }}>
                 {findMatches.length
                   ? `${Math.min(findIndex + 1, findMatches.length)} of ${findMatches.length}`
                   : 'No matches'}
@@ -917,7 +938,7 @@ export function SessionView({
               flexDirection: 'row',
               gap: 6,
               justifyContent: 'center',
-              paddingVertical: 14,
+              paddingTop: 14, paddingBottom: 14,
             }}>
             <AppSymbol
               name={{ ios: 'clock.arrow.circlepath', android: 'history', web: 'history' }}

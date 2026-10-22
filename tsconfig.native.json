@@ -5,7 +5,7 @@
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"jsx": "preserve",
-		"jsxImportSource": "@nativescript-community/octane",
+		"jsxImportSource": "@octane-xplat/jsx",
 		"moduleSuffixes": [".ios", ".android", ".mobile", ""],
 		"customConditions": ["native"],
 		"lib": ["ESNext"],
@@ -13,6 +13,7 @@
 		"paths": { "@/*": ["./src/*"] },
 		"types": ["@nativescript/types", "vite/client"],
 		"noEmit": true,
+		"allowImportingTsExtensions": true,
 		"skipLibCheck": true
 	},
 	"include": ["src/**/*", "references.d.ts"],

@@ -38,7 +38,7 @@ export function Sheet({
             fontWeight: '600',
             letterSpacing: 0.4,
             marginBottom: 6,
-            marginHorizontal: 12,
+            marginLeft: 12, marginRight: 12,
             marginTop: 6,
             textTransform: 'uppercase',
             color: theme.textSecondary,
@@ -55,7 +55,8 @@ export function Sheet({
     <XSheet label={title ?? 'Options'} isOpen={visible} onOpenChange={(isOpen) => {if (!isOpen) {onDismiss();}}} snapPoints={[0.62]}>
       <View
         style={{
-          paddingHorizontal: Spacing.two,
+          paddingLeft: Spacing.two,
+          paddingRight: Spacing.two,
           paddingTop: 4,
           paddingBottom: Math.max(insets.bottom, 14),
           backgroundColor: theme.surface,
@@ -102,8 +103,10 @@ export function SheetRow({
         flexDirection: 'row',
         gap: 11,
         minHeight: 50,
-        paddingHorizontal: 12,
-        paddingVertical: 9,
+        paddingLeft: 12,
+        paddingRight: 12,
+        paddingTop: 9,
+        paddingBottom: 9,
         backgroundColor: selected ? theme.overlay : 'transparent',
         opacity: disabled ? 0.4 : 1,
       }}

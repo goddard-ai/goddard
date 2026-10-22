@@ -25,15 +25,8 @@ import type {
 } from 'mdast';
 
 import type { ReactNode } from 'octane';
-import {
-  Image,
-  Pressable,
-  pushRoute,
-  RichText,
-  RichTextSpan,
-  ScrollableArea,
-  View,
-} from '@octane-xplat/ui';
+import { Image, Pressable, RichText, RichTextSpan, ScrollableArea, View } from '@octane-xplat/ui';
+import { pushRoute } from '@octane-xplat/ui/routing';
 
 import { openUrl } from '@/lib/open-url';
 import {
@@ -199,7 +192,7 @@ function inlineContext(
  * that materializes them lives inside a component body. */
 interface LeafPiece {
   text: string;
-  style: Style[];
+  style: Style;
 }
 
 function leafPieces(
@@ -221,7 +214,7 @@ function leafPieces(
       }
     }
 
-    return { text: slice, style: [style ?? {}, faded] };
+    return { text: slice, style: { ...style, ...faded } };
   });
 }
 
@@ -279,7 +272,7 @@ function RenderLeaf({
   return pieces.map(({ piece, session }) => (
     <RichTextSpan
       text={piece.text}
-      style={session ? [piece.style, ictx.block.styles.sessionMention] : piece.style}
+      style={session ? { ...(piece.style), ...(ictx.block.styles.sessionMention) } : piece.style}
       onPress={session
         ? () => pushRoute({ stack: 'root', name: 'session/:id', params: { id: session } })
         : undefined}
@@ -541,7 +534,7 @@ function RenderListItem({
   const spans = beginTextElement(ctx, marker);
   const opacity = spans.length ? spans[0]![2] : 1;
   const markerStyle = opacity < 1
-    ? [styles.listMarker, { color: applyAlpha(styles.listMarker.color, opacity) }]
+    ? { ...styles.listMarker, color: applyAlpha(styles.listMarker.color, opacity) }
     : styles.listMarker;
 
   return (
@@ -570,7 +563,7 @@ function RenderTable({
       <ScrollableArea axis="inline">
         <View>
           {head ? (
-            <View style={[styles.tableRow, styles.tableHeadRow]}>
+            <View style={{ ...styles.tableRow, ...styles.tableHeadRow }}>
               {head.children.map((cell, cellIndex) => (
                 <RenderTableCell
                   cell={cell}
@@ -619,7 +612,7 @@ function RenderTableCell({
   const ictx = inlineContext(ctx, flattenInline(cell.children), textStyle.color);
   return (
     <View style={styles.tableCell}>
-      <RichText style={[textStyle, align ? { textAlign: align } : null]}>
+      <RichText style={{ ...textStyle, ...(align ? { textAlign: align } : null) }}>
         <RenderInline nodes={cell.children} ictx={ictx} />
       </RichText>
     </View>

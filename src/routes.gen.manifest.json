@@ -27,7 +27,8 @@
 			"source": "src/app/connect.tsrx",
 			"loader": false,
 			"guard": false,
-			"head": false
+			"head": false,
+			"errorBoundary": false
 		},
 		{
 			"name": "daemon-editor",
@@ -39,7 +40,8 @@
 			"source": "src/app/daemon-editor.tsrx",
 			"loader": false,
 			"guard": false,
-			"head": false
+			"head": false,
+			"errorBoundary": false
 		},
 		{
 			"name": "daemon-scan",
@@ -51,7 +53,8 @@
 			"source": "src/app/daemon-scan.tsrx",
 			"loader": false,
 			"guard": false,
-			"head": false
+			"head": false,
+			"errorBoundary": false
 		},
 		{
 			"name": "daemons",
@@ -63,7 +66,8 @@
 			"source": "src/app/daemons.tsrx",
 			"loader": false,
 			"guard": false,
-			"head": false
+			"head": false,
+			"errorBoundary": false
 		},
 		{
 			"name": "deliverables",
@@ -75,7 +79,8 @@
 			"source": "src/app/deliverables.tsrx",
 			"loader": false,
 			"guard": false,
-			"head": false
+			"head": false,
+			"errorBoundary": false
 		},
 		{
 			"name": "index",
@@ -87,7 +92,8 @@
 			"source": "src/app/index.tsrx",
 			"loader": false,
 			"guard": false,
-			"head": false
+			"head": false,
+			"errorBoundary": false
 		},
 		{
 			"name": "new-task",
@@ -99,7 +105,8 @@
 			"source": "src/app/new-task.tsrx",
 			"loader": false,
 			"guard": false,
-			"head": false
+			"head": false,
+			"errorBoundary": false
 		},
 		{
 			"name": "notifications",
@@ -111,7 +118,8 @@
 			"source": "src/app/notifications.tsrx",
 			"loader": false,
 			"guard": false,
-			"head": false
+			"head": false,
+			"errorBoundary": false
 		},
 		{
 			"name": "plans",
@@ -123,7 +131,8 @@
 			"source": "src/app/plans.tsrx",
 			"loader": false,
 			"guard": false,
-			"head": false
+			"head": false,
+			"errorBoundary": false
 		},
 		{
 			"name": "plans/:id",
@@ -137,7 +146,8 @@
 			"source": "src/app/plans/[id].tsrx",
 			"loader": false,
 			"guard": false,
-			"head": false
+			"head": false,
+			"errorBoundary": false
 		},
 		{
 			"name": "session/:id",
@@ -151,7 +161,8 @@
 			"source": "src/app/session/[id].tsrx",
 			"loader": false,
 			"guard": false,
-			"head": false
+			"head": false,
+			"errorBoundary": false
 		}
 	]
 }

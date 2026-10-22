@@ -22,16 +22,8 @@ import {
 import { atomVisibleText } from '@waku/client/transcript-presentation';
 import { parseRenameSubmission } from '@waku/client/composer-autocomplete';
 import { useEffect, useRef, useState, type ReactNode } from 'octane';
-import {
-  Spinner,
-  Pressable,
-  ScrollableArea,
-  Text,
-  TextArea,
-  pushRoute,
-  useSafeAreaInsets,
-  View,
-} from '@octane-xplat/ui';
+import { Spinner, Pressable, ScrollableArea, Text, TextArea, useSafeAreaInsets, View } from '@octane-xplat/ui';
+import { pushRoute } from '@octane-xplat/ui/routing';
 
 import { AppSymbol } from './app-symbol';
 import { BossAvatar } from './boss-roster';
@@ -99,18 +91,17 @@ export function ComposerCard({
     <GlassSurface
       fallbackColor={theme.composer}
       interactive
-      style={[
-        {
-          borderRadius: 26,
-          paddingBottom: 8,
-          paddingHorizontal: 10,
-          paddingTop: 6,
-        },
-        !liquidGlass && {
+      style={{
+        borderRadius: 26,
+        paddingBottom: 8,
+        paddingLeft: 10,
+        paddingRight: 10,
+        paddingTop: 6,
+        ...(!liquidGlass && {
           borderColor: theme.border,
           borderWidth: hairline,
-        },
-      ]}>
+        }),
+      }}>
       {beforeInput}
       <ComposerTextInput
         multiline
@@ -119,8 +110,10 @@ export function ComposerCard({
           lineHeight: '21px',
           maxHeight: 120,
           minHeight: 42,
-          paddingHorizontal: 6,
-          paddingVertical: 8,
+          paddingLeft: 6,
+          paddingRight: 6,
+          paddingTop: 8,
+          paddingBottom: 8,
           color: theme.text,
         }}
         {...inputProps}
@@ -200,7 +193,7 @@ export function SendButton({
         width: 36,
         backgroundColor: disabled
           ? theme.surfaceMuted
-          : steering ? NativeTint : theme.inverse,
+          : steering ? String(NativeTint) : theme.inverse,
         opacity: busy ? 0.6 : 1,
       }}>
       {busy ? (
@@ -532,7 +525,7 @@ export function MobileComposer({
           : 'Message agent';
 
   return (
-    <View style={[{ paddingHorizontal: 12, paddingTop: 4 }, shellPadding]}>
+    <View style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 4, ...shellPadding }}>
       {permission && !userInput && (
         <PermissionPanel
           permission={permission}
@@ -557,8 +550,10 @@ export function MobileComposer({
             flexDirection: 'row',
             gap: 9,
             marginBottom: 7,
-            paddingHorizontal: 10,
-            paddingVertical: 7,
+            paddingLeft: 10,
+            paddingRight: 10,
+            paddingTop: 7,
+            paddingBottom: 7,
             backgroundColor: theme.dangerSoft,
           }}>
           <Text style={{ flex: '1 1', fontSize: 13, fontWeight: '600', lineHeight: '17px', color: theme.danger }}>
@@ -589,7 +584,8 @@ export function MobileComposer({
             gap: 8,
             marginBottom: 6,
             minHeight: 34,
-            paddingHorizontal: 10,
+            paddingLeft: 10,
+            paddingRight: 10,
             backgroundColor: theme.overlay,
             borderColor: theme.border,
           }}>
@@ -629,8 +625,10 @@ export function MobileComposer({
             flexDirection: 'row',
             gap: 7,
             marginBottom: 7,
-            paddingHorizontal: 10,
-            paddingVertical: 6,
+            paddingLeft: 10,
+            paddingRight: 10,
+            paddingTop: 6,
+            paddingBottom: 6,
             backgroundColor: theme.overlay,
           }}>
           <BossAvatar identity={boss.identity} size={16} />
@@ -646,7 +644,14 @@ export function MobileComposer({
           <ScrollableArea
             axis="inline"
             style={{ marginBottom: 6 }}>
-            <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 4, paddingTop: 4, paddingBottom: 6 }}>
+            <View style={{
+              flexDirection: 'row',
+              gap: 8,
+              paddingLeft: 4,
+              paddingRight: 4,
+              paddingTop: 4,
+              paddingBottom: 6,
+            }}>
               {deliverable ? (
                 <Pressable
                   accessibilityHint="Opens the deliverable preview"
@@ -879,7 +884,8 @@ export function PermissionPanel({
               flexDirection: 'row',
               gap: 6,
               minHeight: 38,
-              paddingHorizontal: 14,
+              paddingLeft: 14,
+              paddingRight: 14,
               backgroundColor: option.allow ? theme.inverse : theme.surfaceMuted,
               opacity: responding && responding !== option.id ? 0.55 : 1,
             }}>
@@ -999,10 +1005,12 @@ function UserInputPanel({
                 gap: 8,
                 marginBottom: 6,
                 minHeight: 44,
-                paddingHorizontal: 11,
-                paddingVertical: 8,
+                paddingLeft: 11,
+                paddingRight: 11,
+                paddingTop: 8,
+                paddingBottom: 8,
                 backgroundColor: checked ? theme.overlayStrong : theme.surfaceMuted,
-                borderColor: checked ? NativeTint : 'transparent',
+                borderColor: checked ? String(NativeTint) : 'transparent',
               }}>
               <View style={{ flex: '1 1' }}>
                 <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>{option.label}</Text>
@@ -1031,10 +1039,12 @@ function UserInputPanel({
             fontSize: 14,
             lineHeight: '18px',
             minHeight: 42,
-            paddingHorizontal: 11,
-            paddingVertical: 9,
+            paddingLeft: 11,
+            paddingRight: 11,
+            paddingTop: 9,
+            paddingBottom: 9,
             backgroundColor: theme.surfaceMuted,
-            borderColor: custom.trim() ? NativeTint : 'transparent',
+            borderColor: custom.trim() ? String(NativeTint) : 'transparent',
             color: theme.text,
           }}
           value={custom}
@@ -1060,7 +1070,12 @@ function UserInputPanel({
                 setSubmitting(false);
               });
             }}
-            style={{ justifyContent: 'center', minHeight: 36, paddingHorizontal: 6 }}>
+            style={{
+              justifyContent: 'center',
+              minHeight: 36,
+              paddingLeft: 6,
+              paddingRight: 6,
+            }}>
             <Text style={{ fontSize: 14, fontWeight: '600', color: theme.textTertiary }}>Dismiss</Text>
           </Pressable>
           <Pressable
@@ -1082,7 +1097,8 @@ function UserInputPanel({
               borderWidth: 1,
               justifyContent: 'center',
               minHeight: 30,
-              paddingHorizontal: 10,
+              paddingLeft: 10,
+              paddingRight: 10,
               borderColor: custom.trim() ? theme.borderStrong : theme.border,
               opacity: !custom.trim() || submitting ? 0.55 : 1,
             }}>
@@ -1099,7 +1115,12 @@ function UserInputPanel({
           <Pressable
             accessibilityRole="button"
             onPress={() => setIndex((value) => value - 1)}
-            style={{ justifyContent: 'center', minHeight: 36, paddingHorizontal: 6 }}>
+            style={{
+              justifyContent: 'center',
+              minHeight: 36,
+              paddingLeft: 6,
+              paddingRight: 6,
+            }}>
             <Text style={{ fontSize: 14, fontWeight: '600', color: theme.textSecondary }}>Back</Text>
           </Pressable>
         ) : <View />}
@@ -1115,7 +1136,8 @@ function UserInputPanel({
             justifyContent: 'center',
             minHeight: 36,
             minWidth: 78,
-            paddingHorizontal: 14,
+            paddingLeft: 14,
+            paddingRight: 14,
             backgroundColor: theme.inverse,
             opacity: !canContinue || submitting ? 0.55 : 1,
           }}>

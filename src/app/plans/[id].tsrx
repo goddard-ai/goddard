@@ -1,5 +1,6 @@
 /** @jsxImportSource @nativescript-community/octane */
-import { Pressable, ScrollableArea, Text, useRoute, View } from '@octane-xplat/ui';
+import { Pressable, ScrollableArea, Text, View } from '@octane-xplat/ui';
+import { useRoute } from '@octane-xplat/ui/routing';
 import { PlanDetail } from '@/components/plans';
 import { navigateBack, ScreenHeaderBackdrop } from '@/components/screen-header';
 import { useBossState } from '@/lib/daemon-queries';

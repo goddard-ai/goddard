@@ -38,7 +38,8 @@ export function ScanFallback(props: {
           borderRadius: Radius.medium,
           justifyContent: 'center',
           minHeight: 44,
-          paddingHorizontal: 18,
+          paddingLeft: 18,
+          paddingRight: 18,
           backgroundColor: String(NativeTint),
         }}
       >

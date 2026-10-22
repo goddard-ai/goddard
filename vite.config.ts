@@ -17,10 +17,10 @@ export default defineConfig(({ mode }) => ({
 		// Suffix chain (first match wins): .web → shared → fallback.
 		extensions: [
 			'.web.tsrx',
-			'.tsrx',
 			'.web.tsx',
-			'.tsx',
 			'.web.ts',
+			'.tsrx',
+			'.tsx',
 			'.mjs',
 			'.mts',
 			'.ts',

@@ -1,7 +1,7 @@
 /** @jsxImportSource @nativescript-community/octane */
 import { registerElement } from '@nativescript-community/octane';
 import type { Attributes } from '@nativescript-community/octane/intrinsics';
-import { Color, Device, Screen } from '@nativescript/core';
+import { Color, Device, GridLayout, Screen } from '@nativescript/core';
 import { Drawer as NSDrawer, install } from '@nativescript-community/ui-drawer';
 import { useEffect, useRef } from 'octane';
 
@@ -19,10 +19,12 @@ class TaskDrawerView extends NSDrawer {
 
 install();
 registerElement('taskdrawer', TaskDrawerView);
+registerElement('drawercontent', GridLayout);
 
 declare module '@nativescript-community/octane/intrinsics' {
   interface NativeScriptElements {
     taskdrawer: Attributes<typeof TaskDrawerView>;
+    drawercontent: Attributes<typeof GridLayout>;
   }
 }
 
@@ -73,14 +75,14 @@ export function TaskDrawerSurface({
     >
       {/* The sheet sits behind the content; `under` mode keeps it fixed
           while the card slides. Its own width is the open offset. */}
-      <gridlayout hostSlot="leftDrawer" style={{ width: drawerWidth }}>
+      <drawercontent hostSlot="leftDrawer" style={{ width: drawerWidth }}>
         {drawerContent}
-      </gridlayout>
-      <gridlayout hostSlot="mainContent">
+      </drawercontent>
+      <drawercontent hostSlot="mainContent">
         {/* The lifted card: hardware radius, clipped contents, and a faint
             edge shadow — always on; it paints offscreen until the card
             slides, so no per-progress animation is needed. */}
-        <gridlayout
+        <drawercontent
           ref={liftCard}
           style={{
             backgroundColor: new Color(theme.background),
@@ -89,8 +91,8 @@ export function TaskDrawerSurface({
           }}
         >
           {children}
-        </gridlayout>
-      </gridlayout>
+        </drawercontent>
+      </drawercontent>
     </taskdrawer>
   );
 }

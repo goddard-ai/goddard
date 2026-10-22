@@ -4,9 +4,9 @@ Normal installs use published `@octane-xplat/*` packages. To temporarily use a
 local checkout, run from this repository root, replacing `/path/to/octane-xplat`
 with your checkout path:
 
-Use a checkout compatible with Octane Xplat `0.11.1`, the version this app pins.
-Newer releases have removed the routing and store APIs the app uses; linking
-the latest checkout requires migrating those APIs first.
+Use a checkout compatible with Octane Xplat `0.16.1`, the version this app pins.
+The app imports routing and stores from `@octane-xplat/ui/routing` and
+`@octane-xplat/ui/data`. Unreleased checkouts may change these contracts.
 
 ```sh
 pnpm -C /path/to/octane-xplat install
@@ -25,7 +25,7 @@ dependencies there.
 Verify the links with:
 
 ```sh
-realpath node_modules/@octane-xplat/{effects,platform,share,ui,cli,lint}
+realpath node_modules/@octane-xplat/{effects,jsx,platform,share,ui,cli,lint}
 ```
 
 Every path should be under your checkout. To restore published packages, run:

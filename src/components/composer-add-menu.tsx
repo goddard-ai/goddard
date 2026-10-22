@@ -46,20 +46,20 @@ export function ComposerAddMenu({
   if (disabled) {return trigger;}
 
   // Let the menu finish dismissing before presenting a picker.
-  const choose = (kind: 'command' | 'file') => setTimeout(() => onChooseContext(kind), 160);
-  const pick = (source: ComposerAttachmentSource) => setTimeout(() => onChoose?.(source), 160);
+  const choose = (kind: 'command' | 'file') => { setTimeout(() => onChooseContext(kind), 160); };
+  const pick = (source: ComposerAttachmentSource) => { setTimeout(() => onChoose?.(source), 160); };
 
   return (
     <DropdownMenu
       trigger={trigger}
       items={[
-        { key: 'command', label: 'Commands', onSelect: () => choose('command') },
-        { key: 'mention', label: 'Mention files', onSelect: () => choose('file') },
+        { type: 'action' as const, key: 'command', label: 'Commands', onSelect: () => choose('command') },
+        { type: 'action' as const, key: 'mention', label: 'Mention files', onSelect: () => choose('file') },
         ...(onChoose
           ? [
-              { key: 'files', label: 'Files', onSelect: () => pick('files') },
-              { key: 'camera', label: 'Camera', onSelect: () => pick('camera') },
-              { key: 'photo', label: 'Photo', onSelect: () => pick('photo') },
+              { type: 'action' as const, key: 'files', label: 'Files', onSelect: () => pick('files') },
+              { type: 'action' as const, key: 'camera', label: 'Camera', onSelect: () => pick('camera') },
+              { type: 'action' as const, key: 'photo', label: 'Photo', onSelect: () => pick('photo') },
             ]
           : []),
       ]}
