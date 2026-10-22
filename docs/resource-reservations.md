@@ -30,12 +30,14 @@ goddard-agent resource run \
 The command starts after its entire resource set becomes available. It inherits
 the working directory, environment, stdin, stdout, and stderr, and the wrapper
 returns its exit code. Waiting messages go to stderr and the task's ordinary
-activity rows. Requests queue in submission order; a blocked request may delay
-later requests for otherwise free resources. The wait is bounded, defaults to
-600 seconds, and accepts 0–86400 seconds. Zero allows an immediate grant only.
+activity rows. Earlier requests keep priority for the capacity they need;
+later requests can use spare or unrelated capacity. The wait is bounded,
+defaults to 600 seconds, and accepts 0–86400 seconds. Zero allows an immediate
+grant only.
 
 For an iOS workflow, replace the example UUID with a simulator UUID from
-`xcrun simctl list devices`. Reserve the simulator and build capacity together:
+`xcrun simctl list devices`. When a phase needs the simulator and build capacity
+at the same time, reserve them together:
 
 ```sh
 goddard-agent resource run \
@@ -57,6 +59,32 @@ and desktop-input capacity is freed separately. Goddard never shuts down,
 reboots, or adopts an already-running user-owned device. A `linux:` VM has no
 host inventory probe, so its residency cannot outlive its reservation — shut
 the VM down before the workload exits.
+
+## Release build capacity between phases
+
+Use separate top-level reservations when compilation finishes before device
+testing begins. Build capacity stays held while the reserved command runs, so a
+shell waiting for review or inspecting a running app still holds its build slot.
+
+For a project with separate build and test scripts, replace the script paths and
+simulator UUID below. The build script only compiles; the test script boots the
+reserved simulator, tests the existing build, and shuts the simulator down before
+exiting:
+
+```sh
+goddard-agent resource run \
+  --json '{"resources":{"native_builds":1},"purpose":"build iOS test artifacts"}' \
+  -- ./scripts/build-ios.sh &&
+goddard-agent resource run \
+  --json '{"resources":{"exclusive":["ios:00000000-0000-0000-0000-000000000001"],"resident_devices":1},"purpose":"test existing iOS build"}' \
+  -- ./scripts/test-ios-without-building.sh
+```
+
+The first command releases its build slot before the second queues for a device.
+The device phase may wait again. Nested commands borrow their outer reservation;
+ending a nested build does not release the outer command's build slot. If a later
+phase needs another build, end the current reservation, including shutting down
+its owned device, and acquire the next phase's complete set.
 
 ## Inspect, cancel, or reserve manually
 
@@ -132,8 +160,9 @@ not stopped automatically. Do not delete the ledger to bypass a live holder.
 
 If a request stays blocked, inspect `resource status`. Stop your own workload
 or shut down your own retained device, then inspect status again. Device
-inventory failures block new resident-device grants rather than assume free
-capacity. iOS discovery uses `simctl`; Android discovery recognizes local
+inventory failures retain existing claims and block new device grants for the
+affected platform. A successful probe for another platform can still clear its
+stopped devices. iOS discovery uses `simctl`; Android discovery recognizes local
 emulator/QEMU processes and their AVD names. Unknown emulator names still count
 as external capacity. AVD names containing spaces and remote Android sessions
 are not reliably attributable in this version. Linux VMs are not discovered:

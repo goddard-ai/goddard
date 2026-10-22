@@ -43,6 +43,16 @@ struct Observation {
     errors: Vec<String>,
 }
 
+impl Observation {
+    fn unprobed() -> Self {
+        Self {
+            blind: vec!["ios:".into(), "android:".into()],
+            errors: vec!["device inventory not probed".into()],
+            ..Self::default()
+        }
+    }
+}
+
 /// Exclusive keys that draw on the shared `resident_devices` pool:
 /// mobile simulators/emulators plus named Linux VMs. Other exclusive
 /// names remain plain locks that consume no resident capacity.
@@ -50,19 +60,15 @@ fn resident_device(key: &str) -> bool {
     key.starts_with("ios:") || key.starts_with("android:") || key.starts_with("linux:")
 }
 
-/// Resident classes the host inventory probe can report. A `linux:` VM
-/// is not observable: its residency is bounded by the reservation's own
-/// lifecycle rather than a retained idle-device observation.
-fn probed_device(key: &str) -> bool {
-    key.starts_with("ios:") || key.starts_with("android:")
-}
-
 /// Whether a resident key still proves live capacity after its
 /// reservation ends — the inventory still lists it, or its class's probe
 /// failed so it is conservatively retained.
 fn retained_device(key: &str, observation: &Observation) -> bool {
     observation.devices.iter().any(|device| device == key)
-        || (probed_device(key) && !observation.errors.is_empty())
+        || observation
+            .blind
+            .iter()
+            .any(|class| key.starts_with(class.as_str()))
 }
 
 impl Broker {
@@ -88,7 +94,7 @@ impl Broker {
         // claim devices get a fresh one, and Status polls share a short
         // cache — a waiter's 500 ms poll must not serialize the authority
         // lock behind probe latency. Every other op reports "not probed":
-        // an errored observation keeps resident-device claims
+        // an unknown observation keeps resident-device claims
         // conservatively and still blocks resident-device grants, which is
         // what `release_admission` already relies on.
         let claims_devices = match &operation {
@@ -103,15 +109,7 @@ impl Broker {
         } else if matches!(operation, ResourceOperation::Status { .. }) {
             self.transaction(task, operation, cached_observation())
         } else {
-            self.transaction(
-                task,
-                operation,
-                Observation {
-                    devices: Vec::new(),
-                    blind: vec!["ios:".into(), "android:".into()],
-                    errors: vec!["device inventory not probed".into()],
-                },
-            )
+            self.transaction(task, operation, Observation::unprobed())
         }
     }
 
@@ -144,7 +142,7 @@ impl Broker {
         let policy: ResourcePolicy = read_json(&self.root.join("policy.json"))?.unwrap_or_default();
         let observation = observe();
         let now = now();
-        // Observation failure retains all previously granted resident claims.
+        // A failed or skipped probe retains only that class's resident claims.
         ledger.reservations.retain_mut(|r| {
             // A reanchored lease answers liveness through its surviving
             // owner, never the transacting daemon. Holder anchors that were
@@ -246,6 +244,7 @@ impl Broker {
                         r.task == task
                             && r.granted_at.is_some()
                             && !r.released
+                            && !r.cancelled
                             && !r.resources.is_empty()
                     }) {
                         bail!(
@@ -496,11 +495,11 @@ impl Broker {
         purpose: String,
         claim: AdmissionClaim,
     ) -> Result<AdmissionAttempt> {
-        // Device claims need the real inventory — an empty observation
-        // would hide user-owned devices and over-grant. Model-only and
-        // counted-pool tickets never consult it.
+        // Model-only and counted-pool tickets skip inventory probes, but
+        // this transaction also reconciles and schedules other device
+        // reservations. Unknown inventory must preserve those claims.
         let observe = if resources.exclusive.is_empty() && resources.resident_devices == 0 {
-            Observation::default
+            Observation::unprobed
         } else {
             observe
         };
@@ -532,11 +531,7 @@ impl Broker {
         let _ = self.transaction(
             task,
             ResourceOperation::Release { id },
-            Observation {
-                devices: vec![],
-                blind: vec!["ios:".into(), "android:".into()],
-                errors: vec!["admission release".into()],
-            },
+            Observation::unprobed(),
         );
     }
 
@@ -551,11 +546,7 @@ impl Broker {
                         let _ = broker.transaction(
                             task,
                             ResourceOperation::Cancel { id },
-                            Observation {
-                                devices: vec![],
-                                blind: vec!["ios:".into(), "android:".into()],
-                                errors: vec!["lifecycle cleanup".into()],
-                            },
+                            Observation::unprobed(),
                         );
                     }
                 }
@@ -704,7 +695,16 @@ fn admission_blockers(
         blockers.push(AdmissionBlocker::HostResources {
             detail: "host capacity is occupied".into(),
         });
-    } else if !claim.skip_wait_order && starves_earlier_waiter(request, ledger) {
+    } else if !claim.skip_wait_order
+        && blocked(
+            request,
+            ledger,
+            policy,
+            observation,
+            Some(task),
+            ledger.reservations.len(),
+        )
+    {
         blockers.push(AdmissionBlocker::HostResources {
             detail: "an earlier resource request is waiting for the same capacity".into(),
         });
@@ -769,16 +769,6 @@ fn claimable_while_waiting(
     claimable
 }
 
-/// Whether granting `request` now would leapfrog a parked `Acquire` that
-/// needs the same capacity. A pending request counts as sharing when it
-/// names an identical exclusive key or draws on the same counted pool.
-fn starves_earlier_waiter(request: &ResourceSet, ledger: &Ledger) -> bool {
-    ledger
-        .reservations
-        .iter()
-        .filter(|r| r.granted_at.is_none() && !r.cancelled && !r.released)
-        .any(|waiting| shares_capacity(&waiting.resources, request))
-}
 fn schedule(ledger: &mut Ledger, policy: &ResourcePolicy, observation: &Observation, now: u64) {
     for index in 0..ledger.reservations.len() {
         let r = &ledger.reservations[index];
@@ -1301,6 +1291,217 @@ mod tests {
                 .iter()
                 .any(|error| error == "device inventory not probed")
         );
+    }
+
+    #[test]
+    fn failed_inventory_retains_only_its_own_device_class() {
+        for (stopped, unknown, blind) in
+            [(ios(), android(), "android:"), (android(), ios(), "ios:")]
+        {
+            let h = Harness::new();
+            h.broker
+                .set_policy(&ResourcePolicy {
+                    resident_devices: 2,
+                    ..Default::default()
+                })
+                .unwrap();
+            let a = Uuid::new_v4();
+            let b = Uuid::new_v4();
+            let stopped_id = id(&h.acquire(a, stopped.clone()));
+            let unknown_id = id(&h.acquire(b, unknown));
+            for (owner, id) in [(a, stopped_id), (b, unknown_id)] {
+                h.broker
+                    .operate(owner, ResourceOperation::Release { id })
+                    .unwrap();
+            }
+            let observation = || Observation {
+                devices: vec![],
+                blind: vec![blind.into()],
+                errors: vec!["one device inventory unavailable".into()],
+            };
+            let next = h
+                .broker
+                .transaction(Uuid::new_v4(), acquisition(stopped, None), observation())
+                .unwrap();
+            assert!(granted(&next, id(&next)));
+            assert!(next.reservations.iter().all(|r| r.id != stopped_id));
+            assert!(next.reservations.iter().any(|r| r.id == unknown_id));
+
+            // A later successful inventory also releases the unknown claim.
+            let recovered = h.op(a, ResourceOperation::Status { id: None });
+            assert!(recovered.reservations.iter().all(|r| r.id != unknown_id));
+        }
+    }
+
+    #[test]
+    fn unprobed_admissions_preserve_device_ownership_and_waiters() {
+        for resources in [ResourceSet::default(), build()] {
+            let h = Harness::new();
+            h.broker
+                .set_policy(&ResourcePolicy {
+                    resident_devices: 2,
+                    ..Default::default()
+                })
+                .unwrap();
+            let owner = Uuid::new_v4();
+            let retained = id(&h.acquire(owner, ios()));
+            h.broker.release_admission(owner, retained);
+            let waiter = Uuid::new_v4();
+            let queued = h
+                .broker
+                .transaction(
+                    waiter,
+                    acquisition(android(), None),
+                    Observation {
+                        devices: [ios().exclusive, android().exclusive].concat(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            let queued_id = id(&queued);
+            assert!(!granted(&queued, queued_id));
+            let admission = h
+                .broker
+                .try_admission(
+                    Uuid::new_v4(),
+                    Uuid::new_v4(),
+                    resources,
+                    "device-free admission".into(),
+                    AdmissionClaim {
+                        daemon: Uuid::new_v4(),
+                        provider: "codex".into(),
+                        model: "test".into(),
+                        live_limit: 1,
+                        hard_cap: 1,
+                        allow_burst: false,
+                        skip_wait_order: false,
+                    },
+                )
+                .unwrap();
+            assert!(admission.granted);
+            assert!(
+                admission
+                    .status
+                    .reservations
+                    .iter()
+                    .any(|r| r.id == retained)
+            );
+            assert!(!granted(&admission.status, queued_id));
+
+            // Only an actual observation that both devices stopped can
+            // release the retained device and grant the parked request.
+            let stopped = h.op(waiter, ResourceOperation::Status { id: None });
+            assert!(stopped.reservations.iter().all(|r| r.id != retained));
+            assert!(granted(&stopped, queued_id));
+        }
+    }
+
+    #[test]
+    fn cancelled_device_claim_does_not_block_its_tasks_next_build() {
+        let h = Harness::new();
+        let task = Uuid::new_v4();
+        let first = id(&h.acquire(
+            task,
+            ResourceSet {
+                native_builds: 1,
+                ..ios()
+            },
+        ));
+        h.mutate(|ledger| ledger.reservations[0].holder_pid = i32::MAX as u32);
+        let observation = || Observation {
+            devices: ios().exclusive,
+            ..Default::default()
+        };
+        let next = h
+            .broker
+            .transaction(task, acquisition(build(), None), observation())
+            .unwrap();
+        assert!(granted(&next, id(&next)));
+        let retained = next.reservations.iter().find(|r| r.id == first).unwrap();
+        assert!(retained.cancelled);
+        assert_eq!(retained.resources, ios());
+
+        // The old device still consumes capacity, even though it no
+        // longer prevents this task from acquiring unrelated resources.
+        let device = h
+            .broker
+            .transaction(Uuid::new_v4(), acquisition(ios(), None), observation())
+            .unwrap();
+        assert!(!granted(&device, id(&device)));
+    }
+
+    #[test]
+    fn admission_uses_spare_capacity_without_starving_a_device_waiter() {
+        let h = Harness::new();
+        h.broker
+            .set_policy(&ResourcePolicy {
+                native_builds: 3,
+                ..Default::default()
+            })
+            .unwrap();
+        let waiter = Uuid::new_v4();
+        let head = h
+            .broker
+            .transaction(
+                waiter,
+                acquisition(
+                    ResourceSet {
+                        native_builds: 1,
+                        ..ios()
+                    },
+                    None,
+                ),
+                Observation {
+                    devices: ios().exclusive,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let head_id = id(&head);
+        assert!(!granted(&head, head_id));
+        let claim = || AdmissionClaim {
+            daemon: Uuid::new_v4(),
+            provider: "codex".into(),
+            model: "test".into(),
+            live_limit: 1,
+            hard_cap: 1,
+            allow_burst: false,
+            skip_wait_order: false,
+        };
+        let spare = h
+            .broker
+            .try_admission(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                ResourceSet {
+                    native_builds: 2,
+                    ..Default::default()
+                },
+                "use spare builds".into(),
+                claim(),
+            )
+            .unwrap();
+        assert!(spare.granted);
+        assert!(!granted(&spare.status, head_id));
+        let last_slot = h
+            .broker
+            .try_admission(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                build(),
+                "must leave capacity for the head".into(),
+                claim(),
+            )
+            .unwrap();
+        assert!(!last_slot.granted);
+        assert!(last_slot.blockers.iter().any(|blocker| matches!(
+            blocker,
+            AdmissionBlocker::HostResources { detail } if detail.contains("earlier resource request")
+        )));
+        assert!(granted(
+            &h.op(waiter, ResourceOperation::Status { id: None }),
+            head_id,
+        ));
     }
 
     #[test]

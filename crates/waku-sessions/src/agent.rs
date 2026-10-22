@@ -1066,7 +1066,8 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
     instruction.push_str(&format!(
         "\n- `resource` — reserve host resources before simulator/emulator, expensive native build, or shared desktop input work. \
          Use `{command} resource run --json '{{\"resources\":{{\"native_builds\":1}},\"purpose\":\"native build\"}}' -- COMMAND ARGS`. \
-         Acquire the full resource set once; nested commands reuse subsets automatically. \
+         Acquire the full resource set for each phase; nested commands reuse subsets automatically. \
+         Use separate top-level build and device-test reservations when those phases do not overlap. End the build reservation when compilation finishes instead of keeping it open for review or app inspection. \
          iOS uses `exclusive:[\"ios:<UDID>\"]` plus `resident_devices:1`; Android uses `android:<AVD>`; a physical device uses `device:<id>` with no `resident_devices`; a brokered Linux VM uses `linux:<name>`. \
          Add `desktop_input:1` for shared focus/input, not for isolated app processes. \
          Shut down owned virtual devices before ending a reservation; idle devices still consume capacity. \
