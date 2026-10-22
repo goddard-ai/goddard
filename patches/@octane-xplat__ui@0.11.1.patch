@@ -1,0 +1,26 @@
+diff --git a/dist/native/tap-to-blur.ios.js b/dist/native/tap-to-blur.ios.js
+index beb8281b7447499b0f59bc08d6ccaced07203cf2..e839d37438b98297e33b2df7b2feeb6207098ed5 100644
+--- a/dist/native/tap-to-blur.ios.js
++++ b/dist/native/tap-to-blur.ios.js
+@@ -43,7 +43,7 @@ function iosAttach() {
+ 			}
+ 			return true;
+ 		},
+-		tap(_recognizer) {
++		'tap:'(_recognizer) {
+ 			iosWindow.endEditing(true);
+ 		}
+ 	}, {
+diff --git a/src/tap-to-blur.ios.ts b/src/tap-to-blur.ios.ts
+index 85769a63ef8ec71b2fb5e5007a5313fb3592e61c..3c7d2eacbe188561ce6f636c2ffe76c307de3685 100644
+--- a/src/tap-to-blur.ios.ts
++++ b/src/tap-to-blur.ios.ts
+@@ -63,7 +63,7 @@ function iosAttach() {
+ 					return true
+ 				},
+ 
+-				tap(_recognizer: any) {
++				'tap:'(_recognizer: any) {
+ 					iosWindow.endEditing(true)
+ 				},
+ 			},
