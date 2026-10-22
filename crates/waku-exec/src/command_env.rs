@@ -2117,25 +2117,17 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn captures_environment_from_a_shell_process() {
-        let id = SHELL_ENV_CAPTURE_ID.fetch_add(1, Ordering::Relaxed);
-        let directory =
-            std::env::temp_dir().join(format!("waku-command-env-test-{}-{id}", std::process::id()));
-        fs::create_dir(&directory).expect("create shell fixture directory");
-        let shell = directory.join("fake-shell");
-        fs::write(
-            &shell,
-            "#!/bin/sh\n/usr/bin/printf 'PATH=/Users/example/.fnm/current/bin:/usr/bin\\000GODDARD_TEST_TOKEN=from-shell\\000' > \"$GODDARD_SHELL_ENV_CAPTURE_FILE\"\n",
+        // An installed interpreter avoids Linux ETXTBSY when another test's
+        // fork inherits a writable descriptor to a freshly written script.
+        let environment = capture_shell_environment(
+            Path::new("/bin/sh"),
+            &[
+                "-c",
+                "/usr/bin/printf 'PATH=/Users/example/.fnm/current/bin:/usr/bin\\000GODDARD_TEST_TOKEN=from-shell\\000' > \"$GODDARD_SHELL_ENV_CAPTURE_FILE\"",
+            ],
+            LOGIN_SHELL_ENV_TIMEOUT,
         )
-        .expect("write shell fixture");
-        let mut permissions = fs::metadata(&shell)
-            .expect("read shell fixture")
-            .permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(&shell, permissions).expect("make shell fixture executable");
-
-        let environment =
-            capture_shell_environment(&shell, &["-i", "-l", "-c"], LOGIN_SHELL_ENV_TIMEOUT)
-                .expect("capture shell environment");
+        .expect("capture shell environment");
 
         assert_eq!(
             environment,
@@ -2150,8 +2142,6 @@ mod tests {
                 ),
             ]
         );
-        let _ = fs::remove_file(shell);
-        let _ = fs::remove_dir(directory);
     }
 
     #[cfg(unix)]
