@@ -930,7 +930,7 @@ impl WakuBackend {
             chain.id,
         );
         let trigger = sender
-            .and_then(|id| self.boss.employee(id))
+            .and_then(|id| self.boss.employee_including_retired(id))
             .map(|employee| crate::model::ReportTrigger::new(&employee, kind));
         if let Err(error) = self.queue_agent_prompt_with_id(
             target,
@@ -1055,7 +1055,7 @@ impl WakuBackend {
             .and_then(|step| step.attempts.last())
             .and_then(|attempt| attempt.employee_id);
         let trigger = sender
-            .and_then(|id| self.boss.employee(id))
+            .and_then(|id| self.boss.employee_including_retired(id))
             .map(|employee| {
                 crate::model::ReportTrigger::new(
                     &employee,

@@ -182,6 +182,17 @@ impl WakuBackend {
     /// the lineage — parked in or delivered to any generation, not only
     /// the session holding the pointer now.
     pub(super) fn boss_lineage_message_landed(&self, session_id: Uuid, message_id: Uuid) -> bool {
+        if self.boss.is_boss(session_id) {
+            match ContinuityLedger::load(&self.boss_continuity_path()) {
+                Ok(ledger) if ledger.cleared_notification_ids.contains(&message_id) => return true,
+                Ok(_) => {}
+                Err(error) => {
+                    // An unreadable receipt store cannot authorize redelivery.
+                    eprintln!("could not check Boss notification receipt: {error:#}");
+                    return true;
+                }
+            }
+        }
         let mut state = self.task_state.lock();
         self.boss_lineage_sessions(session_id).iter().any(|id| {
             state
@@ -1191,6 +1202,38 @@ impl WakuBackend {
         // successor was never published, so it joins the retired rows.
         journal.abort();
         let ledger = ContinuityLedger::load(&continuity_path)?;
+        // Clearing consumes both delivered reports and parked notifications.
+        // Preserve their identities before deleting the only transcript copy,
+        // including reports from versions that did not attach trigger metadata.
+        let notification_ids: std::collections::BTreeSet<_> = {
+            let mut state = self.task_state.lock();
+            let mut ids = std::collections::BTreeSet::new();
+            for session in state.sessions.iter_mut().filter(|session| {
+                session.boss_managed
+                    && session.project_id == identity.id
+                    && session.planning.is_none()
+            }) {
+                self.task_store.hydrate(session)?;
+                ids.extend(session.messages.iter().filter_map(|message| {
+                    (message.role == MessageRole::User
+                        && (message.hidden
+                            || message.sent_by_task.is_some()
+                            || message.report_trigger.is_some()))
+                    .then_some(message.id)
+                }));
+                ids.extend(session.queued_messages.iter().filter_map(|message| {
+                    matches!(
+                        message.source,
+                        crate::model::QueuedMessageSource::Agent { .. }
+                    )
+                    .then_some(message.id)
+                }));
+            }
+            ids
+        };
+        ContinuityLedger::update(&continuity_path, |latest| {
+            latest.cleared_notification_ids.extend(notification_ids);
+        })?;
         // A durable refresh request — manual compact or incident — is
         // answered by the clear itself: the fresh chat must not inherit
         // the request and immediately rotate again.

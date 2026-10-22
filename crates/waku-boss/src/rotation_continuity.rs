@@ -179,6 +179,10 @@ pub struct RotationRequest {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ContinuityLedger {
+    /// Notification identities consumed by a human chat clear. Unlike chat
+    /// rows, these receipts survive deletion so reconciled work stays quiet.
+    #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub cleared_notification_ids: std::collections::BTreeSet<Uuid>,
     pub replacement_leases: Vec<crate::replacement_lease::ReplacementLease>,
     pub frozen_coordinator: Option<crate::guarded_lifecycle::FrozenCoordinator>,
     pub coordinator_effects: Vec<crate::coordinator_contract::CoordinatorEffect>,

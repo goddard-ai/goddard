@@ -17196,6 +17196,14 @@ fn clear_replaces_the_boss_chat_and_removes_retired_generations() {
     });
     let mut employee = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     employee.boss_managed = true;
+    let mut report = crate::model::Message::new(crate::model::MessageRole::User, "old report");
+    report.hidden = true;
+    report.sent_by_task = Some(employee.id);
+    let report_id = report.id;
+    retired.messages.push(report);
+    let queued = crate::model::QueuedMessage::agent("parked report", Some(employee.id));
+    let queued_id = queued.id;
+    retired.queued_messages.push(queued);
     {
         let mut state = backend.task_state.lock();
         state.push_session(retired.clone());
@@ -17263,6 +17271,9 @@ fn clear_replaces_the_boss_chat_and_removes_retired_generations() {
     assert!(backend.boss_fenced_chat(active));
     assert!(!backend.boss_fenced_chat(cleared.id));
     assert!(backend.boss.is_boss(cleared.id));
+    assert!(backend.boss_lineage_message_landed(cleared.id, report_id));
+    assert!(backend.boss_lineage_message_landed(cleared.id, queued_id));
+    assert!(!backend.boss_lineage_message_landed(cleared.id, Uuid::new_v4()));
     // The chain survives bookkeeping: a second clear swaps again.
     let BossResult::Session {
         session: cleared_next,
@@ -19540,6 +19551,7 @@ fn reopen_backend(root: &Path) -> WakuBackend {
 fn chains_execute_in_order_sealing_handoffs_quietly() {
     let root = std::env::temp_dir().join(format!("waku-chain-order-{}", Uuid::new_v4()));
     let (backend, boss, head) = chain_backend(&root);
+    assert_eq!(rotation_boss(&backend), boss);
     let project = backend.task_state.lock().projects[0].id;
     let personas = backend.boss.document().personas.clone();
     let outcome = backend
@@ -19674,6 +19686,62 @@ fn chains_execute_in_order_sealing_handoffs_quietly() {
     assert!(reports[0].contains("Outcome"));
     backend.drive_chains();
     assert_eq!(chain_reports(&backend, boss).len(), 1, "redelivery dedupes");
+    // Finished employees may already have left the live roster when chain
+    // routing runs. Their notification must still name the turn's trigger.
+    backend
+        .boss
+        .retire_expired(crate::model::unix_time() + 86_401)
+        .unwrap();
+    assert!(backend.boss.employee(second.session_id).is_none());
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.sessions.iter_mut().find(|s| s.id == boss).unwrap();
+        session.messages.retain(|message| message.id != chain_id);
+        session
+            .queued_messages
+            .retain(|message| message.id != chain_id);
+        session.finish_active_turn(crate::model::TurnStatus::Completed);
+        state.mark_session_dirty(boss);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend.agent.note_driver_event(
+        boss,
+        &DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    );
+    backend.drive_chains();
+    {
+        let state = backend.task_state.lock();
+        let session = state.sessions.iter().find(|s| s.id == boss).unwrap();
+        let trigger = session
+            .messages
+            .iter()
+            .find(|m| m.id == chain_id)
+            .and_then(|m| m.report_trigger.as_ref())
+            .unwrap();
+        assert_eq!(trigger.kind, crate::model::ReportTriggerKind::Finished);
+    }
+    let BossResult::Session { session: fresh, .. } = backend
+        .handle_boss_operation(None, BossOperation::Clear, &EventSink::detached())
+        .unwrap()
+    else {
+        panic!("fresh Boss chat expected")
+    };
+    backend.drive_chains();
+    assert!(
+        chain_reports(&backend, fresh.id).is_empty(),
+        "clear consumes old reports"
+    );
+    drop(backend);
+    let backend = reopen_backend(&root);
+    backend.drive_chains();
+    assert!(
+        chain_reports(&backend, fresh.id).is_empty(),
+        "receipts survive restart"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
