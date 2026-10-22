@@ -4,7 +4,6 @@
 	],
 	"rules": {
 		"curly": "error",
-		"xplat/spacing": "error",
 		"xplat/no-dom-globals": "error",
 		"xplat/no-web-only-api": "error",
 		"xplat/element-vocabulary": "error",
