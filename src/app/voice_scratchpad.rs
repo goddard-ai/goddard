@@ -5011,7 +5011,7 @@ impl Waku {
             composer::ComposerCard::SideChat { .. } => "side-chat",
         };
         let content = match chrome {
-            PressToTalkChrome::Hold => self.render_press_to_talk_indicator(&theme),
+            PressToTalkChrome::Hold => self.render_press_to_talk_indicator(&theme, cx),
             PressToTalkChrome::Bubble(bubble) => {
                 self.render_press_to_talk_bubble(bubble, surface_key, &theme, cx)
             }
@@ -5042,7 +5042,7 @@ impl Waku {
     /// with its red dot, or "Finishing transcription…" while the worker
     /// drains. The Starting window paints nothing — capture begins fast
     /// enough that a chip would only flicker.
-    fn render_press_to_talk_indicator(&self, theme: &Theme) -> AnyElement {
+    fn render_press_to_talk_indicator(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let label = self
             .press_to_talk
             .notice_label()
@@ -5052,6 +5052,7 @@ impl Waku {
         div()
             .id("ptt-indicator")
             .occlude()
+            .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
             .flex_none()
             .flex()
             .items_center()
@@ -5108,6 +5109,7 @@ impl Waku {
         div()
             .id("ptt-notice")
             .occlude()
+            .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
             .flex_none()
             .flex()
             .items_center()
@@ -5225,6 +5227,12 @@ impl Waku {
         div()
             .id(SharedString::from(format!("ptt-bubble-{surface_key}")))
             .occlude()
+            .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                if matches!(event.button, MouseButton::Navigate(_)) {
+                    this.commit_press_to_talk_bubble_edit(cx);
+                    this.navigation_mouse_down(event, window, cx);
+                }
+            }))
             // The field's escape arrives as `Clear` — it is not opted
             // into `clear_on_escape`, so it propagates up to the card.
             .on_action(cx.listener(|this, _: &crate::input::Clear, window, cx| {
@@ -5425,7 +5433,9 @@ impl Waku {
                 .items_start()
                 .gap(px(6.0))
                 .children(match chrome {
-                    PressToTalkChrome::Hold => Some(self.render_press_to_talk_indicator(&theme)),
+                    PressToTalkChrome::Hold => {
+                        Some(self.render_press_to_talk_indicator(&theme, cx))
+                    }
                     PressToTalkChrome::Bubble(bubble) => {
                         Some(self.render_press_to_talk_bubble(bubble, "annotation", &theme, cx))
                     }

@@ -1,0 +1,1 @@
+- Three-finger swipes and mouse back/forward buttons now navigate while the pointer is over a memory-note editor in Boss Brain.

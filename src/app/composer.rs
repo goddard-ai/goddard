@@ -6867,6 +6867,13 @@ impl Waku {
         let trash_focus = self.transcript_control_focus("pasted-text-remove", cx);
         let card = div()
             .occlude()
+            .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                if matches!(event.button, MouseButton::Navigate(_)) {
+                    // Navigation clears the outgoing editor, so save its text first.
+                    this.commit_pasted_text_editor(cx);
+                    this.navigation_mouse_down(event, window, cx);
+                }
+            }))
             .key_context(PASTED_TEXT_CONTEXT)
             .on_action(cx.listener(|this, _: &DismissMenu, window, cx| {
                 this.discard_pasted_text_editor(window, cx);
