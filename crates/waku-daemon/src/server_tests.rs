@@ -401,6 +401,9 @@ fn start_recreates_a_missing_projectless_workspace() {
     assert!(!root.join("repo-that-was-deleted").exists());
 
     client.shutdown();
+    // This fixture owns the listener: stop it even if the client closes
+    // before the server acknowledges its best-effort shutdown message.
+    shutdown.store(true, Ordering::Release);
     server.join().unwrap();
     std::fs::remove_dir_all(root).ok();
     std::fs::remove_dir_all(
