@@ -18,6 +18,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::io;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -27,9 +28,7 @@ use waku_protocol::SubprocessLabelSample;
 /// blocked in `recv_timeout`, not running — the cap prices the children,
 /// not the threads.
 const MAX_CONCURRENT_SUBPROCESSES: usize = 8;
-/// A spawn that cannot get a permit this long proceeds anyway — a wedged
-/// child must not freeze every future spawn forever — and logs, since the
-/// gate is meant to fail only when something is already wrong.
+/// A spawn that cannot get a permit this long fails without starting a child.
 const PERMIT_WAIT: Duration = Duration::from_secs(60);
 /// One child holding a permit this long earns a stderr line; the aggregate
 /// counters record that it happened but not *when*.
@@ -93,15 +92,12 @@ pub fn snapshot() -> BTreeMap<String, SubprocessLabelSample> {
         .collect()
 }
 
-/// A held (or timed-out) spawn slot. Dropping returns the token and
+/// A held spawn slot. Dropping returns the token and
 /// records the hold; carrying it inside a child handle extends the hold to
 /// the handle's lifetime.
 pub struct Permit {
     tokens: crossbeam_channel::Sender<()>,
     label: String,
-    /// `false` when the wait timed out and the spawn proceeds uncounted by
-    /// the cap — the stats still record the wait and the hold.
-    held: bool,
     started: Instant,
 }
 
@@ -116,12 +112,9 @@ impl Drop for Permit {
             entry.hold_ms += held_ms;
             entry.max_hold_ms = entry.max_hold_ms.max(held_ms);
         }
-        if self.held {
-            // Try-send rather than send: a full channel would mean a bug
-            // minted extra tokens, and blocking inside a drop must never
-            // happen.
-            let _ = self.tokens.try_send(());
-        }
+        // Try-send rather than send: a full channel would mean a bug
+        // minted extra tokens, and blocking inside a drop must never happen.
+        let _ = self.tokens.try_send(());
         if held_ms >= OUTLIER_HOLD.as_millis() as u64 {
             eprintln!(
                 "goddard-daemon: subprocess `{}` held a spawn slot for {held_ms}ms",
@@ -131,38 +124,52 @@ impl Drop for Permit {
     }
 }
 
-fn acquire_on(tokens: &PermitTokens, label: String, limit: Duration) -> Permit {
+fn acquire_on(tokens: &PermitTokens, label: String, deadline: Instant) -> io::Result<Permit> {
     {
         let mut stats = stats().lock().expect("subprocess stats lock");
         stats.entry(label.clone()).or_default().in_flight += 1;
     }
     let waited = Instant::now();
-    let held = tokens.1.recv_timeout(limit).is_ok();
+    let held = deadline
+        .checked_duration_since(waited)
+        .filter(|remaining| !remaining.is_zero())
+        .is_some_and(|remaining| tokens.1.recv_timeout(remaining).is_ok());
+    let expired = Instant::now() >= deadline;
     let wait_ms = waited.elapsed().as_millis() as u64;
     {
         let mut stats = stats().lock().expect("subprocess stats lock");
         let entry = stats.entry(label.clone()).or_default();
         entry.wait_ms += wait_ms;
         entry.max_wait_ms = entry.max_wait_ms.max(wait_ms);
+        if !held || expired {
+            entry.in_flight = entry.in_flight.saturating_sub(1);
+        }
     }
-    if !held {
-        eprintln!(
-            "goddard-daemon: subprocess `{label}` waited {wait_ms}ms for a spawn slot; spawning unbounded"
-        );
+    if !held || expired {
+        if held {
+            let _ = tokens.0.try_send(());
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("subprocess `{label}` deadline expired waiting for a spawn slot"),
+        ));
     }
-    Permit {
+    Ok(Permit {
         tokens: tokens.0.clone(),
         label,
-        held,
         started: Instant::now(),
-    }
+    })
 }
 
-/// Wait for a spawn slot for `label`, recording the wait. Waiting longer
-/// than [`PERMIT_WAIT`] logs and returns a tokenless permit — see the
-/// constant.
-pub fn acquire(label: String) -> Permit {
-    acquire_on(permits(), label, PERMIT_WAIT)
+/// Wait for a spawn slot for `label`, failing after [`PERMIT_WAIT`].
+pub fn acquire(label: String) -> io::Result<Permit> {
+    acquire_until(label, Instant::now() + PERMIT_WAIT)
+}
+
+/// Acquire before the request's absolute deadline. Queueing consumes that
+/// same deadline; a timed-out request never starts a child without a permit.
+pub fn acquire_until(label: String, deadline: Instant) -> io::Result<Permit> {
+    acquire_on(permits(), label, deadline)
 }
 
 #[cfg(test)]
@@ -181,11 +188,21 @@ mod tests {
     #[test]
     fn a_permit_waits_until_a_token_frees() {
         let tokens = test_tokens(1);
-        let first = acquire_on(&tokens, "test-first".to_owned(), Duration::from_secs(5));
+        let first = acquire_on(
+            &tokens,
+            "test-first".to_owned(),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
         let (done_tx, done_rx) = mpsc::channel();
         let thread = std::thread::spawn(move || {
-            let permit = acquire_on(&tokens, "test-late".to_owned(), Duration::from_secs(5));
-            let _ = done_tx.send(permit.held);
+            let permit = acquire_on(
+                &tokens,
+                "test-late".to_owned(),
+                Instant::now() + Duration::from_secs(5),
+            )
+            .unwrap();
+            let _ = done_tx.send(());
             drop(permit);
         });
         assert!(
@@ -193,22 +210,45 @@ mod tests {
             "a second acquire should still be waiting"
         );
         drop(first);
-        assert!(
-            done_rx
-                .recv_timeout(Duration::from_secs(5))
-                .expect("a freed token should unblock the waiter")
-        );
+        done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a freed token should unblock the waiter");
         thread.join().unwrap();
     }
 
     #[test]
-    fn a_permit_times_out_and_spawns_unbounded() {
+    fn a_timed_out_waiter_does_not_receive_or_mint_a_permit() {
         let tokens = test_tokens(1);
-        let first = acquire_on(&tokens, "test-holder".to_owned(), Duration::from_secs(5));
-        let late = acquire_on(&tokens, "test-late".to_owned(), Duration::from_millis(50));
-        assert!(first.held);
-        assert!(!late.held);
-        drop(late);
+        let first = acquire_on(
+            &tokens,
+            "test-holder".to_owned(),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        let label = "test-expired-waiter".to_owned();
+        let error = acquire_on(
+            &tokens,
+            label.clone(),
+            Instant::now() + Duration::from_millis(20),
+        )
+        .err()
+        .expect("saturated admission must fail");
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(snapshot()[&label].in_flight, 0);
+        assert_eq!(snapshot()[&label].spawns, 0);
+        assert!(tokens.1.try_recv().is_err());
         drop(first);
+        assert!(tokens.1.try_recv().is_ok());
+        assert!(tokens.1.try_recv().is_err());
+    }
+
+    #[test]
+    fn an_expired_deadline_cannot_take_an_available_slot() {
+        let tokens = test_tokens(1);
+        let error = acquire_on(&tokens, "test-already-expired".to_owned(), Instant::now())
+            .err()
+            .expect("expired admission must fail");
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(tokens.1.try_recv().is_ok());
     }
 }

@@ -189,7 +189,17 @@ impl Proc {
     /// the handle, so this suits children a caller must pipe or wait on
     /// itself but which still end within a request.
     pub fn spawn_bounded(&mut self) -> io::Result<BoundedChild> {
-        let permit = crate::subprocess::acquire(self.exec_label());
+        let permit = crate::subprocess::acquire(self.exec_label())?;
+        self.spawn_with_permit(permit)
+    }
+
+    /// Spawn only if admission succeeds before the request's deadline.
+    pub fn spawn_bounded_until(&mut self, deadline: Instant) -> io::Result<BoundedChild> {
+        let permit = crate::subprocess::acquire_until(self.exec_label(), deadline)?;
+        self.spawn_with_permit(permit)
+    }
+
+    fn spawn_with_permit(&mut self, permit: crate::subprocess::Permit) -> io::Result<BoundedChild> {
         spawn(&mut self.command).map(|child| BoundedChild {
             child: Some(child),
             _permit: permit,
@@ -199,14 +209,14 @@ impl Proc {
     /// Spawn through [`spawn`] under a permit and collect output; the
     /// permit holds for the child's whole run.
     pub fn output(&mut self) -> io::Result<Output> {
-        let _permit = crate::subprocess::acquire(self.exec_label());
+        let _permit = crate::subprocess::acquire(self.exec_label())?;
         output(&mut self.command)
     }
 
     /// Spawn through [`spawn`] under a permit and wait for exit; the
     /// permit holds for the child's whole run.
     pub fn status(&mut self) -> io::Result<ExitStatus> {
-        let _permit = crate::subprocess::acquire(self.exec_label());
+        let _permit = crate::subprocess::acquire(self.exec_label())?;
         spawn(&mut self.command)?.wait()
     }
 }
@@ -1744,6 +1754,16 @@ mod tests {
 
         assert_eq!(output.stdout, b"stdout");
         assert_eq!(output.stderr, b"stderr");
+    }
+
+    #[test]
+    fn expired_spawn_admission_does_not_execute_the_command() {
+        let mut command = plain_command("goddard-test-command-that-must-not-be-executed");
+        let error = command
+            .spawn_bounded_until(Instant::now())
+            .err()
+            .expect("an expired request must fail before spawning");
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     }
 
     #[test]
