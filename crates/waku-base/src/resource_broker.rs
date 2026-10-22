@@ -2637,14 +2637,22 @@ mod tests {
         let a = Uuid::new_v4();
         let first = h.acquire(a, build());
         let first_id = id(&first);
-        // SIG_IGN survives exec, so this orphan ignores the TERM grace.
-        let mut workload = Workload(
-            Command::new("/bin/sh")
-                .args(["-c", "trap '' TERM; exec /bin/sleep 30"])
-                .process_group(0)
-                .spawn()
-                .unwrap(),
-        );
+        // Install SIG_IGN before spawn returns; a shell trap can race the
+        // broker's first TERM. The ignored disposition survives exec.
+        let mut command = Command::new("/bin/sleep");
+        command.arg("30").process_group(0);
+        // SAFETY: the child hook only calls async-signal-safe signal and
+        // reads errno on failure; it does not allocate or acquire locks.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::signal(libc::SIGTERM, libc::SIG_IGN) == libc::SIG_ERR {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(())
+                }
+            });
+        }
+        let mut workload = Workload(command.spawn().unwrap());
         h.op(
             a,
             ResourceOperation::Attach {
