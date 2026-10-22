@@ -220,6 +220,8 @@ enum PaletteAction {
     /// "New terminal in…" — the project picker; the pick floats a fresh
     /// terminal rooted at the project.
     NewTerminalIn,
+    SplitTerminalRight,
+    SplitTerminalDown,
     NewTaskInDirectory(PathBuf, bool),
     NewTaskProjectless(bool),
     NewTaskInSameWorktree,
@@ -2626,6 +2628,24 @@ impl Waku {
                 None,
                 PaletteAction::NewTerminalIn,
                 "new terminal in project directory shell console floating",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("terminal.split_right"),
+                "icons/split.svg",
+                Some(ShortcutHint::action(&SplitTerminal)),
+                PaletteAction::SplitTerminalRight,
+                "split terminal right horizontal pane shell console",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("terminal.split_down"),
+                "icons/split-down.svg",
+                Some(ShortcutHint::action(&SplitTerminalDown)),
+                PaletteAction::SplitTerminalDown,
+                "split terminal down vertical pane shell console",
                 next(),
             ),
             CommandPaletteItem::command(
@@ -5643,6 +5663,12 @@ impl Waku {
                 if !self.open_terminal_project_switcher(window, cx) {
                     self.new_terminal_action(&NewTerminal, window, cx);
                 }
+            }
+            PaletteAction::SplitTerminalRight => {
+                self.split_terminal_action(&SplitTerminal, window, cx)
+            }
+            PaletteAction::SplitTerminalDown => {
+                self.split_terminal_down_action(&SplitTerminalDown, window, cx)
             }
             PaletteAction::NewTaskInDirectory(path, incognito) => {
                 self.create_task_in_directory(path, incognito, window, cx)

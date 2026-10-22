@@ -3909,6 +3909,10 @@ terminal.minimize:
   en: Minimize to floating terminal
 terminal.split:
   en: Split terminal
+terminal.split_right:
+  en: Split terminal right
+terminal.split_down:
+  en: Split terminal down
 terminal.split_at_max:
   en: "At most %{max} panes"
 

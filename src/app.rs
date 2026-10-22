@@ -95,13 +95,14 @@ use crate::{
     OpenResumePicker, OpenSettings, PushBaseBranch, Quit, ReplaceAllMatches, RunProjectScript,
     SaveFile, SelectAllProjectsRows, SelectAutomationsTab, SelectFavoriteModel, SelectFirstProject,
     SelectFirstTask, SelectLastProject, SelectLastTask, SelectProjectsTab, SelectSidebarSession,
-    SplitTerminal, StepModelPickerBackward, SwitchProjectBackward, SwitchProjectForward,
-    SwitchTaskBackward, SwitchTaskForward, SyncBranch, ToggleAutomationsPage, ToggleBigPicture,
-    ToggleBranchPicker, ToggleCommandPalette, ToggleEmployeeAttention, ToggleEnvironment,
-    ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
-    ToggleFpsCounter, ToggleFullScreen, ToggleGitPanel, ToggleInboxPage, ToggleModelPicker,
-    ToggleProjectsPage, ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar,
-    ToggleTerminalMaximize, ToggleTerminals, ToggleUsagePanel, ToggleWorkspace, Zoom,
+    SplitTerminal, SplitTerminalDown, StepModelPickerBackward, SwitchProjectBackward,
+    SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward, SyncBranch, ToggleAutomationsPage,
+    ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleEmployeeAttention,
+    ToggleEnvironment, ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex,
+    ToggleFindWholeWord, ToggleFpsCounter, ToggleFullScreen, ToggleGitPanel, ToggleInboxPage,
+    ToggleModelPicker, ToggleProjectsPage, ToggleRightPanel, ToggleRuntimeModePicker,
+    ToggleSessionPin, ToggleSidebar, ToggleTerminalMaximize, ToggleTerminals, ToggleUsagePanel,
+    ToggleWorkspace, Zoom,
 };
 
 #[cfg(target_os = "macos")]

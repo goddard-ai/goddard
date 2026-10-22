@@ -1149,6 +1149,17 @@ pub enum PersistedRightPanelSurface {
     Terminal(Uuid),
 }
 
+/// A terminal group's directional splits. Leaves refer to stable terminal ids.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum TerminalPaneLayout {
+    Pane(Uuid),
+    Split {
+        down: bool,
+        first: Box<TerminalPaneLayout>,
+        second: Box<TerminalPaneLayout>,
+    },
+}
+
 /// The durable part of an open terminal. Goddard reopens a fresh shell at the
 /// last reported cwd; it does not resume the interrupted process.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1176,6 +1187,8 @@ pub struct PersistedTerminal {
     /// empty unless the record anchors a split group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub panes: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_layout: Option<TerminalPaneLayout>,
 }
 
 /// A right-panel surface maximized over the window, if one was.

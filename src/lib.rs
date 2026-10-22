@@ -143,6 +143,7 @@ actions!(
         CloseDockedTerminal,
         DismissDockedTerminal,
         SplitTerminal,
+        SplitTerminalDown,
         RunProjectScript,
         CopySelection,
         CopyWorkingDirectory,

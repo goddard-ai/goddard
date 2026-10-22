@@ -1391,6 +1391,7 @@ impl Waku {
                         custom_title: record.custom_title.clone(),
                         pane_of: record.pane_of,
                         panes: record.panes.clone(),
+                        pane_layout: record.pane_layout.clone(),
                     })
             })
             .collect();
@@ -1568,6 +1569,7 @@ impl Waku {
                         custom_title: terminal.custom_title.clone(),
                         pane_of: terminal.pane_of,
                         panes: terminal.panes.clone(),
+                        pane_layout: terminal.pane_layout.clone(),
                     },
                 )
             })

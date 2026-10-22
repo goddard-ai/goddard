@@ -3859,6 +3859,8 @@ impl Waku {
         // ordinary shortcuts do not flash model details or sweep controls.
         if event.modifiers.alt != self.sidebar_alt_modifier_down {
             self.sidebar_alt_modifier_down = event.modifiers.alt;
+            // Terminal split controls switch direction immediately on Option/Alt.
+            cx.notify();
             self.sidebar_alt_generation = self.sidebar_alt_generation.wrapping_add(1);
             let generation = self.sidebar_alt_generation;
             if !event.modifiers.alt {
@@ -3945,7 +3947,9 @@ impl Waku {
         self.sidebar_shortcut_hint_generation =
             self.sidebar_shortcut_hint_generation.wrapping_add(1);
         self.sidebar_shortcut_hint_chord_used = false;
-        self.sidebar_alt_modifier_down = false;
+        if std::mem::take(&mut self.sidebar_alt_modifier_down) {
+            cx.notify();
+        }
         self.sidebar_alt_generation = self.sidebar_alt_generation.wrapping_add(1);
         if self.sidebar_alt_held {
             self.sidebar_alt_held = false;

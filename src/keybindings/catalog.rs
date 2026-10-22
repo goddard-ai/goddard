@@ -1636,7 +1636,16 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor {
         id: "terminal.split",
         action: || Box::new(crate::SplitTerminal),
-        title_key: "terminal.split",
+        title_key: "terminal.split_right",
+        title_index: None,
+        category: C::Terminal,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "terminal.split_down",
+        action: || Box::new(crate::SplitTerminalDown),
+        title_key: "terminal.split_down",
         title_index: None,
         category: C::Terminal,
         editability: EDITABLE,

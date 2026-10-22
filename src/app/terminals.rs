@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::TerminalPaneLayout;
 use crate::ui::ActivationExt;
 
 /// One entry in the sidebar's Terminals group. `session` scopes the
@@ -31,13 +32,13 @@ pub(super) struct TerminalRecord {
     /// Ordered pane ids splitting this terminal beyond the anchor, which
     /// always lays out first. Empty unless this record anchors a group.
     pub panes: Vec<Uuid>,
+    /// Explicit split geometry; absent for legacy stack/grid groups.
+    pub pane_layout: Option<TerminalPaneLayout>,
 }
 
-/// A right-panel terminal tab splits into a vertical stack — at most
-/// three panes share the strip's full width.
+/// Maximum panes in a right-panel terminal tab.
 pub(super) const RIGHT_PANEL_TERMINAL_MAX_PANES: usize = 3;
-/// A standalone terminal filling the main area splits into a grid at
-/// most three columns wide — a 3x3 layout, nine panes.
+/// Maximum panes in a standalone or floating terminal group.
 pub(super) const STANDALONE_TERMINAL_MAX_PANES: usize = 9;
 /// Columns the standalone grid lays out across before wrapping rows.
 pub(super) const STANDALONE_TERMINAL_GRID_COLUMNS: usize = 3;
@@ -96,6 +97,89 @@ fn terminal_group_ids(records: &HashMap<Uuid, TerminalRecord>, anchor_id: Uuid) 
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Retain surviving leaves, collapsing closed panes, and append panes added by
+/// drag and drop. Membership stays authoritative over saved layout metadata.
+fn terminal_pane_layout(
+    saved: Option<&TerminalPaneLayout>,
+    panes: &[Uuid],
+    down: bool,
+) -> Option<TerminalPaneLayout> {
+    fn retain(
+        layout: &TerminalPaneLayout,
+        remaining: &mut Vec<Uuid>,
+    ) -> Option<TerminalPaneLayout> {
+        match layout {
+            TerminalPaneLayout::Pane(id) => {
+                let index = remaining.iter().position(|pane| pane == id)?;
+                remaining.remove(index);
+                Some(TerminalPaneLayout::Pane(*id))
+            }
+            TerminalPaneLayout::Split {
+                down,
+                first,
+                second,
+            } => match (retain(first, remaining), retain(second, remaining)) {
+                (Some(first), Some(second)) => Some(terminal_layout_pair(first, second, *down)),
+                (first, second) => first.or(second),
+            },
+        }
+    }
+    let mut remaining = panes.to_vec();
+    let mut layout = saved.and_then(|saved| retain(saved, &mut remaining));
+    for id in remaining {
+        let pane = TerminalPaneLayout::Pane(id);
+        layout = Some(match layout {
+            Some(layout) => terminal_layout_pair(layout, pane, down),
+            None => pane,
+        });
+    }
+    layout
+}
+
+fn terminal_group_layout(
+    records: &HashMap<Uuid, TerminalRecord>,
+    anchor_id: Uuid,
+    stack: bool,
+) -> Option<TerminalPaneLayout> {
+    let panes = terminal_group_ids(records, anchor_id);
+    let record = records.get(&anchor_id)?;
+    if record.pane_layout.is_some() || stack {
+        return terminal_pane_layout(record.pane_layout.as_ref(), &panes, stack);
+    }
+    // Preserve the old balanced grid until the first directional split.
+    let rows = panes.len().div_ceil(STANDALONE_TERMINAL_GRID_COLUMNS);
+    let columns = panes.len().div_ceil(rows.max(1));
+    panes
+        .chunks(columns.max(1))
+        .filter_map(|row| terminal_pane_layout(None, row, false))
+        .reduce(|first, second| terminal_layout_pair(first, second, true))
+}
+
+fn terminal_layout_pair(
+    first: TerminalPaneLayout,
+    second: TerminalPaneLayout,
+    down: bool,
+) -> TerminalPaneLayout {
+    TerminalPaneLayout::Split {
+        down,
+        first: Box::new(first),
+        second: Box::new(second),
+    }
+}
+
+fn split_terminal_layout(layout: &mut TerminalPaneLayout, target: Uuid, pane: Uuid, down: bool) {
+    match layout {
+        TerminalPaneLayout::Pane(id) if *id == target => {
+            *layout = terminal_layout_pair(layout.clone(), TerminalPaneLayout::Pane(pane), down);
+        }
+        TerminalPaneLayout::Split { first, second, .. } => {
+            split_terminal_layout(first, target, pane, down);
+            split_terminal_layout(second, target, pane, down);
+        }
+        _ => {}
+    }
 }
 
 fn visible_terminal_group_ids(panes: &[Uuid], maximized: Option<Uuid>) -> Vec<Uuid> {
@@ -166,14 +250,29 @@ fn join_terminal_groups(
         return Vec::new();
     }
     let incoming = terminal_group_ids(records, dragged_id);
+    let directional = [anchor_id, dragged_id].iter().any(|id| {
+        records
+            .get(id)
+            .is_some_and(|record| record.pane_layout.is_some())
+    });
+    let down = limit == RIGHT_PANEL_TERMINAL_MAX_PANES;
+    let layout = directional.then(|| {
+        terminal_layout_pair(
+            terminal_group_layout(records, anchor_id, down).expect("existing target group"),
+            terminal_group_layout(records, dragged_id, down).expect("existing dragged group"),
+            down,
+        )
+    });
     for id in &incoming {
         if let Some(record) = records.get_mut(id) {
             record.pane_of = Some(anchor_id);
             record.panes.clear();
+            record.pane_layout = None;
         }
     }
     if let Some(record) = records.get_mut(&anchor_id) {
         record.panes.extend(incoming.iter().copied());
+        record.pane_layout = layout;
     }
     incoming
 }
@@ -720,6 +819,7 @@ impl Waku {
                 custom_title: None,
                 pane_of: None,
                 panes: Vec::new(),
+                pane_layout: None,
             },
         );
         self.terminal_order.push(terminal_id);
@@ -1723,10 +1823,30 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Uuid> {
+        self.split_terminal_in_direction(anchor_id, max_panes, false, window, cx)
+    }
+
+    fn split_terminal_in_direction(
+        &mut self,
+        anchor_id: Uuid,
+        max_panes: usize,
+        down: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Uuid> {
         let record = self.terminal_records.get(&anchor_id)?;
         if !terminal_group_can_add(record, 1, max_panes) {
             return None;
         }
+        let target = self
+            .focused_terminal_id(window, cx)
+            .filter(|id| self.terminal_group_anchor(*id) == anchor_id)
+            .unwrap_or(anchor_id);
+        let mut layout = terminal_group_layout(
+            &self.terminal_records,
+            anchor_id,
+            max_panes == RIGHT_PANEL_TERMINAL_MAX_PANES,
+        )?;
         let session = record.session;
         let growing_beyond_stack = record.panes.len() + 2 > RIGHT_PANEL_TERMINAL_MAX_PANES;
         let working_directory = self
@@ -1746,6 +1866,11 @@ impl Waku {
         }
         if let Some(record) = self.terminal_records.get_mut(&anchor_id) {
             record.panes.push(pane_id);
+            split_terminal_layout(&mut layout, target, pane_id, down);
+            record.pane_layout = Some(layout);
+        }
+        if self.selected_terminal == Some(anchor_id) {
+            self.maximized_terminal_pane = None;
         }
         if let Some(anchor) = self.right_panel_terminals.get(&anchor_id) {
             anchor.update(cx, |view, _| view.set_pane(true));
@@ -1760,9 +1885,9 @@ impl Waku {
     }
 
     /// `secondary-alt-d` — split whichever terminal surface the user is
-    /// looking at. A focused member's group decides the surface — its
-    /// anchor as the active right-panel tab stacks (3 max), the
-    /// main-area terminal grids (3x3 max). With no terminal focused the
+    /// looking at. A focused member's group decides the surface and its
+    /// limit (3 panes in a right-panel tab, 9 in the main area).
+    /// With no terminal focused the
     /// main-area selection splits first, then the active panel tab.
     pub(super) fn split_terminal_action(
         &mut self,
@@ -1770,6 +1895,19 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.split_terminal_surface(false, window, cx);
+    }
+
+    pub(super) fn split_terminal_down_action(
+        &mut self,
+        _: &SplitTerminalDown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.split_terminal_surface(true, window, cx);
+    }
+
+    fn split_terminal_surface(&mut self, down: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.settings_page = None;
         let focused_anchor = self
             .focused_terminal_id(window, cx)
@@ -1782,18 +1920,30 @@ impl Waku {
             } else {
                 RIGHT_PANEL_TERMINAL_MAX_PANES
             };
-            self.split_terminal(anchor_id, max_panes, window, cx);
+            self.split_terminal_in_direction(anchor_id, max_panes, down, window, cx);
             return;
         }
         if let Some(anchor_id) = self.selected_terminal {
-            self.split_terminal(anchor_id, STANDALONE_TERMINAL_MAX_PANES, window, cx);
+            self.split_terminal_in_direction(
+                anchor_id,
+                STANDALONE_TERMINAL_MAX_PANES,
+                down,
+                window,
+                cx,
+            );
             return;
         }
         if let Some(anchor_id) = self
             .active_right_panel_surface()
             .and_then(RightPanelSurface::terminal_id)
         {
-            self.split_terminal(anchor_id, RIGHT_PANEL_TERMINAL_MAX_PANES, window, cx);
+            self.split_terminal_in_direction(
+                anchor_id,
+                RIGHT_PANEL_TERMINAL_MAX_PANES,
+                down,
+                window,
+                cx,
+            );
         }
     }
 
@@ -1998,13 +2148,18 @@ impl Waku {
         if let Some(index) = self.terminal_order.iter().position(|id| *id == anchor_id) {
             self.terminal_order.insert(index, new_anchor);
         }
-        if let Some(record) = self.terminal_records.get_mut(&anchor_id) {
-            record.panes.clear();
-        }
+        let pane_layout = self
+            .terminal_records
+            .get_mut(&anchor_id)
+            .and_then(|record| {
+                record.panes.clear();
+                record.pane_layout.take()
+            });
         if let Some(record) = self.terminal_records.get_mut(&new_anchor) {
             record.pinned |= pinned;
             record.pane_of = None;
             record.panes = panes.clone();
+            record.pane_layout = pane_layout;
         }
         for pane in &panes {
             if let Some(record) = self.terminal_records.get_mut(pane) {
@@ -3386,10 +3541,32 @@ impl Waku {
             .into_any_element()
     }
 
-    /// A split group's panes laid out for its surface — the right
-    /// panel's tabs stack vertically, the main-area terminal tiles into
-    /// at most three columns. Each cell is a real terminal view with a
-    /// close control overlaid at its toolbar's right edge.
+    fn render_terminal_pane_layout(
+        &self,
+        layout: &TerminalPaneLayout,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match layout {
+            TerminalPaneLayout::Pane(id) => self.render_terminal_pane(*id, window, cx),
+            TerminalPaneLayout::Split {
+                down,
+                first,
+                second,
+            } => div()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .flex()
+                .when(*down, |element| element.flex_col())
+                .child(self.render_terminal_pane_layout(first, window, cx))
+                .child(self.render_terminal_pane_layout(second, window, cx))
+                .into_any_element(),
+        }
+    }
+
+    /// Render saved directional splits, or the surface's legacy stack/grid
+    /// for groups created before directional splitting was available.
     pub(super) fn render_terminal_group(
         &self,
         anchor_id: Uuid,
@@ -3403,37 +3580,52 @@ impl Waku {
         .then_some(self.maximized_terminal_pane)
         .flatten();
         let panes = visible_terminal_group_ids(&panes, standalone_maximized);
-        let body = match layout {
-            TerminalGroupLayout::Stack => div()
-                .flex_1()
-                .min_h_0()
-                .w_full()
-                .flex()
-                .flex_col()
-                .children(
-                    panes
-                        .into_iter()
-                        .map(|pane_id| self.render_terminal_pane(pane_id, window, cx)),
+        let directional = self
+            .terminal_records
+            .get(&anchor_id)
+            .and_then(|record| record.pane_layout.as_ref());
+        let body =
+            if directional.is_some() {
+                terminal_pane_layout(
+                    directional,
+                    &panes,
+                    matches!(layout, TerminalGroupLayout::Stack),
                 )
-                .into_any_element(),
-            TerminalGroupLayout::Grid => {
-                // Balance the cells: rows cap the grid at three tall, so
-                // the column count floats with the pane count — 2 panes
-                // sit side by side, 4 make a 2x2, 9 fill the 3x3.
-                let rows = panes.len().div_ceil(STANDALONE_TERMINAL_GRID_COLUMNS);
-                let columns = panes.len().div_ceil(rows.max(1));
-                let mut grid = div().flex_1().min_h_0().w_full().flex().flex_col();
-                for row in panes.chunks(columns.max(1)) {
-                    grid = grid.child(
-                        div().flex_1().min_h_0().w_full().flex().children(
-                            row.iter()
-                                .map(|pane_id| self.render_terminal_pane(*pane_id, window, cx)),
-                        ),
-                    );
+                .map(|layout| self.render_terminal_pane_layout(&layout, window, cx))
+                .unwrap_or_else(|| div().into_any_element())
+            } else {
+                match layout {
+                    TerminalGroupLayout::Stack => div()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .children(
+                            panes
+                                .into_iter()
+                                .map(|pane_id| self.render_terminal_pane(pane_id, window, cx)),
+                        )
+                        .into_any_element(),
+                    TerminalGroupLayout::Grid => {
+                        // Balance the cells: rows cap the grid at three tall, so
+                        // the column count floats with the pane count — 2 panes
+                        // sit side by side, 4 make a 2x2, 9 fill the 3x3.
+                        let rows = panes.len().div_ceil(STANDALONE_TERMINAL_GRID_COLUMNS);
+                        let columns = panes.len().div_ceil(rows.max(1));
+                        let mut grid = div().flex_1().min_h_0().w_full().flex().flex_col();
+                        for row in panes.chunks(columns.max(1)) {
+                            grid =
+                                grid.child(div().flex_1().min_h_0().w_full().flex().children(
+                                    row.iter().map(|pane_id| {
+                                        self.render_terminal_pane(*pane_id, window, cx)
+                                    }),
+                                ));
+                        }
+                        grid.into_any_element()
+                    }
                 }
-                grid.into_any_element()
-            }
-        };
+            };
         let limit = match layout {
             TerminalGroupLayout::Stack => RIGHT_PANEL_TERMINAL_MAX_PANES,
             TerminalGroupLayout::Grid => STANDALONE_TERMINAL_MAX_PANES,
@@ -3520,11 +3712,16 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        let down = self.sidebar_alt_modifier_down;
         let at_cap = self.terminal_group_panes(anchor_id).len() >= max_panes;
         let label = if at_cap {
             tr!("terminal.split_at_max", max = max_panes)
         } else {
-            tr!("terminal.split")
+            tr!(if down {
+                "terminal.split_down"
+            } else {
+                "terminal.split_right"
+            })
         };
         let focus = self.transcript_control_focus(id, cx);
         div()
@@ -3539,9 +3736,15 @@ impl Waku {
             .justify_center()
             .cursor_default()
             .tooltip(move |window, cx| {
-                Tooltip::new(label.clone())
-                    .action(&SplitTerminal)
-                    .build(window, cx)
+                if down {
+                    Tooltip::new(label.clone())
+                        .action(&SplitTerminalDown)
+                        .build(window, cx)
+                } else {
+                    Tooltip::new(label.clone())
+                        .action(&SplitTerminal)
+                        .build(window, cx)
+                }
             })
             .when(at_cap, |element| element.opacity(0.35))
             .when(!at_cap, |element| {
@@ -3554,16 +3757,36 @@ impl Waku {
                     })
                     .on_click(cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
-                        this.split_terminal(anchor_id, max_panes, window, cx);
+                        this.split_terminal_in_direction(
+                            anchor_id,
+                            max_panes,
+                            window.modifiers().alt,
+                            window,
+                            cx,
+                        );
                     }))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.split_terminal(anchor_id, max_panes, window, cx);
+                            this.split_terminal_in_direction(
+                                anchor_id,
+                                max_panes,
+                                window.modifiers().alt,
+                                window,
+                                cx,
+                            );
                             cx.stop_propagation();
                         }
                     }))
             })
-            .child(icon("icons/split.svg", 13.0, theme.text_tertiary))
+            .child(icon(
+                if down {
+                    "icons/split-down.svg"
+                } else {
+                    "icons/split.svg"
+                },
+                13.0,
+                theme.text_tertiary,
+            ))
     }
 
     /// One terminal row in the Terminals group — also what a pinned
@@ -4226,7 +4449,56 @@ mod tests {
             custom_title: Some(id.to_string()),
             pane_of: None,
             panes: Vec::new(),
+            pane_layout: None,
         }
+    }
+
+    #[test]
+    fn terminal_split_directions_survive_closing_and_promoting_panes() {
+        let [anchor, right, down, dropped] = [1, 2, 3, 4].map(Uuid::from_u128);
+        let mut layout = TerminalPaneLayout::Pane(anchor);
+        split_terminal_layout(&mut layout, anchor, right, false);
+        split_terminal_layout(&mut layout, right, down, true);
+        assert_eq!(
+            layout,
+            terminal_layout_pair(
+                TerminalPaneLayout::Pane(anchor),
+                terminal_layout_pair(
+                    TerminalPaneLayout::Pane(right),
+                    TerminalPaneLayout::Pane(down),
+                    true
+                ),
+                false,
+            )
+        );
+        // Closing the original anchor promotes its surviving subtree intact.
+        let promoted = terminal_pane_layout(Some(&layout), &[right, down], false).unwrap();
+        assert_eq!(
+            promoted,
+            terminal_layout_pair(
+                TerminalPaneLayout::Pane(right),
+                TerminalPaneLayout::Pane(down),
+                true,
+            )
+        );
+        // Closing a nested pane collapses only that split; new dropped panes
+        // still render once alongside the surviving directional layout.
+        assert_eq!(
+            terminal_pane_layout(Some(&layout), &[anchor, down, dropped], false),
+            Some(terminal_layout_pair(
+                terminal_layout_pair(
+                    TerminalPaneLayout::Pane(anchor),
+                    TerminalPaneLayout::Pane(down),
+                    false
+                ),
+                TerminalPaneLayout::Pane(dropped),
+                false,
+            ))
+        );
+        assert_eq!(
+            terminal_pane_layout(Some(&layout), &[down], false),
+            Some(TerminalPaneLayout::Pane(down))
+        );
     }
 
     #[test]
@@ -4267,9 +4539,27 @@ mod tests {
         join_terminal_groups(&mut records, ids[3], ids[2], 9);
         assert!(!terminal_groups_fit(&records, ids[2], ids[0], 3));
         assert!(!terminal_groups_fit(&records, ids[1], ids[2], 9));
+        let dragged_layout = terminal_layout_pair(
+            TerminalPaneLayout::Pane(ids[2]),
+            TerminalPaneLayout::Pane(ids[3]),
+            true,
+        );
+        records.get_mut(&ids[2]).unwrap().pane_layout = Some(dragged_layout.clone());
         assert_eq!(
             join_terminal_groups(&mut records, ids[2], ids[0], 9),
             ids[2..]
+        );
+        assert_eq!(
+            records[&ids[0]].pane_layout,
+            Some(terminal_layout_pair(
+                terminal_layout_pair(
+                    TerminalPaneLayout::Pane(ids[0]),
+                    TerminalPaneLayout::Pane(ids[1]),
+                    false
+                ),
+                dragged_layout,
+                false,
+            ))
         );
         assert_eq!(terminal_group_ids(&records, ids[0]), ids);
         assert_eq!(records.len(), 4);
@@ -4291,11 +4581,18 @@ mod tests {
                 .expect("legacy terminal record");
         assert_eq!(record.pane_of, None);
         assert!(record.panes.is_empty());
+        assert!(record.pane_layout.is_none());
         record.panes.push(pane);
+        record.pane_layout = Some(terminal_layout_pair(
+            TerminalPaneLayout::Pane(id),
+            TerminalPaneLayout::Pane(pane),
+            true,
+        ));
         let saved = serde_json::to_value(&record).unwrap();
         let restored: PersistedTerminal = serde_json::from_value(saved).unwrap();
         assert_eq!(restored.id, id);
         assert_eq!(restored.panes, vec![pane]);
+        assert_eq!(restored.pane_layout, record.pane_layout);
         record.id = pane;
         record.panes.clear();
         record.pane_of = Some(id);
@@ -4609,6 +4906,7 @@ mod tests {
             custom_title: None,
             pane_of: None,
             panes: Vec::new(),
+            pane_layout: None,
         };
         let mut records = HashMap::new();
         records.insert(ids[0], record(false));
@@ -4641,6 +4939,7 @@ mod tests {
             custom_title: None,
             pane_of,
             panes: Vec::new(),
+            pane_layout: None,
         };
         let mut records = HashMap::new();
         records.insert(ids[0], record(false, None));
