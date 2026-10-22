@@ -204,15 +204,20 @@ fn connect_socket(
     config: WebSocketConfig,
     deadline: Instant,
 ) -> anyhow::Result<DaemonSocket> {
-    let host = url
-        .host_str()
-        .context("Goddard daemon address has no host")?;
+    let host = url.host().context("Goddard daemon address has no host")?;
     let port = url
         .port_or_known_default()
         .context("Goddard daemon address has no port")?;
     let mut last_error = None;
     let mut stream = None;
-    for address in (host, port).to_socket_addrs()? {
+    // URL text brackets IPv6 literals, while socket resolution expects the
+    // address itself. Resolve domains only; literal IPs already are resolved.
+    let addresses = match host {
+        url::Host::Domain(host) => (host, port).to_socket_addrs()?.collect::<Vec<_>>(),
+        url::Host::Ipv4(ip) => vec![std::net::SocketAddr::from((ip, port))],
+        url::Host::Ipv6(ip) => vec![std::net::SocketAddr::from((ip, port))],
+    };
+    for address in addresses {
         match TcpStream::connect_timeout(&address, deadline_remaining(deadline)?) {
             Ok(connected) => {
                 stream = Some(connected);
@@ -1264,6 +1269,68 @@ mod tests {
                 .unwrap()
                 .as_str(),
             "wss://waku.example.test/v1"
+        );
+    }
+
+    #[test]
+    fn remote_daemon_connects_over_ipv6_loopback() {
+        let listener = std::net::TcpListener::bind("[::1]:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("accept failed: {error}"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut socket = tungstenite::accept(stream).unwrap();
+            let Message::Text(hello) = socket.read().unwrap() else {
+                panic!("expected client hello");
+            };
+            assert!(matches!(
+                serde_json::from_str::<ClientMessage>(&hello).unwrap(),
+                ClientMessage::Hello { token, .. } if token == "ipv6-token"
+            ));
+            socket
+                .send(Message::Text(
+                    serde_json::to_string(&ServerMessage::Hello {
+                        protocol_version: PROTOCOL_VERSION,
+                        daemon_version: "test".into(),
+                        daemon_commit: None,
+                        agent_cli_available: false,
+                    })
+                    .unwrap()
+                    .into(),
+                ))
+                .unwrap();
+            let _ = socket.read();
+        });
+        let result = DaemonClient::connect_before(
+            &address,
+            "ipv6-token".into(),
+            Vec::new(),
+            Instant::now() + Duration::from_secs(2),
+        );
+        if let Ok(client) = &result {
+            client.force_disconnect();
+        }
+        server.join().unwrap();
+        assert!(
+            result.is_ok(),
+            "IPv6 daemon connection failed: {:?}",
+            result.err()
         );
     }
 

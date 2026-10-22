@@ -1,0 +1,1 @@
+- Failed remote task deletions retain their host ownership, keeping retries from reaching the local daemon.

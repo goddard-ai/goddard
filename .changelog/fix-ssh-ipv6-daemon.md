@@ -1,0 +1,1 @@
+- Connect to remote daemons using IPv6 addresses without connection timeouts caused by address parsing.

@@ -1693,6 +1693,126 @@ mod tests {
     use super::*;
 
     #[test]
+    fn remote_reconnect_resumes_without_duplicate_events_and_accepts_a_new_epoch() {
+        use waku_protocol::{ClientMessage, SequencedEvent, ServerMessage, WireDriverEvent};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        let first_epoch = Uuid::new_v4();
+        let second_epoch = Uuid::new_v4();
+        let server = std::thread::spawn(move || {
+            for connection in 0..2 {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline, "client did not reconnect");
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(error) => panic!("accept failed: {error}"),
+                    }
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut socket = tungstenite::accept(stream).unwrap();
+                let tungstenite::Message::Text(text) = socket.read().unwrap() else {
+                    panic!("expected hello");
+                };
+                let ClientMessage::Hello {
+                    token, resume_from, ..
+                } = serde_json::from_str(&text).unwrap()
+                else {
+                    panic!("expected hello");
+                };
+                assert_eq!(token, "token");
+                if connection == 0 {
+                    assert!(resume_from.is_empty());
+                } else {
+                    assert_eq!(resume_from.len(), 1);
+                    let cursor = &resume_from[0];
+                    assert_eq!(
+                        (
+                            cursor.session_id,
+                            cursor.runtime_id,
+                            cursor.epoch,
+                            cursor.sequence
+                        ),
+                        (session_id, runtime_id, first_epoch, 7)
+                    );
+                }
+                let events = if connection == 0 {
+                    vec![(first_epoch, 7)]
+                } else {
+                    vec![
+                        (first_epoch, 7),
+                        (first_epoch, 8),
+                        (first_epoch, 8),
+                        (second_epoch, 1),
+                        (second_epoch, 1),
+                        (second_epoch, 2),
+                    ]
+                };
+                let messages = std::iter::once(ServerMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    daemon_version: "test".into(),
+                    daemon_commit: None,
+                    agent_cli_available: false,
+                })
+                .chain(events.into_iter().map(|(epoch, sequence)| {
+                    ServerMessage::Event(SequencedEvent {
+                        session_id,
+                        runtime_id,
+                        epoch,
+                        sequence,
+                        event: WireDriverEvent::new("textDelta", serde_json::json!("output")),
+                    })
+                }));
+                for message in messages {
+                    socket
+                        .send(tungstenite::Message::Text(
+                            serde_json::to_string(&message).unwrap().into(),
+                        ))
+                        .unwrap();
+                }
+                // Keep the socket alive until the test explicitly severs it.
+                let _ = socket.read();
+            }
+        });
+        let supervisor = test_supervisor(&address);
+        let clients = supervisor.subscribe_clients();
+        let original = clients.recv_timeout(Duration::from_secs(2)).unwrap();
+        let events = original.subscribe(session_id, runtime_id);
+        assert_eq!(
+            events
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .sequence,
+            7
+        );
+        original.force_disconnect();
+        assert!(events.recv_timeout(Duration::from_secs(2)).is_err());
+        let weak = Arc::downgrade(&supervisor.inner);
+        let monitor = std::thread::spawn(move || monitor_daemon(weak, None, false));
+        let replacement = clients.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(!original.same_connection(&replacement));
+        let events = replacement.subscribe(session_id, runtime_id);
+        for expected in [(first_epoch, 8), (second_epoch, 1), (second_epoch, 2)] {
+            let event = events.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert_eq!((event.epoch, event.sequence), expected);
+        }
+        assert!(events.is_empty());
+        supervisor.inner.running.store(false, Ordering::Release);
+        replacement.force_disconnect();
+        monitor.join().unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
     fn settings_coalescing_preserves_credentials_until_an_explicit_replacement() {
         use waku_protocol::inference::{InferenceProvider, InferenceProviderSettings};
 

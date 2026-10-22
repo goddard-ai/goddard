@@ -4,6 +4,10 @@
 #[path = "persistence/startup_tests.rs"]
 mod startup_tests;
 
+#[cfg(test)]
+#[path = "persistence/remote_tests.rs"]
+mod remote_tests;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write as _};
@@ -4598,18 +4602,21 @@ impl StateStore {
     }
 
     pub fn remove_session(&self, session_id: Uuid) -> io::Result<()> {
-        let result = match self.daemons.daemon_for_session(session_id) {
-            Some(daemon) => daemon
-                .client()
-                .notify(session_id, Uuid::nil(), Command::RemoveSession)
-                .map_err(to_io_error),
-            // The owning daemon is gone or unreachable; the row is already
-            // unclaimed locally and there is nobody left to tell.
-            None => Ok(()),
+        let Some(daemon) = self.daemons.daemon_for_session(session_id) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the daemon owning this session is not connected",
+            ));
         };
+        daemon
+            .client()
+            .notify(session_id, Uuid::nil(), Command::RemoveSession)
+            .map_err(to_io_error)?;
+        // Retain ownership and incremental-save state on failure: otherwise
+        // a retry treats this remote session as local.
         self.daemons.drop_session(session_id);
         self.save_cursors.lock().remove(&session_id);
-        result
+        Ok(())
     }
 
     pub fn remove_project(&self, project_id: Uuid) -> io::Result<()> {
