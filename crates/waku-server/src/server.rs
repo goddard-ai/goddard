@@ -1796,6 +1796,7 @@ struct ExposureControl {
 struct ExposedListener {
     config: DaemonExposure,
     port: u16,
+    listener: TcpListener,
     shutdown: Arc<AtomicBool>,
     _advert: Option<waku_base::lan::LanAdvert>,
     thread: std::thread::JoinHandle<()>,
@@ -1833,31 +1834,58 @@ impl ExposureControl {
         let Some(dispatcher) = self.dispatcher.upgrade() else {
             bail!("the daemon server is shutting down");
         };
-        // Bind before dropping the current listener: a failed rebind leaves
-        // the running exposure untouched.
-        let listener = TcpListener::bind(("0.0.0.0", config.port))
-            .with_context(|| format!("could not expose the daemon on port {}", config.port))?;
+        // Reuse the bound socket when only credentials/origins change. A
+        // second bind to the same port would fail while it is still active.
+        // For a different port, bind first so failure preserves the old one.
+        let (listener, reusing_port) = match active
+            .as_ref()
+            .filter(|current| current.port == config.port)
+        {
+            Some(current) => (
+                current
+                    .listener
+                    .try_clone()
+                    .context("could not reuse the exposed listener")?,
+                true,
+            ),
+            None => (
+                TcpListener::bind(("0.0.0.0", config.port)).with_context(|| {
+                    format!("could not expose the daemon on port {}", config.port)
+                })?,
+                false,
+            ),
+        };
         listener
             .set_nonblocking(true)
             .context("could not configure the exposed listener")?;
         let port = listener.local_addr()?.port();
+        let accept_listener = listener
+            .try_clone()
+            .context("could not clone the exposed listener")?;
         let shutdown = Arc::new(AtomicBool::new(false));
         // Reachable is exactly when LAN discovery matters: wake the share
         // endpoint and register `_waku._tcp` just like a startup bind.
         self.backend.kickstart_reachability();
-        let advert = self
-            .backend
-            .lan_advertisement()
-            .and_then(|(name, instance_id)| {
-                match waku_base::lan::LanAdvert::start(&name, &instance_id, port, PROTOCOL_VERSION)
-                {
-                    Ok(advert) => Some(advert),
-                    Err(error) => {
-                        eprintln!("could not advertise the daemon on the LAN: {error:#}");
-                        None
+        let advert = if reusing_port {
+            None
+        } else {
+            self.backend
+                .lan_advertisement()
+                .and_then(|(name, instance_id)| {
+                    match waku_base::lan::LanAdvert::start(
+                        &name,
+                        &instance_id,
+                        port,
+                        PROTOCOL_VERSION,
+                    ) {
+                        Ok(advert) => Some(advert),
+                        Err(error) => {
+                            eprintln!("could not advertise the daemon on the LAN: {error:#}");
+                            None
+                        }
                     }
-                }
-            });
+                })
+        };
         let options = Arc::new(ServerOptions {
             allowed_origins: config.allowed_origins.iter().cloned().collect(),
             ..self.base_options.clone()
@@ -1872,7 +1900,7 @@ impl ExposureControl {
                 .name("goddard-daemon-exposed".into())
                 .spawn(move || {
                     if let Err(error) = accept_loop(
-                        listener,
+                        accept_listener,
                         token,
                         dispatcher,
                         hub,
@@ -1887,9 +1915,17 @@ impl ExposureControl {
                 .context("could not start the exposed daemon listener")?
         };
         self.backend.note_exposed_port(Some(port));
+        // Keep the existing LAN registration for the same endpoint; rotating
+        // authentication does not change what discovery should advertise.
+        let advert = if reusing_port {
+            active.as_mut().and_then(|current| current._advert.take())
+        } else {
+            advert
+        };
         let previous = active.replace(ExposedListener {
             config,
             port,
+            listener,
             shutdown,
             _advert: advert,
             thread,
@@ -2012,6 +2048,19 @@ fn descriptor_exhaustion(error: &io::Error) -> bool {
     {
         let _ = error;
         false
+    }
+}
+
+/// Every exit from an authenticated transport releases its subscription,
+/// including I/O errors propagated with `?` before the normal loop exit.
+struct ConnectionSubscription<'a> {
+    hub: &'a Hub,
+    subscriber_id: u64,
+}
+
+impl Drop for ConnectionSubscription<'_> {
+    fn drop(&mut self) {
+        self.hub.unsubscribe(self.subscriber_id);
     }
 }
 
@@ -2153,6 +2202,10 @@ fn handle_connection(
     } else {
         hub.subscribe(&resume_from, subscriber)
     };
+    let _subscription = ConnectionSubscription {
+        hub: &hub,
+        subscriber_id,
+    };
 
     let mut read_timeout = SOCKET_POLL_INTERVAL;
     let mut navigation_burst = 0;
@@ -2293,7 +2346,6 @@ fn handle_connection(
             Err(error) => return Err(error).context("Goddard daemon WebSocket failed"),
         }
     }
-    hub.unsubscribe(subscriber_id);
     Ok(())
 }
 
@@ -4104,6 +4156,79 @@ mod tests {
     }
 
     #[test]
+    fn remote_transport_failure_releases_its_subscription_and_terminal_ownership() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let hub = Arc::new(Hub::default());
+        let dispatcher = Arc::new(RequestDispatcher::new(
+            Arc::new(TestBackend::default()),
+            hub.clone(),
+        ));
+        let server_hub = hub.clone();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            handle_connection(
+                stream,
+                "secret",
+                dispatcher,
+                server_hub,
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
+                &ServerOptions::default(),
+            )
+        });
+        let stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let (mut socket, _) = tungstenite::client(format!("ws://{address}/v1"), stream).unwrap();
+        write_json(
+            &mut socket,
+            &ClientMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                token: "secret".into(),
+                client_id: Uuid::new_v4(),
+                resume_from: Vec::new(),
+            },
+        )
+        .unwrap();
+        assert!(matches!(socket.read(), Ok(Message::Text(_))));
+        // Round-trip a request as a barrier: the hello reply precedes the
+        // subscriber registration, so it alone cannot prove we are attached.
+        write_json(
+            &mut socket,
+            &ClientMessage::Request(Request {
+                request_id: Uuid::new_v4(),
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command: Command::GetSettings,
+            }),
+        )
+        .unwrap();
+        assert!(matches!(socket.read(), Ok(Message::Text(_))));
+        let subscriber_id = {
+            let state = hub.state.lock();
+            assert_eq!(state.subscribers.len(), 1);
+            *state.subscribers.keys().next().unwrap()
+        };
+        let terminal = Uuid::new_v4();
+        hub.claim_terminal(terminal, Uuid::new_v4(), subscriber_id, Vec::new());
+        assert_eq!(hub.terminal_owner(terminal), Some(subscriber_id));
+        // A lost network connection has no WebSocket closing handshake.
+        drop(socket);
+        assert!(server.join().unwrap().is_err());
+        assert!(
+            hub.state.lock().subscribers.is_empty(),
+            "dead transport retained a subscriber"
+        );
+        assert_eq!(
+            hub.terminal_owner(terminal),
+            None,
+            "dead transport still owns the terminal"
+        );
+    }
+
+    #[test]
     fn late_client_attaches_to_replay_and_live_runtime_events() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -5326,6 +5451,112 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 405"), "{response}");
 
         DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        shutdown.store(true, Ordering::Release);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn remote_exposure_rotates_credentials_on_the_same_port_and_survives_failed_rebinds() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(TestBackend::default()),
+                server_shutdown,
+                ServerOptions::default(),
+            )
+            .unwrap()
+        });
+        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let expose = |port, token: &str, origin: &str| {
+            client.request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SetDaemonExposure {
+                    exposure: Some(DaemonExposure {
+                        port,
+                        token: token.into(),
+                        allowed_origins: vec![origin.into()],
+                    }),
+                },
+            )
+        };
+        // Let the OS select a free port, then keep that port for subsequent
+        // settings changes, just as the Daemon settings screen does.
+        let port = match expose(0, "old-token", "https://old.example").unwrap() {
+            ResponsePayload::Exposure { port: Some(port) } => port,
+            other => panic!("unexpected exposure response: {other:?}"),
+        };
+        let remote_address = format!("127.0.0.1:{port}");
+        let remote = DaemonClient::connect(&remote_address, "old-token".into()).unwrap();
+        let result = expose(port, "new-token", "https://new.example");
+        if result.is_err() {
+            shutdown.store(true, Ordering::Release);
+            server.join().unwrap();
+            panic!("rotating credentials on the existing port failed: {result:?}");
+        }
+        assert!(
+            matches!(result.unwrap(), ResponsePayload::Exposure { port: Some(same) } if same == port)
+        );
+        assert!(DaemonClient::connect(&remote_address, "old-token".into()).is_err());
+        let replacement = DaemonClient::connect(&remote_address, "new-token".into()).unwrap();
+        // Changing the origin allowlist must take effect on the same port.
+        use tungstenite::client::IntoClientRequest as _;
+        for (origin, allowed) in [
+            ("https://old.example", false),
+            ("https://new.example", true),
+        ] {
+            let mut request = format!("ws://{remote_address}/v1")
+                .into_client_request()
+                .unwrap();
+            request
+                .headers_mut()
+                .insert(ORIGIN, origin.parse().unwrap());
+            let stream = TcpStream::connect(&remote_address).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            match tungstenite::client(request, stream) {
+                Ok((mut socket, _)) => {
+                    assert!(allowed, "revoked origin was accepted");
+                    let _ = socket.close(None);
+                }
+                Err(tungstenite::HandshakeError::Failure(tungstenite::Error::Http(response))) => {
+                    assert!(!allowed, "new origin was rejected");
+                    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+                }
+                Err(error) => panic!("unexpected handshake failure: {error}"),
+            }
+        }
+
+        let occupied = TcpListener::bind("0.0.0.0:0").unwrap();
+        assert!(
+            expose(
+                occupied.local_addr().unwrap().port(),
+                "third-token",
+                "https://third.example"
+            )
+            .is_err()
+        );
+        // Failed replacement must preserve both the live connection and its
+        // credentials; it must not partially apply the requested config.
+        replacement
+            .request(Uuid::nil(), Uuid::nil(), Command::GetSettings)
+            .unwrap();
+        assert!(DaemonClient::connect(&remote_address, "new-token".into()).is_ok());
+        assert!(DaemonClient::connect(&remote_address, "third-token".into()).is_err());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !remote.is_disconnected() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            remote.is_disconnected(),
+            "old authenticated connection survived token rotation"
+        );
         shutdown.store(true, Ordering::Release);
         server.join().unwrap();
     }
