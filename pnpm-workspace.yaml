@@ -65,7 +65,9 @@ patchedDependencies:
   # turbo.json as a workspace root — Turborepo's per-package task configs marked apps/* as
   # roots, masking the real pnpm root so served `/node_modules/` tails never reached the
   # `.pnpm` store scan and non-hoisted transitive deps like source-map-js 404'd dev boot.
-  "@nativescript/vite@8.0.17": node_modules/.pnpm-config/@octane-xplat/patches/patches/@nativescript__vite@8.0.17.patch
+  # App-local extension: package-internal # imports must reach esbuild's imports-map
+  # resolver rather than becoming missing optional-dependency stubs during native boot.
+  "@nativescript/vite@8.0.17": patches/@nativescript__vite@8.0.17.patch
   # Driver setProp skips `undefined` writes — NativeScript native setters coerce it (e.g.
   # editable → ios.userInteractionEnabled = NO), leaving dead UI that still has its JS
   # listeners. Aligns intrinsic ref types with Octane callback cleanup and nested arrays
