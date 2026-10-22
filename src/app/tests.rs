@@ -799,23 +799,31 @@ fn reference_atoms_splice_their_token_and_chip() {
 fn boss_prompt_project_reference_sets_response_context_only_for_one_project() {
     use super::transcript::single_project_prompt_context;
 
-    let one =
-        single_project_prompt_context("inspect [project \"Goddard\" (path: /work/goddard)] now")
-            .unwrap();
-    assert_eq!(one.project_root, std::path::PathBuf::from("/work/goddard"));
+    let project = std::env::temp_dir().join("work/goddard");
+    let other_project = std::env::temp_dir().join("work/other");
+    let one = single_project_prompt_context(&format!(
+        "inspect [project \"Goddard\" (path: {})] now",
+        project.display()
+    ))
+    .unwrap();
+    assert_eq!(one.project_root, project);
     assert_eq!(one.worktree, None);
 
     assert!(single_project_prompt_context("no project here").is_none());
     assert!(
-        single_project_prompt_context(
-            "[project \"A\" (path: /work/a)] [project \"B\" (path: /work/b)]"
-        )
+        single_project_prompt_context(&format!(
+            "[project \"A\" (path: {})] [project \"B\" (path: {})]",
+            project.display(),
+            other_project.display()
+        ))
         .is_none()
     );
     assert!(
-        single_project_prompt_context(
-            "[project \"A\" (path: /work/a)] [project \"B\" (path: /work/a)]"
-        )
+        single_project_prompt_context(&format!(
+            "[project \"A\" (path: {})] [project \"B\" (path: {})]",
+            project.display(),
+            project.display()
+        ))
         .is_some()
     );
 }

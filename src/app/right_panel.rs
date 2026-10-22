@@ -3488,11 +3488,22 @@ mod tests {
     }
 
     fn published_link_fixture() -> waku_client::boss::BossDeliverable {
+        let root = std::env::temp_dir().join("goddard-deliverable-link-fixture");
+        let filename = ".xplat-workaround-review.deliverable.md";
         waku_client::boss::BossDeliverable {
             id: Uuid::parse_str("6e72122c-db05-47c2-b582-0044fde480e7").unwrap(),
             name: "Opals review".into(),
-            path: "/Users/alec/dev/worktrees/goddard/dev/temp/boss/deliverables/6e72122c-db05-47c2-b582-0044fde480e7/.xplat-workaround-review.deliverable.md".into(),
-            source_path: Some("/Users/alec/dev/opals/.xplat-workaround-review.deliverable.md".into()),
+            path: root
+                .join("published/6e72122c-db05-47c2-b582-0044fde480e7")
+                .join(filename)
+                .to_string_lossy()
+                .into_owned(),
+            source_path: Some(
+                root.join("project")
+                    .join(filename)
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
             directory: false,
             created_at: 1,
             updated_at: 1,
@@ -3511,10 +3522,10 @@ mod tests {
         let stored = &deliverable.path;
         let source = deliverable.source_path.as_deref().unwrap();
         let context = crate::model::ReferenceContext {
-            project_root: PathBuf::from("/Users/alec/dev/opals"),
+            project_root: Path::new(source).parent().unwrap().to_path_buf(),
             worktree: None,
         };
-        // This exact Boss review link used to take the Finder route.
+        // A published Boss review link used to take the Finder route.
         assert_eq!(
             transcript_link_route(stored, None),
             TranscriptLinkRoute::Finder(PathBuf::from(stored))
@@ -3544,49 +3555,56 @@ mod tests {
 
     #[test]
     fn transcript_deliverable_links_decode_spaces_without_claiming_other_files() {
+        let root = std::env::temp_dir().join("goddard-deliverable-link-fixture");
+        let published = root.join("published");
+        let project = root.join("My Project");
+        let stored = published.join("Review Notes.md");
+        let source = project.join("Review Notes.md");
+        let file_url = url::Url::from_file_path(&stored).unwrap().to_string();
         let mut deliverable = published_link_fixture();
-        deliverable.path = "/published/Review Notes.md".into();
-        deliverable.source_path = Some("/work/My Project/Review Notes.md".into());
+        deliverable.path = stored.to_string_lossy().into_owned();
+        deliverable.source_path = Some(source.to_string_lossy().into_owned());
         let deliverables = [deliverable];
         for target in [
-            "/published/./Review Notes.md",
-            "/published/tmp/../Review%20Notes.md:2",
-            "file:///published/Review%20Notes.md#review",
-            "file://localhost/published/Review%20Notes.md#L2",
-            "/work/My%20Project/Review%20Notes.md",
+            format!("{}/./Review Notes.md", published.display()),
+            format!("{}/tmp/../Review Notes.md:2", published.display()).replace(' ', "%20"),
+            format!("{file_url}#review"),
+            format!("{}#L2", file_url.replacen("file://", "file://localhost", 1)),
+            source.to_string_lossy().replace(' ', "%20"),
         ] {
             assert_eq!(
-                transcript_deliverable(target, &deliverables).map(|d| d.id),
+                transcript_deliverable(&target, &deliverables).map(|d| d.id),
                 Some(deliverables[0].id),
                 "{target}"
             );
         }
         for target in [
-            "/work/My Project/source.md",
-            "/published/Review Notes.md.backup",
-            "Review Notes.md",
-            "https://example.com/published/Review%20Notes.md",
-            "goddard://task/6e72122c-db05-47c2-b582-0044fde480e7",
+            project.join("source.md").to_string_lossy().into_owned(),
+            published
+                .join("Review Notes.md.backup")
+                .to_string_lossy()
+                .into_owned(),
+            "Review Notes.md".into(),
+            "https://example.com/published/Review%20Notes.md".into(),
+            "goddard://task/6e72122c-db05-47c2-b582-0044fde480e7".into(),
         ] {
             assert!(
-                transcript_deliverable(target, &deliverables).is_none(),
+                transcript_deliverable(&target, &deliverables).is_none(),
                 "{target}"
             );
         }
         assert_eq!(
-            transcript_link_route(
-                "/work/My Project/source.md",
-                Some(Path::new("/work/My Project"))
-            ),
+            transcript_link_route(&project.join("source.md").to_string_lossy(), Some(&project)),
             TranscriptLinkRoute::ProjectFile("source.md".into(), None)
         );
         assert_eq!(
             transcript_link_route("https://example.com/review.md", None),
             TranscriptLinkRoute::External
         );
+        let unpublished = root.join("unpublished/review.md");
         assert_eq!(
-            transcript_link_route("/unpublished/review.md", None),
-            TranscriptLinkRoute::Finder(PathBuf::from("/unpublished/review.md"))
+            transcript_link_route(&unpublished.to_string_lossy(), None),
+            TranscriptLinkRoute::Finder(unpublished)
         );
     }
 
@@ -3603,14 +3621,15 @@ mod tests {
             path.parent().unwrap().to_path_buf(),
             ".xplat-workaround-review.deliverable.md".to_owned(),
         ));
+        let other_project = std::env::temp_dir().join("other/employee");
         assert_eq!(panel_file_read_target(None, &linked.path, true), expected);
         assert_eq!(
-            panel_file_read_target(Some(Path::new("/other/employee")), &linked.path, true),
+            panel_file_read_target(Some(&other_project), &linked.path, true),
             expected
         );
         assert_eq!(
-            panel_file_read_target(Some(Path::new("/other/employee")), "source.md", false),
-            Some((PathBuf::from("/other/employee"), "source.md".into()))
+            panel_file_read_target(Some(&other_project), "source.md", false),
+            Some((other_project, "source.md".into()))
         );
         assert_eq!(panel_file_read_target(None, "source.md", false), None);
     }
