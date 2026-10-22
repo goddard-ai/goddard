@@ -2169,7 +2169,7 @@ pub struct BossState {
     /// Retired identities remain available for revival until their name is
     /// assigned to another employee. They are not part of the visible roster.
     #[serde(default)]
-    pub retired_employees: Vec<BossEmployee>,
+    pub retired_employees: std::sync::Arc<Vec<BossEmployee>>,
     /// Documents saved before the rename record these under `bundles`.
     #[serde(default, alias = "bundles")]
     pub deliverables: Vec<BossDeliverable>,

@@ -12,7 +12,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0"
 dunce = "1"
 rust-i18n = "4"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 similar = "3"
 # ts-rs warns on every serde attribute it does not model. The ones used here,

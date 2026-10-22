@@ -716,7 +716,7 @@ mod tests {
             rotation: None,
             personas: Vec::new(),
             employees: Vec::new(),
-            retired_employees: Vec::new(),
+            retired_employees: Default::default(),
             deliverables: Vec::new(),
             planning: Vec::new(),
             outcomes: Vec::new(),

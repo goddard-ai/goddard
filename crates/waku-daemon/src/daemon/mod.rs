@@ -212,7 +212,7 @@ fn protected_employee_transcripts(
 ) -> HashSet<Uuid> {
     boss.employees
         .iter()
-        .chain(&boss.retired_employees)
+        .chain(boss.retired_employees.iter())
         .filter(|employee| {
             !employee.expired()
                 || employee.expired_at.is_none_or(|at| {

@@ -3,6 +3,9 @@
 #[path = "plan_contract.rs"]
 mod plan_contract;
 
+#[path = "state_storage.rs"]
+mod state_storage;
+
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -436,6 +439,7 @@ pub struct BossService {
     root: PathBuf,
     active: std::sync::atomic::AtomicBool,
     state: Mutex<BossState>,
+    storage: state_storage::StateStorage,
     notifier: Mutex<Option<crate::TaskNotifier>>,
     operation_lock: Mutex<()>,
     finish_employee: Mutex<Option<crate::FinishEmployee>>,
@@ -463,6 +467,7 @@ impl BossService {
             root,
             active: std::sync::atomic::AtomicBool::new(false),
             state: Mutex::new(disabled_state()),
+            storage: Default::default(),
             notifier: Mutex::new(None),
             operation_lock: Mutex::new(()),
             finish_employee: Mutex::new(None),
@@ -487,15 +492,8 @@ impl BossService {
         if self.active.load(Ordering::Acquire) {
             return Ok(());
         }
-        let mut state = {
-            fs::create_dir_all(self.root.join("files/memory"))?;
-            let path = self.root.join("boss.json");
-            match fs::read(&path) {
-                Ok(bytes) => serde_json::from_slice(&bytes).context("invalid Boss document")?,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => fresh_state(),
-                Err(error) => return Err(error.into()),
-            }
-        };
+        fs::create_dir_all(self.root.join("files/memory"))?;
+        let mut state = self.storage.load(&self.root)?.unwrap_or_else(fresh_state);
         let now = waku_protocol::model::unix_time();
         reconcile_persona_defaults(&mut state);
         for employee in &mut state.employees {
@@ -531,19 +529,16 @@ impl BossService {
         *self.router.lock() = BossRouter::default();
         *self.evals.lock() = BossEval::default();
         self.persona_writes.lock().clear();
+        self.storage.clear();
         self.active.store(false, Ordering::Release);
     }
 
     pub fn open(root: PathBuf) -> anyhow::Result<Self> {
         fs::create_dir_all(root.join("files/memory"))?;
-        let path = root.join("boss.json");
-        // Fail closed on corruption: replacing the document would lose identity
-        // and grants while leaving its private files behind.
-        let mut state: BossState = match fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes).context("invalid Boss document")?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => fresh_state(),
-            Err(error) => return Err(error.into()),
-        };
+        // Loading either the active document or referenced history fails
+        // closed; missing history must never silently erase retired identities.
+        let storage = state_storage::StateStorage::default();
+        let mut state = storage.load(&root)?.unwrap_or_else(fresh_state);
         for index in 0..state.employees.len() {
             if state.employees[index].job_title.is_empty() {
                 state.employees[index].job_title = state.employees[index].identity.name.clone();
@@ -583,6 +578,7 @@ impl BossService {
                     .collect(),
             ),
             state: Mutex::new(state),
+            storage,
             notifier: Mutex::new(None),
             operation_lock: Mutex::new(()),
             finish_employee: Mutex::new(None),
@@ -1138,8 +1134,12 @@ impl BossService {
             let employee = state
                 .employees
                 .iter_mut()
-                .chain(state.retired_employees.iter_mut())
                 .find(|entry| entry.session_id == session_id)
+                .or_else(|| {
+                    std::sync::Arc::make_mut(&mut state.retired_employees)
+                        .iter_mut()
+                        .find(|entry| entry.session_id == session_id)
+                })
                 .expect("employee presence checked above");
             employee.plan_id = candidate.plan_id;
             employee.item_id = candidate.item_id;
@@ -2232,8 +2232,12 @@ impl BossService {
             let employee = state
                 .employees
                 .iter_mut()
-                .chain(state.retired_employees.iter_mut())
                 .find(|entry| entry.session_id == session)
+                .or_else(|| {
+                    std::sync::Arc::make_mut(&mut state.retired_employees)
+                        .iter_mut()
+                        .find(|entry| entry.session_id == session)
+                })
                 .ok_or_else(|| anyhow!("unknown employee"))?;
             employee.purpose = Some(purpose);
             Ok(())
@@ -2255,8 +2259,12 @@ impl BossService {
             let employee = state
                 .employees
                 .iter_mut()
-                .chain(state.retired_employees.iter_mut())
                 .find(|entry| entry.session_id == session)
+                .or_else(|| {
+                    std::sync::Arc::make_mut(&mut state.retired_employees)
+                        .iter_mut()
+                        .find(|entry| entry.session_id == session)
+                })
                 .ok_or_else(|| anyhow!("unknown employee"))?;
             employee.persona_id = resolved;
             Ok(())
@@ -2451,8 +2459,12 @@ impl BossService {
             let employee = state
                 .employees
                 .iter_mut()
-                .chain(state.retired_employees.iter_mut())
                 .find(|entry| entry.session_id == session_id)
+                .or_else(|| {
+                    std::sync::Arc::make_mut(&mut state.retired_employees)
+                        .iter_mut()
+                        .find(|entry| entry.session_id == session_id)
+                })
                 .ok_or_else(|| anyhow!("not a Boss employee"))?;
             employee.job_title = job_title.trim().to_owned();
             Ok(())
@@ -2929,7 +2941,7 @@ impl BossService {
                     {
                         bail!("name has been reused; summon a new employee");
                     }
-                    state.retired_employees.remove(index);
+                    std::sync::Arc::make_mut(&mut state.retired_employees).remove(index);
                     entry.set_lifecycle(EmployeeLifecycle::Working, 0);
                     entry.expired_at = None;
                     entry.blocker = None;
@@ -3843,7 +3855,7 @@ impl BossService {
                 .iter()
                 .position(|entry| entry.session_id == session)
             {
-                let entry = state.retired_employees.remove(index);
+                let entry = std::sync::Arc::make_mut(&mut state.retired_employees).remove(index);
                 if state
                     .employees
                     .iter()
@@ -4068,7 +4080,7 @@ impl BossService {
             for employee in state.employees.drain(..) {
                 if retires(&employee) {
                     retired.push(employee.clone());
-                    state.retired_employees.push(employee);
+                    std::sync::Arc::make_mut(&mut state.retired_employees).push(employee);
                 } else {
                     keep.push(employee);
                 }
@@ -4591,7 +4603,7 @@ impl BossService {
                     for employee in state
                         .employees
                         .iter_mut()
-                        .chain(state.retired_employees.iter_mut())
+                        .chain(std::sync::Arc::make_mut(&mut state.retired_employees).iter_mut())
                     {
                         employee.identity.avatar_style = avatar_style;
                     }
@@ -4995,8 +5007,12 @@ impl BossService {
                     let employee = state
                         .employees
                         .iter_mut()
-                        .chain(state.retired_employees.iter_mut())
-                        .find(|employee| employee.session_id == session_id)
+                        .find(|entry| entry.session_id == session_id)
+                        .or_else(|| {
+                            std::sync::Arc::make_mut(&mut state.retired_employees)
+                                .iter_mut()
+                                .find(|entry| entry.session_id == session_id)
+                        })
                         .ok_or_else(|| anyhow!("unknown employee"))?;
                     employee.attention_viewed_at = Some(now);
                     Ok(())
@@ -5012,8 +5028,12 @@ impl BossService {
                     let employee = state
                         .employees
                         .iter_mut()
-                        .chain(state.retired_employees.iter_mut())
-                        .find(|employee| employee.session_id == session_id)
+                        .find(|entry| entry.session_id == session_id)
+                        .or_else(|| {
+                            std::sync::Arc::make_mut(&mut state.retired_employees)
+                                .iter_mut()
+                                .find(|entry| entry.session_id == session_id)
+                        })
                         .ok_or_else(|| anyhow!("unknown employee"))?;
                     employee.needs_attention = needs_attention;
                     if needs_attention {
@@ -5503,7 +5523,7 @@ impl BossService {
         // A change that lands nothing — e.g. a scheduler pass over an
         // already-settled ticket — pays no revision bump and none of the
         // write set `save` performs under this lock.
-        if serde_json::to_vec(&next)? == serde_json::to_vec(&*state)? {
+        if self.storage.unchanged(&next)? {
             return Ok(());
         }
         self.commit(state, next)
@@ -5547,10 +5567,7 @@ impl BossService {
             writes.insert(persona.id, persona.markdown.clone());
         }
         drop(writes);
-        atomic_write(
-            &self.root.join("boss.json"),
-            &serde_json::to_vec_pretty(state)?,
-        )
+        self.storage.save(&self.root, state)
     }
 
     fn authorize_file(
@@ -7145,7 +7162,7 @@ fn persona_is_referenced(state: &BossState, id: Uuid) -> bool {
     state
         .employees
         .iter()
-        .chain(&state.retired_employees)
+        .chain(state.retired_employees.iter())
         .any(|employee| employee.persona_id == id)
 }
 
@@ -7616,7 +7633,7 @@ fn fresh_state() -> BossState {
         rotation: None,
         personas,
         employees: Vec::new(),
-        retired_employees: Vec::new(),
+        retired_employees: Default::default(),
         deliverables: Vec::new(),
         planning: Vec::new(),
         outcomes: Vec::new(),
@@ -7651,7 +7668,7 @@ fn disabled_state() -> BossState {
         rotation: None,
         personas: Vec::new(),
         employees: Vec::new(),
-        retired_employees: Vec::new(),
+        retired_employees: Default::default(),
         deliverables: Vec::new(),
         planning: Vec::new(),
         outcomes: Vec::new(),
@@ -13631,7 +13648,7 @@ mod memory_op_tests {
         // outcome owns the rows itself.
         restored
             .update(|state| {
-                state.retired_employees.clear();
+                std::sync::Arc::make_mut(&mut state.retired_employees).clear();
                 Ok(())
             })
             .unwrap();
@@ -13785,7 +13802,7 @@ mod memory_op_tests {
         let ghost_finisher = Uuid::new_v4();
         service
             .update(|state| {
-                state.retired_employees.push(veteran);
+                std::sync::Arc::make_mut(&mut state.retired_employees).push(veteran);
                 state.employees.push(legacy);
                 let task = state
                     .outcomes
@@ -14033,7 +14050,7 @@ mod memory_op_tests {
         service
             .update(|state| {
                 let employee = state.employees.remove(0);
-                state.retired_employees.push(employee);
+                std::sync::Arc::make_mut(&mut state.retired_employees).push(employee);
                 Ok(())
             })
             .unwrap();

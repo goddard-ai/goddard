@@ -1947,7 +1947,7 @@ impl Waku {
                 // chips are historical content that still resolves them.
                 // They stay boss-managed and read as finished, never
                 // queued or working; the roster owns any overlap.
-                for employee in &state.retired_employees {
+                for employee in state.retired_employees.iter() {
                     self.boss_ui
                         .job_titles
                         .entry(employee.session_id)
@@ -12200,7 +12200,7 @@ mod tests {
             rotation: None,
             personas: Vec::new(),
             employees: Vec::new(),
-            retired_employees: Vec::new(),
+            retired_employees: Default::default(),
             deliverables: vec![BossDeliverable {
                 id: Uuid::nil(),
                 name: "report.md".into(),
@@ -13864,7 +13864,7 @@ mod tests {
             rotation: None,
             personas: Vec::new(),
             employees: Vec::new(),
-            retired_employees: Vec::new(),
+            retired_employees: Default::default(),
             deliverables: Vec::new(),
             goals_viewed_at: None,
             planning: Vec::new(),

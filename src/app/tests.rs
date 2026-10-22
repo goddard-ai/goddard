@@ -2210,7 +2210,7 @@ fn boss_state(
         rotation: None,
         personas: Vec::new(),
         employees: Vec::new(),
-        retired_employees: Vec::new(),
+        retired_employees: Default::default(),
         deliverables,
         goals_viewed_at: None,
         planning: Vec::new(),

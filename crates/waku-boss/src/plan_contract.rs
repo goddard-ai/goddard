@@ -117,8 +117,12 @@ impl BossService {
             let employee = state
                 .employees
                 .iter_mut()
-                .chain(state.retired_employees.iter_mut())
-                .find(|e| e.session_id == session)
+                .find(|entry| entry.session_id == session)
+                .or_else(|| {
+                    std::sync::Arc::make_mut(&mut state.retired_employees)
+                        .iter_mut()
+                        .find(|entry| entry.session_id == session)
+                })
                 .ok_or_else(|| anyhow!("plan blocker employee missing"))?;
             if !employee.plan_blockers.iter().any(|n| n.id == notice.id) {
                 employee.plan_blockers.push(notice);
@@ -132,8 +136,12 @@ impl BossService {
             if let Some(notice) = state
                 .employees
                 .iter_mut()
-                .chain(state.retired_employees.iter_mut())
-                .find(|e| e.session_id == session)
+                .find(|entry| entry.session_id == session)
+                .or_else(|| {
+                    std::sync::Arc::make_mut(&mut state.retired_employees)
+                        .iter_mut()
+                        .find(|entry| entry.session_id == session)
+                })
                 .and_then(|e| e.plan_blockers.iter_mut().find(|n| n.id == id))
             {
                 notice
