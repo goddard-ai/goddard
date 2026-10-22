@@ -114,6 +114,10 @@ pub enum JournalRecord {
         request_id: String,
         disposition: AnswerDisposition,
         consumed: bool,
+        /// Compaction preserves the opening independently of replay
+        /// retention. Ordinary disposition writes leave it unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        opened: Option<Box<EventEnvelope>>,
     },
     /// The last requested configuration revision. Requested and effective
     /// config are separate facts; only `ConfigActivated` events move the

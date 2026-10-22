@@ -394,6 +394,28 @@ fn respond(inner: &Arc<Inner>, role: &Role, request: WireRequest) -> WireRespons
                 })
                 .unwrap_or_else(error)
         }
+        WireRequest::PendingRequest {
+            epoch,
+            session,
+            request_id,
+        } => {
+            let credential = controller!();
+            let mut host = inner.host.lock().unwrap();
+            let response = host
+                .pending_request(credential, epoch, session, &request_id)
+                .map(|request| WireResponse::PendingRequest {
+                    request: request.map(Box::new),
+                })
+                .unwrap_or_else(error);
+            drop(host);
+            match serde_json::to_vec(&response) {
+                Ok(bytes) if bytes.len() <= ipc::MAX_FRAME_BYTES => response,
+                Ok(_) => error(HostError::Capacity(
+                    "pending request exceeds IPC frame budget".into(),
+                )),
+                Err(_) => error(HostError::Malformed("pending request encoding".into())),
+            }
+        }
         WireRequest::Execute { envelope } => {
             let credential = controller!();
             let mut host = inner.host.lock().unwrap();

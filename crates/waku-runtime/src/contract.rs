@@ -506,6 +506,18 @@ pub struct EffectiveConfig {
     pub config: RequestedConfig,
 }
 
+/// An unresolved native request, including the original attachment data.
+/// Answer delivery remains separate from provider consumption. A missing
+/// opening envelope means an older journal cannot reconstruct the request.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingRequestSnapshot {
+    pub request_id: String,
+    pub answer: AnswerDisposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opened: Option<EventEnvelope>,
+}
+
 /// Per-session truth returned by inventory reconciliation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -591,6 +603,7 @@ pub struct HostStatus {
     pub tail_corrupt: bool,
     pub admission_open: bool,
     pub sessions: Vec<SessionInventory>,
+    /// Replay payloads and independently retained native request openings.
     pub retained_event_bytes: u64,
     pub journal_bytes: u64,
     /// Records accepted into emergency buffering but not yet durable.

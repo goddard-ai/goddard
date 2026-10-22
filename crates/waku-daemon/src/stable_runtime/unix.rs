@@ -19,10 +19,10 @@ use uuid::Uuid;
 use waku_protocol::model::RuntimeEventCursor;
 use waku_runtime::client::{ClientError, RuntimeClient};
 use waku_runtime::contract::{
-    ActionEnvelope, AgentIngress, CanonicalAction, ClientHello, ControlGrant, EventCursor,
-    EventEnvelope, ForwardedOutcome, ForwardedRequest, INGRESS_DESCRIPTOR_VERSION,
-    IngressDescriptor, Inventory, ProviderEvent, RequestClass, ResourceClaim, SessionRef,
-    SessionStatus,
+    ActionEnvelope, AgentIngress, AnswerDisposition, CanonicalAction, ClientHello, ControlGrant,
+    EventCursor, EventEnvelope, ForwardedOutcome, ForwardedRequest, INGRESS_DESCRIPTOR_VERSION,
+    IngressDescriptor, Inventory, PendingRequestSnapshot, ProviderEvent, RequestClass,
+    ResourceClaim, SessionInventory, SessionRef, SessionStatus,
 };
 use waku_runtime::host::load_credentials;
 
@@ -370,6 +370,7 @@ pub(crate) fn start_link(
         }
     };
     row.session_id = session_id;
+    let requests = reconcile_requests(&mut client, grant.epoch, &inventory, sref, row.applied_seq)?;
     row.updated_at = crate::model::unix_time();
     task_store
         .stable_link_save(&row)
@@ -469,13 +470,97 @@ pub(crate) fn start_link(
         .lock()
         .unwrap()
         .insert(sref.session_id, Arc::downgrade(&shared));
-    spawn_pump(&shared);
+    spawn_pump(&shared, requests);
     spawn_service(&shared);
     // A prior owner may have left a delivery held behind an already
     // settled cancellation — the fenced release completes that recorded
     // intent; nothing is replayed or admitted anew.
     shared.release_if_settled();
     Ok((DriverHandle::from_control(Arc::new(link.clone())), link))
+}
+
+#[derive(Default)]
+struct ReconciledRequests {
+    /// Inventory and replay agree through this sequence. Historical opens
+    /// for requests already answered or settled must not reopen a card.
+    through: u64,
+    unanswered: BTreeSet<String>,
+    restore: Vec<EventEnvelope>,
+}
+
+fn reconcile_requests(
+    client: &mut RuntimeClient,
+    epoch: u64,
+    inventory: &Inventory,
+    sref: SessionRef,
+    applied_seq: u64,
+) -> anyhow::Result<ReconciledRequests> {
+    let Some(session) = inventory.sessions.iter().find(|inv| inv.session == sref) else {
+        // A fresh admission is newer than the pre-admission inventory.
+        return Ok(ReconciledRequests::default());
+    };
+    let mut requests = ReconciledRequests {
+        through: session.high_water,
+        ..Default::default()
+    };
+    for request_id in &session.pending_requests {
+        let pending = client
+            .pending_request(epoch, sref, request_id)
+            .map_err(link_error)
+            .context(
+                "the runtime host cannot reconstruct its pending requests; attachment is blocked",
+            )?;
+        let Some(pending) = pending else {
+            // Consumption can settle between inventory and this read.
+            continue;
+        };
+        anyhow::ensure!(
+            &pending.request_id == request_id,
+            "the runtime returned a different pending request"
+        );
+        let Some(opened) = unanswered_request(inventory.runtime_instance, session, &pending)?
+        else {
+            continue;
+        };
+        requests.unanswered.insert(request_id.clone());
+        if opened.sequence <= applied_seq {
+            // An acknowledged open will never replay. Restore only its
+            // pending surface; do not advance the cursor or dispatch work.
+            requests.restore.push(opened.clone());
+        }
+    }
+    requests.restore.sort_by_key(|opened| opened.sequence);
+    Ok(requests)
+}
+
+fn unanswered_request<'a>(
+    instance: Uuid,
+    session: &SessionInventory,
+    pending: &'a PendingRequestSnapshot,
+) -> anyhow::Result<Option<&'a EventEnvelope>> {
+    if pending.answer != AnswerDisposition::Pending {
+        // Delivery attempts remain uncertain until native evidence
+        // settles them. Attachment never asks the user to send again.
+        return Ok(None);
+    }
+    let opened = pending.opened.as_ref().context(
+        "the runtime journal lacks the pending request's original payload; attachment is blocked",
+    )?;
+    anyhow::ensure!(
+        opened.runtime_instance == instance
+            && opened.session_id == session.session.session_id
+            && opened.generation == session.session.generation
+            && opened.sequence <= session.high_water
+            && matches!(&opened.event, ProviderEvent::RequestOpened { request_id, .. } if request_id == &pending.request_id),
+        "the runtime's pending request does not belong to this attachment"
+    );
+    if opened
+        .turn_id
+        .is_some_and(|turn| !session.open_turns.contains(&turn))
+    {
+        return Ok(None);
+    }
+    Ok(Some(opened))
 }
 
 /// Whether the task reattaches to a surviving host session or admits a new
@@ -1390,16 +1475,16 @@ impl LinkShared {
 
 /// The event pump: replay from the durable cursor, translate, interleave
 /// the applied marker the forwarder acks through `note_applied`.
-fn spawn_pump(shared: &Arc<LinkShared>) {
+fn spawn_pump(shared: &Arc<LinkShared>, requests: ReconciledRequests) {
     let worker = shared.clone();
     let thread = std::thread::Builder::new()
         .name("goddard-stable-pump".into())
-        .spawn(move || pump_loop(worker))
+        .spawn(move || pump_loop(worker, requests))
         .expect("stable runtime pump spawns");
     shared.threads.lock().unwrap().push(thread);
 }
 
-fn pump_loop(shared: Arc<LinkShared>) {
+fn pump_loop(shared: Arc<LinkShared>, mut requests: ReconciledRequests) {
     let mut cursor = shared.cursor();
     let mut native = crate::driver::NativeEventProjection::default();
     if let Ok(inventory) = shared.client.lock().unwrap().reconcile(shared.epoch) {
@@ -1417,6 +1502,13 @@ fn pump_loop(shared: Arc<LinkShared>) {
                     .and_then(Value::as_str)
                     .map(str::to_owned),
             );
+        }
+    }
+    for env in std::mem::take(&mut requests.restore) {
+        if let Some(event) = project_request(&shared, &native, &env)
+            && shared.sender.send(event).is_err()
+        {
+            return;
         }
     }
     let mut conn: Option<RuntimeClient> = None;
@@ -1505,32 +1597,13 @@ fn pump_loop(shared: Arc<LinkShared>) {
                                 return;
                             }
                         }
-                        ProviderEvent::RequestOpened {
-                            request_id,
-                            subject,
-                            class,
-                            ..
-                        } => {
-                            if *class == RequestClass::Input
-                                && shared.provider == ProviderKind::Devin
+                        ProviderEvent::RequestOpened { request_id, .. } => {
+                            if (env.sequence > requests.through
+                                || requests.unanswered.contains(request_id))
+                                && let Some(event) = project_request(&shared, &native, &env)
+                                && shared.sender.send(event).is_err()
                             {
-                                if let Some(schema) = subject.get("requestedSchema") {
-                                    shared
-                                        .input_schemas
-                                        .lock()
-                                        .unwrap()
-                                        .insert(request_id.clone(), schema.clone());
-                                }
-                            }
-                            let event = native.request(shared.provider, request_id, subject).or_else(|| {
-                                if *class == RequestClass::Tool {
-                                    Some(DriverEvent::Error("provider tool is waiting for the unqualified product bridge".into()))
-                                } else { translate(&env) }
-                            });
-                            if let Some(event) = event {
-                                if shared.sender.send(event).is_err() {
-                                    return;
-                                }
+                                return;
                             }
                         }
                         ProviderEvent::TurnDelta { delta, .. } if !delta.is_string() => {
@@ -1585,6 +1658,45 @@ fn pump_loop(shared: Arc<LinkShared>) {
             }
         }
     }
+}
+
+/// Reuse the live native projection on attachment, including the schema
+/// needed to encode a later answer on the original provider connection.
+fn project_request(
+    shared: &LinkShared,
+    native: &crate::driver::NativeEventProjection,
+    env: &EventEnvelope,
+) -> Option<DriverEvent> {
+    let ProviderEvent::RequestOpened {
+        request_id,
+        class,
+        subject,
+        ..
+    } = &env.event
+    else {
+        return None;
+    };
+    if *class == RequestClass::Input
+        && shared.provider == ProviderKind::Devin
+        && let Some(schema) = subject.get("requestedSchema")
+    {
+        shared
+            .input_schemas
+            .lock()
+            .unwrap()
+            .insert(request_id.clone(), schema.clone());
+    }
+    native
+        .request(shared.provider, request_id, subject)
+        .or_else(|| {
+            if *class == RequestClass::Tool {
+                Some(DriverEvent::Error(
+                    "provider tool is waiting for the unqualified product bridge".into(),
+                ))
+            } else {
+                translate(env)
+            }
+        })
 }
 
 fn shared_cursor_applied(shared: &Arc<LinkShared>) -> u64 {
@@ -2130,6 +2242,30 @@ mod tests {
             }
         }
         events
+    }
+
+    /// Apply through an explicit host sequence, using the ordered marker
+    /// as the barrier instead of timing the event pump.
+    fn apply_through(
+        link: &StableLink,
+        rx: &crossbeam_channel::Receiver<DriverEvent>,
+        through: u64,
+    ) -> Vec<DriverEvent> {
+        let mut events = Vec::new();
+        loop {
+            match rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("apply marker arrives")
+            {
+                DriverEvent::RuntimeEventCursorAdvanced(cursor) => {
+                    link.note_applied(&cursor);
+                    if cursor.sequence >= through {
+                        return events;
+                    }
+                }
+                event => events.push(event),
+            }
+        }
     }
 
     /// A controller client for the host, independent of any link.
@@ -2977,7 +3113,7 @@ mod tests {
     /// proves the daemon mapping, not qualification of a hosted provider.
     #[test]
     #[cfg(unix)]
-    fn stable_codex_native_protocol_stream_and_approval_round_trip() {
+    fn stable_codex_native_approval_survives_backend_replacement() {
         let runtime_root = temp_root("native-runtime");
         let provider_root = temp_root("native-provider");
         let binary = provider_root.join("controlled-codex");
@@ -3019,8 +3155,8 @@ for line in sys.stdin:
         )
         .unwrap();
         let server = RuntimeServer::bind(host, &runtime_root, Duration::from_millis(5)).unwrap();
-        let (backend, task) =
-            crate::daemon::tests::surface_test_backend(&temp_root("native-backend"));
+        let backend_root = temp_root("native-backend");
+        let (backend, task) = crate::daemon::tests::surface_test_backend(&backend_root);
         let backend = Arc::new(backend);
         backend.install_weak_self();
         let mut opts = options();
@@ -3043,7 +3179,7 @@ for line in sys.stdin:
         handle.prompt("native input".into());
         let mut text = String::new();
         let mut reasoning = String::new();
-        let mut approval = false;
+        let mut approval = None;
         let mut started = 0;
         loop {
             match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
@@ -3064,7 +3200,99 @@ for line in sys.stdin:
                             .iter()
                             .any(|option| option.id == "decline" && !option.allow)
                     );
-                    approval = true;
+                    approval = Some(request_id);
+                }
+                DriverEvent::RuntimeEventCursorAdvanced(cursor) => {
+                    link.note_applied(&cursor);
+                    if approval.is_some() {
+                        break;
+                    }
+                }
+                DriverEvent::TurnFinished { .. } => panic!("provider finished before its approval"),
+                _ => {}
+            }
+        }
+        assert_eq!(started, 1);
+        assert_eq!(text, "native text");
+        assert_eq!(reasoning, "native reasoning");
+        let approval = approval.expect("native approval arrived");
+        let original_session = link.sref();
+        let original_epoch = link.shared.epoch;
+        let owner_pid = link
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(original_epoch)
+            .unwrap()
+            .sessions[0]
+            .effective
+            .as_ref()
+            .unwrap()
+            .config
+            .options["ownerGroupPid"]
+            .as_u64()
+            .expect("owned provider pid");
+        drop(handle);
+        drop(link);
+        drop(backend);
+        drop(rx);
+
+        // Replace the whole backend over the same database while the
+        // production adapter's original subprocess waits on its pipe.
+        let settings =
+            crate::DaemonSettingsStore::open(backend_root.join("settings.json")).unwrap();
+        let backend = Arc::new(
+            WakuBackend::new(settings, StateStore::daemon(backend_root.join("app.db"))).unwrap(),
+        );
+        backend.install_weak_self();
+        let (sender, rx) = crate::driver::test_event_channel();
+        let (handle, link) = start_link(
+            &backend,
+            backend.task_store(),
+            task,
+            Uuid::new_v4(),
+            ProviderKind::Codex,
+            &opts,
+            sender,
+            &runtime_root,
+            None,
+        )
+        .unwrap();
+        assert_eq!(link.sref(), original_session);
+        assert!(link.shared.epoch > original_epoch);
+        let inventory = link
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(link.shared.epoch)
+            .unwrap();
+        assert_eq!(
+            inventory.sessions[0]
+                .effective
+                .as_ref()
+                .unwrap()
+                .config
+                .options["ownerGroupPid"]
+                .as_u64(),
+            Some(owner_pid)
+        );
+        let mut restored = 0;
+        loop {
+            match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
+                DriverEvent::Permission {
+                    request_id,
+                    options,
+                    ..
+                } => {
+                    assert_eq!(request_id, approval);
+                    assert!(
+                        options
+                            .iter()
+                            .any(|option| option.id == "decline" && !option.allow)
+                    );
+                    restored += 1;
                     handle.respond(request_id, "decline".into());
                 }
                 DriverEvent::TurnFinished {
@@ -3074,13 +3302,15 @@ for line in sys.stdin:
                     assert_eq!(summary.as_deref(), Some("controlled failure"));
                     break;
                 }
+                DriverEvent::TurnStarted
+                | DriverEvent::TextDelta(_)
+                | DriverEvent::ReasoningDelta(_) => {
+                    panic!("acknowledged provider output replayed after backend replacement");
+                }
                 _ => {}
             }
         }
-        assert_eq!(started, 1);
-        assert_eq!(text, "native text");
-        assert_eq!(reasoning, "native reasoning");
-        assert!(approval);
+        assert_eq!(restored, 1);
         handle.delete_provider_session();
         drop(handle);
         drop(link);
@@ -3136,11 +3366,11 @@ for line in sys.stdin:
     /// strict Devin adapter validates — a bare answers array would be
     /// refused.
     #[test]
-    fn devin_link_projects_and_answers_elicitations() {
+    fn devin_link_restores_acknowledged_elicitation_and_answers_original_request() {
         let rig = rig(&["devin"]);
-        let mut options = options();
-        options.mode = crate::model::RuntimeMode::Ask;
-        let (handle, link, rx) = link_for(&rig, ProviderKind::Devin, Uuid::new_v4(), None, options);
+        let mut opts = options();
+        opts.mode = crate::model::RuntimeMode::Ask;
+        let (handle, link, rx) = link_for(&rig, ProviderKind::Devin, Uuid::new_v4(), None, opts);
         let driver = rig
             .factory
             .for_session(link.sref().session_id)
@@ -3166,7 +3396,8 @@ for line in sys.stdin:
             }),
             deadline_ms: None,
         });
-        let events = collect_events(&rx, 1);
+        let events = apply_through(&link, &rx, 1);
+        assert_eq!(events.len(), 1);
         match &events[0] {
             DriverEvent::UserInputRequested {
                 request_id,
@@ -3179,6 +3410,41 @@ for line in sys.stdin:
             }
             event => panic!("expected an input request, got {event:?}"),
         }
+        // The opening is acknowledged and has left the host's replay
+        // window. A replacement controller must restore both the card
+        // and its schema before answering on the surviving connection.
+        let original_session = link.sref();
+        let original_epoch = link.shared.epoch;
+        let page = controller(&rig)
+            .events(
+                original_epoch,
+                EventCursor {
+                    session_id: original_session.session_id,
+                    generation: original_session.generation,
+                    applied: 1,
+                },
+                0,
+            )
+            .unwrap();
+        assert!(page.events.is_empty());
+        assert_eq!(page.retained_floor, 2);
+        drop(handle);
+        drop(link);
+        rig.backend.stable_controllers.lock().unwrap().clear();
+        let mut options = options();
+        options.mode = crate::model::RuntimeMode::Ask;
+        let (handle, link, rx) = link_for(&rig, ProviderKind::Devin, Uuid::new_v4(), None, options);
+        assert_eq!(link.sref(), original_session);
+        assert!(link.shared.epoch > original_epoch);
+        let restored = collect_events(&rx, 1);
+        let restored = waku_protocol::event_to_wire(restored.into_iter().next().unwrap()).unwrap();
+        let original = waku_protocol::event_to_wire(events.into_iter().next().unwrap()).unwrap();
+        assert_eq!(restored.kind, original.kind);
+        assert_eq!(restored.payload, original.payload);
+        assert!(
+            driver.dispatched().is_empty(),
+            "attachment never answers automatically"
+        );
         handle.respond_user_input(
             "elic-1".into(),
             vec![
@@ -3228,6 +3494,106 @@ for line in sys.stdin:
                 ),
                 ("elic-2".to_string(), json!({"action":"cancel"})),
             ]
+        );
+    }
+
+    #[test]
+    fn stable_reattachment_does_not_reopen_uncertain_or_finished_turn_requests() {
+        for answer_attempted in [true, false] {
+            let rig = rig(&["codex"]);
+            let (handle, link1, rx1) = link(&rig, Uuid::new_v4(), None);
+            let adapter = rig.factory.for_session(link1.sref().session_id).unwrap();
+            let turn = Uuid::new_v4();
+            adapter.emit(ProviderEvent::TurnStarted {
+                turn_id: turn,
+                delivery_id: Uuid::new_v4(),
+            });
+            adapter.emit(ProviderEvent::RequestOpened {
+                request_id: "original-approval".into(),
+                class: RequestClass::Approval,
+                subject: json!({"title":"Continue?","options":[{"id":"accept","label":"Allow"}]}),
+                deadline_ms: None,
+            });
+            let first = collect_events(&rx1, 2);
+            assert!(
+                matches!(&first[1], DriverEvent::Permission { request_id, .. } if request_id == "original-approval")
+            );
+            // Lose the apply marker. Reattachment will see the historical
+            // open in replay, but current inventory must prevent a second
+            // answer attempt or a card belonging to a finished turn.
+            if answer_attempted {
+                adapter.script_dispatch(waku_runtime::adapter::DispatchOutcome::Unknown {
+                    detail: "reply acknowledgement lost".into(),
+                });
+                handle.respond("original-approval".into(), "accept".into());
+            } else {
+                adapter.emit_completed(turn);
+            }
+            let before = controller(&rig).reconcile(link1.shared.epoch).unwrap();
+            let high_water = before.sessions[0].high_water;
+            let session = link1.sref();
+            drop(handle);
+            drop(link1);
+            rig.backend.stable_controllers.lock().unwrap().clear();
+            let (_handle2, link2, rx2) = link(&rig, Uuid::new_v4(), None);
+            assert_eq!(link2.sref(), session);
+            let next_turn = Uuid::new_v4();
+            adapter.emit(ProviderEvent::TurnStarted {
+                turn_id: next_turn,
+                delivery_id: Uuid::new_v4(),
+            });
+            adapter.emit(ProviderEvent::TurnDelta {
+                turn_id: next_turn,
+                delta: json!("after attachment"),
+            });
+            let replayed = apply_through(&link2, &rx2, high_water + 2);
+            assert!(replayed.iter().any(
+                |event| matches!(event, DriverEvent::TextDelta(text) if text == "after attachment")
+            ));
+            assert!(!replayed.iter().any(|event| matches!(
+                event,
+                DriverEvent::Permission { .. } | DriverEvent::UserInputRequested { .. }
+            )));
+            assert_eq!(adapter.dispatched().len(), usize::from(answer_attempted));
+        }
+    }
+
+    #[test]
+    fn stable_reattachment_refuses_missing_or_foreign_request_payloads() {
+        let rig = rig(&["codex"]);
+        let (_handle, link, rx) = link(&rig, Uuid::new_v4(), None);
+        let adapter = rig.factory.for_session(link.sref().session_id).unwrap();
+        adapter.emit(ProviderEvent::RequestOpened {
+            request_id: "pending-approval".into(),
+            class: RequestClass::Approval,
+            subject: json!({"title":"Continue?"}),
+            deadline_ms: None,
+        });
+        apply_through(&link, &rx, 1);
+        let mut client = controller(&rig);
+        let inventory = client.reconcile(link.shared.epoch).unwrap();
+        assert_eq!(
+            reconcile_requests(&mut client, link.shared.epoch, &inventory, link.sref(), 1)
+                .unwrap()
+                .restore
+                .len(),
+            1
+        );
+        let pending = client
+            .pending_request(link.shared.epoch, link.sref(), "pending-approval")
+            .unwrap()
+            .unwrap();
+        let mut missing = pending.clone();
+        missing.opened = None;
+        assert!(
+            unanswered_request(inventory.runtime_instance, &inventory.sessions[0], &missing)
+                .is_err()
+        );
+        let mut foreign = pending;
+        foreign.opened.as_mut().unwrap().generation += 1;
+        assert!(
+            unanswered_request(inventory.runtime_instance, &inventory.sessions[0], &foreign)
+                .is_err()
         );
     }
 

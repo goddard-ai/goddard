@@ -56,7 +56,7 @@ impl Clock for SystemClock {
 /// targets, not measured provider needs.
 #[derive(Clone, Debug)]
 pub struct Budgets {
-    /// Retained (not yet acknowledged) event bytes per session.
+    /// Retained replay and unresolved request payload bytes per session.
     pub session_memory_bytes: u64,
     /// Retained event bytes across all sessions.
     pub aggregate_memory_bytes: u64,
@@ -162,6 +162,16 @@ struct IdentityFile {
 struct PendingRequest {
     answer: AnswerDisposition,
     consumed: bool,
+    opened: Option<EventEnvelope>,
+}
+
+impl PendingRequest {
+    fn retained_bytes(&self) -> u64 {
+        self.opened
+            .as_ref()
+            .and_then(|opened| serde_json::to_vec(&opened.event).ok())
+            .map_or(0, |bytes| bytes.len() as u64)
+    }
 }
 
 /// A minted ingress grant as the host knows it — the presented token is
@@ -847,6 +857,42 @@ impl RuntimeHost {
         })
     }
 
+    /// Read one native request independently of replay retention. Fetching
+    /// payloads individually keeps namespace inventory inside IPC bounds.
+    /// `None` means the request is absent or consumption is confirmed.
+    pub fn pending_request(
+        &mut self,
+        credential: &str,
+        epoch: u64,
+        target: SessionRef,
+        request_id: &str,
+    ) -> Result<Option<PendingRequestSnapshot>, HostError> {
+        self.check_controller(credential)?;
+        self.check_epoch(epoch)?;
+        self.pump();
+        if !self.persistence_ok {
+            return Err(HostError::PersistenceUnavailable);
+        }
+        let session = self
+            .sessions
+            .get(&target.session_id)
+            .ok_or(HostError::UnknownSession(target.session_id))?;
+        let g = session
+            .generation_at(target.generation)
+            .ok_or(HostError::GenerationMismatch {
+                presented: target.generation,
+                current: session.generation(),
+            })?;
+        Ok(g.pending
+            .get(request_id)
+            .filter(|pending| !pending.consumed)
+            .map(|pending| PendingRequestSnapshot {
+                request_id: request_id.to_owned(),
+                answer: pending.answer.clone(),
+                opened: pending.opened.clone(),
+            }))
+    }
+
     /// The controller's durable applied cursor. Advances only when the
     /// caller has committed its projections and effect receipts; it is the
     /// signal that retained payloads are reconstructible and may be
@@ -1516,7 +1562,18 @@ impl RuntimeHost {
             } else {
                 event
             };
-            let (delivery_id, turn_id, request_id, config_revision) = attribution(&event);
+            let (delivery_id, mut turn_id, request_id, config_revision) = attribution(&event);
+            if matches!(&event, ProviderEvent::RequestOpened { .. }) {
+                // Native requests belong to the sole open turn when the
+                // adapter has one. Never guess an owner among concurrent
+                // turns, or resurrect a finished turn's request on attach.
+                let mut open_turns = g
+                    .turns
+                    .iter()
+                    .filter(|(_, state)| **state != TurnState::Closed)
+                    .map(|(id, _)| *id);
+                turn_id = open_turns.next().filter(|_| open_turns.next().is_none());
+            }
             let sequence = g.next_seq;
             g.next_seq += 1;
             let envelope = EventEnvelope {
@@ -1541,12 +1598,7 @@ impl RuntimeHost {
         self.journal_best_effort(JournalRecord::Event {
             envelope: Box::new(envelope.clone()),
         });
-        self.apply_event(
-            session_id,
-            envelope.generation,
-            envelope.sequence,
-            &envelope.event,
-        );
+        self.apply_event(&envelope);
         // Bounded emergency buffering is exhausted: the provider cannot
         // keep emitting into a store that is not keeping up.
         if !self.persistence_ok && self.pending_data_records() >= self.budgets.emergency_records {
@@ -1556,13 +1608,11 @@ impl RuntimeHost {
 
     /// Derived state from a journaled event — used by live ingest and by
     /// recovery fold so both paths build identical truth.
-    fn apply_event(
-        &mut self,
-        session_id: Uuid,
-        generation: u64,
-        sequence: u64,
-        event: &ProviderEvent,
-    ) {
+    fn apply_event(&mut self, envelope: &EventEnvelope) {
+        let session_id = envelope.session_id;
+        let generation = envelope.generation;
+        let sequence = envelope.sequence;
+        let event = &envelope.event;
         let mut terminate: Option<TerminateReason> = None;
         let mut activated_revision: Option<u64> = None;
         {
@@ -1581,17 +1631,25 @@ impl RuntimeHost {
                     g.turns.insert(*turn_id, TurnState::Closed);
                 }
                 ProviderEvent::RequestOpened { request_id, .. } => {
-                    g.pending.insert(
-                        request_id.clone(),
-                        PendingRequest {
-                            answer: AnswerDisposition::Pending,
-                            consumed: false,
-                        },
-                    );
+                    let pending = PendingRequest {
+                        answer: AnswerDisposition::Pending,
+                        consumed: false,
+                        opened: Some(envelope.clone()),
+                    };
+                    // The attachment copy outlives replay acknowledgement
+                    // and shares its memory budget, including after recovery.
+                    g.retained_bytes += pending.retained_bytes();
+                    if let Some(previous) = g.pending.insert(request_id.clone(), pending) {
+                        g.retained_bytes =
+                            g.retained_bytes.saturating_sub(previous.retained_bytes());
+                    }
                 }
                 ProviderEvent::RequestAnswered { request_id } => {
                     if let Some(pending) = g.pending.get_mut(request_id) {
+                        g.retained_bytes =
+                            g.retained_bytes.saturating_sub(pending.retained_bytes());
                         pending.consumed = true;
+                        pending.opened = None;
                     }
                 }
                 ProviderEvent::ConfigActivated {
@@ -1648,6 +1706,7 @@ impl RuntimeHost {
                     request_id: request_id.clone(),
                     disposition: AnswerDisposition::Accepted,
                     consumed: true,
+                    opened: None,
                 });
             }
             // Consumption evidence also terminally attributes the resolve
@@ -2205,6 +2264,7 @@ impl RuntimeHost {
                 request_id: request_id.clone(),
                 disposition: AnswerDisposition::Attempted,
                 consumed: false,
+                opened: None,
             })
             .is_err()
         {
@@ -2256,6 +2316,7 @@ impl RuntimeHost {
             request_id: request_id.clone(),
             disposition: answer.clone(),
             consumed: false,
+            opened: None,
         });
         let session = self.sessions.get_mut(&session_id).unwrap();
         let g = session.generation_at_mut(target.generation).unwrap();
@@ -2594,6 +2655,7 @@ impl RuntimeHost {
                         request_id: request_id.clone(),
                         disposition: pending.answer.clone(),
                         consumed: pending.consumed,
+                        opened: pending.opened.clone().map(Box::new),
                     });
                 }
                 for (grant_id, issued) in &g.grants {
@@ -2881,12 +2943,7 @@ impl RuntimeHost {
                         g.journal_bytes += size;
                         g.events.push_back(envelope.clone());
                     }
-                    self.apply_event(
-                        envelope.session_id,
-                        envelope.generation,
-                        envelope.sequence,
-                        &envelope.event,
-                    );
+                    self.apply_event(&envelope);
                 }
                 JournalRecord::EventTombstone {
                     session_id,
@@ -2897,6 +2954,10 @@ impl RuntimeHost {
                         && let Some(g) = s.generation_at_mut(*generation)
                     {
                         g.floor = g.floor.max(through + 1);
+                        // A compacted generation may retain no events at
+                        // all. Its tombstone still owns those sequence
+                        // positions and must preserve the high-water mark.
+                        g.next_seq = g.next_seq.max(g.floor);
                         while g.events.front().is_some_and(|e| e.sequence <= *through) {
                             g.events.pop_front();
                         }
@@ -2908,6 +2969,7 @@ impl RuntimeHost {
                     request_id,
                     disposition,
                     consumed,
+                    opened,
                 } => {
                     if let Some(s) = self.sessions.get_mut(session_id)
                         && let Some(g) = s.generation_at_mut(*generation)
@@ -2921,9 +2983,18 @@ impl RuntimeHost {
                             .or_insert(PendingRequest {
                                 answer: AnswerDisposition::Pending,
                                 consumed: false,
+                                opened: None,
                             });
+                        g.retained_bytes = g.retained_bytes.saturating_sub(p.retained_bytes());
                         p.answer = disposition.clone();
                         p.consumed = *consumed;
+                        if let Some(opened) = opened {
+                            p.opened = Some((**opened).clone());
+                        }
+                        if p.consumed {
+                            p.opened = None;
+                        }
+                        g.retained_bytes += p.retained_bytes();
                     }
                 }
                 JournalRecord::ConfigRequest {

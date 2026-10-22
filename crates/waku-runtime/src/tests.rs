@@ -724,6 +724,62 @@ fn unpausable_provider_is_interrupted_at_budget() {
 }
 
 #[test]
+fn acknowledged_pending_requests_still_reach_memory_budget() {
+    for aggregate in [false, true] {
+        let root = TestRoot::new();
+        let mut budgets = Budgets::default();
+        if aggregate {
+            budgets.aggregate_memory_bytes = 1024;
+        } else {
+            budgets.session_memory_bytes = 1024;
+        }
+        let mut rig = open(&root, budgets);
+        let grant = rig.control();
+        let (session, _) = rig.admit(&grant);
+        let fake = rig.factory.for_session(session).unwrap();
+        let mut applied = 0;
+        for request in 0..8 {
+            fake.emit(ProviderEvent::RequestOpened {
+                request_id: format!("pending-{request}"),
+                class: RequestClass::Approval,
+                subject: json!({"prompt":"x".repeat(128)}),
+                deadline_ms: None,
+            });
+            let page = rig.events(&grant, session, applied);
+            applied = page.high_water;
+            rig.host
+                .acknowledge(&rig.creds().0, grant.epoch, rig.cursor(session, applied))
+                .unwrap();
+            if rig
+                .host
+                .reconcile(&rig.creds().0, grant.epoch)
+                .unwrap()
+                .sessions[0]
+                .fence
+                .is_some()
+            {
+                break;
+            }
+        }
+        let inventory = rig.host.reconcile(&rig.creds().0, grant.epoch).unwrap();
+        assert_eq!(inventory.sessions[0].fence, Some(FenceKind::Backpressure));
+        assert_eq!(inventory.sessions[0].status, SessionStatus::Interrupted);
+        applied = rig.events(&grant, session, applied).high_water;
+        rig.host
+            .acknowledge(&rig.creds().0, grant.epoch, rig.cursor(session, applied))
+            .unwrap();
+        assert!(rig.events(&grant, session, applied).events.is_empty());
+        assert!(
+            rig.host
+                .status(&rig.creds().0)
+                .unwrap()
+                .retained_event_bytes
+                > 0
+        );
+    }
+}
+
+#[test]
 fn pausable_provider_backpressures_instead_of_dying() {
     let root = TestRoot::new();
     let budgets = Budgets {
@@ -831,9 +887,24 @@ fn disk_failure_buffers_then_recovers_without_losing_events() {
     // new commands stop before provider dispatch.
     rig.fault.store(true, Ordering::SeqCst);
     fake.emit_delta(turn, "during outage");
+    fake.emit(ProviderEvent::RequestOpened {
+        request_id: "outage-approval".into(),
+        class: RequestClass::Approval,
+        subject: json!({"prompt":"allow?"}),
+        deadline_ms: None,
+    });
     rig.host.pump();
     assert!(!rig.host.status(&rig.creds().0).unwrap().persistence_ok);
-    assert_eq!(rig.host.status(&rig.creds().0).unwrap().buffered_records, 1);
+    assert_eq!(rig.host.status(&rig.creds().0).unwrap().buffered_records, 2);
+    let target = SessionRef {
+        session_id: session,
+        generation: 1,
+    };
+    assert_eq!(
+        rig.host
+            .pending_request(&rig.creds().0, grant.epoch, target, "outage-approval"),
+        Err(HostError::PersistenceUnavailable)
+    );
     let err = rig
         .host
         .execute(
@@ -856,7 +927,15 @@ fn disk_failure_buffers_then_recovers_without_losing_events() {
     assert!(rig.host.status(&rig.creds().0).unwrap().persistence_ok);
     assert_eq!(rig.host.status(&rig.creds().0).unwrap().buffered_records, 0);
     let page = rig.events(&grant, session, 0);
-    assert_eq!(page.events.len(), 2);
+    assert_eq!(page.events.len(), 3);
+    assert!(
+        rig.host
+            .pending_request(&rig.creds().0, grant.epoch, target, "outage-approval")
+            .unwrap()
+            .unwrap()
+            .opened
+            .is_some()
+    );
 
     // And the whole outage is durable across a later crash recovery.
     drop(rig.host);
@@ -864,7 +943,7 @@ fn disk_failure_buffers_then_recovers_without_losing_events() {
     let grant2 = rig2.control();
     rig2.host.reconcile(&rig2.creds().0, grant2.epoch).unwrap();
     let page = rig2.events(&grant2, session, 0);
-    assert_eq!(page.events.len(), 2);
+    assert_eq!(page.events.len(), 3);
 }
 
 #[test]
@@ -1054,6 +1133,45 @@ fn request_resolves_once_under_current_authority() {
     });
     rig.host.pump();
 
+    let target = SessionRef {
+        session_id: session,
+        generation: 1,
+    };
+    let pending = rig
+        .host
+        .pending_request(&rig.creds().0, grant.epoch, target, "req-1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(pending.answer, AnswerDisposition::Pending);
+    assert!(
+        matches!(pending.opened.unwrap().event, ProviderEvent::RequestOpened { subject, .. }
+        if subject == json!({"prompt":"allow?"}))
+    );
+    assert!(matches!(
+        rig.host
+            .pending_request("wrong-credential", grant.epoch, target, "req-1"),
+        Err(HostError::Unauthorized)
+    ));
+    assert!(matches!(
+        rig.host.pending_request(
+            &rig.creds().0,
+            grant.epoch,
+            SessionRef {
+                generation: 2,
+                ..target
+            },
+            "req-1"
+        ),
+        Err(HostError::GenerationMismatch { .. })
+    ));
+    let old_epoch = grant.epoch;
+    let grant = rig.control();
+    assert!(matches!(
+        rig.host
+            .pending_request(&rig.creds().0, old_epoch, target, "req-1"),
+        Err(HostError::StaleEpoch { .. })
+    ));
+
     // Unknown request identity refuses.
     let receipt = rig
         .host
@@ -1163,6 +1281,20 @@ fn consumed_answer_with_lost_ack_reconciles_by_evidence() {
         disposition(&receipt),
         CommandDisposition::Uncertain { .. }
     ));
+    let target = SessionRef {
+        session_id: session,
+        generation: 1,
+    };
+    let pending = rig
+        .host
+        .pending_request(&rig.creds().0, grant.epoch, target, "req-9")
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        pending.answer,
+        AnswerDisposition::Uncertain { .. }
+    ));
+    assert!(pending.opened.is_some());
 
     // Qualified adapter evidence (the provider reporting consumption)
     // reconciles the uncertainty — without resending anything.
@@ -1174,6 +1306,23 @@ fn consumed_answer_with_lost_ack_reconciles_by_evidence() {
     let inv = rig.host.reconcile(&rig.creds().0, grant.epoch).unwrap();
     // The request is no longer pending — its answer is delivered.
     assert!(inv.sessions[0].pending_requests.is_empty());
+    assert!(
+        rig.host
+            .pending_request(&rig.creds().0, grant.epoch, target, "req-9")
+            .unwrap()
+            .is_none()
+    );
+    let applied = rig.events(&grant, session, 0).high_water;
+    rig.host
+        .acknowledge(&rig.creds().0, grant.epoch, rig.cursor(session, applied))
+        .unwrap();
+    assert_eq!(
+        rig.host
+            .status(&rig.creds().0)
+            .unwrap()
+            .retained_event_bytes,
+        0
+    );
 }
 
 // -- journal integrity -----------------------------------------------------
@@ -1218,13 +1367,13 @@ fn persisted_floor_outlives_the_instance() {
 
 #[test]
 fn compaction_preserves_pending_requests_and_requested_config() {
-    // A small journal forces the rewrite path quickly. What survives
-    // compaction must be the same truth recovery would build.
+    // Force the rewrite path after every pump. What survives compaction
+    // must be the same truth recovery would build.
     let root = TestRoot::new();
     let budgets = Budgets {
-        aggregate_journal_bytes: 8 * 1024,
+        aggregate_journal_bytes: 64 * 1024,
         control_reserve_bytes: 256,
-        compact_at_fraction: 0.3,
+        compact_at_fraction: 0.0,
         ..Default::default()
     };
     let mut rig = open(&root, budgets);
@@ -1232,6 +1381,10 @@ fn compaction_preserves_pending_requests_and_requested_config() {
     let (session, _) = rig.admit(&grant);
     let fake = rig.factory.for_session(session).unwrap();
     let turn = Uuid::new_v4();
+    fake.emit(ProviderEvent::TurnStarted {
+        turn_id: turn,
+        delivery_id: Uuid::new_v4(),
+    });
     for i in 0..20 {
         fake.emit_delta(turn, &format!("delta-{i}"));
     }
@@ -1239,15 +1392,30 @@ fn compaction_preserves_pending_requests_and_requested_config() {
         request_id: "req-kept".into(),
         class: RequestClass::Tool,
         subject: serde_json::json!({"tool": "run"}),
-        deadline_ms: None,
+        deadline_ms: Some(123_456),
     });
     rig.host.pump();
-    // The daemon applies the early events; their payloads can be reclaimed
-    // and the journal rewritten.
+    let page = rig.events(&grant, session, 0);
+    let opened = page.events.last().unwrap().clone();
+    assert_eq!(opened.turn_id, Some(turn));
+    let applied = page.high_water;
+    // Reclaim even the opening event. Its attachment data must survive
+    // independently of replay, including after a compacted journal opens.
     let (c, _) = rig.creds();
     rig.host
-        .acknowledge(&c, grant.epoch, rig.cursor(session, 15))
+        .acknowledge(&c, grant.epoch, rig.cursor(session, applied))
         .unwrap();
+    rig.host.pump();
+    let retained = rig.events(&grant, session, applied);
+    assert!(retained.events.is_empty());
+    assert!(retained.retained_floor > opened.sequence);
+    assert_eq!(
+        rig.host
+            .status(&rig.creds().0)
+            .unwrap()
+            .retained_event_bytes,
+        serde_json::to_vec(&opened.event).unwrap().len() as u64
+    );
 
     let before = rig.host.status(&rig.creds().0).unwrap().journal_bytes;
     drop(rig.host);
@@ -1260,10 +1428,25 @@ fn compaction_preserves_pending_requests_and_requested_config() {
         inv.sessions[0].pending_requests,
         vec!["req-kept".to_string()]
     );
-    // Retained events still replay from the floor.
-    let page = rig2.events(&grant2, session, 15);
-    assert!(page.retained_floor >= 16);
-    assert!(!page.events.is_empty());
+    assert!(inv.sessions[0].high_water >= applied);
+    assert_eq!(
+        rig2.host
+            .pending_request(
+                &rig2.creds().0,
+                grant2.epoch,
+                SessionRef {
+                    session_id: session,
+                    generation: 1,
+                },
+                "req-kept"
+            )
+            .unwrap(),
+        Some(PendingRequestSnapshot {
+            request_id: "req-kept".into(),
+            answer: AnswerDisposition::Pending,
+            opened: Some(opened),
+        })
+    );
     let after = rig2.host.status(&rig2.creds().0).unwrap().journal_bytes;
     assert!(
         after <= before + 64 * 1024,

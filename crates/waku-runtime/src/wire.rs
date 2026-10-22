@@ -59,6 +59,13 @@ pub enum WireRequest {
     Reconcile {
         epoch: u64,
     },
+    /// Original native request and answer-delivery truth. One request per
+    /// frame, so large pending payloads never inflate global inventory.
+    PendingRequest {
+        epoch: u64,
+        session: SessionRef,
+        request_id: String,
+    },
     Execute {
         envelope: Box<ActionEnvelope>,
     },
@@ -143,6 +150,9 @@ pub enum WireResponse {
     },
     Inventory {
         inventory: Box<Inventory>,
+    },
+    PendingRequest {
+        request: Option<Box<PendingRequestSnapshot>>,
     },
     Receipt {
         receipt: CommandReceipt,

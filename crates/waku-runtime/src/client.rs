@@ -220,6 +220,24 @@ impl RuntimeClient {
         })
     }
 
+    /// Fetch original attachment data without replaying acknowledged events.
+    pub fn pending_request(
+        &mut self,
+        epoch: u64,
+        session: SessionRef,
+        request_id: &str,
+    ) -> Result<Option<PendingRequestSnapshot>, ClientError> {
+        let response = self.call(&WireRequest::PendingRequest {
+            epoch,
+            session,
+            request_id: request_id.to_owned(),
+        })?;
+        payload(response, |r| match r {
+            WireResponse::PendingRequest { request } => Some(request.map(|request| *request)),
+            _ => None,
+        })
+    }
+
     pub fn execute(&mut self, envelope: ActionEnvelope) -> Result<CommandReceipt, ClientError> {
         let response = self.call(&WireRequest::Execute {
             envelope: Box::new(envelope),

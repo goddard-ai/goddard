@@ -193,10 +193,24 @@ configuration now projects to app/catalog/detail through
 config revision and the activation boundary; each session's durable
 `config_activation` mark rejects stale-revision and foreign-generation
 redeliveries and gates generic client saves that predate the confirmation.
-Pending native cards need reconstructible attachment data, originating
-command/delivery identities must survive app and daemon replacement, and
-event effects still require atomic projection/cursor settlement. These remain Stage 2C gates
-alongside real CLI/MCP ingress and resource/credential lease transfer.
+Native request openings now survive replay acknowledgement and journal
+compaction independently of the retained event window. Their payloads remain
+charged to the host's memory budgets until consumption is confirmed. The
+controller-only, epoch-fenced `PendingRequest` read returns one original envelope
+and its answer disposition; payloads are fetched individually to keep global
+inventory small.
+Attachment restores acknowledged, unanswered approvals and input forms through
+the same native projector used for live events, including Devin's typed answer
+schema. It suppresses historical openings for attempted answers and requests
+bound to finished turns, preserves original identities and deadlines, and never
+answers on attach.
+An older host or journal missing the required payload blocks attachment. A live
+pinned host is still never replaced automatically to satisfy this requirement.
+
+Originating command/delivery identities must still survive app and daemon
+replacement, and event effects require atomic projection/cursor settlement.
+These remain Stage 2C gates alongside full app reconnection qualification,
+MCP/callback ingress and the remaining resource/credential lease transfer.
 
 ## Not yet in this stage
 
@@ -337,5 +351,5 @@ helper, reservation anchoring and end-to-end ingress over the provisioned
 grant. `mbx test -p waku-base --lib reanchor` covers lease survival across
 daemon death, owner death, foreign-owner fencing and dead-row refusal.
 MCP/callback adaptation and actual rebuilt daemon/provider reload evidence
-remain open. App configuration consumers, pending-card reconstruction and
-atomic event/effect/cursor settlement are separate Stage 2C work.
+remain open. App configuration consumers, full app reconnection qualification
+and atomic event/effect/cursor settlement are separate Stage 2C work.
