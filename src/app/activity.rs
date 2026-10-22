@@ -46,6 +46,9 @@ impl Default for ActivityState {
 
 impl Waku {
     pub(super) fn activity_refresh(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        if !self.state.github.activity_enabled {
+            return;
+        }
         let Some(cwd) = self
             .state
             .projects
@@ -139,6 +142,9 @@ impl Waku {
         selection: ActivitySelection,
         cx: &mut Context<Self>,
     ) {
+        if !self.state.github.activity_enabled {
+            return;
+        }
         let Some(cwd) = self
             .state
             .projects
@@ -213,6 +219,14 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.state.github.activity_enabled || !self.state.projects_page_enabled {
+            return;
+        }
+        self.session_navigation.visit(
+            self.navigation_location(),
+            NavigationLocation::ProjectsPage(project_id),
+        );
+        self.show_projects_page(project_id, window, cx);
         self.set_projects_tab(project_id, projects::ProjectsTab::Activity, window, cx);
         self.activity_select(project_id, ActivitySelection::Run(run_id), cx);
     }

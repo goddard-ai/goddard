@@ -1072,7 +1072,7 @@ impl Waku {
             )
         });
         let pull_request = session.and_then(|session| {
-            if managed {
+            if managed || !self.state.github.task_pull_requests_enabled {
                 return None;
             }
             let entries = self

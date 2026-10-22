@@ -5567,12 +5567,56 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Git,
-                id: "github-experiment-toggle",
+                id: "github-references-experiment-toggle",
                 icon: "icons/github.svg",
-                title_key: "experiments.github_title",
-                description_key: "experiments.github_description",
-                enabled: self.state.github_enabled,
-                set: Self::set_github_enabled,
+                title_key: "experiments.github_references_title",
+                description_key: "experiments.github_references_description",
+                enabled: self.state.github.references_enabled,
+                set: Self::set_github_references_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Git,
+                id: "github-task-pull-requests-experiment-toggle",
+                icon: "icons/github.svg",
+                title_key: "experiments.github_task_pull_requests_title",
+                description_key: "experiments.github_task_pull_requests_description",
+                enabled: self.state.github.task_pull_requests_enabled,
+                set: Self::set_github_task_pull_requests_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Git,
+                id: "github-browser-experiment-toggle",
+                icon: "icons/github.svg",
+                title_key: "experiments.github_browser_title",
+                description_key: "experiments.github_browser_description",
+                enabled: self.state.github.browser_enabled,
+                set: Self::set_github_browser_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Git,
+                id: "github-inbox-experiment-toggle",
+                icon: "icons/github.svg",
+                title_key: "experiments.github_inbox_title",
+                description_key: "experiments.github_inbox_description",
+                enabled: self.state.github.inbox_enabled,
+                set: Self::set_github_inbox_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Git,
+                id: "github-activity-experiment-toggle",
+                icon: "icons/github.svg",
+                title_key: "experiments.github_activity_title",
+                description_key: "experiments.github_activity_description",
+                enabled: self.state.github.activity_enabled,
+                set: Self::set_github_activity_enabled,
                 eval_backed: false,
                 tuning: None,
             },
@@ -7458,11 +7502,58 @@ impl Waku {
         cx.notify();
     }
 
-    fn set_github_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+    fn set_github_references_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.github.references_enabled = enabled;
+        self.github_features_changed(cx);
+    }
+
+    fn set_github_task_pull_requests_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.github.task_pull_requests_enabled = enabled;
+        self.github_features_changed(cx);
+    }
+
+    fn set_github_browser_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.github.browser_enabled = enabled;
+        self.github_features_changed(cx);
+    }
+
+    fn set_github_inbox_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if !enabled {
             self.notifications.reset();
         }
-        self.state.github_enabled = enabled;
+        self.state.github.inbox_enabled = enabled;
+        self.github_features_changed(cx);
+    }
+
+    fn set_github_activity_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.github.activity_enabled = enabled;
+        self.github_features_changed(cx);
+    }
+
+    fn github_features_changed(&mut self, cx: &mut Context<Self>) {
+        // Invalidate pending discoveries when both consumers are disabled.
+        self.sidebar_pull_request_scan_fingerprint.set(None);
+        if !self.state.github.task_discovery_enabled() {
+            self.sidebar_pull_request_scan_generation.set(
+                self.sidebar_pull_request_scan_generation
+                    .get()
+                    .wrapping_add(1),
+            );
+            self.sidebar_pull_requests.borrow_mut().clear();
+        }
+        self.sync_right_panel_owner(cx);
+        for index in (0..self.right_panel_surfaces.len()).rev() {
+            let disabled = match self.right_panel_surfaces[index] {
+                RightPanelSurface::PullRequest { .. } => {
+                    !self.state.github.task_pull_requests_enabled
+                }
+                RightPanelSurface::GitHub(_) => !self.state.github.details_enabled(),
+                _ => false,
+            };
+            if disabled {
+                self.close_right_panel_surface(index, cx);
+            }
+        }
         self.save();
         cx.notify();
     }

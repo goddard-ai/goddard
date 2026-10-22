@@ -1267,6 +1267,74 @@ pub struct PersistedRightPanelState {
     pub fullscreen: Option<PersistedFullscreenSurface>,
 }
 
+/// Independent GitHub experiments. The flattened wire keys preserve the old
+/// `github_enabled` preference as a fallback only for features not yet saved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "GitHubFeaturesRepr")]
+pub struct GitHubFeatures {
+    #[serde(rename = "github_references_enabled")]
+    pub references_enabled: bool,
+    #[serde(rename = "github_task_pull_requests_enabled")]
+    pub task_pull_requests_enabled: bool,
+    #[serde(rename = "github_browser_enabled")]
+    pub browser_enabled: bool,
+    #[serde(rename = "github_inbox_enabled")]
+    pub inbox_enabled: bool,
+    #[serde(rename = "github_activity_enabled")]
+    pub activity_enabled: bool,
+}
+
+impl Default for GitHubFeatures {
+    fn default() -> Self {
+        let enabled = default_experiment_enabled();
+        Self {
+            references_enabled: enabled,
+            task_pull_requests_enabled: enabled,
+            browser_enabled: enabled,
+            inbox_enabled: enabled,
+            activity_enabled: enabled,
+        }
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct GitHubFeaturesRepr {
+    github_enabled: Option<bool>,
+    github_references_enabled: Option<bool>,
+    github_task_pull_requests_enabled: Option<bool>,
+    github_browser_enabled: Option<bool>,
+    github_inbox_enabled: Option<bool>,
+    github_activity_enabled: Option<bool>,
+}
+
+impl From<GitHubFeaturesRepr> for GitHubFeatures {
+    fn from(value: GitHubFeaturesRepr) -> Self {
+        let legacy = value
+            .github_enabled
+            .unwrap_or_else(default_experiment_enabled);
+        Self {
+            references_enabled: value.github_references_enabled.unwrap_or(legacy),
+            task_pull_requests_enabled: value.github_task_pull_requests_enabled.unwrap_or(legacy),
+            browser_enabled: value.github_browser_enabled.unwrap_or(legacy),
+            inbox_enabled: value.github_inbox_enabled.unwrap_or(legacy),
+            activity_enabled: value.github_activity_enabled.unwrap_or(legacy),
+        }
+    }
+}
+
+impl GitHubFeatures {
+    /// References and inbox threads can open shared details without the browser.
+    pub fn details_enabled(self) -> bool {
+        self.references_enabled || self.browser_enabled || self.inbox_enabled
+    }
+
+    /// Inbox fix actions need the same PR ownership discovery as task badges.
+    pub fn task_discovery_enabled(self) -> bool {
+        self.task_pull_requests_enabled || self.inbox_enabled
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AppSettings {
@@ -1434,9 +1502,9 @@ pub struct AppSettings {
     /// Experimental: the Git panel (⌘⌥G) commit graph and diffs. Defaults on
     /// in debug builds.
     pub git_panel_enabled: bool,
-    /// Experimental: GitHub issues and pull requests on the Projects page,
-    /// sidebar rows, and the right panel. Defaults on in debug builds.
-    pub github_enabled: bool,
+    /// Independent GitHub experiment preferences. Defaults on in debug builds.
+    #[serde(flatten)]
+    pub github: GitHubFeatures,
     /// Experimental: the Projects page (⌘⇧P) — a project's worktrees,
     /// branches, issues, and pull requests in one place. Defaults on in
     /// debug builds.
@@ -1652,7 +1720,7 @@ impl Default for AppSettings {
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
-            github_enabled: default_experiment_enabled(),
+            github: GitHubFeatures::default(),
             projects_page_enabled: default_experiment_enabled(),
             review_queue_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
@@ -2216,8 +2284,8 @@ pub struct PersistedState {
     pub big_picture_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub git_panel_enabled: bool,
-    #[serde(default = "default_experiment_enabled")]
-    pub github_enabled: bool,
+    #[serde(flatten)]
+    pub github: GitHubFeatures,
     #[serde(default = "default_experiment_enabled")]
     pub projects_page_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
@@ -2736,7 +2804,7 @@ impl PersistedState {
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
-            github_enabled: default_experiment_enabled(),
+            github: GitHubFeatures::default(),
             projects_page_enabled: default_experiment_enabled(),
             review_queue_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
@@ -3236,7 +3304,7 @@ impl PersistedState {
             custom_commands: self.custom_commands.clone(),
             big_picture_enabled: self.big_picture_enabled,
             git_panel_enabled: self.git_panel_enabled,
-            github_enabled: self.github_enabled,
+            github: self.github,
             projects_page_enabled: self.projects_page_enabled,
             review_queue_enabled: self.review_queue_enabled,
             friends_enabled: self.friends_enabled,
@@ -3409,7 +3477,7 @@ impl PersistedState {
         self.custom_commands = settings.custom_commands;
         self.big_picture_enabled = settings.big_picture_enabled;
         self.git_panel_enabled = settings.git_panel_enabled;
-        self.github_enabled = settings.github_enabled;
+        self.github = settings.github;
         self.projects_page_enabled = settings.projects_page_enabled;
         self.review_queue_enabled = settings.review_queue_enabled;
         self.friends_enabled = settings.friends_enabled;
@@ -4792,6 +4860,75 @@ mod tests {
         assert!(path.exists());
 
         fs::remove_dir_all(&directory).ok();
+    }
+
+    const GITHUB_FEATURE_KEYS: [&str; 5] = [
+        "github_references_enabled",
+        "github_task_pull_requests_enabled",
+        "github_browser_enabled",
+        "github_inbox_enabled",
+        "github_activity_enabled",
+    ];
+
+    #[test]
+    fn github_features_migrate_legacy_preferences_and_preserve_explicit_overrides() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.github, GitHubFeatures::default());
+        for legacy in [false, true] {
+            for override_key in [None].into_iter().chain(GITHUB_FEATURE_KEYS.map(Some)) {
+                let mut input = serde_json::json!({ "github_enabled": legacy });
+                if let Some(key) = override_key {
+                    input[key] = (!legacy).into();
+                }
+                let settings: AppSettings = serde_json::from_value(input.clone()).unwrap();
+                let saved = serde_json::to_value(&settings).unwrap();
+                assert!(saved.get("github_enabled").is_none());
+                for key in GITHUB_FEATURE_KEYS {
+                    assert_eq!(
+                        saved[key],
+                        if Some(key) == override_key {
+                            !legacy
+                        } else {
+                            legacy
+                        }
+                    );
+                }
+                // Old monolithic state files use the same migration as app settings.
+                let mut state = serde_json::to_value(PersistedState::empty()).unwrap();
+                for key in GITHUB_FEATURE_KEYS {
+                    state.as_object_mut().unwrap().remove(key);
+                }
+                state
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(input.as_object().unwrap().clone());
+                let restored: PersistedState = serde_json::from_value(state).unwrap();
+                assert_eq!(restored.github, settings.github);
+            }
+        }
+    }
+
+    #[test]
+    fn github_features_persist_independently_through_settings_and_state() {
+        for mask in 0..32 {
+            let mut input = serde_json::json!({});
+            for (index, key) in GITHUB_FEATURE_KEYS.iter().enumerate() {
+                input[key] = (mask & (1 << index) != 0).into();
+            }
+            let settings: AppSettings = serde_json::from_value(input.clone()).unwrap();
+            let mut state = PersistedState::empty();
+            state.apply_app_settings(settings);
+            let saved = serde_json::to_value(state.app_settings()).unwrap();
+            for key in GITHUB_FEATURE_KEYS {
+                assert_eq!(saved[key], input[key]);
+            }
+            let restored: PersistedState =
+                serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
+            assert_eq!(restored.github, state.github);
+            let mut restored = PersistedState::empty();
+            restored.apply_app_settings(serde_json::from_value(saved).unwrap());
+            assert_eq!(restored.github, state.github);
+        }
     }
 
     #[test]

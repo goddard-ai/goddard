@@ -3406,8 +3406,9 @@ impl Waku {
     fn ensure_sidebar_pull_requests(&self, cx: &mut Context<Self>) {
         const RESCAN_BUCKET_SECONDS: u64 = 300;
 
-        // Experimental — no scan, and no PR badges, while the opt-in is off.
-        if !self.state.github_enabled {
+        // Task badges and inbox ownership share discovery; neither needs a scan
+        // when both experiments are off.
+        if !self.state.github.task_discovery_enabled() {
             return;
         }
 
@@ -3543,7 +3544,9 @@ impl Waku {
                     })
                     .await;
             let _ = waku.update(cx, |waku, cx| {
-                if waku.sidebar_pull_request_scan_generation.get() != generation {
+                if waku.sidebar_pull_request_scan_generation.get() != generation
+                    || !waku.state.github.task_discovery_enabled()
+                {
                     return;
                 }
                 // Sessions whose host is offline keep their last-known rows.
@@ -4035,7 +4038,7 @@ impl Waku {
             },
         );
         fingerprint = mix(fingerprint, u64::from(self.state.projects_page_enabled));
-        fingerprint = mix(fingerprint, u64::from(self.state.github_enabled));
+        fingerprint = mix(fingerprint, u64::from(self.state.github.inbox_enabled));
         fingerprint = mix(fingerprint, u64::from(self.state.phase_routing_enabled));
         // The Boss gate decides whether boss rows, managed-session
         // filtering, and deliverables join the list at all — with an empty
@@ -4302,8 +4305,8 @@ impl Waku {
         if self.state.projects_page_enabled {
             rows.push(SidebarRow::Projects);
         }
-        // The Inbox row rides the GitHub integration opt-in.
-        if self.state.github_enabled {
+        // The Inbox row has its own GitHub opt-in.
+        if self.state.github.inbox_enabled {
             rows.push(SidebarRow::Inbox);
         }
         // Automations is an experiment too — the row leaves with the card.
@@ -7004,23 +7007,30 @@ impl Waku {
         .then(|| sidebar_draft_preview(&self.composer_drafts, session))
         .flatten();
         let pull_request_badge = self
-            .sidebar_pull_requests
-            .borrow()
-            .get(&session_id)
-            .and_then(|entries| {
-                sidebar_pull_request_badge(entries, session_pull_request_window(session))
-            });
+            .state
+            .github
+            .task_pull_requests_enabled
+            .then(|| {
+                self.sidebar_pull_requests
+                    .borrow()
+                    .get(&session_id)
+                    .and_then(|entries| {
+                        sidebar_pull_request_badge(entries, session_pull_request_window(session))
+                    })
+            })
+            .flatten();
         // The informational-blue dot an unread notification thread earns —
         // a status marker, not a control. The header chip owns interaction.
-        let pull_request_unread = self
-            .sidebar_pull_requests
-            .borrow()
-            .get(&session_id)
-            .is_some_and(|entries| {
-                session_pull_requests_in_window(entries, session_pull_request_window(session))
-                    .iter()
-                    .any(|entry| self.notifications.has_unread_pull_request(&entry.url))
-            });
+        let pull_request_unread = self.state.github.task_pull_requests_enabled
+            && self
+                .sidebar_pull_requests
+                .borrow()
+                .get(&session_id)
+                .is_some_and(|entries| {
+                    session_pull_requests_in_window(entries, session_pull_request_window(session))
+                        .iter()
+                        .any(|entry| self.notifications.has_unread_pull_request(&entry.url))
+                });
         // Option temporarily trades the project/checkout detail for the
         // model and reasoning effort this session is configured to use.
         // `session_options` resolves packed model suffixes and rejects traits

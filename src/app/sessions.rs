@@ -1482,7 +1482,8 @@ impl Waku {
                 .then_some(NavigationLocation::AutomationsPage),
             PersistedNavigationLocation::Inbox => self
                 .state
-                .github_enabled
+                .github
+                .inbox_enabled
                 .then_some(NavigationLocation::Inbox),
         };
         self.session_navigation.back = self
@@ -4150,7 +4151,7 @@ impl Waku {
         projects: &[Project],
         projects_page_enabled: bool,
         automations_enabled: bool,
-        github_enabled: bool,
+        github_inbox_enabled: bool,
         stack: &mut Vec<NavigationLocation>,
     ) {
         loop {
@@ -4162,7 +4163,7 @@ impl Waku {
                         })) => {}
                 Some(NavigationLocation::AutomationsPage) if automations_enabled => break,
                 Some(NavigationLocation::AutomationsPage) => {}
-                Some(NavigationLocation::Inbox) if github_enabled => break,
+                Some(NavigationLocation::Inbox) if github_inbox_enabled => break,
                 Some(NavigationLocation::Inbox) => {}
                 _ => break,
             }
@@ -4214,7 +4215,7 @@ impl Waku {
             &self.state.projects,
             self.state.projects_page_enabled,
             self.state.automations_enabled,
-            self.state.github_enabled,
+            self.state.github.inbox_enabled,
             &mut self.session_navigation.back,
         );
         let Some(current) = self.navigation_location() else {
@@ -4280,7 +4281,7 @@ impl Waku {
             &self.state.projects,
             self.state.projects_page_enabled,
             self.state.automations_enabled,
-            self.state.github_enabled,
+            self.state.github.inbox_enabled,
             &mut self.session_navigation.forward,
         );
         let Some(current) = self.navigation_location() else {

@@ -7268,7 +7268,7 @@ impl Waku {
     /// for the provider. The composer and transcript keep the plain token;
     /// items the workspace's mention store never saw stay verbatim.
     fn expand_work_item_references(&self, workspace: Option<&Path>, prompt: &str) -> String {
-        if !self.state.github_enabled || !prompt.contains('#') {
+        if !self.state.github.references_enabled || !prompt.contains('#') {
             return prompt.to_owned();
         }
         let Some(state) = workspace.and_then(|path| self.work_item_mentions.get(path)) else {

@@ -231,9 +231,13 @@ impl GitHubBrowser {
 }
 
 impl Waku {
-    /// Refetch the repo identity (when unknown) and both lists for the
-    /// browser's current state filter. Explicit refresh reuses this path.
+    /// Refetch the shared repo identity and, when browsing is enabled, both
+    /// lists for the current state filter. Activity only needs the identity.
     pub(super) fn github_refresh(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        let browsing = self.state.github.browser_enabled;
+        if !browsing && !self.state.github.activity_enabled {
+            return;
+        }
         let Some(cwd) = self
             .state
             .projects
@@ -262,15 +266,17 @@ impl Waku {
         let query_state = browser.query_state;
         // Refresh keeps showing the rows it is about to replace; the loader
         // is for the first pass only.
-        if !matches!(browser.pull_requests, GitHubFetch::Loaded(Some(_))) {
+        if browsing && !matches!(browser.pull_requests, GitHubFetch::Loaded(Some(_))) {
             browser.pull_requests = GitHubFetch::Loading;
         }
-        if !matches!(browser.issues, GitHubFetch::Loaded(Some(_))) {
+        if browsing && !matches!(browser.issues, GitHubFetch::Loaded(Some(_))) {
             browser.issues = GitHubFetch::Loading;
         }
         // A refresh while a detail is open re-reads it too; the stale copy
         // stays on screen until the fresh one lands.
-        let open_detail = browser.detail;
+        let open_detail = browser
+            .detail
+            .filter(|_| self.state.github.details_enabled());
         cx.notify();
         cx.spawn(async move |waku, cx| {
             let resolved = cx
@@ -286,33 +292,36 @@ impl Waku {
                             _ => (None, GitHubAvailability::Unavailable),
                         }
                     });
-                    let pull_requests = workspace
-                        .request(waku_client::WorkspaceOperation::ListRepoPullRequests {
-                            cwd: cwd.clone(),
-                            state: query_state,
-                            query: None,
-                        })
-                        .ok()
-                        .and_then(|result| match result {
-                            waku_client::WorkspaceResult::PullRequests { entries } => entries,
-                            _ => None,
-                        });
-                    let issues = workspace
-                        .request(waku_client::WorkspaceOperation::ListIssues {
-                            cwd: cwd.clone(),
-                            state: query_state,
-                            query: None,
-                        })
-                        .ok()
-                        .and_then(|result| match result {
-                            waku_client::WorkspaceResult::Issues { entries } => entries,
-                            _ => None,
-                        });
+                    let lists = browsing.then(|| {
+                        let pull_requests = workspace
+                            .request(waku_client::WorkspaceOperation::ListRepoPullRequests {
+                                cwd: cwd.clone(),
+                                state: query_state,
+                                query: None,
+                            })
+                            .ok()
+                            .and_then(|result| match result {
+                                waku_client::WorkspaceResult::PullRequests { entries } => entries,
+                                _ => None,
+                            });
+                        let issues = workspace
+                            .request(waku_client::WorkspaceOperation::ListIssues {
+                                cwd: cwd.clone(),
+                                state: query_state,
+                                query: None,
+                            })
+                            .ok()
+                            .and_then(|result| match result {
+                                waku_client::WorkspaceResult::Issues { entries } => entries,
+                                _ => None,
+                            });
+                        (pull_requests, issues)
+                    });
                     let detail = open_detail.map(|detail| {
                         let value = github_fetch_detail(&workspace, &cwd, detail);
                         (detail, value)
                     });
-                    (repo, pull_requests, issues, detail)
+                    (repo, lists, detail)
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
@@ -325,12 +334,14 @@ impl Waku {
                     if browser.generation != generation {
                         return;
                     }
-                    let (repo, pull_requests, issues, detail) = resolved;
+                    let (repo, lists, detail) = resolved;
                     if let Some(repo) = repo {
                         browser.repo = Some(repo);
                     }
-                    browser.pull_requests = GitHubFetch::Loaded(pull_requests.map(Rc::new));
-                    browser.issues = GitHubFetch::Loaded(issues.map(Rc::new));
+                    if let Some((pull_requests, issues)) = lists {
+                        browser.pull_requests = GitHubFetch::Loaded(pull_requests.map(Rc::new));
+                        browser.issues = GitHubFetch::Loaded(issues.map(Rc::new));
+                    }
                     if let Some((detail_ref, value)) = detail {
                         let fetched = value.map(Rc::new);
                         media_detail = fetched.clone();
@@ -654,7 +665,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.state.github_enabled {
+        if !self.state.github.details_enabled() {
             return;
         }
         self.github_ensure_detail(project_id, detail, cx);
@@ -739,7 +750,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.state.github_enabled || !self.github_ensure_browser(project_id, window, cx) {
+        if !self.state.github.details_enabled()
+            || !self.github_ensure_browser(project_id, window, cx)
+        {
             return false;
         }
         self.github_open_detail(
@@ -996,6 +1009,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.state.github.browser_enabled {
+            return;
+        }
         let (tab, filter) = self
             .github_browsers
             .get(&project_id)
@@ -1791,7 +1807,14 @@ impl Waku {
         }
 
         if let Some(checks) = checks {
-            section = section.child(github_checks_section(scope, project_id, checks, &theme, cx));
+            section = section.child(github_checks_section(
+                scope,
+                project_id,
+                checks,
+                self.state.github.activity_enabled && self.state.projects_page_enabled,
+                &theme,
+                cx,
+            ));
         }
         if let Some(commits) = commits {
             let repo_url = self
@@ -2586,12 +2609,13 @@ fn github_section_header(label: String, count: Option<usize>, theme: &Theme) -> 
 }
 
 /// One check run or commit status per row: status glyph, name, state label
-/// and duration. Actions checks open their run in Activity; other checks
-/// keep their details URL. An empty list is the host's answer.
+/// and duration. Actions checks open their run in Activity when enabled;
+/// otherwise checks keep their details URL. An empty list is the host's answer.
 fn github_checks_section(
     scope: &str,
     project_id: Uuid,
     checks: &[PullRequestCheck],
+    activity_enabled: bool,
     theme: &Theme,
     cx: &mut Context<Waku>,
 ) -> Div {
@@ -2651,7 +2675,7 @@ fn github_checks_section(
                             None => sidebar::sidebar_check_status_label(check.status),
                         }),
                 );
-            if let Some(run_id) = check.run_id {
+            if let Some(run_id) = check.run_id.filter(|_| activity_enabled) {
                 row = row
                     .tab_index(0)
                     .focus_visible(|style| style.bg(theme.focus_highlight()))

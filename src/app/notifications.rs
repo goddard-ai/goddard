@@ -254,7 +254,7 @@ impl Waku {
     /// conditional fetch when the interval says one is due. All work is on
     /// the background executor; only the store swap touches the UI.
     pub(super) fn maybe_poll_notifications(&mut self, cx: &mut Context<Self>) {
-        if !self.state.github_enabled
+        if !self.state.github.inbox_enabled
             || self.notifications.in_flight
             || Instant::now() < self.notifications.next_poll
         {
@@ -288,7 +288,7 @@ impl Waku {
     ) {
         self.notifications.in_flight = false;
         self.notifications.next_poll = Instant::now() + self.notifications.poll_interval;
-        if !self.state.github_enabled {
+        if !self.state.github.inbox_enabled {
             // Toggled off mid-flight — the reset already owns the store.
             return;
         }
@@ -734,7 +734,7 @@ impl Waku {
     /// Open the page as a navigation destination; back returns to whatever
     /// the main column showed before.
     pub(super) fn open_inbox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.state.github_enabled {
+        if !self.state.github.inbox_enabled {
             return;
         }
         self.session_navigation
@@ -746,7 +746,7 @@ impl Waku {
     /// Projects page. Recording the move is the caller's job: opens `visit`,
     /// back/forward restores `go_back`/`go_forward`.
     pub(super) fn show_inbox(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.state.github_enabled {
+        if !self.state.github.inbox_enabled {
             return;
         }
         self.settings_page = None;

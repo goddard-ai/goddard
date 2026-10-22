@@ -3149,7 +3149,7 @@ impl Waku {
                 next(),
             ));
         }
-        if self.state.github_enabled {
+        if self.state.github.inbox_enabled {
             commands.push(CommandPaletteItem::command(
                 PaletteSection::Commands,
                 tr!("command_palette.go_to_inbox"),

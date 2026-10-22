@@ -2670,7 +2670,7 @@ impl Waku {
             &self.state.projects,
             self.state.projects_page_enabled,
             self.state.automations_enabled,
-            self.state.github_enabled,
+            self.state.github.inbox_enabled,
             &mut self.session_navigation.back,
         );
         self.docked_terminal = Some(terminal_id);
@@ -2885,7 +2885,7 @@ impl Waku {
                 &self.state.projects,
                 self.state.projects_page_enabled,
                 self.state.automations_enabled,
-                self.state.github_enabled,
+                self.state.github.inbox_enabled,
                 &mut self.session_navigation.back,
             );
             let current = NavigationLocation::Terminal(terminal_id);

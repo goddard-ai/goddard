@@ -5757,6 +5757,15 @@ impl Waku {
         surface: &RightPanelSurface,
         commit_review: bool,
     ) -> bool {
+        match surface {
+            RightPanelSurface::PullRequest { .. }
+                if !self.state.github.task_pull_requests_enabled =>
+            {
+                return false;
+            }
+            RightPanelSurface::GitHub(_) if !self.state.github.details_enabled() => return false,
+            _ => {}
+        }
         let owner = self.active_right_panel_owner();
         if let RightPanelSurface::File(path) = surface
             && self.is_deliverable_panel_file(path)

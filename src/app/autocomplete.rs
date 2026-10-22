@@ -881,7 +881,7 @@ impl Waku {
             None
         };
         let trigger = trigger.filter(|trigger| {
-            !matches!(trigger.kind, TriggerKind::WorkItem) || self.state.github_enabled
+            !matches!(trigger.kind, TriggerKind::WorkItem) || self.state.github.references_enabled
         });
         if *ui.token.borrow() != trigger {
             *ui.token.borrow_mut() = trigger.clone();
@@ -1848,7 +1848,7 @@ impl Waku {
         workspace: Option<&Path>,
         content: &str,
     ) -> Vec<ComposerWorkItem> {
-        if !self.state.github_enabled || !content.contains('#') {
+        if !self.state.github.references_enabled || !content.contains('#') {
             return Vec::new();
         }
         let Some(state) = workspace.and_then(|path| self.work_item_mentions.get(path)) else {
