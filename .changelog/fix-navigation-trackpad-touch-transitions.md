@@ -1,0 +1,1 @@
+- Three-finger navigation swipes now retain movement through brief touch interruptions and count the final movement as fingers lift from the trackpad.
