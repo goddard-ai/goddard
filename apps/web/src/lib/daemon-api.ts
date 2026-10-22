@@ -1,6 +1,7 @@
 import type {
   AgentSession,
   AgentInvocation,
+  BranchMetadata,
   BranchSnapshot,
   Checkpoint,
   CommitSnapshot,
@@ -55,6 +56,8 @@ export const daemonKeys = {
     ['daemon', address, 'usage', JSON.stringify(window)] as const,
   workspace: (address: string, cwd: string) =>
     ['daemon', address, 'workspace', cwd] as const,
+  workspaceBranchMetadata: (address: string, cwd: string) =>
+    [...daemonKeys.workspace(address, cwd), 'branch-metadata'] as const,
   sessionTurnRefsRoot: (address: string) =>
     ['daemon', address, 'session-turn-refs'] as const,
   sessionTurnRefs: (address: string, cwd: string, sessionId: string) =>
@@ -363,6 +366,15 @@ export async function writeWorkspaceTextFile(
     content,
   })
   if (result.type !== 'ack') throw new Error('The daemon returned an unexpected file response')
+}
+
+export async function inspectWorkspaceBranchMetadata(
+  client: WakuClient,
+  cwd: string,
+): Promise<BranchMetadata | null> {
+  const result = await workspaceRequest(client, { type: 'inspectBranchMetadata', cwd })
+  if (result.type !== 'branchMetadata') throw new Error('The daemon returned an unexpected Git response')
+  return result.snapshot
 }
 
 export async function inspectWorkspaceBranches(

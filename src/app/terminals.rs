@@ -689,11 +689,11 @@ impl Waku {
                                 package: nearest_package_name(&cwd),
                                 worktree: root.as_deref().and_then(terminal_worktree_name).or_else(
                                     || match workspace.request(
-                                        waku_client::WorkspaceOperation::InspectBranches {
+                                        waku_client::WorkspaceOperation::InspectBranchMetadata {
                                             cwd: cwd.clone(),
                                         },
                                     ) {
-                                        Ok(waku_client::WorkspaceResult::Branches {
+                                        Ok(waku_client::WorkspaceResult::BranchMetadata {
                                             snapshot: Some(snapshot),
                                         }) => {
                                             snapshot.current.and_then(|name| nonempty_name(&name))

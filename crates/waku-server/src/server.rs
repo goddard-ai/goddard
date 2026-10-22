@@ -2944,6 +2944,8 @@ fn workspace_operation_kind(operation: &WorkspaceOperation) -> &'static str {
         WorkspaceOperation::ArchiveProjectlessWorkspace { .. } => "archiveProjectlessWorkspace",
         WorkspaceOperation::RestoreProjectlessWorkspace { .. } => "restoreProjectlessWorkspace",
         WorkspaceOperation::DeleteProjectlessWorkspace { .. } => "deleteProjectlessWorkspace",
+        WorkspaceOperation::InspectBranchMetadata { .. } => "inspectBranchMetadata",
+        WorkspaceOperation::InspectUpstreamStatus { .. } => "inspectUpstreamStatus",
         WorkspaceOperation::InspectBranches { .. } => "inspectBranches",
         WorkspaceOperation::CheckoutBranch { .. } => "checkoutBranch",
         WorkspaceOperation::ResetWorktree { .. } => "resetWorktree",

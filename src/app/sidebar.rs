@@ -3133,11 +3133,11 @@ impl Waku {
                         let workspace = waku_client::WorkspaceClient::new(supervisor.client());
                         for path in paths {
                             let branch = match workspace.request(
-                                waku_client::WorkspaceOperation::InspectBranches {
+                                waku_client::WorkspaceOperation::InspectBranchMetadata {
                                     cwd: path.clone(),
                                 },
                             ) {
-                                Ok(waku_client::WorkspaceResult::Branches {
+                                Ok(waku_client::WorkspaceResult::BranchMetadata {
                                     snapshot: Some(snapshot),
                                 }) => snapshot.display_branch().map(str::to_owned),
                                 _ => None,
@@ -3379,11 +3379,11 @@ impl Waku {
                             for (_, cwd, branch) in &targets {
                                 if branch.is_none() && !branches.contains_key(cwd) {
                                     let resolved_branch = match workspace.request(
-                                        waku_client::WorkspaceOperation::InspectBranches {
+                                        waku_client::WorkspaceOperation::InspectBranchMetadata {
                                             cwd: cwd.clone(),
                                         },
                                     ) {
-                                        Ok(waku_client::WorkspaceResult::Branches {
+                                        Ok(waku_client::WorkspaceResult::BranchMetadata {
                                             snapshot: Some(snapshot),
                                         }) => snapshot.current,
                                         _ => None,

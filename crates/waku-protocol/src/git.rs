@@ -28,6 +28,42 @@ pub struct UpstreamStatus {
     pub behind: u64,
 }
 
+/// Branch names and checkout identity, without history traversal or worktree
+/// change counts. Suitable for branch pickers and background labels.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct BranchMetadata {
+    #[ts(type = "string")]
+    pub repository: PathBuf,
+    pub current: Option<String>,
+    pub detached_head: Option<String>,
+    /// The remote's default when it names a local branch, else the current branch.
+    pub default_branch: Option<String>,
+    /// `origin/HEAD`'s target, without falling back to the checked-out branch.
+    pub remote_default: Option<String>,
+    pub origin_url: Option<String>,
+    pub branches: Vec<BranchEntry>,
+}
+
+impl BranchMetadata {
+    pub fn display_branch(&self) -> Option<&str> {
+        self.current.as_deref().or(self.detached_head.as_deref())
+    }
+}
+
+/// Checkout identity and upstream divergence, without worktree change counts.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct BranchUpstreamSnapshot {
+    pub current: Option<String>,
+    pub detached_head: Option<String>,
+    pub upstream: Option<UpstreamStatus>,
+}
+
+impl BranchUpstreamSnapshot {
+    pub fn display_branch(&self) -> Option<&str> {
+        self.current.as_deref().or(self.detached_head.as_deref())
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct BranchSnapshot {
     #[ts(type = "string")]

@@ -6,9 +6,10 @@ use uuid::Uuid;
 
 use crate::composer::{FileEntry, SlashCommand};
 use crate::git::{
-    AgentInvocation, ArchivePreview, BasePushState, BranchSnapshot, CheckoutStatus, CommitEntry,
-    CommitSnapshot, CreatedWorktree, GitPanelSnapshot, LandOutcome, PullOutcome, PullStrategy,
-    PushBaseOutcome, RebaseOutcome, RemoteFileRef, ReviewQueue,
+    AgentInvocation, ArchivePreview, BasePushState, BranchMetadata, BranchSnapshot,
+    BranchUpstreamSnapshot, CheckoutStatus, CommitEntry, CommitSnapshot, CreatedWorktree,
+    GitPanelSnapshot, LandOutcome, PullOutcome, PullStrategy, PushBaseOutcome, RebaseOutcome,
+    RemoteFileRef, ReviewQueue,
 };
 use crate::model::{Checkpoint, ProviderKind};
 
@@ -718,6 +719,17 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         path: PathBuf,
     },
+    /// Branch names and checkout identity without worktree or history scans.
+    InspectBranchMetadata {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    /// Checkout identity and upstream divergence without worktree scans.
+    InspectUpstreamStatus {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    /// Complete branch snapshot, including upstream and worktree change counts.
     InspectBranches {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -1387,6 +1399,12 @@ pub enum WorkspaceResult {
     ProjectlessWorkspace {
         #[ts(type = "string")]
         cwd: PathBuf,
+    },
+    BranchMetadata {
+        snapshot: Option<BranchMetadata>,
+    },
+    UpstreamStatus {
+        snapshot: Option<BranchUpstreamSnapshot>,
     },
     Branches {
         snapshot: Option<BranchSnapshot>,

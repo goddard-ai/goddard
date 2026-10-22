@@ -1,7 +1,7 @@
 import type {
   AgentInvocation,
   AgentSession,
-  BranchSnapshot,
+  BranchMetadata,
   ComposerDraftChange,
   DaemonSettings,
   FileEntry,
@@ -382,15 +382,15 @@ export async function applyComposerDraftChanges(
   );
 }
 
-export async function inspectBranches(
+export async function inspectBranchMetadata(
   client: WakuClient,
   cwd: string,
-): Promise<BranchSnapshot | null> {
+): Promise<BranchMetadata | null> {
   const response = expectResponse(
-    await client.request({ type: 'workspace', operation: { type: 'inspectBranches', cwd } }),
+    await client.request({ type: 'workspace', operation: { type: 'inspectBranchMetadata', cwd } }),
     'workspace',
   );
-  if (response.result.type !== 'branches') {
+  if (response.result.type !== 'branchMetadata') {
     throw new Error('The daemon returned an unexpected branches response');
   }
   return response.result.snapshot;

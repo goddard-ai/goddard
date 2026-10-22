@@ -44,7 +44,7 @@ import { useComposerPicker } from '@/hooks/use-composer-picker';
 import { useComposerKeyboardPadding, useKeyboardPadding } from '@/hooks/use-keyboard-padding';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
 import { useTheme } from '@/hooks/use-theme';
-import { daemonKeys, inspectBranches } from '@/lib/daemon-api';
+import { daemonKeys, inspectBranchMetadata } from '@/lib/daemon-api';
 import { composerProviderPrompt } from '@/lib/composer-completion';
 import {
   loadComposerPreferences,
@@ -103,7 +103,7 @@ export default function NewTaskScreen() {
       daemon.activeProfile?.id ?? 'disconnected',
       selectedProject?.path ?? 'missing',
     ),
-    queryFn: () => inspectBranches(daemon.client!, selectedProject!.path),
+    queryFn: () => inspectBranchMetadata(daemon.client!, selectedProject!.path),
     enabled: daemon.phase === 'connected' && Boolean(daemon.client && selectedProject) && isolated,
     staleTime: 30_000,
   });

@@ -6,6 +6,7 @@ import {
   daemonKeys,
   discoverComposerCommands,
   hydrateSession,
+  inspectWorkspaceBranchMetadata,
   inspectWorkspaceBranches,
   listSessionTurnRefs,
   listComposerFiles,
@@ -44,6 +45,16 @@ export function useComposerDrafts() {
       Boolean(client && config) &&
       settings.data?.composer_drafts_experiment_enabled === true,
     staleTime: Number.POSITIVE_INFINITY,
+  })
+}
+
+export function useWorkspaceBranchMetadata(cwd: string | undefined) {
+  const { client, config, phase } = useDaemon()
+  return useQuery({
+    queryKey: daemonKeys.workspaceBranchMetadata(config?.address ?? 'disconnected', cwd ?? 'none'),
+    queryFn: () => inspectWorkspaceBranchMetadata(requireClient(client), cwd!),
+    enabled: phase === 'connected' && Boolean(client && config && cwd),
+    staleTime: 5_000,
   })
 }
 

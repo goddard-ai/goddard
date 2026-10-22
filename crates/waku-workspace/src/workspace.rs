@@ -184,6 +184,12 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
             crate::projectless::remove_workspace(&path)?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::InspectBranchMetadata { cwd } => WorkspaceResult::BranchMetadata {
+            snapshot: crate::git_branch::inspect_metadata(&cwd)?,
+        },
+        WorkspaceOperation::InspectUpstreamStatus { cwd } => WorkspaceResult::UpstreamStatus {
+            snapshot: crate::git_branch::inspect_upstream(&cwd)?,
+        },
         WorkspaceOperation::InspectBranches { cwd } => WorkspaceResult::Branches {
             snapshot: crate::git_branch::inspect(&cwd)?,
         },
@@ -1089,7 +1095,7 @@ fn resolve_diff_range(cwd: &Path, source: ReviewDiffSource) -> anyhow::Result<Di
 }
 
 fn branch_base(cwd: &Path) -> anyhow::Result<String> {
-    let Some(snapshot) = crate::git_branch::inspect(cwd)? else {
+    let Some(snapshot) = crate::git_branch::inspect_metadata(cwd)? else {
         bail!("the workspace is not a Git repository");
     };
     let Some(head) = resolve(cwd, "HEAD") else {

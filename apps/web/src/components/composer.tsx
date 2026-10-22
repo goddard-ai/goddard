@@ -11,7 +11,7 @@ import {
 } from '@waku/client'
 import type {
   AgentSession,
-  BranchSnapshot,
+  BranchMetadata,
   ComposerDraft,
   ComposerDraftAnnotation,
   GoalOperation,
@@ -46,7 +46,7 @@ import {
   useComposerFiles,
   useDaemonSettings,
   useProviderProbe,
-  useWorkspaceBranches,
+  useWorkspaceBranchMetadata,
 } from '@/hooks/use-daemon-data'
 import { importDaemonPathAttachment, importFiles, readAttachmentImage } from '@/lib/attachments'
 import { visibleBranches } from '@/lib/branch-search'
@@ -193,7 +193,7 @@ export function Composer({
   } = useRuntime()
   const probe = useProviderProbe(session.provider)
   const cwd = sessionCwd(session, project)
-  const branches = useWorkspaceBranches(cwd)
+  const branches = useWorkspaceBranchMetadata(cwd)
   const composerFiles = useComposerFiles(cwd)
   const composerCommands = useComposerCommands(session.provider, cwd)
   const [prompt, setPrompt] = useState(initialComposerDraft?.text ?? '')
@@ -1836,7 +1836,7 @@ function BranchPicker({
   onCreate,
   onRefresh,
 }: {
-  snapshot: BranchSnapshot
+  snapshot: BranchMetadata
   workspace: NonNullable<AgentSession['workspace']>
   disabled: boolean
   pending: boolean

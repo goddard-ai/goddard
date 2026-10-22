@@ -20,11 +20,34 @@ const MAX_UNTRACKED_FILE_BYTES: u64 = 8 * 1_024 * 1_024;
 const MAX_UNTRACKED_TOTAL_BYTES: u64 = 32 * 1_024 * 1_024;
 const BINARY_PROBE_BYTES: usize = 8_000;
 
-pub use waku_protocol::git::{BranchEntry, BranchSnapshot, RemoteFileRef, UpstreamStatus};
+pub use waku_protocol::git::{
+    BranchEntry, BranchMetadata, BranchSnapshot, BranchUpstreamSnapshot, RemoteFileRef,
+    UpstreamStatus,
+};
 
-/// Inspect local branches and which worktree, if any, currently owns each.
-/// `Ok(None)` means `cwd` is not inside a Git repository.
+/// Inspect branch metadata, upstream divergence, and worktree change counts.
+/// Use [`inspect_metadata`] for branch pickers and labels that need no counts.
 pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
+    let Some(metadata) = inspect_metadata(cwd)? else {
+        return Ok(None);
+    };
+    let upstream = upstream_status(cwd);
+    let (additions, deletions) = worktree_line_counts(&metadata.repository);
+    Ok(Some(BranchSnapshot {
+        repository: metadata.repository,
+        current: metadata.current,
+        detached_head: metadata.detached_head,
+        default_branch: metadata.default_branch,
+        remote_default: metadata.remote_default,
+        origin_url: metadata.origin_url,
+        upstream,
+        branches: metadata.branches,
+        additions,
+        deletions,
+    }))
+}
+
+fn repository_root(cwd: &Path) -> anyhow::Result<Option<PathBuf>> {
     let repository_output = crate::command_env::search_path_command("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(cwd)
@@ -38,8 +61,10 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
             .trim()
             .to_owned(),
     );
-    let repository = dunce::canonicalize(&repository).unwrap_or(repository);
+    Ok(Some(dunce::canonicalize(&repository).unwrap_or(repository)))
+}
 
+fn branch_identity(cwd: &Path) -> anyhow::Result<(Option<String>, Option<String>)> {
     let current =
         optional_stdout(cwd, &["branch", "--show-current"])?.filter(|branch| !branch.is_empty());
     let detached_head = if current.is_none() {
@@ -47,6 +72,17 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
     } else {
         None
     };
+    Ok((current, detached_head))
+}
+
+/// Inspect local branches and which worktree, if any, currently owns each.
+/// Does not inspect worktree contents or traverse commit history.
+/// `Ok(None)` means `cwd` is not inside a Git repository.
+pub fn inspect_metadata(cwd: &Path) -> anyhow::Result<Option<BranchMetadata>> {
+    let Some(repository) = repository_root(cwd)? else {
+        return Ok(None);
+    };
+    let (current, detached_head) = branch_identity(cwd)?;
 
     // `%(worktreepath)` is empty for an available branch and points at the
     // owning checkout otherwise. A NUL separates it from the branch name so
@@ -109,20 +145,29 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
         .filter(|branch| branches.iter().any(|entry| entry.name == *branch))
         .or_else(|| current.clone());
     let origin_url = remote_url(cwd, "origin")?;
-    let upstream = upstream_status(cwd);
-    let (additions, deletions) = worktree_line_counts(&repository);
 
-    Ok(Some(BranchSnapshot {
+    Ok(Some(BranchMetadata {
         repository,
         current,
         detached_head,
         default_branch,
         remote_default,
         origin_url,
-        upstream,
         branches,
-        additions,
-        deletions,
+    }))
+}
+
+/// Inspect upstream divergence and checkout identity without reading worktree
+/// changes or enumerating every local branch.
+pub fn inspect_upstream(cwd: &Path) -> anyhow::Result<Option<BranchUpstreamSnapshot>> {
+    if repository_root(cwd)?.is_none() {
+        return Ok(None);
+    }
+    let (current, detached_head) = branch_identity(cwd)?;
+    Ok(Some(BranchUpstreamSnapshot {
+        current,
+        detached_head,
+        upstream: upstream_status(cwd),
     }))
 }
 
@@ -147,7 +192,7 @@ fn upstream_name(cwd: &Path) -> Option<String> {
 /// The checked-out branch's upstream and its divergence from it. `None` for
 /// a detached HEAD or a branch with no upstream configured; a probe failure
 /// also degrades to `None` rather than failing the whole inspect.
-fn upstream_status(cwd: &Path) -> Option<UpstreamStatus> {
+pub fn upstream_status(cwd: &Path) -> Option<UpstreamStatus> {
     let name = upstream_name(cwd)?;
     // `--left-right --count @{upstream}...HEAD` reports the upstream-only
     // count first — how far the checkout trails — then the HEAD-only count.
@@ -562,7 +607,7 @@ mod tests {
             &["worktree", "add", "-b", "occupied", other.to_str().unwrap()],
         );
 
-        let snapshot = inspect(&repository).unwrap().unwrap();
+        let snapshot = inspect_metadata(&repository).unwrap().unwrap();
         assert_eq!(snapshot.current.as_deref(), Some("main"));
         assert_eq!(snapshot.branches[0].name, "main");
         assert!(
@@ -592,16 +637,126 @@ mod tests {
     #[test]
     fn captures_the_origin_remote_url() {
         let repository = repository();
-        assert_eq!(inspect(&repository).unwrap().unwrap().origin_url, None);
+        assert_eq!(
+            inspect_metadata(&repository).unwrap().unwrap().origin_url,
+            None
+        );
         run_git(
             &repository,
             &["remote", "add", "origin", "git@github.com:owner/repo.git"],
         );
-        let snapshot = inspect(&repository).unwrap().unwrap();
+        let snapshot = inspect_metadata(&repository).unwrap().unwrap();
         assert_eq!(
             snapshot.origin_url.as_deref(),
             Some("git@github.com:owner/repo.git")
         );
+    }
+
+    #[test]
+    fn metadata_handles_non_repositories_unborn_and_detached_heads() {
+        let root = std::env::temp_dir().join(format!("waku-branch-metadata-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        assert_eq!(inspect_metadata(&root).unwrap(), None);
+        run_git(&root, &["init", "-b", "main"]);
+        let unborn = inspect_metadata(&root).unwrap().unwrap();
+        assert_eq!(unborn.current.as_deref(), Some("main"));
+        assert_eq!(unborn.default_branch.as_deref(), Some("main"));
+        assert!(unborn.detached_head.is_none());
+        assert!(unborn.branches.is_empty());
+        fs::remove_dir_all(&root).unwrap();
+
+        let repository = repository();
+        run_git(&repository, &["checkout", "--detach", "HEAD"]);
+        let detached = inspect_metadata(&repository).unwrap().unwrap();
+        assert!(detached.current.is_none());
+        assert_eq!(detached.display_branch(), detached.detached_head.as_deref());
+        assert!(detached.detached_head.is_some());
+        fs::remove_dir_all(repository).unwrap();
+    }
+
+    #[test]
+    fn focused_inspection_skips_worktree_scans() {
+        const CHILD_REPOSITORY: &str = "GODDARD_TEST_BRANCH_INSPECTION_REPOSITORY";
+        const CHILD_KIND: &str = "GODDARD_TEST_BRANCH_INSPECTION_KIND";
+        if let Some(repository) = std::env::var_os(CHILD_REPOSITORY) {
+            let repository = PathBuf::from(repository);
+            if std::env::var(CHILD_KIND).unwrap() == "metadata" {
+                let snapshot = inspect_metadata(&repository).unwrap().unwrap();
+                assert_eq!(snapshot.current.as_deref(), Some("main"));
+                assert!(
+                    snapshot
+                        .branches
+                        .iter()
+                        .any(|branch| branch.name == "feature")
+                );
+            } else {
+                let snapshot = inspect_upstream(&repository).unwrap().unwrap();
+                assert_eq!(snapshot.display_branch(), Some("main"));
+                let upstream = snapshot.upstream.unwrap();
+                assert_eq!(upstream.name, "feature");
+                assert_eq!((upstream.ahead, upstream.behind), (0, 0));
+            }
+            return;
+        }
+
+        let repository = repository();
+        run_git(
+            &repository,
+            &["branch", "--set-upstream-to=feature", "main"],
+        );
+        fs::write(repository.join("README.md"), "main\nmodified\n").unwrap();
+        fs::write(repository.join("untracked.txt"), "untracked\n").unwrap();
+        for kind in ["metadata", "upstream"] {
+            let trace = repository.join(format!(".git/{kind}-trace.jsonl"));
+            // Keep Git's tracing environment inside a child test process so
+            // parallel tests do not mutate or observe process-global state.
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "git_branch::tests::focused_inspection_skips_worktree_scans",
+                    "--nocapture",
+                ])
+                .env(CHILD_REPOSITORY, &repository)
+                .env(CHILD_KIND, kind)
+                .env("GIT_TRACE2_EVENT", &trace)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let commands = fs::read_to_string(trace)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .filter(|event| event["event"] == "start")
+                .filter_map(|event| {
+                    event["argv"]
+                        .as_array()
+                        .and_then(|args| args.get(1))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                })
+                .collect::<Vec<_>>();
+            assert!(
+                !commands.is_empty(),
+                "Git trace must observe the inspection"
+            );
+            assert!(
+                !commands
+                    .iter()
+                    .any(|command| matches!(command.as_str(), "diff" | "ls-files" | "status")),
+                "{kind} inspected worktree contents: {commands:?}"
+            );
+            if kind == "metadata" {
+                assert!(!commands.iter().any(|command| command == "rev-list"));
+            } else {
+                assert!(commands.iter().any(|command| command == "rev-list"));
+            }
+        }
+        fs::remove_dir_all(repository).unwrap();
     }
 
     #[test]

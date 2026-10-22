@@ -205,7 +205,7 @@ pub(crate) fn backend_for(provider: ProviderKind) -> Option<Arc<dyn CloudBackend
 /// Dirty worktree state is allowed through: uncommitted files simply stay
 /// local, which is what "pushed state" means.
 pub(crate) fn resolve_target(cwd: &Path) -> anyhow::Result<CloudTarget> {
-    let snapshot = crate::git_branch::inspect(cwd)
+    let snapshot = crate::git_branch::inspect_metadata(cwd)
         .context("could not inspect the repository")?
         .context("cloud tasks run against a Git repository — this workspace isn't one")?;
     let repo_url = snapshot
@@ -219,7 +219,7 @@ pub(crate) fn resolve_target(cwd: &Path) -> anyhow::Result<CloudTarget> {
         .current
         .clone()
         .context("cloud tasks need a checked-out branch")?;
-    let Some(upstream) = &snapshot.upstream else {
+    let Some(upstream) = crate::git_branch::upstream_status(cwd) else {
         bail!("branch `{branch}` was never pushed — push it so the cloud environment can clone it");
     };
     if upstream.ahead > 0 {

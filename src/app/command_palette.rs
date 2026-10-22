@@ -12,7 +12,7 @@ use nucleo_matcher::{Matcher, Utf32Str};
 use waku_protocol::workspace::{GitHubAvailability, GitHubRepoRef, RepoWorktree};
 
 use super::*;
-use crate::git_branch::BranchSnapshot;
+use crate::git_branch::BranchUpstreamSnapshot;
 use crate::ui::shortcut::ShortcutHint;
 
 actions!(
@@ -799,11 +799,11 @@ pub(super) struct CommandPaletteUi {
     rebase_base: Option<RebaseBasePicker>,
     rebase_generation: u64,
     /// The "Sync branch…" project step's per-project checkout probes, keyed
-    /// by project — the `InspectBranches` snapshot behind each row's
+    /// by project — the upstream snapshot behind each row's
     /// ahead/behind counts and the picker's sync-priority order. Projects
     /// whose probe is in flight or found no repository have no entry, and
     /// `sync_branch_generation` drops a probe superseded by a newer scan.
-    sync_branch_divergence: HashMap<Uuid, BranchSnapshot>,
+    sync_branch_divergence: HashMap<Uuid, BranchUpstreamSnapshot>,
     sync_branch_generation: u64,
     /// The transcript code-block run parked behind its project picker, and
     /// the candidates the block's inference already surfaced — the picker's
@@ -1474,7 +1474,7 @@ impl Waku {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    client.request(waku_client::WorkspaceOperation::InspectBranches {
+                    client.request(waku_client::WorkspaceOperation::InspectBranchMetadata {
                         cwd: workspace,
                     })
                 })
@@ -1491,7 +1491,7 @@ impl Waku {
                 };
                 picker.pending = false;
                 match result {
-                    Ok(waku_client::WorkspaceResult::Branches {
+                    Ok(waku_client::WorkspaceResult::BranchMetadata {
                         snapshot: Some(snapshot),
                     }) => {
                         picker.current_branch = snapshot.current;
@@ -2205,8 +2205,8 @@ impl Waku {
     }
 
     /// Probe every listed project's checkout for the upstream counts the
-    /// "Sync branch…" project step rows and bands are built from — one
-    /// `InspectBranches` per project on its own daemon, each answer landing
+    /// "Sync branch…" project step rows and bands are built from. Each
+    /// project gets one probe on its own daemon, with the answer landing
     /// in `sync_branch_divergence` and rebuilding the picker while it is
     /// still up. A landed Git operation re-runs this so a keep-open sync's
     /// post-sync counts replace the stale ones.
@@ -2229,8 +2229,9 @@ impl Waku {
                 let result = cx
                     .background_executor()
                     .spawn(async move {
-                        client
-                            .request(waku_client::WorkspaceOperation::InspectBranches { cwd: path })
+                        client.request(waku_client::WorkspaceOperation::InspectUpstreamStatus {
+                            cwd: path,
+                        })
                     })
                     .await;
                 let _ = waku.update(cx, |waku, cx| {
@@ -2238,14 +2239,14 @@ impl Waku {
                         return;
                     }
                     match result {
-                        Ok(waku_client::WorkspaceResult::Branches {
+                        Ok(waku_client::WorkspaceResult::UpstreamStatus {
                             snapshot: Some(snapshot),
                         }) => {
                             waku.command_palette
                                 .sync_branch_divergence
                                 .insert(project_id, snapshot);
                         }
-                        Ok(waku_client::WorkspaceResult::Branches { snapshot: None }) => {
+                        Ok(waku_client::WorkspaceResult::UpstreamStatus { snapshot: None }) => {
                             waku.command_palette
                                 .sync_branch_divergence
                                 .remove(&project_id);
