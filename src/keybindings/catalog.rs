@@ -1634,6 +1634,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "terminal.split",
+        action: || Box::new(crate::SplitTerminal),
+        title_key: "terminal.split",
+        title_index: None,
+        category: C::Terminal,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "terminal.maximize_restore",
         action: || Box::new(crate::ToggleTerminalMaximize),
         title_key: "terminal.maximize_restore",
@@ -2974,6 +2983,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("terminal.new", All, "secondary-j", BossChat),
     e("app.run_script", All, "secondary-r", ""),
     e("terminal.new", All, "secondary-t", ""),
+    e("terminal.split", All, "secondary-alt-d", ""),
     e("workspace.toggle_model_picker", All, "secondary-/", ""),
     e(
         "workspace.step_model_picker_backward",

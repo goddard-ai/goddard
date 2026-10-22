@@ -111,7 +111,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
         bound(tr!("right_panel.new_terminal"), NewTerminal, None),
         bound(tr!("shortcuts.toggle_terminals"), ToggleTerminals, None),
         bound(tr!("menu.focus_composer"), FocusComposer, None),
-        bound(tr!("menu.focus_terminal"), FocusTerminal, None),
+        bound(tr!("menu.focus_terminal"), FocusTerminal, Some("!BossChat")),
         bound(tr!("menu.toggle_model_picker"), ToggleModelPicker, None),
         bound(tr!("menu.toggle_branch_picker"), ToggleBranchPicker, None),
         bound(
@@ -274,7 +274,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                 bound(
                     tr!("shortcuts.push_base"),
                     PushBaseBranch,
-                    Some("Workspace"),
+                    Some("Workspace && !StandaloneTerminal"),
                 ),
                 bound(
                     tr!("shortcuts.copy_selection"),

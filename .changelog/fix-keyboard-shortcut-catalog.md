@@ -1,0 +1,1 @@
+- Split terminal is available in keyboard shortcut settings, and the shortcut reference lists Focus Terminal and Push Base Branch with their current context restrictions.
