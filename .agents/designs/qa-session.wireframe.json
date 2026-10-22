@@ -1,43 +1,27 @@
 {
   "version": 1,
-  "name": "QA session \u2014 setup and review workspace",
+  "name": "QA session",
   "screens": [
     {
-      "name": "1 \u00b7 First-use setup \u00b7 settings cards",
-      "width": 960,
-      "height": 920,
+      "name": "1 · Setup",
+      "width": 800,
+      "height": 540,
       "root": {
         "type": "frame",
-        "direction": "row",
-        "align": "start",
-        "padding": {
-          "x": 24,
-          "y": 40
-        },
+        "direction": "column",
         "children": [
           {
             "type": "frame",
-            "direction": "column",
-            "width": "fill",
-            "children": []
-          },
-          {
-            "type": "frame",
-            "direction": "column",
-            "width": 800,
-            "gap": 24,
+            "direction": "row",
+            "align": "center",
             "children": [
               {
                 "type": "frame",
-                "direction": "row",
-                "align": "center",
-                "gap": 20,
+                "direction": "column",
                 "children": [
                   {
                     "type": "frame",
                     "direction": "column",
-                    "gap": 8,
-                    "width": "fill",
                     "children": [
                       {
                         "type": "text",
@@ -47,303 +31,225 @@
                       },
                       {
                         "type": "text",
-                        "text": "Set up Acme Web for isolated QA sessions.",
+                        "text": "Acme Web",
                         "role": "body",
                         "tone": "secondary"
                       }
-                    ]
+                    ],
+                    "gap": 6
                   },
                   {
-                    "type": "rect",
-                    "label": "Acme Web  \u25be",
-                    "height": 34,
-                    "cornerRadius": 6,
-                    "width": 152,
-                    "fill": "overlay"
-                  }
-                ]
-              },
-              {
-                "type": "text",
-                "text": "Saved for this project. You can change these settings before any session.",
-                "role": "caption",
-                "tone": "secondary"
-              },
-              {
-                "type": "frame",
-                "direction": "column",
-                "gap": 10,
-                "children": [
-                  {
-                    "type": "text",
-                    "text": "Review source",
-                    "role": "label",
-                    "tone": "primary"
+                    "type": "frame",
+                    "direction": "column",
+                    "children": [
+                      {
+                        "type": "frame",
+                        "direction": "row",
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "frame",
+                            "direction": "column",
+                            "children": [
+                              {
+                                "type": "text",
+                                "text": "Dev server command",
+                                "role": "label",
+                                "tone": "primary"
+                              }
+                            ],
+                            "width": 180,
+                            "gap": 4
+                          },
+                          {
+                            "type": "frame",
+                            "direction": "column",
+                            "children": [
+                              {
+                                "type": "text",
+                                "text": "pnpm run dev",
+                                "role": "body",
+                                "tone": "primary"
+                              }
+                            ],
+                            "width": "fill",
+                            "height": 40,
+                            "justify": "center",
+                            "padding": {
+                              "x": 12
+                            },
+                            "fill": "inset",
+                            "cornerRadius": 8
+                          }
+                        ],
+                        "width": "fill",
+                        "padding": {
+                          "x": 20,
+                          "y": 18
+                        },
+                        "gap": 20,
+                        "fill": "surface",
+                        "cornerRadius": 16,
+                        "annotations": "Editable default inferred from the project scripts and lockfile."
+                      },
+                      {
+                        "type": "frame",
+                        "direction": "row",
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "frame",
+                            "direction": "column",
+                            "children": [
+                              {
+                                "type": "text",
+                                "text": "Install command",
+                                "role": "label",
+                                "tone": "primary"
+                              },
+                              {
+                                "type": "text",
+                                "text": "Optional",
+                                "role": "caption",
+                                "tone": "secondary"
+                              }
+                            ],
+                            "width": 180,
+                            "gap": 4
+                          },
+                          {
+                            "type": "frame",
+                            "direction": "column",
+                            "children": [
+                              {
+                                "type": "text",
+                                "text": "pnpm install --frozen-lockfile",
+                                "role": "body",
+                                "tone": "primary"
+                              }
+                            ],
+                            "width": "fill",
+                            "height": 40,
+                            "justify": "center",
+                            "padding": {
+                              "x": 12
+                            },
+                            "fill": "inset",
+                            "cornerRadius": 8
+                          }
+                        ],
+                        "width": "fill",
+                        "padding": {
+                          "x": 20,
+                          "y": 18
+                        },
+                        "gap": 20,
+                        "fill": "surface",
+                        "cornerRadius": 16,
+                        "annotations": "Editable package-manager default. Leave blank to skip installation."
+                      },
+                      {
+                        "type": "frame",
+                        "direction": "row",
+                        "align": "center",
+                        "children": [
+                          {
+                            "type": "frame",
+                            "direction": "column",
+                            "children": [
+                              {
+                                "type": "text",
+                                "text": "QA branch",
+                                "role": "label",
+                                "tone": "primary"
+                              }
+                            ],
+                            "width": 180,
+                            "gap": 4
+                          },
+                          {
+                            "type": "frame",
+                            "direction": "column",
+                            "children": [
+                              {
+                                "type": "text",
+                                "text": "dev",
+                                "role": "body",
+                                "tone": "primary"
+                              }
+                            ],
+                            "width": "fill",
+                            "height": 40,
+                            "justify": "center",
+                            "padding": {
+                              "x": 12
+                            },
+                            "fill": "inset",
+                            "cornerRadius": 8
+                          }
+                        ],
+                        "width": "fill",
+                        "padding": {
+                          "x": 20,
+                          "y": 18
+                        },
+                        "gap": 20,
+                        "fill": "surface",
+                        "cornerRadius": 16,
+                        "annotations": "Select an editable local QA branch; exclude the default branch. Fetch origin before choosing its immediate next commit relative to the remote default branch."
+                      }
+                    ],
+                    "gap": 8
                   },
                   {
                     "type": "frame",
                     "direction": "row",
                     "align": "center",
-                    "gap": 12,
-                    "padding": {
-                      "x": 20,
-                      "y": 16
-                    },
-                    "fill": "surface",
-                    "cornerRadius": 16,
-                    "annotations": "Use the same leading branch icon and inline input placement as the existing QA branch settings card.",
                     "children": [
-                      {
-                        "type": "rect",
-                        "label": "\u2442",
-                        "height": 20,
-                        "cornerRadius": 6,
-                        "width": 20
-                      },
                       {
                         "type": "frame",
                         "direction": "column",
-                        "width": "fill",
-                        "gap": 9,
-                        "children": [
-                          {
-                            "type": "text",
-                            "text": "QA branch",
-                            "role": "label",
-                            "tone": "primary"
-                          },
-                          {
-                            "type": "text",
-                            "text": "Take the next commit from this local branch. The default branch is excluded.",
-                            "role": "caption",
-                            "tone": "secondary"
-                          },
-                          {
-                            "type": "rect",
-                            "label": "dev",
-                            "height": 34,
-                            "cornerRadius": 6,
-                            "width": 360,
-                            "fill": "inset"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              },
-              {
-                "type": "frame",
-                "direction": "column",
-                "gap": 10,
-                "children": [
-                  {
-                    "type": "text",
-                    "text": "Development server",
-                    "role": "label",
-                    "tone": "primary"
-                  },
-                  {
-                    "type": "frame",
-                    "direction": "row",
-                    "align": "center",
-                    "gap": 12,
-                    "padding": {
-                      "x": 20,
-                      "y": 16
-                    },
-                    "fill": "surface",
-                    "cornerRadius": 16,
-                    "children": [
-                      {
-                        "type": "rect",
-                        "label": ">_",
-                        "height": 20,
-                        "cornerRadius": 6,
-                        "width": 20
+                        "children": [],
+                        "width": "fill"
                       },
                       {
-                        "type": "frame",
-                        "direction": "column",
-                        "width": "fill",
-                        "gap": 9,
-                        "children": [
-                          {
-                            "type": "text",
-                            "text": "Dev server command",
-                            "role": "label",
-                            "tone": "primary"
-                          },
-                          {
-                            "type": "text",
-                            "text": "Run after dependencies are installed. Suggested from package.json.",
-                            "role": "caption",
-                            "tone": "secondary"
-                          },
-                          {
-                            "type": "rect",
-                            "label": "pnpm run dev",
-                            "height": 34,
-                            "cornerRadius": 6,
-                            "width": 360,
-                            "fill": "inset"
-                          }
-                        ]
-                      }
-                    ]
-                  },
-                  {
-                    "type": "frame",
-                    "direction": "row",
-                    "align": "center",
-                    "gap": 12,
-                    "padding": {
-                      "x": 20,
-                      "y": 16
-                    },
-                    "fill": "surface",
-                    "cornerRadius": 16,
-                    "children": [
-                      {
                         "type": "rect",
-                        "label": "\u2193",
-                        "height": 20,
-                        "cornerRadius": 6,
-                        "width": 20
+                        "label": "Cancel",
+                        "width": 76,
+                        "height": 36,
+                        "cornerRadius": 8
                       },
                       {
-                        "type": "frame",
-                        "direction": "column",
-                        "width": "fill",
-                        "gap": 9,
-                        "children": [
-                          {
-                            "type": "text",
-                            "text": "Install command \u00b7 optional",
-                            "role": "label",
-                            "tone": "primary"
-                          },
-                          {
-                            "type": "text",
-                            "text": "Suggested from pnpm-lock.yaml. Leave blank to skip installation.",
-                            "role": "caption",
-                            "tone": "secondary"
-                          },
-                          {
-                            "type": "rect",
-                            "label": "pnpm install --frozen-lockfile",
-                            "height": 34,
-                            "cornerRadius": 6,
-                            "width": 360,
-                            "fill": "inset"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              },
-              {
-                "type": "frame",
-                "direction": "column",
-                "gap": 10,
-                "children": [
-                  {
-                    "type": "text",
-                    "text": "Ready to review",
-                    "role": "label",
-                    "tone": "primary"
-                  },
-                  {
-                    "type": "frame",
-                    "direction": "row",
-                    "align": "center",
-                    "gap": 12,
-                    "padding": {
-                      "x": 20,
-                      "y": 16
-                    },
-                    "fill": "surface",
-                    "cornerRadius": 16,
-                    "annotations": "Refresh the remote default branch before selecting the candidate from the local QA branch.",
-                    "children": [
-                      {
                         "type": "rect",
-                        "label": "\u2442",
-                        "height": 20,
-                        "cornerRadius": 6,
-                        "width": 20
-                      },
-                      {
-                        "type": "frame",
-                        "direction": "column",
-                        "width": "fill",
-                        "gap": 6,
-                        "children": [
-                          {
-                            "type": "text",
-                            "text": "a7c92d1 \u00b7 Fix checkout validation",
-                            "role": "label",
-                            "tone": "primary"
-                          },
-                          {
-                            "type": "text",
-                            "text": "Local dev \u2192 origin/main + 1 commit",
-                            "role": "caption",
-                            "tone": "secondary"
-                          }
-                        ]
+                        "label": "Start QA",
+                        "width": 120,
+                        "height": 36,
+                        "cornerRadius": 8,
+                        "fill": "accent",
+                        "annotations": "Save the three project settings, create a detached temporary worktree, install dependencies if configured, then start the dev server."
                       }
-                    ]
+                    ],
+                    "gap": 8
                   }
-                ]
-              },
-              {
-                "type": "frame",
-                "direction": "row",
-                "align": "center",
-                "gap": 12,
-                "children": [
-                  {
-                    "type": "text",
-                    "text": "Creates a temporary worktree and starts the server.",
-                    "role": "caption",
-                    "tone": "secondary",
-                    "width": "fill"
-                  },
-                  {
-                    "type": "rect",
-                    "label": "Cancel",
-                    "height": 34,
-                    "cornerRadius": 6,
-                    "width": 80,
-                    "fill": "overlay"
-                  },
-                  {
-                    "type": "rect",
-                    "label": "Save & start QA",
-                    "height": 34,
-                    "cornerRadius": 6,
-                    "width": 156,
-                    "fill": "accent"
-                  }
-                ]
+                ],
+                "width": 640,
+                "gap": 28
               }
-            ]
-          },
-          {
-            "type": "frame",
-            "direction": "column",
-            "width": "fill",
-            "children": []
+            ],
+            "justify": "center"
           }
-        ]
+        ],
+        "padding": {
+          "x": 40,
+          "y": 64
+        },
+        "annotations": "The project was selected in the command palette. Use the spacing, rounded cards, and native fields of Goddard Settings."
       }
     },
     {
-      "name": "2 \u00b7 QA workspace \u00b7 server running",
-      "width": 1200,
-      "height": 820,
+      "name": "2 · Review",
+      "width": 1120,
+      "height": 720,
       "root": {
         "type": "frame",
         "direction": "column",
@@ -352,84 +258,42 @@
             "type": "frame",
             "direction": "row",
             "align": "center",
-            "padding": {
-              "x": 20,
-              "y": 14
-            },
-            "gap": 12,
             "children": [
               {
                 "type": "frame",
                 "direction": "column",
-                "width": "fill",
-                "gap": 5,
                 "children": [
                   {
                     "type": "text",
-                    "text": "Acme Web \u00b7 QA",
+                    "text": "Fix checkout validation",
                     "role": "label",
                     "tone": "primary"
                   },
                   {
                     "type": "text",
-                    "text": "a7c92d1  Fix checkout validation",
+                    "text": "Acme Web · a7c92d1",
                     "role": "caption",
                     "tone": "secondary"
                   }
-                ]
-              },
-              {
-                "type": "rect",
-                "label": "Edit QA setup",
-                "height": 36,
-                "cornerRadius": 6,
-                "width": 124,
-                "fill": "overlay"
+                ],
+                "width": "fill",
+                "gap": 6
               },
               {
                 "type": "rect",
                 "label": "Approve & push to main",
-                "height": 36,
-                "cornerRadius": 6,
                 "width": 210,
+                "height": 36,
+                "cornerRadius": 8,
                 "fill": "accent",
-                "annotations": "Recheck the remote base, record approval, and push exactly this SHA. Disable if files change or the base moved."
+                "annotations": "Recheck the remote base, record approval, and push only the reviewed SHA. Disable if the checkout changes or the base moved. Use the actual default branch in the label."
               }
-            ]
-          },
-          {
-            "type": "divider"
-          },
-          {
-            "type": "frame",
-            "direction": "row",
-            "align": "center",
+            ],
             "padding": {
-              "x": 20,
-              "y": 10
+              "x": 24,
+              "y": 18
             },
-            "gap": 20,
-            "children": [
-              {
-                "type": "text",
-                "text": "Detached HEAD \u00b7 a7c92d1",
-                "role": "caption",
-                "tone": "primary"
-              },
-              {
-                "type": "text",
-                "text": "Local dev \u2192 origin/main + 1 commit",
-                "role": "caption",
-                "tone": "secondary",
-                "width": "fill"
-              },
-              {
-                "type": "text",
-                "text": "Temporary worktree",
-                "role": "caption",
-                "tone": "secondary"
-              }
-            ]
+            "gap": 24
           },
           {
             "type": "divider"
@@ -437,17 +301,52 @@
           {
             "type": "frame",
             "direction": "row",
-            "align": "center",
+            "align": "stretch",
             "height": "fill",
             "children": [
               {
                 "type": "frame",
                 "direction": "column",
-                "width": 440,
-                "height": "fill",
-                "padding": 20,
-                "gap": 12,
                 "children": [
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "children": [
+                      {
+                        "type": "text",
+                        "text": "QA agent",
+                        "role": "label",
+                        "tone": "primary",
+                        "height": 36
+                      },
+                      {
+                        "type": "frame",
+                        "direction": "column",
+                        "children": [
+                          {
+                            "type": "text",
+                            "text": "Try an empty delivery address,",
+                            "role": "body",
+                            "tone": "primary"
+                          },
+                          {
+                            "type": "text",
+                            "text": "then correct it and complete checkout.",
+                            "role": "body",
+                            "tone": "primary"
+                          }
+                        ],
+                        "gap": 6
+                      }
+                    ],
+                    "gap": 24
+                  },
+                  {
+                    "type": "frame",
+                    "direction": "column",
+                    "children": [],
+                    "height": "fill"
+                  },
                   {
                     "type": "frame",
                     "direction": "row",
@@ -455,164 +354,30 @@
                     "children": [
                       {
                         "type": "text",
-                        "text": "QA conversation",
-                        "role": "label",
-                        "tone": "primary",
+                        "text": "Ask about this change…",
+                        "role": "body",
+                        "tone": "secondary",
                         "width": "fill"
                       },
                       {
-                        "type": "text",
-                        "text": "New session",
-                        "role": "caption",
-                        "tone": "secondary"
-                      }
-                    ]
-                  },
-                  {
-                    "type": "divider"
-                  },
-                  {
-                    "type": "frame",
-                    "direction": "column",
-                    "padding": 16,
-                    "gap": 10,
-                    "fill": "surface",
-                    "cornerRadius": 8,
-                    "children": [
-                      {
-                        "type": "text",
-                        "text": "Reviewing a7c92d1",
-                        "role": "label",
-                        "tone": "primary"
-                      },
-                      {
-                        "type": "text",
-                        "text": "Fix checkout validation",
-                        "role": "body",
-                        "tone": "primary"
-                      },
-                      {
-                        "type": "text",
-                        "text": "Base: origin/main \u00b7 4b20e8a",
-                        "role": "caption",
-                        "tone": "secondary"
-                      },
-                      {
                         "type": "rect",
-                        "label": "Open originating task \u2197",
+                        "label": "Send",
+                        "width": 56,
                         "height": 36,
-                        "cornerRadius": 6,
-                        "fill": "overlay",
-                        "width": "fill",
-                        "annotations": "Shown only when the originating task is known. The new QA agent receives a reference to its transcript."
+                        "cornerRadius": 8
                       }
-                    ]
-                  },
-                  {
-                    "type": "text",
-                    "text": "QA agent",
-                    "role": "label",
-                    "tone": "primary"
-                  },
-                  {
-                    "type": "text",
-                    "text": "The app is running. This commit updates",
-                    "role": "body",
-                    "tone": "primary"
-                  },
-                  {
-                    "type": "text",
-                    "text": "checkout validation and its error message.",
-                    "role": "body",
-                    "tone": "primary"
-                  },
-                  {
-                    "type": "text",
-                    "text": "Test plan",
-                    "role": "label",
-                    "tone": "primary"
-                  },
-                  {
-                    "type": "text",
-                    "text": "1. Submit an empty delivery address.",
-                    "role": "body",
-                    "tone": "primary"
-                  },
-                  {
-                    "type": "text",
-                    "text": "2. Correct it and complete checkout.",
-                    "role": "body",
-                    "tone": "primary"
-                  },
-                  {
-                    "type": "frame",
-                    "direction": "column",
-                    "height": "fill",
-                    "children": []
-                  },
-                  {
-                    "type": "frame",
-                    "direction": "column",
-                    "padding": 14,
+                    ],
+                    "padding": 12,
                     "gap": 8,
-                    "fill": "surface",
-                    "cornerRadius": 8,
-                    "children": [
-                      {
-                        "type": "text",
-                        "text": "You",
-                        "role": "caption",
-                        "tone": "secondary"
-                      },
-                      {
-                        "type": "text",
-                        "text": "What else should I test?",
-                        "role": "body",
-                        "tone": "primary"
-                      }
-                    ]
-                  },
-                  {
-                    "type": "frame",
-                    "direction": "column",
-                    "padding": 14,
-                    "gap": 18,
                     "fill": "inset",
-                    "cornerRadius": 8,
-                    "annotations": "Existing agent composer. Inline diff comments are deferred for v1.",
-                    "children": [
-                      {
-                        "type": "text",
-                        "text": "Ask about this commit or report a problem\u2026",
-                        "role": "body",
-                        "tone": "secondary"
-                      },
-                      {
-                        "type": "frame",
-                        "direction": "row",
-                        "align": "center",
-                        "gap": 8,
-                        "children": [
-                          {
-                            "type": "text",
-                            "text": "Attach file or line references",
-                            "role": "caption",
-                            "tone": "secondary",
-                            "width": "fill"
-                          },
-                          {
-                            "type": "rect",
-                            "label": "Send",
-                            "height": 36,
-                            "cornerRadius": 6,
-                            "width": 64,
-                            "fill": "accent"
-                          }
-                        ]
-                      }
-                    ]
+                    "cornerRadius": 12,
+                    "annotations": "Use the existing agent composer. The agent receives the reviewed commit, base, worktree, test plan, and originating task reference when available."
                   }
-                ]
+                ],
+                "width": 400,
+                "height": "fill",
+                "padding": 24,
+                "gap": 24
               },
               {
                 "type": "divider"
@@ -620,76 +385,46 @@
               {
                 "type": "frame",
                 "direction": "column",
-                "width": "fill",
-                "height": "fill",
-                "padding": 20,
-                "gap": 14,
                 "children": [
                   {
                     "type": "frame",
                     "direction": "row",
                     "align": "center",
-                    "gap": 8,
                     "children": [
                       {
                         "type": "rect",
-                        "label": "Commit diff",
+                        "label": "Diff",
+                        "width": 64,
                         "height": 36,
-                        "cornerRadius": 6,
-                        "width": 120,
+                        "cornerRadius": 8,
                         "fill": "surface"
                       },
                       {
                         "type": "rect",
                         "label": "Terminal",
+                        "width": 86,
                         "height": 36,
-                        "cornerRadius": 6,
-                        "width": 100,
-                        "fill": "overlay",
-                        "annotations": "Switch to install and dev server logs; retry failed startup here."
+                        "cornerRadius": 8,
+                        "annotations": "Shows install and dev server output, including links printed by the server."
                       },
                       {
-                        "type": "text",
-                        "text": "2 files \u00b7 +18 \u22124",
-                        "role": "caption",
-                        "tone": "secondary",
-                        "width": "fill",
-                        "align": "end"
-                      }
-                    ]
-                  },
-                  {
-                    "type": "divider"
-                  },
-                  {
-                    "type": "frame",
-                    "direction": "row",
-                    "align": "center",
-                    "gap": 12,
-                    "children": [
-                      {
-                        "type": "text",
-                        "text": "Server process running",
-                        "role": "label",
-                        "tone": "primary",
+                        "type": "frame",
+                        "direction": "column",
+                        "children": [],
                         "width": "fill"
                       },
                       {
                         "type": "text",
-                        "text": "pnpm run dev",
+                        "text": "Server running",
                         "role": "caption",
                         "tone": "secondary"
                       }
-                    ]
+                    ],
+                    "gap": 8
                   },
                   {
                     "type": "frame",
                     "direction": "column",
-                    "padding": 16,
-                    "gap": 16,
-                    "fill": "inset",
-                    "cornerRadius": 8,
-                    "height": "fill",
                     "children": [
                       {
                         "type": "text",
@@ -701,95 +436,58 @@
                         "type": "divider"
                       },
                       {
-                        "type": "text",
-                        "text": "  18    function validateAddress(address) {",
-                        "role": "caption",
-                        "tone": "primary"
-                      },
-                      {
                         "type": "frame",
                         "direction": "column",
-                        "fill": "overlay",
-                        "padding": 12,
-                        "gap": 10,
                         "children": [
                           {
                             "type": "text",
-                            "text": "\u2212 19      return Boolean(address);",
-                            "role": "caption",
+                            "text": "  18    function validateAddress(address) {",
+                            "role": "body",
                             "tone": "primary"
                           },
                           {
-                            "type": "text",
-                            "text": "+ 19      return address.trim().length > 0;",
-                            "role": "caption",
-                            "tone": "primary"
-                          }
-                        ]
-                      },
-                      {
-                        "type": "text",
-                        "text": "  20    }",
-                        "role": "caption",
-                        "tone": "primary"
-                      },
-                      {
-                        "type": "text",
-                        "text": "src/checkout/form.tsx",
-                        "role": "label",
-                        "tone": "primary"
-                      },
-                      {
-                        "type": "divider"
-                      },
-                      {
-                        "type": "text",
-                        "text": "  42    if (!validateAddress(address)) {",
-                        "role": "caption",
-                        "tone": "primary"
-                      },
-                      {
-                        "type": "frame",
-                        "direction": "column",
-                        "fill": "overlay",
-                        "padding": 12,
-                        "gap": 10,
-                        "children": [
-                          {
-                            "type": "text",
-                            "text": "\u2212 43      setError(\"Invalid input\");",
-                            "role": "caption",
-                            "tone": "primary"
+                            "type": "frame",
+                            "direction": "column",
+                            "children": [
+                              {
+                                "type": "text",
+                                "text": "− 19      return Boolean(address);",
+                                "role": "body",
+                                "tone": "primary"
+                              },
+                              {
+                                "type": "text",
+                                "text": "+ 19      return address.trim().length > 0;",
+                                "role": "body",
+                                "tone": "primary"
+                              }
+                            ],
+                            "gap": 8,
+                            "padding": {
+                              "x": 12,
+                              "y": 10
+                            },
+                            "fill": "surface",
+                            "cornerRadius": 6
                           },
                           {
                             "type": "text",
-                            "text": "+ 43      setError(\"Enter a delivery address\");",
-                            "role": "caption",
+                            "text": "  20    }",
+                            "role": "body",
                             "tone": "primary"
                           }
-                        ]
-                      },
-                      {
-                        "type": "text",
-                        "text": "  44      return;",
-                        "role": "caption",
-                        "tone": "primary"
-                      },
-                      {
-                        "type": "text",
-                        "text": "  45    }",
-                        "role": "caption",
-                        "tone": "primary"
+                        ],
+                        "gap": 8
                       }
-                    ]
-                  },
-                  {
-                    "type": "text",
-                    "text": "Pinned commit \u00b7 working tree clean",
-                    "role": "caption",
-                    "tone": "secondary"
+                    ],
+                    "gap": 16,
+                    "annotations": "The existing commit diff surface, pinned to the exact commit under review."
                   }
-                ]
+                ],
+                "width": "fill",
+                "height": "fill",
+                "padding": 24,
+                "gap": 28
               }
             ]
           }
