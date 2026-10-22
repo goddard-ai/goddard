@@ -1,0 +1,1 @@
+- Reduced repeated Git history work when refreshing task sidebar badges, while keeping working-tree changes current.

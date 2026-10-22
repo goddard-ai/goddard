@@ -120,6 +120,15 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Snapshot> {
 /// base branch; [`checkout_only_subjects`] uses it to excuse commits whose
 /// patch already landed there under a rewritten SHA.
 pub fn checkout_status(cwd: &Path, base: Option<&str>) -> anyhow::Result<Option<CheckoutStatus>> {
+    checkout_status_with_history(cwd, |_| Ok(checkout_only_subjects(cwd, base)?.len() as u64))
+}
+
+/// Inspect the working tree afresh while letting the daemon reuse a verified
+/// history count. The callback shares this request's Git deadline.
+pub fn checkout_status_with_history(
+    cwd: &Path,
+    history: impl FnOnce(Instant) -> anyhow::Result<u64>,
+) -> anyhow::Result<Option<CheckoutStatus>> {
     let deadline = Instant::now() + CHECKOUT_STATUS_TIMEOUT;
     let previous = GIT_DEADLINE.with(|current| {
         let effective = current
@@ -129,17 +138,49 @@ pub fn checkout_status(cwd: &Path, base: Option<&str>) -> anyhow::Result<Option<
     });
     let _reset = GitDeadlineReset(previous);
 
-    if !git_optional_stdout(cwd, &["rev-parse", "--is-inside-work-tree"])?
-        .is_some_and(|answer| answer == "true")
-    {
+    if !is_checkout(cwd)? {
         return Ok(None);
     }
-    let status = git_stdout(cwd, &["status", "--porcelain=v1", "--untracked-files=all"])?;
-    let unpushed_commits = checkout_only_subjects(cwd, base)?.len() as u64;
+    // Only existence matters for this badge; collapsed untracked directories
+    // avoid enumerating every generated file just to answer a boolean.
+    let status = git_stdout(
+        cwd,
+        &["status", "--porcelain=v1", "--untracked-files=normal"],
+    )?;
+    let unpushed_commits = history(GIT_DEADLINE.with(|current| current.get().unwrap()))?;
     Ok(Some(CheckoutStatus {
         uncommitted_changes: !status.is_empty(),
         unpushed_commits,
     }))
+}
+
+fn is_checkout(cwd: &Path) -> anyhow::Result<bool> {
+    match fs::metadata(cwd) {
+        Ok(metadata) if !metadata.is_dir() => return Ok(false),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error).context("could not inspect checkout directory"),
+    }
+    let output = git_capture(cwd, &["rev-parse", "--is-inside-work-tree"])?;
+    if output.status.success() {
+        return Ok(output.stdout.trim_ascii() == b"true");
+    }
+    // Exit 128 also means corruption, unsafe ownership, and permission errors.
+    // Only the ordinary repository-discovery miss may clear a cached badge.
+    if output.status.code() == Some(128)
+        && String::from_utf8_lossy(&output.stderr)
+            .starts_with("fatal: not a git repository (or any")
+    {
+        for ancestor in cwd.ancestors() {
+            match fs::symlink_metadata(ancestor.join(".git")) {
+                Ok(_) => bail!("Git command failed: {}", command_error(&output)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error).context("could not inspect repository marker"),
+            }
+        }
+        return Ok(false);
+    }
+    bail!("Git command failed: {}", command_error(&output))
 }
 
 /// What archiving a checkout would stash: every dirty working-tree file and
@@ -183,18 +224,24 @@ pub fn archive_preview(cwd: &Path, base: Option<&str>) -> anyhow::Result<Option<
 /// from no ref and every one of its commits would be listed. `git cherry`
 /// against the resolved base marks each such commit `-` — its patch already
 /// landed under a new SHA — and those are dropped.
-fn checkout_only_subjects(cwd: &Path, base: Option<&str>) -> anyhow::Result<Vec<String>> {
-    if git_stdout(cwd, &["remote"])?.is_empty() {
+pub(crate) fn checkout_only_subjects(
+    cwd: &Path,
+    base: Option<&str>,
+) -> anyhow::Result<Vec<String>> {
+    if complete_git_stdout(cwd, &["remote"])?.is_empty()
+        || complete_git_optional_stdout(cwd, &["rev-parse", "--verify", "--quiet", "HEAD"])?
+            .is_none()
+    {
         return Ok(Vec::new());
     }
     let mut args = vec!["log", "--format=%H%x00%s", "HEAD", "--not"];
-    let exclude = git_optional_stdout(cwd, &["symbolic-ref", "-q", "--short", "HEAD"])?
+    let exclude = complete_git_optional_stdout(cwd, &["symbolic-ref", "-q", "--short", "HEAD"])?
         .map(|branch| format!("--exclude={branch}"));
     if let Some(exclude) = &exclude {
         args.push(exclude.as_str());
     }
     args.extend(["--branches", "--tags", "--remotes"]);
-    let log = git_optional_stdout(cwd, &args)?.unwrap_or_default();
+    let log = complete_git_stdout(cwd, &args)?;
     let mut commits: Vec<(String, String)> = log
         .lines()
         .filter_map(|line| line.split_once('\0'))
@@ -203,8 +250,8 @@ fn checkout_only_subjects(cwd: &Path, base: Option<&str>) -> anyhow::Result<Vec<
         .collect();
     if !commits.is_empty()
         && let Some(base) = crate::git_panel::land_base(cwd, base)?
-        && let Some(cherry) = git_optional_stdout(cwd, &["cherry", &base, "HEAD"])?
     {
+        let cherry = complete_git_stdout(cwd, &["cherry", &base, "HEAD"])?;
         let landed: std::collections::HashSet<&str> = cherry
             .lines()
             .filter_map(|line| line.strip_prefix("- "))
@@ -212,6 +259,33 @@ fn checkout_only_subjects(cwd: &Path, base: Option<&str>) -> anyhow::Result<Vec<
         commits.retain(|(sha, _)| !landed.contains(sha.as_str()));
     }
     Ok(commits.into_iter().map(|(_, subject)| subject).collect())
+}
+
+/// Metadata and history must be complete before they can become cache keys or
+/// successful counts. The ordinary command helper intentionally bounds output
+/// for display; reaching that bound is an error for these machine reads.
+pub(crate) fn complete_git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
+    complete_git_optional_stdout(cwd, args)?
+        .ok_or_else(|| anyhow!("Git metadata command did not succeed"))
+}
+
+pub(crate) fn complete_git_optional_stdout(
+    cwd: &Path,
+    args: &[&str],
+) -> anyhow::Result<Option<String>> {
+    let output = git_capture(cwd, args)?;
+    if !output.status.success() {
+        if output.status.code() == Some(1) {
+            return Ok(None);
+        }
+        bail!("Git command failed: {}", command_error(&output));
+    }
+    if output.stdout.len() >= MAX_STDOUT_BYTES {
+        bail!("Git metadata output exceeded the capture limit");
+    }
+    Ok(Some(
+        String::from_utf8(output.stdout)?.trim_end().to_owned(),
+    ))
 }
 
 pub fn generate_message(
@@ -1239,6 +1313,19 @@ mod tests {
         let root = std::env::temp_dir().join(format!("waku-status-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         assert!(checkout_status(&root, None).unwrap().is_none());
+    }
+
+    #[test]
+    fn checkout_status_distinguishes_removed_paths_from_broken_git_metadata() {
+        let root = std::env::temp_dir().join(format!("waku-status-failure-{}", Uuid::new_v4()));
+        assert!(checkout_status(&root, None).unwrap().is_none());
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join(".git"), "gitdir: missing-admin-directory\n").unwrap();
+        assert!(checkout_status(&root, None).is_err());
+        fs::remove_file(root.join(".git")).unwrap();
+        fs::create_dir(root.join(".git")).unwrap();
+        assert!(checkout_status(&root, None).is_err());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

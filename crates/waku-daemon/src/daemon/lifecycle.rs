@@ -80,6 +80,7 @@ impl WakuBackend {
             usage_scan_cache: Mutex::new(HashMap::new()),
             codex_reset_credit_lock: Mutex::new(()),
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
+            checkout_history: checkout_history::CheckoutHistoryCache::default(),
             agent: Arc::new(crate::agent::AgentState::default()),
             runtime_lifecycles: Arc::new(RuntimeLifecycles::default()),
             #[cfg(test)]

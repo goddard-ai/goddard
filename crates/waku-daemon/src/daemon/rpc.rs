@@ -1704,6 +1704,13 @@ impl Backend for WakuBackend {
                 })
             }
             Command::Workspace {
+                operation: WorkspaceOperation::InspectCheckoutStatus { cwd, base },
+            } => Ok(ResponsePayload::Workspace {
+                result: WorkspaceResult::CheckoutStatus {
+                    status: self.checkout_history.inspect(&cwd, base.as_deref())?,
+                },
+            }),
+            Command::Workspace {
                 operation:
                     WorkspaceOperation::CaptureTurn {
                         cwd,

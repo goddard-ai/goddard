@@ -541,6 +541,7 @@ pub struct WakuBackend {
     /// double-click, not a second spend.
     codex_reset_credit_lock: Mutex<()>,
     checkpoint_capture_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
+    checkout_history: checkout_history::CheckoutHistoryCache,
     /// Scoped agent credentials, per-session prompt queues, and the live
     /// turn bookkeeping the runtime event forwarder maintains. `pub(crate)`
     /// so server tests can mint a token and connect with it the way a
@@ -708,6 +709,7 @@ mod boss_rotation;
 mod catalog_ops;
 mod chain_exec;
 mod chain_handoff;
+mod checkout_history;
 mod driver_commands;
 mod events;
 mod idle;
