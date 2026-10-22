@@ -4,6 +4,10 @@ Normal installs use published `@octane-xplat/*` packages. To temporarily use a
 local checkout, run from this repository root, replacing `/path/to/octane-xplat`
 with your checkout path:
 
+Use a checkout compatible with Octane Xplat `0.11.1`, the version this app pins.
+Newer releases have removed the routing and store APIs the app uses; linking
+the latest checkout requires migrating those APIs first.
+
 ```sh
 pnpm -C /path/to/octane-xplat install
 pnpm -C /path/to/octane-xplat --filter @octane-xplat/cli --filter @octane-xplat/lint build
