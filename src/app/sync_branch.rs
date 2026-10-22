@@ -808,6 +808,7 @@ mod tests {
     /// beneath a symlink that leaves its project's checkout — the boss
     /// chat's detached workspace is one — resolves no repository even
     /// though the lexical path's ancestors hold a `.git`.
+    #[cfg(unix)]
     #[test]
     fn repo_root_check_follows_symlinks_out_of_the_checkout() {
         let base = std::env::temp_dir().join(format!("waku-sync-{}", Uuid::new_v4()));
