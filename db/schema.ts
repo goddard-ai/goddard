@@ -196,7 +196,7 @@ export const stableRuntimeLinks = sqliteTable("stable_runtime_links", {
   generation: integer("generation").notNull(),
   /** Last host event sequence durably applied to daemon state. */
   appliedSeq: integer("applied_seq").notNull().default(0),
-  /** live | interrupted | ended — mirrors what the host last reported. */
+  /** live | interrupted | ended, or applying while a daemon replay checkpoint is pending. */
   status: text("status").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

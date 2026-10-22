@@ -1102,6 +1102,7 @@ impl Backend for WakuBackend {
                 }
                 let mut newly_archived = Vec::new();
                 let mut state = self.task_state.lock();
+                let stable_sessions = self.task_store.stable_link_session_ids()?;
                 let removed_project_ids = self.removed_project_ids.lock();
                 for mut project in projects {
                     if removed_project_ids.contains(&project.id) {
@@ -1162,13 +1163,26 @@ impl Backend for WakuBackend {
                         if employee.is_some()
                             || existing.boss_managed
                             || self.boss.is_managed(session_id)
+                            || stable_sessions.contains(&session_id)
                         {
                             // A queued employee's shell is memory-only — an
                             // archive flag a client saves on it dies at
                             // restart. The roster record carries the stop
                             // once the merge lock is released.
                             let was_archived = existing.archived_at.is_some();
+                            // Ordinary stable chats keep user-owned archive
+                            // changes; the managed merge otherwise makes this
+                            // stamp monotonic for Boss and employee sessions.
+                            let archive = (stable_sessions.contains(&session_id)
+                                && employee.is_none()
+                                && !existing.boss_managed
+                                && !self.boss.is_managed(session_id)
+                                && session.updated_at >= existing.updated_at)
+                                .then_some(session.archived_at);
                             merge_stale_session_metadata(existing, session);
+                            if let Some(archive) = archive {
+                                existing.archived_at = archive;
+                            }
                             if !was_archived && existing.archived_at.is_some() {
                                 newly_archived.push(session_id);
                             }
@@ -1279,8 +1293,25 @@ impl Backend for WakuBackend {
                 // re-dirtied while the write runs unlocked keeps its flag.
                 let batch = self.task_store.save_batch(&mut state);
                 state.unmark_sessions_dirty(&batch.dirty_ids);
-                drop(state);
-                if let Err(error) = self.task_store.write_batch(&batch) {
+                // A delayed client-save snapshot must not overwrite a newer
+                // stable transcript after its host cursor has committed. Keep
+                // the state lock through writes in the opt-in configuration,
+                // including first admission before its link row exists.
+                #[cfg(test)]
+                let test_root = self.stable_test_root.as_ref();
+                #[cfg(not(test))]
+                let test_root = None;
+                let serialized = if !stable_sessions.is_empty()
+                    || crate::stable_runtime::configured(test_root)
+                {
+                    Some(state)
+                } else {
+                    drop(state);
+                    None
+                };
+                let written = self.task_store.write_batch(&batch);
+                drop(serialized);
+                if let Err(error) = written {
                     // The rows never landed — the marks go back so the next
                     // save retries them.
                     let mut state = self.task_state.lock();
@@ -2246,7 +2277,7 @@ impl Backend for WakuBackend {
                 // prompts — the sandbox is the boundary, and the quarantine
                 // flag only keeps unattended senders (agent prompts,
                 // automations) out until the user trusts the transfer.
-                let driver = {
+                let (driver, stable) = {
                     let mut sessions = self.sessions.lock();
                     let entry = sessions
                         .get_mut(&session_id)
@@ -2260,7 +2291,10 @@ impl Backend for WakuBackend {
                     // Serving a request is activity — the idle reaper must
                     // not reclaim a runtime a client just talked to.
                     entry.last_active = std::time::Instant::now();
-                    entry.driver.clone()
+                    if let Some(link) = &entry.stable {
+                        link.require_available()?;
+                    }
+                    (entry.driver.clone(), entry.stable.is_some())
                 };
                 if let Command::Prompt {
                     prompt,
@@ -2296,7 +2330,7 @@ impl Backend for WakuBackend {
                         report_trigger: None,
                         reference_context: None,
                     };
-                    if self.boss.is_managed(session_id) {
+                    if self.boss.is_managed(session_id) || stable {
                         record_boss_event(
                             &self.task_state,
                             &self.task_store,

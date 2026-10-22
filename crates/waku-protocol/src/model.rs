@@ -4612,6 +4612,13 @@ pub enum DriverEvent {
     /// sequence has been incorporated into the local session projection.
     /// Providers never emit this and the daemon never serializes it.
     RuntimeEventCursorAdvanced(RuntimeEventCursor),
+    /// Internal stable-host replay page. The daemon fences application, then
+    /// commits the transcript and cursor together before acknowledging it.
+    /// This wrapper never crosses the client wire boundary.
+    RuntimeEventBatch {
+        cursor: RuntimeEventCursor,
+        events: Vec<DriverEvent>,
+    },
     Connected {
         provider_cursor: Option<ProviderResumeCursor>,
     },

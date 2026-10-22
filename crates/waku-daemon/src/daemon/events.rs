@@ -36,6 +36,11 @@ pub(super) fn record_boss_event(
     }
     let mut activity = None;
     match event {
+        DriverEvent::AgentPresetSelected(preset) => session.agent_preset.clone_from(preset),
+        DriverEvent::AutoTitleUpdated(title) => {
+            session.set_auto_title(title.clone());
+        }
+        DriverEvent::AvailableCommands(commands) => session.available_commands.clone_from(commands),
         DriverEvent::PromptSubmitted {
             message,
             turn_id,
@@ -515,19 +520,27 @@ pub(super) fn forward_driver_events(
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
     data_dir: std::path::PathBuf,
 ) {
-    while let Ok(event) = event_receiver.recv() {
+    let lifecycle = lifecycles.session(session_id);
+    let mut page_owner = None;
+    let mut pending = std::collections::VecDeque::new();
+    let mut checkpoint: Option<(
+        crate::stable_runtime::StableLink,
+        crate::persistence::StableLinkRow,
+        crate::model::RuntimeEventCursor,
+    )> = None;
+    while let Some(event) = pending.pop_front().or_else(|| event_receiver.recv().ok()) {
         #[cfg(test)]
         if let Some(received) = lifecycles.event_received.lock().clone() {
             received(session_id, runtime_id);
         }
         // Registration and teardown use this same gate. Keep it through every
         // effect below so replacement cannot win a check/effect race.
-        let lifecycle = lifecycles.session(session_id);
         let owner = lifecycle.lock();
         let managed = boss.is_managed(session_id);
-        let stale = lifecycles
-            .shutting_down
-            .load(std::sync::atomic::Ordering::Acquire)
+        let stale = (checkpoint.is_none()
+            && lifecycles
+                .shutting_down
+                .load(std::sync::atomic::Ordering::Acquire))
             || !sessions
                 .lock()
                 .get(&session_id)
@@ -536,7 +549,14 @@ pub(super) fn forward_driver_events(
                 && boss.employee_lifecycle(session_id)
                     == Some(waku_protocol::boss::EmployeeLifecycle::Queued));
         if stale {
-            if matches!(&event, DriverEvent::ProcessExited) {
+            let exited = match &event {
+                DriverEvent::ProcessExited => true,
+                DriverEvent::RuntimeEventBatch { events, .. } => events
+                    .iter()
+                    .any(|event| matches!(event, DriverEvent::ProcessExited)),
+                _ => false,
+            };
+            if exited {
                 // A queued employee can still own the dying entry. Retire
                 // that runtime, while preserving the queued session's state.
                 let removed = {
@@ -556,19 +576,51 @@ pub(super) fn forward_driver_events(
                 drop_detached(removed);
                 break;
             }
+            if let Some((link, ..)) = checkpoint.take() {
+                link.fail_checkpoint();
+                break;
+            }
             continue;
         }
         owner.set(Some(runtime_id));
-        // A stable-runtime applied marker is not a client event: it is the
-        // link's ack boundary — every host event ordered before it has been
-        // applied by this loop, so the runtime's cursor may advance.
-        if let DriverEvent::RuntimeEventCursorAdvanced(cursor) = &event
-            && let Some(link) = sessions
-                .lock()
-                .get(&session_id)
-                .and_then(|entry| entry.stable.clone())
+        let stable = sessions
+            .lock()
+            .get(&session_id)
+            .and_then(|entry| entry.stable.clone());
+        if let DriverEvent::RuntimeEventBatch {
+            cursor,
+            events: batch,
+        } = event
         {
-            link.note_applied(cursor);
+            let Some(link) = stable else {
+                break;
+            };
+            match link.begin_checkpoint(&cursor) {
+                Ok(applying) => {
+                    // Keep the reentrant lifecycle gate until this whole page
+                    // commits. Graceful replacement waits for the checkpoint
+                    // instead of abandoning a partially applied page.
+                    page_owner = Some(lifecycle.lock());
+                    checkpoint = Some((link, applying, cursor));
+                    pending.extend(batch);
+                    pending.push_back(DriverEvent::RuntimeEventCursorAdvanced(cursor));
+                }
+                Err(error) => {
+                    report_stable_checkpoint_failure(&link, &events, session_id, runtime_id, error);
+                    break;
+                }
+            }
+            continue;
+        }
+        if matches!(&event, DriverEvent::RuntimeEventCursorAdvanced(_)) && stable.is_some() {
+            if let Some((link, applying, cursor)) = checkpoint.take()
+                && let Err(error) =
+                    link.finish_checkpoint(&applying, &cursor, &mut task_state.lock())
+            {
+                report_stable_checkpoint_failure(&link, &events, session_id, runtime_id, error);
+                break;
+            }
+            page_owner.take();
             continue;
         }
 
@@ -675,7 +727,7 @@ pub(super) fn forward_driver_events(
         } else {
             None
         };
-        if (managed && !stale) || automation_settle {
+        if (managed && !stale) || automation_settle || stable.is_some() {
             // A genuinely-completed turn keeps its verdict; only a
             // cancel-issued settle writes the intentional interruption.
             let interrupted =
@@ -687,6 +739,10 @@ pub(super) fn forward_driver_events(
             };
             if let Err(error) = recorded {
                 eprintln!("could not record task settlement {session_id}: {error:#}");
+                if let Some(link) = &stable {
+                    report_stable_checkpoint_failure(link, &events, session_id, runtime_id, error);
+                    break;
+                }
             } else if !stale {
                 let _ = super::instruction_pins::capture_boss_instruction_event(
                     &boss,
@@ -1073,6 +1129,15 @@ pub(super) fn forward_driver_events(
             }
         }
         if process_exited {
+            // The terminal event retires this forwarder before another marker
+            // can arrive. Commit its replay page before removing the runtime.
+            if let Some((link, applying, cursor)) = checkpoint.take()
+                && let Err(error) =
+                    link.finish_checkpoint(&applying, &cursor, &mut task_state.lock())
+            {
+                report_stable_checkpoint_failure(&link, &events, session_id, runtime_id, error);
+                break;
+            }
             // Remove and clear under the registration lock: a replacement
             // cannot register between the ownership check and cleanup.
             let removed = {
@@ -1095,5 +1160,24 @@ pub(super) fn forward_driver_events(
             drop_detached(removed);
             break;
         }
+    }
+}
+
+/// Leave the provider alive and its events unacknowledged on a local write
+/// failure. The durable applying fence makes replacement fail closed.
+fn report_stable_checkpoint_failure(
+    link: &crate::stable_runtime::StableLink,
+    events: &EventSink,
+    session_id: Uuid,
+    runtime_id: Uuid,
+    error: anyhow::Error,
+) {
+    link.fail_checkpoint();
+    let message = format!(
+        "Stable-runtime transcript checkpoint failed; event application is stopped and explicit reconciliation is required: {error:#}"
+    );
+    eprintln!("goddard-daemon: {session_id}: {message}");
+    if let Ok(wire) = event_to_wire(DriverEvent::Error(message)) {
+        let _ = events.for_session(session_id, runtime_id).send(wire);
     }
 }

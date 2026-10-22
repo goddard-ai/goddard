@@ -34,7 +34,7 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             "bossTerminalIntent",
             json!({ "title": title, "cwd": cwd, "command": command }),
         ),
-        DriverEvent::RuntimeEventCursorAdvanced(_) => {
+        DriverEvent::RuntimeEventCursorAdvanced(_) | DriverEvent::RuntimeEventBatch { .. } => {
             bail!("client-only runtime cursors cannot be sent by the daemon")
         }
         DriverEvent::RuntimeLost => {

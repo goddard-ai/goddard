@@ -472,6 +472,23 @@ impl WakuBackend {
             );
             #[cfg(unix)]
             {
+                // Stable replay owns the transcript. Admission must not create
+                // a provider whose output has no durable product session.
+                {
+                    let mut state = self.task_state.lock();
+                    let session = state
+                        .sessions
+                        .iter_mut()
+                        .find(|session| session.id == session_id)
+                        .ok_or_else(|| anyhow!("save the task before starting a stable runtime"))?;
+                    self.task_store.hydrate(session)?;
+                    anyhow::ensure!(
+                        session.has_started() && !session.incognito,
+                        "stable runtime requires a saved, persistent task"
+                    );
+                    state.mark_session_dirty(session_id);
+                    self.task_store.save(&mut state)?;
+                }
                 let (handle, stable) = crate::stable_runtime::start_link(
                     self,
                     &self.task_store,

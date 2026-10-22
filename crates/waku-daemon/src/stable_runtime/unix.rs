@@ -30,7 +30,7 @@ use crate::Backend;
 use crate::daemon::WakuBackend;
 use crate::driver::{DriverControl, DriverEventSender, DriverHandle, DriverStartOptions};
 use crate::model::{DriverEvent, PermissionOption, ProviderKind, UserInputQuestion};
-use crate::persistence::{StableLinkRow, StableReceipt, StateStore};
+use crate::persistence::{PersistedState, StableLinkRow, StableReceipt, StateStore};
 
 /// Env override locating the `waku-runtime-host` executable to spawn when
 /// no live endpoint answers. Absent it, the sibling of the daemon binary is
@@ -233,6 +233,10 @@ pub(crate) fn start_link(
     root: &Path,
     service_override: Option<Arc<dyn IngressService>>,
 ) -> anyhow::Result<(DriverHandle, StableLink)> {
+    anyhow::ensure!(
+        !options.ephemeral,
+        "stable runtime requires a persistent session"
+    );
     waku_runtime::ipc::private_root(root)
         .context("could not verify the private runtime namespace root")?;
     let verified_root = root
@@ -583,6 +587,10 @@ fn resolve_attachment(
     provider: ProviderKind,
 ) -> anyhow::Result<Attachment> {
     if let Some(row) = prior {
+        anyhow::ensure!(
+            row.status != "applying",
+            "stable-runtime event application was interrupted; explicit reconciliation is required"
+        );
         if row.runtime_instance == inventory.runtime_instance
             && let Some(inv) = inventory
                 .sessions
@@ -1272,6 +1280,9 @@ impl LinkShared {
         command_id: Uuid,
         action: CanonicalAction,
     ) -> Option<waku_runtime::contract::CommandReceipt> {
+        if self.stop.load(Ordering::Acquire) {
+            return None;
+        }
         let mut client = self.client.lock().unwrap();
         match execute_safe(&mut client, &self.envelope(command_id, action)) {
             Ok(receipt) => {
@@ -1301,6 +1312,9 @@ impl LinkShared {
     /// epoch-fenced `PermitDispatch`. A rejection or an unconfirmed answer
     /// is reported rather than treated as permission.
     fn permit_dispatch(&self) -> bool {
+        if self.stop.load(Ordering::Acquire) {
+            return false;
+        }
         let permission = {
             let mut client = self.client.lock().unwrap();
             execute_safe(
@@ -1375,6 +1389,7 @@ impl LinkShared {
 
     /// The forwarder consumed this link's applied marker: every host event
     /// through `sequence` is durably applied — record the receipt, then ack.
+    #[cfg(test)]
     fn note_applied(&self, cursor: &RuntimeEventCursor) {
         if cursor.epoch != self.marker_epoch || cursor.runtime_id != self.runtime_id {
             return;
@@ -1530,6 +1545,7 @@ fn pump_loop(shared: Arc<LinkShared>, mut requests: ReconciledRequests) {
         match client.events(shared.epoch, cursor, POLL_WAIT_MS) {
             Ok(page) => {
                 let mut last = None;
+                let mut projected = Vec::new();
                 for env in page.events {
                     if env.sequence <= shared_cursor_applied(&shared) {
                         continue;
@@ -1582,42 +1598,29 @@ fn pump_loop(shared: Arc<LinkShared>, mut requests: ReconciledRequests) {
                             // revision ride along so every consumer can
                             // reject a stale or foreign-generation
                             // redelivery.
-                            if shared
-                                .sender
-                                .send(DriverEvent::ConfigActivated {
-                                    generation: env.generation,
-                                    revision: *revision,
-                                    boundary: activation_boundary(*boundary),
-                                    provider: effective.provider.clone(),
-                                    model: effective.model.clone(),
-                                    reasoning_effort: effective.effort.clone(),
-                                })
-                                .is_err()
-                            {
-                                return;
-                            }
+                            projected.push(DriverEvent::ConfigActivated {
+                                generation: env.generation,
+                                revision: *revision,
+                                boundary: activation_boundary(*boundary),
+                                provider: effective.provider.clone(),
+                                model: effective.model.clone(),
+                                reasoning_effort: effective.effort.clone(),
+                            });
                         }
                         ProviderEvent::RequestOpened { request_id, .. } => {
                             if (env.sequence > requests.through
                                 || requests.unanswered.contains(request_id))
                                 && let Some(event) = project_request(&shared, &native, &env)
-                                && shared.sender.send(event).is_err()
                             {
-                                return;
+                                projected.push(event);
                             }
                         }
                         ProviderEvent::TurnDelta { delta, .. } if !delta.is_string() => {
-                            for event in native.project(shared.provider, delta) {
-                                if shared.sender.send(event).is_err() {
-                                    return;
-                                }
-                            }
+                            projected.extend(native.project(shared.provider, delta));
                         }
                         _ => {
                             if let Some(event) = translate(&env) {
-                                if shared.sender.send(event).is_err() {
-                                    return;
-                                }
+                                projected.push(event);
                             }
                         }
                     }
@@ -1625,15 +1628,22 @@ fn pump_loop(shared: Arc<LinkShared>, mut requests: ReconciledRequests) {
                 }
                 if let Some(sequence) = last {
                     cursor.applied = sequence;
-                    // The marker rides the same ordered channel — when the
-                    // forwarder consumes it, every earlier event is durable.
-                    let _ = shared.sender.send(DriverEvent::RuntimeEventCursorAdvanced(
-                        RuntimeEventCursor {
-                            runtime_id: shared.runtime_id,
-                            epoch: shared.marker_epoch,
-                            sequence,
-                        },
-                    ));
+                    if shared
+                        .sender
+                        .send(DriverEvent::RuntimeEventBatch {
+                            cursor: RuntimeEventCursor {
+                                runtime_id: shared.runtime_id,
+                                epoch: shared.marker_epoch,
+                                sequence,
+                            },
+                            events: projected,
+                        })
+                        .is_err()
+                    {
+                        return;
+                    }
+                    // Bound transcript checkpoints to the streaming cadence.
+                    std::thread::sleep(Duration::from_millis(120));
                 }
             }
             Err(ClientError::Io(_)) => conn = None,
@@ -1788,9 +1798,68 @@ fn service_loop(shared: Arc<LinkShared>) {
 }
 
 impl StableLink {
-    /// The forwarder's callback on this link's applied marker: every host
-    /// event through `cursor.sequence` is durably applied — record the
-    /// receipt, then acknowledge.
+    pub(crate) fn require_available(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.shared.stop.load(Ordering::Acquire),
+            "stable-runtime event application is stopped; explicit reconciliation is required"
+        );
+        Ok(())
+    }
+
+    pub(crate) fn begin_checkpoint(
+        &self,
+        cursor: &RuntimeEventCursor,
+    ) -> anyhow::Result<StableLinkRow> {
+        anyhow::ensure!(
+            !self.shared.stop.load(Ordering::Acquire)
+                && cursor.epoch == self.shared.marker_epoch
+                && cursor.runtime_id == self.shared.runtime_id,
+            "stable-runtime checkpoint belongs to another attachment"
+        );
+        let row = self
+            .shared
+            .store
+            .stable_link(self.shared.task_id)?
+            .ok_or_else(|| anyhow!("stable-runtime link is missing"))?;
+        anyhow::ensure!(
+            row.namespace == STABLE_NAMESPACE
+                && row.runtime_instance == self.shared.instance
+                && row.runtime_session_id == self.shared.sref.session_id
+                && row.generation == self.shared.sref.generation
+                && cursor.sequence > row.applied_seq,
+            "stable-runtime checkpoint owner or cursor changed"
+        );
+        Ok(self.shared.store.stable_link_begin(&row)?)
+    }
+
+    pub(crate) fn finish_checkpoint(
+        &self,
+        applying: &StableLinkRow,
+        cursor: &RuntimeEventCursor,
+        state: &mut PersistedState,
+    ) -> anyhow::Result<()> {
+        self.shared
+            .store
+            .save_stable_checkpoint(state, applying, cursor.sequence)?;
+        // A lost ACK is safe: reattachment repeats it from the durable cursor.
+        let _ = self.shared.client.lock().unwrap().acknowledge(
+            self.shared.epoch,
+            EventCursor {
+                session_id: self.shared.sref.session_id,
+                generation: self.shared.sref.generation,
+                applied: cursor.sequence,
+            },
+        );
+        Ok(())
+    }
+
+    /// Detach on projection failure while preserving the provider and its log.
+    pub(crate) fn fail_checkpoint(&self) {
+        self.shared.stop.store(true, Ordering::Release);
+    }
+
+    // Raw transport tests stand in for the forwarder's durable application.
+    #[cfg(test)]
     pub(crate) fn note_applied(&self, cursor: &RuntimeEventCursor) {
         self.shared.note_applied(cursor);
     }
@@ -1989,7 +2058,8 @@ impl DriverControl for StableLink {
     }
 
     fn apply_options(&self, options: crate::driver::SessionOptions) -> bool {
-        if options.mode != self.shared.mode
+        if self.shared.stop.load(Ordering::Acquire)
+            || options.mode != self.shared.mode
             || options.service_tier.is_some()
             || options.context_window.is_some()
         {
@@ -2173,6 +2243,30 @@ mod tests {
         }
     }
 
+    // Transport-only tests inspect projections individually; the real daemon
+    // tests below exercise the batch/checkpoint protocol through the forwarder.
+    fn link_test_event_channel() -> (DriverEventSender, crossbeam_channel::Receiver<DriverEvent>) {
+        let (sender, incoming) = crate::driver::test_event_channel();
+        let (outgoing, receiver) = crossbeam_channel::unbounded();
+        std::thread::spawn(move || {
+            while let Ok(event) = incoming.recv() {
+                let batch = match event {
+                    DriverEvent::RuntimeEventBatch { cursor, mut events } => {
+                        events.push(DriverEvent::RuntimeEventCursorAdvanced(cursor));
+                        events
+                    }
+                    event => vec![event],
+                };
+                for event in batch {
+                    if outgoing.send(event).is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+        (sender, receiver)
+    }
+
     fn link(
         rig: &Rig,
         runtime_id: Uuid,
@@ -2196,7 +2290,7 @@ mod tests {
         StableLink,
         crossbeam_channel::Receiver<DriverEvent>,
     ) {
-        let (sender, rx) = crate::driver::test_event_channel();
+        let (sender, rx) = link_test_event_channel();
         let (handle, link) = start_link(
             &rig.backend,
             rig.backend.task_store(),
@@ -2499,7 +2593,7 @@ mod tests {
     #[test]
     fn stable_link_fails_loudly_without_adapter() {
         let rig = rig(&[]);
-        let (sender, _rx) = crate::driver::test_event_channel();
+        let (sender, _rx) = link_test_event_channel();
         let result = start_link(
             &rig.backend,
             rig.backend.task_store(),
@@ -2548,13 +2642,7 @@ mod tests {
         }
     }
 
-    /// The whole Stage-2C chain end to end: a cold `ensure_agent_runtime`
-    /// attaches through the host, the forwarder applies events and acks
-    /// durably, and a wholesale replacement daemon — a second backend over
-    /// the same `app.db` — attaches to the surviving session rather than
-    /// admitting again.
-    #[test]
-    fn daemon_replacement_reattaches_end_to_end() {
+    fn daemon_test_rig() -> (RuntimeServer, FakeFactory, Arc<WakuBackend>, Uuid, PathBuf) {
         let runtime_root = temp_root("runtime");
         let backend_root = temp_root("backend");
         let factory = FakeFactory::new();
@@ -2574,7 +2662,7 @@ mod tests {
             Box::new(SystemClock),
         )
         .expect("host opens");
-        let _server = RuntimeServer::bind(host, &runtime_root, Duration::from_millis(5))
+        let server = RuntimeServer::bind(host, &runtime_root, Duration::from_millis(5))
             .expect("server binds");
 
         // The provider binary override keeps cold launches off the host's
@@ -2606,6 +2694,18 @@ mod tests {
         backend.stable_test_root = Some(runtime_root.clone());
         let backend = Arc::new(backend);
         backend.install_weak_self();
+        (server, factory, backend, session_id, backend_root)
+    }
+
+    /// The whole Stage-2C chain end to end: a cold `ensure_agent_runtime`
+    /// attaches through the host, the forwarder applies events and acks
+    /// durably, and a wholesale replacement daemon — a second backend over
+    /// the same `app.db` — attaches to the surviving session rather than
+    /// admitting again.
+    #[test]
+    fn daemon_replacement_reattaches_end_to_end() {
+        let (_server, factory, backend, session_id, backend_root) = daemon_test_rig();
+        let runtime_root = backend.stable_test_root.clone().unwrap();
         let events = crate::EventSink::detached();
 
         // First daemon: admit.
@@ -2619,27 +2719,66 @@ mod tests {
             .expect("link row");
         assert_eq!(row.runtime_session_id, attempt1);
 
-        // Provider events travel host → pump → forwarder → durable apply →
-        // marker → host ack.
+        let mut stale_client = backend
+            .task_store()
+            .load_session_detail(session_id)
+            .unwrap()
+            .unwrap();
+        // Provider events travel host → pump → forwarder → checkpoint → ack.
+        // No client saves and no turn completion may be needed for durability.
         let adapter = factory.for_session(attempt1).expect("adapter attached");
         adapter.emit_live();
+        adapter.emit(ProviderEvent::ConfigActivated {
+            revision: 1,
+            boundary: waku_runtime::contract::ActivationBoundary::NextTurn,
+            effective: waku_runtime::contract::RequestedConfig {
+                provider: Some("codex".into()),
+                model: None,
+                effort: None,
+                options: json!({"codexThreadId": "owned-thread"}),
+            },
+        });
         let turn = Uuid::new_v4();
         adapter.emit(ProviderEvent::TurnStarted {
             turn_id: turn,
             delivery_id: Uuid::new_v4(),
         });
-        adapter.emit_delta(turn, "body");
-        adapter.emit_completed(turn);
+        adapter.emit(ProviderEvent::TurnDelta {
+            turn_id: turn,
+            delta: json!({"method": "item/reasoning/textDelta", "params": {
+                "threadId": "owned-thread", "turnId": "owned-turn", "itemId": "reasoning-1", "delta": "thinking"
+            }}),
+        });
+        adapter.emit(ProviderEvent::TurnDelta {
+            turn_id: turn,
+            delta: json!("body"),
+        });
         until("the applied cursor to reach the turn's events", || {
             backend
                 .task_store()
                 .stable_link(session_id)
                 .ok()
                 .flatten()
-                .is_some_and(|row| row.applied_seq >= 4)
+                .is_some_and(|row| row.applied_seq >= 5)
         });
 
-        // The daemon is replaced wholesale — the host session survives.
+        let persisted = backend
+            .task_store()
+            .load_session_detail(session_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.messages.last().unwrap().content, "body");
+        assert!(persisted.active_turn_id().is_some());
+        assert_eq!(
+            persisted.transcript_blocks[0].activities[0]
+                .reasoning
+                .as_ref()
+                .unwrap()
+                .content,
+            "thinking"
+        );
+
+        // The daemon is replaced wholesale in the middle of a streamed turn.
         drop(backend);
         let settings =
             crate::DaemonSettingsStore::open(backend_root.join("settings.json")).unwrap();
@@ -2653,6 +2792,39 @@ mod tests {
         let successor = Arc::new(successor);
         successor.install_weak_self();
 
+        // A delayed client snapshot must preserve the checkpoint even before
+        // the successor has registered an in-memory runtime for this task.
+        stale_client.updated_at = crate::model::unix_time() + 60;
+        successor
+            .handle(
+                crate::Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: crate::Command::SaveTaskState {
+                        projects: Vec::new(),
+                        live_session_ids: vec![session_id],
+                        sessions: vec![stale_client],
+                        session_tails: Vec::new(),
+                    },
+                },
+                events.clone(),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            successor
+                .task_store()
+                .load_session_detail(session_id)
+                .unwrap()
+                .unwrap()
+                .messages
+                .last()
+                .unwrap()
+                .content,
+            "body"
+        );
+
         let (attempt2, _handle2) = successor
             .ensure_agent_runtime(session_id, &events)
             .expect("successor attaches");
@@ -2665,24 +2837,162 @@ mod tests {
         // runtime session — nothing prompts the provider again.
         assert_ne!(attempt2, attempt1);
         assert_eq!(row.runtime_session_id, attempt1);
-        assert!(row.applied_seq >= 4);
+        assert!(row.applied_seq >= 5);
 
         // New provider activity replays to the successor's forwarder only
         // once — the cursor resumes where the last daemon left it.
-        let turn2 = Uuid::new_v4();
-        adapter.emit(ProviderEvent::TurnStarted {
-            turn_id: turn2,
-            delivery_id: Uuid::new_v4(),
+        adapter.emit(ProviderEvent::TurnDelta {
+            turn_id: turn,
+            delta: json!(" after the replacement"),
         });
-        adapter.emit_delta(turn2, "after the replacement");
+        adapter.emit_completed(turn);
         until("the successor's cursor to advance", || {
             successor
                 .task_store()
                 .stable_link(session_id)
                 .ok()
                 .flatten()
-                .is_some_and(|row| row.applied_seq >= 6)
+                .is_some_and(|row| row.applied_seq >= 7)
         });
+        let persisted = successor
+            .task_store()
+            .load_session_detail(session_id)
+            .unwrap()
+            .unwrap();
+        let replies = persisted
+            .messages
+            .iter()
+            .filter(|message| message.role == crate::model::MessageRole::Assistant)
+            .collect::<Vec<_>>();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].content, "body after the replacement");
+        assert!(persisted.active_turn_id().is_none());
+        assert_eq!(
+            persisted.transcript_blocks[0].activities[0]
+                .reasoning
+                .as_ref()
+                .unwrap()
+                .content,
+            "thinking"
+        );
+        assert!(
+            adapter.dispatched().is_empty(),
+            "attachment never submits another turn"
+        );
+
+        adapter.emit(ProviderEvent::Terminated {
+            reason: waku_runtime::contract::TerminateReason::Exited {
+                detail: "controlled exit".into(),
+            },
+        });
+        until("the terminal event checkpoint", || {
+            successor
+                .task_store()
+                .stable_link(session_id)
+                .ok()
+                .flatten()
+                .is_some_and(|row| row.applied_seq == 8 && row.status == "live")
+        });
+    }
+
+    #[test]
+    fn stable_forwarder_write_failure_stops_application_without_acknowledging() {
+        let (_server, factory, backend, session_id, _) = daemon_test_rig();
+        let events = crate::EventSink::detached();
+        let observed = events.tapped_events();
+        let (attempt, handle) = backend.ensure_agent_runtime(session_id, &events).unwrap();
+        let adapter = factory.for_session(attempt).unwrap();
+        let turn = Uuid::new_v4();
+        adapter.emit_live();
+        adapter.emit(ProviderEvent::TurnStarted {
+            turn_id: turn,
+            delivery_id: Uuid::new_v4(),
+        });
+        adapter.emit(ProviderEvent::TurnDelta {
+            turn_id: turn,
+            delta: json!("saved"),
+        });
+        until("initial checkpoint", || {
+            backend
+                .task_store()
+                .stable_link(session_id)
+                .unwrap()
+                .unwrap()
+                .applied_seq
+                == 3
+        });
+        rusqlite::Connection::open(backend.task_store().path())
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_checkpoint BEFORE UPDATE ON stable_runtime_links
+             WHEN NEW.applied_seq > OLD.applied_seq
+             BEGIN SELECT RAISE(ABORT, 'injected checkpoint failure'); END;",
+            )
+            .unwrap();
+        adapter.emit(ProviderEvent::TurnDelta {
+            turn_id: turn,
+            delta: json!(" unsaved"),
+        });
+        until("the checkpoint failure to reach clients", || {
+            observed.try_iter().any(|message| {
+                let crate::ServerMessage::Event(event) = message else {
+                    return false;
+                };
+                event.event.kind == "error"
+                    && event
+                        .event
+                        .payload
+                        .as_str()
+                        .is_some_and(|text| text.contains("checkpoint failed"))
+            })
+        });
+        let row = backend
+            .task_store()
+            .stable_link(session_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.applied_seq, 3);
+        assert_eq!(row.status, "applying");
+        assert_eq!(
+            backend
+                .task_store()
+                .load_session_detail(session_id)
+                .unwrap()
+                .unwrap()
+                .messages
+                .last()
+                .unwrap()
+                .content,
+            "saved"
+        );
+        handle.prompt("must not reach the provider".into());
+        assert!(adapter.dispatched().is_empty());
+        let creds = load_credentials(backend.stable_test_root.as_ref().unwrap()).unwrap();
+        let (mut client, _) = RuntimeClient::controller(
+            backend.stable_test_root.as_ref().unwrap(),
+            &creds.controller,
+            &ClientHello::current(),
+        )
+        .unwrap();
+        // Existing daemon control remains valid; acquiring control here would
+        // itself fence the forwarder and obscure the write-failure behavior.
+        let epoch = backend
+            .stable_controllers
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .grant
+            .epoch;
+        let inventory = client.reconcile(epoch).unwrap();
+        let session = inventory
+            .sessions
+            .iter()
+            .find(|session| session.session.session_id == attempt)
+            .unwrap();
+        assert_eq!(session.acknowledged, 3);
+        assert_eq!(adapter.terminate_count(), 0);
     }
 
     /// The opt-in gate: without a root there is no seam; a named root opts
@@ -2716,7 +3026,7 @@ mod tests {
         let second_service = Arc::new(OwnerService(second_id, AtomicUsize::new(0)));
         let (first_handle, first, first_rx) = link(&rig, first_id, Some(first_service.clone()));
         let second_task = Uuid::new_v4();
-        let (sender, second_rx) = crate::driver::test_event_channel();
+        let (sender, second_rx) = link_test_event_channel();
         let (second_handle, second) = start_link(
             &rig.backend,
             rig.backend.task_store(),
@@ -2878,7 +3188,7 @@ mod tests {
     #[test]
     fn stable_cursor_write_failure_keeps_host_history_unacknowledged() {
         let rig = rig(&["codex"]);
-        let (_handle, link, rx) = link(&rig, Uuid::new_v4(), None);
+        let (handle, link, rx) = link(&rig, Uuid::new_v4(), None);
         let adapter = rig.factory.for_session(link.sref().session_id).unwrap();
         adapter.emit_live();
         let marker = loop {
@@ -2888,6 +3198,11 @@ mod tests {
                 break marker;
             }
         };
+        let applying = link.begin_checkpoint(&marker).unwrap();
+        let mut state = rig.backend.task_store().load().unwrap();
+        for session in &mut state.sessions {
+            rig.backend.task_store().hydrate(session).unwrap();
+        }
         rusqlite::Connection::open(rig.backend.task_store().path())
             .unwrap()
             .execute_batch(
@@ -2895,7 +3210,13 @@ mod tests {
              BEGIN SELECT RAISE(FAIL, 'injected cursor write failure'); END;",
             )
             .unwrap();
-        link.note_applied(&marker);
+        assert!(
+            link.finish_checkpoint(&applying, &marker, &mut state)
+                .is_err()
+        );
+        link.fail_checkpoint();
+        handle.prompt("must not dispatch after a failed checkpoint".into());
+        assert!(adapter.dispatched().is_empty());
         let inventory = link
             .shared
             .client
@@ -2917,6 +3238,32 @@ mod tests {
                 .unwrap()
                 .applied_seq,
             0
+        );
+        drop(handle);
+        drop(link);
+        let (sender, _events) = link_test_event_channel();
+        let error = start_link(
+            &rig.backend,
+            rig.backend.task_store(),
+            rig.session_id,
+            Uuid::new_v4(),
+            ProviderKind::Codex,
+            &options(),
+            sender,
+            &rig.runtime_root,
+            None,
+        )
+        .err()
+        .expect("partial application must block reattachment");
+        assert!(
+            error.to_string().contains("application was interrupted"),
+            "{error:#}"
+        );
+        assert!(adapter.dispatched().is_empty());
+        assert_eq!(
+            adapter.terminate_count(),
+            0,
+            "recovery preserves the provider"
         );
     }
 
@@ -3163,7 +3510,7 @@ for line in sys.stdin:
         opts.binary = binary;
         opts.cwd = provider_root.clone();
         opts.mode = crate::model::RuntimeMode::Ask;
-        let (sender, rx) = crate::driver::test_event_channel();
+        let (sender, rx) = link_test_event_channel();
         let (handle, link) = start_link(
             &backend,
             backend.task_store(),
@@ -3246,7 +3593,7 @@ for line in sys.stdin:
             WakuBackend::new(settings, StateStore::daemon(backend_root.join("app.db"))).unwrap(),
         );
         backend.install_weak_self();
-        let (sender, rx) = crate::driver::test_event_channel();
+        let (sender, rx) = link_test_event_channel();
         let (handle, link) = start_link(
             &backend,
             backend.task_store(),
@@ -3988,7 +4335,7 @@ for line in sys.stdin:
         write_descriptor(&descriptor_path, &substituted).unwrap();
         let mut opts = options();
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
-        let (sender, _) = crate::driver::test_event_channel();
+        let (sender, _) = link_test_event_channel();
         let rejected = start_link(
             &rig.backend,
             rig.backend.task_store(),
@@ -4008,7 +4355,7 @@ for line in sys.stdin:
         rig.backend.stable_controllers.lock().unwrap().clear();
         let mut opts = options();
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
-        let (sender, _) = crate::driver::test_event_channel();
+        let (sender, _) = link_test_event_channel();
         let result = start_link(
             &rig.backend,
             rig.backend.task_store(),
@@ -4024,7 +4371,7 @@ for line in sys.stdin:
         assert!(RuntimeClient::agent(&rig.runtime_root, &second.grant).is_err());
         // Lost recovery evidence also fails closed, even if a daemon is live.
         std::fs::remove_file(&descriptor_path).unwrap();
-        let (sender, _) = crate::driver::test_event_channel();
+        let (sender, _) = link_test_event_channel();
         assert!(
             start_link(
                 &rig.backend,

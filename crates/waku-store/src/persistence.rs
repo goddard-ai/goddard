@@ -2220,6 +2220,34 @@ impl StateStore {
         Ok(())
     }
 
+    /// Commit the transcript and its host replay cursor in the same SQLite
+    /// transaction. The caller holds the state lock while checkpointing.
+    pub fn save_stable_checkpoint(
+        &self,
+        state: &mut PersistedState,
+        applying: &StableLinkRow,
+        sequence: u64,
+    ) -> io::Result<()> {
+        if applying.status != "applying" || sequence <= applying.applied_seq {
+            return Err(io::Error::other("invalid stable-runtime checkpoint"));
+        }
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == applying.session_id)
+            .ok_or_else(|| io::Error::other("stable-runtime session is missing"))?;
+        if !session.detail_loaded || !session.has_started() || session.incognito {
+            return Err(io::Error::other(
+                "stable-runtime checkpoint requires a loaded, persistent session",
+            ));
+        }
+        state.mark_session_dirty(applying.session_id);
+        let batch = self.save_batch(state);
+        self.write_batch_with_checkpoint(&batch, Some((applying, sequence)))?;
+        state.dirty_sessions.clear();
+        Ok(())
+    }
+
     /// Snapshots everything one save writes while the caller still holds the
     /// state lock, so the write itself — serialization plus the SQLite
     /// transaction — can run without it. Sessions entered state through a
@@ -2294,6 +2322,14 @@ impl StateStore {
     /// Writes one snapshotted batch. Holds only the storage lock, so it can
     /// run after the caller's state lock is released.
     pub fn write_batch(&self, batch: &SaveBatch) -> io::Result<()> {
+        self.write_batch_with_checkpoint(batch, None)
+    }
+
+    fn write_batch_with_checkpoint(
+        &self,
+        batch: &SaveBatch,
+        checkpoint: Option<(&StableLinkRow, u64)>,
+    ) -> io::Result<()> {
         let mut guard = self.storage.lock();
         if guard.is_none() {
             *guard = Some(Storage {
@@ -2358,7 +2394,6 @@ impl StateStore {
                     )
                     .map_err(to_io_error)?;
             }
-            storage.saved_projects = projects_fingerprint;
         }
 
         // Applied only after the commit below, so a transaction that rolls back
@@ -2378,7 +2413,6 @@ impl StateStore {
                         rusqlite::params_from_iter(session_params(session)),
                     )
                     .map_err(to_io_error)?;
-                storage.persisted_sessions.insert(session.id);
                 continue;
             }
             let checkpoint_cache = terminal_checkpoints_for_session(
@@ -2404,7 +2438,6 @@ impl StateStore {
                 )?,
             ));
             persisted_checkpoints.push((session.id, checkpoint_cache));
-            storage.persisted_sessions.insert(session.id);
         }
 
         let removed = storage
@@ -2413,7 +2446,7 @@ impl StateStore {
             .copied()
             .filter(|id| !batch.live_ids.contains(id))
             .collect::<Vec<_>>();
-        for id in removed {
+        for id in &removed {
             let key = id.to_string();
             transaction
                 .execute("DELETE FROM sessions WHERE id = ?1", params![key])
@@ -2427,13 +2460,22 @@ impl StateStore {
             transaction
                 .execute("DELETE FROM messages WHERE session_id = ?1", params![key])
                 .map_err(to_io_error)?;
+        }
+
+        if let Some((applying, sequence)) = checkpoint {
+            update_stable_link(&transaction, applying, "live", sequence)?;
+        }
+        transaction.commit().map_err(to_io_error)?;
+        // Now that the rows are durable, and not before.
+        storage.saved_projects = projects_fingerprint;
+        for session in &batch.sessions {
+            storage.persisted_sessions.insert(session.id);
+        }
+        for id in removed {
             storage.persisted_sessions.remove(&id);
             storage.written_messages.remove(&id);
             storage.terminal_checkpoints.remove(&id);
         }
-
-        transaction.commit().map_err(to_io_error)?;
-        // Now that the rows are durable, and not before.
         for (session_id, fingerprints) in written_messages {
             storage.written_messages.insert(session_id, fingerprints);
         }
@@ -3444,9 +3486,43 @@ pub struct StableLinkRow {
     pub generation: u64,
     /// Last host event sequence durably applied to daemon state.
     pub applied_seq: u64,
-    /// `live` | `interrupted` | `ended` — what the host last reported.
+    /// `live` | `interrupted` | `ended`, or `applying` while the daemon is
+    /// applying a replay page. Recovery of `applying` requires reconciliation.
     pub status: String,
     pub updated_at: u64,
+}
+
+fn update_stable_link(
+    connection: &Connection,
+    expected: &StableLinkRow,
+    status: &str,
+    sequence: u64,
+) -> io::Result<()> {
+    let sequence = i64::try_from(sequence).map_err(to_io_error)?;
+    let changed = connection
+        .execute(
+            "UPDATE stable_runtime_links SET status = ?1, applied_seq = ?2
+         WHERE session_id = ?3 AND namespace = ?4 AND runtime_session_id = ?5
+           AND runtime_instance = ?6 AND generation = ?7 AND applied_seq = ?8 AND status = ?9",
+            params![
+                status,
+                sequence,
+                expected.session_id.to_string(),
+                expected.namespace,
+                expected.runtime_session_id.to_string(),
+                expected.runtime_instance.to_string(),
+                expected.generation as i64,
+                expected.applied_seq as i64,
+                expected.status
+            ],
+        )
+        .map_err(to_io_error)?;
+    if changed != 1 {
+        return Err(io::Error::other(
+            "stable-runtime checkpoint owner or cursor changed",
+        ));
+    }
+    Ok(())
 }
 
 impl StableLinkRow {
@@ -3522,6 +3598,31 @@ impl StateStore {
                 })
             })
             .transpose()
+    }
+
+    /// These transcripts belong to the daemon even before reattachment.
+    pub fn stable_link_session_ids(&self) -> io::Result<HashSet<Uuid>> {
+        let connection = self.open()?;
+        let mut statement = connection
+            .prepare("SELECT session_id FROM stable_runtime_links")
+            .map_err(to_io_error)?;
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(to_io_error)?
+            .map(|row| Uuid::parse_str(&row.map_err(to_io_error)?).map_err(to_io_error))
+            .collect()
+    }
+
+    /// Fence replay before any non-idempotent projection or downstream effect.
+    /// A crash before the checkpoint finishes must not replay that page blindly.
+    pub fn stable_link_begin(&self, row: &StableLinkRow) -> io::Result<StableLinkRow> {
+        if row.status != "live" {
+            return Err(io::Error::other("stable-runtime link needs reconciliation"));
+        }
+        update_stable_link(&self.open()?, row, "applying", row.applied_seq)?;
+        let mut applying = row.clone();
+        applying.status = "applying".into();
+        Ok(applying)
     }
 
     /// Upsert a link row — written when the admission lands and every time
@@ -3723,6 +3824,99 @@ mod tests {
             annotations: Vec::new(),
             inline_atoms: Vec::new(),
         }
+    }
+
+    #[test]
+    fn stable_checkpoint_rolls_back_transcript_and_cursor_then_retries() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        state.sessions[0].begin_turn("question");
+        let mut removed = AgentSession::new(state.projects[0].id, ProviderKind::Codex);
+        removed.begin_turn("to remove");
+        let removed_id = removed.id;
+        state.push_session(removed);
+        store.save(&mut state).unwrap();
+        state.sessions.retain(|session| session.id != removed_id);
+        state.projects[0].name = "renamed project".into();
+        let id = state.sessions[0].id;
+        let row = StableLinkRow::admit("goddard", id, Uuid::new_v4(), Uuid::new_v4());
+        store.stable_link_save(&row).unwrap();
+        let applying = store.stable_link_begin(&row).unwrap();
+        state.sessions[0].push_message(MessageRole::Assistant, "streamed reply");
+
+        let connection = Connection::open(store.path()).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_checkpoint BEFORE UPDATE ON stable_runtime_links
+             WHEN NEW.applied_seq > OLD.applied_seq
+             BEGIN SELECT RAISE(ABORT, 'injected checkpoint failure'); END;",
+            )
+            .unwrap();
+        assert!(
+            store
+                .save_stable_checkpoint(&mut state, &applying, 3)
+                .is_err()
+        );
+        let reopened = store_in(&directory);
+        assert_eq!(reopened.stable_link(id).unwrap().unwrap(), applying);
+        let persisted = reopened.load_session_detail(id).unwrap().unwrap();
+        assert_eq!(persisted.messages.len(), 1);
+        assert_eq!(persisted.messages[0].content, "question");
+        assert!(state.dirty_sessions.contains(&id));
+        assert!(reopened.load_session_detail(removed_id).unwrap().is_some());
+        assert_ne!(reopened.load().unwrap().projects[0].name, "renamed project");
+
+        connection
+            .execute_batch("DROP TRIGGER reject_checkpoint")
+            .unwrap();
+        store
+            .save_stable_checkpoint(&mut state, &applying, 3)
+            .unwrap();
+        let persisted = reopened.load_session_detail(id).unwrap().unwrap();
+        assert_eq!(persisted.messages.len(), 2);
+        assert_eq!(persisted.messages[1].content, "streamed reply");
+        let committed = reopened.stable_link(id).unwrap().unwrap();
+        assert_eq!(committed.applied_seq, 3);
+        assert_eq!(committed.status, "live");
+        assert!(!state.dirty_sessions.contains(&id));
+        assert!(reopened.load_session_detail(removed_id).unwrap().is_none());
+        assert_eq!(reopened.load().unwrap().projects[0].name, "renamed project");
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn stable_checkpoint_cannot_write_through_a_replaced_owner() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        state.sessions[0].begin_turn("question");
+        store.save(&mut state).unwrap();
+        let id = state.sessions[0].id;
+        let row = StableLinkRow::admit("goddard", id, Uuid::new_v4(), Uuid::new_v4());
+        store.stable_link_save(&row).unwrap();
+        let applying = store.stable_link_begin(&row).unwrap();
+        let replacement = StableLinkRow::admit("goddard", id, Uuid::new_v4(), Uuid::new_v4());
+        store.stable_link_save(&replacement).unwrap();
+        state.sessions[0].push_message(MessageRole::Assistant, "obsolete projection");
+        assert!(
+            store
+                .save_stable_checkpoint(&mut state, &applying, 3)
+                .is_err()
+        );
+        let reopened = store_in(&directory);
+        assert_eq!(reopened.stable_link(id).unwrap().unwrap(), replacement);
+        assert_eq!(
+            reopened
+                .load_session_detail(id)
+                .unwrap()
+                .unwrap()
+                .messages
+                .len(),
+            1
+        );
+        assert!(store.stable_link_begin(&row).is_err());
+        fs::remove_dir_all(directory).ok();
     }
 
     #[test]

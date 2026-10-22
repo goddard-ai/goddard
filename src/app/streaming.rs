@@ -269,6 +269,9 @@ impl Waku {
                     self.journal_session_error("computer-use-start", &message, session_id);
                 }
             }
+            // Stable-host batches are consumed inside the daemon and rejected
+            // by event_to_wire; they cannot arrive on a desktop event stream.
+            DriverEvent::RuntimeEventBatch { .. } => {}
             DriverEvent::RuntimeEventCursorAdvanced(cursor) => {
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.runtime_event_cursor = Some(cursor);

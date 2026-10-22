@@ -15,9 +15,9 @@
 //!   consulted after transport loss rather than resending under a new
 //!   identity, and forwarded agent requests answer from durable receipts.
 //! - Durable before ack: the daemon only acknowledges a host event sequence
-//!   after the forwarder has applied it — the marker the pump interleaves is
-//!   the ack boundary, and `stable_runtime_links.applied_seq` is the
-//!   crash-resume truth.
+//!   after the forwarder commits its transcript and cursor together. A durable
+//!   `applying` fence blocks blind replay of a partially applied page;
+//!   `stable_runtime_links.applied_seq` is the crash-resume truth.
 //! - Uncertain, never resent: effects the daemon cannot confirm stay
 //!   `Uncertain` — no automatic resend on either side.
 
@@ -38,7 +38,27 @@ pub(crate) enum StableLink {}
 
 #[cfg(not(unix))]
 impl StableLink {
-    pub(crate) fn note_applied(&self, _cursor: &waku_protocol::model::RuntimeEventCursor) {
+    pub(crate) fn require_available(&self) -> anyhow::Result<()> {
+        match *self {}
+    }
+
+    pub(crate) fn begin_checkpoint(
+        &self,
+        _cursor: &waku_protocol::model::RuntimeEventCursor,
+    ) -> anyhow::Result<crate::persistence::StableLinkRow> {
+        match *self {}
+    }
+
+    pub(crate) fn finish_checkpoint(
+        &self,
+        _applying: &crate::persistence::StableLinkRow,
+        _cursor: &waku_protocol::model::RuntimeEventCursor,
+        _state: &mut crate::persistence::PersistedState,
+    ) -> anyhow::Result<()> {
+        match *self {}
+    }
+
+    pub(crate) fn fail_checkpoint(&self) {
         match *self {}
     }
 }
@@ -52,6 +72,15 @@ const ROOT_ENV: &str = "WAKU_STABLE_RUNTIME_ROOT";
 /// comma-separated provider id list. Defaults to every provider when the
 /// root opt-in is set.
 const PROVIDERS_ENV: &str = "WAKU_STABLE_RUNTIME_PROVIDERS";
+
+/// Also covers first admission, before a durable link row exists. Client save
+/// snapshots must not overtake a checkpoint while stable hosting is enabled.
+pub(crate) fn configured(test_root: Option<&PathBuf>) -> bool {
+    test_root.is_some()
+        || [ROOT_ENV, PROVIDERS_ENV]
+            .iter()
+            .any(|name| std::env::var(name).is_ok_and(|value| !value.is_empty()))
+}
 /// The default runtime namespace root under the daemon's data directory.
 pub(crate) fn default_root(data_dir: &Path) -> PathBuf {
     data_dir.join("runtime").join(STABLE_NAMESPACE)

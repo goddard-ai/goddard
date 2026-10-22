@@ -148,16 +148,18 @@ and daemon incarnation. Opening a second task does not fence the first. Each
 namespace service routes requests by their host session/generation, serializes
 execution, and persists an uncertain acceptance receipt before any product
 effect. A result-write failure leaves that receipt in place; retry returns
-uncertainty instead of executing again. Applied cursor writes must succeed
-before host acknowledgement, and the forwarder checks generation ownership
-before accepting an applied marker.
+uncertainty instead of executing again. The forwarder checks attachment and
+host-generation ownership before applying a replay page. Its transcript and
+host cursor commit in one SQLite transaction before host acknowledgement.
 
 Codex admissions use the strict adapter launch schema: supervised mode maps to
 `untrusted`/`read-only`, automatic edits to `on-request`/`workspace-write`, and
 full access to `never`/`danger-full-access`. Devin admissions carry only `cwd`
 and require supervised mode. Unsupported product options fail before admission:
 CLI credentials, MCP, Computer Use, nonempty presets/subagents, service tiers,
-context windows, sandbox VMs and legacy resume cursors. This is a qualification
+context windows, sandbox VMs, ephemeral sessions and legacy resume cursors.
+Stable admission also requires a saved, persistent product task so output has a
+durable transcript owner before the provider starts. This is a qualification
 boundary, not a replacement bridge. The default remains the legacy driver.
 
 Provider prompts use the adapters' text input contract. Native notifications
@@ -207,10 +209,47 @@ answers on attach.
 An older host or journal missing the required payload blocks attachment. A live
 pinned host is still never replaced automatically to satisfy this requirement.
 
+### Durable transcript checkpoints
+
+Stable sessions use daemon-owned transcript projection for ordinary chats as
+well as managed chats. Prompt submissions persist before dispatch. Text and
+reasoning no longer depend on client saves or turn completion: each host replay
+page carries an internal batch boundary, with checkpoint delivery limited to the
+120 ms streaming cadence. Client saves retain the daemon transcript, including
+before a successor daemon reattaches. Their writes remain ordered with
+checkpoints so an older save cannot overwrite an acknowledged transcript.
+
+| Durable link state | Meaning on attachment |
+| --- | --- |
+| `live`, cursor N | Transcript and cursor N committed together; acknowledge N and replay later events. |
+| `applying`, cursor N | Application of events after N began but was not confirmed complete; block automatic attachment for explicit reconciliation. |
+
+Before any page effect, the daemon writes the `applying` fence. After processing
+the page it commits the session snapshot and new cursor together and returns the
+row to `live`. A terminal process event commits before retiring its forwarder.
+A failed write stops application and new dispatch through that link, preserves
+the provider and host log, and reports the failure to clients. A lost host ACK
+is harmless because the next attachment acknowledges the durable cursor again.
+Both transitions compare the recorded host owner, generation, prior cursor and
+status rather than unconditionally replacing the link row.
+
+This is a conservative checkpoint, not automatic recovery of a partially applied
+page. Some event handlers persist transcripts or perform automation, queue and
+Boss effects before the final checkpoint. A crash in that interval leaves
+`applying`; those effects still need reconciliation or durable per-effect
+receipts before that state can recover automatically. Do not clear the fence
+and replay blindly. There is not yet a product repair flow for this state.
+
+Tests cover rollback of transcript and cursor on an injected SQLite failure,
+owner replacement, host ACK retention and dispatch refusal after failure, and
+an unfinished text/reasoning stream across backend replacement without client
+saves or duplicated text. These are controlled harness checks, not actual
+provider/rebuilt-app qualification.
+
 Originating command/delivery identities must still survive app and daemon
-replacement, and event effects require atomic projection/cursor settlement.
-These remain Stage 2C gates alongside full app reconnection qualification,
-MCP/callback ingress and the remaining resource/credential lease transfer.
+replacement. Partial-page effect reconciliation remains a Stage 2C gate
+alongside full app reconnection qualification, MCP/callback ingress and the
+remaining resource/credential lease transfer.
 
 ## Not yet in this stage
 
@@ -352,4 +391,5 @@ grant. `mbx test -p waku-base --lib reanchor` covers lease survival across
 daemon death, owner death, foreign-owner fencing and dead-row refusal.
 MCP/callback adaptation and actual rebuilt daemon/provider reload evidence
 remain open. App configuration consumers, full app reconnection qualification
-and atomic event/effect/cursor settlement are separate Stage 2C work.
+and reconciliation of partial cross-store event effects remain Stage 2C work.
+The transcript/cursor checkpoint described above is implemented.
