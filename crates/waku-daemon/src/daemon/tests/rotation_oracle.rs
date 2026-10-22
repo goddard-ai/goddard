@@ -157,7 +157,7 @@ fn frozen_boss_admission_fails_closed_and_human_input_stays_queued() {
 }
 
 #[test]
-fn boss_manual_compact_translates_to_a_durable_safe_refresh() {
+fn unsupported_manual_boss_refresh_keeps_chat_available() {
     use waku_boss::rotation_continuity::ContinuityLedger;
     let root = std::env::temp_dir().join(format!("boss-compact-oracle-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
@@ -165,13 +165,13 @@ fn boss_manual_compact_translates_to_a_durable_safe_refresh() {
     let runtime = Uuid::new_v4();
     let observed = install_rotation_observer(&backend);
     let capture = boss_runtime(&backend, boss, runtime);
-    // The occupancy heuristic is opted out — a refresh request still
-    // requests refresh because it is a prevention request, not a preference.
+    // A manual request remains subject to qualification even when automatic
+    // refresh is disabled.
     let mut settings = backend.settings.get();
     settings.boss_rotation_disabled = true;
     backend.settings.replace(settings).unwrap();
 
-    backend
+    let error = backend
         .handle(
             Request {
                 request_id: Uuid::new_v4(),
@@ -182,22 +182,35 @@ fn boss_manual_compact_translates_to_a_durable_safe_refresh() {
             EventSink::detached(),
             None,
         )
-        .unwrap();
+        .unwrap_err();
+    assert!(error.to_string().contains("Boss refresh is unavailable"));
 
-    // The provider never sees the compact: no context leaves the fence.
+    // An unsupported refresh never reaches the provider.
     assert!(capture.prompts.lock().is_empty());
     let ledger = ContinuityLedger::load(&root.join("boss/continuity.json")).unwrap();
-    assert!(ledger.rotation_request.is_some());
+    assert!(ledger.rotation_request.is_none());
 
     assert!(
         backend
             .reconcile_boss_rotation(crate::model::unix_time())
-            .is_err()
+            .is_ok()
     );
     let next = backend.boss.identity_and_session().1.unwrap();
     assert_eq!(boss, next);
     let ledger = ContinuityLedger::load(&root.join("boss/continuity.json")).unwrap();
-    assert!(ledger.rotation_request.is_some());
+    assert!(ledger.rotation_request.is_none());
+
+    assert!(!backend.boss_incident_fenced(boss));
+    let driver = backend.sessions.lock().get(&boss).unwrap().driver.clone();
+    driver.compact();
+    assert!(
+        ContinuityLedger::load(&backend.boss_continuity_path())
+            .unwrap()
+            .rotation_request
+            .is_none()
+    );
+    driver.prompt("continue the healthy chat".into());
+    assert_eq!(capture.prompts.lock().len(), 1);
 
     let observations = observed.lock().clone();
     assert!(
@@ -344,6 +357,7 @@ fn rotation_journal_never_reports_publication_before_readiness() {
     let root = std::env::temp_dir().join(format!("boss-lifecycle-oracle-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let old = rotation_boss(&backend);
+    install_pending_boss_rotation(&backend, crate::model::unix_time());
     let observed = install_rotation_observer(&backend);
     {
         let mut state = backend.task_state.lock();
@@ -366,7 +380,12 @@ fn rotation_journal_never_reports_publication_before_readiness() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert!(stages.contains(&RotationLifecycleStage::IntentPersisted));
+    assert!(
+        waku_boss::boss_rotation::RotationJournal::load(&backend.boss_journal_path())
+            .unwrap()
+            .intent
+            .is_some()
+    );
     assert!(stages.contains(&RotationLifecycleStage::SuccessorPrepared));
     assert!(!stages.contains(&RotationLifecycleStage::PointerPublished));
     assert!(!stages.contains(&RotationLifecycleStage::OwnershipCommitted));
@@ -698,6 +717,7 @@ fn durable_handoff_failure_and_missing_readiness_both_prevent_publication() {
     let root = std::env::temp_dir().join(format!("boss-handoff-order-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let old = rotation_boss(&backend);
+    install_pending_boss_rotation(&backend, crate::model::unix_time());
     {
         let mut state = backend.task_state.lock();
         state.session_mut(old).unwrap().context_usage = Some(crate::model::ContextUsage {
@@ -994,6 +1014,7 @@ fn guarded_lifecycle_freezes_queued_intake_and_restarts_without_publication() {
     let root = std::env::temp_dir().join(format!("guarded-rotation-restart-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let old = rotation_boss(&backend);
+    install_pending_boss_rotation(&backend, crate::model::unix_time());
     let original = crate::model::QueuedMessage::new(&"large input ".repeat(10000));
     {
         let mut state = backend.task_state.lock();
@@ -1081,6 +1102,7 @@ fn guarded_lifecycle_open_tool_loop_freezes_before_waiting_for_quiescence() {
     let root = std::env::temp_dir().join(format!("guarded-open-turn-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let old = rotation_boss(&backend);
+    install_pending_boss_rotation(&backend, crate::model::unix_time());
     {
         let mut state = backend.task_state.lock();
         let session = state.session_mut(old).unwrap();
@@ -1158,6 +1180,7 @@ fn guarded_lifecycle_reconciles_original_receipt_without_replaying_or_activating
     let root = std::env::temp_dir().join(format!("guarded-receipt-recovery-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let old = rotation_boss(&backend);
+    install_pending_boss_rotation(&backend, crate::model::unix_time());
     {
         let mut state = backend.task_state.lock();
         state.session_mut(old).unwrap().context_usage = Some(crate::model::ContextUsage {
@@ -1254,11 +1277,18 @@ fn guarded_lifecycle_unqualified_refresh_never_attempts_capacity_bypass() {
         assert!(
             backend
                 .reconcile_boss_rotation(crate::model::unix_time())
-                .is_err()
+                .is_ok()
         );
         assert_eq!(backend.boss.identity_and_session().1, Some(old));
     }
     assert_eq!(launches.load(Ordering::SeqCst), 0);
     assert!(backend.sessions.lock().is_empty());
+    assert!(!backend.boss_incident_fenced(old));
+    assert!(
+        waku_boss::boss_rotation::RotationJournal::load(&backend.boss_journal_path())
+            .unwrap()
+            .intent
+            .is_none()
+    );
     std::fs::remove_dir_all(root).ok();
 }

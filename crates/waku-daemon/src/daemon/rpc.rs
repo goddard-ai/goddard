@@ -2407,6 +2407,20 @@ impl Backend for WakuBackend {
                         crate::boss_rotation::CompactionOrigin::DaemonCommand,
                         crate::model::unix_time(),
                     );
+                    if self.boss.is_boss(session_id) {
+                        let provider = self
+                            .task_state
+                            .lock()
+                            .sessions
+                            .iter()
+                            .find(|session| session.id == session_id)
+                            .map(|session| session.provider)
+                            .ok_or_else(|| anyhow!("Boss session is missing"))?;
+                        anyhow::ensure!(
+                            self.boss_provider_qualification(provider).qualified(),
+                            "Boss refresh is unavailable for this provider"
+                        );
+                    }
                 }
                 handle_driver_command(&driver, command)
             }

@@ -12,8 +12,11 @@ rotation request.
 `BossOwnershipDriver` wraps Boss and planning handles. Ordinary chat runs under
 existing ownership and continuity checks without claiming the strict budget
 guarantee. Archived, retired, incident-fenced and frozen sessions remain blocked.
-Startup and scoped CLI calls enforce those fences too. Manual compact still
-requests a fresh session; replacement activation remains unqualified.
+Startup and scoped CLI calls enforce those fences too. New threshold and manual
+refreshes require a qualified provider. Current adapters are unqualified, so a
+threshold crossing leaves the chat usable and manual compact returns an error
+before creating a rotation intent. Existing intents and actual compaction
+incidents still enter recovery and cannot publish an unvalidated successor.
 
 `boss/continuity.json` retains exact packages, native receipts and unresolved
 effect references beside legacy handoffs, incidents and refresh requests.

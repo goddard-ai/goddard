@@ -16782,6 +16782,38 @@ fn rotation_boss(backend: &WakuBackend) -> Uuid {
     session.id
 }
 
+/// A pending intent from a previous process. This exercises recovery without
+/// pretending the current provider can start a new replacement.
+fn install_pending_boss_rotation(backend: &WakuBackend, now: u64) {
+    use waku_boss::boss_rotation::RotationJournal;
+    let (identity, active) = backend.boss.identity_and_session();
+    let active = active.unwrap();
+    let (provider, model) = {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(active).unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        // Production anchors empty drafts before persisting the intent.
+        if session.messages.is_empty() {
+            session.push_message(MessageRole::System, "Boss coordination checkpoint.");
+            session.messages.last_mut().unwrap().hidden = true;
+        }
+        let configuration = (session.provider, session.model.clone());
+        backend.task_store.save(&mut state).unwrap();
+        configuration
+    };
+    let mut journal = RotationJournal::load(&backend.boss_journal_path()).unwrap();
+    journal.active_session_id = Some(active);
+    journal
+        .begin(identity.id, active, Uuid::new_v4(), now)
+        .unwrap();
+    let intent = journal.intent.as_mut().unwrap();
+    intent.identity_digest = Some(backend.boss.identity_digest());
+    intent.provider = Some(format!("{provider:?}"));
+    intent.model = model;
+    intent.provider_qualification = Some(backend.boss_provider_qualification(provider));
+    journal.persist(&backend.boss_journal_path()).unwrap();
+}
+
 /// Seed a committed record from the pre-guard daemon for tests of stale
 /// credentials, lineage dedupe and legacy receipts. This does not exercise or
 /// qualify successor admission; production rotation must never use this path.
@@ -17372,7 +17404,7 @@ fn clear_replaces_the_boss_chat_and_removes_retired_generations() {
 }
 
 #[test]
-fn boss_rotation_never_archives_or_publishes_without_readiness() {
+fn unsupported_boss_rotation_keeps_the_current_chat_available() {
     use waku_boss::{boss_rotation::RotationJournal, rotation_continuity::ContinuityLedger};
     let root = std::env::temp_dir().join(format!("boss-rotation-runtime-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
@@ -17399,7 +17431,7 @@ fn boss_rotation_never_archives_or_publishes_without_readiness() {
     assert!(
         backend
             .reconcile_boss_rotation(crate::model::unix_time())
-            .is_err()
+            .is_ok()
     );
     assert_eq!(backend.boss.identity_and_session().1, Some(old));
     assert!(
@@ -17412,10 +17444,12 @@ fn boss_rotation_never_archives_or_publishes_without_readiness() {
             .is_none()
     );
     let journal = RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
-    assert!(journal.intent.is_some());
+    assert!(journal.intent.is_none());
     assert!(journal.rotations.is_empty());
     let ledger = ContinuityLedger::load(&root.join("boss/continuity.json")).unwrap();
-    assert!(ledger.frozen_coordinator.unwrap().package.is_some());
+    assert!(ledger.frozen_coordinator.is_none());
+    assert!(!backend.boss_incident_fenced(old));
+    backend.ensure_coordinator_available(old).unwrap();
     drop(backend);
     remove_tree(root);
 }
@@ -17430,6 +17464,7 @@ fn boss_rotation_pause_does_not_wait_on_predecessor_event_pump() {
     let root = std::env::temp_dir().join(format!("boss-rotation-offlock-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
     let old = rotation_boss(&backend);
+    install_pending_boss_rotation(&backend, crate::model::unix_time());
     {
         let mut state = backend.task_state.lock();
         state.session_mut(old).unwrap().context_usage = Some(crate::model::ContextUsage {
@@ -17465,6 +17500,7 @@ fn boss_rotation_pause_preserves_the_persisted_composer_draft() {
     settings.composer_drafts_experiment_enabled = true;
     backend.settings.replace(settings).unwrap();
     let old = rotation_boss(&backend);
+    install_pending_boss_rotation(&backend, crate::model::unix_time());
     // The client's incremental write path, not a hand-built file.
     backend
         .composer_drafts
@@ -17575,7 +17611,7 @@ fn boss_rotation_opt_out_and_exact_threshold_keep_the_current_chat() {
     assert!(
         backend
             .reconcile_boss_rotation(crate::model::unix_time())
-            .is_err()
+            .is_ok()
     );
     assert_eq!(backend.boss.identity_and_session().1, Some(old));
     drop(backend);

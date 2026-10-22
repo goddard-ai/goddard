@@ -207,8 +207,8 @@ impl WakuBackend {
     }
 
     /// The installed provider's prevention-contract evidence for the active
-    /// Boss configuration. Unknown or undetected versions stay unqualified —
-    /// the lifecycle may rotate for safety but must never claim prevention.
+    /// Boss configuration. Only a qualified route can start a new preventive
+    /// refresh; interrupted rotations and compaction incidents still recover.
     pub(super) fn boss_provider_qualification(
         &self,
         provider: ProviderKind,
@@ -789,6 +789,15 @@ impl WakuBackend {
                     usage.window.unwrap_or_default(),
                 )
             };
+            // Starting an unsupported replacement would fence a healthy chat
+            // indefinitely. Existing intents and actual compaction incidents
+            // still recover fail-closed; new prevention needs a qualified route.
+            if !incident && !self.boss_provider_qualification(old.provider).qualified() {
+                if requested.is_some() {
+                    anyhow::bail!("Boss refresh is unavailable for this provider");
+                }
+                return Ok(());
+            }
             if old.messages.is_empty() {
                 // The task store omits empty drafts even when their queues are
                 // populated. Anchor the predecessor durably before freezing so
@@ -1910,10 +1919,22 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
 
     fn compact(&self) {
         // Provider compaction is never invoked for the Boss: a manual
-        // compact becomes a durable safe-refresh request the reconciler
-        // settles as a fresh session. This is the fail-closed path for
-        // every provider, qualified or not.
+        // compact can request a fresh session only when the provider supports
+        // replacement. Unsupported requests must not fence a healthy chat.
         if !self.boss.is_boss(self.session_id) {
+            return;
+        }
+        let supported = self
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|session| session.id == self.session_id)
+            .is_some_and(|session| {
+                waku_boss::rotation_continuity::qualify_provider(session.provider, None).qualified()
+            });
+        if !supported {
+            eprintln!("Boss refresh is unavailable for this provider");
             return;
         }
         if let Err(error) = ContinuityLedger::update(&self.continuity_path, |ledger| {

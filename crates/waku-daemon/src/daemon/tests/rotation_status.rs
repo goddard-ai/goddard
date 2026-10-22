@@ -58,6 +58,13 @@ fn rotation_diagnostics_cover_identity_accounting_stages_and_terminal() {
     )
     .unwrap();
     let now = crate::model::unix_time();
+    waku_boss::rotation_continuity::ContinuityLedger::update(
+        &backend.boss_continuity_path(),
+        |ledger| {
+            ledger.record_compaction_incident(old, now, "provider compacted the chat");
+        },
+    )
+    .unwrap();
     assert!(backend.reconcile_boss_rotation(now).is_err());
     let next = backend.boss.identity_and_session().1.unwrap();
     assert_eq!(old, next);
@@ -66,7 +73,7 @@ fn rotation_diagnostics_cover_identity_accounting_stages_and_terminal() {
         crate::boss_rotation::RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
     let rotation = journal.intent.as_ref().expect("pending rotation");
     let diagnostics = &rotation.diagnostics;
-    assert_eq!(diagnostics.cause, RotationCause::ContextThreshold);
+    assert_eq!(diagnostics.cause, RotationCause::Incident);
     assert_eq!(diagnostics.provider, Some(ProviderKind::Codex));
     assert_eq!(diagnostics.model.as_deref(), Some("gpt-6.1-sol"));
     assert_eq!(diagnostics.context_threshold, Some(0.75));
@@ -136,9 +143,10 @@ fn delayed_and_paused_refresh_publish_their_status() {
     )
     .unwrap();
     let start = crate::model::unix_time();
+    install_pending_boss_rotation(&backend, start);
     // The open turn keeps the intent pending — each pass still republishes.
     backend.reconcile_boss_rotation(start).unwrap();
-    // The production trigger has already persisted the frozen intent.
+    // Recovery has persisted the freeze for the existing intent.
     let path = root.join("boss/rotation.json");
     let mut journal = crate::boss_rotation::RotationJournal::load(&path).unwrap();
     backend.reconcile_boss_rotation(start + 1).unwrap();
@@ -471,7 +479,7 @@ fn manual_compact_attempt_is_journal_telemetry_and_retry_is_human_only() {
             EventSink::detached(),
             None,
         )
-        .unwrap();
+        .unwrap_err();
     let journal =
         crate::boss_rotation::RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
     assert!(journal.signals.iter().any(|signal| matches!(

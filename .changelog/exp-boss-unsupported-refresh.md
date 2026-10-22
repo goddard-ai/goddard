@@ -1,0 +1,1 @@
+- Boss chats stay usable when their provider cannot refresh safely; manual refresh reports that limitation before pausing the chat.
