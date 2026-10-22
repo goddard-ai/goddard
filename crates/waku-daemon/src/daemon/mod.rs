@@ -214,7 +214,7 @@ fn protected_employee_transcripts(
         .iter()
         .chain(&boss.retired_employees)
         .filter(|employee| {
-            !employee.expired
+            !employee.expired()
                 || employee.expired_at.is_none_or(|at| {
                     now.saturating_sub(at) <= EMPLOYEE_TRANSCRIPT_RETENTION_SECONDS
                 })

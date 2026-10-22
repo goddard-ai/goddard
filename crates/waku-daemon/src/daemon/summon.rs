@@ -2162,7 +2162,7 @@ impl WakuBackend {
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let _owner = lifecycle.lock();
-        let was_expired = self.boss.employee(session_id).is_some_and(|e| e.expired)
+        let was_expired = self.boss.employee(session_id).is_some_and(|e| e.expired())
             || self
                 .boss
                 .document()
@@ -2423,7 +2423,7 @@ impl WakuBackend {
             .boss
             .employee_including_retired(session_id)
             .ok_or_else(|| anyhow!("{session_id} is not a Boss employee"))?;
-        if !employee.expired {
+        if !employee.expired() {
             bail!("employee {session_id} is still live — prompt it instead of resuming");
         }
         if chain_exec::chain_binding(&self.boss, session_id).is_some() {

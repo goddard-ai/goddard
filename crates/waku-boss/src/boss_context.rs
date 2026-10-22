@@ -68,7 +68,7 @@ pub fn employee_roster(
             let session = sessions
                 .iter()
                 .find(|session| session.id == employee.session_id);
-            let status = if employee.expired {
+            let status = if employee.expired() {
                 "expired"
             } else if employee.blocker.is_some() {
                 "blocked"
@@ -149,7 +149,7 @@ pub fn employee_roster(
                 ),
                 status,
                 queued,
-                employee.expired,
+                employee.expired(),
             )
         })
         .collect::<Vec<_>>();
@@ -257,7 +257,7 @@ pub fn work_context(
             .find(|session| session.id == employee.session_id)
             .map(|session| session.project_id)
     };
-    let live_employees = || boss.employees.iter().filter(|entry| !entry.expired);
+    let live_employees = || boss.employees.iter().filter(|entry| !entry.expired());
     let mut digest = String::new();
     let mut header_lines = Vec::new();
     let mut mapped_employees = 0usize;
@@ -380,7 +380,7 @@ pub fn work_context(
                 "  - {} ({}) — {status}{}{}\n",
                 entry.identity.name,
                 truncate_chars(&entry.job_title, TITLE_CAP),
-                if entry.expired { " — finished" } else { "" },
+                if entry.expired() { " — finished" } else { "" },
                 if entry.blocker.is_some() {
                     " · blocker flagged"
                 } else {
@@ -790,7 +790,6 @@ mod tests {
             permissions: PersonaPermissions::default(),
             boss_authority: false,
             pinned_files: Vec::new(),
-            expired,
             workspace_transition: false,
             expired_at: expired.then(unix_time),
             needs_attention: false,
@@ -798,7 +797,12 @@ mod tests {
             blocker: None,
             cancelled: false,
             expiry: None,
-            state: EmployeeLifecycle::Working,
+            state: if expired {
+                EmployeeLifecycle::Expired
+            } else {
+                EmployeeLifecycle::Working
+            }
+            .into(),
             ticket: None,
             queued_at: None,
             request_id: None,

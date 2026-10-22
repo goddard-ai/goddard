@@ -34,7 +34,8 @@ impl BossService {
                 .find(|e| e.session_id == session)
                 .ok_or_else(|| anyhow!("required-plan employee missing"))?;
             anyhow::ensure!(
-                !employee.expired && employee.assignment_kind == PlanAssignmentKind::Implementation,
+                !employee.expired()
+                    && employee.assignment_kind == PlanAssignmentKind::Implementation,
                 "required-plan principal is no longer active"
             );
             anyhow::ensure!(
@@ -272,11 +273,11 @@ impl BossService {
                     "plan principal is no longer active",
                 )
             })?;
-        if current.expired
-            || (current.state == EmployeeLifecycle::Queued && current.ticket.is_some())
+        if current.expired()
+            || (current.lifecycle() == EmployeeLifecycle::Queued && current.ticket.is_some())
             || current.workspace_transition
             || matches!(
-                current.state,
+                current.lifecycle(),
                 EmployeeLifecycle::Finishing | EmployeeLifecycle::Expired
             )
         {

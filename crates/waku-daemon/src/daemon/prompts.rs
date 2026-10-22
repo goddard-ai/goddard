@@ -178,7 +178,7 @@ impl WakuBackend {
             let was_expired = self
                 .boss
                 .employee(target)
-                .is_some_and(|employee| employee.expired)
+                .is_some_and(|employee| employee.expired())
                 || self
                     .boss
                     .document()

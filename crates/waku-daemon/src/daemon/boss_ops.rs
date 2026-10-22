@@ -893,7 +893,7 @@ impl WakuBackend {
                     // it once capacity frees; a steer has no open turn to
                     // fold into, so it becomes the next queued prompt. Stop
                     // remains live-only.
-                    let was_expired = self.boss.employee(session_id).is_some_and(|e| e.expired)
+                    let was_expired = self.boss.employee(session_id).is_some_and(|e| e.expired())
                         || self
                             .boss
                             .document()
@@ -1036,7 +1036,7 @@ impl WakuBackend {
                     let employee = self.boss.employee(session_id).ok_or_else(|| anyhow!("employee missing"))?;
                     anyhow::ensure!(employee.plan_readiness.as_ref().is_some_and(|r|
                         r.phase == waku_protocol::boss::PlanReadinessPhase::Blocked), "required-plan attempt is not blocked");
-                    if employee.expired {
+                    if employee.expired() {
                         self.resume_employee(session_id)?;
                     } else {
                         self.retire_plan_runtime(session_id, events)?;

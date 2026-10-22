@@ -528,7 +528,7 @@ impl WakuBackend {
                     job_title: employee.and_then(|employee| {
                         (!employee.job_title.is_empty()).then(|| employee.job_title.clone())
                     }),
-                    employee_expired: employee.map(|employee| employee.expired),
+                    employee_expired: employee.map(|employee| employee.expired()),
                     status: session.status,
                     archived: session.archived_at.is_some(),
                     created_at: session.created_at,

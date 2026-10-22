@@ -1417,7 +1417,6 @@ pub struct BossEmployee {
     /// `memory/` in the Boss files root.
     #[serde(default, alias = "knowledgeFiles")]
     pub pinned_files: Vec<String>,
-    pub expired: bool,
     /// A workspace move is retiring its old runtime. The admission stays
     /// live; normal turn settlement is suppressed until the move completes.
     /// A daemon restart resolves an abandoned move as an interruption.
@@ -1463,9 +1462,10 @@ pub struct BossEmployee {
     pub expiry: Option<EmployeeExpiry>,
     /// Admission lifecycle — `queued`, `dispatching`, `working`,
     /// `finishing`, or `expired`. Records written before the queue
-    /// deserialize as `working`; `expired` stays the wire projection.
-    #[serde(default)]
-    pub state: EmployeeLifecycle,
+    /// deserialize as `working`; `expired` is derived only at the wire boundary.
+    #[serde(flatten)]
+    #[ts(flatten)]
+    pub state: EmployeeStatus,
     /// The employee's admission ticket — present from a queued summon
     /// through dispatch, and retained afterward for accounting and
     /// re-admission. Legacy employees predate it and run uncapped.
@@ -1560,26 +1560,86 @@ pub struct Assignment {
 /// none — keeps every success actionable without inventing intent.
 pub const DEFAULT_AFTER_SUCCESS: &str = "Review the result and decide the next step.";
 
+/// Canonical employee state. The legacy `expired` flag is a wire projection.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(from = "EmployeeLifecycleWire", into = "EmployeeLifecycleWire")]
+pub struct EmployeeStatus(EmployeeLifecycle);
+
+#[derive(Deserialize, Serialize, TS)]
+struct EmployeeLifecycleWire {
+    #[serde(default)]
+    state: EmployeeLifecycle,
+    #[serde(default)]
+    expired: bool,
+}
+
+// ts-rs's derived type overrides cannot be flattened. Delegate to the wire
+// shape explicitly so the compatibility fields stay on BossEmployee.
+impl TS for EmployeeStatus {
+    type WithoutGenerics = Self;
+    type OptionInnerType = Self;
+
+    fn name(cfg: &ts_rs::Config) -> String {
+        Self::inline(cfg)
+    }
+
+    fn inline(cfg: &ts_rs::Config) -> String {
+        EmployeeLifecycleWire::inline(cfg)
+    }
+
+    fn inline_flattened(cfg: &ts_rs::Config) -> String {
+        EmployeeLifecycleWire::inline_flattened(cfg)
+    }
+
+    fn visit_dependencies(visitor: &mut impl ts_rs::TypeVisitor) {
+        EmployeeLifecycleWire::visit_dependencies(visitor);
+    }
+}
+
+impl From<EmployeeLifecycle> for EmployeeStatus {
+    fn from(state: EmployeeLifecycle) -> Self {
+        Self(state)
+    }
+}
+
+impl From<EmployeeLifecycleWire> for EmployeeStatus {
+    fn from(wire: EmployeeLifecycleWire) -> Self {
+        Self(if wire.expired {
+            EmployeeLifecycle::Expired
+        } else {
+            wire.state
+        })
+    }
+}
+
+impl From<EmployeeStatus> for EmployeeLifecycleWire {
+    fn from(status: EmployeeStatus) -> Self {
+        Self {
+            state: status.0,
+            expired: status.0 == EmployeeLifecycle::Expired,
+        }
+    }
+}
+
 impl BossEmployee {
     /// Move the employee to `lifecycle`, keeping the `expired` wire
     /// projection and its timestamp in step.
     pub fn set_lifecycle(&mut self, lifecycle: EmployeeLifecycle, now: u64) {
-        self.state = lifecycle;
-        self.expired = lifecycle == EmployeeLifecycle::Expired;
+        self.state = lifecycle.into();
         if lifecycle != EmployeeLifecycle::Working {
             self.workspace_transition = false;
         }
-        if self.expired && self.expired_at.is_none() {
+        if self.expired() && self.expired_at.is_none() {
             self.expired_at = Some(now);
         }
     }
 
-    /// The lifecycle derived for records too old to carry `state`.
+    pub fn expired(&self) -> bool {
+        self.lifecycle() == EmployeeLifecycle::Expired
+    }
+
     pub fn lifecycle(&self) -> EmployeeLifecycle {
-        if self.expired && self.state != EmployeeLifecycle::Expired {
-            return EmployeeLifecycle::Expired;
-        }
-        self.state
+        self.state.0
     }
 }
 
@@ -2000,7 +2060,7 @@ impl BossPlan {
                 .items
                 .iter()
                 .all(|item| item.state != PlanItemState::ToDo)
-            && linked.all(|entry| entry.expired)
+            && linked.all(|entry| entry.expired())
     }
 }
 
@@ -2015,7 +2075,7 @@ impl PlanItem {
                 let live = employees.iter().any(|entry| {
                     entry.plan_id == Some(plan.id)
                         && entry.item_id == Some(self.id)
-                        && !entry.expired
+                        && !entry.expired()
                 });
                 if live {
                     PlanItemProgress::InProgress
@@ -2763,7 +2823,7 @@ impl BossOutcome {
     /// an expired record with a clean finish and no flagged blocker;
     /// cancelled assignments count for nothing.
     pub fn assignment_succeeded(employee: &BossEmployee) -> bool {
-        employee.expired
+        employee.expired()
             && !employee.cancelled
             && employee.blocker.is_none()
             && employee
@@ -2785,7 +2845,7 @@ impl BossOutcome {
             return false;
         }
         employee.blocker.is_some()
-            || (employee.expired
+            || (employee.expired()
                 && employee
                     .expiry
                     .as_ref()
@@ -2834,7 +2894,7 @@ impl BossOutcome {
     /// and not cancelled. Queued, dispatching, and working all count:
     /// capacity waiting is already-visible Waiting work.
     fn live_assignment(employee: &BossEmployee) -> bool {
-        !employee.expired && !employee.cancelled
+        !employee.expired() && !employee.cancelled
     }
 
     /// Whether the task currently qualifies for an unattended reminder:
@@ -2903,7 +2963,7 @@ impl BossOutcome {
             if !belongs || employee.session_id == closer || employee.cancelled {
                 continue;
             }
-            if !employee.expired {
+            if !employee.expired() {
                 outstanding.push(format!(
                     "assignment \"{}\" ({}) is still working",
                     employee.job_title, employee.identity.name
@@ -4361,5 +4421,54 @@ mod tests {
         }))
         .unwrap();
         assert!(state.planning.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod employee_lifecycle_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn legacy_employee_lifecycles_normalize_at_the_wire_boundary() {
+        let typescript = BossEmployee::export_to_string(&ts_rs::Config::new()).unwrap();
+        assert!(typescript.contains("state: EmployeeLifecycle"));
+        assert!(typescript.contains("expired: boolean"));
+        for (state, expired, expected) in [
+            (None, false, EmployeeLifecycle::Working),
+            (None, true, EmployeeLifecycle::Expired),
+            (Some("working"), true, EmployeeLifecycle::Expired),
+            (Some("expired"), false, EmployeeLifecycle::Expired),
+            (Some("queued"), false, EmployeeLifecycle::Queued),
+            (Some("dispatching"), false, EmployeeLifecycle::Dispatching),
+            (Some("finishing"), false, EmployeeLifecycle::Finishing),
+        ] {
+            let mut wire = json!({
+                "sessionId": Uuid::new_v4(),
+                "supervisorId": Uuid::new_v4(),
+                "identity": { "id": Uuid::new_v4(), "name": "Employee", "avatarSeed": "seed" },
+                "personaId": Uuid::new_v4(),
+                "permissions": PersonaPermissions::default(),
+                "expired": expired
+            });
+            if let Some(state) = state {
+                wire["state"] = json!(state);
+            }
+            let mut employee: BossEmployee = serde_json::from_value(wire).unwrap();
+            assert_eq!(employee.lifecycle(), expected);
+            assert_eq!(employee.expired(), expected == EmployeeLifecycle::Expired);
+            let stored = serde_json::to_value(&employee).unwrap();
+            assert_eq!(stored["state"], serde_json::to_value(expected).unwrap());
+            assert_eq!(stored["expired"], expected == EmployeeLifecycle::Expired);
+            // Resuming changes the canonical state; the compatibility flag
+            // follows without a second mutable field to synchronize.
+            employee.set_lifecycle(EmployeeLifecycle::Queued, 100);
+            let stored = serde_json::to_value(&employee).unwrap();
+            assert_eq!(stored["state"], "queued");
+            assert_eq!(stored["expired"], false);
+            let resumed: BossEmployee = serde_json::from_value(stored).unwrap();
+            assert_eq!(resumed.lifecycle(), EmployeeLifecycle::Queued);
+            assert!(!resumed.expired());
+        }
     }
 }

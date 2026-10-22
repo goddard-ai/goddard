@@ -43,7 +43,7 @@ bossAuthority: boolean,
  * The persona's memory pins at summon time — paths relative to
  * `memory/` in the Boss files root.
  */
-pinnedFiles: Array<string>, expired: boolean,
+pinnedFiles: Array<string>,
 /**
  * A workspace move is retiring its old runtime. The admission stays
  * live; normal turn settlement is suppressed until the move completes.
@@ -92,12 +92,6 @@ cancelled: boolean,
  * the field existed; re-admission clears it with `blocker`.
  */
 expiry?: EmployeeExpiry,
-/**
- * Admission lifecycle — `queued`, `dispatching`, `working`,
- * `finishing`, or `expired`. Records written before the queue
- * deserialize as `working`; `expired` stays the wire projection.
- */
-state: EmployeeLifecycle,
 /**
  * The employee's admission ticket — present from a queued summon
  * through dispatch, and retained afterward for accounting and
@@ -156,4 +150,4 @@ itemId?: string,
  * behavior captured at summon. `None` makes the employee a
  * standalone job — its finish follows `work_goal` alone.
  */
-assignment?: Assignment, };
+assignment?: Assignment, state: EmployeeLifecycle, expired: boolean, };

@@ -271,7 +271,7 @@ fn validate_definition(state: &BossState, definition: &ChainDefinition) -> Resul
                     .employees
                     .iter()
                     .any(|employee| employee.session_id == id
-                        && !employee.expired
+                        && !employee.expired()
                         && !employee.cancelled)),
             "outcome already has a live finisher"
         );
@@ -1375,7 +1375,7 @@ pub(crate) fn reconcile(state: &mut BossState) -> Result<()> {
                             .iter()
                             .chain(state.retired_employees.iter())
                             .find(|entry| entry.session_id == employee)
-                            .is_none_or(|entry| entry.expired)
+                            .is_none_or(|entry| entry.expired())
                     })
             });
             if uncertain

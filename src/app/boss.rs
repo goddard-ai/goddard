@@ -26,7 +26,7 @@ fn global_avatar_style_operation(avatar_style: AvatarStyle) -> BossOperation {
 
 fn employee_attention_is_unread(employee: &BossEmployee) -> bool {
     employee.needs_attention
-        && employee.expired
+        && employee.expired()
         && employee.attention_viewed_at.is_none_or(|viewed_at| {
             employee
                 .expired_at
@@ -1518,7 +1518,7 @@ fn sort_boss_employees(
 ) {
     employees.sort_by_key(|employee| {
         let session = sessions.get(&employee.session_id).copied();
-        let timestamp = if employee.expired {
+        let timestamp = if employee.expired() {
             session
                 .and_then(|session| {
                     session
@@ -1538,7 +1538,7 @@ fn sort_boss_employees(
                 .unwrap_or(0)
         };
         (
-            employee.expired,
+            employee.expired(),
             std::cmp::Reverse(timestamp),
             employee.session_id,
         )
@@ -1883,7 +1883,7 @@ impl Waku {
                     *key,
                     employees
                         .iter()
-                        .filter(|entry| !entry.expired)
+                        .filter(|entry| !entry.expired())
                         .map(|entry| entry.session_id)
                         .collect(),
                 );
@@ -1905,7 +1905,7 @@ impl Waku {
                             .workspace_transitions
                             .insert(employee.session_id);
                     }
-                    if employee.expired {
+                    if employee.expired() {
                         self.boss_ui.expired.insert(employee.session_id);
                     } else {
                         self.boss_ui.working.insert(employee.session_id);
@@ -5276,7 +5276,7 @@ impl Waku {
                             .flat_map(|boss_state| boss_state.employees.iter_mut())
                             .find(|employee| employee.session_id == session_id)
                         {
-                            employee.state = state;
+                            employee.state = state.into();
                             if let (Some(ticket), Some(admission)) =
                                 (&mut employee.ticket, admission)
                             {
@@ -6680,7 +6680,7 @@ impl Waku {
             state
                 .employees
                 .iter()
-                .find(|employee| employee.session_id == session_id && employee.expired)
+                .find(|employee| employee.session_id == session_id && employee.expired())
                 .map(|employee| (*key, !employee.needs_attention))
         });
         let Some((key, needs_attention)) = target else {
@@ -8373,7 +8373,7 @@ impl Waku {
         theme: &Theme,
     ) -> ((String, Hsla), (&'static str, bool)) {
         use waku_protocol::boss::EmployeeLifecycle;
-        if employee.workspace_transition && !employee.expired {
+        if employee.workspace_transition && !employee.expired() {
             return (
                 (tr!("boss.status_switching_workspace"), theme.text_secondary),
                 ("icons/loader-circle.svg", true),
@@ -12464,7 +12464,6 @@ mod tests {
             permissions: PersonaPermissions::default(),
             boss_authority: false,
             pinned_files: Vec::new(),
-            expired: false,
             workspace_transition: false,
             expired_at: None,
             needs_attention: false,
@@ -12472,7 +12471,7 @@ mod tests {
             blocker: None,
             cancelled: false,
             expiry: None,
-            state: waku_protocol::boss::EmployeeLifecycle::Working,
+            state: waku_protocol::boss::EmployeeLifecycle::Working.into(),
             ticket: None,
             queued_at: None,
             request_id: None,
@@ -12489,7 +12488,7 @@ mod tests {
         employee.needs_attention = true;
         assert!(!employee_attention_is_unread(&employee));
 
-        employee.expired = true;
+        employee.state = waku_protocol::boss::EmployeeLifecycle::Expired.into();
         employee.expired_at = Some(100);
         assert!(employee_attention_is_unread(&employee));
         employee.attention_viewed_at = Some(99);
@@ -12501,9 +12500,9 @@ mod tests {
         // employee's old expiry has not changed.
         employee.attention_viewed_at = None;
         assert!(employee_attention_is_unread(&employee));
-        employee.expired = false;
+        employee.state = waku_protocol::boss::EmployeeLifecycle::Working.into();
         assert!(!employee_attention_is_unread(&employee));
-        employee.expired = true;
+        employee.state = waku_protocol::boss::EmployeeLifecycle::Expired.into();
         employee.needs_attention = false;
         assert!(!employee_attention_is_unread(&employee));
     }
@@ -12511,7 +12510,7 @@ mod tests {
     #[test]
     fn employees_keep_active_order_and_sort_idle_by_latest_completion() {
         let mut queued = boss_employee(Some(300));
-        queued.state = waku_protocol::boss::EmployeeLifecycle::Queued;
+        queued.state = waku_protocol::boss::EmployeeLifecycle::Queued.into();
         let working = boss_employee(Some(200));
 
         let mut created_later = boss_employee(Some(900));
@@ -12660,8 +12659,7 @@ mod tests {
 
         // Resume makes the employee active; finishing a newer turn moves it
         // back to the idle head using the new turn's completion timestamp.
-        finished.expired = false;
-        finished.state = waku_protocol::boss::EmployeeLifecycle::Working;
+        finished.state = waku_protocol::boss::EmployeeLifecycle::Working.into();
         assert_eq!(
             sorted_ids(&finished, &peer, &session, &peer_session),
             vec![finished.session_id, peer.session_id]
@@ -12918,7 +12916,6 @@ mod tests {
             permissions: PersonaPermissions::default(),
             boss_authority: false,
             pinned_files: Vec::new(),
-            expired: lifecycle == waku_protocol::boss::EmployeeLifecycle::Expired,
             workspace_transition: false,
             expired_at: None,
             needs_attention: false,
@@ -12926,7 +12923,7 @@ mod tests {
             blocker: None,
             cancelled: false,
             expiry: None,
-            state: lifecycle,
+            state: lifecycle.into(),
             ticket,
             queued_at: (lifecycle == waku_protocol::boss::EmployeeLifecycle::Queued).then_some(1),
             request_id: None,

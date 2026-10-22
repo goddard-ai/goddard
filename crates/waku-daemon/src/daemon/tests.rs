@@ -5733,7 +5733,7 @@ fn a_clean_employee_finish_retires_runtime_revokes_token_and_stays_silent() {
             waku_protocol::boss::EmployeeSettle::TurnFinished,
         )
         .unwrap();
-    assert!(backend.boss.employee(employee_id).unwrap().expired);
+    assert!(backend.boss.employee(employee_id).unwrap().expired());
     assert!(backend.agent.resolve(&token).is_none());
     assert!(!backend.sessions.lock().contains_key(&employee_id));
     assert_eq!(*child_capture.shutdowns.lock(), 1);
@@ -6195,7 +6195,7 @@ fn workspace_transition_suppresses_turn_settlement_without_expiring() {
         .unwrap();
     let employee = backend.boss.employee(employee_id).unwrap();
     assert!(employee.workspace_transition);
-    assert!(!employee.expired);
+    assert!(!employee.expired());
     assert!(employee.expiry.is_none());
     assert!(backend.sessions.lock().contains_key(&employee_id));
     assert_eq!(*child.shutdowns.lock(), 0);
@@ -6206,7 +6206,7 @@ fn workspace_transition_suppresses_turn_settlement_without_expiring() {
     backend
         .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
         .unwrap();
-    assert!(backend.boss.employee(employee_id).unwrap().expired);
+    assert!(backend.boss.employee(employee_id).unwrap().expired());
     assert_eq!(*child.shutdowns.lock(), 1);
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
@@ -6262,7 +6262,7 @@ fn workspace_transition_recovers_as_restart_interruption() {
     );
     backend.recover_boss_employee(employee_id).unwrap();
     let employee = backend.boss.employee(employee_id).unwrap();
-    assert!(employee.expired);
+    assert!(employee.expired());
     assert!(!employee.workspace_transition);
     assert_eq!(employee.expiry.unwrap().cause, ExpiryCause::Restarted);
     assert!(!backend.sessions.lock().contains_key(&employee_id));
@@ -6310,7 +6310,7 @@ fn workspace_transition_cannot_revive_a_stopped_employee() {
     backend
         .finish_boss_employee(employee_id, false, EmployeeSettle::Stopped)
         .unwrap();
-    assert!(backend.boss.employee(employee_id).unwrap().expired);
+    assert!(backend.boss.employee(employee_id).unwrap().expired());
     assert!(
         backend
             .boss
@@ -7486,7 +7486,7 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
             waku_protocol::boss::EmployeeSettle::TurnFinished,
         )
         .unwrap();
-    assert!(backend.boss.employee(employee_id).unwrap().expired);
+    assert!(backend.boss.employee(employee_id).unwrap().expired());
     // The expiry pass dropped the employee's runtime; a resurrected
     // prompt cold-starts one in production — a control driver stands
     // in for it here.
@@ -7518,7 +7518,7 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
             &EventSink::detached(),
         )
         .unwrap();
-    assert!(!backend.boss.employee(employee_id).unwrap().expired);
+    assert!(!backend.boss.employee(employee_id).unwrap().expired());
     assert_eq!(
         backend.boss.employee(employee_id).unwrap().identity.name,
         employee_name
@@ -7644,7 +7644,7 @@ fn a_settle_expiry_drains_past_an_open_turn() {
         )
         .unwrap();
     let employee = backend.boss.employee(employee_id).unwrap();
-    assert!(!employee.expired);
+    assert!(!employee.expired());
     assert_eq!(
         backend.boss.employee_lifecycle(employee_id),
         Some(waku_protocol::boss::EmployeeLifecycle::Working)
@@ -7670,7 +7670,7 @@ fn a_settle_expiry_drains_past_an_open_turn() {
             waku_protocol::boss::EmployeeSettle::TurnFinished,
         )
         .unwrap();
-    assert!(backend.boss.employee(employee_id).unwrap().expired);
+    assert!(backend.boss.employee(employee_id).unwrap().expired());
     assert!(backend.sessions.lock().get(&employee_id).is_none());
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
@@ -8305,7 +8305,7 @@ fn an_agent_prompt_to_an_adopted_employee_refuses() {
             .summon(Some(AgentWorkspace::Adopt), Some(worktree_path))
             .is_err()
     );
-    assert!(fixture.backend.boss.employee(dead_id).unwrap().expired);
+    assert!(fixture.backend.boss.employee(dead_id).unwrap().expired());
 
     let error = fixture
         .backend
@@ -8321,7 +8321,7 @@ fn an_agent_prompt_to_an_adopted_employee_refuses() {
         .unwrap_err();
     let text = format!("{error:#}");
     assert!(text.contains("worktree was adopted"), "{text}");
-    assert!(fixture.backend.boss.employee(dead_id).unwrap().expired);
+    assert!(fixture.backend.boss.employee(dead_id).unwrap().expired());
 }
 
 /// Adoption refuses worktrees it cannot safely take: a live owner's,
@@ -8754,7 +8754,7 @@ fn summon_attention_flag_is_persisted_on_employee() {
     assert!(employee.needs_attention);
     assert_eq!(employee.attention_viewed_at, None);
     assert!(
-        employee.expired,
+        employee.expired(),
         "the deliberately missing provider failed launch"
     );
 }
@@ -9405,7 +9405,7 @@ fn a_summon_at_capacity_admits_a_durable_queued_ticket() {
         .release_admission(held_task, held);
     backend.run_summon_scheduler();
     let employee = backend.boss.employee(session_id).unwrap();
-    assert!(employee.expired);
+    assert!(employee.expired());
     assert!(
         employee
             .blocker
@@ -9493,7 +9493,7 @@ fn archiving_a_queued_employee_drops_its_ticket() {
     );
     backend.run_summon_scheduler();
     let employee = backend.boss.employee(session_id).unwrap();
-    assert!(employee.expired);
+    assert!(employee.expired());
     assert_eq!(
         employee.expiry.as_ref().map(|expiry| expiry.cause),
         Some(ExpiryCause::Stopped)
@@ -9546,7 +9546,7 @@ fn an_archived_queued_employee_stays_expired_after_restart() {
     *backend.broker_root.lock() = Some(root.join("broker"));
     backend.run_summon_scheduler();
     let employee = backend.boss.employee(session_id).unwrap();
-    assert!(employee.expired);
+    assert!(employee.expired());
     assert_eq!(
         employee.expiry.as_ref().map(|expiry| expiry.cause),
         Some(ExpiryCause::Stopped)
@@ -9622,14 +9622,14 @@ fn a_stopped_queued_employee_stays_expired_after_restart() {
             &EventSink::detached(),
         )
         .unwrap();
-    assert!(backend.boss.employee(session_id).unwrap().expired);
+    assert!(backend.boss.employee(session_id).unwrap().expired());
     drop(backend);
 
     let backend = reopen_backend(&root);
     *backend.broker_root.lock() = Some(root.join("broker"));
     backend.run_summon_scheduler();
     let employee = backend.boss.employee(session_id).unwrap();
-    assert!(employee.expired);
+    assert!(employee.expired());
     assert_eq!(
         employee.expiry.as_ref().map(|expiry| expiry.cause),
         Some(ExpiryCause::Stopped)
@@ -9672,14 +9672,14 @@ fn a_removed_queued_employee_stays_expired_after_restart() {
         .unwrap()
         .release_admission(held_task, held);
     backend.remove_session(session_id).unwrap();
-    assert!(backend.boss.employee(session_id).unwrap().expired);
+    assert!(backend.boss.employee(session_id).unwrap().expired());
     drop(backend);
 
     let backend = reopen_backend(&root);
     *backend.broker_root.lock() = Some(root.join("broker"));
     backend.run_summon_scheduler();
     let employee = backend.boss.employee(session_id).unwrap();
-    assert!(employee.expired);
+    assert!(employee.expired());
     assert_eq!(
         employee.expiry.as_ref().map(|expiry| expiry.cause),
         Some(ExpiryCause::Stopped)
@@ -9738,7 +9738,7 @@ fn a_queued_ticket_expires_when_its_project_checkout_is_gone() {
     *backend.broker_root.lock() = Some(root.join("broker"));
     backend.run_summon_scheduler();
     let employee = backend.boss.employee(session_id).unwrap();
-    assert!(employee.expired);
+    assert!(employee.expired());
     assert_eq!(
         employee.expiry.as_ref().map(|expiry| expiry.cause),
         Some(ExpiryCause::Stopped)
@@ -9830,7 +9830,7 @@ fn a_repair_finisher_retries_broker_admission_after_restart() {
         .into_iter()
         .find(|employee| employee.job_title == "failed sibling")
         .unwrap();
-    assert!(worker.expired);
+    assert!(worker.expired());
     assert!(!waku_protocol::boss::BossOutcome::assignment_succeeded(
         &worker
     ));
@@ -9986,7 +9986,7 @@ fn a_queued_employee_holds_until_the_human_chooses_the_employee_base() {
         )
         .unwrap();
     let employee = backend.boss.employee(session_id).unwrap();
-    assert!(employee.expired, "the choice released the queued ticket");
+    assert!(employee.expired(), "the choice released the queued ticket");
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -10115,8 +10115,8 @@ fn queued_tickets_dispatch_fifo_once_capacity_frees() {
     backend.run_summon_scheduler();
     // With the pool free both dispatched in turn and expired on the
     // missing binary.
-    assert!(backend.boss.employee(first).unwrap().expired);
-    assert!(backend.boss.employee(second).unwrap().expired);
+    assert!(backend.boss.employee(first).unwrap().expired());
+    assert!(backend.boss.employee(second).unwrap().expired());
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -10623,7 +10623,7 @@ fn set_resources_on_a_queued_ticket_changes_its_admission() {
         .operate(build_holder, ResourceOperation::Release { id: held_build })
         .unwrap();
     backend.run_summon_scheduler();
-    assert!(backend.boss.employee(session_id).unwrap().expired);
+    assert!(backend.boss.employee(session_id).unwrap().expired());
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -10890,7 +10890,7 @@ fn blocked_queue_ticket_does_not_stall_a_free_model_lane() {
             .iter()
             .any(|reason| matches!(reason, AdmissionBlocker::ModelLimit { used: 1, limit: 1 }))
     );
-    assert!(backend.boss.employee(later).unwrap().expired);
+    assert!(backend.boss.employee(later).unwrap().expired());
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -10951,7 +10951,7 @@ fn model_limits_key_on_the_provider_model_pair() {
         .find(|entry| entry.job_title == "claude job")
         .unwrap()
         .session_id;
-    assert!(backend.boss.employee(claude_id).unwrap().expired);
+    assert!(backend.boss.employee(claude_id).unwrap().expired());
 
     // The blocked Codex ticket remains queued until explicitly stopped.
     backend
@@ -10964,7 +10964,7 @@ fn model_limits_key_on_the_provider_model_pair() {
             &EventSink::detached(),
         )
         .unwrap();
-    assert!(backend.boss.employee(claude_id).unwrap().expired);
+    assert!(backend.boss.employee(claude_id).unwrap().expired());
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -11044,7 +11044,7 @@ fn burst_admission_needs_the_flag_and_stops_at_hard_cap() {
         .unwrap()
         .release_admission(held_task, held);
     backend.run_summon_scheduler();
-    assert!(backend.boss.employee(burst_id).unwrap().expired);
+    assert!(backend.boss.employee(burst_id).unwrap().expired());
     let plain = backend.boss.queued_heads();
     assert_eq!(plain.len(), 1);
     assert!(
@@ -11120,7 +11120,7 @@ fn queued_employees_take_prompts_and_expire_without_claims() {
         .unwrap();
     control(EmployeeControl::Stop).unwrap();
     let employee = backend.boss.employee(session_id).unwrap();
-    assert!(employee.expired);
+    assert!(employee.expired());
     assert!(employee.cancelled);
     assert!(
         !backend.agent.has_queued(boss),
@@ -11920,7 +11920,7 @@ fn setmodel_recovers_an_expired_employee_atomically() {
             backend.task_store.save(&mut state).unwrap();
         }
         let before = backend.boss.employee(session_id).unwrap();
-        assert!(before.expired);
+        assert!(before.expired());
         let control = |model: &str, effort: Option<String>| {
             backend.handle_boss_operation(
                 Some(boss),
@@ -11943,7 +11943,7 @@ fn setmodel_recovers_an_expired_employee_atomically() {
         };
         assert!(control(model, Some("light-speed".into())).is_err());
         let unchanged = backend.boss.employee(session_id).unwrap();
-        assert!(unchanged.expired);
+        assert!(unchanged.expired());
         assert_eq!(
             unchanged.ticket.as_ref().unwrap().generation,
             before.ticket.as_ref().unwrap().generation
@@ -12886,7 +12886,7 @@ fn an_expired_employees_prompt_requeues_for_admission() {
         .find(|session| session.id != boss)
         .unwrap()
         .id;
-    assert!(backend.boss.employee(session_id).unwrap().expired);
+    assert!(backend.boss.employee(session_id).unwrap().expired());
 
     // Close the pool, then prompt the expired employee — it queues as
     // generation two with the prompt as its dispatch envelope.
@@ -12906,7 +12906,7 @@ fn an_expired_employees_prompt_requeues_for_admission() {
         .unwrap();
     let employee = backend.boss.employee(session_id).unwrap();
     assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
-    assert!(!employee.expired);
+    assert!(!employee.expired());
     let ticket = employee.ticket.as_ref().unwrap();
     assert_eq!(ticket.generation, 2);
     // The session already ran — the revive prompt replays as a turn,
@@ -12953,7 +12953,7 @@ fn an_agent_prompt_to_an_expired_employee_requeues_it() {
         .find(|session| session.id != boss)
         .unwrap()
         .id;
-    assert!(backend.boss.employee(session_id).unwrap().expired);
+    assert!(backend.boss.employee(session_id).unwrap().expired());
 
     // Close the pool, then prompt the expired employee — it queues as
     // generation two with the prompt parked on the ticket.
@@ -12971,7 +12971,7 @@ fn an_agent_prompt_to_an_expired_employee_requeues_it() {
         .unwrap();
     let employee = backend.boss.employee(session_id).unwrap();
     assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
-    assert!(!employee.expired);
+    assert!(!employee.expired());
     assert_eq!(
         employee.ticket.as_ref().unwrap().pending_prompts,
         vec!["keep going".to_owned()]
@@ -13037,7 +13037,7 @@ fn a_resume_requeues_the_expired_employee_with_its_cause() {
         .unwrap();
     let employee = backend.boss.employee(session_id).unwrap();
     assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
-    assert!(!employee.expired);
+    assert!(!employee.expired());
     assert!(employee.expiry.is_none());
     let ticket = employee.ticket.as_ref().unwrap();
     assert_eq!(ticket.generation, 2);
@@ -13139,7 +13139,7 @@ fn a_resumed_employee_reads_connecting_once_dispatched() {
     backend
         .finish_boss_employee(employee_id, false, EmployeeSettle::Restarted)
         .unwrap();
-    assert!(backend.boss.employee(employee_id).unwrap().expired);
+    assert!(backend.boss.employee(employee_id).unwrap().expired());
     // Close the model pool so the requeue parks — the dispatch boundary is
     // exercised directly rather than racing the synchronous scheduler.
     {
@@ -13170,7 +13170,7 @@ fn a_resumed_employee_reads_connecting_once_dispatched() {
         employee.lifecycle(),
         waku_protocol::boss::EmployeeLifecycle::Queued
     );
-    assert!(!employee.expired);
+    assert!(!employee.expired());
     let mut ticket = employee.ticket.clone().unwrap();
     // The prompt envelope needs the daemon's bound agent surface, which a
     // test backend does not have — the shell-status write happens before
@@ -13332,7 +13332,7 @@ fn a_restart_resume_leads_with_the_continuation_note() {
     );
     backend.recover_boss_employee(employee_id).unwrap();
     let employee = backend.boss.employee(employee_id).unwrap();
-    assert!(employee.expired);
+    assert!(employee.expired());
     assert_eq!(employee.expiry.unwrap().cause, ExpiryCause::Restarted);
     // Close the pool so the resume queues instead of dispatching —
     // the parked prompts and the resume note read off the ticket.
@@ -13389,7 +13389,7 @@ fn a_human_resume_requeues_a_stopped_employee() {
         )
         .unwrap();
     let stopped = backend.boss.employee(employee_id).unwrap();
-    assert!(stopped.expired && stopped.cancelled);
+    assert!(stopped.expired() && stopped.cancelled);
     set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
     backend
         .handle_boss_operation(
@@ -13402,7 +13402,7 @@ fn a_human_resume_requeues_a_stopped_employee() {
         .unwrap();
     let employee = backend.boss.employee(employee_id).unwrap();
     assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
-    assert!(!employee.expired && !employee.cancelled);
+    assert!(!employee.expired() && !employee.cancelled);
     let ticket = employee.ticket.as_ref().unwrap();
     assert_eq!(ticket.resume_count, 1);
     assert_eq!(ticket.last_resumed_cause, Some(ExpiryCause::Stopped));
@@ -13478,7 +13478,7 @@ fn an_employee_with_parked_prompts_drains_instead_of_expiring() {
     // The parked prompt delivered to the live employee — no settle,
     // no expiry, nothing left parked.
     let employee = backend.boss.employee(employee_id).unwrap();
-    assert!(!employee.expired);
+    assert!(!employee.expired());
     assert!(!backend.agent.has_queued(employee_id));
     assert!(
         child_capture
@@ -13505,7 +13505,7 @@ fn an_employee_with_parked_prompts_drains_instead_of_expiring() {
         backend
             .boss
             .employee(employee_id)
-            .is_some_and(|employee| employee.expired)
+            .is_some_and(|employee| employee.expired())
     });
     assert!(expired, "the empty-queue settle expired the employee");
     let employee = backend.boss.employee(employee_id).unwrap();
@@ -13794,7 +13794,7 @@ fn queued_tickets_survive_restart_with_their_goals() {
     let reopened = crate::boss::BossService::open(root.join("boss")).unwrap();
     let employee = reopened.employee(session_id).unwrap();
     assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
-    assert!(!employee.expired);
+    assert!(!employee.expired());
     let ticket = employee.ticket.as_ref().unwrap();
     assert_eq!(ticket.outcome_id, Some(goal));
     assert_eq!(ticket.group_id.as_deref(), Some("wave-1"));
@@ -14522,7 +14522,7 @@ fn a_wave_reports_once_when_every_member_settles() {
         .release_admission(held_task, held);
     backend.run_summon_scheduler();
     for member in [first, second] {
-        assert!(backend.boss.employee(member).unwrap().expired);
+        assert!(backend.boss.employee(member).unwrap().expired());
     }
 
     let document = backend.boss.document();
@@ -14750,7 +14750,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
         let has_runtime = backend.sessions.lock().contains_key(&employee_id);
         snapshots.lock().push((
             employee.workspace_transition,
-            employee.expired,
+            employee.expired(),
             status,
             has_runtime,
         ));
@@ -14783,7 +14783,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
         assert!(session.workspace.is_local());
     }
     assert_eq!(*first_capture.shutdowns.lock(), 0);
-    assert!(!backend.boss.employee(employee_id).unwrap().expired);
+    assert!(!backend.boss.employee(employee_id).unwrap().expired());
 
     // The switch itself lands; only the resume prompt's provider
     // launch fails under the test's missing binary.
@@ -14823,7 +14823,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     // The old runtime was retired, the record is live again, and the
     // resume prompt waits parked for the next runtime.
     assert_eq!(*first_capture.shutdowns.lock(), 1);
-    assert!(!backend.boss.employee(employee_id).unwrap().expired);
+    assert!(!backend.boss.employee(employee_id).unwrap().expired());
     assert!(backend.agent.has_queued(employee_id));
     assert!(
         !backend
@@ -14886,7 +14886,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
         assert!(session.workspace.is_local());
     }
     assert_eq!(*second_capture.shutdowns.lock(), 1);
-    assert!(!backend.boss.employee(employee_id).unwrap().expired);
+    assert!(!backend.boss.employee(employee_id).unwrap().expired());
 
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
@@ -16294,7 +16294,7 @@ fn a_queued_prompt_survives_expiry_and_drains_before_the_revive_prompt() {
             waku_protocol::boss::EmployeeSettle::TurnFinished,
         )
         .unwrap();
-    assert!(backend.boss.employee(employee_id).unwrap().expired);
+    assert!(backend.boss.employee(employee_id).unwrap().expired());
     {
         let mut state = backend.task_state.lock();
         let session = state
@@ -18052,7 +18052,7 @@ fn a_cancelled_outcome_stops_its_live_assignments() {
     assert_eq!(task.state, OutcomeState::Cancelled);
     let employee = backend.boss.employee(employee_id).unwrap();
     assert!(employee.cancelled);
-    assert!(employee.expired, "the live assignment was stopped");
+    assert!(employee.expired(), "the live assignment was stopped");
     // A late settle cannot reopen the cancelled outcome.
     backend
         .finish_boss_employee(employee_id, false, EmployeeSettle::TurnFinished)
@@ -19375,7 +19375,7 @@ fn chain_queued_dispatch_never_rebinds_to_an_equivalent_registration() {
             .contains("project_unavailable")
     );
     assert_eq!(chain.steps[0].definition.project_id, selected.id);
-    assert!(document.employees[0].expired);
+    assert!(document.employees[0].expired());
     assert_eq!(backend.task_state.lock().projects.len(), 1);
     assert!(
         !backend
@@ -20494,7 +20494,7 @@ fn chain_archived_queued_attempt_stays_stopped_after_restart() {
         .iter()
         .find(|employee| employee.session_id == first.session_id)
         .unwrap();
-    assert!(employee.expired);
+    assert!(employee.expired());
     assert_eq!(
         document.employees.len(),
         1,
@@ -21217,7 +21217,7 @@ fn plan_delivery_runtime_delivers_before_execution_and_recovers_exact_revision()
         waku_protocol::boss::PlanReadinessPhase::Delivered
     );
     assert!(readiness.delivered);
-    assert!(!backend.boss.employee(session_id).unwrap().expired);
+    assert!(!backend.boss.employee(session_id).unwrap().expired());
     // A grant update retires this generation instead of reusing its receipt.
     let permissions = waku_protocol::boss::PermissionOverrides {
         computer_use: Some(

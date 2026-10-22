@@ -499,10 +499,9 @@ impl BossService {
         let now = waku_protocol::model::unix_time();
         reconcile_persona_defaults(&mut state);
         for employee in &mut state.employees {
-            if employee.expired && employee.expired_at.is_none() {
+            if employee.expired() && employee.expired_at.is_none() {
                 employee.expired_at = Some(now);
             }
-            normalize_lifecycle(employee);
         }
         reconcile_waves(&mut state, now);
         reconcile_outcome_assignments(&mut state);
@@ -565,10 +564,9 @@ impl BossService {
         // this version first sees them.
         let now = waku_protocol::model::unix_time();
         for employee in &mut state.employees {
-            if employee.expired && employee.expired_at.is_none() {
+            if employee.expired() && employee.expired_at.is_none() {
                 employee.expired_at = Some(now);
             }
-            normalize_lifecycle(employee);
         }
         reconcile_waves(&mut state, now);
         reconcile_outcome_assignments(&mut state);
@@ -750,7 +748,7 @@ impl BossService {
                 .iter_mut()
                 .find(|employee| employee.session_id == session_id)
             {
-                employee.expired = true;
+                employee.set_lifecycle(EmployeeLifecycle::Expired, at);
                 employee.expired_at = Some(at);
             }
             Ok(())
@@ -953,7 +951,7 @@ impl BossService {
             return true;
         }
         self.state.lock().employees.iter().any(|employee| {
-            employee.session_id == session && employee.boss_authority && !employee.expired
+            employee.session_id == session && employee.boss_authority && !employee.expired()
         })
     }
 
@@ -984,7 +982,7 @@ impl BossService {
         };
         state.employees.iter().any(|entry| {
             entry.session_id == caller
-                && !entry.expired
+                && !entry.expired()
                 && entry.permissions.summon_employees
                 && entry.persona_id == persona_id
         })
@@ -1111,14 +1109,14 @@ impl BossService {
             let mut candidate = current.clone();
             candidate.plan_id = effective_plan;
             candidate.item_id = item_id;
-            if current.plan_binding.is_some() && (!current.expired || plan.is_none()) {
+            if current.plan_binding.is_some() && (!current.expired() || plan.is_none()) {
                 // Same-plan item edits retain the accepted revision. A live
                 // assignment cannot switch authority through bookkeeping.
                 plan_contract::validate_binding(state, &candidate)?;
             } else {
                 // Item bookkeeping cannot silently backfill a legacy or
                 // newly required plan. Explicit plan selection is intake.
-                if !current.expired && plan.is_none() && effective_plan.is_some() {
+                if !current.expired() && plan.is_none() && effective_plan.is_some() {
                     plan_contract::validate_binding(state, &candidate)?;
                 }
                 candidate.plan_binding = plan_contract::select_binding(
@@ -1437,7 +1435,7 @@ impl BossService {
                         .employees
                         .iter()
                         .filter(|employee| {
-                            !employee.expired
+                            !employee.expired()
                                 && !employee.cancelled
                                 && employee
                                     .assignment
@@ -1738,7 +1736,7 @@ impl BossService {
                 .find(|employee| employee.session_id == session)
         });
         let finisher_live =
-            finisher.is_some_and(|employee| !employee.expired && !employee.cancelled);
+            finisher.is_some_and(|employee| !employee.expired() && !employee.cancelled);
         if finishes_outcome {
             anyhow::ensure!(
                 !state
@@ -1884,7 +1882,7 @@ impl BossService {
                                 .assignment
                                 .as_ref()
                                 .is_none_or(|assignment| assignment.outcome_id != task.id)
-                            || sibling.expired
+                            || sibling.expired()
                             || sibling.cancelled
                     });
         }
@@ -1915,7 +1913,7 @@ impl BossService {
             return AssignmentFinish::Quiet;
         };
         task.last_activity_at = now;
-        let succeeded = employee.expired
+        let succeeded = employee.expired()
             && !employee.cancelled
             && employee.blocker.is_none()
             && employee
@@ -2325,7 +2323,7 @@ impl BossService {
                 .ok_or_else(|| {
                     anyhow!("only the boss or a permitted employee can summon employees")
                 })?;
-            if parent.expired || !parent.permissions.summon_employees {
+            if parent.expired() || !parent.permissions.summon_employees {
                 bail!("this persona cannot summon employees");
             }
             if parent.persona_id != persona_id {
@@ -2368,7 +2366,6 @@ impl BossService {
             permissions,
             boss_authority,
             pinned_files,
-            expired: false,
             workspace_transition: false,
             expired_at: None,
             needs_attention: false,
@@ -2376,7 +2373,7 @@ impl BossService {
             blocker: None,
             cancelled: false,
             expiry: None,
-            state: EmployeeLifecycle::Queued,
+            state: EmployeeLifecycle::Queued.into(),
             ticket: None,
             queued_at: None,
             request_id: None,
@@ -2888,7 +2885,7 @@ impl BossService {
         // parked behind admission has no live turn to finish. Legacy
         // ticketless `queued` records still own a runtime, so theirs land.
         if !self.employee(session).is_some_and(|entry| {
-            !entry.expired
+            !entry.expired()
                 && !entry.workspace_transition
                 && !(entry.lifecycle() == EmployeeLifecycle::Queued && entry.ticket.is_some())
         }) {
@@ -2948,7 +2945,7 @@ impl BossService {
             if let Some(entry) = state
                 .employees
                 .iter_mut()
-                .find(|entry| entry.session_id == session && entry.expired)
+                .find(|entry| entry.session_id == session && entry.expired())
             {
                 entry.set_lifecycle(EmployeeLifecycle::Working, 0);
                 entry.expired_at = None;
@@ -3027,7 +3024,7 @@ impl BossService {
                     .employees
                     .iter()
                     .chain(state.retired_employees.iter())
-                    .any(|entry| entry.plan_id == Some(plan.id) && !entry.expired)
+                    .any(|entry| entry.plan_id == Some(plan.id) && !entry.expired())
             })
             .filter(|item| {
                 !state
@@ -4049,7 +4046,7 @@ impl BossService {
     pub fn retire_expired(&self, now: u64) -> anyhow::Result<Vec<BossEmployee>> {
         let _operation = self.operation_lock.lock();
         let retires = |employee: &BossEmployee| {
-            employee.expired
+            employee.expired()
                 // A flagged employee is the user's unread backlog — it
                 // stays on the roster until unflagged or manually
                 // archived, never swept by the hygiene cadence.
@@ -5062,7 +5059,7 @@ impl BossService {
             state
                 .employees
                 .iter()
-                .any(|employee| employee.session_id == *caller && !employee.expired)
+                .any(|employee| employee.session_id == *caller && !employee.expired())
         });
         let own_project_path = active_employee
             .and_then(|session| self.projects.lock().get(&session).cloned())
@@ -5127,7 +5124,7 @@ impl BossService {
             state
                 .employees
                 .iter()
-                .find(|employee| Some(employee.session_id) == caller && !employee.expired)
+                .find(|employee| Some(employee.session_id) == caller && !employee.expired())
                 .map(|employee| employee.permissions.bucket_ids.clone())
                 .unwrap_or_default()
         };
@@ -5572,7 +5569,7 @@ impl BossService {
             .iter()
             .find(|entry| Some(entry.session_id) == caller)
             .ok_or_else(|| anyhow!("this task is not a Boss employee"))?;
-        if employee.expired {
+        if employee.expired() {
             bail!("this employee has expired");
         }
         // Plan documents are shared supervisor context: every live employee
@@ -6405,20 +6402,6 @@ fn validate_name(name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Keep the lifecycle field and the `expired` projection consistent for
-/// documents written before `state` existed: the flag was the only
-/// record, so it wins wherever they disagree.
-fn normalize_lifecycle(employee: &mut BossEmployee) {
-    if employee.expired {
-        employee.state = EmployeeLifecycle::Expired;
-    } else if employee.state == EmployeeLifecycle::Expired {
-        employee.expired = true;
-        if employee.expired_at.is_none() {
-            employee.expired_at = Some(waku_protocol::model::unix_time());
-        }
-    }
-}
-
 /// Which employees a restart cut off mid-flight. Queued tickets hold no
 /// runtime or claims, so they re-dispatch instead of finishing as
 /// interrupted; `dispatching`/`finishing` records reconcile through
@@ -6426,7 +6409,7 @@ fn normalize_lifecycle(employee: &mut BossEmployee) {
 /// ticket is malformed or predates admission — it interrupts like a
 /// working record.
 fn restart_interrupted(employee: &BossEmployee) -> bool {
-    if employee.expired {
+    if employee.expired() {
         return false;
     }
     employee.lifecycle() != EmployeeLifecycle::Queued || employee.ticket.is_none()
@@ -6437,7 +6420,7 @@ fn restart_interrupted(employee: &BossEmployee) -> bool {
 /// task staying open. `queued` records without tickets are legacy working
 /// rows, and running siblings settle on their own.
 fn linked_queued_ticket(employee: &BossEmployee, outcome: Uuid) -> bool {
-    !employee.expired
+    !employee.expired()
         && !employee.cancelled
         && employee.lifecycle() == EmployeeLifecycle::Queued
         && employee.ticket.is_some()
@@ -6630,7 +6613,7 @@ fn assignment_verdict(
 
 /// The settle record a roster entry carries — `None` while it is live.
 fn recorded_settle(employee: &BossEmployee) -> Option<AssignmentSettle> {
-    employee.expired.then(|| AssignmentSettle {
+    employee.expired().then(|| AssignmentSettle {
         verdict: assignment_verdict(
             employee.expiry.as_ref().map(|expiry| expiry.cause),
             employee.cancelled,
@@ -8259,7 +8242,6 @@ mod tests {
                     permissions: PersonaPermissions::default(),
                     boss_authority: false,
                     pinned_files: Vec::new(),
-                    expired: false,
                     workspace_transition: false,
                     expired_at: None,
                     needs_attention: false,
@@ -8267,7 +8249,7 @@ mod tests {
                     blocker: None,
                     cancelled: false,
                     expiry: None,
-                    state: EmployeeLifecycle::Working,
+                    state: EmployeeLifecycle::Working.into(),
                     ticket: None,
                     queued_at: None,
                     request_id: None,
@@ -8340,7 +8322,6 @@ mod tests {
                     permissions: PersonaPermissions::default(),
                     boss_authority: false,
                     pinned_files: Vec::new(),
-                    expired: false,
                     workspace_transition: false,
                     expired_at: None,
                     needs_attention: false,
@@ -8348,7 +8329,7 @@ mod tests {
                     blocker: None,
                     cancelled: false,
                     expiry: None,
-                    state: EmployeeLifecycle::Working,
+                    state: EmployeeLifecycle::Working.into(),
                     ticket: None,
                     queued_at: None,
                     request_id: None,
@@ -8726,7 +8707,6 @@ mod tests {
                     },
                     boss_authority: false,
                     pinned_files: vec!["docs/release.md".into(), "memory/work/old.md".into()],
-                    expired: false,
                     workspace_transition: false,
                     expired_at: None,
                     needs_attention: false,
@@ -8734,7 +8714,7 @@ mod tests {
                     blocker: None,
                     cancelled: false,
                     expiry: None,
-                    state: EmployeeLifecycle::Working,
+                    state: EmployeeLifecycle::Working.into(),
                     ticket: None,
                     queued_at: None,
                     request_id: None,
@@ -8875,7 +8855,6 @@ mod tests {
                         permissions: PersonaPermissions::default(),
                         boss_authority: false,
                         pinned_files: Vec::new(),
-                        expired: false,
                         workspace_transition: false,
                         expired_at: None,
                         needs_attention: false,
@@ -8883,7 +8862,7 @@ mod tests {
                         blocker: None,
                         cancelled: false,
                         expiry: None,
-                        state: EmployeeLifecycle::Working,
+                        state: EmployeeLifecycle::Working.into(),
                         ticket: None,
                         queued_at: None,
                         request_id: None,
@@ -9592,7 +9571,6 @@ mod tests {
                     permissions: PersonaPermissions::default(),
                     boss_authority: false,
                     pinned_files: Vec::new(),
-                    expired: false,
                     workspace_transition: false,
                     expired_at: None,
                     needs_attention: false,
@@ -9600,7 +9578,7 @@ mod tests {
                     blocker: None,
                     cancelled: false,
                     expiry: None,
-                    state: EmployeeLifecycle::Working,
+                    state: EmployeeLifecycle::Working.into(),
                     ticket: None,
                     queued_at: None,
                     request_id: None,
@@ -10424,7 +10402,6 @@ mod tests {
                     permissions: PersonaPermissions::default(),
                     boss_authority: false,
                     pinned_files: Vec::new(),
-                    expired: false,
                     workspace_transition: false,
                     expired_at: None,
                     needs_attention: false,
@@ -10432,7 +10409,7 @@ mod tests {
                     blocker: None,
                     cancelled: false,
                     expiry: None,
-                    state: EmployeeLifecycle::Working,
+                    state: EmployeeLifecycle::Working.into(),
                     ticket: None,
                     queued_at: None,
                     request_id: None,
@@ -11914,7 +11891,6 @@ mod memory_op_tests {
                     resolved_at: None,
                 });
                 let mut employee = employee;
-                employee.expired = true;
                 employee.expired_at = Some(1);
                 employee.set_lifecycle(EmployeeLifecycle::Expired, 1);
                 state.employees.push(employee);
@@ -11999,7 +11975,7 @@ mod memory_op_tests {
         // completes the expiry.
         busy.store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(service.expire(draining).unwrap().is_some());
-        assert!(service.employee(draining).unwrap().expired);
+        assert!(service.employee(draining).unwrap().expired());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -12562,7 +12538,7 @@ mod memory_op_tests {
             )
             .unwrap();
         employee.assignment_kind = waku_protocol::boss::PlanAssignmentKind::Research;
-        employee.expired = true;
+        employee.state = waku_protocol::boss::EmployeeLifecycle::Expired.into();
         let session = employee.session_id;
         service
             .update(|state| {
@@ -12841,7 +12817,7 @@ mod memory_op_tests {
             service.complete_expiry(employee.session_id, None).unwrap();
             assert_eq!(snapshots.lock().len(), 1);
             let snapshot = snapshots.lock().pop().unwrap();
-            assert!(snapshot.employees[0].expired);
+            assert!(snapshot.employees[0].expired());
             let task = &snapshot.outcomes[0];
             if finishes {
                 assert_eq!(
@@ -13219,7 +13195,7 @@ mod memory_op_tests {
         assert_eq!(stop, vec![queued.session_id]);
         let sibling = service.employee(working.session_id).unwrap();
         assert!(
-            !sibling.expired && !sibling.cancelled,
+            !sibling.expired() && !sibling.cancelled,
             "a working sibling keeps running"
         );
         let untouched = service.employee(elsewhere.session_id).unwrap();
