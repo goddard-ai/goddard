@@ -16,10 +16,7 @@ impl Host {
         let root = std::env::temp_dir().join(format!(
             "runtime-process-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            uuid::Uuid::new_v4()
         ));
         let endpoint = launch(&root);
         let identity: serde_json::Value =

@@ -2138,6 +2138,16 @@ mod tests {
         let session = Uuid::new_v4();
         capture_turn_start(&directory, session, 1).unwrap();
         fs::write(directory.join("unchanged.filtered"), "filter me\n").unwrap();
+        // Keep this fixture outside Git's racy-index window: a file as new
+        // as the index may legitimately need its clean filter run again.
+        fs::File::options()
+            .write(true)
+            .open(directory.join("unchanged.filtered"))
+            .unwrap()
+            .set_times(
+                fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1)),
+            )
+            .unwrap();
         capture_turn(&directory, session, 1).unwrap();
         let runs_after_end = fs::read_to_string(&filter_log).unwrap().lines().count();
         assert!(

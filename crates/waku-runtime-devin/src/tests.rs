@@ -1,6 +1,7 @@
 use super::*;
 use serde_json::json;
 use std::sync::mpsc::{Receiver, sync_channel};
+use std::time::Instant;
 use waku_runtime::contract::{
     ActionEnvelope, ClientHello, CommandDisposition, EventCursor, RequestedConfig, SessionRef,
     TerminalOutcome,
@@ -1156,13 +1157,23 @@ fn recovered_devin_owner_blocks_reconciliation_and_new_admission_without_pid_sig
     .unwrap();
     host.pump();
     drop(host); // no durable drain: physical cleanup cannot be inferred from a PID
-    let mut host = RuntimeHost::open(
-        &root,
-        HostOptions::new("devin-recovery"),
-        factory.clone(),
-        Box::new(ManualClock::new(1_000_000)),
-    )
-    .unwrap();
+    // A concurrent test can fork while the old owner holds its lock; that
+    // child keeps the descriptor until exec. Wait only for that lock release.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut host = loop {
+        match RuntimeHost::open(
+            &root,
+            HostOptions::new("devin-recovery"),
+            factory.clone(),
+            Box::new(ManualClock::new(1_000_000)),
+        ) {
+            Ok(host) => break host,
+            Err(waku_runtime::contract::HostError::AlreadyOwned) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => panic!("could not reopen recovered host: {error:?}"),
+        }
+    };
     let grant = host
         .acquire_control(&credential, &ClientHello::current())
         .unwrap();

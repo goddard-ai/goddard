@@ -12246,7 +12246,7 @@ mod tests {
                         .child("A very long employee job title that must yield space")
                         .into_any_element(),
                     "A very long employee job title that must yield space",
-                    Some("icons/code.svg"),
+                    Some("icons/hammer.svg"),
                     true,
                     &theme,
                     None,

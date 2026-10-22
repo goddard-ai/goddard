@@ -1937,12 +1937,13 @@ fn boss_prompts_carry_the_header_and_a_pending_verdict_upgrades_to_the_digest() 
     // The first wrap spends the one-shot persona injection.
     let _ = wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "prime".into());
 
-    // Orientation rides every boss prompt — no router verdict required.
+    // Orientation and the current work brief ride every boss prompt — no
+    // router verdict required. Only the digest needs a deferred verdict.
     let wrapped =
         wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "hello".into());
     assert!(wrapped.contains("<goddard-boss-context>\nWork overview"));
     assert!(wrapped.contains("app: 1 task (1 active)"));
-    assert!(!wrapped.contains("Fix login"));
+    assert!(wrapped.contains("Fix login"));
     assert!(wrapped.ends_with("hello"));
 
     // A deferred attach upgrades the same block to the full digest —
@@ -15369,7 +15370,7 @@ fn boss_script_batches_operations_with_fresh_scope_per_invocation() {
         "script variables must not persist between calls"
     );
     // Bound functions run real boss operations — a file write lands in
-    // the boss's files root, and `view()` unwraps to the state map.
+    // the boss's files root, and `view()` returns the bounded state digest.
     let BossResult::Eval { value, .. } = eval(
         "writeFile(\"memory/eval-note.md\", \"durable fact\"); readFile(\"memory/eval-note.md\")",
     )
@@ -15381,7 +15382,7 @@ fn boss_script_batches_operations_with_fresh_scope_per_invocation() {
         std::fs::read_to_string(root.join("boss/files/memory/eval-note.md")).unwrap(),
         "durable fact"
     );
-    let BossResult::Eval { value, .. } = eval("view().identity.name.len() > 0").unwrap() else {
+    let BossResult::Eval { value, .. } = eval("view().counts.personas > 0").unwrap() else {
         panic!("expected an eval result")
     };
     assert_eq!(value, serde_json::json!(true));
