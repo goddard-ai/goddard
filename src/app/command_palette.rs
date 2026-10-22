@@ -215,6 +215,9 @@ impl PaletteIdentifier {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum PaletteAction {
+    StartQa,
+    EditQaSetup,
+    ChooseQaProject(Uuid),
     NewTask,
     NewTaskIn,
     /// "New terminal in…" — the project picker; the pick floats a fresh
@@ -1159,6 +1162,7 @@ impl Waku {
     }
 
     fn open_command_palette_run_script_projects_view(&mut self, cx: &mut Context<Self>) {
+        self.qa_project_picker = None;
         self.command_palette.view = CommandPaletteView::RunScriptProjects;
         self.command_palette.run_script_project = None;
         self.command_palette.run_scripts.clear();
@@ -2398,7 +2402,11 @@ impl Waku {
                 tr!("command_palette.resume_provider_placeholder")
             }
             CommandPaletteView::RunScriptProjects => {
-                tr!("command_palette.run_script_project_placeholder")
+                if self.qa_project_picker.is_some() {
+                    tr!("qa.choose_project")
+                } else {
+                    tr!("command_palette.run_script_project_placeholder")
+                }
             }
             CommandPaletteView::RunScripts => tr!("command_palette.run_script_placeholder"),
             CommandPaletteView::RunScriptWorktrees => {
@@ -2604,6 +2612,24 @@ impl Waku {
             current
         };
         let mut commands = vec![
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("qa.start_action"),
+                "icons/git-branch.svg",
+                None,
+                PaletteAction::StartQa,
+                "qa review test dev server isolated worktree resume",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Commands),
+                tr!("qa.edit_action"),
+                "icons/settings.svg",
+                None,
+                PaletteAction::EditQaSetup,
+                "qa setup install command development server branch",
+                next(),
+            ),
             CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.new_task"),
@@ -3881,7 +3907,11 @@ impl Waku {
                     detail: Some(detail),
                     icon: PaletteIcon::Asset("icons/folder.svg"),
                     shortcut: None,
-                    action: PaletteAction::ChooseRunScriptProject(project_id),
+                    action: if self.qa_project_picker.is_some() {
+                        PaletteAction::ChooseQaProject(project_id)
+                    } else {
+                        PaletteAction::ChooseRunScriptProject(project_id)
+                    },
                     content_match: None,
                     order,
                     recency: 0,
@@ -4230,7 +4260,11 @@ impl Waku {
         self.command_palette.results = candidates;
         self.finish_drill_in_refresh(
             selected_action.flatten(),
-            Some(PaletteAction::ChooseRunScriptProject),
+            Some(if self.qa_project_picker.is_some() {
+                PaletteAction::ChooseQaProject
+            } else {
+                PaletteAction::ChooseRunScriptProject
+            }),
         );
     }
 
@@ -5545,6 +5579,22 @@ impl Waku {
         };
 
         match action {
+            PaletteAction::StartQa | PaletteAction::EditQaSetup => {
+                let edit = action == PaletteAction::EditQaSetup;
+                self.open_command_palette_run_script_projects_view(cx);
+                self.qa_project_picker = Some(edit);
+                self.command_palette.search.update(cx, |input, cx| {
+                    input.set_placeholder(tr!("qa.choose_project"), cx)
+                });
+                self.refresh_command_palette_results("", false, cx);
+                return;
+            }
+            PaletteAction::ChooseQaProject(project_id) => {
+                let edit = self.qa_project_picker.take().unwrap_or(false);
+                self.close_command_palette(window, cx);
+                self.begin_qa(project_id, edit, window, cx);
+                return;
+            }
             PaletteAction::Resume => {
                 self.open_command_palette_resume_view(None, cx);
                 return;
@@ -6008,6 +6058,9 @@ impl Waku {
             | PaletteAction::ChooseResumeProvider
             | PaletteAction::SelectResumeProvider(_)
             | PaletteAction::ResumeProviderSession(..)
+            | PaletteAction::StartQa
+            | PaletteAction::EditQaSetup
+            | PaletteAction::ChooseQaProject(_)
             | PaletteAction::OpenRunScript
             | PaletteAction::ChooseRunScriptProject(_)
             | PaletteAction::ChooseRunScriptLocation { .. }

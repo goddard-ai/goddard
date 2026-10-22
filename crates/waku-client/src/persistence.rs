@@ -1876,8 +1876,21 @@ pub fn sanitized_font_family(family: Option<String>) -> Option<String> {
     })
 }
 
+/// Desktop QA window identity, retained when its server is stopped.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct QaSessionRecord {
+    pub session_id: Uuid,
+    pub project_id: Uuid,
+    pub checkout: waku_protocol::workspace::QaCheckout,
+    pub config: waku_protocol::workspace::QaConfig,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct AppState {
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    qa_configs: HashMap<Uuid, waku_protocol::workspace::QaConfig>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    qa_sessions: HashMap<Uuid, QaSessionRecord>,
     app_state_version: u32,
     #[serde(default = "Uuid::new_v4")]
     analytics_id: Uuid,
@@ -2049,6 +2062,10 @@ struct AppState {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PersistedState {
+    #[serde(default)]
+    pub qa_configs: HashMap<Uuid, waku_protocol::workspace::QaConfig>,
+    #[serde(default)]
+    pub qa_sessions: HashMap<Uuid, QaSessionRecord>,
     pub version: u32,
     #[serde(default = "Uuid::new_v4")]
     pub analytics_id: Uuid,
@@ -2746,6 +2763,8 @@ impl PersistedState {
 
     pub fn empty() -> Self {
         Self {
+            qa_configs: HashMap::new(),
+            qa_sessions: HashMap::new(),
             version: STATE_VERSION,
             analytics_id: Uuid::new_v4(),
             analytics_enabled: true,
@@ -3379,6 +3398,8 @@ impl PersistedState {
 
     fn app_state(&self) -> AppState {
         AppState {
+            qa_configs: self.qa_configs.clone(),
+            qa_sessions: self.qa_sessions.clone(),
             app_state_version: APP_STATE_VERSION,
             analytics_id: self.analytics_id,
             selected_project: self.selected_project,
@@ -3563,6 +3584,8 @@ impl PersistedState {
     }
 
     fn apply_app_state(&mut self, app_state: AppState) {
+        self.qa_configs = app_state.qa_configs;
+        self.qa_sessions = app_state.qa_sessions;
         self.analytics_id = app_state.analytics_id;
         self.selected_project = app_state.selected_project;
         self.selected_session = app_state.selected_session;
@@ -4068,6 +4091,7 @@ fn pack_save_frames(prepared: Vec<SizedSaveSession>) -> Vec<Vec<SizedSaveSession
 }
 
 pub struct StateStore {
+    auxiliary: Option<Uuid>,
     path: PathBuf,
     app_state_path: PathBuf,
     app_settings_path: PathBuf,
@@ -4128,6 +4152,7 @@ impl StateStore {
 
     pub fn remote(daemon: DaemonSupervisor) -> Self {
         Self {
+            auxiliary: None,
             app_state_path: default_app_state_path(),
             app_settings_path: default_app_settings_path(),
             legacy_settings_paths: default_legacy_settings_paths(),
@@ -4140,6 +4165,23 @@ impl StateStore {
             written_app_settings: Mutex::new(0),
             written_app_state: Mutex::new(0),
         }
+    }
+
+    /// Keep a QA window's navigation and terminal state out of the main
+    /// window's file; only the main window writes shared app preferences.
+    pub fn auxiliary(daemon: DaemonSupervisor, id: Uuid) -> Self {
+        let mut store = Self::remote(daemon);
+        store.auxiliary = Some(id);
+        store.app_state_path = store
+            .app_state_path
+            .with_file_name("qa-windows")
+            .join(format!("{id}.json"));
+        store.remote_catalogs_path = store.app_state_path.with_extension("catalog.json");
+        store
+    }
+
+    pub fn is_auxiliary(&self) -> bool {
+        self.auxiliary.is_some()
     }
 
     /// Shared daemon registry — the app claims catalog rows and resolves
@@ -4450,13 +4492,17 @@ impl StateStore {
             if !self.daemons.catalog_loaded(key) {
                 continue;
             }
-            let owned = |id: &Uuid| match key {
-                DaemonKey::Local => !self.daemons.is_remote_session(*id),
-                DaemonKey::Remote(_) => self.daemons.session_owner(*id) == key,
+            let owned = |id: &Uuid| {
+                self.auxiliary.is_none_or(|session_id| session_id == *id)
+                    && match key {
+                        DaemonKey::Local => !self.daemons.is_remote_session(*id),
+                        DaemonKey::Remote(_) => self.daemons.session_owner(*id) == key,
+                    }
             };
             let projects: Vec<Project> = state
                 .projects
                 .iter()
+                .filter(|_| !self.is_auxiliary())
                 .filter(|project| match key {
                     DaemonKey::Local => !self.daemons.is_remote_project(project.id),
                     DaemonKey::Remote(_) => self.daemons.project_owner(project.id) == key,
@@ -4617,6 +4663,9 @@ impl StateStore {
     }
 
     fn write_app_settings(&self, settings: &AppSettings) -> io::Result<()> {
+        if self.is_auxiliary() {
+            return Ok(());
+        }
         write_app_file(
             settings,
             &self.app_settings_path,
@@ -5601,6 +5650,64 @@ mod tests {
             restored.voice_transcription_backend,
             VoiceTranscriptionBackend::Whistle
         );
+    }
+
+    #[test]
+    fn qa_setup_and_checkout_survive_desktop_state_round_trip() {
+        use waku_protocol::{
+            git::{CommitEntry, CreatedWorktree},
+            workspace::{QaCheckout, QaConfig},
+        };
+        let project_id = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
+        let config = QaConfig {
+            dev_command: "pnpm dev".into(),
+            install_command: "pnpm install --frozen-lockfile".into(),
+            branch: "dev".into(),
+        };
+        let record = QaSessionRecord {
+            project_id,
+            session_id,
+            config: config.clone(),
+            checkout: QaCheckout {
+                base_branch: "trunk".into(),
+                base_sha: "base".into(),
+                qa_branch: "dev".into(),
+                commit: CommitEntry {
+                    sha: "reviewed".into(),
+                    short_sha: "reviewed".into(),
+                    subject: "Feature".into(),
+                    body: "Test-Plan: open the preview".into(),
+                    author: "Author".into(),
+                    author_email: "author@example.test".into(),
+                    authored_at: 1,
+                    additions: 1,
+                    deletions: 0,
+                },
+                worktree: CreatedWorktree {
+                    path: PathBuf::from("/tmp/qa-checkout"),
+                    name: "qa-checkout".into(),
+                    lfs_skipped: false,
+                },
+            },
+        };
+        let mut state = PersistedState::empty();
+        state.qa_configs.insert(project_id, config.clone());
+        state.qa_sessions.insert(session_id, record);
+        let saved = serde_json::to_vec(&state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(serde_json::from_slice(&saved).unwrap());
+        assert_eq!(restored.qa_configs[&project_id], config);
+        assert_eq!(
+            restored.qa_sessions[&session_id].checkout.commit.sha,
+            "reviewed"
+        );
+        assert_eq!(restored.qa_sessions[&session_id].checkout.base_sha, "base");
+        assert_eq!(restored.qa_sessions[&session_id].project_id, project_id);
+        assert_eq!(restored.qa_sessions[&session_id].config, config);
+        let legacy: AppState = serde_json::from_str(r#"{"app_state_version":1}"#).unwrap();
+        assert!(legacy.qa_configs.is_empty());
+        assert!(legacy.qa_sessions.is_empty());
     }
 
     #[test]

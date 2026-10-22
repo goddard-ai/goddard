@@ -273,6 +273,8 @@ export type { PullRequestState } from "./PullRequestState";
 export type { PullRequestSummary } from "./PullRequestSummary";
 export type { PullStrategy } from "./PullStrategy";
 export type { PushBaseOutcome } from "./PushBaseOutcome";
+export type { QaCheckout } from "./QaCheckout";
+export type { QaConfig } from "./QaConfig";
 export type { QueuedMessage } from "./QueuedMessage";
 export type { QueuedMessageSource } from "./QueuedMessageSource";
 export type { ReasoningBlock } from "./ReasoningBlock";

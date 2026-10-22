@@ -13,6 +13,26 @@ use crate::git::{
 };
 use crate::model::{Checkpoint, ProviderKind};
 
+/// Confirmed commands for a project's local QA sessions.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct QaConfig {
+    pub dev_command: String,
+    pub install_command: String,
+    pub branch: String,
+}
+
+/// Immutable identity of the checkout the human is testing.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct QaCheckout {
+    pub base_branch: String,
+    pub base_sha: String,
+    pub qa_branch: String,
+    pub commit: crate::git::CommitEntry,
+    pub worktree: crate::git::CreatedWorktree,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ReviewDiffSource {
@@ -625,6 +645,27 @@ impl ProjectFilesListing {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceOperation {
+    QaDefaults {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        preferred_branch: String,
+    },
+    QaStart {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        branch: String,
+    },
+    QaCheck {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        checkout: QaCheckout,
+    },
+    QaPromote {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        checkout: QaCheckout,
+    },
+
     /// Resolve on the daemon host; a removed worktree falls back to its project.
     ResolveReferenceWorkspace {
         context: crate::model::ReferenceContext,
@@ -1357,6 +1398,13 @@ pub enum WorkspaceOperation {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceResult {
+    QaDefaults {
+        config: QaConfig,
+    },
+    QaStarted {
+        checkout: QaCheckout,
+    },
+
     ReferenceWorkspace {
         #[ts(type = "string")]
         path: PathBuf,

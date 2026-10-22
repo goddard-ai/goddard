@@ -2457,6 +2457,12 @@ pub(super) struct VoiceBriefingPlayback {
 }
 
 pub struct Waku {
+    qa_setup: Option<qa::QaSetup>,
+    qa_window: Option<qa::QaWindow>,
+    qa_windows: HashMap<Uuid, gpui::WindowHandle<Waku>>,
+    qa_project_picker: Option<bool>,
+    qa_pending_projects: HashSet<Uuid>,
+
     /// Owns the headless provider process for exactly as long as the desktop
     /// app entity. Debug builds can replace it independently after a rebuild;
     /// all live driver handles below are lightweight RPC proxies.
@@ -4493,6 +4499,7 @@ mod projects;
 mod provider_switch;
 mod provider_switch_dialog;
 mod push_base;
+mod qa;
 mod recent_prompts;
 mod reclaim_dialog;
 mod relocate;
@@ -5377,6 +5384,15 @@ impl Waku {
         cx: &mut App,
         daemon: waku_client::DaemonSupervisor,
     ) -> Entity<Self> {
+        Self::new_window(window, cx, daemon, None)
+    }
+
+    fn new_window(
+        window: &mut Window,
+        cx: &mut App,
+        daemon: waku_client::DaemonSupervisor,
+        qa_window: Option<qa::QaWindow>,
+    ) -> Entity<Self> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         // Set only when `scripts/dev.ts` launched this app — the file it names
         // is the auto-restart toggle the watcher reads after each build.
@@ -5387,13 +5403,26 @@ impl Waku {
             .as_deref()
             .map(read_auto_restart)
             .unwrap_or(false);
-        let store = Arc::new(StateStore::remote(daemon.clone()));
+        let store = Arc::new(match &qa_window {
+            Some(qa) => StateStore::auxiliary(daemon.clone(), qa.record.session_id),
+            None => StateStore::remote(daemon.clone()),
+        });
         let daemons = store.daemons();
         let daemon_hostname = crate::daemon::local_hostname().unwrap_or_else(|| "this-mac".into());
         let daemon_lan_ip = crate::daemon::local_ipv4();
         let composer_draft_store = ComposerDraftStore::remote(daemons.clone());
         let composer_drafts = composer_draft_store.load().unwrap_or_default();
         let mut state = store.load_or_fresh(cwd);
+        if let Some(qa) = &qa_window {
+            state.sessions.retain(|session| session.id == qa.record.session_id);
+            state.selected_project = Some(qa.record.project_id);
+            state.selected_session = Some(qa.record.session_id);
+            state.remote_hosts.clear();
+            state.terminals.clear();
+            state.selected_terminal = None;
+            state.sidebar_visible = false;
+            state.right_panel_visible = true;
+        }
         // Remote hosts connect in the background after the entity exists;
         // seed each one's cached catalog now so its projects and sessions are
         // on screen — read-only until live — before the first frame.
@@ -5445,7 +5474,11 @@ impl Waku {
             state.voice_briefing_gateway_key.clear();
             staged_key = true;
         }
-        if let Err(error) = daemon.update_settings(state.daemon_settings()) {
+        if let Err(error) = if store.is_auxiliary() {
+            Ok(())
+        } else {
+            daemon.update_settings(state.daemon_settings())
+        } {
             eprintln!("could not normalize daemon settings after migration: {error:#}");
             // The daemon never saw the key — restore the legacy field and
             // un-stage the slot so it can't persist into app state as
@@ -5899,8 +5932,11 @@ impl Waku {
         let right_panel_pane = WakuPane::new(Waku::right_panel_pane_content, cx);
         let git_panel_pane = WakuPane::new(Waku::git_panel_pane_content, cx);
         let workspace_client = waku_client::WorkspaceClient::new(daemon.client());
-        let (projectless_migrated, projectless_migration_error) =
-            migrate_legacy_projectless_projects(&mut state, &workspace_client);
+        let (projectless_migrated, projectless_migration_error) = if qa_window.is_none() {
+            migrate_legacy_projectless_projects(&mut state, &workspace_client)
+        } else {
+            (false, None)
+        };
         // Resolve colliding project names across the merged catalog — the
         // persisted list plus every seeded remote one.
         Project::resolve_display_names(&mut state.projects);
@@ -5984,7 +6020,12 @@ impl Waku {
         let mut startup_live_session_ids = state
             .sessions
             .iter()
-            .filter(|session| session.status.is_busy())
+            .filter(|session| {
+                session.status.is_busy()
+                    && qa_window
+                        .as_ref()
+                        .is_none_or(|qa| session.id == qa.record.session_id)
+            })
             .map(|session| session.id)
             .collect::<Vec<_>>();
         if let Some(selected) = state.selected_session
@@ -6232,6 +6273,7 @@ impl Waku {
         let scene_overlay_enabled = window.enable_scene_overlay().is_ok();
         let (updater_status, updater_events) = cx
             .try_global::<crate::updater::UpdaterState>()
+            .filter(|_| qa_window.is_none())
             .and_then(|state| state.0.as_ref())
             .map(|updater| (updater.status(), Some(updater.events())))
             .unwrap_or_default();
@@ -7089,7 +7131,9 @@ impl Waku {
                     if this
                         .update(cx, |this, cx| {
                             this.maybe_refresh_background_work(cx);
-                            this.maybe_poll_notifications(cx);
+                            if this.qa_window.is_none() {
+                                this.maybe_poll_notifications(cx);
+                            }
                             this.maybe_refresh_provider_checked_label(cx);
                         })
                         .is_err()
@@ -7218,6 +7262,11 @@ impl Waku {
             let initial_session = state.selected_session;
 
             Self {
+                qa_setup: None,
+                qa_window,
+                qa_windows: HashMap::new(),
+                qa_project_picker: None,
+                qa_pending_projects: HashSet::new(),
                 daemon,
                 daemons,
                 remote_errors: HashMap::new(),
@@ -8068,6 +8117,9 @@ impl Waku {
             // the UI state carried across the last quit — history, scroll
             // positions, open panels.
             this.restore_ui_state(window, cx);
+            if this.qa_window.is_some() {
+                this.initialize_qa_window(window, cx);
+            }
             // A dormant task keeps its collapsed home on relaunch — the
             // reveal only gives the restored selection a visible row.
             if let Some(session_id) = this.state.selected_session {

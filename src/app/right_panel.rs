@@ -8612,12 +8612,18 @@ impl Waku {
                 && self.right_panel_files_selected_path.is_some();
             // A plan tab is the session's own document — it stays mounted
             // for the session's life, so the strip draws no close control.
-            let closable = right_panel_surface_is_closable(&surface);
+            let closable = right_panel_surface_is_closable(&surface)
+                && !(self.qa_window.is_some() && surface == RightPanelSurface::Diff);
+            let tab_focus = self.transcript_control_focus(format!("right-panel-tab-{index}"), cx);
+            let close_focus = self.transcript_control_focus(format!("close-right-panel-tab-{index}"), cx);
             let activate_weak = cx.entity().downgrade();
             let close_weak = cx.entity().downgrade();
             tabs = tabs.child(
                 div()
                     .id(SharedString::from(format!("right-panel-tab-{index}")))
+                    .track_focus(&tab_focus)
+                    .tab_index(0)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .h(px(28.0))
                     .min_w(px(100.0))
                     .max_w(px(176.0))
@@ -8675,6 +8681,9 @@ impl Waku {
                         element.child(
                             div()
                                 .id(SharedString::from(format!("close-right-panel-tab-{index}")))
+                                .track_focus(&close_focus)
+                                .tab_index(0)
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
                                 .w(px(16.0))
                                 .h(px(16.0))
                                 .rounded(px(4.0))
@@ -8683,7 +8692,7 @@ impl Waku {
                                 .justify_center()
                                 .hover(|element| element.bg(theme.overlay_strong))
                                 .child(icon("icons/x.svg", 10.0, theme.text_tertiary))
-                                .on_click(move |_, _, cx| {
+                                .on_activation_app(move |_, cx| {
                                     cx.stop_propagation();
                                     let _ = close_weak.update(cx, |this, cx| {
                                         this.close_right_panel_surface(index, cx);
@@ -8691,7 +8700,7 @@ impl Waku {
                                 }),
                         )
                     })
-                    .on_click(move |_, _, cx| {
+                    .on_activation_app(move |_, cx| {
                         let _ = activate_weak.update(cx, |this, cx| {
                             this.right_panel_active_surface = Some(index);
                             this.reveal_right_panel_tab(index);
@@ -8712,7 +8721,7 @@ impl Waku {
         }
         // The add button trails the rightmost tab so it reads as part of the
         // strip; it scrolls with the tabs and opens its menu on a short hover.
-        if !self.right_panel_surfaces.is_empty() {
+        if !self.right_panel_surfaces.is_empty() && self.qa_window.is_none() {
             let weak = cx.entity().downgrade();
             let existing_surfaces = self.right_panel_surfaces.clone();
             // Managed sessions get no terminal, file-tree, or review tabs —
@@ -8821,6 +8830,10 @@ impl Waku {
                         theme.surface,
                     )),
             );
+
+        if self.qa_window.is_some() {
+            return header.child(div().text_size(sp(11.0)).text_color(theme.text_secondary).child(self.qa_server_status(cx)));
+        }
 
         if let Some(terminal_id) = self
             .active_right_panel_surface()
@@ -14658,6 +14671,10 @@ impl Waku {
         source: ReviewDiffSource,
         cx: &mut Context<Self>,
     ) {
+        if self.qa_window.is_some() && source != ReviewDiffSource::Commit {
+            return;
+        }
+
         if self.right_panel_diff_source != source {
             self.right_panel_diff_selection.clear();
             self.right_panel_diff_source = source;

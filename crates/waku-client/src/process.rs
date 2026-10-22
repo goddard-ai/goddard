@@ -860,6 +860,22 @@ impl DaemonSupervisor {
         Ok(supervisor)
     }
 
+    /// An independent event stream for another desktop window. Cloning the
+    /// client would replace per-runtime subscriptions in the original window.
+    pub fn independent_connection(&self) -> anyhow::Result<Self> {
+        let (address, token) = {
+            let target = self.inner.target.lock();
+            match &*target {
+                DaemonTarget::Local(process) => (process.address.clone(), process.token.clone()),
+                DaemonTarget::Remote { address, token, .. } => (address.clone(), token.clone()),
+                DaemonTarget::Restarting(_) => {
+                    anyhow::bail!("the daemon is restarting; try again shortly")
+                }
+            }
+        };
+        Self::connect(&address, token)
+    }
+
     fn from_target(
         target: DaemonTarget,
         executable: Option<PathBuf>,

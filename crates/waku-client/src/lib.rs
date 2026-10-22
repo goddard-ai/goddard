@@ -14,6 +14,7 @@ pub mod discover;
 pub mod driver;
 pub mod persistence;
 mod process;
+pub mod qa;
 pub mod routing;
 mod workspace_client;
 

@@ -356,16 +356,22 @@ fn reviewer_identity(cwd: &Path) -> anyhow::Result<String> {
 /// Record `decision` for `sha` — it must still be on `origin/<branch>` —
 /// then push the notes ref.
 fn record(cwd: &Path, sha: &str, decision: ReviewDecision, branch: &str) -> anyhow::Result<()> {
+    record_on_ref(cwd, sha, decision, &qa_remote(branch))
+}
+
+pub(crate) fn record_on_ref(
+    cwd: &Path,
+    sha: &str,
+    decision: ReviewDecision,
+    source: &str,
+) -> anyhow::Result<()> {
     ensure_repository(cwd)?;
     fetch_notes(cwd);
-    let on_qa = git_capture(
-        cwd,
-        &["merge-base", "--is-ancestor", sha, &qa_remote(branch)],
-    )?
-    .status
-    .success();
+    let on_qa = git_capture(cwd, &["merge-base", "--is-ancestor", sha, source])?
+        .status
+        .success();
     if !on_qa {
-        bail!("{sha} is not on origin/{branch} — it may have been promoted or reverted already");
+        bail!("{sha} is not on {source} — it may have been promoted or reverted already");
     }
     let line = serde_json::to_string(&NoteLine {
         v: 1,

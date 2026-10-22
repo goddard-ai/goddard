@@ -3161,12 +3161,17 @@ impl Waku {
     /// boss surfaces — pinned to the right panel's Review tab. A new target
     /// drops the loaded snapshot the way a source switch does; the refresh
     /// `open_right_panel_surface` runs refetches through `CommitDiff`.
-    fn open_right_panel_commit_review(
+    pub(super) fn open_right_panel_commit_review(
         &mut self,
         workspace: PathBuf,
         sha: &str,
         cx: &mut Context<Self>,
     ) {
+        if self.qa_window.as_ref().is_some_and(|qa| {
+            qa.record.checkout.commit.sha != sha || qa.record.checkout.worktree.path != workspace
+        }) {
+            return;
+        }
         self.transcript_commit_hover = None;
         *self.transcript_selection.hovered_commit.borrow_mut() = None;
         let retargeted = self

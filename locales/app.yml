@@ -7306,3 +7306,57 @@ workspace.no_existing_worktrees:
   en: No existing worktrees.
 workspace.no_matching_worktrees:
   en: No matching worktrees.
+
+qa.start_action:
+  en: Start QA Session…
+qa.edit_action:
+  en: Edit QA Setup…
+qa.choose_project:
+  en: Choose a project for QA…
+qa.dev_command:
+  en: Dev server command
+qa.install_command:
+  en: Install command
+qa.install_optional:
+  en: Install command (optional)
+qa.branch:
+  en: QA branch
+qa.required:
+  en: Enter a dev server command and a QA branch.
+qa.preparing:
+  en: Preparing QA…
+qa.window_title:
+  en: Goddard — QA
+qa.server:
+  en: QA dev server
+qa.setup:
+  en: QA setup
+qa.start:
+  en: Start QA
+qa.wait_agent:
+  en: Wait for the agent to finish before discarding this QA checkout.
+qa.discarded:
+  en: QA review ended. The conversation is retained.
+qa.next:
+  en: Review next commit
+qa.pushing:
+  en: Working…
+qa.approve:
+  en: Approve & push to %{branch}
+qa.restart_server:
+  en: Restart server
+qa.discard:
+  en: Discard
+
+qa.promoted:
+  en: "Approved and pushed to %{branch}."
+
+qa.command_running:
+  en: "Install / server command running"
+qa.command_exited:
+  en: "Exited (%{code})"
+qa.command_stopped:
+  en: Server stopped
+
+qa.actions:
+  en: More

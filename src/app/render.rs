@@ -569,6 +569,9 @@ impl Render for Waku {
         // panel is mid-slide, and settling here rather than at the point of
         // use keeps the pane islands and the transcript on one set of widths.
         let panels = self.settle_panel_slides(window);
+        if self.qa_window.is_some() {
+            return self.render_qa_window(window, cx);
+        }
         if panels.sliding {
             // The manual drive for the width tweens — the same scheduling
             // `with_animation` would do, minus its element-id keying.
@@ -590,6 +593,7 @@ impl Render for Waku {
         if self.settings_page.is_some() {
             let speed_reader = self.render_speed_reader_overlay(cx);
             let command_palette = self.render_command_palette(window, cx);
+            let qa_setup = self.render_qa_setup(cx);
             let file_finder = self.render_file_finder(window, cx);
             let commit_dialog = self.render_commit_dialog(cx);
             let issue_dialog = self.render_issue_dialog(cx);
@@ -653,6 +657,7 @@ impl Render for Waku {
                 .child(self.render_settings(window, cx))
                 .children(toast)
                 .children(command_palette)
+                .children(qa_setup)
                 .children(file_finder)
                 .children(commit_dialog)
                 .children(issue_dialog)
@@ -707,6 +712,7 @@ impl Render for Waku {
         let computer_use = self.render_computer_use_overlay(window, cx);
         let speed_reader = self.render_speed_reader_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
+        let qa_setup = self.render_qa_setup(cx);
         let file_finder = self.render_file_finder(window, cx);
         let commit_dialog = self.render_commit_dialog(cx);
         let issue_dialog = self.render_issue_dialog(cx);
@@ -1233,6 +1239,7 @@ impl Render for Waku {
             })
             .children(computer_use)
             .children(command_palette)
+            .children(qa_setup)
             .children(file_finder)
             .children(commit_dialog)
             .children(issue_dialog)
@@ -1381,7 +1388,7 @@ impl Waku {
     /// is active. Every full-window surface (workspace and settings alike)
     /// must include this, or a toast raised there stays invisible until the
     /// user navigates away.
-    fn render_active_toast(
+    pub(super) fn render_active_toast(
         &mut self,
         window: &Window,
         cx: &mut Context<Self>,

@@ -2683,10 +2683,13 @@ impl Waku {
     fn apply_remote_task_state(
         &mut self,
         key: waku_client::DaemonKey,
-        snapshot: RemoteTaskStateSnapshot,
+        mut snapshot: RemoteTaskStateSnapshot,
         fresh: bool,
         cx: &mut Context<Self>,
     ) {
+        if let Some(qa) = &self.qa_window {
+            snapshot.sessions.retain(|session| session.id == qa.record.session_id);
+        }
         let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
         let known_session_ids = self
             .state
@@ -5028,11 +5031,14 @@ impl Waku {
     pub(super) fn save(&mut self) -> bool {
         self.capture_ui_state();
         self.last_stream_save = Instant::now();
-        let daemon_error = self
-            .daemon
-            .update_settings(self.state.daemon_settings())
-            .err()
-            .map(|error| error.to_string());
+        let daemon_error = if self.store.is_auxiliary() {
+            None
+        } else {
+            self.daemon
+                .update_settings(self.state.daemon_settings())
+                .err()
+                .map(|error| error.to_string())
+        };
         let app_error = if self.friend_sessions.is_empty() {
             self.store
                 .save(&mut self.state)
@@ -6831,6 +6837,10 @@ impl Waku {
         queue_background: bool,
         cx: &mut Context<Self>,
     ) {
+        if !self.qa_accepts_submission(session_id) {
+            self.restore_composer_submission(session_id, submission, cx);
+            return;
+        }
         let session_id = self.resolve_boss_chat_session(session_id);
         if self
             .state

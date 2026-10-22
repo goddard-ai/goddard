@@ -73,6 +73,23 @@ fn reference_file(context: &waku_protocol::model::ReferenceContext, path: &Path)
 /// `Review*` operations read it.
 pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result<WorkspaceResult> {
     Ok(match operation {
+        WorkspaceOperation::QaDefaults {
+            cwd,
+            preferred_branch,
+        } => WorkspaceResult::QaDefaults {
+            config: waku_vcs::qa::defaults(&cwd, &preferred_branch)?,
+        },
+        WorkspaceOperation::QaStart { cwd, branch } => WorkspaceResult::QaStarted {
+            checkout: waku_vcs::qa::start(&cwd, &branch)?,
+        },
+        WorkspaceOperation::QaCheck { cwd, checkout } => {
+            waku_vcs::qa::unchanged(&cwd, &checkout)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::QaPromote { cwd, checkout } => {
+            waku_vcs::qa::promote(&cwd, &checkout)?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::ResolveReferenceFile { context, path } => {
             WorkspaceResult::ReferenceWorkspace {
                 path: reference_file(&context, &path),

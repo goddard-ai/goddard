@@ -4,12 +4,13 @@ import type { CreateIssueInput } from "./CreateIssueInput";
 import type { ProjectFilesListing } from "./ProjectFilesListing";
 import type { ProviderKind } from "./ProviderKind";
 import type { PullStrategy } from "./PullStrategy";
+import type { QaCheckout } from "./QaCheckout";
 import type { ReferenceContext } from "./ReferenceContext";
 import type { ReviewDiffSource } from "./ReviewDiffSource";
 import type { WorkItemKind } from "./WorkItemKind";
 import type { WorkItemQueryState } from "./WorkItemQueryState";
 
-export type WorkspaceOperation = { "type": "resolveReferenceWorkspace", context: ReferenceContext, } | { "type": "resolveReferenceFile", context: ReferenceContext, path: string, } | { "type": "listTree", root: string, expanded_paths: string[], } | { "type": "browseDirectory", path: string | null, } | { "type": "readTextFile", root: string, relative_path: string, } | { "type": "readBinaryFile", root: string, relative_path: string, } | { "type": "writeTextFile", root: string, relative_path: string, content: string, } | { "type": "listProjectFiles", root: string, cap: number,
+export type WorkspaceOperation = { "type": "qaDefaults", cwd: string, preferred_branch: string, } | { "type": "qaStart", cwd: string, branch: string, } | { "type": "qaCheck", cwd: string, checkout: QaCheckout, } | { "type": "qaPromote", cwd: string, checkout: QaCheckout, } | { "type": "resolveReferenceWorkspace", context: ReferenceContext, } | { "type": "resolveReferenceFile", context: ReferenceContext, path: string, } | { "type": "listTree", root: string, expanded_paths: string[], } | { "type": "browseDirectory", path: string | null, } | { "type": "readTextFile", root: string, relative_path: string, } | { "type": "readBinaryFile", root: string, relative_path: string, } | { "type": "writeTextFile", root: string, relative_path: string, content: string, } | { "type": "listProjectFiles", root: string, cap: number,
 /**
  * `WorkingTree` when absent, so peers from before the field existed
  * keep their checkout listing.

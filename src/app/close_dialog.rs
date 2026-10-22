@@ -117,6 +117,13 @@ impl Waku {
     /// The last ⌘W step and the red close button share this gate: hiding
     /// the window while work runs gets the same confirmation quit does.
     pub(super) fn request_window_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.qa_window.is_some() {
+            self.stop_qa_server(cx);
+            self.capture_and_save_current_composer_draft(cx);
+            self.save();
+            window.remove_window();
+            return;
+        }
         if self.busy_close_counts(cx).is_idle() {
             crate::platform::hide_window(window);
             return;

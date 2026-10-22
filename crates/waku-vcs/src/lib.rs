@@ -9,6 +9,7 @@ pub mod github;
 pub mod issues;
 pub mod notifications;
 pub mod pull_requests;
+pub mod qa;
 pub mod repo;
 pub mod review;
 pub mod shell_command;

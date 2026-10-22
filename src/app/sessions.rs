@@ -725,6 +725,13 @@ impl Waku {
         transition: SessionActivationTransition,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .qa_window
+            .as_ref()
+            .is_some_and(|qa| qa.record.session_id != session_id)
+        {
+            return;
+        }
         let Some(session) = self
             .state
             .sessions
