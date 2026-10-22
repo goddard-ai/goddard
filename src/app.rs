@@ -330,7 +330,7 @@ enum SettingsPage {
 }
 
 impl SettingsPage {
-    /// Computer Use, Friends, and Integrations each sit behind a single
+    /// Git, Computer Use, Friends, and Integrations each sit behind a single
     /// Experiments opt-in; Jev's page configures the eval backend that
     /// several experiments share, so it stays while any of them is on.
     /// Keeping this decision on the page itself makes the Settings sidebar
@@ -341,12 +341,14 @@ impl SettingsPage {
         friends_enabled: bool,
         jev_in_use: bool,
         integrations_enabled: bool,
+        git_worktree_management_enabled: bool,
     ) -> bool {
         match self {
             Self::ComputerUse => computer_use_experiment_enabled,
             Self::Friends => friends_enabled,
             Self::Jev => jev_in_use,
             Self::Integrations => integrations_enabled,
+            Self::Git => git_worktree_management_enabled,
             _ => true,
         }
     }

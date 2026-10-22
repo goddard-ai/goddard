@@ -988,6 +988,10 @@ experiments.git_panel_title:
   en: Git panel
 experiments.git_panel_description:
   en: A ⌘⌥G panel beside the session with the commit graph, expandable diffs, upstream tracking, and a /land command to land a worktree on its base.
+experiments.git_worktree_management_title:
+  en: Git worktree management
+experiments.git_worktree_management_description:
+  en: Add a Git page to Settings for browsing worktrees and branches, starting tasks from them, and managing repository checkouts.
 experiments.github_references_title:
   en: GitHub references
 experiments.github_references_description:

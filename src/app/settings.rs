@@ -301,14 +301,15 @@ pub(super) struct RemoteHostEditor {
 
 /// The sidebar rows the query leaves visible, in display order. `query` must
 /// already be trimmed and lowercased; when it is empty every page matches.
-/// Friends and Integrations are experiments — their rows only appear while
-/// the opt-in is on; Jev's stays while any eval-backed experiment is on.
+/// Experimental pages appear while their opt-in is on; Jev's stays while
+/// any eval-backed experiment is on.
 pub(super) fn visible_settings_pages(
     query: &str,
     computer_use_experiment_enabled: bool,
     friends_enabled: bool,
     jev_in_use: bool,
     integrations_enabled: bool,
+    git_worktree_management_enabled: bool,
 ) -> impl Iterator<Item = (SettingsPage, String, &'static str)> + '_ {
     SETTINGS_PAGES
         .into_iter()
@@ -318,6 +319,7 @@ pub(super) fn visible_settings_pages(
                 friends_enabled,
                 jev_in_use,
                 integrations_enabled,
+                git_worktree_management_enabled,
             )
         })
         .filter_map(move |(page, label_key, icon, keywords_key)| {
@@ -973,6 +975,7 @@ impl Waku {
                 self.state.friends_enabled,
                 self.jev_in_use(),
                 self.state.integrations_enabled,
+                self.state.git_worktree_management_enabled,
             )
             .collect()
         };
@@ -1205,6 +1208,7 @@ impl Waku {
             self.state.friends_enabled,
             self.jev_in_use(),
             self.state.integrations_enabled,
+            self.state.git_worktree_management_enabled,
         )
         .map(|(page, ..)| page)
         .collect::<Vec<_>>();
@@ -1522,6 +1526,7 @@ impl Waku {
                 self.state.friends_enabled,
                 self.jev_in_use(),
                 self.state.integrations_enabled,
+                self.state.git_worktree_management_enabled,
             ) {
                 continue;
             }
@@ -5567,6 +5572,17 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Git,
+                id: "git-worktree-management-experiment-toggle",
+                icon: "icons/git-branch.svg",
+                title_key: "experiments.git_worktree_management_title",
+                description_key: "experiments.git_worktree_management_description",
+                enabled: self.state.git_worktree_management_enabled,
+                set: Self::set_git_worktree_management_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Git,
                 id: "github-references-experiment-toggle",
                 icon: "icons/github.svg",
                 title_key: "experiments.github_references_title",
@@ -7498,6 +7514,19 @@ impl Waku {
             self.close_git_panel_state();
         }
         self.state.git_panel_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_git_worktree_management_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.git_worktree_management_enabled = enabled;
+        if !enabled {
+            self.settings_navigation.remove(SettingsPage::Git);
+            self.git_page_refresh_pending = false;
+            if self.settings_page == Some(SettingsPage::Git) {
+                self.settings_page = Some(SettingsPage::General);
+            }
+        }
         self.save();
         cx.notify();
     }

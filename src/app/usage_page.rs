@@ -59,8 +59,9 @@ impl Waku {
         self.visit_settings_page(page, window, cx);
     }
 
-    /// `open_settings_page` without the opt-in gates — a deep link lands on
-    /// the page even while the sidebar doesn't list it. Fix paths for
+    /// `open_settings_page` without the navigation-only gates — a deep link
+    /// can reach a page even while the sidebar doesn't list it. Git worktree
+    /// management still requires its experiment opt-in. Fix paths for
     /// shipped features use this: the provider-switch dialog's "Open Jev
     /// settings" must reach the backend configuration even when no eval
     /// experiment happens to be on.
@@ -91,6 +92,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if page == SettingsPage::Git && !self.state.git_worktree_management_enabled {
+            return;
+        }
         // Reaching a page while settings was closed is a fresh visit —
         // whichever entry point landed here, the last visit's stack is dead.
         if self.settings_page.is_none() {
@@ -118,6 +122,12 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A stale history entry must not remount a disabled experiment.
+        let page = if page == SettingsPage::Git && !self.state.git_worktree_management_enabled {
+            SettingsPage::General
+        } else {
+            page
+        };
         if page != SettingsPage::Integrations {
             self.integration_editor = None;
         }

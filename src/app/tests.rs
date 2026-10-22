@@ -6466,7 +6466,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     use super::SettingsPage;
 
     let pages = |query: &str| {
-        visible_settings_pages(query, true, true, true, true)
+        visible_settings_pages(query, true, true, true, true, true)
             .map(|(page, ..)| page)
             .collect::<Vec<_>>()
     };
@@ -6513,21 +6513,33 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     assert_eq!(pages("codex"), codex_pages);
 
     assert_eq!(pages("no such setting"), vec![]);
+    // Git worktree management has an independent gate for navigation,
+    // keyboard cycling, and keyword searches.
+    for query in ["", "worktrees"] {
+        assert!(
+            !visible_settings_pages(query, true, true, true, true, false)
+                .any(|(page, ..)| page == SettingsPage::Git)
+        );
+        assert!(
+            visible_settings_pages(query, true, true, true, true, true)
+                .any(|(page, ..)| page == SettingsPage::Git)
+        );
+    }
     // Friends is experimental: with the opt-in off its row leaves the
     // navigation and the cycle skips it.
     assert!(
-        !visible_settings_pages("", true, false, true, true)
+        !visible_settings_pages("", true, false, true, true, true)
             .any(|(page, ..)| page == SettingsPage::Friends)
     );
     // Jev likewise leaves the navigation when no eval-backed experiment is
     // on — its gate is the union of those opt-ins, not one flag.
     assert!(
-        !visible_settings_pages("", true, true, false, true)
+        !visible_settings_pages("", true, true, false, true, true)
             .any(|(page, ..)| page == SettingsPage::Jev)
     );
     // Integrations is experimental the same way.
     assert!(
-        !visible_settings_pages("", true, true, true, false)
+        !visible_settings_pages("", true, true, true, false, true)
             .any(|(page, ..)| page == SettingsPage::Integrations)
     );
 }
@@ -6806,17 +6818,17 @@ fn undo_archive_restores_only_sessions_still_archived() {
 fn computer_use_navigation_follows_the_experiment_opt_in() {
     use super::SettingsPage;
 
-    assert!(SettingsPage::General.is_visible_in_navigation(false, false, false, false));
-    assert!(!SettingsPage::ComputerUse.is_visible_in_navigation(false, false, false, false));
-    assert!(SettingsPage::ComputerUse.is_visible_in_navigation(true, false, false, false));
-    assert!(!SettingsPage::Jev.is_visible_in_navigation(false, false, false, false));
-    assert!(SettingsPage::Jev.is_visible_in_navigation(false, false, true, false));
-    assert!(!SettingsPage::Integrations.is_visible_in_navigation(false, false, false, false));
-    assert!(SettingsPage::Integrations.is_visible_in_navigation(false, false, false, true));
+    assert!(SettingsPage::General.is_visible_in_navigation(false, false, false, false, true));
+    assert!(!SettingsPage::ComputerUse.is_visible_in_navigation(false, false, false, false, true));
+    assert!(SettingsPage::ComputerUse.is_visible_in_navigation(true, false, false, false, true));
+    assert!(!SettingsPage::Jev.is_visible_in_navigation(false, false, false, false, true));
+    assert!(SettingsPage::Jev.is_visible_in_navigation(false, false, true, false, true));
+    assert!(!SettingsPage::Integrations.is_visible_in_navigation(false, false, false, false, true));
+    assert!(SettingsPage::Integrations.is_visible_in_navigation(false, false, false, true, true));
 
     // The experiment flag also removes the page from search results.
     let pages = |query: &str, enabled: bool| {
-        visible_settings_pages(query, enabled, true, true, true)
+        visible_settings_pages(query, enabled, true, true, true, true)
             .map(|(page, ..)| page)
             .collect::<Vec<_>>()
     };

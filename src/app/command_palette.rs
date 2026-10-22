@@ -3571,6 +3571,7 @@ impl Waku {
                 self.state.friends_enabled,
                 self.jev_in_use(),
                 self.state.integrations_enabled,
+                self.state.git_worktree_management_enabled,
             ) {
                 continue;
             }

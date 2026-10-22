@@ -1502,6 +1502,9 @@ pub struct AppSettings {
     /// Experimental: the Git panel (⌘⌥G) commit graph and diffs. Defaults on
     /// in debug builds.
     pub git_panel_enabled: bool,
+    /// Experimental: the Git settings page's worktree and branch management.
+    #[serde(default = "default_experiment_enabled")]
+    pub git_worktree_management_enabled: bool,
     /// Independent GitHub experiment preferences. Defaults on in debug builds.
     #[serde(flatten)]
     pub github: GitHubFeatures,
@@ -1720,6 +1723,7 @@ impl Default for AppSettings {
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
+            git_worktree_management_enabled: default_experiment_enabled(),
             github: GitHubFeatures::default(),
             projects_page_enabled: default_experiment_enabled(),
             review_queue_enabled: default_experiment_enabled(),
@@ -2284,6 +2288,9 @@ pub struct PersistedState {
     pub big_picture_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub git_panel_enabled: bool,
+    /// Experimental: the Git settings page's worktree and branch management.
+    #[serde(default = "default_experiment_enabled")]
+    pub git_worktree_management_enabled: bool,
     #[serde(flatten)]
     pub github: GitHubFeatures,
     #[serde(default = "default_experiment_enabled")]
@@ -2804,6 +2811,7 @@ impl PersistedState {
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
+            git_worktree_management_enabled: default_experiment_enabled(),
             github: GitHubFeatures::default(),
             projects_page_enabled: default_experiment_enabled(),
             review_queue_enabled: default_experiment_enabled(),
@@ -3304,6 +3312,7 @@ impl PersistedState {
             custom_commands: self.custom_commands.clone(),
             big_picture_enabled: self.big_picture_enabled,
             git_panel_enabled: self.git_panel_enabled,
+            git_worktree_management_enabled: self.git_worktree_management_enabled,
             github: self.github,
             projects_page_enabled: self.projects_page_enabled,
             review_queue_enabled: self.review_queue_enabled,
@@ -3477,6 +3486,7 @@ impl PersistedState {
         self.custom_commands = settings.custom_commands;
         self.big_picture_enabled = settings.big_picture_enabled;
         self.git_panel_enabled = settings.git_panel_enabled;
+        self.git_worktree_management_enabled = settings.git_worktree_management_enabled;
         self.github = settings.github;
         self.projects_page_enabled = settings.projects_page_enabled;
         self.review_queue_enabled = settings.review_queue_enabled;
