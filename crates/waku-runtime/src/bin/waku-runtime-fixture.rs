@@ -1,16 +1,18 @@
 //! Explicit fake-host fixture for IPC qualification tests.
 //! The independently pinned production launcher lives in waku-runtime-host.
 
-use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
-use std::time::Duration;
 
-use waku_runtime::adapter::AdapterFactory;
-use waku_runtime::fake::FakeFactory;
-use waku_runtime::host::{HostOptions, RuntimeHost, SystemClock};
-use waku_runtime::registry::AdapterRegistry;
-use waku_runtime::server::RuntimeServer;
+#[cfg(unix)]
+use std::{path::PathBuf, sync::Arc, time::Duration};
+#[cfg(unix)]
+use waku_runtime::{
+    adapter::AdapterFactory,
+    fake::FakeFactory,
+    host::{HostOptions, RuntimeHost, SystemClock},
+    registry::AdapterRegistry,
+    server::RuntimeServer,
+};
 
 #[cfg(unix)]
 fn run() -> ExitCode {
