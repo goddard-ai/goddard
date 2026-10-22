@@ -281,11 +281,19 @@ impl WakuBackend {
     /// The surviving host pid anchoring this task's resource leases, when
     /// its recorded runtime link is attached under a live controller.
     pub(super) fn stable_anchor_pid(&self, session_id: Uuid) -> Option<u32> {
-        crate::stable_runtime::stable_anchor_pid(
-            &self.task_store,
-            &self.stable_controllers,
-            session_id,
-        )
+        #[cfg(unix)]
+        {
+            crate::stable_runtime::stable_anchor_pid(
+                &self.task_store,
+                &self.stable_controllers,
+                session_id,
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = session_id;
+            None
+        }
     }
 
     /// Wake the scheduler for one dispatch pass — call after enqueueing a

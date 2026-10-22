@@ -465,18 +465,26 @@ impl WakuBackend {
             // The opt-in seam: this launch attaches through the surviving
             // runtime host. Every other provider keeps the legacy
             // in-process driver until Stage 4.
-            let (handle, stable) = crate::stable_runtime::start_link(
-                self,
-                &self.task_store,
-                session_id,
-                runtime_id,
-                provider,
-                &options,
-                sender,
-                &root,
-                None,
-            )?;
-            return Ok((handle, Some(stable)));
+            #[cfg(not(unix))]
+            anyhow::bail!(
+                "stable runtime requires a Unix host (requested {})",
+                root.display()
+            );
+            #[cfg(unix)]
+            {
+                let (handle, stable) = crate::stable_runtime::start_link(
+                    self,
+                    &self.task_store,
+                    session_id,
+                    runtime_id,
+                    provider,
+                    &options,
+                    sender,
+                    &root,
+                    None,
+                )?;
+                return Ok((handle, Some(stable)));
+            }
         }
         let handle = if cloud {
             driver::start_cloud(provider, options, sender)?

@@ -613,6 +613,7 @@ pub struct WakuBackend {
     /// ingress service upgrades it for scoped command dispatch.
     weak_self: Mutex<Weak<WakuBackend>>,
     /// One controller lease per host namespace for this daemon incarnation.
+    #[cfg(unix)]
     pub(crate) stable_controllers:
         std::sync::Mutex<HashMap<PathBuf, Arc<crate::stable_runtime::ControllerLease>>>,
     /// Test seam: routes provider launches through an in-test runtime host

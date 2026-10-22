@@ -245,6 +245,8 @@ tar = "0.4"
 embed-resource = "3.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# Boss mascot frames use the same image types as GPUI on every desktop platform.
+image = "0.25"
 raw-window-handle = "0.6"
 # The browser surface. WebView2 is evergreen on Windows 10 and in-box on 11.
 # Goddard drives it through `webview2-com` rather than wry because it needs the
