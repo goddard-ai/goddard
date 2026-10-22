@@ -649,6 +649,7 @@ export function requestPair(
         message = JSON.parse(String(event.data)) as ServerMessage;
       } catch {
         finish(() => reject(new Error("Goddard daemon sent invalid JSON")));
+        socket.close(1000, "invalid pairing response");
         return;
       }
       if (message.type === "pairPending") return;
@@ -665,6 +666,7 @@ export function requestPair(
         return;
       }
       finish(() => reject(new Error("Goddard daemon sent an invalid pairing response")));
+      socket.close(1000, "invalid pairing response");
     });
     socket.addEventListener("close", () => {
       finish(() => reject(new Error("Goddard daemon disconnected during pairing")));

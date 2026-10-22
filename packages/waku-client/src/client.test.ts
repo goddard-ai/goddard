@@ -5,6 +5,7 @@ import {
   WakuConnectionError,
   WakuRpcError,
   daemonUrl,
+  requestPair,
   type WebSocketLike,
 } from "./client";
 import { PROTOCOL_VERSION } from "./generated";
@@ -438,5 +439,85 @@ describe("WakuClient connection failures", () => {
     now = 43;
     sockets[0]!.receive({ type: "taskStateChanged", revision: 1 });
     expect(client.lastMessageAt).toBe(43);
+  });
+});
+
+describe("requestPair", () => {
+  function pairing(timeoutMs = 1_000) {
+    const socket = new FakeSocket();
+    let connectedUrl = "";
+    const result = requestPair("127.0.0.1:4312", "iOS test device", {
+      timeoutMs,
+      webSocketFactory: (url) => {
+        connectedUrl = url;
+        return socket;
+      },
+    });
+    return { socket, result, connectedUrl };
+  }
+
+  test("waits for owner approval before returning the granted credential", async () => {
+    const { socket, result, connectedUrl } = pairing();
+    expect(connectedUrl).toBe("ws://127.0.0.1:4312/v1");
+    socket.open();
+    expect(JSON.parse(socket.sent[0]!)).toEqual({
+      type: "pairRequest",
+      protocolVersion: PROTOCOL_VERSION,
+      deviceName: "iOS test device",
+    });
+    let settled = false;
+    void result.then(() => { settled = true; });
+    socket.receive({ type: "pairPending" });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(socket.readyState).toBe(1);
+    socket.receive({ type: "pairGranted", token: "test-client-token", daemonName: "Test host" });
+    await expect(result).resolves.toEqual({
+      status: "granted",
+      token: "test-client-token",
+      daemonName: "Test host",
+    });
+    expect(socket.readyState).toBe(3);
+  });
+
+  test("returns an owner refusal without treating it as a transport failure", async () => {
+    const { socket, result } = pairing();
+    socket.open();
+    socket.receive({ type: "pairDeclined", message: "Request declined" });
+    await expect(result).resolves.toEqual({ status: "declined", message: "Request declined" });
+    expect(socket.readyState).toBe(3);
+  });
+
+  test("rejects a disconnect while waiting for approval", async () => {
+    const { socket, result } = pairing();
+    const failure = result.catch((cause) => cause);
+    socket.open();
+    socket.receive({ type: "pairPending" });
+    socket.emitClose();
+    expect(await failure).toMatchObject({ message: "Goddard daemon disconnected during pairing" });
+  });
+
+  test("bounds an unanswered request and closes its socket", async () => {
+    const { socket, result } = pairing(10);
+    const failure = result.catch((cause) => cause);
+    socket.open();
+    socket.receive({ type: "pairPending" });
+    expect(await failure).toMatchObject({ message: "pair request timed out waiting for approval" });
+    expect(socket.readyState).toBe(3);
+  });
+
+  test("rejects an unrelated response instead of authenticating", async () => {
+    const { socket, result } = pairing();
+    const failure = result.catch((cause) => cause);
+    socket.open();
+    socket.receive({ type: "hello", protocolVersion: PROTOCOL_VERSION, daemonVersion: "test" });
+    expect(await failure).toMatchObject({ message: "Goddard daemon sent an invalid pairing response" });
+    expect(socket.readyState).toBe(3);
+  });
+
+  test("reports a socket setup failure", async () => {
+    await expect(requestPair("127.0.0.1:4312", "iOS test device", {
+      webSocketFactory: () => { throw new Error("Socket unavailable"); },
+    })).rejects.toThrow("Socket unavailable");
   });
 });
