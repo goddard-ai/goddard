@@ -21537,6 +21537,7 @@ mod instruction_pins;
 mod plan_acceptance;
 mod rotation_oracle;
 mod rotation_status;
+mod summon_recovery;
 
 mod employee_composer;
 

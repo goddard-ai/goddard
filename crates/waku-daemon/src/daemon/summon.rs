@@ -1438,23 +1438,25 @@ impl WakuBackend {
             fingerprint_fields["purpose"] = serde_json::to_value(purpose)?;
         }
         let fingerprint = serde_json::to_string(&fingerprint_fields)?;
-        if let Some(request_id) = request_id
-            && let Some(existing) = self
-                .boss
-                .document()
+        if let Some(request_id) = request_id {
+            let document = self.boss.document();
+            if let Some(existing) = document
                 .employees
                 .iter()
+                .chain(document.retired_employees.iter())
                 .find(|entry| entry.request_id == Some(request_id))
-                .cloned()
-        {
-            if existing.request_fingerprint.as_deref() == Some(fingerprint.as_str())
-                || (explicit_purpose.is_none()
-                    && existing.request_fingerprint.as_deref() == Some(legacy_fingerprint.as_str()))
             {
-                // Lost-response retry — the original admission stands.
-                return Ok((existing.session_id, false));
+                if existing.request_fingerprint.as_deref() == Some(fingerprint.as_str())
+                    || (explicit_purpose.is_none()
+                        && existing.request_fingerprint.as_deref()
+                            == Some(legacy_fingerprint.as_str()))
+                {
+                    // Lost-response retry — the original admission stands,
+                    // including after its roster record has retired.
+                    return Ok((existing.session_id, false));
+                }
+                bail!("requestId was already used for a different summon");
             }
-            bail!("requestId was already used for a different summon");
         }
         let purpose = resolved_purpose.ok_or_else(|| anyhow!(
             "summon requires purpose (building or helping) or a persona default or explicit assignmentKind (implementation or research)"
@@ -1464,19 +1466,6 @@ impl WakuBackend {
         let plan_binding =
             self.boss
                 .effective_plan_binding(plan.as_deref(), outcome_id, item, assignment_kind)?;
-        // The assignment link resolves the same way: unknown or closed tasks,
-        // a second live finisher, the finisher/intent conflict, an
-        // out-of-task prerequisite, and new work during the finishing
-        // phase all fail at admission. A `newOutcome` summon creates its
-        // parent atomically with this assignment.
-        let assignment = self.boss.assignment_admission(
-            outcome_id,
-            new_outcome,
-            finishes_outcome,
-            after_success,
-            prerequisites,
-            plan_binding.as_ref().map(|binding| binding.plan_id),
-        )?;
         if let Some(adopt) = &adopt_worktree {
             self.resolve_worktree_adoption(Path::new(&project), adopt, None)?;
         }
@@ -1537,7 +1526,7 @@ impl WakuBackend {
             pending_prompts: Vec::new(),
             group_id,
             priority,
-            outcome_id: assignment.as_ref().map(|assignment| assignment.outcome_id),
+            outcome_id,
             reservation: None,
             pending_resources: None,
             pending_reservation: None,
@@ -1555,25 +1544,27 @@ impl WakuBackend {
         employee.plan_id = plan_binding.as_ref().map(|binding| binding.plan_id);
         employee.item_id = item;
         employee.plan_binding = plan_binding;
-        employee.assignment = assignment.clone();
         // The task shell lands before the roster does — a client that
         // opens the new employee immediately finds the assignment's
         // session, still unstarted: no worktree, no runtime, no claims.
         self.create_employee_shell(&employee, &resolved, &ticket)?;
         let session_id = employee.session_id;
-        if let Err(error) = self.boss.enqueue_ticket(employee.clone(), ticket) {
-            self.remove_session_shell(session_id);
-            return Err(error);
-        }
-        // The task's finishing pointer lands once the employee exists —
-        // admission already proved the designation is free to take.
-        if let Some(assignment) = assignment
-            .as_ref()
-            .filter(|assignment| assignment.finishes_outcome)
-        {
-            self.boss
-                .designate_finisher(assignment.outcome_id, session_id)?;
-        }
+        // Outcome validation and publication share the employee's admission
+        // transaction, including a new parent and its finishing designation.
+        let employee = match self.boss.enqueue_assignment(
+            employee,
+            ticket,
+            new_outcome,
+            finishes_outcome,
+            after_success,
+            prerequisites,
+        ) {
+            Ok(employee) => employee,
+            Err(error) => {
+                self.remove_session_shell(session_id);
+                return Err(error);
+            }
+        };
         self.post_summon_marker(supervisor, &employee, events)?;
         self.wake_summon_queue();
         Ok((session_id, true))

@@ -1,0 +1,1 @@
+- Retrying a Boss employee summon with the same request ID returns the original employee even after retirement and restart.

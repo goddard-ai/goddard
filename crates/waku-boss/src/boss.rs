@@ -1638,16 +1638,36 @@ impl BossService {
         Ok(updated.unwrap())
     }
 
-    /// The summon-time half of a assignment link: validate the task (or
-    /// create it for a `newOutcome` summon), the finisher designation, and
-    /// the captured completion behavior, then return the `Assignment` the
-    /// employee record carries. A `newOutcome` summon creates its parent
-    /// atomically with the assignment — validation failures happen
-    /// before the write, so no orphan task survives a rejected summon.
-    /// The task's `finishing_assignment` pointer lands later through
-    /// [`BossService::designate_finisher`], once the employee id exists.
+    /// Resolve an assignment and persist its parent outcome bookkeeping.
+    /// New summons use `enqueue_assignment` to commit the parent, employee,
+    /// ticket and finishing designation together.
     pub fn assignment_admission(
         &self,
+        outcome_id: Option<Uuid>,
+        new_outcome: Option<NewOutcome>,
+        finishes_outcome: bool,
+        after_success: Option<String>,
+        prerequisites: Vec<Uuid>,
+        plan: Option<Uuid>,
+    ) -> anyhow::Result<Option<Assignment>> {
+        let mut assignment = None;
+        self.update(|state| {
+            assignment = Self::resolve_assignment(
+                state,
+                outcome_id,
+                new_outcome,
+                finishes_outcome,
+                after_success,
+                prerequisites,
+                plan,
+            )?;
+            Ok(())
+        })?;
+        Ok(assignment)
+    }
+
+    fn resolve_assignment(
+        state: &mut BossState,
         outcome_id: Option<Uuid>,
         new_outcome: Option<NewOutcome>,
         finishes_outcome: bool,
@@ -1666,152 +1686,144 @@ impl BossService {
             );
         }
         let resolved_id;
-        {
-            // The `newOutcome` write and its first link commit in one update:
-            // validation runs first, so a rejected assignment leaves no
-            // orphan parent behind.
-            let mut state = self.state.lock();
-            if let Some(input) = &new_outcome {
-                let mut task = Self::new_outcome_record(&input.outcome, &input.success_criteria)?;
-                task.plan_id = plan;
-                anyhow::ensure!(
-                    !finishes_outcome || !task.success_criteria.is_empty(),
-                    "a finishing assignment requires the task's success criteria to be explicit"
-                );
-                resolved_id = task.id;
-                state.outcomes.push(task);
-            } else {
-                resolved_id = outcome_id.unwrap_or_default();
-            }
-            if outcome_id.is_none() && new_outcome.is_none() {
-                anyhow::ensure!(
-                    !finishes_outcome,
-                    "a finishing assignment requires a task — pass outcomeId or newOutcome"
-                );
-                anyhow::ensure!(
-                    after_success.is_none(),
-                    "afterSuccess applies only to task assignments — pass outcomeId"
-                );
-                anyhow::ensure!(
-                    prerequisites.is_empty(),
-                    "prerequisites apply only to task assignments — pass outcomeId"
-                );
-                return Ok(None);
-            }
-            let outcome_id = resolved_id;
-            let task = state
-                .outcomes
-                .iter()
-                .find(|task| task.id == outcome_id)
-                .ok_or_else(|| anyhow!("unknown task {outcome_id}"))?;
+        if let Some(input) = &new_outcome {
+            let mut task = Self::new_outcome_record(&input.outcome, &input.success_criteria)?;
+            task.plan_id = plan;
             anyhow::ensure!(
-                !task.terminal(),
-                "task {outcome_id} is {}; reopen it before assigning new assignments",
-                task.state.label()
+                !finishes_outcome || !task.success_criteria.is_empty(),
+                "a finishing assignment requires the task's success criteria to be explicit"
             );
-            let finisher = task.finishing_assignment.and_then(|session| {
-                state
-                    .employees
+            resolved_id = task.id;
+            state.outcomes.push(task);
+        } else {
+            resolved_id = outcome_id.unwrap_or_default();
+        }
+        if outcome_id.is_none() && new_outcome.is_none() {
+            anyhow::ensure!(
+                !finishes_outcome,
+                "a finishing assignment requires a task — pass outcomeId or newOutcome"
+            );
+            anyhow::ensure!(
+                after_success.is_none(),
+                "afterSuccess applies only to task assignments — pass outcomeId"
+            );
+            anyhow::ensure!(
+                prerequisites.is_empty(),
+                "prerequisites apply only to task assignments — pass outcomeId"
+            );
+            return Ok(None);
+        }
+        let outcome_id = resolved_id;
+        let task = state
+            .outcomes
+            .iter()
+            .find(|task| task.id == outcome_id)
+            .ok_or_else(|| anyhow!("unknown task {outcome_id}"))?;
+        anyhow::ensure!(
+            !task.terminal(),
+            "task {outcome_id} is {}; reopen it before assigning new assignments",
+            task.state.label()
+        );
+        let finisher = task.finishing_assignment.and_then(|session| {
+            state
+                .employees
+                .iter()
+                .find(|employee| employee.session_id == session)
+        });
+        let finisher_live =
+            finisher.is_some_and(|employee| !employee.expired && !employee.cancelled);
+        if finishes_outcome {
+            anyhow::ensure!(
+                !state
+                    .chains
                     .iter()
-                    .find(|employee| employee.session_id == session)
-            });
-            let finisher_live =
-                finisher.is_some_and(|employee| !employee.expired && !employee.cancelled);
-            if finishes_outcome {
-                anyhow::ensure!(
-                    !state
-                        .chains
-                        .iter()
-                        .any(|chain| chain.request.outcome_id == outcome_id
-                            && chain.finisher_reserved),
-                    "task {outcome_id} has a reserved chain finisher"
-                );
-                anyhow::ensure!(
-                    after_success.is_none(),
-                    "a finishing assignment completes the task silently — it cannot also carry follow-up intent"
-                );
-                anyhow::ensure!(
-                    !task.success_criteria.trim().is_empty(),
-                    "a finishing assignment requires the task's success criteria to be explicit"
-                );
-                anyhow::ensure!(
-                    !finisher_live,
-                    "task {outcome_id} already has a finishing assignment — cancel it or let it settle before designating another"
-                );
-            } else {
-                // The finishing phase keeps its completion contract
-                // stable — new ordinary work waits until the attempt
-                // resolves or is stopped.
-                anyhow::ensure!(
-                    !finisher_live,
-                    "task {outcome_id} is in its finishing phase — stop the finishing assignment before assigning more work"
-                );
-            }
-            // Prerequisites must be sibling assignments on this task. A new
-            // leaf cannot close a cycle — nothing declared dependents on
-            // an employee that does not exist yet.
-            for prerequisite in &prerequisites {
-                let sibling = state
-                    .employees
-                    .iter()
-                    .chain(state.retired_employees.iter())
-                    .find(|employee| employee.session_id == *prerequisite)
-                    .ok_or_else(|| anyhow!("unknown prerequisite assignment {prerequisite}"))?;
-                let belongs = sibling
-                    .assignment
-                    .as_ref()
-                    .is_some_and(|assignment| assignment.outcome_id == outcome_id);
-                anyhow::ensure!(
-                    belongs,
-                    "prerequisite {prerequisite} is not a assignment of task {outcome_id}"
-                );
-                anyhow::ensure!(
-                    !sibling.cancelled,
-                    "prerequisite {prerequisite} is cancelled — replace it with a new assignment"
-                );
-            }
-            // Meaningful activity: an assignment restarts the task's
-            // unattended clock.
-            if let Some(entry) = state
+                    .any(|chain| chain.request.outcome_id == outcome_id && chain.finisher_reserved),
+                "task {outcome_id} has a reserved chain finisher"
+            );
+            anyhow::ensure!(
+                after_success.is_none(),
+                "a finishing assignment completes the task silently — it cannot also carry follow-up intent"
+            );
+            anyhow::ensure!(
+                !task.success_criteria.trim().is_empty(),
+                "a finishing assignment requires the task's success criteria to be explicit"
+            );
+            anyhow::ensure!(
+                !finisher_live,
+                "task {outcome_id} already has a finishing assignment — cancel it or let it settle before designating another"
+            );
+        } else {
+            // The finishing phase keeps its completion contract
+            // stable — new ordinary work waits until the attempt
+            // resolves or is stopped.
+            anyhow::ensure!(
+                !finisher_live,
+                "task {outcome_id} is in its finishing phase — stop the finishing assignment before assigning more work"
+            );
+        }
+        // Prerequisites must be sibling assignments on this task. A new
+        // leaf cannot close a cycle — nothing declared dependents on
+        // an employee that does not exist yet.
+        for prerequisite in &prerequisites {
+            let sibling = state
+                .employees
+                .iter()
+                .chain(state.retired_employees.iter())
+                .find(|employee| employee.session_id == *prerequisite)
+                .ok_or_else(|| anyhow!("unknown prerequisite assignment {prerequisite}"))?;
+            let belongs = sibling
+                .assignment
+                .as_ref()
+                .is_some_and(|assignment| assignment.outcome_id == outcome_id);
+            anyhow::ensure!(
+                belongs,
+                "prerequisite {prerequisite} is not a assignment of task {outcome_id}"
+            );
+            anyhow::ensure!(
+                !sibling.cancelled,
+                "prerequisite {prerequisite} is cancelled — replace it with a new assignment"
+            );
+        }
+        // Meaningful activity: an assignment restarts the task's
+        // unattended clock.
+        if let Some(entry) = state
+            .outcomes
+            .iter_mut()
+            .find(|entry| entry.id == outcome_id)
+        {
+            entry.last_activity_at = waku_protocol::model::unix_time();
+            entry.unattended_since = None;
+        }
+        if let Some(input_plan) = plan
+            && let Some(entry) = state
                 .outcomes
                 .iter_mut()
                 .find(|entry| entry.id == outcome_id)
-            {
-                entry.last_activity_at = waku_protocol::model::unix_time();
-                entry.unattended_since = None;
-            }
-            if let Some(input_plan) = plan
-                && let Some(entry) = state
-                    .outcomes
-                    .iter_mut()
-                    .find(|entry| entry.id == outcome_id)
-                && entry.plan_id.is_none()
-            {
-                entry.plan_id = Some(input_plan);
-            }
-            Ok(Some(Assignment {
-                outcome_id,
-                after_success: if finishes_outcome {
-                    String::new()
-                } else {
-                    let intent = after_success.unwrap_or_default();
-                    let intent = intent.trim();
-                    if intent.is_empty() {
-                        DEFAULT_AFTER_SUCCESS.to_owned()
-                    } else {
-                        intent.to_owned()
-                    }
-                },
-                finishes_outcome,
-                prerequisites,
-            }))
+            && entry.plan_id.is_none()
+        {
+            entry.plan_id = Some(input_plan);
         }
+        Ok(Some(Assignment {
+            outcome_id,
+            after_success: if finishes_outcome {
+                String::new()
+            } else {
+                let intent = after_success.unwrap_or_default();
+                let intent = intent.trim();
+                if intent.is_empty() {
+                    DEFAULT_AFTER_SUCCESS.to_owned()
+                } else {
+                    intent.to_owned()
+                }
+            },
+            finishes_outcome,
+            prerequisites,
+        }))
     }
 
-    /// Point a task's finishing designation at an admitted assignment — the
-    /// second half of a `finishesOutcome` summon, written after the employee
-    /// record exists. A fresh designation supersedes the previous
-    /// completion conflict: the boss has chosen the next attempt.
+    /// Update the finishing designation for an existing assignment. New summons
+    /// set it in `enqueue_assignment`'s transaction. A fresh designation clears
+    /// the previous completion conflict: the boss has chosen the next attempt.
     pub fn designate_finisher(&self, outcome_id: Uuid, assignment: Uuid) -> anyhow::Result<()> {
         self.update(|state| {
             anyhow::ensure!(
@@ -3425,24 +3437,71 @@ impl BossService {
     pub fn enqueue_ticket(
         &self,
         mut employee: BossEmployee,
-        mut ticket: SummonTicket,
+        ticket: SummonTicket,
     ) -> anyhow::Result<BossEmployee> {
-        let now = waku_protocol::model::unix_time();
+        self.update(|state| Self::enqueue_employee(state, &mut employee, ticket))?;
+        Ok(employee)
+    }
+
+    /// Commit a summon and all its outcome bookkeeping in one write. Failed
+    /// validation or persistence leaves neither an orphan parent nor a
+    /// partially admitted finishing assignment.
+    pub fn enqueue_assignment(
+        &self,
+        mut employee: BossEmployee,
+        mut ticket: SummonTicket,
+        new_outcome: Option<NewOutcome>,
+        finishes_outcome: bool,
+        after_success: Option<String>,
+        prerequisites: Vec<Uuid>,
+    ) -> anyhow::Result<BossEmployee> {
         self.update(|state| {
-            plan_contract::validate_binding(state, &employee)?;
-            state.next_sequence = state.next_sequence.saturating_add(1);
-            ticket.sequence = state.next_sequence;
-            employee.set_lifecycle(EmployeeLifecycle::Queued, now);
-            employee.queued_at = Some(now);
-            if let Some(group) = ticket.group_id.clone() {
-                join_wave(state, &group, &employee);
+            employee.assignment = Self::resolve_assignment(
+                state,
+                ticket.outcome_id,
+                new_outcome,
+                finishes_outcome,
+                after_success,
+                prerequisites,
+                employee.plan_id,
+            )?;
+            ticket.outcome_id = employee.assignment.as_ref().map(|link| link.outcome_id);
+            if let Some(assignment) = employee
+                .assignment
+                .as_ref()
+                .filter(|assignment| assignment.finishes_outcome)
+            {
+                let outcome = state
+                    .outcomes
+                    .iter_mut()
+                    .find(|outcome| outcome.id == assignment.outcome_id)
+                    .expect("assignment parent validated above");
+                outcome.finishing_assignment = Some(employee.session_id);
+                outcome.completion_conflict = None;
             }
-            employee.ticket = Some(ticket);
-            state.employees.push(employee.clone());
-            record_assignment_admission(state, &employee, now);
-            Ok(())
+            Self::enqueue_employee(state, &mut employee, ticket)
         })?;
         Ok(employee)
+    }
+
+    fn enqueue_employee(
+        state: &mut BossState,
+        employee: &mut BossEmployee,
+        mut ticket: SummonTicket,
+    ) -> anyhow::Result<()> {
+        let now = waku_protocol::model::unix_time();
+        plan_contract::validate_binding(state, employee)?;
+        state.next_sequence = state.next_sequence.saturating_add(1);
+        ticket.sequence = state.next_sequence;
+        employee.set_lifecycle(EmployeeLifecycle::Queued, now);
+        employee.queued_at = Some(now);
+        if let Some(group) = ticket.group_id.clone() {
+            join_wave(state, &group, employee);
+        }
+        employee.ticket = Some(ticket);
+        state.employees.push(employee.clone());
+        record_assignment_admission(state, employee, now);
+        Ok(())
     }
 
     /// Park a follow-up on a queued ticket — it joins the dispatch

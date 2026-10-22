@@ -1,0 +1,1 @@
+- Failed Boss employee summons no longer leave orphan outcomes, and new outcomes and finishing assignments are saved together.
