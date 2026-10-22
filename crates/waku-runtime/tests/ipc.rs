@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Stage-2C transport checks over real Unix sockets: roles, fencing,
 //! attach/detach replay, agent ingress, and the service bridge — all
 //! through the private IPC a daemon and agent would actually use.
@@ -164,13 +166,18 @@ fn wrong_credential_and_foreign_namespace_are_refused() {
 
 #[test]
 fn malformed_frames_close_without_harming_the_server() {
-    use std::io::Write;
+    use std::io::{ErrorKind, Read, Write};
     let rig = serve();
     let mut stream = waku_runtime::ipc::connect(rig.root.path()).unwrap();
     // Garbage where a frame belongs: the server drops the connection.
     stream.write_all(b"not-a-frame-at-all").unwrap();
-    let response: Option<WireResponse> = waku_runtime::ipc::recv(&mut stream).unwrap();
-    assert!(response.is_none());
+    // Closing with unread input can reset the socket on Linux. Both EOF and
+    // a reset prove the server closed it without returning response bytes.
+    match stream.read(&mut [0u8; 1]) {
+        Ok(0) => {}
+        Err(error) if error.kind() == ErrorKind::ConnectionReset => {}
+        result => panic!("malformed connection must close without a response: {result:?}"),
+    }
     // The server is untouched: a clean client still connects and works.
     let mut client = rig.controller();
     let status = client.status().unwrap();

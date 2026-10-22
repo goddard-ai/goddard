@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! The executable boundary: a spawned `waku-runtime-host` serving real
 //! IPC, surviving controller replacement, and recovering honestly from a
 //! kill. Barriers are file/process state — endpoint publication and exit
