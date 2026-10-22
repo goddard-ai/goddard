@@ -12,6 +12,8 @@ use anyhow::{Context as _, anyhow, bail};
 use waku_git::process::GitCommand as _;
 
 const MAX_HYDRATED_PATCH_BYTES: usize = 32 * 1024 * 1024;
+// Leave room for the response envelope after JSON string escaping.
+const MAX_REVIEW_WIRE_BYTES: usize = waku_protocol::MAX_WIRE_MESSAGE_BYTES - 64 * 1024;
 /// Binary reads base64-encode on the wire; 32 MiB stays well under
 /// `MAX_WIRE_MESSAGE_BYTES` (48 MiB) once encoded.
 const MAX_BINARY_FILE_BYTES: u64 = 32 * 1024 * 1024;
@@ -938,20 +940,26 @@ struct DiffRange {
 }
 
 fn collect_review_diff(cwd: &Path, source: ReviewDiffSource) -> anyhow::Result<ReviewDiffData> {
+    waku_git::process::with_deadline(
+        std::time::Instant::now() + waku_git::process::READ_TIMEOUT,
+        || collect_review_diff_inner(cwd, source),
+    )
+}
+
+fn collect_review_diff_inner(
+    cwd: &Path,
+    source: ReviewDiffSource,
+) -> anyhow::Result<ReviewDiffData> {
     ensure_repository(cwd)?;
     let range = resolve_diff_range(cwd, source)?;
-    let numstat = diff_output(cwd, &range, &["--numstat"])?;
-    let hydrated = diff_output(cwd, &range, &["--unified=2147483647"])?;
-    let (patch, complete_context) = if hydrated.len() <= MAX_HYDRATED_PATCH_BYTES {
-        (hydrated, true)
-    } else {
-        (diff_output(cwd, &range, &["--unified=3"])?, false)
-    };
-    Ok(ReviewDiffData {
-        source,
-        numstat,
-        patch,
-        complete_context,
+    let numstat = diff_output(
+        cwd,
+        &range,
+        &["--numstat"],
+        waku_git::process::MAX_METADATA_BYTES,
+    )?;
+    bounded_review_diff(source, numstat, |mode| {
+        diff_output(cwd, &range, &[mode], MAX_HYDRATED_PATCH_BYTES)
     })
 }
 
@@ -960,6 +968,13 @@ fn collect_review_diff(cwd: &Path, source: ReviewDiffSource) -> anyhow::Result<R
 /// An unstaged path with no index entry is an untracked file and diffs as a
 /// new file through `--no-index`.
 fn file_diff(cwd: &Path, path: &str, staged: bool) -> anyhow::Result<ReviewDiffData> {
+    waku_git::process::with_deadline(
+        std::time::Instant::now() + waku_git::process::READ_TIMEOUT,
+        || file_diff_inner(cwd, path, staged),
+    )
+}
+
+fn file_diff_inner(cwd: &Path, path: &str, staged: bool) -> anyhow::Result<ReviewDiffData> {
     ensure_repository(cwd)?;
     let source = if staged {
         ReviewDiffSource::Staged
@@ -981,21 +996,14 @@ fn file_diff(cwd: &Path, path: &str, staged: bool) -> anyhow::Result<ReviewDiffD
             vec![mode, "--no-index", "/dev/null", path]
         }
     };
-    let numstat = file_diff_output(cwd, &diff_args("--numstat"), !tracked)?;
-    let hydrated = file_diff_output(cwd, &diff_args("--unified=2147483647"), !tracked)?;
-    let (patch, complete_context) = if hydrated.len() <= MAX_HYDRATED_PATCH_BYTES {
-        (hydrated, true)
-    } else {
-        (
-            file_diff_output(cwd, &diff_args("--unified=3"), !tracked)?,
-            false,
-        )
-    };
-    Ok(ReviewDiffData {
-        source,
-        numstat,
-        patch,
-        complete_context,
+    let numstat = file_diff_output(
+        cwd,
+        &diff_args("--numstat"),
+        !tracked,
+        waku_git::process::MAX_METADATA_BYTES,
+    )?;
+    bounded_review_diff(source, numstat, |mode| {
+        file_diff_output(cwd, &diff_args(mode), !tracked, MAX_HYDRATED_PATCH_BYTES)
     })
 }
 
@@ -1003,41 +1011,121 @@ fn file_diff(cwd: &Path, path: &str, staged: bool) -> anyhow::Result<ReviewDiffD
 /// parent, or the empty tree for a root commit. A merge reads as the delta
 /// the merge brought in.
 fn commit_diff(cwd: &Path, sha: &str) -> anyhow::Result<ReviewDiffData> {
+    waku_git::process::with_deadline(
+        std::time::Instant::now() + waku_git::process::READ_TIMEOUT,
+        || commit_diff_inner(cwd, sha),
+    )
+}
+
+fn commit_diff_inner(cwd: &Path, sha: &str) -> anyhow::Result<ReviewDiffData> {
     ensure_repository(cwd)?;
     let to = resolve(cwd, sha).ok_or_else(|| anyhow!("unknown commit {sha}"))?;
     let from = resolve(cwd, &format!("{sha}^")).unwrap_or_else(|| EMPTY_TREE.to_owned());
     let range = DiffRange { from, to };
-    let numstat = diff_output(cwd, &range, &["--numstat"])?;
-    let hydrated = diff_output(cwd, &range, &["--unified=2147483647"])?;
-    let (patch, complete_context) = if hydrated.len() <= MAX_HYDRATED_PATCH_BYTES {
-        (hydrated, true)
-    } else {
-        (diff_output(cwd, &range, &["--unified=3"])?, false)
-    };
-    Ok(ReviewDiffData {
-        source: ReviewDiffSource::Commit,
-        numstat,
-        patch,
-        complete_context,
+    let numstat = diff_output(
+        cwd,
+        &range,
+        &["--numstat"],
+        waku_git::process::MAX_METADATA_BYTES,
+    )?;
+    bounded_review_diff(ReviewDiffSource::Commit, numstat, |mode| {
+        diff_output(cwd, &range, &[mode], MAX_HYDRATED_PATCH_BYTES)
     })
+}
+
+/// Retry only a size-limited read. Both successful forms contain every
+/// changed hunk; `complete_context=false` never means an arbitrary prefix.
+fn bounded_review_diff(
+    source: ReviewDiffSource,
+    numstat: String,
+    mut patch: impl FnMut(&'static str) -> anyhow::Result<String>,
+) -> anyhow::Result<ReviewDiffData> {
+    let mut data = ReviewDiffData {
+        source,
+        numstat,
+        patch: String::new(),
+        complete_context: true,
+    };
+    match patch("--unified=2147483647") {
+        Ok(hydrated) => {
+            data.patch = hydrated;
+            if review_diff_fits_wire(&data, MAX_REVIEW_WIRE_BYTES) {
+                return Ok(data);
+            }
+            // Release full context before launching the fallback command.
+            data.patch = String::new();
+        }
+        Err(error)
+            if error
+                .downcast_ref::<waku_git::process::CaptureError>()
+                .is_some_and(|error| {
+                    matches!(
+                        error,
+                        waku_git::process::CaptureError::OutputLimit {
+                            stream: "stdout",
+                            ..
+                        }
+                    )
+                }) =>
+        {
+            ()
+        }
+        Err(error) => return Err(error),
+    }
+    data.complete_context = false;
+    data.patch =
+        patch("--unified=3").context("Git diff is too large to preview or could not be read")?;
+    if !review_diff_fits_wire(&data, MAX_REVIEW_WIRE_BYTES) {
+        bail!("Git diff is too large to preview; open individual changed files");
+    }
+    Ok(data)
+}
+
+fn review_diff_fits_wire(data: &ReviewDiffData, maximum_bytes: usize) -> bool {
+    struct Budget(usize);
+    impl std::io::Write for Budget {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() > self.0 {
+                return Err(std::io::Error::other(
+                    "Git diff exceeds the response size limit",
+                ));
+            }
+            self.0 -= bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    // Count serialization without retaining a second complete copy of it.
+    serde_json::to_writer(Budget(maximum_bytes), data).is_ok()
 }
 
 /// `git diff` output for a single path. `no_index` runs the
 /// `/dev/null`-vs-file form, where exit status 1 still means success (the
 /// files differed).
-fn file_diff_output(cwd: &Path, args: &[&str], no_index: bool) -> anyhow::Result<String> {
-    let output = crate::command_env::search_path_command("git")
-        .args([
-            "-c",
-            "core.quotePath=false",
-            "diff",
-            "--no-ext-diff",
-            "--no-color",
-        ])
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .context("failed to generate Git diff")?;
+fn file_diff_output(
+    cwd: &Path,
+    args: &[&str],
+    no_index: bool,
+    maximum_bytes: usize,
+) -> anyhow::Result<String> {
+    let output = waku_git::process::read_until(
+        crate::command_env::search_path_command("git")
+            .label("git:diff")
+            .args([
+                "-c",
+                "core.quotePath=false",
+                "diff",
+                "--no-ext-diff",
+                "--no-color",
+            ])
+            .args(args)
+            .current_dir(cwd),
+        std::time::Instant::now() + waku_git::process::READ_TIMEOUT,
+        maximum_bytes,
+    )
+    .context("failed to generate Git diff")?;
     if output.status.success() || (no_index && output.status.code() == Some(1)) {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
@@ -1149,23 +1237,32 @@ fn index_tree(cwd: &Path) -> anyhow::Result<String> {
     }
 }
 
-fn diff_output(cwd: &Path, range: &DiffRange, modes: &[&str]) -> anyhow::Result<String> {
-    let output = crate::command_env::search_path_command("git")
-        .args([
-            "-c",
-            "core.quotePath=false",
-            "diff",
-            "--no-ext-diff",
-            "--no-color",
-        ])
-        .args(modes)
-        .arg("--no-renames")
-        .arg(&range.from)
-        .arg(&range.to)
-        .args(["--", "."])
-        .current_dir(cwd)
-        .output()
-        .context("failed to generate Git diff")?;
+fn diff_output(
+    cwd: &Path,
+    range: &DiffRange,
+    modes: &[&str],
+    maximum_bytes: usize,
+) -> anyhow::Result<String> {
+    let output = waku_git::process::read_until(
+        crate::command_env::search_path_command("git")
+            .label("git:diff")
+            .args([
+                "-c",
+                "core.quotePath=false",
+                "diff",
+                "--no-ext-diff",
+                "--no-color",
+            ])
+            .args(modes)
+            .arg("--no-renames")
+            .arg(&range.from)
+            .arg(&range.to)
+            .args(["--", "."])
+            .current_dir(cwd),
+        std::time::Instant::now() + waku_git::process::READ_TIMEOUT,
+        maximum_bytes,
+    )
+    .context("failed to generate Git diff")?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
@@ -1231,6 +1328,68 @@ mod tests {
 
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn review_diff_falls_back_only_for_complete_output_overflow() {
+        let mut modes = Vec::new();
+        let data = bounded_review_diff(ReviewDiffSource::Staged, "1\t0\tfile\n".into(), |mode| {
+            modes.push(mode);
+            if mode == "--unified=2147483647" {
+                Err(waku_git::process::CaptureError::OutputLimit {
+                    stream: "stdout",
+                    limit: MAX_HYDRATED_PATCH_BYTES,
+                }
+                .into())
+            } else {
+                Ok("complete compact patch".into())
+            }
+        })
+        .unwrap();
+        assert_eq!(modes, ["--unified=2147483647", "--unified=3"]);
+        assert_eq!(data.patch, "complete compact patch");
+        assert_eq!(data.numstat, "1\t0\tfile\n");
+        assert!(!data.complete_context);
+
+        let mut calls = 0;
+        let error = bounded_review_diff(ReviewDiffSource::Staged, String::new(), |_| {
+            calls += 1;
+            Err(waku_git::process::CaptureError::Deadline.into())
+        })
+        .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<waku_git::process::CaptureError>()
+                .is_some()
+        );
+        assert_eq!(calls, 1, "timeouts must not restart Git");
+    }
+
+    #[test]
+    fn review_diff_rejects_oversized_compact_output_and_counts_json_escaping() {
+        let mut calls = 0;
+        assert!(
+            bounded_review_diff(ReviewDiffSource::Staged, String::new(), |_| {
+                calls += 1;
+                Err(waku_git::process::CaptureError::OutputLimit {
+                    stream: "stdout",
+                    limit: MAX_HYDRATED_PATCH_BYTES,
+                }
+                .into())
+            })
+            .is_err()
+        );
+        assert_eq!(calls, 2);
+
+        let data = ReviewDiffData {
+            source: ReviewDiffSource::Staged,
+            numstat: "1\t0\tfile\n".into(),
+            patch: "\"\u{0}\n\\".into(),
+            complete_context: true,
+        };
+        let serialized = serde_json::to_vec(&data).unwrap();
+        assert!(review_diff_fits_wire(&data, serialized.len()));
+        assert!(!review_diff_fits_wire(&data, serialized.len() - 1));
+    }
 
     fn git_ok(cwd: &Path, args: &[&str]) {
         let output = crate::command_env::search_path_command("git")
