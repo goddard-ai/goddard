@@ -1458,17 +1458,14 @@ impl Waku {
             "land" => Some(("icons/git-merge.svg", tr!("suggestions.land"))),
             // These canned ids label the action rather than echoing the
             // prompt the chip sends.
-            "implement-plan" => Some(("icons/compass.svg", tr!("suggestions.implement_plan"))),
-            "approve-plan" => Some(("icons/circle-check.svg", tr!("boss.plan_finalize"))),
-            "whats-next" => Some(("icons/circle-help.svg", tr!("suggestions.whats_next"))),
-            "address-review" => Some((
-                "icons/git-pull-request.svg",
-                tr!("suggestions.address_review"),
-            )),
-            "fix-ci" => Some(("icons/wrench.svg", tr!("suggestions.fix_ci"))),
+            "implement-plan" => Some(("icons/chat.svg", tr!("suggestions.implement_plan"))),
+            "approve-plan" => Some(("icons/chat.svg", tr!("boss.plan_finalize"))),
+            "whats-next" => Some(("icons/chat.svg", tr!("suggestions.whats_next"))),
+            "address-review" => Some(("icons/chat.svg", tr!("suggestions.address_review"))),
+            "fix-ci" => Some(("icons/chat.svg", tr!("suggestions.fix_ci"))),
             canned => {
                 let prompt = suggested_prompt(canned, &self.state.suggested_prompts)?;
-                Some(("icons/sparkle.svg", prompt))
+                Some(("icons/chat.svg", prompt))
             }
         }
     }

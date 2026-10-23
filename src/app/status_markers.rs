@@ -1049,7 +1049,7 @@ impl Waku {
                             .unwrap_or_else(|| tr!("suggestions.proceed")),
                         ),
                         StatusSuggestedAction::MakeItHappen => (
-                            "icons/play.svg",
+                            "icons/chat.svg",
                             action_predictions::suggested_prompt(
                                 "make-it-happen",
                                 &self.state.suggested_prompts,
@@ -1057,7 +1057,7 @@ impl Waku {
                             .unwrap_or_else(|| tr!("suggestions.make_it_happen")),
                         ),
                         StatusSuggestedAction::KeepGoing => (
-                            "icons/sparkle.svg",
+                            "icons/chat.svg",
                             action_predictions::suggested_prompt(
                                 "keep-going",
                                 &self.state.suggested_prompts,
@@ -1065,7 +1065,7 @@ impl Waku {
                             .unwrap_or_else(|| tr!("suggestions.keep_going")),
                         ),
                         StatusSuggestedAction::FixErrors => (
-                            "icons/sparkle.svg",
+                            "icons/chat.svg",
                             action_predictions::suggested_prompt(
                                 "fix-errors",
                                 &self.state.suggested_prompts,
@@ -1073,7 +1073,7 @@ impl Waku {
                             .unwrap_or_else(|| tr!("suggestions.fix_errors")),
                         ),
                         StatusSuggestedAction::RunTests => (
-                            "icons/sparkle.svg",
+                            "icons/chat.svg",
                             action_predictions::suggested_prompt(
                                 "run-tests",
                                 &self.state.suggested_prompts,
@@ -1089,12 +1089,12 @@ impl Waku {
                                 .unwrap_or_else(|| tr!("suggestions.you_decide")),
                         ),
                         StatusSuggestedAction::Diagnose => (
-                            "icons/search.svg",
+                            "icons/chat.svg",
                             action_predictions::suggested_action_title("diagnose")
                                 .unwrap_or_else(|| tr!("suggestions.diagnose")),
                         ),
                         StatusSuggestedAction::Done => (
-                            "icons/check.svg",
+                            "icons/chat.svg",
                             action_predictions::suggested_prompt(
                                 "done",
                                 &self.state.suggested_prompts,
