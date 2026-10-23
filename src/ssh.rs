@@ -15,7 +15,7 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, bail};
@@ -222,9 +222,39 @@ fi
 printf '%s\n%s\n%s\n' "$token" "$port" "$proto"
 "#;
 
-/// State directory shared by control sockets and the askpass queue.
+/// State directory for the askpass queue and helper.
 fn ssh_dir() -> PathBuf {
     waku_client::persistence::StateStore::default_path().with_file_name("ssh")
+}
+
+/// Keep socket paths short even with a long checkout or data-directory override.
+/// OpenSSH appends 17 bytes while binding; macOS allows only 103 path bytes.
+fn control_dir(state_dir: &Path) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    state_dir.hash(&mut hasher);
+    // SAFETY: geteuid has no preconditions and does not mutate process state.
+    let uid = unsafe { libc::geteuid() };
+    PathBuf::from(format!("/tmp/gd-ssh-{uid}-{:016x}", hasher.finish()))
+}
+
+fn prepare_control_dir(dir: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error).context("could not create SSH control directory"),
+    }
+    let metadata =
+        std::fs::symlink_metadata(dir).context("could not inspect SSH control directory")?;
+    // SAFETY: geteuid has no preconditions and does not mutate process state.
+    let uid = unsafe { libc::geteuid() };
+    anyhow::ensure!(
+        metadata.is_dir() && metadata.uid() == uid && metadata.permissions().mode() & 0o077 == 0,
+        "SSH control directory must be a private directory owned by the current user: {}",
+        dir.display()
+    );
+    Ok(())
 }
 
 /// The queue fifo askpass helpers write their request directories to.
@@ -313,7 +343,7 @@ impl SshTransport {
     }
 
     fn control_path(&self) -> PathBuf {
-        ssh_dir().join(format!("{}.ctl", self.host))
+        control_dir(&ssh_dir()).join(format!("{}.ctl", self.host))
     }
 
     /// `ssh` with the control socket pinned and its authentication mode
@@ -367,6 +397,7 @@ impl SshTransport {
     /// master to confirmation mode, where every later session and forward
     /// is refused with "Permission denied".
     fn ensure_master(&self, auth: SshAuth) -> anyhow::Result<()> {
+        prepare_control_dir(&control_dir(&ssh_dir()))?;
         if self.master_alive() {
             return Ok(());
         }
@@ -674,4 +705,45 @@ pub(super) fn ssh_config_hosts() -> Vec<String> {
 fn free_local_port() -> anyhow::Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     Ok(listener.local_addr()?.port())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::UnixListener;
+
+    #[test]
+    fn control_socket_supports_long_state_paths_and_openssh_suffix() {
+        let state =
+            PathBuf::from("/very/long/checkout/".repeat(30)).join(Uuid::new_v4().to_string());
+        let dir = control_dir(&state);
+        assert_eq!(dir, control_dir(&state));
+        assert_ne!(dir, control_dir(&state.join("another-app")));
+        prepare_control_dir(&dir).unwrap();
+        prepare_control_dir(&dir).unwrap();
+        let socket = dir.join(format!("{}.ctl.0123456789abcdef", Uuid::new_v4()));
+        assert!(socket.as_os_str().len() <= 103);
+        let listener = UnixListener::bind(&socket).unwrap();
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        drop(listener);
+        std::fs::remove_file(socket).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn control_directory_rejects_shared_directories_and_symlinks() {
+        let dir = PathBuf::from(format!("/tmp/gd-ssh-test-{}", Uuid::new_v4()));
+        prepare_control_dir(&dir).unwrap();
+        let link = dir.with_extension("link");
+        std::os::unix::fs::symlink(&dir, &link).unwrap();
+        assert!(prepare_control_dir(&link).is_err());
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(prepare_control_dir(&dir).is_err());
+        std::fs::remove_file(link).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
 }
