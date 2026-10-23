@@ -1010,5 +1010,7 @@ fn kill_owned(child: &mut Child) {
     let _ = child.wait();
 }
 
-#[cfg(test)]
+// The fixture is a Python script spawed as the provider CLI — the stable
+// runtime host is a Unix-only contract, so these tests stay there too.
+#[cfg(all(test, unix))]
 mod tests;
