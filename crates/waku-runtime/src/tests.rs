@@ -1590,7 +1590,9 @@ fn agent_ingress_env_pins_the_cli_on_path_and_carries_pairs() {
         env.iter()
             .find(|(name, _)| name == "PATH")
             .map(|(_, value)| value.as_os_str()),
-        Some(std::ffi::OsStr::new("/pinned/helpers:/usr/bin"))
+        std::env::join_paths([std::path::Path::new("/pinned/helpers"), std::path::Path::new("/usr/bin"),])
+            .as_deref()
+            .ok()
     );
     // No inherited PATH — a standard fallback keeps the helper findable.
     let fallback = agent_ingress_env(&ingress, None);
@@ -1599,9 +1601,14 @@ fn agent_ingress_env_pins_the_cli_on_path_and_carries_pairs() {
             .iter()
             .find(|(name, _)| name == "PATH")
             .map(|(_, value)| value.as_os_str()),
-        Some(std::ffi::OsStr::new(
-            "/pinned/helpers:/usr/bin:/bin:/usr/local/bin"
-        ))
+        std::env::join_paths([
+            std::path::Path::new("/pinned/helpers"),
+            std::path::Path::new("/usr/bin"),
+            std::path::Path::new("/bin"),
+            std::path::Path::new("/usr/local/bin"),
+        ])
+        .as_deref()
+        .ok()
     );
 }
 
