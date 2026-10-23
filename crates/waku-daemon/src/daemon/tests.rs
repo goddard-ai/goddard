@@ -8656,6 +8656,13 @@ fn remove_tree(path: impl AsRef<Path>) {
                 let _ = e;
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
+            // Windows holds onto open files indefinitely — a live backend or
+            // drained-later handle makes removal impossible, and a stale temp
+            // directory is a harmless test artifact there.
+            Err(e) if cfg!(windows) => {
+                eprintln!("leaving {} behind: {e}", path.display());
+                return;
+            }
             Err(e) => panic!("remove_dir_all {}: {e}", path.display()),
         }
     }
