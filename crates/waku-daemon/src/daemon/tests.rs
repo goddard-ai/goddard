@@ -8661,6 +8661,18 @@ fn remove_tree(path: impl AsRef<Path>) {
     }
 }
 
+/// A provider-binary override that exists on every host: the probe only
+/// requires the path to be a file, and the controlled driver never spawns.
+fn stub_binary(root: impl AsRef<Path>, name: &str) -> String {
+    let path = root.as_ref().join(name);
+    std::fs::write(
+        &path, "stub
+",
+    )
+    .unwrap();
+    path.display().to_string()
+}
+
 fn summon_op(
     backend: &WakuBackend,
     root: &Path,
@@ -10182,7 +10194,7 @@ fn start_now_dispatches_a_queued_ticket_through_burst_headroom() {
     let mut daemon_settings = backend.settings.get();
     daemon_settings
         .provider_binary_overrides
-        .insert(ProviderKind::Codex, "/usr/bin/true".into());
+        .insert(ProviderKind::Codex, stub_binary(&root, "codex-stub"));
     backend.settings.replace(daemon_settings).unwrap();
 
     let result = backend
@@ -10251,7 +10263,7 @@ fn start_now_takes_the_queue_head_but_never_crosses_the_hard_cap() {
     let mut daemon_settings = backend.settings.get();
     daemon_settings
         .provider_binary_overrides
-        .insert(ProviderKind::Codex, "/usr/bin/true".into());
+        .insert(ProviderKind::Codex, stub_binary(&root, "codex-stub"));
     backend.settings.replace(daemon_settings).unwrap();
     let summon = |job: &str| {
         let BossResult::Summoned {
@@ -11286,7 +11298,7 @@ fn setmodel_selection_survives_stale_saves_broadcast_hydration_and_reload() {
     let mut settings = backend.settings.get();
     settings
         .provider_binary_overrides
-        .insert(ProviderKind::Claude, "/usr/bin/true".into());
+        .insert(ProviderKind::Claude, stub_binary(&root, "claude-stub"));
     backend.settings.replace(settings).unwrap();
     let capture = Arc::new(CaptureDriver::default());
     let launched = Arc::new(Mutex::new(Vec::new()));
@@ -13805,7 +13817,7 @@ fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
     let mut daemon_settings = backend.settings.get();
     daemon_settings
         .provider_binary_overrides
-        .insert(ProviderKind::Codex, "/usr/bin/true".into());
+        .insert(ProviderKind::Codex, stub_binary(&root, "codex-stub"));
     backend.settings.replace(daemon_settings).unwrap();
     // The boss chat owns no live runtime and every spawn attempt fails —
     // the window the repeated reminders rode.
@@ -13971,7 +13983,7 @@ fn outcome_reminder_dedupes_across_boss_rotation() {
         let mut daemon_settings = backend.settings.get();
         daemon_settings
             .provider_binary_overrides
-            .insert(ProviderKind::Codex, "/usr/bin/true".into());
+            .insert(ProviderKind::Codex, stub_binary(&root, "codex-stub"));
         backend.settings.replace(daemon_settings).unwrap();
         // The boss chat owns no live runtime and every spawn attempt fails —
         // reminder deliveries can only park.
@@ -14104,7 +14116,7 @@ fn outcome_reminder_stays_suppressed_while_wait_or_assignment_covers_it() {
     let mut daemon_settings = backend.settings.get();
     daemon_settings
         .provider_binary_overrides
-        .insert(ProviderKind::Codex, "/usr/bin/true".into());
+        .insert(ProviderKind::Codex, stub_binary(&root, "codex-stub"));
     backend.settings.replace(daemon_settings).unwrap();
     // The spawn failure is armed so an enqueue attempt would surface, but
     // suppression means none is made.
@@ -14797,6 +14809,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
             .replace('\\', "/");
         let slashed = |p: &Path| p.display().to_string().replace('\\', "/");
         assert!(context.contains(&slashed(&path)));
+        let project = dunce::canonicalize(&project).unwrap_or(project);
         assert!(context.contains(&slashed(&project)));
         path.clone()
     };
@@ -19389,7 +19402,7 @@ fn chain_backend(root: &Path) -> (WakuBackend, Uuid, String) {
     for provider in [ProviderKind::Claude, ProviderKind::Codex] {
         daemon_settings
             .provider_binary_overrides
-            .insert(provider, "/usr/bin/true".into());
+            .insert(provider, stub_binary(&root, "provider-stub"));
     }
     backend.settings.replace(daemon_settings).unwrap();
     // Step bases must resolve — give the fixture repo one real commit.
@@ -19581,7 +19594,7 @@ fn reopen_backend(root: &Path) -> WakuBackend {
     for provider in [ProviderKind::Claude, ProviderKind::Codex] {
         daemon_settings
             .provider_binary_overrides
-            .insert(provider, "/usr/bin/true".into());
+            .insert(provider, stub_binary(&root, "provider-stub"));
     }
     backend.settings.replace(daemon_settings).unwrap();
     backend
@@ -20917,6 +20930,8 @@ fn automation_runs_wait_for_their_own_delivered_turns() {
     for run in reopened.runs {
         assert!(detail.messages.iter().any(|message| Some(message.id) == run.message_id && message.turn_id == run.turn_id));
     }
+    backend.shutdown();
+    drop(backend);
     remove_tree(root);
 }
 

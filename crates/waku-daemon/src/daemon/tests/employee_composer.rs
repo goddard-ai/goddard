@@ -10,7 +10,7 @@ fn fixture(root: &Path) -> (WakuBackend, Uuid, Arc<CaptureDriver>, Arc<AtomicUsi
     let mut settings = backend.settings.get();
     settings
         .provider_binary_overrides
-        .insert(ProviderKind::Codex, "/usr/bin/true".into());
+        .insert(ProviderKind::Codex, super::stub_binary(&root, "codex-stub"));
     backend.settings.replace(settings).unwrap();
     let capture = Arc::new(CaptureDriver::default());
     let launches = Arc::new(AtomicUsize::new(0));
