@@ -17,9 +17,15 @@ use std::net::TcpListener;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use anyhow::{Context, bail};
+use parking_lot::Mutex;
 use uuid::Uuid;
+
+#[cfg(test)]
+#[path = "ssh/tests.rs"]
+mod tests;
 
 /// One pending password/passphrase request from an ssh child. The prompt
 /// text comes from ssh itself (for example `user@host's password:`), and
@@ -50,13 +56,16 @@ impl SshAskpassRequest {
 /// the queue fifo's absolute path when the script is written.
 const ASKPASS_SCRIPT: &str = r#"#!/bin/sh
 dir=$(mktemp -d "${TMPDIR:-/tmp}/goddard-askpass.XXXXXX") || exit 1
-mkfifo "$dir/in" "$dir/out" 2>/dev/null || { rm -rf "$dir"; exit 1; }
-printf '%s\n' "$dir" > "%QUEUE%"
-printf '%s\n' "$1" > "$dir/in"
-cat "$dir/out"
-status=$?
-rm -rf "$dir"
-exit $status
+trap 'rm -rf "$dir"' 0
+trap 'exit 1' HUP INT TERM
+mkfifo "$dir/in" "$dir/out" 2>/dev/null || exit 1
+# The app opens the response FIFO nonblocking. Establish its reader before
+# publishing the prompt so an immediate answer or cancellation cannot race it.
+exec 3<>"$dir/out" || exit 1
+printf '%s\n' "$dir" > "%QUEUE%" || exit 1
+printf '%s\n' "$1" > "$dir/in" || exit 1
+IFS= read -r answer <&3 || exit 1
+printf '%s\n' "$answer"
 "#;
 
 /// Provision and start the remote daemon, printing `token\nport\nprotocol`
@@ -191,7 +200,9 @@ if [ "$running" -eq 1 ]; then
     stop_daemon
     running=0
     if [ "$(cat "$version_file" 2>/dev/null || true)" != "$app_version" ]; then
-      install_daemon || true
+      install_daemon
+      rc=$?
+      if [ "$rc" -ne 0 ]; then exit "$rc"; fi
     fi
   fi
 fi
@@ -332,6 +343,9 @@ pub(super) enum SshAuth {
 pub(super) struct SshTransport {
     host: Uuid,
     destination: String,
+    /// Clones used by the transport watcher share the currently installed
+    /// forward so a daemon restart can retarget it without changing the URL.
+    forward: Arc<Mutex<Option<(u16, u16)>>>,
 }
 
 impl SshTransport {
@@ -339,6 +353,7 @@ impl SshTransport {
         Self {
             host,
             destination: destination.to_owned(),
+            forward: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -587,18 +602,31 @@ impl SshTransport {
     /// Point a local ephemeral port at the remote daemon's loopback port on
     /// the existing master. Fails fast when the forward cannot bind.
     fn add_forward(&self, auth: SshAuth, local_port: u16, remote_port: u16) -> anyhow::Result<()> {
+        let mut forward = self.forward.lock();
+        self.forward_command(auth, "forward", local_port, remote_port)?;
+        *forward = Some((local_port, remote_port));
+        Ok(())
+    }
+
+    fn forward_command(
+        &self,
+        auth: SshAuth,
+        operation: &str,
+        local_port: u16,
+        remote_port: u16,
+    ) -> anyhow::Result<()> {
         let output = self
             .command(auth)
             .arg("-O")
-            .arg("forward")
+            .arg(operation)
             .arg("-L")
             .arg(format!("127.0.0.1:{local_port}:127.0.0.1:{remote_port}"))
             .arg(&self.destination)
             .output()
-            .context("could not run ssh forward")?;
+            .with_context(|| format!("could not run ssh {operation}"))?;
         if !output.status.success() {
             bail!(
-                "ssh port forward to {} failed: {}",
+                "ssh port {operation} to {} failed: {}",
                 self.destination,
                 String::from_utf8_lossy(&output.stderr).trim()
             );
@@ -622,12 +650,27 @@ impl SshTransport {
         Ok((local_port, supervisor))
     }
 
-    /// Re-establish the forward after the master restarts. The local port
-    /// must stay stable so the supervisor's reconnect target never changes.
+    /// Re-establish the forward after the master or daemon restarts. The local
+    /// port stays stable so the supervisor's reconnect target never changes.
     pub(super) fn restore_forward(&self, auth: SshAuth, local_port: u16) -> anyhow::Result<()> {
+        let mut forward = self.forward.lock();
+        let master_was_alive = self.master_alive();
         self.ensure_master(auth)?;
+        if !master_was_alive {
+            // The old master's listeners disappeared with it. Clear this
+            // even if provisioning fails, since the new master has no forward.
+            *forward = None;
+        }
         let (_, remote_port) = self.provision(auth)?;
-        self.add_forward(auth, local_port, remote_port)
+        // A live master still owns the old local listener, even when the
+        // daemon behind it died and now reports a new ephemeral port.
+        if master_was_alive && let Some((previous_local, previous_remote)) = *forward {
+            self.forward_command(auth, "cancel", previous_local, previous_remote)?;
+            *forward = None;
+        }
+        self.forward_command(auth, "forward", local_port, remote_port)?;
+        *forward = Some((local_port, remote_port));
+        Ok(())
     }
 
     /// Tear down the master connection, closing every forward on it.
@@ -675,23 +718,19 @@ pub(super) fn ssh_config_hosts() -> Vec<String> {
     config
         .lines()
         .flat_map(|line| {
-            let line = line.trim();
+            let mut fields = line.split_whitespace();
             // `Host` is case-insensitive and must be a whole word —
             // `HostName` is a different directive.
-            if line.len() <= 4
-                || !line[..4].eq_ignore_ascii_case("host")
-                || !line.as_bytes()[4].is_ascii_whitespace()
+            if !fields
+                .next()
+                .is_some_and(|field| field.eq_ignore_ascii_case("host"))
             {
                 return Vec::new();
             }
-            line[4..]
-                .split_whitespace()
+            fields
+                .take_while(|pattern| !pattern.starts_with('#'))
                 .filter(|pattern| {
-                    !pattern.is_empty()
-                        && !pattern.starts_with('!')
-                        && !pattern.starts_with('#')
-                        && !pattern.contains('*')
-                        && !pattern.contains('?')
+                    !pattern.starts_with('!') && !pattern.contains('*') && !pattern.contains('?')
                 })
                 .map(str::to_owned)
                 .collect()

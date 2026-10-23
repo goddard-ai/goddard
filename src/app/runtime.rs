@@ -3758,7 +3758,7 @@ impl Waku {
                 cx.background_executor()
                     .timer(std::time::Duration::from_secs(5))
                     .await;
-                let Some((link, interactive, in_use)) = waku
+                let Some((link, interactive, in_use, daemon_connected)) = waku
                     .update(cx, |waku, _| {
                         waku.ssh_transports.get(&host_id).cloned().map(|link| {
                             let interactive = waku.ssh_repair_requests.contains(&host_id);
@@ -3766,6 +3766,7 @@ impl Waku {
                                 link,
                                 interactive,
                                 interactive || waku.remote_host_in_use(host_id),
+                                waku.remote_host_connected(host_id),
                             )
                         })
                     })
@@ -3796,7 +3797,7 @@ impl Waku {
                     let result = cx
                         .background_executor()
                         .spawn(async move {
-                            if link.transport.master_alive() {
+                            if daemon_connected && link.transport.master_alive() {
                                 return Ok(());
                             }
                             link.transport
@@ -3812,7 +3813,7 @@ impl Waku {
                 } else {
                     cx.background_executor()
                         .spawn(async move {
-                            if link.transport.master_alive() {
+                            if daemon_connected && link.transport.master_alive() {
                                 return Ok(());
                             }
                             link.transport

@@ -1,0 +1,1 @@
+- SSH password answers and cancellations are no longer lost when delivered immediately after a prompt appears.

@@ -1,0 +1,1 @@
+- The SSH host picker handles Unicode comments without crashing and no longer lists inline comment words as host aliases.
