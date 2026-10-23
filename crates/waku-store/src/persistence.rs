@@ -5493,6 +5493,8 @@ mod tests {
         store.hydrate(&mut reloaded.sessions[0]).unwrap();
         assert_eq!(reloaded.sessions[0].reasoning_effort, None);
         assert!(reloaded.sessions[0].detail_loaded);
+        // The store holds the database open; Windows cannot delete it first.
+        drop(store);
         std::fs::remove_dir_all(root).unwrap();
     }
 
