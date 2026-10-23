@@ -263,7 +263,7 @@ fn plan_acceptance_provider_workspace_and_launch_fault_matrix() {
                 );
                 backend.shutdown();
                 drop(backend);
-                std::fs::remove_dir_all(root).unwrap();
+                crate::daemon::tests::remove_tree(root);
                 cases += 1;
             }
         }
@@ -314,7 +314,7 @@ fn plan_acceptance_ordinary_no_plan_work_keeps_unstaged_dispatch() {
             assert!(raw.target.exists());
             backend.shutdown();
             drop(backend);
-            std::fs::remove_dir_all(root).unwrap();
+            crate::daemon::tests::remove_tree(root);
         }
     }
     eprintln!("plan acceptance ordinary work: 4 passed; no plan gate or acknowledgement required");

@@ -2097,7 +2097,7 @@ fn computer_use_is_scoped_independently_of_task_and_settings_writes() {
     assert_eq!(result["reason"], "computer_use_disabled");
     service.shutdown();
     drop(backend);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[cfg(unix)]
@@ -8644,6 +8644,23 @@ fn set_model_policy(
         .unwrap();
 }
 
+/// Windows keeps a directory undeletable while a handle inside it is still
+/// draining — retry the teardown briefly rather than racing shutdown.
+fn remove_tree(path: impl AsRef<Path>) {
+    let path = path.as_ref();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => return,
+            Err(e) if std::time::Instant::now() < deadline => {
+                let _ = e;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(e) => panic!("remove_dir_all {}: {e}", path.display()),
+        }
+    }
+}
+
 fn summon_op(
     backend: &WakuBackend,
     root: &Path,
@@ -9264,6 +9281,8 @@ fn employee_purpose_admission_defaults_and_control_preserve_lifecycle() {
 /// At capacity a valid summon is not an error — it is a durable
 /// queued ticket that creates no worktree, no runtime, and no claims.
 /// The returned admission carries the position and the wait reason.
+// Host resource supervision is Unix-only; the admission path bails elsewhere.
+#[cfg(unix)]
 #[test]
 fn a_summon_at_capacity_admits_a_durable_queued_ticket() {
     use waku_protocol::boss::{AdmissionBlocker, BossResult, EmployeeLifecycle};
@@ -9713,6 +9732,8 @@ fn a_queued_ticket_expires_when_its_project_checkout_is_gone() {
 /// The mirror of the stop cases: a queued ticket nobody touched replays
 /// its durable identity — the pass reconstructs the memory-only shell and
 /// lands the same Working observation it owed before the restart.
+// Host resource supervision is Unix-only; the admission path bails elsewhere.
+#[cfg(unix)]
 #[test]
 fn a_queued_ticket_dispatches_after_restart() {
     use waku_protocol::boss::{BossResult, EmployeeLifecycle};
@@ -9757,6 +9778,8 @@ fn a_queued_ticket_dispatches_after_restart() {
 /// Failed siblings permit a repair finisher to reach resource admission.
 /// Broker failure and daemon recovery retain the same durable ticket, and
 /// the next scheduler pass retries without a prompt or ticket edit.
+// Host resource supervision is Unix-only; the admission path bails elsewhere.
+#[cfg(unix)]
 #[test]
 fn a_repair_finisher_retries_broker_admission_after_restart() {
     use waku_protocol::boss::{AdmissionBlocker, BossOperation, BossResult, EmployeeLifecycle};
@@ -10084,6 +10107,8 @@ fn queued_tickets_dispatch_fifo_once_capacity_frees() {
 /// parked while queued still rides the same launch envelope — never a
 /// parallel spawn. A stale press afterward resolves the settled state
 /// instead of erroring or dispatching again.
+// Host resource supervision is Unix-only; the admission path bails elsewhere.
+#[cfg(unix)]
 #[test]
 fn start_now_dispatches_a_queued_ticket_through_burst_headroom() {
     use waku_protocol::boss::{
@@ -10202,6 +10227,8 @@ fn start_now_dispatches_a_queued_ticket_through_burst_headroom() {
 /// ticket, yet the hard cap still binds: at a saturated lane the press
 /// reports the truthful wait reason, and a second press is the same
 /// committed intent rather than a second dispatch.
+// Host resource supervision is Unix-only; the admission path bails elsewhere.
+#[cfg(unix)]
 #[test]
 fn start_now_takes_the_queue_head_but_never_crosses_the_hard_cap() {
     use waku_protocol::boss::{
@@ -10344,6 +10371,8 @@ fn start_now_takes_the_queue_head_but_never_crosses_the_hard_cap() {
 /// occupied set stays queued on the physical-capacity reason, the flag
 /// persists through a daemon restart, and once the hold lifts the flag
 /// still drives the burst admission the restart owed it.
+// Host resource supervision is Unix-only; the admission path bails elsewhere.
+#[cfg(unix)]
 #[test]
 fn start_now_flag_survives_restart_and_never_steals_held_resources() {
     use waku_protocol::boss::{
@@ -10474,6 +10503,8 @@ fn start_now_flag_survives_restart_and_never_steals_held_resources() {
 /// admission attempt must satisfy the declared host set, so a ticket
 /// that would have dispatched on the freed model slot keeps waiting
 /// until the claimed capacity is also free.
+// Host resource supervision is Unix-only; the admission path bails elsewhere.
+#[cfg(unix)]
 #[test]
 fn set_resources_on_a_queued_ticket_changes_its_admission() {
     use waku_protocol::boss::{
@@ -10582,6 +10613,8 @@ fn set_resources_on_a_queued_ticket_changes_its_admission() {
 /// ticket: the record never leaves `working`, the held claims stand
 /// until the new set grants, and the swap then releases the old
 /// reservation atomically.
+// Host resource supervision is Unix-only; the admission path bails elsewhere.
+#[cfg(unix)]
 #[test]
 fn set_resources_on_a_working_employee_swaps_in_place() {
     use waku_protocol::boss::{
@@ -11012,6 +11045,8 @@ fn burst_admission_needs_the_flag_and_stops_at_hard_cap() {
 
 /// Queued employees take prompts into their durable envelope and stop
 /// settles them without ever touching a reservation.
+// Host resource supervision is Unix-only; the admission path bails elsewhere.
+#[cfg(unix)]
 #[test]
 fn queued_employees_take_prompts_and_expire_without_claims() {
     use waku_protocol::boss::{BossOperation, EmployeeControl};
@@ -14755,9 +14790,14 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
         let repository = dunce::canonicalize(&project).unwrap();
         assert!(path.starts_with(repository.parent().unwrap().join("worktrees")));
         assert!(crate::worktree::is_linked_worktree(path));
-        let context = session.pending_provider_context.as_ref().unwrap();
-        assert!(context.contains(&path.display().to_string()));
-        assert!(context.contains(&project.display().to_string()));
+        let context = session
+            .pending_provider_context
+            .as_ref()
+            .unwrap()
+            .replace('\\', "/");
+        let slashed = |p: &Path| p.display().to_string().replace('\\', "/");
+        assert!(context.contains(&slashed(&path)));
+        assert!(context.contains(&slashed(&project)));
         path.clone()
     };
     // The old runtime was retired, the record is live again, and the
@@ -16823,7 +16863,7 @@ fn a_boss_steer_arriving_for_a_rotated_chat_is_queued_on_the_successor() {
         message.id == queued_id && message.content == "Keep the release plan focused on QA"
     }));
     drop(backend);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 /// A steer echo that arrives on the retired chat after a refresh still owns
@@ -16944,7 +16984,7 @@ fn a_steer_echo_on_a_retired_boss_chat_unmirrors_the_carried_chip() {
         "the carried chip dropped with the echo — nothing left to re-deliver"
     );
     drop(backend);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[test]
@@ -17357,7 +17397,7 @@ fn boss_rotation_never_archives_or_publishes_without_readiness() {
     let ledger = ContinuityLedger::load(&root.join("boss/continuity.json")).unwrap();
     assert!(ledger.frozen_coordinator.unwrap().package.is_some());
     drop(backend);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 /// Regression: the retired session's event pump holds its lifecycle gate
@@ -17394,7 +17434,7 @@ fn boss_rotation_pause_does_not_wait_on_predecessor_event_pump() {
     );
     drop(gate);
     drop(backend);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[test]
@@ -17467,7 +17507,7 @@ fn boss_rotation_pause_preserves_the_persisted_composer_draft() {
             .is_none()
     );
     drop(backend);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[test]
@@ -17519,7 +17559,7 @@ fn boss_rotation_opt_out_and_exact_threshold_keep_the_current_chat() {
     );
     assert_eq!(backend.boss.identity_and_session().1, Some(old));
     drop(backend);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[test]
@@ -17592,7 +17632,7 @@ fn boss_rotation_recovery_blocks_each_unvalidated_publication_boundary() {
         );
         assert!(backend.sessions.lock().is_empty());
         drop(backend);
-        std::fs::remove_dir_all(root).unwrap();
+        remove_tree(root);
     }
 }
 
@@ -19237,7 +19277,7 @@ fn chain_api_validates_every_step_before_acceptance_and_never_launches() {
             .project_id,
         project_id
     );
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[test]
@@ -19325,7 +19365,7 @@ fn chain_queued_dispatch_never_rebinds_to_an_equivalent_registration() {
             .iter()
             .any(|session| session.id == employee.session_id)
     );
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 fn chain_backend(root: &Path) -> (WakuBackend, Uuid, String) {
@@ -19742,7 +19782,7 @@ fn chains_execute_in_order_sealing_handoffs_quietly() {
         chain_reports(&backend, fresh.id).is_empty(),
         "receipts survive restart"
     );
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[test]
@@ -19952,7 +19992,7 @@ fn chain_successor_launch_error_reconciles_only_effect_free_attempts() {
                 Some(head.as_str())
             );
         }
-        std::fs::remove_dir_all(root).unwrap();
+        remove_tree(root);
     }
 }
 
@@ -20072,7 +20112,7 @@ fn chain_terminal_failure_pauses_once_and_retry_continues() {
     let chain = backend.boss.document().chains[0].clone();
     assert_eq!(chain.current_step, 1);
     assert_eq!(chain.steps[0].status, StepStatus::Succeeded);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 /// The supervisor id recorded at Create goes stale when the boss session
@@ -20156,7 +20196,7 @@ fn chain_retry_admission_survives_boss_rotation() {
         chain.steps[0].attempts[1].employee_id
     );
     assert_eq!(retry.supervisor_id, rotated);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 /// A chain exception whose report already reached the retired Boss chat
@@ -20269,7 +20309,7 @@ fn chain_exception_report_dedupes_across_boss_rotation() {
             .any(|m| m.id == original_report)
     );
     drop(backend);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[test]
@@ -20370,7 +20410,7 @@ fn chain_restart_recovers_at_admission_and_handoff_boundaries() {
         StepStatus::Working
     );
     assert_eq!(backend.boss.document().employees.len(), 2);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 /// Archiving a queued chain step's task is the owner's stop — durable on
@@ -20448,7 +20488,7 @@ fn chain_archived_queued_attempt_stays_stopped_after_restart() {
             .iter()
             .all(|session| session.id != first.session_id || session.archived_at.is_some())
     );
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[test]
@@ -20601,7 +20641,7 @@ fn chain_controls_win_the_finish_race() {
     // Owner-initiated controls surface nothing — no exception, no report.
     let landed = chain_reports(&backend, boss);
     assert!(landed.is_empty(), "unexpected reports: {landed:?}");
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[test]
@@ -20674,7 +20714,7 @@ fn chain_employees_skip_ordinary_reporting_and_resume() {
         backend.resume_employee(employee.session_id).is_err(),
         "chain attempts resume through chain controls"
     );
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[test]
@@ -20877,7 +20917,7 @@ fn automation_runs_wait_for_their_own_delivered_turns() {
     for run in reopened.runs {
         assert!(detail.messages.iter().any(|message| Some(message.id) == run.message_id && message.turn_id == run.turn_id));
     }
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 /// Contract checks stop before any resource claim or provider launch.
@@ -21183,7 +21223,7 @@ fn plan_delivery_runtime_delivers_before_execution_and_recovers_exact_revision()
     assert_eq!(capture.prompts.lock().len(), 3);
     backend.shutdown();
     drop(backend);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 #[test]
@@ -21262,7 +21302,7 @@ fn plan_delivery_restored_accepted_attempts_do_not_replay_work_or_require_ack() 
         assert!(!capture.prompts.lock()[2].contains("# Reviewed fixture\n"));
         backend.shutdown();
         drop(backend);
-        std::fs::remove_dir_all(root).unwrap();
+        remove_tree(root);
     }
 }
 
@@ -21367,7 +21407,7 @@ fn plan_delivery_preflight_declares_supported_adapters_and_rejects_guest_modes()
         }
         backend.shutdown();
         drop(backend);
-        std::fs::remove_dir_all(root).unwrap();
+        remove_tree(root);
     }
 }
 
@@ -21468,7 +21508,7 @@ fn plan_blocker_receipt_replays_once_without_employee_cli_authentication() {
     assert!(!retried.ticket.unwrap().pending_prompts.is_empty());
     backend.shutdown();
     drop(backend);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }
 
 mod instruction_pins;
@@ -21761,5 +21801,5 @@ fn task_wireframes_require_opt_in_valid_documents_and_workspace_containment() {
             .is_err()
     );
     drop(backend);
-    std::fs::remove_dir_all(root).unwrap();
+    remove_tree(root);
 }

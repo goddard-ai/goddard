@@ -440,8 +440,11 @@ mod tests {
     }
 
     fn landing_fixture() -> (TempRepo, PathBuf, PathBuf, String) {
-        let root =
-            TempRepo(std::env::temp_dir().join(format!("goddard-merge-{}", uuid::Uuid::new_v4())));
+        // CI's %TEMP% resolves through an 8.3 name (RUNNER~1) while git
+        // reports the canonical path — normalize once so error text matches.
+        let root_dir = std::env::temp_dir().join(format!("goddard-merge-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root_dir).unwrap();
+        let root = TempRepo(dunce::canonicalize(&root_dir).unwrap());
         let project = root.0.join("project");
         let employee = root.0.join("employee");
         std::fs::create_dir_all(&project).unwrap();
