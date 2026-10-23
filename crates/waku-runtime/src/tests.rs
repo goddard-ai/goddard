@@ -1590,23 +1590,29 @@ fn agent_ingress_env_pins_the_cli_on_path_and_carries_pairs() {
         env.iter()
             .find(|(name, _)| name == "PATH")
             .map(|(_, value)| value.as_os_str()),
-        std::env::join_paths([std::path::Path::new("/pinned/helpers"), std::path::Path::new("/usr/bin"),])
-            .as_deref()
-            .ok()
+        std::env::join_paths([
+            std::path::Path::new("/pinned/helpers"),
+            std::path::Path::new("/usr/bin"),
+        ])
+        .as_deref()
+        .ok()
     );
     // No inherited PATH — a standard fallback keeps the helper findable.
     let fallback = agent_ingress_env(&ingress, None);
+    let standard: &[&str] = if cfg!(windows) {
+        &["C:\\Windows\\System32"]
+    } else {
+        &["/usr/bin", "/bin", "/usr/local/bin"]
+    };
     assert_eq!(
         fallback
             .iter()
             .find(|(name, _)| name == "PATH")
             .map(|(_, value)| value.as_os_str()),
-        std::env::join_paths([
-            std::path::Path::new("/pinned/helpers"),
-            std::path::Path::new("/usr/bin"),
-            std::path::Path::new("/bin"),
-            std::path::Path::new("/usr/local/bin"),
-        ])
+        std::env::join_paths(
+            std::iter::once(std::path::Path::new("/pinned/helpers"))
+                .chain(standard.iter().map(std::path::Path::new)),
+        )
         .as_deref()
         .ok()
     );
