@@ -422,7 +422,7 @@ impl Broker {
         crate::fs_ext::restrict_to_owner(&temporary)?;
         File::open(&temporary)?.sync_all()?;
         fs::rename(&temporary, &path)?;
-        File::open(&self.root)?.sync_all()?;
+        crate::fs_ext::sync_dir(&self.root)?;
         drop(lock);
         Ok(ResourceStatus {
             policy,
@@ -468,7 +468,7 @@ impl Broker {
         crate::fs_ext::restrict_to_owner(&temporary)?;
         File::open(&temporary)?.sync_all()?;
         fs::rename(&temporary, &path)?;
-        File::open(&self.root)?.sync_all()?;
+        crate::fs_ext::sync_dir(&self.root)?;
         drop(lock);
         Ok(())
     }
@@ -1264,6 +1264,8 @@ mod tests {
         }
     }
 
+    // operate() is the supervised-workload entry point and is Unix-only.
+    #[cfg(unix)]
     #[test]
     fn operate_probes_devices_only_for_status_and_device_claims() {
         let h = Harness::new();
@@ -2141,10 +2143,7 @@ mod tests {
             "a force claim leapfrogs the waiter: {:?}",
             forced.blockers
         );
-        let status = h
-            .broker
-            .operate(Uuid::new_v4(), ResourceOperation::Status { id: None })
-            .unwrap();
+        let status = h.op(Uuid::new_v4(), ResourceOperation::Status { id: None });
         let parked = status
             .reservations
             .iter()

@@ -40,6 +40,36 @@ pub fn restrict_to_owner(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Sync the directory holding a rename so the new entry survives a crash.
+///
+/// Unix opens and fsyncs the directory itself. Windows cannot open one
+/// through `File::open` — that takes `FILE_FLAG_BACKUP_SEMANTICS`, and
+/// `FlushFileBuffers` is not guaranteed on every filesystem — so the sync
+/// is best-effort there; callers already serialize the mutation under a
+/// lock, and this call only adds crash durability.
+pub fn sync_dir(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::fs::File::open(path)?.sync_all()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        let _ = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+            .and_then(|file| file.sync_all());
+        Ok(())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
 /// Link `link` to `original`.
 ///
 /// Windows picks the symlink flavor from the target's kind, and creating
