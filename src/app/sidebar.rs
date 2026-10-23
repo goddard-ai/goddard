@@ -5077,7 +5077,8 @@ impl Waku {
                 .borrow()
                 .get(&group)
                 .map_or(0, Vec::len)
-        });
+        })
+        .filter(|count| *count > 0);
         let folder_missing =
             matches!(group, SidebarGroup::Project(id) if self.missing_projects.contains(&id));
         let project_starred = matches!(group, SidebarGroup::Project(id) if self
@@ -5367,6 +5368,7 @@ impl Waku {
                             element.child(
                                 div()
                                     .flex_none()
+                                    .mb(px(1.0))
                                     .text_size(sp(12.0))
                                     .text_color(theme.text_tertiary)
                                     .child(format!("{count}")),
