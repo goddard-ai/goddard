@@ -471,6 +471,12 @@ mod tests {
         project(name, PathBuf::from(path), false)
     }
 
+    /// An absolute fixture root — bare `/work` is not absolute on Windows,
+    /// so path selectors need a drive-prefixed root there.
+    fn work(name: &str) -> PathBuf {
+        Path::new(if cfg!(windows) { "C:/work" } else { "/work" }).join(name)
+    }
+
     fn bare(text: &str) -> ProjectSelector {
         ProjectSelector::Bare(text.into())
     }
@@ -591,9 +597,10 @@ mod tests {
 
     #[test]
     fn a_temporary_row_rejects_name_and_path_but_reports_its_record() {
-        let temporary = project("adhoc", PathBuf::from("/work/adhoc"), true);
+        let temporary = project("adhoc", work("adhoc"), true);
         let catalog = vec![temporary.clone()];
-        for selector in [name("adhoc"), path("/work/adhoc")] {
+        let adhoc = work("adhoc").display().to_string();
+        for selector in [name("adhoc"), path(&adhoc)] {
             let error = resolve_project(&catalog, &selector).unwrap_err();
             assert_eq!(error.code, ProjectSelectionErrorCode::ProjectTemporary);
             assert_eq!(error.candidates, vec![CanonicalProject::of(&temporary)]);
