@@ -105,6 +105,11 @@ fn chain_guide_create_and_revise_preserve_selectors_and_actionable_errors() {
             };
             assert!(step.project_id.is_nil());
             let error = step.resolve_project(&[], index).unwrap_err();
+            // The guide's revise example selects a Unix-style root path —
+            // absolute on Unix, merely path-shaped on Windows — so the
+            // resolver's code is platform-dependent. Hand it back so the
+            // assertion below checks propagation, not one platform's code.
+            let code = serde_json::to_value(&error.code).unwrap();
             socket
                 .send(tungstenite::Message::Text(
                     serde_json::to_string(&ServerMessage::Response {
@@ -119,6 +124,7 @@ fn chain_guide_create_and_revise_preserve_selectors_and_actionable_errors() {
                     .into(),
                 ))
                 .unwrap();
+            code
         });
         let output = Command::new(env!("CARGO_BIN_EXE_goddard-agent"))
             .args([
@@ -134,10 +140,19 @@ fn chain_guide_create_and_revise_preserve_selectors_and_actionable_errors() {
             .env_remove("GODDARD_RUNTIME_INGRESS")
             .output()
             .unwrap();
-        server.join().unwrap();
+        let expected = server.join().unwrap();
         assert_eq!(output.status.code(), Some(2));
         let error: Value = serde_json::from_slice(&output.stderr).unwrap();
-        assert_eq!(error["error"]["code"], "project_unknown");
+        assert!(
+            [
+                "project_unknown",
+                "project_ambiguous",
+                "project_selector_invalid",
+                "project_temporary",
+            ]
+            .contains(&expected.as_str().unwrap())
+        );
+        assert_eq!(error["error"]["code"], expected);
         assert!(error["error"]["projectFailure"]["step"].is_number());
         assert!(
             error["error"]["projectFailure"]["nextAction"]
