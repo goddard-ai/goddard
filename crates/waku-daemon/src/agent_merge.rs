@@ -411,6 +411,12 @@ mod tests {
         }
     }
 
+    /// Path text the way submission errors render it: git's porcelain
+    /// output uses forward slashes even on Windows.
+    fn slashed(path: &Path) -> String {
+        path.to_string_lossy().replace('\\', "/")
+    }
+
     fn git(cwd: &Path, args: &[&str]) -> String {
         let output = Command::new("git")
             .args(args)
@@ -440,6 +446,7 @@ mod tests {
         let employee = root.0.join("employee");
         std::fs::create_dir_all(&project).unwrap();
         git(&project, &["init", "--initial-branch=dev"]);
+        git(&project, &["config", "core.autocrlf", "false"]);
         git(&project, &["config", "user.name", "Goddard Test"]);
         git(&project, &["config", "user.email", "test@goddard.local"]);
         let base = commit(&project, "base.txt", "base\n", "base");
@@ -492,9 +499,10 @@ mod tests {
             }
             let error = submit(&project, &employee, Some(&base), "dev")
                 .unwrap_err()
-                .to_string();
+                .to_string()
+                .replace('\\', "/");
             assert!(error.contains("QA landing checkout"), "{error}");
-            assert!(error.contains(project.to_str().unwrap()), "{error}");
+            assert!(error.contains(&slashed(&project)), "{error}");
             assert!(error.contains("base.txt"), "{error}");
             assert_eq!(git(&project, &["rev-parse", "HEAD"]).trim(), base);
             assert_eq!(
@@ -511,9 +519,10 @@ mod tests {
 
         let error = submit(&project, &employee, Some(&base), "dev")
             .unwrap_err()
-            .to_string();
+            .to_string()
+            .replace('\\', "/");
 
-        assert!(error.contains(employee.to_str().unwrap()), "{error}");
+        assert!(error.contains(&slashed(&employee)), "{error}");
         assert!(error.contains("unfinished.txt"), "{error}");
         assert_eq!(git(&project, &["rev-parse", "HEAD"]).trim(), base);
     }
@@ -529,9 +538,10 @@ mod tests {
 
             let error = submit(&project, &employee, Some(&base), "dev")
                 .unwrap_err()
-                .to_string();
+                .to_string()
+                .replace('\\', "/");
 
-            assert!(error.contains(checkout.to_str().unwrap()), "{error}");
+            assert!(error.contains(&slashed(&checkout)), "{error}");
             assert!(error.contains("MERGE_HEAD"), "{error}");
             assert_eq!(git(&project, &["rev-parse", "HEAD"]).trim(), base);
             std::fs::remove_file(marker).unwrap();
@@ -545,9 +555,10 @@ mod tests {
 
         let error = submit(&project, &employee, Some(&base), "dev")
             .unwrap_err()
-            .to_string();
+            .to_string()
+            .replace('\\', "/");
 
-        assert!(error.contains(project.to_str().unwrap()), "{error}");
+        assert!(error.contains(&slashed(&project)), "{error}");
         assert!(error.contains("unit.txt"), "{error}");
         assert_eq!(git(&project, &["rev-parse", "HEAD"]).trim(), base);
         assert_eq!(
@@ -572,11 +583,12 @@ mod tests {
 
         let error = submit(&project, &employee, Some(&base), "dev")
             .unwrap_err()
-            .to_string();
+            .to_string()
+            .replace('\\', "/");
 
         assert!(error.contains("multiple worktrees"), "{error}");
-        assert!(error.contains(project.to_str().unwrap()), "{error}");
-        assert!(error.contains(dupe.to_str().unwrap()), "{error}");
+        assert!(error.contains(&slashed(&project)), "{error}");
+        assert!(error.contains(&slashed(&dupe)), "{error}");
         assert_eq!(git(&project, &["rev-parse", "dev"]).trim(), base);
         assert!(employee.join("unit.txt").exists());
     }
@@ -593,7 +605,8 @@ mod tests {
 
         let error = submit(&project, &employee, Some(&base), "dev")
             .unwrap_err()
-            .to_string();
+            .to_string()
+            .replace('\\', "/");
 
         assert!(error.contains("submitting worktree"), "{error}");
         assert!(error.contains("QA branch"), "{error}");
