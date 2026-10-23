@@ -736,8 +736,50 @@ pub(super) fn picker_rows(probes: &[ProviderProbe], spec: &PickerRowSpec) -> Vec
                 })
         })
         .filter(|row| provider_listed(row.provider))
-        .filter(|row| !searching || combo_matches_query(row, spec.normalized_query))
         .collect();
+    // Catalogs are discovery snapshots, not the source of truth for saved
+    // selections. Keep missing favorites (and temporarily unstarred rows)
+    // reachable until the user removes them, with their original chord slots.
+    for favorite in spec
+        .favorites
+        .iter()
+        .chain(spec.pinned.iter().map(|pinned| &pinned.favorite))
+    {
+        let Some(probe) = probes.iter().find(|probe| {
+            probe.provider == favorite.provider
+                && probe.installed
+                && provider_listed(probe.provider)
+        }) else {
+            continue;
+        };
+        let (model_id, effort, fast) = normalize_model_combo(
+            probes,
+            favorite.provider,
+            &favorite.model,
+            favorite.effort.clone(),
+            favorite.fast,
+        );
+        let model = probe
+            .models
+            .iter()
+            .find(|model| model.id == model_id)
+            .cloned()
+            .unwrap_or_else(|| ProviderModel::new(&model_id, &model_id));
+        let mut row = ModelPickerRow::model(favorite.provider, model);
+        if !matches!(spec.granularity, PickerGranularity::Models) {
+            row.effort = effort.or_else(|| model_default_effort(&row.model));
+            row.fast = matches!(spec.granularity, PickerGranularity::Combos) && fast;
+        }
+        if !combos.iter().any(|existing| {
+            existing.provider == row.provider
+                && existing.model.id == row.model.id
+                && existing.effort == row.effort
+                && existing.fast == row.fast
+        }) {
+            combos.push(row);
+        }
+    }
+    combos.retain(|row| !searching || combo_matches_query(row, spec.normalized_query));
     mark_stored_selections(&mut combos, probes, spec);
 
     // Leading policy rows: a stance heads the list while its own vocabulary

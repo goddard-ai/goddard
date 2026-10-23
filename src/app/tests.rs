@@ -7268,6 +7268,127 @@ fn picker_rows_sort_favorites_then_recents_then_provider_and_name() {
 }
 
 #[test]
+fn picker_rows_preserve_favorite_slots_across_catalog_changes() {
+    use super::model_picker::{PickerGranularity, PinnedUnfavorite, favorite_chord_index};
+    use crate::model::FavoriteModel;
+
+    let original = picker_probe(ProviderKind::Codex, "saved-model", &["high"], true);
+    let favorites = [
+        FavoriteModel {
+            provider: ProviderKind::Codex,
+            model: "saved-model".into(),
+            effort: Some("high".into()),
+            fast: true,
+        },
+        FavoriteModel {
+            provider: ProviderKind::Codex,
+            model: "other-model".into(),
+            effort: None,
+            fast: false,
+        },
+    ];
+    let mut missing = original.clone();
+    missing.models.clear();
+    let changed_traits = picker_probe(ProviderKind::Codex, "saved-model", &["low"], false);
+    for probe in [&original, &missing, &changed_traits, &original] {
+        let rows = visible_picker_rows(
+            std::slice::from_ref(probe),
+            &favorites,
+            &[],
+            &[],
+            None,
+            "",
+            false,
+            PickerGranularity::Combos,
+        );
+        for (index, favorite) in favorites.iter().enumerate() {
+            let row = combo(&rows[index]);
+            assert_eq!(row.model.id, favorite.model);
+            assert_eq!(row.effort, favorite.effort);
+            assert_eq!(row.fast, favorite.fast);
+            assert_eq!(row.favorite_index, Some(index));
+            assert_eq!(
+                row.favorite_index.and_then(favorite_chord_index),
+                Some(index + 1)
+            );
+            assert_eq!(
+                rows.iter()
+                    .filter(|row| combo(row).favorite_index == Some(index))
+                    .count(),
+                1
+            );
+        }
+    }
+
+    // Missing rows still obey search and provider eligibility.
+    let probes = [missing];
+    let rows = visible_picker_rows(
+        &probes,
+        &favorites,
+        &[],
+        &[],
+        None,
+        "saved-model effort:high",
+        false,
+        PickerGranularity::Combos,
+    );
+    assert_eq!(rows.len(), 1);
+    assert_eq!(combo(&rows[0]).favorite_index, Some(0));
+    for (disabled, locked) in [
+        (vec![ProviderKind::Codex], None),
+        (vec![], Some(ProviderKind::Claude)),
+    ] {
+        assert!(
+            visible_picker_rows(
+                &probes,
+                &favorites,
+                &[],
+                &disabled,
+                locked,
+                "",
+                false,
+                PickerGranularity::Combos,
+            )
+            .is_empty()
+        );
+    }
+
+    // Unstarring a missing model frees its chord immediately, while its row
+    // stays parked until the picker closes so it can be starred again.
+    let pinned = [PinnedUnfavorite {
+        favorite: favorites[0].clone(),
+        position: 0,
+    }];
+    let rows = visible_picker_rows_with_pins(
+        &probes,
+        &favorites[1..],
+        &pinned,
+        &[],
+        &[],
+        None,
+        "",
+        false,
+        PickerGranularity::Combos,
+    );
+    assert_eq!(combo(&rows[0]).model.id, "saved-model");
+    assert_eq!(combo(&rows[0]).favorite_index, None);
+    assert_eq!(combo(&rows[0]).favorite_rank, Some(0));
+    assert_eq!(combo(&rows[1]).favorite_index, Some(0));
+    let rows = visible_picker_rows(
+        &probes,
+        &favorites[1..],
+        &[],
+        &[],
+        None,
+        "",
+        false,
+        PickerGranularity::Combos,
+    );
+    assert_eq!(rows.len(), 1);
+    assert_eq!(combo(&rows[0]).model.id, "other-model");
+}
+
+#[test]
 fn picker_rows_give_recency_to_the_fast_variant_last_started() {
     use super::model_picker::PickerGranularity;
     use crate::persistence::RecentModelUse;

@@ -1211,19 +1211,23 @@ fn model_option_row(
     };
     let kind = row.provider;
     let model = &row.model;
-    let effort_label = row.effort.as_deref().and_then(|effort| {
-        model
-            .reasoning_efforts
-            .iter()
-            .find(|option| option.id == effort)
-            .map(|option| {
-                option
-                    .label_i18n
-                    .as_ref()
-                    .map(waku_client::WireTranslation::render)
-                    .unwrap_or_else(|| option.label.clone())
-            })
-    });
+    let effort_label = row
+        .effort
+        .as_deref()
+        .and_then(|effort| {
+            model
+                .reasoning_efforts
+                .iter()
+                .find(|option| option.id == effort)
+                .map(|option| {
+                    option
+                        .label_i18n
+                        .as_ref()
+                        .map(waku_client::WireTranslation::render)
+                        .unwrap_or_else(|| option.label.clone())
+                })
+        })
+        .or_else(|| row.effort.clone());
     let sub_provider = model
         .sub_provider
         .as_deref()
