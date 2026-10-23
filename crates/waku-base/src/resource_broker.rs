@@ -420,7 +420,12 @@ impl Broker {
         let bytes = serde_json::to_vec(&ledger)?;
         fs::write(&temporary, bytes)?;
         crate::fs_ext::restrict_to_owner(&temporary)?;
-        File::open(&temporary)?.sync_all()?;
+        // FlushFileBuffers needs GENERIC_WRITE on Windows — a read-only
+        // File::open fails there with access denied.
+        OpenOptions::new()
+            .write(true)
+            .open(&temporary)?
+            .sync_all()?;
         fs::rename(&temporary, &path)?;
         crate::fs_ext::sync_dir(&self.root)?;
         drop(lock);
@@ -466,7 +471,12 @@ impl Broker {
         let bytes = serde_json::to_vec(policy)?;
         fs::write(&temporary, bytes)?;
         crate::fs_ext::restrict_to_owner(&temporary)?;
-        File::open(&temporary)?.sync_all()?;
+        // FlushFileBuffers needs GENERIC_WRITE on Windows — a read-only
+        // File::open fails there with access denied.
+        OpenOptions::new()
+            .write(true)
+            .open(&temporary)?
+            .sync_all()?;
         fs::rename(&temporary, &path)?;
         crate::fs_ext::sync_dir(&self.root)?;
         drop(lock);
@@ -1155,9 +1165,7 @@ fn android_devices(processes: &str) -> Vec<String> {
         .collect()
 }
 
-// Resource workload supervision is Unix-only (operate() bails
-// elsewhere); the ledger tests exercise its machinery.
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::{
@@ -1266,6 +1274,8 @@ mod tests {
         }
     }
 
+    // operate() is the supervised-workload entry point and is Unix-only.
+    #[cfg(unix)]
     #[test]
     fn operate_probes_devices_only_for_status_and_device_claims() {
         let h = Harness::new();
@@ -2143,10 +2153,7 @@ mod tests {
             "a force claim leapfrogs the waiter: {:?}",
             forced.blockers
         );
-        let status = h
-            .broker
-            .operate(Uuid::new_v4(), ResourceOperation::Status { id: None })
-            .unwrap();
+        let status = h.op(Uuid::new_v4(), ResourceOperation::Status { id: None });
         let parked = status
             .reservations
             .iter()
@@ -2730,7 +2737,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod retention_tests {
     use super::*;
     #[test]
@@ -2809,7 +2816,7 @@ mod retention_tests {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod process_tests {
     use super::*;
     use std::{
