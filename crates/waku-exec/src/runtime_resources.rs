@@ -163,7 +163,12 @@ fn refresh_staged(source: &Path, staged: &Path, key: Option<&Path>) -> anyhow::R
         fs::copy(source, &staging)
             .map(|_| ())
             .and_then(|()| {
-                fs::File::open(&staging)?.set_modified(fs::metadata(source)?.modified()?)
+                // SetFileTime needs a writable handle on Windows; File::open
+                // is read-only there.
+                fs::OpenOptions::new()
+                    .write(true)
+                    .open(&staging)?
+                    .set_modified(fs::metadata(source)?.modified()?)
             })
             .map_err(anyhow::Error::from)
     };
