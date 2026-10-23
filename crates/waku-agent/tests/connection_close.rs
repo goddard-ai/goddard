@@ -83,7 +83,18 @@ fn cli_closes_cleanly_after_success_and_failure_without_waiting_for_a_stalled_pe
                 // Do not let tungstenite flush its automatic Close reply:
                 // the CLI must abandon an unresponsive peer within budget.
                 let started = Instant::now();
-                assert_eq!(socket.get_mut().read(&mut [0]).unwrap(), 0);
+                // A peer that exits mid-handshake reports EOF on Unix but a
+                // reset (WSAECONNRESET) on Windows — either proves it is gone.
+                match socket.get_mut().read(&mut [0]) {
+                    Ok(0) => {}
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::ConnectionReset
+                                | std::io::ErrorKind::ConnectionAborted
+                        ) => {}
+                    other => panic!("CLI stayed connected past the close budget: {other:?}"),
+                }
                 assert!(started.elapsed() < Duration::from_secs(2));
             }
         });
