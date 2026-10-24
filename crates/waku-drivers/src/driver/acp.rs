@@ -773,17 +773,15 @@ async fn run_sdk_connection(
                 let first_prompt = first_prompt.clone();
                 let prompt_requests = prompt_requests.clone();
                 async move |notification: SessionNotification, _connection| {
-                    if !suppress_session_updates.load(Ordering::Acquire) {
-                        handle_session_update(
-                            provider,
-                            notification,
-                            &prompt_requests,
-                            &events,
-                            &mut stream_state.lock(),
-                            first_prompt.lock().as_deref(),
-                        )?;
-                    }
-                    Ok(())
+                    handle_session_update(
+                        provider,
+                        notification,
+                        suppress_session_updates.load(Ordering::Acquire),
+                        &prompt_requests,
+                        &events,
+                        &mut stream_state.lock(),
+                        first_prompt.lock().as_deref(),
+                    )
                 }
             },
             agent_client_protocol::on_receive_notification!(),
@@ -3269,6 +3267,7 @@ impl StableProjection {
             let _ = handle_session_update(
                 ProviderKind::Devin,
                 notification,
+                false,
                 &Mutex::new(PendingPrompts::default()),
                 events,
                 &mut self.stream,
@@ -3281,6 +3280,7 @@ impl StableProjection {
 fn handle_session_update(
     provider: ProviderKind,
     notification: SessionNotification,
+    suppress_replay: bool,
     prompt_requests: &Mutex<PendingPrompts>,
     events: &impl DriverEventSink,
     state: &mut AcpStreamState,
@@ -3288,6 +3288,12 @@ fn handle_session_update(
 ) -> agent_client_protocol::Result<()> {
     let update = serde_json::to_value(notification.update)?;
     let kind = update.get("sessionUpdate").and_then(Value::as_str);
+    // Loading replays transcript content already stored by Goddard, but the
+    // provider's command catalog belongs to the new live connection. Keep it
+    // even when it arrives before session/load returns.
+    if suppress_replay && kind != Some("available_commands_update") {
+        return Ok(());
+    }
     // Only turn-scoped updates are acceptance evidence: session-level records
     // (titles, usage, command lists) can arrive unrelated to the submission.
     if matches!(
@@ -5142,6 +5148,7 @@ mod tests {
             handle_session_update(
                 ProviderKind::Cursor,
                 SessionNotification::new("s", update),
+                false,
                 &prompt_requests,
                 &events,
                 &mut state,
@@ -5190,6 +5197,7 @@ mod tests {
             handle_session_update(
                 ProviderKind::Devin,
                 SessionNotification::new("s", update),
+                false,
                 &prompt_requests,
                 &events,
                 &mut state,
@@ -5232,6 +5240,7 @@ mod tests {
             handle_session_update(
                 ProviderKind::Devin,
                 SessionNotification::new("s", update),
+                false,
                 &prompt_requests,
                 &events,
                 &mut state,
@@ -5279,6 +5288,7 @@ mod tests {
             handle_session_update(
                 ProviderKind::Devin,
                 SessionNotification::new("s", update),
+                false,
                 &prompt_requests,
                 &events,
                 &mut state,
@@ -5304,6 +5314,7 @@ mod tests {
             handle_session_update(
                 ProviderKind::Devin,
                 SessionNotification::new("s", update),
+                false,
                 &prompt_requests,
                 &events,
                 &mut state,
@@ -5407,6 +5418,7 @@ mod tests {
             handle_session_update(
                 ProviderKind::Fx,
                 SessionNotification::new("s", update),
+                false,
                 &prompt_requests,
                 &events,
                 &mut state,
@@ -5423,6 +5435,43 @@ mod tests {
     }
 
     #[test]
+    fn session_load_preserves_commands_without_replaying_transcript() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let mut state = AcpStreamState::default();
+        let prompt_requests = Mutex::new(PendingPrompts::default());
+        for update in [
+            json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "Old reply"}
+            }),
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "old-tool", "title": "Old tool", "status": "completed"
+            }),
+            json!({
+                "sessionUpdate": "available_commands_update",
+                "availableCommands": [{"name": "compact", "description": "Compact context"}]
+            }),
+        ] {
+            handle_session_update(
+                ProviderKind::Devin,
+                SessionNotification::new("s", serde_json::from_value(update).unwrap()),
+                true,
+                &prompt_requests,
+                &events,
+                &mut state,
+                None,
+            )
+            .unwrap();
+        }
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        assert_eq!(seen.len(), 1);
+        assert!(matches!(&seen[0], DriverEvent::AvailableCommands(commands)
+            if commands.len() == 1 && commands[0].name == "compact"));
+        assert!(!state.produced_content);
+    }
+
+    #[test]
     fn session_info_update_forwards_a_generated_title() {
         let (events, event_rx) = crossbeam_channel::unbounded();
         let mut state = AcpStreamState::default();
@@ -5435,6 +5484,7 @@ mod tests {
         handle_session_update(
             ProviderKind::Devin,
             SessionNotification::new("s", update),
+            false,
             &prompt_requests,
             &events,
             &mut state,
@@ -5461,6 +5511,7 @@ mod tests {
         handle_session_update(
             ProviderKind::Devin,
             SessionNotification::new("s", update),
+            false,
             &prompt_requests,
             &events,
             &mut state,
