@@ -1,0 +1,1 @@
+- Press Cmd+Shift+Enter in an empty task composer to push the current branch in a local workspace when it tracks an upstream, has outgoing commits, and has no incoming commits.

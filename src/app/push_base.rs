@@ -556,7 +556,8 @@ impl Waku {
         }
     }
 
-    /// ⌘⇧↩ — push the selected session's base branch to its upstream: the
+    /// ⌘⇧↩ — push an empty local composer's current branch, or the
+    /// selected worktree session's base branch to its upstream: the
     /// landed notice's button without the card. The base is the newest
     /// landed notice's, falling back to the session's recorded base.
     pub(super) fn push_base_branch_action(
@@ -565,6 +566,21 @@ impl Waku {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .composer_session()
+            .is_some_and(|session| matches!(session.workspace, SessionWorkspace::Local))
+        {
+            if self.composer_is_empty(cx)
+                && self.live_deliverable_page().is_none()
+                && let Some(workspace) = self
+                    .composer_session()
+                    .and_then(|session| self.workspace_path_for_session(session))
+                    .map(Path::to_path_buf)
+            {
+                self.push_local_branch_if_ready(workspace, cx);
+            }
+            return;
+        }
         let target = self.selected_session().and_then(|session| {
             let workspace = self
                 .workspace_path_for_session(session)
@@ -590,6 +606,46 @@ impl Waku {
                 cx.notify();
             }
         }
+    }
+
+    /// Read fresh Git state off-thread rather than requiring the Git panel
+    /// to be open. Dirty files do not prevent pushing existing commits.
+    fn push_local_branch_if_ready(&mut self, workspace: PathBuf, cx: &mut Context<Self>) {
+        if self.git_panel_operation.is_some() {
+            return;
+        }
+        let Some(client) = self.workspace_client_for_path(&workspace) else {
+            return;
+        };
+        let inspect_workspace = workspace.clone();
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(WorkspaceOperation::InspectUpstreamStatus {
+                        cwd: inspect_workspace,
+                    })
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| match result {
+                Ok(WorkspaceResult::UpstreamStatus {
+                    snapshot: Some(snapshot),
+                }) if snapshot.detached_head.is_none()
+                    && snapshot
+                        .upstream
+                        .as_ref()
+                        .is_some_and(|upstream| upstream.ahead > 0 && upstream.behind == 0) =>
+                {
+                    waku.start_workspace_push(workspace, cx);
+                }
+                Err(error) => {
+                    waku.show_toast(error.to_string());
+                    cx.notify();
+                }
+                _ => {}
+            });
+        })
+        .detach();
     }
 
     pub(super) fn open_push_base_failure(

@@ -1063,8 +1063,8 @@ pub(crate) fn bind_keys(cx: &mut App) {
             Some("Workspace"),
         ),
         KeyBinding::new("secondary-shift-a", ArchiveSession, Some("Workspace")),
-        // Push the landed session's base branch to its upstream — the
-        // landed notice's button, without the card. A stronger submit
+        // Push the local session's current branch or a landed worktree's
+        // base branch to its upstream. A stronger submit
         // chord: `secondary-enter` already means "send" in the composer.
         KeyBinding::new(
             "secondary-shift-enter",
