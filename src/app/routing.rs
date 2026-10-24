@@ -321,14 +321,23 @@ impl Waku {
     }
 
     /// Whether the draft may pick Auto: routing is not disabled, the
-    /// session has not started, and at least one provider could take the
-    /// route. An unconfigured eval backend does not block it — the daemon
-    /// falls back to `last_used` and says so in the decision.
+    /// session has not started, its daemon has Jev configured, and at
+    /// least one provider could take the route. The daemon check follows
+    /// the session's owner — a draft in a remote project answers to the
+    /// remote host's eval setup, and a host that cannot be inspected
+    /// offers no row. A configured backend missing its credential still
+    /// offers Auto with the row's warning: the route falls back to
+    /// `last_used` and says so in the decision.
     pub(super) fn auto_route_available(&self) -> bool {
         self.state.auto_model_routing() != AutoModelRouting::Disabled
             && self.model_picker_session().is_some_and(|session| {
-                !self.managed_session_is_boss(self.daemons.session_owner(session.id), session.id)
+                let key = self.daemons.session_owner(session.id);
+                !self.managed_session_is_boss(key, session.id)
                     && !session.provider_locked()
+                    && self
+                        .daemons
+                        .supervisor(key)
+                        .is_some_and(|daemon| daemon.settings().eval.is_some())
             })
             && !self
                 .route_candidates_on(self.model_picker_daemon_key())
