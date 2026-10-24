@@ -15,8 +15,9 @@ use super::model_picker::{
 };
 use super::plan_approval::session_plan_approval_sent;
 use super::runtime::{
-    append_queued_steer_preview, expired_employee_operation, merge_remote_session_catalog,
-    session_accepts_immediate_steer, session_has_active_provider_turn,
+    append_queued_steer_preview, expired_employee_operation, merge_remote_project_catalog,
+    merge_remote_session_catalog, session_accepts_immediate_steer,
+    session_has_active_provider_turn,
 };
 use super::sessions::{
     UnreadTarget, dormant_session_ids, next_attention_target, next_idle_session,
@@ -357,6 +358,63 @@ fn non_fresh_catalog_removes_incognito_sessions_like_any_other() {
 
     assert_eq!(removed, vec![incognito_id]);
     assert!(catalog.is_empty());
+}
+
+#[test]
+fn remote_project_catalog_reconciles_by_id_instead_of_doubling() {
+    let mut owned = Project::from_path(std::path::PathBuf::from("/work/owned"));
+    owned.starred = true;
+    let owned_id = owned.id;
+    // A row claims were lost on mid-edit: unclaimed until the snapshot
+    // reports it again. Merging must update it, never append a twin.
+    let ghost = Project::from_path(std::path::PathBuf::from("/work/ghost"));
+    let ghost_id = ghost.id;
+    let other_daemon = Project::from_path(std::path::PathBuf::from("/work/foreign"));
+    let other_id = other_daemon.id;
+
+    let mut catalog = vec![owned.clone(), ghost, other_daemon];
+    let mut incoming = Project::from_path(std::path::PathBuf::from("/work/owned"));
+    incoming.id = owned_id;
+    incoming.starred = false;
+    let mut ghost_refresh = Project::from_path(std::path::PathBuf::from("/work/ghost"));
+    ghost_refresh.id = ghost_id;
+    let added = Project::from_path(std::path::PathBuf::from("/work/added"));
+    let added_id = added.id;
+
+    merge_remote_project_catalog(
+        &mut catalog,
+        vec![incoming, ghost_refresh, added],
+        // Only `owned` routes to the merging daemon — `foreign` belongs to
+        // another and `ghost` is unclaimed.
+        |id| id == owned_id,
+    );
+
+    assert_eq!(catalog.len(), 4);
+    assert_eq!(
+        catalog
+            .iter()
+            .filter(|project| project.id == ghost_id)
+            .count(),
+        1,
+        "the re-reported unclaimed row must not double",
+    );
+    assert!(!catalog.iter().find(|p| p.id == owned_id).unwrap().starred);
+    assert!(catalog.iter().any(|project| project.id == other_id));
+    assert!(catalog.iter().any(|project| project.id == added_id));
+}
+
+#[test]
+fn remote_project_catalog_removes_only_rows_the_merging_daemon_owns() {
+    let owned = Project::from_path(std::path::PathBuf::from("/work/owned"));
+    let foreign = Project::from_path(std::path::PathBuf::from("/work/foreign"));
+    let foreign_id = foreign.id;
+    let mut catalog = vec![owned, foreign];
+
+    // An empty snapshot deletes what the daemon dropped but must never touch
+    // rows claimed to another daemon.
+    merge_remote_project_catalog(&mut catalog, Vec::new(), |id| id != foreign_id);
+    assert_eq!(catalog.len(), 1);
+    assert_eq!(catalog[0].id, foreign_id);
 }
 
 #[test]

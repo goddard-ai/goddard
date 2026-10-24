@@ -95,7 +95,20 @@ impl DaemonMap {
         self.inner.remotes.write().insert(host, supervisor);
     }
 
-    /// Detach a host's supervisor. Dropping the last clone stops its monitor
+    /// Detach a host's supervisor without surrendering its catalog claims.
+    /// Editing a host record restarts the connect loop, but the host still
+    /// owns its rows: dropping the claims mid-edit would read them as local
+    /// and let the next save write them into another daemon's catalog.
+    /// Dropping the last supervisor clone still stops its monitor and ends
+    /// its task-state sync.
+    pub fn detach_remote(&self, host: Uuid) -> Option<DaemonSupervisor> {
+        self.inner.remotes.write().remove(&host)
+    }
+
+    /// Remove a host entirely: detach its supervisor and forget every claim
+    /// and loaded marker it held — the rows themselves are being deleted by
+    /// the caller, so any later claim for the same ids must come from a
+    /// fresh snapshot. Dropping the last supervisor clone stops its monitor
     /// and closes subscriber channels, which ends its task-state sync.
     pub fn remove_remote(&self, host: Uuid) -> Option<DaemonSupervisor> {
         let removed = self.inner.remotes.write().remove(&host);

@@ -508,6 +508,34 @@ pub(super) fn merge_remote_session_catalog(
     removed
 }
 
+/// `merge_remote_session_catalog` for projects. Reported rows reconcile by
+/// id rather than replace-by-owner: a row still claimed to another daemon —
+/// or left unclaimed while a host record was being edited — must update in
+/// place instead of appending a second copy of the same project. `owns`
+/// scopes deletions to the merging daemon's rows for the same reason as
+/// sessions. Any surviving same-id rows collapse to one: claims can be lost
+/// to older bugs and both copies describe one project.
+pub(super) fn merge_remote_project_catalog(
+    local: &mut Vec<Project>,
+    remote: Vec<Project>,
+    owns: impl Fn(Uuid) -> bool,
+) {
+    let remote_ids = remote
+        .iter()
+        .map(|project| project.id)
+        .collect::<HashSet<_>>();
+    local.retain(|project| !owns(project.id) || remote_ids.contains(&project.id));
+    for remote in remote {
+        if let Some(local) = local.iter_mut().find(|project| project.id == remote.id) {
+            *local = remote;
+        } else {
+            local.push(remote);
+        }
+    }
+    let mut seen = HashSet::with_capacity(local.len());
+    local.retain(|project| seen.insert(project.id));
+}
+
 /// Preserve newer resident detail and list edits while installing a stored baseline.
 pub(super) fn merge_hydrated_session(
     existing: &mut AgentSession,
@@ -2755,12 +2783,11 @@ impl Waku {
             self.project_switcher.session_removed(*session_id);
             self.transcript_scroll_positions.remove(session_id);
         }
-        self.state
-            .projects
-            .retain(|project| self.daemons.project_owner(project.id) != key);
-        self.state
-            .projects
-            .extend(snapshot.projects.iter().cloned());
+        merge_remote_project_catalog(
+            &mut self.state.projects,
+            snapshot.projects.clone(),
+            |project_id| self.daemons.project_owner(project_id) == key,
+        );
         Project::resolve_display_names(&mut self.state.projects);
         // Sessions the merge just learned about were made outside this UI —
         // an automation run, the CLI, or another client on this daemon.
@@ -3591,7 +3618,7 @@ impl Waku {
         }
         #[cfg(unix)]
         self.ssh_repair_requests.remove(&host_id);
-        self.daemons.remove_remote(host_id);
+        self.daemons.detach_remote(host_id);
         self.remote_errors.remove(&host_id);
         self.needs_auth_hosts.remove(&host_id);
         self.interactive_connects_pending.remove(&host_id);

@@ -1208,8 +1208,25 @@ fn seed_remote_catalog(
     host: Uuid,
     catalog: &RemoteTaskStateSnapshot,
 ) {
-    state.projects.extend(catalog.projects.iter().cloned());
-    state.sessions.extend(catalog.sessions.iter().cloned());
+    // A catalog polluted by a past claims gap can already carry these ids —
+    // the claims below still route them to this host, so seed only the rows
+    // the merged list does not already hold rather than double them.
+    let known_projects: HashSet<Uuid> = state.projects.iter().map(|p| p.id).collect();
+    let known_sessions: HashSet<Uuid> = state.sessions.iter().map(|s| s.id).collect();
+    state.projects.extend(
+        catalog
+            .projects
+            .iter()
+            .filter(|p| !known_projects.contains(&p.id))
+            .cloned(),
+    );
+    state.sessions.extend(
+        catalog
+            .sessions
+            .iter()
+            .filter(|s| !known_sessions.contains(&s.id))
+            .cloned(),
+    );
     daemons.replace_remote_catalog(
         host,
         &catalog
