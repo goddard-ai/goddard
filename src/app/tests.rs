@@ -15,9 +15,9 @@ use super::model_picker::{
 };
 use super::plan_approval::session_plan_approval_sent;
 use super::runtime::{
-    append_queued_steer_preview, expired_employee_operation, merge_remote_project_catalog,
-    merge_remote_session_catalog, session_accepts_immediate_steer,
-    session_has_active_provider_turn,
+    DeferredSteer, append_queued_steer_preview, expired_employee_operation,
+    merge_remote_project_catalog, merge_remote_session_catalog, session_accepts_immediate_steer,
+    session_has_active_provider_turn, take_ready_deferred_steers,
 };
 use super::sessions::{
     UnreadTarget, dormant_session_ids, next_attention_target, next_idle_session,
@@ -558,6 +558,87 @@ fn steer_waits_during_assistant_text_but_not_reasoning_or_tools() {
     // A backgrounded status without a live provider turn is not steerable.
     session.turns.last_mut().unwrap().status = TurnStatus::Completed;
     assert!(!session_accepts_immediate_steer(&session));
+}
+
+#[test]
+fn deferred_steers_deliver_once_in_order_when_text_yields_to_tools() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Devin);
+    session.begin_turn("inspect the project");
+    session.mark_active_turn_provider_started();
+    session.status = SessionStatus::Working;
+    session.push_message(MessageRole::Assistant, "I will inspect the tests.");
+    session.messages.last_mut().unwrap().streaming = true;
+    let first = QueuedMessage::new("focus on the failing test");
+    let second = QueuedMessage::new("also check its callers");
+    // Ordinary follow-ups and provider-rejected steers stay queued.
+    let follow_up = QueuedMessage::new("a separate task");
+    let rejected = QueuedMessage::new("provider rejected this steer");
+    let turn_id = session.active_turn_id().unwrap();
+    let mut deferred = std::collections::VecDeque::from([
+        DeferredSteer {
+            turn_id,
+            queued_id: first.id,
+        },
+        DeferredSteer {
+            turn_id,
+            queued_id: second.id,
+        },
+    ]);
+    let expected = vec![first.id, second.id];
+    append_queued_steer_preview(&mut session, &first);
+    append_queued_steer_preview(&mut session, &second);
+    session.queued_messages = vec![follow_up, first, second, rejected];
+
+    // Preview rows must not hide the still-streaming assistant message.
+    assert!(!session_accepts_immediate_steer(&session));
+    assert!(take_ready_deferred_steers(&session, &mut deferred).is_empty());
+
+    // A new reasoning/tool step closes the text segment without ending the turn.
+    session.messages[1].streaming = false;
+    assert_eq!(
+        take_ready_deferred_steers(&session, &mut deferred),
+        expected
+    );
+    assert!(take_ready_deferred_steers(&session, &mut deferred).is_empty());
+    assert_eq!(session.active_turn_id(), Some(turn_id));
+}
+
+#[test]
+fn deferred_steers_do_not_survive_queue_removal_or_a_new_turn() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Devin);
+    session.begin_turn("inspect the project");
+    session.mark_active_turn_provider_started();
+    session.status = SessionStatus::Working;
+    let queued = QueuedMessage::new("steer this turn");
+    let turn_id = session.active_turn_id().unwrap();
+    let mut deferred = std::collections::VecDeque::from([
+        DeferredSteer {
+            turn_id,
+            queued_id: Uuid::new_v4(),
+        },
+        DeferredSteer {
+            turn_id,
+            queued_id: queued.id,
+        },
+    ]);
+    session.queued_messages.push(queued);
+    session.turns.last_mut().unwrap().status = TurnStatus::Interrupted;
+    assert!(take_ready_deferred_steers(&session, &mut deferred).is_empty());
+    assert!(deferred.is_empty());
+
+    session.begin_turn("next task");
+    session.mark_active_turn_provider_started();
+    deferred.push_back(DeferredSteer {
+        turn_id,
+        queued_id: session.queued_messages[0].id,
+    });
+    assert!(take_ready_deferred_steers(&session, &mut deferred).is_empty());
+    deferred.push_back(DeferredSteer {
+        turn_id: session.active_turn_id().unwrap(),
+        queued_id: Uuid::new_v4(),
+    });
+    assert!(take_ready_deferred_steers(&session, &mut deferred).is_empty());
+    assert!(deferred.is_empty());
 }
 
 #[test]

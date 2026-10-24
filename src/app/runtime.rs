@@ -448,8 +448,34 @@ pub(super) fn session_accepts_immediate_steer(session: &AgentSession) -> bool {
         )
         && !session
             .messages
-            .last()
-            .is_some_and(|message| message.role == MessageRole::Assistant && message.streaming)
+            .iter()
+            .rev()
+            .find(|message| message.role == MessageRole::Assistant)
+            .is_some_and(|message| message.streaming)
+}
+
+pub(super) struct DeferredSteer {
+    pub turn_id: Uuid,
+    pub queued_id: Uuid,
+}
+
+/// Only unsent steers may retry, and only in the turn they were aimed at.
+/// Removed queue entries and settled turns retire the retry intent.
+pub(super) fn take_ready_deferred_steers(
+    session: &AgentSession,
+    deferred: &mut VecDeque<DeferredSteer>,
+) -> Vec<Uuid> {
+    deferred.retain(|steer| {
+        session.active_turn_id() == Some(steer.turn_id)
+            && session
+                .queued_messages
+                .iter()
+                .any(|queued| queued.id == steer.queued_id && !queued.is_agent_owned())
+    });
+    if !session_accepts_immediate_steer(session) {
+        return Vec::new();
+    }
+    deferred.drain(..).map(|steer| steer.queued_id).collect()
 }
 
 /// Merge the daemon's list-only session projection into the desktop catalog.
@@ -2556,6 +2582,7 @@ impl Waku {
                 events,
                 pending_events: VecDeque::new(),
                 pending_steers: VecDeque::new(),
+                deferred_steers: VecDeque::new(),
                 stream_phase: None,
                 pending_reasoning_newlines: 0,
                 stream_remeasure_pending: false,
@@ -6597,6 +6624,7 @@ impl Waku {
                 events: prepared.events,
                 pending_events: VecDeque::new(),
                 pending_steers: VecDeque::new(),
+                deferred_steers: VecDeque::new(),
                 stream_phase: None,
                 pending_reasoning_newlines: 0,
                 stream_remeasure_pending: false,
@@ -6925,7 +6953,7 @@ impl Waku {
     }
 
     /// Deliver a steer while the provider can consume it in the current turn.
-    /// During assistant text generation, queue a follow-up instead.
+    /// During assistant text generation, defer until the next safe phase.
     pub(super) fn steer_composer_submission(
         &mut self,
         submission: ComposerSubmission,
@@ -7009,6 +7037,21 @@ impl Waku {
         // A live driver reports the outcome asynchronously via SteerAccepted
         // or SteerRejected once a steer is handed off.
         if !self.session_can_steer(&session) {
+            if let Some(runtime) = self.runtimes.get_mut(&session.id)
+                && runtime.driver.supports_steer()
+                && let Some(turn_id) = session.active_turn_id()
+            {
+                let queued_id = *submission.queued_id.get_or_insert_with(Uuid::new_v4);
+                if !runtime
+                    .deferred_steers
+                    .iter()
+                    .any(|steer| steer.queued_id == queued_id)
+                {
+                    runtime
+                        .deferred_steers
+                        .push_back(DeferredSteer { turn_id, queued_id });
+                }
+            }
             self.enqueue_steer_follow_up_submission(session.id, submission, cx);
             return;
         }
@@ -7065,6 +7108,27 @@ impl Waku {
                 .runtimes
                 .get(&session.id)
                 .is_some_and(|runtime| runtime.driver.supports_steer())
+    }
+
+    fn retry_deferred_steers(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(runtime) = self.runtimes.get_mut(&session_id) else {
+            return;
+        };
+        if runtime.deferred_steers.is_empty() {
+            return;
+        }
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        let ready = take_ready_deferred_steers(session, &mut runtime.deferred_steers);
+        for queued_id in ready {
+            self.steer_queued_message(session_id, queued_id, cx);
+        }
     }
 
     /// A composer send whose target chip names an employee rides the
@@ -8312,6 +8376,7 @@ impl Waku {
                 .pending_events
                 .retain(|event| matches!(event, DriverEvent::BackgroundWork(_)));
             runtime.pending_steers.clear();
+            runtime.deferred_steers.clear();
             runtime.stream_remeasure_pending = false;
             runtime.stream_phase = None;
             runtime.pending_permission = None;
@@ -8775,6 +8840,9 @@ impl Waku {
             runtime.stream_remeasure_pending = markdown_changed;
             if keep_runtime {
                 self.runtimes.insert(session_id, runtime);
+                if runtime_changed {
+                    self.retry_deferred_steers(session_id, cx);
+                }
             }
             changed |= runtime_changed || background_changed;
             persisted_state_changed |= runtime_changed;

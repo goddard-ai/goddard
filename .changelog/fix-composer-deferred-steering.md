@@ -1,0 +1,1 @@
+- Steering submitted while assistant text streams now sends when the same turn resumes reasoning or tool work, instead of waiting for the turn to finish.

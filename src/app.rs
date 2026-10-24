@@ -1684,6 +1684,8 @@ struct SessionRuntime {
     /// Presentation metadata for steering messages awaiting the provider's
     /// accepted/rejected acknowledgement, in transport order.
     pending_steers: VecDeque<ComposerSubmission>,
+    /// Unsent steers waiting for a safe phase of their original turn.
+    deferred_steers: VecDeque<runtime::DeferredSteer>,
     stream_phase: Option<StreamPhase>,
     /// Newline-only reasoning deltas buffered while a reasoning block streams.
     /// Some providers (e.g. GLM via OpenRouter) emit every text chunk followed

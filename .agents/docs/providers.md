@@ -63,11 +63,12 @@ it through `DriverControl::supports_steer` and delivers it with `steer`; the
 outcome comes back asynchronously as `SteerAccepted` or `SteerRejected`. The
 composer steers a started turn while the provider is reasoning, using tools,
 waiting for input, or parked on detached work. While assistant text is
-streaming, or steering is unsupported or refused, the app uses its follow-up queue — the
-message stays visible above the composer and starts a fresh turn once the
-current one settles. Queueing there is load-bearing: a mid-generation steer
-can be acknowledged into a volatile input buffer and vanish if the turn ends
-without another model call.
+streaming, the app parks the steer and retries when that same turn resumes
+reasoning or tool work. If the turn ends first, or steering is unsupported or
+refused, the message stays queued for a fresh turn. Only unsent steers retry;
+provider rejections stay queued. Waiting during text generation is load-bearing:
+a steer can be acknowledged into a volatile input buffer and vanish if the turn
+ends without another model call.
 
 Every driver normalizes its tool events into one `ActivityItem`
 (`Reasoning | Command | FileChange | Search | Plan | Tool`) via
