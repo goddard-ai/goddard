@@ -43,50 +43,37 @@ pub(super) struct CloseDialogState {
 pub(super) struct BusyCloseCounts {
     /// Busy sessions on the app-spawned daemon — quitting kills it.
     local_sessions: usize,
-    /// Busy sessions on remote daemons — those outlive the app.
-    remote_sessions: usize,
     /// Terminals with a command still running — they die with the app.
     terminals: usize,
 }
 
 impl BusyCloseCounts {
     fn is_idle(self) -> bool {
-        self.local_sessions == 0 && self.remote_sessions == 0 && self.terminals == 0
+        self.local_sessions == 0 && self.terminals == 0
     }
 }
 
-/// Busy sessions the app owns, split by whose daemon runs them — friend
-/// watches are read-only views of a session on someone else's daemon, so
-/// a quit doesn't abandon them. Remote-host sessions run on a daemon the
-/// quit cannot touch; local ones die with the app-spawned daemon.
-pub(super) fn busy_owned_session_counts(
+/// Busy local sessions the app owns. Friend watches and remote-host sessions
+/// outlive this app, so neither belongs in the close warning.
+pub(super) fn busy_local_owned_session_count(
     sessions: &[AgentSession],
     is_watched: impl Fn(Uuid) -> bool,
     is_remote: impl Fn(Uuid) -> bool,
-) -> (usize, usize) {
-    let mut local = 0;
-    let mut remote = 0;
-    for session in sessions {
-        if !session.is_busy() || is_watched(session.id) {
-            continue;
-        }
-        if is_remote(session.id) {
-            remote += 1;
-        } else {
-            local += 1;
-        }
-    }
-    (local, remote)
+) -> usize {
+    sessions
+        .iter()
+        .filter(|session| session.is_busy() && !is_watched(session.id) && !is_remote(session.id))
+        .count()
 }
 
 impl Waku {
-    /// Live work the close confirmation warns about: busy sessions split
-    /// by owning daemon plus terminals with a command still running.
+    /// Live work the close confirmation warns about: busy local sessions
+    /// plus terminals with a command still running.
     fn busy_close_counts(&self, cx: &App) -> BusyCloseCounts {
-        let (local_sessions, remote_sessions) = busy_owned_session_counts(
+        let local_sessions = busy_local_owned_session_count(
             &self.state.sessions,
             |id| self.friend_sessions.contains_key(&id),
-            |id| self.daemons.is_remote_session(id),
+            |id| self.is_remote_session(id),
         );
         let terminals = self
             .right_panel_terminals
@@ -95,7 +82,6 @@ impl Waku {
             .count();
         BusyCloseCounts {
             local_sessions,
-            remote_sessions,
             terminals,
         }
     }
@@ -193,7 +179,7 @@ impl Waku {
         };
 
         let mut lines: Vec<String> = Vec::new();
-        match dialog.counts.local_sessions + dialog.counts.remote_sessions {
+        match dialog.counts.local_sessions {
             1 => lines.push(tr!("app_close.busy_sessions_one")),
             n if n > 1 => lines.push(tr!("app_close.busy_sessions_many", count = n)),
             _ => {}
@@ -212,9 +198,6 @@ impl Waku {
         } else {
             if dialog.counts.local_sessions > 0 {
                 lines.push(tr!("app_close.sessions_consequence_local", app = APP_NAME));
-            }
-            if dialog.counts.remote_sessions > 0 {
-                lines.push(tr!("app_close.sessions_consequence_remote"));
             }
             if dialog.counts.terminals > 0 {
                 lines.push(tr!("app_close.terminals_consequence"));
