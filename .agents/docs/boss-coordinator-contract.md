@@ -1,11 +1,23 @@
 # Boss coordinator readiness contract
 
-Ordinary Boss and planning chat uses the existing provider prompt and CLI
-surfaces. It does not claim the strict pre-compaction guarantee. Startup and
-driver admission still reject archived, retired, incident-fenced or frozen
-sessions; unreadable continuity also blocks admission. Unverified replacement
-submission and activation remain paused behind the strict contract below.
-Existing prepared packages and unresolved receipts are retained.
+Boss tries to avoid provider compaction through best-effort session rotation.
+Compaction itself does not revoke authority: canonical instructions are restored
+on the next outbound prompt alongside instruction pins and current work state.
+An ordinary refresh waits for a settled turn, preserves history and queued input,
+then hands coordination to one fresh session. Its provider launches lazily through
+normal admission. Transcript notices carry recovery feedback; no refresh toasts.
+
+Startup, driver admission and scoped CLI calls still reject archived, retired,
+frozen and pending-ownership sessions. Unreadable continuity also blocks
+admission. New rotation intents record `mode: bestEffort`; older intents default
+to `strict`. An older compaction checkpoint can switch to best effort only when
+its successor delivery is still Prepared, no replacement lease exists and neither
+owner has unresolved external effects. Unknown attempts retain their original
+correlation and never authorize replay. Prepared packages remain as evidence.
+
+The remaining sections describe the retained strict checkpoint contract, which
+ordinary rotation does not claim. Current adapters cannot satisfy its provider
+qualification, native receipt, budget and policy requirements.
 
 ## Integration boundaries
 
@@ -21,10 +33,10 @@ Existing prepared packages and unresolved receipts are retained.
   launch/resume. Healthy ordinary chat does not require startup-budget evidence.
 - `BossOwnershipDriver` permits the active Boss and registered planning sessions
   while they are unarchived and unfenced. Scoped CLI calls retain ordinary
-  authorization. Retired credentials, frozen replacements and compaction
-  incidents remain blocked; no native execution-policy qualification is claimed.
+  authorization. Retired credentials and frozen replacements remain blocked;
+  compaction alone does not block. No native execution-policy qualification is claimed.
 - Healthy human prompts use the normal `PromptSubmitted` and provider-delivery
-  path. Incident-fenced human prompts retain their content and attachments in
+  path. Ownership-fenced human prompts retain their content and attachments in
   the durable queue; employee results remain queued while fenced. Generic
   turn/error/process events cannot acknowledge, reject or consume continuity. Existing legacy accepted records
   cannot establish exact-package acceptance.

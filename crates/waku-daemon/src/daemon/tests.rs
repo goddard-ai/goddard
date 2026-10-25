@@ -17531,7 +17531,7 @@ fn clear_replaces_the_boss_chat_and_removes_retired_generations() {
 }
 
 #[test]
-fn unsupported_boss_rotation_keeps_the_current_chat_available() {
+fn best_effort_boss_rotation_preserves_history_without_provider_qualification() {
     use waku_boss::{boss_rotation::RotationJournal, rotation_continuity::ContinuityLedger};
     let root = std::env::temp_dir().join(format!("boss-rotation-runtime-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
@@ -17560,7 +17560,8 @@ fn unsupported_boss_rotation_keeps_the_current_chat_available() {
             .reconcile_boss_rotation(crate::model::unix_time())
             .is_ok()
     );
-    assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    let next = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(old, next);
     assert!(
         backend
             .task_state
@@ -17568,15 +17569,20 @@ fn unsupported_boss_rotation_keeps_the_current_chat_available() {
             .session_mut(old)
             .unwrap()
             .archived_at
-            .is_none()
+            .is_some()
     );
     let journal = RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
     assert!(journal.intent.is_none());
-    assert!(journal.rotations.is_empty());
+    assert_eq!(journal.rotations.len(), 1);
+    assert_eq!(
+        journal.rotations[0].mode,
+        waku_boss::boss_rotation::RotationMode::BestEffort
+    );
     let ledger = ContinuityLedger::load(&root.join("boss/continuity.json")).unwrap();
     assert!(ledger.frozen_coordinator.is_none());
-    assert!(!backend.boss_incident_fenced(old));
-    backend.ensure_coordinator_available(old).unwrap();
+    assert!(!backend.boss_incident_fenced(next));
+    backend.ensure_coordinator_available(next).unwrap();
+    assert!(backend.ensure_coordinator_available(old).is_err());
     drop(backend);
     remove_tree(root);
 }
@@ -17740,7 +17746,7 @@ fn boss_rotation_opt_out_and_exact_threshold_keep_the_current_chat() {
             .reconcile_boss_rotation(crate::model::unix_time())
             .is_ok()
     );
-    assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    assert_ne!(backend.boss.identity_and_session().1, Some(old));
     drop(backend);
     remove_tree(root);
 }

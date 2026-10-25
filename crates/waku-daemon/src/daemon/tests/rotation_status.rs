@@ -65,13 +65,13 @@ fn rotation_diagnostics_cover_identity_accounting_stages_and_terminal() {
         },
     )
     .unwrap();
-    assert!(backend.reconcile_boss_rotation(now).is_err());
+    backend.reconcile_boss_rotation(now).unwrap();
     let next = backend.boss.identity_and_session().1.unwrap();
-    assert_eq!(old, next);
+    assert_ne!(old, next);
 
     let journal =
         crate::boss_rotation::RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
-    let rotation = journal.intent.as_ref().expect("pending rotation");
+    let rotation = journal.rotations.last().expect("committed rotation");
     let diagnostics = &rotation.diagnostics;
     assert_eq!(diagnostics.cause, RotationCause::Incident);
     assert_eq!(diagnostics.provider, Some(ProviderKind::Codex));
@@ -111,17 +111,18 @@ fn rotation_diagnostics_cover_identity_accounting_stages_and_terminal() {
             RotationLifecycleStage::Triggered,
             RotationLifecycleStage::IntentPersisted,
             RotationLifecycleStage::SuccessorPrepared,
+            RotationLifecycleStage::PointerPublished,
+            RotationLifecycleStage::PredecessorFenced,
+            RotationLifecycleStage::OwnershipCommitted,
+            RotationLifecycleStage::SuccessorActivated,
         ]
     );
-    assert!(diagnostics.failed_attempts > 0);
-    assert!(!matches!(
+    assert_eq!(diagnostics.failed_attempts, 0);
+    assert!(matches!(
         diagnostics.terminal,
         Some(waku_boss::boss_rotation::RotationTerminal::Activated { .. })
     ));
-    assert_eq!(
-        backend.boss.document().rotation.unwrap().phase,
-        BossRotationPhase::Paused
-    );
+    assert!(backend.boss.document().rotation.is_none());
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -182,7 +183,7 @@ fn detected_compaction_marks_an_incident_and_refreshes_on_the_next_tick() {
     busy_boss_chat(&backend, old, Uuid::new_v4());
     let now = crate::model::unix_time();
     // The provider event lands in both durable records: the continuity
-    // ledger fences the generation and requests the refresh; the journal
+    // ledger requests the refresh without fencing; the journal
     // correlates the signal and surfaces the incident status.
     crate::daemon::boss_rotation::record_boss_compaction_signal(
         &backend.data_dir,
@@ -200,7 +201,8 @@ fn detected_compaction_marks_an_incident_and_refreshes_on_the_next_tick() {
     // The busy chat cannot rotate yet — the incident stays visible.
     backend.reconcile_boss_rotation(now).unwrap();
     let status = backend.boss.document().rotation.expect("incident status");
-    assert_eq!(status.phase, BossRotationPhase::Refreshing);
+    assert_eq!(status.phase, BossRotationPhase::CompactionIncident);
+    backend.ensure_coordinator_available(old).unwrap();
     // Once the chat settles the same pass rotates with the incident cause.
     record_boss_event(
         &backend.task_state,
@@ -213,14 +215,17 @@ fn detected_compaction_marks_an_incident_and_refreshes_on_the_next_tick() {
         },
     )
     .unwrap();
-    assert!(backend.reconcile_boss_rotation(now + 1).is_err());
+    backend.reconcile_boss_rotation(now + 1).unwrap();
     let next = backend.boss.identity_and_session().1.unwrap();
-    assert_eq!(old, next);
+    assert_ne!(old, next);
     let journal =
         crate::boss_rotation::RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
-    let rotation = journal.intent.as_ref().expect("pending incident recovery");
+    let rotation = journal
+        .rotations
+        .last()
+        .expect("committed incident recovery");
     assert_eq!(rotation.diagnostics.cause, RotationCause::Incident);
-    assert!(journal.incident.is_some());
+    assert!(journal.incident.is_none());
     assert!(journal.signals.iter().any(|signal| matches!(
         signal,
         crate::boss_rotation::RotationSignal::Compaction {
@@ -229,7 +234,7 @@ fn detected_compaction_marks_an_incident_and_refreshes_on_the_next_tick() {
             ..
         } if *session_id == old
     )));
-    assert!(backend.boss.document().rotation.is_some());
+    assert!(backend.boss.document().rotation.is_none());
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -256,6 +261,7 @@ fn incident_refresh_carries_parked_work_and_closes_orphaned_turns() {
     let mut ledger = waku_boss::rotation_continuity::ContinuityLedger::load(&continuity_path)
         .expect("continuity ledger");
     ledger.record_compaction_incident(old, fenced_at, "compaction activity observed");
+    ledger.compaction_incidents.last_mut().unwrap().fenced = true;
     ledger.persist(&continuity_path).unwrap();
     // Parked work the fence holds — mirrored into the document and the
     // in-memory queue exactly like the production park path.
@@ -314,9 +320,9 @@ fn incident_refresh_carries_parked_work_and_closes_orphaned_turns() {
         },
     )
     .unwrap();
-    assert!(backend.reconcile_boss_rotation(now + 1).is_err());
+    backend.reconcile_boss_rotation(now + 1).unwrap();
     let next = backend.boss.identity_and_session().1.unwrap();
-    assert_eq!(old, next);
+    assert_ne!(old, next);
     {
         let state = backend.task_state.lock();
         let successor = state
@@ -335,8 +341,8 @@ fn incident_refresh_carries_parked_work_and_closes_orphaned_turns() {
             .iter()
             .find(|session| session.id == old)
             .unwrap();
-        assert!(!retired.queued_messages.is_empty());
-        assert!(retired.archived_at.is_none());
+        assert!(retired.queued_messages.is_empty());
+        assert!(retired.archived_at.is_some());
         assert_eq!(
             retired.turns.last().map(|turn| turn.status),
             Some(crate::model::TurnStatus::Interrupted)
@@ -344,7 +350,7 @@ fn incident_refresh_carries_parked_work_and_closes_orphaned_turns() {
     }
     assert!(backend.agent.has_queued(next));
     let ledger = waku_boss::rotation_continuity::ContinuityLedger::load(&continuity_path).unwrap();
-    assert!(ledger.rotation_request.is_some());
+    assert!(ledger.rotation_request.is_none());
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -401,9 +407,9 @@ fn incident_refresh_delivers_carried_work_once_the_swap_commits() {
         },
     )
     .unwrap();
-    assert!(backend.reconcile_boss_rotation(now + 1).is_err());
+    backend.reconcile_boss_rotation(now + 1).unwrap();
     let next = backend.boss.identity_and_session().1.unwrap();
-    assert_eq!(old, next);
+    assert_ne!(old, next);
     // The stop hold followed the chat, not the retiring id — the carried
     // report stays parked until the user's next prompt releases it.
     assert!(backend.agent.user_stopped(next));
@@ -425,22 +431,23 @@ fn incident_refresh_delivers_carried_work_once_the_swap_commits() {
     backend.deliver_pending_agent_prompts();
     assert!(capture.prompts.lock().is_empty());
     assert!(backend.agent.has_queued(next));
-    // Releasing the stop hold cannot qualify the successor's provider.
+    // Ordinary recovery delivers the carried report once the user resumes.
     backend.agent.clear_user_stop(next);
     backend.deliver_pending_agent_prompts();
-    assert!(capture.prompts.lock().is_empty());
-    assert!(backend.agent.has_queued(next));
+    assert_eq!(capture.prompts.lock().len(), 1);
+    assert!(!backend.agent.has_queued(next));
     let state = backend.task_state.lock();
     let successor = state
         .sessions
         .iter()
         .find(|session| session.id == next)
         .unwrap();
-    assert_eq!(successor.queued_messages.len(), 1);
+    assert!(successor.queued_messages.is_empty());
     assert!(
-        successor.queued_messages[0]
-            .content
-            .contains("parked report")
+        successor
+            .messages
+            .iter()
+            .any(|message| message.content.contains("parked report"))
     );
     drop(state);
     drop(backend);
@@ -479,7 +486,7 @@ fn manual_compact_attempt_is_journal_telemetry_and_retry_is_human_only() {
             EventSink::detached(),
             None,
         )
-        .unwrap_err();
+        .unwrap();
     let journal =
         crate::boss_rotation::RotationJournal::load(&root.join("boss/rotation.json")).unwrap();
     assert!(journal.signals.iter().any(|signal| matches!(

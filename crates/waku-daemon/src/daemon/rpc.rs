@@ -2326,7 +2326,7 @@ impl Backend for WakuBackend {
                     // submission instead of orphaning it.
                     anyhow::ensure!(
                         !self.boss_incident_fenced(session_id),
-                        "Boss session is fenced while a provider-compaction refresh is pending"
+                        "Boss coordination is fenced while an ownership transition is reconciled"
                     );
                     let submitted_message_id = message_id.unwrap_or_else(Uuid::new_v4);
                     let submitted = DriverEvent::PromptSubmitted {
@@ -2449,20 +2449,6 @@ impl Backend for WakuBackend {
                         crate::boss_rotation::CompactionOrigin::DaemonCommand,
                         crate::model::unix_time(),
                     );
-                    if self.boss.is_boss(session_id) {
-                        let provider = self
-                            .task_state
-                            .lock()
-                            .sessions
-                            .iter()
-                            .find(|session| session.id == session_id)
-                            .map(|session| session.provider)
-                            .ok_or_else(|| anyhow!("Boss session is missing"))?;
-                        anyhow::ensure!(
-                            self.boss_provider_qualification(provider).qualified(),
-                            "Boss refresh is unavailable for this provider"
-                        );
-                    }
                 }
                 handle_driver_command(&driver, command)
             }

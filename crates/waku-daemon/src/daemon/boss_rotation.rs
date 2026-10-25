@@ -4,7 +4,7 @@ use crate::boss_rotation::{
     RotationJournal, RotationSignal, RotationUsageSample,
 };
 use crate::model::MessageRole;
-use waku_boss::boss_rotation::RotationCause;
+use waku_boss::boss_rotation::{RotationCause, RotationMode};
 use waku_boss::rotation_continuity::ContinuityLedger;
 #[cfg(test)]
 use waku_boss::rotation_oracle::{
@@ -715,7 +715,7 @@ impl WakuBackend {
         let path = self.boss_journal_path();
         let continuity_path = self.boss_continuity_path();
         let mut journal = RotationJournal::load(&path)?;
-        let ledger = ContinuityLedger::load(&continuity_path)?;
+        let mut ledger = ContinuityLedger::load(&continuity_path)?;
         if journal.intent.is_none()
             && ledger
                 .replacement_leases
@@ -748,6 +748,27 @@ impl WakuBackend {
             .map(|entry| entry.detected_at)
             .min();
         let incident = fenced_at.is_some();
+        // Only the old implementation fenced on compaction. Its unconfirmed
+        // prompt rows may need unwinding; new compaction events do not revoke
+        // admission and must never interrupt a legitimate provider turn.
+        let recovering_fence = ledger
+            .compaction_incidents
+            .iter()
+            .any(|entry| entry.session_id == active && entry.fenced)
+            || journal.intent.as_ref().is_some_and(|intent| {
+                intent.mode == RotationMode::Strict && ledger.has_incident(intent.old_session_id)
+            });
+        if recovering_fence
+            && let Some(intent) = journal.intent.as_mut()
+            && intent.boss_id == identity.id
+            && (active == intent.old_session_id || active == intent.new_session_id)
+            && ledger
+                .release_unsubmitted_replacement(intent.old_session_id, intent.new_session_id)
+                .is_ok()
+        {
+            intent.mode = RotationMode::BestEffort;
+            journal.persist(&path)?;
+        }
         let requested = ledger.rotation_request.as_ref().map(|request| {
             if incident {
                 format!(
@@ -763,15 +784,15 @@ impl WakuBackend {
         }
         let mut state = self.task_state.lock();
         if journal.intent.is_none() {
-            if let Some(fenced_at) = fenced_at {
+            if recovering_fence && let Some(fenced_at) = fenced_at {
                 self.unwind_fence_orphaned_turn(&mut state, active, fenced_at)?;
             }
             let Some(old) = state.session_mut(active) else {
                 return Ok(());
             };
             self.task_store.hydrate(old)?;
-            // Trigger and freeze independently of queue emptiness or an open
-            // provider turn. Quiescence is checked only after the durable fence.
+            // Queued work follows the successor; an open provider turn must
+            // settle before an ordinary refresh starts an ownership transaction.
             let policy = BossRotationConfig::from_settings(settings);
             let reason = if let Some(reason) = requested.clone() {
                 reason
@@ -789,13 +810,10 @@ impl WakuBackend {
                     usage.window.unwrap_or_default(),
                 )
             };
-            // Starting an unsupported replacement would fence a healthy chat
-            // indefinitely. Existing intents and actual compaction incidents
-            // still recover fail-closed; new prevention needs a qualified route.
-            if !incident && !self.boss_provider_qualification(old.provider).qualified() {
-                if requested.is_some() {
-                    anyhow::bail!("Boss refresh is unavailable for this provider");
-                }
+            // Ordinary rotation waits for a safe boundary before recording an
+            // ownership transaction. Usage is a heuristic, not a guarantee
+            // that the provider cannot compact inside its own turn.
+            if !boss_chat_settled(old, &self.agent, true) {
                 return Ok(());
             }
             if old.messages.is_empty() {
@@ -816,6 +834,7 @@ impl WakuBackend {
                 // identity (persona, defaults, grants), provider/model, and
                 // the prevention-contract evidence at intent time.
                 let intent = journal.intent.as_mut().expect("begun rotation");
+                intent.mode = RotationMode::BestEffort;
                 intent.reason = Some(reason);
                 intent.identity_digest = Some(self.boss.identity_digest());
                 intent.provider = Some(format!("{:?}", old.provider));
@@ -890,15 +909,19 @@ impl WakuBackend {
             "Boss rotation session pointer diverged"
         );
         ContinuityLedger::update(&continuity_path, |ledger| {
-            ledger.freeze_coordinator(
-                intent.old_session_id,
-                intent.new_session_id,
-                intent.old_generation,
-            )
+            if intent.mode == RotationMode::BestEffort {
+                ledger.release_unsubmitted_replacement(intent.old_session_id, intent.new_session_id)
+            } else {
+                ledger.freeze_coordinator(
+                    intent.old_session_id,
+                    intent.new_session_id,
+                    intent.old_generation,
+                )
+            }
         })??;
         let predecessor = format!("<boss-rotation-link:{}>", intent.old_session_id);
         if active == intent.old_session_id {
-            if let Some(fenced_at) = fenced_at {
+            if recovering_fence && let Some(fenced_at) = fenced_at {
                 self.unwind_fence_orphaned_turn(&mut state, active, fenced_at)?;
             }
             let old = state
@@ -978,8 +1001,37 @@ impl WakuBackend {
                                 .model
                                 .as_deref()
                                 .is_none_or(|model| model == staged.model.as_deref().unwrap_or(""))
+                            && (intent.mode == RotationMode::Strict
+                                || state.sessions.iter().any(|old| {
+                                    old.id == intent.old_session_id
+                                        && old.provider == staged.provider
+                                        && old.model == staged.model
+                                }))
                     });
                 if !identity_current || !config_current {
+                    if intent.mode == RotationMode::BestEffort {
+                        // No provider submission exists for this checkpoint.
+                        // Keep its history, restore intake to the predecessor,
+                        // and let the next pass stage the current configuration.
+                        let staged = state
+                            .session_mut(intent.new_session_id)
+                            .ok_or_else(|| anyhow!("rotation destination is missing"))?;
+                        staged.archived_at.get_or_insert(now);
+                        let queued = std::mem::take(&mut staged.queued_messages);
+                        let old = state
+                            .session_mut(intent.old_session_id)
+                            .ok_or_else(|| anyhow!("rotation source session is missing"))?;
+                        for message in queued {
+                            if !old.queued_messages.iter().any(|held| held.id == message.id) {
+                                old.queued_messages.push(message);
+                            }
+                        }
+                        self.task_store.save(&mut state)?;
+                        journal.abort();
+                        journal.persist(&path)?;
+                        self.boss.reset_context(intent.old_session_id);
+                        return Ok(());
+                    }
                     // Do not discard a submitted package or an uncertain effect.
                     // A changed revision requires explicit reconciliation; the old
                     // generation stays frozen and the checkpoint remains durable.
@@ -989,9 +1041,13 @@ impl WakuBackend {
                 }
             }
         }
-        // Pin the same durable lease across pointer, retirement and ownership
-        // commit. Recovery must reacquire this pin before touching either owner.
-        let replacement_pin = self.validate_rotation_successor(&state, &intent, now)?;
+        // Strict recovery pins its durable lease across ownership publication.
+        // Ordinary refresh only stages a chat; normal admission owns its launch.
+        let replacement_pin = if intent.mode == RotationMode::Strict {
+            Some(self.validate_rotation_successor(&state, &intent, now)?)
+        } else {
+            None
+        };
         if active == intent.old_session_id {
             self.boss
                 .replace_session_id(active, intent.new_session_id)?;
@@ -1105,7 +1161,9 @@ impl WakuBackend {
             });
         }
         journal.persist(&path)?;
-        replacement_pin.activated(&continuity_path)?;
+        if let Some(pin) = replacement_pin {
+            pin.activated(&continuity_path)?;
+        }
         // The refresh request — manual compact or incident — is consumed
         // by the committed swap. Incidents stay as evidence.
         if ledger.rotation_request.is_some() {
@@ -1702,7 +1760,7 @@ impl BossOwnershipDriver {
     }
 
     /// `true` for the pointed Boss chat or a registered planning session
-    /// while unarchived and unfenced by continuity or a compaction incident.
+    /// while unarchived and outside an unresolved ownership transition.
     /// A staged successor answers `false` until the pointer publishes it —
     /// no authority exists before ownership commits.
     fn admit(&self, boundary: &str) -> bool {
@@ -1918,23 +1976,9 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
     }
 
     fn compact(&self) {
-        // Provider compaction is never invoked for the Boss: a manual
-        // compact can request a fresh session only when the provider supports
-        // replacement. Unsupported requests must not fence a healthy chat.
+        // Prefer an ordinary fresh session to provider compaction. This is a
+        // best-effort request and does not freeze a running turn.
         if !self.boss.is_boss(self.session_id) {
-            return;
-        }
-        let supported = self
-            .task_state
-            .lock()
-            .sessions
-            .iter()
-            .find(|session| session.id == self.session_id)
-            .is_some_and(|session| {
-                waku_boss::rotation_continuity::qualify_provider(session.provider, None).qualified()
-            });
-        if !supported {
-            eprintln!("Boss refresh is unavailable for this provider");
             return;
         }
         if let Err(error) = ContinuityLedger::update(&self.continuity_path, |ledger| {
@@ -2035,9 +2079,8 @@ fn boss_rotation_handoff(old: &AgentSession, marker: &str) -> String {
 }
 
 impl WakuBackend {
-    /// Ordinary chat may launch under its existing authority. Replacement
-    /// activation keeps the separate strict provider contract; a frozen or
-    /// incident-fenced session cannot bypass it by starting an ordinary runtime.
+    /// Ordinary chat may launch under its existing authority. A retired or
+    /// ownership-frozen session cannot bypass reconciliation by launching again.
     pub(super) fn ensure_coordinator_available(&self, session_id: Uuid) -> anyhow::Result<()> {
         anyhow::ensure!(
             !self.boss_fenced_chat(session_id),
@@ -2056,7 +2099,7 @@ impl WakuBackend {
         drop(state);
         anyhow::ensure!(
             !self.boss_incident_fenced(session_id),
-            "Boss session is fenced while a provider-compaction refresh is pending"
+            "Boss coordination is fenced while an ownership transition is reconciled"
         );
         Ok(())
     }

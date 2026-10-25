@@ -155,14 +155,21 @@ pub struct ContinuityDelivery {
     pub attempt: Option<ContinuityAttempt>,
 }
 
-/// A provider-side compaction observed on a Boss session. The fenced
-/// session record stays as evidence after the incident forces a refresh.
+/// Provider-side compaction retained as evidence after a refresh.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompactionIncident {
     pub session_id: Uuid,
     pub detected_at: u64,
     pub detail: String,
+    /// Older daemons denied provider submission after this event. Only their
+    /// unconfirmed prompt rows may be unwound during upgrade recovery.
+    #[serde(default = "legacy_incident_fenced")]
+    pub fenced: bool,
+}
+
+fn legacy_incident_fenced() -> bool {
+    true
 }
 
 /// A refresh requested outside the occupancy trigger — a manual compact
@@ -196,6 +203,38 @@ const RETAINED_TERMINAL_DELIVERIES: usize = 32;
 const RETAINED_INCIDENTS: usize = 64;
 
 impl ContinuityLedger {
+    /// An unsubmitted checkpoint can fall back to ordinary session rotation.
+    /// Submitted receipts, live reservations and unknown effects must retain
+    /// their original recovery contract; changing modes must never replay them.
+    pub fn release_unsubmitted_replacement(
+        &mut self,
+        predecessor: Uuid,
+        successor: Uuid,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.deliveries.iter().all(|delivery| {
+                delivery.session_id != successor
+                    || delivery.status == ContinuityDeliveryStatus::Prepared
+            }) && self
+                .replacement_leases
+                .iter()
+                .all(|lease| { lease.predecessor != predecessor && lease.successor != successor })
+                && self.coordinator_effects.iter().all(|effect| {
+                    (effect.binding.session != predecessor && effect.binding.session != successor)
+                        || effect.resolution.is_some()
+                }),
+            "Boss refresh awaits reconciliation of submitted work"
+        );
+        if let Some(frozen) = &self.frozen_coordinator {
+            anyhow::ensure!(
+                frozen.predecessor == predecessor && frozen.successor == successor,
+                "another coordinator replacement remains unresolved"
+            );
+            self.frozen_coordinator = None;
+        }
+        Ok(())
+    }
+
     /// Record a prepared package. Preparing the same delivery id twice
     /// reconciles onto the existing record rather than duplicating it.
     pub fn prepare(
@@ -436,9 +475,8 @@ impl ContinuityLedger {
         }
     }
 
-    /// Record a detected provider compaction and request the safe refresh
-    /// it forces. The incident record is permanent evidence; the request
-    /// is what the reconciler acts on.
+    /// Record provider compaction and request a best-effort refresh. Evidence
+    /// remains durable without revoking the active coordinator's authority.
     pub fn record_compaction_incident(
         &mut self,
         session_id: Uuid,
@@ -449,17 +487,16 @@ impl ContinuityLedger {
             session_id,
             detected_at: now,
             detail: detail.into(),
+            fenced: false,
         });
         if self.compaction_incidents.len() > RETAINED_INCIDENTS {
             let excess = self.compaction_incidents.len() - RETAINED_INCIDENTS;
             self.compaction_incidents.drain(..excess);
         }
-        self.request_rotation(now, "provider compaction detected on the fenced session");
+        self.request_rotation(now, "provider compaction detected; refresh when settled");
     }
 
-    /// Whether a compaction incident fenced this session. An incident on a
-    /// generation means the provider's context can no longer be trusted —
-    /// context-growing calls must stay denied until ownership rotates.
+    /// Whether provider compaction was observed on this generation.
     pub fn has_incident(&self, session_id: Uuid) -> bool {
         self.compaction_incidents
             .iter()
@@ -919,11 +956,17 @@ mod tests {
     }
 
     #[test]
-    fn compaction_incident_fences_and_requests_refresh_once() {
+    fn compaction_incident_requests_refresh_once_without_fencing() {
         let session = Uuid::new_v4();
         let mut ledger = ContinuityLedger::default();
         ledger.record_compaction_incident(session, 10, "compaction activity observed");
         assert!(ledger.has_incident(session));
+        assert!(!ledger.compaction_incidents[0].fenced);
+        let legacy: CompactionIncident = serde_json::from_value(serde_json::json!({
+            "sessionId": session, "detectedAt": 10, "detail": "legacy compaction"
+        }))
+        .unwrap();
+        assert!(legacy.fenced);
         assert!(ledger.rotation_request.is_some());
         ledger.request_rotation(11, "manual compact");
         // The first request owns the record — later triggers reconcile onto it.

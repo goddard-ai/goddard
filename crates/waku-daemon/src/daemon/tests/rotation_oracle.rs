@@ -157,7 +157,7 @@ fn frozen_boss_admission_fails_closed_and_human_input_stays_queued() {
 }
 
 #[test]
-fn unsupported_manual_boss_refresh_keeps_chat_available() {
+fn manual_boss_refresh_is_best_effort_even_with_automatic_rotation_disabled() {
     use waku_boss::rotation_continuity::ContinuityLedger;
     let root = std::env::temp_dir().join(format!("boss-compact-oracle-{}", Uuid::new_v4()));
     let (backend, _) = surface_test_backend(&root);
@@ -165,13 +165,13 @@ fn unsupported_manual_boss_refresh_keeps_chat_available() {
     let runtime = Uuid::new_v4();
     let observed = install_rotation_observer(&backend);
     let capture = boss_runtime(&backend, boss, runtime);
-    // A manual request remains subject to qualification even when automatic
-    // refresh is disabled.
+    // Manual refresh uses ordinary provider startup, independently of the
+    // automatic threshold preference and strict prevention qualification.
     let mut settings = backend.settings.get();
     settings.boss_rotation_disabled = true;
     backend.settings.replace(settings).unwrap();
 
-    let error = backend
+    backend
         .handle(
             Request {
                 request_id: Uuid::new_v4(),
@@ -182,13 +182,18 @@ fn unsupported_manual_boss_refresh_keeps_chat_available() {
             EventSink::detached(),
             None,
         )
-        .unwrap_err();
-    assert!(error.to_string().contains("Boss refresh is unavailable"));
+        .unwrap();
 
-    // An unsupported refresh never reaches the provider.
+    // Compact never reaches the provider; the active chat remains usable
+    // until the scheduler performs a settled session swap.
     assert!(capture.prompts.lock().is_empty());
     let ledger = ContinuityLedger::load(&root.join("boss/continuity.json")).unwrap();
-    assert!(ledger.rotation_request.is_none());
+    assert!(ledger.rotation_request.is_some());
+    assert!(!backend.boss_incident_fenced(boss));
+    let driver = backend.sessions.lock().get(&boss).unwrap().driver.clone();
+    driver.compact();
+    driver.prompt("continue the healthy chat".into());
+    assert_eq!(capture.prompts.lock().len(), 1);
 
     assert!(
         backend
@@ -196,20 +201,11 @@ fn unsupported_manual_boss_refresh_keeps_chat_available() {
             .is_ok()
     );
     let next = backend.boss.identity_and_session().1.unwrap();
-    assert_eq!(boss, next);
+    assert_ne!(boss, next);
     let ledger = ContinuityLedger::load(&root.join("boss/continuity.json")).unwrap();
     assert!(ledger.rotation_request.is_none());
 
-    assert!(!backend.boss_incident_fenced(boss));
-    let driver = backend.sessions.lock().get(&boss).unwrap().driver.clone();
-    driver.compact();
-    assert!(
-        ContinuityLedger::load(&backend.boss_continuity_path())
-            .unwrap()
-            .rotation_request
-            .is_none()
-    );
-    driver.prompt("continue the healthy chat".into());
+    driver.prompt("retired credentials cannot coordinate".into());
     assert_eq!(capture.prompts.lock().len(), 1);
 
     let observations = observed.lock().clone();
@@ -817,6 +813,7 @@ fn identity_drift_during_staging_pauses_and_preserves_evidence() {
         ..RotationJournal::default()
     };
     journal.intent = Some(RotationIntent {
+        mode: Default::default(),
         boss_id: identity.id,
         old_session_id: old,
         old_generation: 0,
@@ -1252,7 +1249,7 @@ fn guarded_lifecycle_reconciles_original_receipt_without_replaying_or_activating
 }
 
 #[test]
-fn guarded_lifecycle_unqualified_refresh_never_attempts_capacity_bypass() {
+fn best_effort_rotation_leaves_provider_launch_to_normal_admission() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let root = std::env::temp_dir().join(format!("guarded-capacity-{}", Uuid::new_v4()));
     let (mut backend, _) = surface_test_backend(&root);
@@ -1279,7 +1276,7 @@ fn guarded_lifecycle_unqualified_refresh_never_attempts_capacity_bypass() {
                 .reconcile_boss_rotation(crate::model::unix_time())
                 .is_ok()
         );
-        assert_eq!(backend.boss.identity_and_session().1, Some(old));
+        assert_ne!(backend.boss.identity_and_session().1, Some(old));
     }
     assert_eq!(launches.load(Ordering::SeqCst), 0);
     assert!(backend.sessions.lock().is_empty());
@@ -1291,4 +1288,314 @@ fn guarded_lifecycle_unqualified_refresh_never_attempts_capacity_bypass() {
             .is_none()
     );
     std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn compaction_keeps_the_live_turn_and_restores_authoritative_context() {
+    let root = std::env::temp_dir().join(format!("boss-compaction-recovery-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let old = rotation_boss(&backend);
+    boss_runtime(&backend, old, Uuid::new_v4());
+    let canonical = backend.boss.canonical_boss_instructions(old).unwrap();
+    backend.boss.prompt_with_context(old, "first prompt".into());
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        &DriverEvent::TurnStarted,
+    )
+    .unwrap();
+    let turn = backend
+        .task_state
+        .lock()
+        .session_mut(old)
+        .unwrap()
+        .active_turn_id();
+    let mut compacting = ActivityItem::new(
+        Some("compact-recovery".into()),
+        ActivityKind::Tool,
+        "Compacting context",
+        None,
+        false,
+    );
+    compacting.title_i18n = Some(localized!("activity.compacting_context").1);
+    let event = DriverEvent::RichActivity(compacting);
+    for _ in 0..2 {
+        super::super::events::boss_continuity_note_event(
+            &backend.boss,
+            &backend.task_state,
+            &backend.task_store,
+            old,
+            &event,
+        );
+    }
+    backend.ensure_coordinator_available(old).unwrap();
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time())
+        .unwrap();
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(old).unwrap();
+        assert_eq!(session.active_turn_id(), turn);
+        assert_eq!(
+            session
+                .messages
+                .iter()
+                .filter(|message| {
+                    message.role == MessageRole::System
+                        && message.content.starts_with("Boss context was compacted.")
+                })
+                .count(),
+            1
+        );
+    }
+    let wrapped = super::super::prompt_delivery::wrap_boss_outbound_prompt(
+        &backend.task_state,
+        &backend.automations.document(),
+        &backend.boss,
+        old,
+        "continue".into(),
+    );
+    assert!(wrapped.contains(canonical.trim()));
+    assert!(wrapped.contains("<goddard-boss-context>"));
+    record_boss_event(
+        &backend.task_state,
+        &backend.task_store,
+        old,
+        &DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    )
+    .unwrap();
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time())
+        .unwrap();
+    let next = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(old, next);
+    backend.ensure_coordinator_available(next).unwrap();
+    drop(backend);
+    remove_tree(root);
+}
+
+#[test]
+fn compaction_upgrade_recovers_unsubmitted_checkpoints_but_retains_unknown_attempts() {
+    use waku_boss::{
+        boss_rotation::{RotationJournal, RotationMode},
+        rotation_continuity::ContinuityLedger,
+    };
+    for submitted in [false, true] {
+        let root = std::env::temp_dir().join(format!("boss-compaction-upgrade-{}", Uuid::new_v4()));
+        let (backend, _) = surface_test_backend(&root);
+        let old = rotation_boss(&backend);
+        install_pending_boss_rotation(&backend, crate::model::unix_time());
+        assert!(
+            backend
+                .reconcile_boss_rotation(crate::model::unix_time())
+                .is_err()
+        );
+        let path = backend.boss_continuity_path();
+        let journal = RotationJournal::load(&backend.boss_journal_path()).unwrap();
+        let next = journal.intent.unwrap().new_session_id;
+        ContinuityLedger::update(&path, |ledger| {
+            ledger.record_compaction_incident(
+                old,
+                crate::model::unix_time(),
+                "legacy compaction fence",
+            );
+            ledger.compaction_incidents.last_mut().unwrap().fenced = true;
+            if submitted {
+                ledger
+                    .submit_package(&format!("boss-successor:{next}"), Uuid::new_v4(), 1)
+                    .unwrap();
+            }
+        })
+        .unwrap();
+        let queued = Uuid::new_v4();
+        backend
+            .handle(
+                Request {
+                    request_id: queued,
+                    session_id: old,
+                    runtime_id: Uuid::nil(),
+                    command: Command::Prompt {
+                        prompt: "preserve this human message".into(),
+                        turn_id: None,
+                        message_id: Some(queued),
+                        attachments: Vec::new(),
+                        hidden: false,
+                    },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        drop(backend);
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        let result = backend.reconcile_boss_rotation(crate::model::unix_time());
+        let journal = RotationJournal::load(&backend.boss_journal_path()).unwrap();
+        let ledger = ContinuityLedger::load(&path).unwrap();
+        if submitted {
+            assert!(result.is_err());
+            assert_eq!(backend.boss.identity_and_session().1, Some(old));
+            assert_eq!(journal.intent.unwrap().mode, RotationMode::Strict);
+            assert!(ledger.frozen_coordinator.is_some());
+            assert_eq!(ledger.deliveries[0].attempts, 1);
+            assert!(backend.ensure_coordinator_available(old).is_err());
+        } else {
+            result.unwrap();
+            assert_eq!(backend.boss.identity_and_session().1, Some(next));
+            assert!(journal.intent.is_none());
+            assert_eq!(
+                journal.rotations.last().unwrap().mode,
+                RotationMode::BestEffort
+            );
+            assert!(ledger.frozen_coordinator.is_none());
+            backend.ensure_coordinator_available(next).unwrap();
+            // Reconciliation is idempotent and cannot create another chat.
+            backend
+                .reconcile_boss_rotation(crate::model::unix_time())
+                .unwrap();
+            assert_eq!(backend.boss.identity_and_session().1, Some(next));
+        }
+        let target = if submitted { old } else { next };
+        let mut state = backend.task_store.load().unwrap();
+        let session = state.session_mut(target).unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        assert!(session.queued_messages.iter().any(
+            |message| message.id == queued && message.content == "preserve this human message"
+        ));
+        drop(backend);
+        remove_tree(root);
+    }
+}
+
+#[test]
+fn best_effort_rotation_recovers_each_side_of_pointer_publication_once() {
+    use waku_boss::{
+        boss_rotation::{RotationJournal, RotationMode},
+        rotation_continuity::ContinuityLedger,
+    };
+    for published in [false, true] {
+        let root = std::env::temp_dir().join(format!("boss-ordinary-restart-{}", Uuid::new_v4()));
+        let (backend, _) = surface_test_backend(&root);
+        let old = rotation_boss(&backend);
+        install_pending_boss_rotation(&backend, crate::model::unix_time());
+        assert!(
+            backend
+                .reconcile_boss_rotation(crate::model::unix_time())
+                .is_err()
+        );
+        let mut journal = RotationJournal::load(&backend.boss_journal_path()).unwrap();
+        let intent = journal.intent.as_mut().unwrap();
+        intent.mode = RotationMode::BestEffort;
+        let next = intent.new_session_id;
+        journal.persist(&backend.boss_journal_path()).unwrap();
+        ContinuityLedger::update(&backend.boss_continuity_path(), |ledger| {
+            ledger.release_unsubmitted_replacement(old, next)
+        })
+        .unwrap()
+        .unwrap();
+        let queued = crate::model::QueuedMessage::new("keep the next assignment");
+        {
+            let mut state = backend.task_state.lock();
+            state
+                .session_mut(old)
+                .unwrap()
+                .queued_messages
+                .push(queued.clone());
+            backend.task_store.save(&mut state).unwrap();
+        }
+        if published {
+            backend.boss.replace_session_id(old, next).unwrap();
+        }
+        drop(backend);
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        for _ in 0..2 {
+            backend
+                .reconcile_boss_rotation(crate::model::unix_time())
+                .unwrap();
+        }
+        assert_eq!(backend.boss.identity_and_session().1, Some(next));
+        let journal = RotationJournal::load(&backend.boss_journal_path()).unwrap();
+        assert!(journal.intent.is_none());
+        assert_eq!(journal.rotations.len(), 1);
+        let mut state = backend.task_store.load().unwrap();
+        let successor = state.session_mut(next).unwrap();
+        backend.task_store.hydrate(successor).unwrap();
+        assert_eq!(
+            successor
+                .queued_messages
+                .iter()
+                .filter(|message| message.id == queued.id)
+                .count(),
+            1
+        );
+        backend.ensure_coordinator_available(next).unwrap();
+        assert!(backend.ensure_coordinator_available(old).is_err());
+        drop(backend);
+        remove_tree(root);
+    }
+}
+
+#[test]
+fn best_effort_rotation_rebinds_changed_configuration_without_holding_chat() {
+    use waku_boss::boss_rotation::{RotationJournal, RotationMode};
+    let root = std::env::temp_dir().join(format!("boss-ordinary-rebind-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let old = rotation_boss(&backend);
+    install_pending_boss_rotation(&backend, crate::model::unix_time());
+    assert!(
+        backend
+            .reconcile_boss_rotation(crate::model::unix_time())
+            .is_err()
+    );
+    let mut journal = RotationJournal::load(&backend.boss_journal_path()).unwrap();
+    journal.intent.as_mut().unwrap().mode = RotationMode::BestEffort;
+    let staged = journal.intent.as_ref().unwrap().new_session_id;
+    journal.persist(&backend.boss_journal_path()).unwrap();
+    {
+        let mut state = backend.task_state.lock();
+        let old = state.session_mut(old).unwrap();
+        old.model = Some("updated-model".into());
+        old.context_usage = Some(crate::model::ContextUsage {
+            tokens: 76,
+            window: Some(100),
+        });
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time())
+        .unwrap();
+    assert_eq!(backend.boss.identity_and_session().1, Some(old));
+    backend.ensure_coordinator_available(old).unwrap();
+    assert!(backend.boss_fenced_chat(staged));
+    backend
+        .reconcile_boss_rotation(crate::model::unix_time())
+        .unwrap();
+    let next = backend.boss.identity_and_session().1.unwrap();
+    assert_ne!(next, old);
+    assert_ne!(next, staged);
+    assert_eq!(
+        backend
+            .task_state
+            .lock()
+            .session_mut(next)
+            .unwrap()
+            .model
+            .as_deref(),
+        Some("updated-model")
+    );
+    drop(backend);
+    remove_tree(root);
 }

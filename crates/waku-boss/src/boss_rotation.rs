@@ -276,9 +276,22 @@ impl BossRotationConfig {
 
 /// A replayable rotation intent. `new_session_id` is only published after the
 /// caller has durably created and initialized the provider session.
+/// Older checkpoints retain the strict receipt/budget contract until recovery
+/// proves that no replacement work was submitted. Ordinary refreshes are lazy
+/// session swaps and make no provider-compaction prevention guarantee.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RotationMode {
+    #[default]
+    Strict,
+    BestEffort,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RotationIntent {
+    #[serde(default)]
+    pub mode: RotationMode,
     pub boss_id: Uuid,
     pub old_session_id: Uuid,
     pub old_generation: u64,
@@ -343,6 +356,7 @@ impl RotationJournal {
             "Boss session pointer changed before rotation"
         );
         self.intent = Some(RotationIntent {
+            mode: RotationMode::Strict,
             boss_id,
             old_session_id,
             old_generation: self.generation,

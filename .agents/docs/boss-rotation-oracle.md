@@ -9,14 +9,27 @@ rotation request.
 
 ## The ownership fence and continuity ledger
 
-`BossOwnershipDriver` wraps Boss and planning handles. Ordinary chat runs under
-existing ownership and continuity checks without claiming the strict budget
-guarantee. Archived, retired, incident-fenced and frozen sessions remain blocked.
-Startup and scoped CLI calls enforce those fences too. New threshold and manual
-refreshes require a qualified provider. Current adapters are unqualified, so a
-threshold crossing leaves the chat usable and manual compact returns an error
-before creating a rotation intent. Existing intents and actual compaction
-incidents still enter recovery and cannot publish an unvalidated successor.
+`BossOwnershipDriver` wraps Boss and planning handles. Provider compaction is a
+recoverable context event, not a loss of coordination authority. It requests a
+refresh, resets canonical-instruction injection and defers the current work
+digest to the next outbound prompt. A durable transcript notice explains the
+recovery; refresh feedback never uses toasts.
+
+New threshold and manual refreshes use `RotationMode::BestEffort`. They wait for
+the current turn to settle, stage a bounded handoff, publish one successor and
+archive the predecessor. Queues, user stops and composer drafts follow the
+successor; history remains readable. Provider startup uses normal admission,
+without claiming native exact receipt or strict pre-compaction guarantees.
+Archived, retired, frozen and pending-ownership sessions remain fenced at
+startup, provider calls and scoped CLI intake.
+
+Missing `mode` on older intents means `Strict`. Compaction-created checkpoints
+can recover through ordinary rotation only if their package was never submitted,
+they hold no replacement reservation and their owners have no unresolved effects.
+The ledger mutation verifies these conditions again before releasing the freeze.
+Submitted attempts and unrelated strict checkpoints retain their original
+reconciliation contract. Older incident records without `fenced` default to true;
+only those fences may justify unwinding a provider-unconfirmed orphan prompt.
 
 `boss/continuity.json` retains exact packages, native receipts and unresolved
 effect references beside legacy handoffs, incidents and refresh requests.
@@ -27,19 +40,16 @@ readiness boundaries.
 
 All production ledger mutations use `ContinuityLedger::update`, which locks
 a stable companion file through read/modify/write. This preserves concurrent
-handoff, receipt, refresh and incident updates. Successor publication stops
-when preparing its durable delivery fails. These changes do not establish
-power-loss durability or runtime qualification. Rotation now freezes the old
-generation durably before waiting for quiescence, stages an immutable exact
-successor checkpoint, and blocks pointer publication on exact native acceptance
-and readiness validation. Current adapters cannot satisfy those checks. Recovery
-of an older, already-published intent also pauses before predecessor retirement;
-it does not retroactively treat that pointer as validated activation.
+handoff, receipt, refresh and incident updates. These changes do not establish
+power-loss durability or runtime qualification. Retained strict checkpoints
+freeze the predecessor and require exact native acceptance and readiness before
+publication. Current adapters cannot satisfy those checks. A pointer published
+by older strict code does not retroactively establish validated activation.
 
 ## Exact-package receipt contract
 
 `ContinuityLedger` also supports an exact-package path for adapter integration.
-Replacement staging uses this path; `deliver_coordinator_package` cannot
+Strict replacement staging uses this path; `deliver_coordinator_package` cannot
 submit with current qualification. Ordinary healthy chat uses legacy prompt
 delivery without asserting exact-package receipt. Legacy records cannot prove
 exact receipt.

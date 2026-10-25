@@ -12,12 +12,15 @@ The report distinguishes source inspection, host observations and missing proof.
 
 ## Current product behavior
 
-Ordinary healthy Boss/planning chat is available without the strict budget
-contract. It retains ownership, archive, incident and frozen-replacement fences.
-Replacement submission/activation still requires the validator below and remains
-unqualified. The evidence packet and startup-blocking integration observations
-below describe the original 2026-10-19 implementation, before ordinary chat was
-restored; they do not describe current ordinary-chat admission.
+Ordinary Boss/planning chat and new best-effort rotations do not require the
+strict budget contract. Provider compaction requests recovery without fencing
+coordination. Ownership transitions, archive flags and frozen replacements still
+enforce their fences. Older strict compaction checkpoints can recover ordinarily
+only when no replacement work was submitted, reserved or left with unknown
+effects; other strict checkpoints retain the validator below. See the
+[coordinator contract](boss-coordinator-contract.md) for the current boundary.
+The historical startup-blocking observations below describe the original
+2026-10-19 implementation, not current ordinary-chat admission or rotation.
 
 ## Baselines and observations
 

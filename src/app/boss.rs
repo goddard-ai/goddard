@@ -2485,6 +2485,27 @@ impl Waku {
         cx.notify();
     }
 
+    fn boss_rotation_notice(&mut self, key: DaemonKey, text: String, cx: &mut Context<Self>) {
+        let Some(session_id) = self
+            .boss_ui
+            .states
+            .get(&key)
+            .and_then(|state| state.session_id)
+        else {
+            return;
+        };
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.push_message(MessageRole::System, text);
+            self.state.mark_session_dirty(session_id);
+            if self.state.selected_session == Some(session_id) {
+                self.reset_visible_state();
+                self.reset_transcript_rows(self.transcript_row_count());
+            }
+            self.save();
+            cx.notify();
+        }
+    }
+
     pub(super) fn boss_request(
         &mut self,
         key: DaemonKey,
@@ -2599,6 +2620,7 @@ impl Waku {
                     search.error = Some(unreachable);
                     self.sync_boss_page_rows();
                 }
+                BossReply::RotationRetry => self.boss_rotation_notice(key, unreachable, cx),
                 _ => self.show_toast(tr!("boss.unreachable")),
             }
             cx.notify();
@@ -2925,10 +2947,6 @@ impl Waku {
                         if matches!(reply, BossReply::BaseChoice) {
                             this.show_toast(tr!("boss.base_choice_saved"));
                         }
-                        if matches!(reply, BossReply::RotationRetry) {
-                            this.show_success_toast(tr!("boss.rotation_retry_sent"));
-                            this.refresh_boss_state_on(key, cx);
-                        }
                         if matches!(reply, BossReply::Clear) {
                             this.show_success_toast(tr!("boss.cleared"));
                             // The Session arm above already landed the swap;
@@ -2944,10 +2962,23 @@ impl Waku {
                             this.refresh_boss_state_on(key, cx);
                         }
                     }
+                    Ok(_) if reply == BossReply::RotationRetry => {
+                        this.boss_rotation_notice(
+                            key,
+                            tr!("boss.unexpected_response").to_string(),
+                            cx,
+                        );
+                    }
                     Ok(_) => this.show_toast(tr!("boss.unexpected_response")),
                     Err(error) => {
                         let error = error.to_string();
-                        if reply == BossReply::MemoryFeed {
+                        if reply == BossReply::RotationRetry {
+                            this.boss_rotation_notice(
+                                key,
+                                tr!("boss.failed", error = error).to_string(),
+                                cx,
+                            );
+                        } else if reply == BossReply::MemoryFeed {
                             let feed = this.boss_ui.memory_feed.entry(key).or_default();
                             feed.loading = false;
                             feed.error = Some(error);

@@ -335,19 +335,14 @@ fn boss_journal_generation(boss: &crate::boss::BossService, session_id: Uuid) ->
     })
 }
 
-/// Reconcile the Boss continuity ledger with a real provider event.
-///
-/// `TurnStarted` is transport acceptance: the bound package the session
-/// carried is consumed — the ledger records `Accepted` and the durable
-/// `pending_provider_context` copy is finally cleared. A failed turn or a
-/// dead runtime without acceptance marks the still-`Submitted` delivery
-/// `Rejected` so the next outbound prompt reconciles the same delivery.
-/// Provider-side compaction on the Boss session is an incident: the
-/// generation is fenced and a safe refresh is requested.
+/// Compaction requests an ordinary refresh without revoking coordination.
+/// Reinstate canonical instructions on the next outbound prompt even if the
+/// current provider turn has not settled enough to rotate yet. Generic events
+/// cannot accept, reject or authorize replay of exact continuity packages.
 pub(super) fn boss_continuity_note_event(
     boss: &crate::boss::BossService,
-    _task_state: &Mutex<PersistedState>,
-    _task_store: &StateStore,
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
     session_id: Uuid,
     event: &DriverEvent,
 ) {
@@ -362,19 +357,43 @@ pub(super) fn boss_continuity_note_event(
         // In particular process exit and failed turns leave acceptance unknown.
         DriverEvent::RichActivity(item) if crate::model::is_context_compaction(item) => {
             eprintln!(
-                "Boss compaction incident on session {session_id}: {}; the generation is fenced and a safe refresh was requested",
+                "Boss compaction on session {session_id}: {}; refresh requested without fencing coordination",
                 item.title,
             );
-            if let Err(error) = ContinuityLedger::update(&path, |ledger| {
+            boss.reset_context(session_id);
+            boss.router_defer_context(session_id);
+            let recorded = ContinuityLedger::update(&path, |ledger| {
                 if !ledger.has_incident(session_id) {
                     ledger.record_compaction_incident(
                         session_id,
                         now,
                         format!("provider compaction activity: {}", item.title),
                     );
+                    true
+                } else {
+                    false
                 }
-            }) {
-                eprintln!("could not record the Boss compaction incident: {error:#}");
+            });
+            match recorded {
+                Ok(true) => {
+                    let notice = (|| -> anyhow::Result<()> {
+                        let mut state = task_state.lock();
+                        if let Some(session) = state.session_mut(session_id) {
+                            task_store.hydrate(session)?;
+                            session.push_message(
+                                crate::model::MessageRole::System,
+                                "Boss context was compacted. Your instructions and active work are saved; a fresh session is pending.",
+                            );
+                            task_store.save(&mut state)?;
+                        }
+                        Ok(())
+                    })();
+                    if let Err(error) = notice {
+                        eprintln!("could not save the Boss compaction notice: {error:#}");
+                    }
+                }
+                Ok(false) => {}
+                Err(error) => eprintln!("could not record the Boss compaction incident: {error:#}"),
             }
         }
         _ => {}

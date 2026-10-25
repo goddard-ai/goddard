@@ -374,9 +374,8 @@ pub(super) fn boss_handoff_accepted(boss: &crate::boss::BossService, session_id:
     })
 }
 
-/// Whether the continuity ledger fences this session. An incident-fenced
-/// Boss chat must hold parked deliveries — anything sent now drops at the
-/// ownership fence after opening a turn the provider never confirms.
+/// Ownership transitions still hold intake, but provider compaction alone does
+/// not revoke the active coordinator's authority.
 pub(super) fn boss_incident_fenced(boss: &crate::boss::BossService, session_id: Uuid) -> bool {
     use waku_boss::{boss_rotation::RotationJournal, rotation_continuity::ContinuityLedger};
     if !boss.is_boss_principal(session_id) {
@@ -393,7 +392,7 @@ pub(super) fn boss_incident_fenced(boss: &crate::boss::BossService, session_id: 
         .unwrap_or(true);
     pending_rotation
         || ContinuityLedger::load(&boss.root().join("continuity.json"))
-            .map(|ledger| ledger.has_incident(session_id) || ledger.coordinator_frozen(session_id))
+            .map(|ledger| ledger.coordinator_frozen(session_id))
             .unwrap_or(true)
 }
 

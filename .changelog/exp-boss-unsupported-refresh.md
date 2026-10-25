@@ -1,1 +1,1 @@
-- Boss chats stay usable when their provider cannot refresh safely; manual refresh reports that limitation before pausing the chat.
+- Boss chats recover from provider compaction without becoming permanently blocked, preserve conversation history and queued messages, and show recovery notices in the transcript. Automatic and manual refreshes use ordinary provider startup.
