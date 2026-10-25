@@ -127,11 +127,13 @@ impl Span {
 
     /// The selected text as markdown: the element's wrap applies only when the
     /// span covers it whole, so partial selections never emit half a fence or
-    /// a heading mark on a fragment of a word.
-    pub fn markdown(&self) -> String {
+    /// a heading mark on a fragment of a word. `quote_depth` drops that many
+    /// leading `>` markers from the wrap — the quote levels the whole
+    /// selection shares.
+    fn markdown(&self, quote_depth: usize) -> String {
         let mut out = String::new();
         if self.covers_element() {
-            out.push_str(&self.copy.prefix);
+            out.push_str(strip_quote_depth(&self.copy.prefix, quote_depth));
         }
         out.push_str(&self.copy.render(&self.text, &self.range));
         if self.covers_element() {
@@ -365,6 +367,18 @@ impl Selection {
         {
             return code;
         }
+        // The quote levels every selected element sits inside, as counted
+        // from their copy margins. A grab that never leaves one blockquote
+        // copies the quoted content without its `>` chrome — the markers
+        // aren't the message's words. A grab that also reaches unquoted
+        // content keeps them, since there they mark where the quote ends.
+        let quote_depth = self
+            .spans
+            .iter()
+            .filter(|span| !span.range.is_empty())
+            .map(|span| quote_depth(&span.copy.prefix))
+            .min()
+            .unwrap_or(0);
         let mut out = String::new();
         let mut has_span = false;
         for span in &self.spans {
@@ -374,7 +388,7 @@ impl Selection {
                     out.push('\n');
                 }
             }
-            out.push_str(&span.markdown());
+            out.push_str(&span.markdown(quote_depth));
             has_span = true;
         }
         out
@@ -513,6 +527,33 @@ fn code_fenced(markdown: &str, text: &str) -> bool {
             .strip_prefix(' ')
             .and_then(|inner| inner.strip_suffix(' '))
             .is_some_and(|inner| inner == text)
+}
+
+/// How many blockquote markers `prefix` leads with — each `>` plus the single
+/// space a copy margin emits after it. Only containers write leading `>`s —
+/// a heading's `#`s or a list's `- ` trail them — so the count is the
+/// element's quote depth.
+fn quote_depth(prefix: &str) -> usize {
+    let mut rest = prefix;
+    let mut depth = 0;
+    while let Some(tail) = rest.strip_prefix('>') {
+        rest = tail.strip_prefix(' ').unwrap_or(tail);
+        depth += 1;
+    }
+    depth
+}
+
+/// `prefix` without its first `depth` quote markers — `"> > ## "` at depth 1
+/// leaves `"> ## "`, so a nested quote keeps its own marker.
+fn strip_quote_depth(prefix: &str, depth: usize) -> &str {
+    let mut rest = prefix;
+    for _ in 0..depth {
+        let Some(tail) = rest.strip_prefix('>') else {
+            break;
+        };
+        rest = tail.strip_prefix(' ').unwrap_or(tail);
+    }
+    rest
 }
 
 /// Clamp a byte offset into `text` and snap it down to a char boundary. Mouse
@@ -1450,6 +1491,102 @@ mod tests {
             selection.clipboard_text().as_deref(),
             Some("one\n\n\n\n## two")
         );
+    }
+
+    #[test]
+    fn markdown_copy_drops_the_margin_when_the_grab_stays_in_one_quote() {
+        let mut registry = SelectionRegistry::default();
+        for (index, (text, prefix)) in [
+            ("first quoted", "> "),
+            ("second **bold**", "> "),
+            ("titled", "> ## "),
+        ]
+        .iter()
+        .enumerate()
+        {
+            registry.push(RegisteredText {
+                key: TextKey::new("r1", index),
+                text: Rc::from(*text),
+                block_break: index > 0,
+                annotation_refs: Vec::new(),
+                commit_refs: Vec::new(),
+                copy: Rc::new(CopySpec {
+                    prefix: Rc::from(*prefix),
+                    suffix: Rc::default(),
+                    fragments: Vec::new(),
+                }),
+                geometry: (),
+            });
+        }
+        let mut selection = Selection::default();
+        // Whole elements: the copied markdown is the quoted content, not its
+        // `>` chrome — and inner marks like the heading's still survive.
+        selection.set_spans(registry.resolve((0, 0), (2, 6)));
+        assert_eq!(
+            selection.clipboard_text().as_deref(),
+            Some("first quoted\n\nsecond **bold**\n\n## titled")
+        );
+        // A partial tail still drops the margin of the elements it closes.
+        selection.set_spans(registry.resolve((0, 6), (2, 6)));
+        assert_eq!(
+            selection.clipboard_text().as_deref(),
+            Some("quoted\n\nsecond **bold**\n\n## titled")
+        );
+    }
+
+    #[test]
+    fn markdown_copy_keeps_the_margin_once_the_grab_leaves_the_quote() {
+        let mut registry = SelectionRegistry::default();
+        for (index, (text, prefix)) in [("quoted", "> "), ("plain", "")].iter().enumerate() {
+            registry.push(RegisteredText {
+                key: TextKey::new("r1", index),
+                text: Rc::from(*text),
+                block_break: index > 0,
+                annotation_refs: Vec::new(),
+                commit_refs: Vec::new(),
+                copy: Rc::new(CopySpec {
+                    prefix: Rc::from(*prefix),
+                    suffix: Rc::default(),
+                    fragments: Vec::new(),
+                }),
+                geometry: (),
+            });
+        }
+        let mut selection = Selection::default();
+        // The unquoted element has no margin, so the shared depth is zero and
+        // the quote's markers stay to mark where quoting ended.
+        selection.set_spans(registry.resolve((0, 0), (1, 5)));
+        assert_eq!(
+            selection.clipboard_text().as_deref(),
+            Some("> quoted\n\nplain")
+        );
+    }
+
+    #[test]
+    fn markdown_copy_strips_only_the_shared_quote_levels() {
+        let mut registry = SelectionRegistry::default();
+        for (index, (text, prefix)) in [("outer", "> "), ("inner", "> > ")].iter().enumerate() {
+            registry.push(RegisteredText {
+                key: TextKey::new("r1", index),
+                text: Rc::from(*text),
+                block_break: index > 0,
+                annotation_refs: Vec::new(),
+                commit_refs: Vec::new(),
+                copy: Rc::new(CopySpec {
+                    prefix: Rc::from(*prefix),
+                    suffix: Rc::default(),
+                    fragments: Vec::new(),
+                }),
+                geometry: (),
+            });
+        }
+        let mut selection = Selection::default();
+        // One level is shared; the nested quote keeps its own marker.
+        selection.set_spans(registry.resolve((0, 0), (1, 5)));
+        assert_eq!(selection.markdown(), "outer\n\n> inner");
+        // A grab of just the nested element shares both levels.
+        selection.set_spans(registry.resolve((1, 0), (1, 5)));
+        assert_eq!(selection.markdown(), "inner");
     }
 
     #[test]
