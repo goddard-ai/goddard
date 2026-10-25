@@ -486,6 +486,22 @@ impl Waku {
             == Some(false)
     }
 
+    /// The top visible row belongs to the latest turn. A glimpse of that turn
+    /// below earlier content is not enough to override the reader's preference.
+    pub(super) fn transcript_watches_latest_turn(&self) -> bool {
+        let Some(session) = self.selected_session() else {
+            return false;
+        };
+        let Some(turn) = session.turns.last() else {
+            return false;
+        };
+        let top_row = self.active_transcript_rows().logical_scroll_top().item_ix;
+        self.transcript_row_kinds
+            .borrow()
+            .get(top_row)
+            .is_some_and(|row| row_turn_id(session, *row) == Some(turn.id))
+    }
+
     /// The landing a session's parked scroll position asks for.
     /// `tail_while_busy` rejoins the tail only while the session is still
     /// working — one that settled in the meantime restores the parked spot.
@@ -1431,15 +1447,18 @@ pub(super) fn tail_rejoin_follows_anchor(anchored: bool, end_space: Pixels) -> b
 }
 
 /// Whether a send holds the reader's scroll position instead of jumping to
-/// the new message. Measured tail bounds take precedence; when virtualization
-/// or remeasurement leaves the tail unknown, retain a reader's explicit scroll
-/// position instead of treating missing bounds as permission to jump.
+/// the new message. Seeing the latest turn or the measured tail overrides the
+/// preference. When virtualization or remeasurement leaves both unknown,
+/// retain a reader's explicit scroll position.
 pub(super) fn send_holds_transcript_position(
     keep_scroll_on_send: bool,
     rests_at_tail: Option<bool>,
     reader_scrolled: bool,
+    watches_latest_turn: bool,
 ) -> bool {
-    keep_scroll_on_send && rests_at_tail.map_or(reader_scrolled, |at_tail| !at_tail)
+    keep_scroll_on_send
+        && !watches_latest_turn
+        && rests_at_tail.map_or(reader_scrolled, |at_tail| !at_tail)
 }
 
 pub(super) const ACTIVITY_IMAGE_WIDTH: f32 = 300.0;

@@ -3081,7 +3081,7 @@ daemon.phase_degraded: 无响应
 settings.composer_enter_steers: 回车操控当前回合
 settings.composer_enter_steers_description: "在编辑器中，回车将草稿注入正在运行的回合，%{modifier}Enter 则将其排队。Shift+Enter 仍然插入换行"
 settings.transcript_keep_scroll_on_send: 发送时保持滚动位置
-settings.transcript_keep_scroll_on_send_description: 发送提示词后，对话记录保持在你滚动到的位置，不再跳转到新消息；回到底部即可继续跟随回复
+settings.transcript_keep_scroll_on_send_description: 发送提示词时，阅读较早轮次会保持滚动位置；查看最新轮次时会跳转到新消息
 session.archived_chip: 已归档
 terminal.boss_directory_fallback: "终端目录 %{requested} 不可用；改用 %{fallback}。"
 terminal.boss_directory_unavailable: 所请求的目录、项目根目录和主目录均不可用。

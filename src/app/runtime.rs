@@ -7957,6 +7957,7 @@ impl Waku {
                 self.state.transcript_keep_scroll_on_send,
                 self.transcript_rests_at_tail_now(),
                 self.transcript_is_scrolled.get() && !self.transcript_anchor_following.get(),
+                self.transcript_watches_latest_turn(),
             );
         // Busy is visible before any Git work begins. The separate transient
         // set keeps this non-cancellable phase visually distinct from a
@@ -8071,8 +8072,9 @@ impl Waku {
             // keeps its position and the turn streams in below the fold.
             // `transcript_anchor` stays as it was because it picks which list
             // renders — replacing or clearing it would swap scroll state. A
-            // measured tail already at the bottom takes the normal jump;
-            // missing tail bounds retain an explicit reader scroll instead.
+            // viewport on the latest turn or at the measured bottom takes
+            // the normal jump; otherwise missing tail bounds retain an
+            // explicit reader scroll.
             if hold_scroll_position {
                 self.transcript_anchor_following.set(false);
                 self.splice_transcript_rows_after_visibility_change(&previous_kinds);

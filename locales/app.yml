@@ -1889,7 +1889,7 @@ settings.transcript_prompt_position_compact:
 settings.transcript_keep_scroll_on_send:
   en: Keep scroll position when sending
 settings.transcript_keep_scroll_on_send_description:
-  en: Sending a prompt leaves the transcript where you scrolled it instead of jumping to the new message; scroll back to the bottom to follow the reply
+  en: Sending a prompt preserves your position while reading earlier turns and follows the new message when you are viewing the latest turn
 settings.composer_dictation:
   en: Composer dictation
 settings.composer_dictation_description:

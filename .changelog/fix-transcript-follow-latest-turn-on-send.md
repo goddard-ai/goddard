@@ -1,0 +1,1 @@
+- Sending a prompt follows the new turn when you are already reading the latest turn, even with Keep scroll position when sending enabled.

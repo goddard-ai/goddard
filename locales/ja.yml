@@ -3130,7 +3130,7 @@ daemon.phase_degraded: 応答なし
 settings.composer_enter_steers: Enter で実行中のターンに送信
 settings.composer_enter_steers_description: "コンポーザーで Enter を押すと下書きが実行中のターンに送られ、%{modifier}Enter でキューに追加されます。Shift+Enter は従来どおり改行を挿入します"
 settings.transcript_keep_scroll_on_send: 送信時にスクロール位置を保持
-settings.transcript_keep_scroll_on_send_description: プロンプトを送信しても、スクロールした位置が維持され、新しいメッセージへジャンプしません。一番下まで戻ると返信を追従します
+settings.transcript_keep_scroll_on_send_description: 過去のターンを読んでいる間は、プロンプトを送信してもスクロール位置を維持します。最新のターンを表示している場合は、新しいメッセージに移動します
 session.archived_chip: アーカイブ済み
 terminal.boss_directory_fallback: "ターミナルのディレクトリ %{requested} は利用できません。代わりに %{fallback} を使用します。"
 terminal.boss_directory_unavailable: 要求されたディレクトリ、プロジェクトルート、ホームディレクトリはいずれも利用できません。

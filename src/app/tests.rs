@@ -4030,28 +4030,43 @@ fn keep_scroll_on_send_retains_reader_scroll_when_tail_bounds_are_missing() {
         assert!(!send_holds_transcript_position(
             false,
             Some(false),
-            reader_scrolled
+            reader_scrolled,
+            false,
         ));
         assert!(!send_holds_transcript_position(
             false,
             None,
-            reader_scrolled
+            reader_scrolled,
+            false,
         ));
         assert!(!send_holds_transcript_position(
             true,
             Some(true),
-            reader_scrolled
+            reader_scrolled,
+            false,
         ));
         assert!(send_holds_transcript_position(
             true,
             Some(false),
-            reader_scrolled
+            reader_scrolled,
+            false,
         ));
     }
     // An offscreen or remeasuring tail must not undo the reader's scroll.
-    assert!(send_holds_transcript_position(true, None, true));
+    assert!(send_holds_transcript_position(true, None, true, false));
     // An untouched, unmeasured transcript still follows the new reply.
-    assert!(!send_holds_transcript_position(true, None, false));
+    assert!(!send_holds_transcript_position(true, None, false, false));
+
+    // Reading the latest turn follows the new prompt even when the reply's
+    // bottom is below the viewport or is not currently measured.
+    for rests_at_tail in [Some(false), Some(true), None] {
+        assert!(!send_holds_transcript_position(
+            true,
+            rests_at_tail,
+            true,
+            true,
+        ));
+    }
 }
 
 #[test]
