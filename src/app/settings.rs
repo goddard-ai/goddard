@@ -570,9 +570,8 @@ pub(super) struct SettingSearch {
     /// Trimmed, lowercased field content; empty means "not searching".
     query: Rc<str>,
     hits: Rc<Cell<usize>>,
-    /// Set when the query matched the page or group title: every row in
-    /// that scope stays visible instead of only the matching rows.
-    force: bool,
+    /// Lowercased page and group names inherited by each setting.
+    keywords: Rc<str>,
     /// `matched` calls so far this pass. A row's ordinal is stable between
     /// the results column and its natural page because both run the same
     /// render function in the same order.
@@ -606,9 +605,9 @@ pub(super) struct SettingRowMatch {
 impl SettingSearch {
     fn new(query: &str) -> Self {
         Self {
-            query: Rc::from(query),
+            query: Rc::from(query.trim().to_lowercase()),
             hits: Rc::new(Cell::new(0)),
-            force: false,
+            keywords: Rc::from(""),
             rows: Rc::new(Cell::new(0)),
             anchor_page: None,
             scroll: ScrollHandle::new(),
@@ -622,19 +621,11 @@ impl SettingSearch {
         Self::new("")
     }
 
-    /// The section-forced mode, used when the query matched the section's
-    /// own title — the whole section renders rather than an empty shell.
-    fn forced(query: &str) -> Self {
-        let mut search = Self::new(query);
-        search.force = true;
-        search
-    }
-
-    /// Keep every row in a matching group while sharing the page's hit count,
-    /// row ordinals, and navigation context. Sibling groups stay independent.
+    /// Add a page or group name to each row's searchable keywords while
+    /// sharing hit counts, row ordinals, and navigation context.
     fn for_group(&self, title: &str) -> Self {
         let mut search = self.clone();
-        search.force |= !settings_match_ranges(title, &self.query).is_empty();
+        search.keywords = Rc::from(format!("{} {}", self.keywords, title.to_lowercase()));
         search
     }
 
@@ -673,8 +664,8 @@ impl SettingSearch {
         self.rows.get()
     }
 
-    /// The title and description match ranges when the row stays visible —
-    /// every row when `force` is on or the query is empty — else `None`.
+    /// Keep a row when every query word appears in its title, description,
+    /// or inherited keywords. Return highlight ranges for the visible text.
     /// Each kept row counts toward the page's hit total while searching.
     /// Every call consumes an ordinal, kept or not, so ordinals match the
     /// natural page's render order exactly.
@@ -684,7 +675,11 @@ impl SettingSearch {
         let title_ranges = settings_match_ranges(title, &self.query);
         let description_ranges = settings_match_ranges(description, &self.query);
         if self.active() {
-            if !self.force && title_ranges.is_empty() && description_ranges.is_empty() {
+            let title = title.to_lowercase();
+            let description = description.to_lowercase();
+            if !self.query.split_whitespace().all(|word| {
+                title.contains(word) || description.contains(word) || self.keywords.contains(word)
+            }) {
                 return None;
             }
             self.hits.set(self.hits.get() + 1);
@@ -709,26 +704,41 @@ impl SettingSearch {
     }
 }
 
-/// Every occurrence of `query` inside `text` as byte ranges, matched
-/// case-insensitively. `StyledText` slices the original on these offsets, so
-/// when lowercasing changes the text's length (rare, e.g. İ) the whole
-/// string counts as one match rather than risking a misaligned range.
+/// Every query word's occurrences in `text`, case-insensitively, with
+/// overlapping ranges merged for highlighting. When lowercasing changes
+/// byte lengths (e.g. İ), highlight the whole text to avoid invalid offsets.
 pub(super) fn settings_match_ranges(text: &str, query: &str) -> Vec<Range<usize>> {
     if query.is_empty() {
         return Vec::new();
     }
     let lowered = text.to_lowercase();
     if lowered.len() != text.len() {
-        return if lowered.contains(query) {
+        return if query.split_whitespace().any(|word| lowered.contains(word)) {
             vec![0..text.len()]
         } else {
             Vec::new()
         };
     }
-    lowered
-        .match_indices(query)
-        .map(|(index, hit)| index..index + hit.len())
-        .collect()
+    let mut ranges: Vec<Range<usize>> = query
+        .split_whitespace()
+        .flat_map(|word| {
+            lowered
+                .match_indices(word)
+                .map(|(index, hit)| index..index + hit.len())
+        })
+        .collect();
+    ranges.sort_unstable_by_key(|range| range.start);
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for range in ranges {
+        if let Some(last) = merged.last_mut()
+            && range.start <= last.end
+        {
+            last.end = last.end.max(range.end);
+        } else {
+            merged.push(range);
+        }
+    }
+    merged
 }
 
 /// The marker a search match gets inside a settings row — a warning-tinted
@@ -1696,16 +1706,13 @@ impl Waku {
                 continue;
             };
             let label = crate::i18n::translate(label_key);
-            // A query matching the section's own title keeps every row in
-            // it — the match is on the heading, not on any one setting.
+            // Page names are keywords too, so a query can combine a page,
+            // a group, and words from the setting itself.
             let label_ranges = settings_match_ranges(&label, query);
-            let search = if label_ranges.is_empty() {
-                SettingSearch::new(query)
-            } else {
-                SettingSearch::forced(query)
-            }
-            .for_page(page, &self.settings_scroll, &self.settings_row_anchors)
-            .visiting(cx.entity().downgrade());
+            let search = SettingSearch::new(query)
+                .for_group(&label)
+                .for_page(page, &self.settings_scroll, &self.settings_row_anchors)
+                .visiting(cx.entity().downgrade());
             let content = match page {
                 SettingsPage::General => self.render_general_settings(&search, cx),
                 SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
@@ -17846,6 +17853,10 @@ mod tests {
         assert!(super::settings_match_ranges("anything", "").is_empty());
         // A query that occurs past the end of a shorter text reports nothing.
         assert!(super::settings_match_ranges("ab", "abc").is_empty());
+        assert_eq!(
+            super::settings_match_ranges("Font size and FONT family", "family font fon"),
+            vec![0..4, 14..18, 19..25]
+        );
     }
 
     #[test]
@@ -17859,8 +17870,8 @@ mod tests {
     }
 
     #[test]
-    fn setting_search_forced_keeps_rows_within_the_matching_scope() {
-        let search = super::SettingSearch::forced("appearance");
+    fn setting_search_inherits_page_and_group_keywords() {
+        let search = super::SettingSearch::new("appearance").for_group("Appearance");
         assert!(search.matched("Theme", "ignored").is_some());
         // Rows with no hit stay too — the match was on the section title.
         assert!(search.matched("ignored", "also ignored").is_some());
@@ -17883,6 +17894,24 @@ mod tests {
         assert!(search.matched("Other", "").is_none());
         assert!(search.for_group("Git").matched("Sessions", "").is_some());
         assert_eq!(search.hits(), 3);
+
+        let search =
+            super::SettingSearch::new("  MARKDOWN transcript appearance  ").for_group("Appearance");
+        let group = search.for_group("Transcript");
+        let matched = group.matched("Markdown files", "Preview files").unwrap();
+        assert_eq!(matched.title_ranges, vec![0..8]);
+        assert!(group.matched("Theme", "Color scheme").is_none());
+        assert!(
+            search
+                .for_group("General")
+                .matched("Markdown files", "")
+                .is_none()
+        );
+        assert!(
+            super::SettingSearch::new("font style")
+                .matched("Font family", "Text style")
+                .is_some()
+        );
     }
 
     #[test]

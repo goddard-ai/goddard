@@ -1,1 +1,1 @@
-- Search Settings by group name to show every setting in that group, alongside matches on individual settings.
+- Combine page or group names with setting keywords in Settings search, such as “Transcript markdown”, to narrow the results.
