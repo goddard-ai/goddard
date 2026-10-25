@@ -1677,6 +1677,23 @@ fn boss_chat_activation_target(
     }
 }
 
+/// Whether a recorded history hop to `id` can never move the view: the
+/// session left the catalog without a `remove`, or the id — possibly
+/// through a Boss rotation, whose swap is not a navigation boundary —
+/// already resolves to the task on screen. Taking the hop either wedges
+/// on the missing row or lands where the user is, so the entry only
+/// swallows a press while the button still reports history beneath it.
+pub(super) fn dead_navigation_task_entry(
+    sessions: &[AgentSession],
+    identities: &HashSet<Uuid>,
+    rotated: &HashMap<Uuid, Uuid>,
+    id: Uuid,
+    current: Option<Uuid>,
+) -> bool {
+    !sessions.iter().any(|session| session.id == id)
+        || Some(boss_chat_activation_target(sessions, identities, rotated, id)) == current
+}
+
 /// Whether the session is a Boss chat a rotation retired — an archived,
 /// boss-managed, non-planning session inside a boss identity's workspace.
 /// The document's pointer may still name it while the swap's pushes are in
@@ -13728,6 +13745,62 @@ mod tests {
             boss_chat_activation_target(&sessions, &identities, &HashMap::new(), unrelated),
             unrelated
         );
+    }
+
+    #[test]
+    fn rotation_poisoned_back_entries_report_dead() {
+        // `/clear`'s landing can record the retired chat while its swap is
+        // still mid-flight. Once the successor is on screen that entry only
+        // resolves back to the same surface — it is dead, and so is an
+        // entry whose session left the catalog entirely.
+        let project = Uuid::new_v4();
+        let old = Uuid::new_v4();
+        let next = Uuid::new_v4();
+        let sessions = vec![
+            boss_chat_session(project, old, true),
+            boss_chat_session(project, next, false),
+        ];
+        let identities = HashSet::from([project]);
+        assert!(dead_navigation_task_entry(
+            &sessions,
+            &identities,
+            &HashMap::new(),
+            old,
+            Some(next)
+        ));
+        // The same entry is a real hop from anywhere else — Back still
+        // lands on the live replacement.
+        assert!(!dead_navigation_task_entry(
+            &sessions,
+            &identities,
+            &HashMap::new(),
+            old,
+            Some(Uuid::new_v4())
+        ));
+        // A session the catalog dropped wedges the activation lookup
+        // outright — the entry must be skipped too.
+        assert!(dead_navigation_task_entry(
+            &sessions,
+            &identities,
+            &HashMap::new(),
+            Uuid::new_v4(),
+            None
+        ));
+        // The live chat, unrotated ids, and pages keep their entries.
+        assert!(!dead_navigation_task_entry(
+            &sessions,
+            &identities,
+            &HashMap::new(),
+            next,
+            Some(Uuid::new_v4())
+        ));
+        assert!(!dead_navigation_task_entry(
+            &sessions,
+            &identities,
+            &HashMap::new(),
+            next,
+            None
+        ));
     }
 
     #[test]

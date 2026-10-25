@@ -796,9 +796,21 @@ impl Waku {
         // session. Back and Forward still match the id the stack recorded.
         let target = self.live_boss_chat_target(session_id).unwrap_or(session_id);
         match transition {
-            SessionActivationTransition::Visit | SessionActivationTransition::Inspect => self
-                .session_navigation
-                .visit(self.navigation_location(), NavigationLocation::Task(target)),
+            SessionActivationTransition::Visit | SessionActivationTransition::Inspect => {
+                // `current` resolves through the same swap: a `/clear`
+                // landing on the successor while the retired chat is still
+                // selected must not record the dead id as a back target —
+                // the rotation was never a boundary, and the entry would
+                // only send Back onto the surface already on screen.
+                let current = self.navigation_location().map(|location| match location {
+                    NavigationLocation::Task(id) => {
+                        NavigationLocation::Task(self.live_boss_chat_target(id).unwrap_or(id))
+                    }
+                    other => other,
+                });
+                self.session_navigation
+                    .visit(current, NavigationLocation::Task(target));
+            }
             SessionActivationTransition::Silent => {}
             SessionActivationTransition::Back { from } => {
                 if self.navigation_location() != Some(from)
@@ -4183,6 +4195,51 @@ impl Waku {
         }
     }
 
+    /// Drop leading task targets a hop can never leave on a different
+    /// surface — see `boss::dead_navigation_task_entry`: the session is
+    /// gone, or a Boss rotation already resolved the recorded id to the
+    /// task on screen. Left in place, each one swallows a press while the
+    /// button still advertises the history beneath it.
+    fn drop_dead_navigation_targets(&mut self, current: NavigationLocation, back: bool) {
+        let current_task = match current {
+            NavigationLocation::Task(id) => Some(id),
+            _ => None,
+        };
+        loop {
+            let target = if back {
+                self.session_navigation.back_target()
+            } else {
+                self.session_navigation.forward_target()
+            };
+            let dead = match target {
+                Some(NavigationLocation::Task(id)) => {
+                    let identities: HashSet<Uuid> = self
+                        .boss_ui
+                        .states
+                        .values()
+                        .map(|state| state.identity.id)
+                        .collect();
+                    boss::dead_navigation_task_entry(
+                        &self.state.sessions,
+                        &identities,
+                        &self.boss_ui.rotated_chat_drafts,
+                        id,
+                        current_task,
+                    )
+                }
+                _ => false,
+            };
+            if !dead {
+                return;
+            }
+            if back {
+                self.session_navigation.back.pop();
+            } else {
+                self.session_navigation.forward.pop();
+            }
+        }
+    }
+
     pub(super) fn navigate_back_action(
         &mut self,
         _: &NavigateBack,
@@ -4233,6 +4290,7 @@ impl Waku {
         let Some(current) = self.navigation_location() else {
             return;
         };
+        self.drop_dead_navigation_targets(current, true);
         match self.session_navigation.back_target() {
             Some(NavigationLocation::Task(target)) => {
                 self.request_session_activation(
@@ -4299,6 +4357,7 @@ impl Waku {
         let Some(current) = self.navigation_location() else {
             return;
         };
+        self.drop_dead_navigation_targets(current, false);
         match self.session_navigation.forward_target() {
             Some(NavigationLocation::Task(target)) => {
                 self.request_session_activation(
