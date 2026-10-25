@@ -562,6 +562,23 @@ struct ExperimentDef {
     tuning: Option<fn(&Waku, Theme, &mut Context<Waku>) -> AnyElement>,
 }
 
+/// Search results are ordered by the most specific source of a matching
+/// word. Every word must still match somewhere in the row's search context.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum SettingMatchSource {
+    Setting,
+    Group,
+    Page,
+}
+
+impl SettingMatchSource {
+    const ORDERED: [Self; 3] = [Self::Setting, Self::Group, Self::Page];
+
+    fn bit(self) -> u8 {
+        1 << self as u8
+    }
+}
+
 /// The query state shared by every settings row built in one render pass.
 /// `hits` counts the rows a page keeps under the query so the content column
 /// can tell whether a whole section rendered empty without diffing trees.
@@ -570,8 +587,13 @@ pub(super) struct SettingSearch {
     /// Trimmed, lowercased field content; empty means "not searching".
     query: Rc<str>,
     hits: Rc<Cell<usize>>,
-    /// Lowercased page and group names inherited by each setting.
-    keywords: Rc<str>,
+    /// Keep inherited names separate so group matches outrank page matches.
+    page_keywords: Rc<str>,
+    group_keywords: Rc<str>,
+    /// Search rendering keeps one source at a time; normal pages keep all.
+    source_filter: Option<SettingMatchSource>,
+    /// Sources found, including rows excluded by the current source filter.
+    sources: Rc<Cell<u8>>,
     /// `matched` calls so far this pass. A row's ordinal is stable between
     /// the results column and its natural page because both run the same
     /// render function in the same order.
@@ -607,7 +629,10 @@ impl SettingSearch {
         Self {
             query: Rc::from(query.trim().to_lowercase()),
             hits: Rc::new(Cell::new(0)),
-            keywords: Rc::from(""),
+            page_keywords: Rc::from(""),
+            group_keywords: Rc::from(""),
+            source_filter: None,
+            sources: Rc::new(Cell::new(0)),
             rows: Rc::new(Cell::new(0)),
             anchor_page: None,
             scroll: ScrollHandle::new(),
@@ -621,12 +646,18 @@ impl SettingSearch {
         Self::new("")
     }
 
-    /// Add a page or group name to each row's searchable keywords while
+    /// Add a group name to each row's searchable keywords while
     /// sharing hit counts, row ordinals, and navigation context.
     fn for_group(&self, title: &str) -> Self {
         let mut search = self.clone();
-        search.keywords = Rc::from(format!("{} {}", self.keywords, title.to_lowercase()));
+        search.group_keywords =
+            Rc::from(format!("{} {}", self.group_keywords, title.to_lowercase()));
         search
+    }
+
+    fn with_page_name(mut self, title: &str) -> Self {
+        self.page_keywords = Rc::from(title.to_lowercase());
+        self
     }
 
     /// Point this pass at `page`'s natural render: rows get ordinals and
@@ -664,6 +695,25 @@ impl SettingSearch {
         self.rows.get()
     }
 
+    fn match_source(&self, title: &str, description: &str) -> Option<SettingMatchSource> {
+        let title = title.to_lowercase();
+        let description = description.to_lowercase();
+        let mut source = SettingMatchSource::Page;
+        for word in self.query.split_whitespace() {
+            let word_source = if title.contains(word) || description.contains(word) {
+                SettingMatchSource::Setting
+            } else if self.group_keywords.contains(word) {
+                SettingMatchSource::Group
+            } else if self.page_keywords.contains(word) {
+                SettingMatchSource::Page
+            } else {
+                return None;
+            };
+            source = source.min(word_source);
+        }
+        Some(source)
+    }
+
     /// Keep a row when every query word appears in its title, description,
     /// or inherited keywords. Return highlight ranges for the visible text.
     /// Each kept row counts toward the page's hit total while searching.
@@ -672,18 +722,16 @@ impl SettingSearch {
     pub(super) fn matched(&self, title: &str, description: &str) -> Option<SettingRowMatch> {
         let ordinal = self.rows.get();
         self.rows.set(ordinal + 1);
-        let title_ranges = settings_match_ranges(title, &self.query);
-        let description_ranges = settings_match_ranges(description, &self.query);
         if self.active() {
-            let title = title.to_lowercase();
-            let description = description.to_lowercase();
-            if !self.query.split_whitespace().all(|word| {
-                title.contains(word) || description.contains(word) || self.keywords.contains(word)
-            }) {
+            let source = self.match_source(title, description)?;
+            self.sources.set(self.sources.get() | source.bit());
+            if self.source_filter.is_some_and(|filter| filter != source) {
                 return None;
             }
             self.hits.set(self.hits.get() + 1);
         }
+        let title_ranges = settings_match_ranges(title, &self.query);
+        let description_ranges = settings_match_ranges(description, &self.query);
         let key = self.anchor_page.map(|page| (page, ordinal));
         let anchor = key.map(|key| {
             self.anchors
@@ -1121,19 +1169,22 @@ impl Waku {
         let searching = !query.is_empty();
         let mut navigation = div().flex().flex_col().gap(px(3.0));
 
-        // While searching the sidebar mirrors the results column: only the
-        // sections that actually rendered, in scroll order, and none drawn
-        // as selected — clicking one scrolls to it instead of switching
-        // pages.
-        let pages: Vec<(SettingsPage, String, &'static str)> = if searching {
+        // While searching, list each page once in first-result order.
+        // Clicking it scrolls to that page's highest-ranked section.
+        let mut seen_pages = HashSet::new();
+        let pages: Vec<(SettingsPage, String, &'static str, usize)> = if searching {
             self.settings_search_sections
                 .iter()
-                .filter_map(|page| {
+                .enumerate()
+                .filter_map(|(index, page)| {
+                    if !seen_pages.insert(*page) {
+                        return None;
+                    }
                     SETTINGS_PAGES
                         .into_iter()
                         .find(|(candidate, ..)| *candidate == *page)
                         .map(|(page, label_key, icon, _)| {
-                            (page, crate::i18n::translate(label_key), icon)
+                            (page, crate::i18n::translate(label_key), icon, index)
                         })
                 })
                 .collect()
@@ -1146,16 +1197,19 @@ impl Waku {
                 self.state.integrations_enabled,
                 self.state.git_worktree_management_enabled,
             )
+            .enumerate()
+            .map(|(index, (page, label, icon))| (page, label, icon, index))
             .collect()
         };
 
-        for (page, label, icon_path) in pages {
+        for (page, label, icon_path, index) in pages {
             let selected = !searching && current_page == page;
             navigation = navigation.child(
                 div()
                     .id(SharedString::from(format!(
-                        "settings-tab-{}",
-                        label.to_lowercase()
+                        "settings-tab-{}-{}",
+                        label.to_lowercase(),
+                        index
                     )))
                     .h(px(36.0))
                     .px(px(11.0))
@@ -1187,7 +1241,7 @@ impl Waku {
                     .child(label)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if searching {
-                            this.scroll_to_settings_section(page, cx);
+                            this.scroll_to_settings_section(index, cx);
                         } else {
                             this.open_settings_page(page, window, cx);
                         }
@@ -1301,17 +1355,12 @@ impl Waku {
             .to_lowercase()
     }
 
-    /// Scroll the results column so `page`'s section lands at the top. The
-    /// sections are the scroll element's direct children, so its index in
-    /// `settings_search_sections` is the item index the handle understands.
-    fn scroll_to_settings_section(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
-        if let Some(index) = self
-            .settings_search_sections
-            .iter()
-            .position(|candidate| *candidate == page)
-        {
+    /// Each ranked section is a direct child of the scroll element. A page
+    /// can appear in multiple tiers, so navigation uses the section index.
+    fn scroll_to_settings_section(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.settings_search_sections.len() {
             self.settings_scroll.scroll_to_top_of_item(index);
-            self.settings_search_target = Some(page);
+            self.settings_search_target = Some(index);
             cx.notify();
         }
     }
@@ -1361,14 +1410,15 @@ impl Waku {
     fn cycle_settings_page(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         let query = self.settings_search_query(cx);
         if !query.is_empty() {
-            let pages = self.settings_search_sections.clone();
             let current = self
                 .settings_search_target
-                .and_then(|target| pages.iter().position(|page| *page == target));
-            let Some(next) = next_picker_highlight(current, pages.len(), key) else {
+                .filter(|index| *index < self.settings_search_sections.len());
+            let Some(next) =
+                next_picker_highlight(current, self.settings_search_sections.len(), key)
+            else {
                 return;
             };
-            self.scroll_to_settings_section(pages[next], cx);
+            self.scroll_to_settings_section(next, cx);
             return;
         }
         let pages = visible_settings_pages(
@@ -1670,7 +1720,8 @@ impl Waku {
     }
 
     /// The search results column: every section that has a matching setting
-    /// renders its heading plus only the matched rows, in sidebar order.
+    /// renders its heading plus matched rows, ordered by setting, group,
+    /// then page matches. Sidebar order breaks ties within each tier.
     /// Each section is a direct child of the scroll element so the sidebar
     /// and arrow keys can `scroll_to_top_of_item` straight to it.
     fn render_settings_search_results(
@@ -1689,94 +1740,113 @@ impl Waku {
 
         self.settings_search_sections.clear();
         let mut sections: Vec<Div> = Vec::new();
-        for page in SEARCHABLE_SETTINGS_PAGES {
-            if !page.is_visible_in_navigation(
-                self.state.computer_use_experiment_enabled,
-                self.state.friends_enabled,
-                self.jev_in_use(),
-                self.state.integrations_enabled,
-                self.state.git_worktree_management_enabled,
-            ) {
-                continue;
+        let mut page_sources: HashMap<SettingsPage, u8> = HashMap::new();
+        for source in SettingMatchSource::ORDERED {
+            for page in SEARCHABLE_SETTINGS_PAGES {
+                // The first pass discovers all sources. Only revisit pages with
+                // lower-tier matches, keeping the common direct-only search to
+                // one render per page.
+                if source != SettingMatchSource::Setting
+                    && !page_sources
+                        .get(&page)
+                        .is_some_and(|sources| *sources & source.bit() != 0)
+                {
+                    continue;
+                }
+                if !page.is_visible_in_navigation(
+                    self.state.computer_use_experiment_enabled,
+                    self.state.friends_enabled,
+                    self.jev_in_use(),
+                    self.state.integrations_enabled,
+                    self.state.git_worktree_management_enabled,
+                ) {
+                    continue;
+                }
+                let Some((_, label_key, _, _)) = SETTINGS_PAGES
+                    .into_iter()
+                    .find(|(candidate, ..)| *candidate == page)
+                else {
+                    continue;
+                };
+                let label = crate::i18n::translate(label_key);
+                // Page names are keywords too, so a query can combine a page,
+                // a group, and words from the setting itself.
+                let label_ranges = settings_match_ranges(&label, query);
+                let mut search = SettingSearch::new(query)
+                    .with_page_name(&label)
+                    .for_page(page, &self.settings_scroll, &self.settings_row_anchors)
+                    .visiting(cx.entity().downgrade());
+                search.source_filter = Some(source);
+                let content = match page {
+                    SettingsPage::General => self.render_general_settings(&search, cx),
+                    SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
+                    SettingsPage::Providers => self.render_providers_settings(&search, cx),
+                    SettingsPage::Friends => self.render_friends_settings(&search, cx),
+                    SettingsPage::Commands => self.render_commands_settings(&search, cx),
+                    SettingsPage::Terminal => self.render_terminal_settings(&search, cx),
+                    SettingsPage::Daemon => self.render_daemon_settings(&search, cx),
+                    SettingsPage::ComputerUse => self.render_computer_use_settings(&search, cx),
+                    SettingsPage::Jev => self.render_jev_settings(&search, cx),
+                    SettingsPage::Experiments => self.render_experiments_settings(&search, cx),
+                    _ => continue,
+                };
+                if source == SettingMatchSource::Setting {
+                    page_sources.insert(page, search.sources.get());
+                }
+                if search.hits() == 0 {
+                    continue;
+                }
+                self.settings_search_sections.push(page);
+                let first = sections.is_empty();
+                sections.push(
+                    div()
+                        .when(!first, |element| element.mt(px(28.0)))
+                        .px(px(32.0))
+                        .child(
+                            div()
+                                .w_full()
+                                .max_w(px(SETTINGS_CONTENT_MAX_WIDTH))
+                                .mx_auto()
+                                .child(
+                                    div()
+                                        .id(SharedString::from(format!(
+                                            "settings-section-{}-{}",
+                                            page as usize, source as u8
+                                        )))
+                                        .tab_index(0)
+                                        .pt(px(2.0))
+                                        .pl(px(6.0))
+                                        .flex_none()
+                                        .cursor_pointer()
+                                        .text_size(sp(18.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .hover(|element| element.text_color(theme.accent))
+                                        .focus_visible(|element| {
+                                            element.bg(theme.focus_highlight())
+                                        })
+                                        .child(settings_search_text(label, label_ranges, theme))
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.visit_setting(page, None, window, cx);
+                                        }))
+                                        .on_key_down(cx.listener(
+                                            move |this, event: &KeyDownEvent, window, cx| {
+                                                if !event.keystroke.modifiers.modified()
+                                                    && matches!(
+                                                        event.keystroke.key.as_str(),
+                                                        "enter" | "space"
+                                                    )
+                                                {
+                                                    this.visit_setting(page, None, window, cx);
+                                                    cx.stop_propagation();
+                                                }
+                                            },
+                                        )),
+                                )
+                                .child(content),
+                        ),
+                );
             }
-            let Some((_, label_key, _, _)) = SETTINGS_PAGES
-                .into_iter()
-                .find(|(candidate, ..)| *candidate == page)
-            else {
-                continue;
-            };
-            let label = crate::i18n::translate(label_key);
-            // Page names are keywords too, so a query can combine a page,
-            // a group, and words from the setting itself.
-            let label_ranges = settings_match_ranges(&label, query);
-            let search = SettingSearch::new(query)
-                .for_group(&label)
-                .for_page(page, &self.settings_scroll, &self.settings_row_anchors)
-                .visiting(cx.entity().downgrade());
-            let content = match page {
-                SettingsPage::General => self.render_general_settings(&search, cx),
-                SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
-                SettingsPage::Providers => self.render_providers_settings(&search, cx),
-                SettingsPage::Friends => self.render_friends_settings(&search, cx),
-                SettingsPage::Commands => self.render_commands_settings(&search, cx),
-                SettingsPage::Terminal => self.render_terminal_settings(&search, cx),
-                SettingsPage::Daemon => self.render_daemon_settings(&search, cx),
-                SettingsPage::ComputerUse => self.render_computer_use_settings(&search, cx),
-                SettingsPage::Jev => self.render_jev_settings(&search, cx),
-                SettingsPage::Experiments => self.render_experiments_settings(&search, cx),
-                _ => continue,
-            };
-            if search.hits() == 0 {
-                continue;
-            }
-            self.settings_search_sections.push(page);
-            let first = sections.is_empty();
-            sections.push(
-                div()
-                    .when(!first, |element| element.mt(px(28.0)))
-                    .px(px(32.0))
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(SETTINGS_CONTENT_MAX_WIDTH))
-                            .mx_auto()
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!(
-                                        "settings-section-{}",
-                                        page as usize
-                                    )))
-                                    .tab_index(0)
-                                    .pt(px(2.0))
-                                    .pl(px(6.0))
-                                    .flex_none()
-                                    .cursor_pointer()
-                                    .text_size(sp(18.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .hover(|element| element.text_color(theme.accent))
-                                    .focus_visible(|element| element.bg(theme.focus_highlight()))
-                                    .child(settings_search_text(label, label_ranges, theme))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.visit_setting(page, None, window, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, window, cx| {
-                                            if !event.keystroke.modifiers.modified()
-                                                && matches!(
-                                                    event.keystroke.key.as_str(),
-                                                    "enter" | "space"
-                                                )
-                                            {
-                                                this.visit_setting(page, None, window, cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
-                            )
-                            .child(content),
-                    ),
-            );
         }
 
         let scroll = div()
@@ -17871,7 +17941,7 @@ mod tests {
 
     #[test]
     fn setting_search_inherits_page_and_group_keywords() {
-        let search = super::SettingSearch::new("appearance").for_group("Appearance");
+        let search = super::SettingSearch::new("appearance").with_page_name("Appearance");
         assert!(search.matched("Theme", "ignored").is_some());
         // Rows with no hit stay too — the match was on the section title.
         assert!(search.matched("ignored", "also ignored").is_some());
@@ -17895,8 +17965,8 @@ mod tests {
         assert!(search.for_group("Git").matched("Sessions", "").is_some());
         assert_eq!(search.hits(), 3);
 
-        let search =
-            super::SettingSearch::new("  MARKDOWN transcript appearance  ").for_group("Appearance");
+        let search = super::SettingSearch::new("  MARKDOWN transcript appearance  ")
+            .with_page_name("Appearance");
         let group = search.for_group("Transcript");
         let matched = group.matched("Markdown files", "Preview files").unwrap();
         assert_eq!(matched.title_ranges, vec![0..8]);
@@ -17912,6 +17982,56 @@ mod tests {
                 .matched("Font family", "Text style")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn setting_search_ranks_setting_then_group_then_page_without_duplicates() {
+        use super::SettingMatchSource;
+
+        // The page and group deliberately have the same name: a word that
+        // appears in more than one source must use the most specific one.
+        let rows = [
+            ("", "Page setting", "Colors"),
+            ("Transcript", "Group setting", "Preview"),
+            ("Transcript", "Description setting", "Transcript styling"),
+            ("Transcript", "Transcript layout", "Spacing"),
+        ];
+        let mut ordered = Vec::new();
+        for source in SettingMatchSource::ORDERED {
+            let mut search = super::SettingSearch::new("transcript").with_page_name("Transcript");
+            search.source_filter = Some(source);
+            for (group, title, description) in rows {
+                if search
+                    .for_group(group)
+                    .matched(title, description)
+                    .is_some()
+                {
+                    ordered.push(title);
+                }
+            }
+            // Filtering a tier must still discover lower tiers and consume
+            // every ordinal, preserving navigation to the natural page.
+            assert_eq!(search.ordinal(), rows.len());
+            assert_eq!(search.sources.get(), 0b111);
+        }
+        assert_eq!(
+            ordered,
+            vec![
+                "Description setting",
+                "Transcript layout",
+                "Group setting",
+                "Page setting"
+            ]
+        );
+
+        let search = super::SettingSearch::new("transcript markdown")
+            .with_page_name("Appearance")
+            .for_group("Transcript");
+        assert_eq!(
+            search.match_source("Markdown files", "Preview"),
+            Some(SettingMatchSource::Setting)
+        );
+        assert_eq!(search.match_source("Theme", "Colors"), None);
     }
 
     #[test]

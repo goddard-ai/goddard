@@ -3965,9 +3965,9 @@ pub struct Waku {
     /// direct child of the content scroll element, so its index here is the
     /// `scroll_to_top_of_item` target the sidebar and arrow keys use.
     settings_search_sections: Vec<SettingsPage>,
-    /// The section the last search-mode navigation landed on; arrow cycling
-    /// steps from it rather than from the selected page.
-    settings_search_target: Option<SettingsPage>,
+    /// Index of the last search-mode navigation target. A page can appear
+    /// in multiple relevance tiers, so page identity alone is ambiguous.
+    settings_search_target: Option<usize>,
     /// One scroll anchor per searchable row, keyed by (page, ordinal in
     /// render order). The results column and the natural page run the same
     /// render function, so a row keeps its ordinal on both sides and a
