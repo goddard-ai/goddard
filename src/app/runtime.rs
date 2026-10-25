@@ -2089,10 +2089,12 @@ impl Waku {
     }
 
     /// The soonest timer the pump must wake for: background log output
-    /// batching, or a recovery episode reaching the end of its count window.
+    /// batching, a recovery episode reaching the end of its count window,
+    /// or an employee sidebar row reaching the end of its avatar wait.
     fn next_timed_pump_delay(&self) -> Option<Duration> {
         [
             self.background_output_refresh_delay(),
+            self.sidebar_employee_avatar_wake_delay(),
             self.daemon_recovery_episode
                 .as_ref()
                 .map(|episode| episode.flush_at.saturating_duration_since(Instant::now())),
@@ -8651,6 +8653,13 @@ impl Waku {
             | self.drain_action_prediction_events(cx)
             | self.drain_inbox_suggestion_events(cx)
         {
+            cx.notify();
+        }
+        // Employee rows parked on their avatar raster reveal on the
+        // letter fallback once the wait outlives the render — the timed
+        // pump edge is their only wake, so an expiry repaints like a
+        // drain.
+        if self.expire_sidebar_employee_avatar_waits(Instant::now()) {
             cx.notify();
         }
         if std::mem::take(&mut self.workspace_queries_stale) {

@@ -1,0 +1,1 @@
+- New Boss employees appear in the sidebar with their avatar already drawn instead of flashing a letter placeholder first.

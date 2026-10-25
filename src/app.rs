@@ -4049,6 +4049,14 @@ pub struct Waku {
     /// Whether a Deliverables group member is unread, cached with the sidebar
     /// row snapshot so the header stays proportional to visible rows.
     sidebar_deliverables_unread: Cell<bool>,
+    /// Employee session ids whose sidebar row is held out of the snapshot
+    /// while its avatar raster renders — id → the reveal deadline. The row
+    /// joins the snapshot early if the raster caches first.
+    sidebar_employee_avatar_waits: RefCell<HashMap<Uuid, Instant>>,
+    /// Employees whose sidebar row has painted once. Revealed rows never
+    /// re-hide: a later raster eviction falls back to the letter
+    /// placeholder in place instead of removing the row.
+    sidebar_employee_avatar_released: RefCell<HashSet<Uuid>>,
     /// Branch labels for ordinary local project paths, resolved together on a
     /// background executor so sidebar rows only read memory.
     sidebar_branch_labels: RefCell<HashMap<PathBuf, SharedString>>,
@@ -7921,6 +7929,8 @@ impl Waku {
                 sidebar_rows_snapshot: RefCell::new(Rc::new(Vec::new())),
                 sidebar_collapsed_group_members: RefCell::new(Rc::new(HashMap::new())),
                 sidebar_deliverables_unread: Cell::new(false),
+                sidebar_employee_avatar_waits: RefCell::new(HashMap::new()),
+                sidebar_employee_avatar_released: RefCell::new(HashSet::new()),
                 sidebar_branch_labels: RefCell::new(HashMap::new()),
                 sidebar_branch_scan_fingerprint: Cell::new(None),
                 sidebar_branch_scan_generation: Cell::new(0),

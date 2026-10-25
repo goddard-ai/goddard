@@ -388,6 +388,55 @@ fn collapsed_employee_avatar_strip<'a>(
     (faces, omitted)
 }
 
+/// One row's answer at the avatar gate — paint now, or keep waiting.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SidebarEmployeeAvatarGate {
+    /// The row may paint: its raster is cached, its wait lapsed, or it
+    /// has painted once already.
+    Ready,
+    /// The row holds out of the snapshot while its raster renders.
+    /// `fresh` marks a wait this call just armed — the caller edges the
+    /// event pump for it since a dedup-marked render request would
+    /// signal nothing.
+    Waiting { fresh: bool },
+}
+
+/// The pure half of the sidebar employee avatar gate: whether a row may
+/// paint given its raster cache state. A missing raster arms a
+/// `SIDEBAR_EMPLOYEE_AVATAR_WAIT` deadline and withholds the row; the
+/// raster landing reveals it early and a lapsed deadline reveals it on
+/// the letter fallback, so no render outcome can hide it for good. A
+/// revealed row stays revealed — a later cache eviction never re-hides
+/// it.
+fn sidebar_employee_avatar_gate(
+    waits: &mut HashMap<Uuid, Instant>,
+    released: &mut HashSet<Uuid>,
+    id: Uuid,
+    cached: bool,
+    now: Instant,
+) -> SidebarEmployeeAvatarGate {
+    if released.contains(&id) {
+        return SidebarEmployeeAvatarGate::Ready;
+    }
+    if cached {
+        waits.remove(&id);
+        released.insert(id);
+        return SidebarEmployeeAvatarGate::Ready;
+    }
+    match waits.get(&id) {
+        Some(deadline) if *deadline <= now => {
+            waits.remove(&id);
+            released.insert(id);
+            SidebarEmployeeAvatarGate::Ready
+        }
+        Some(_) => SidebarEmployeeAvatarGate::Waiting { fresh: false },
+        None => {
+            waits.insert(id, now + SIDEBAR_EMPLOYEE_AVATAR_WAIT);
+            SidebarEmployeeAvatarGate::Waiting { fresh: true }
+        }
+    }
+}
+
 /// Live roster entries override dismissals from their previous admission,
 /// including while queued and before the unarchived session snapshot arrives.
 /// Expired employees still honor the user's archive choices.
@@ -576,6 +625,10 @@ const SIDEBAR_GROUP_ICON_GAP: f32 = 5.0;
 /// with the group label's: header inset + icon width + icon-to-label gap.
 pub(super) const SIDEBAR_GROUP_CHILD_PADDING: f32 =
     SIDEBAR_GROUP_HEADER_INSET + SIDEBAR_GROUP_ICON_WIDTH + SIDEBAR_GROUP_ICON_GAP;
+/// How long a new employee's row waits for its avatar raster before
+/// showing anyway — long enough to cover a queued render, short enough
+/// that a failed or starved job cannot hide the row for long.
+const SIDEBAR_EMPLOYEE_AVATAR_WAIT: Duration = Duration::from_secs(1);
 /// Member faces a collapsed employee group's header previews before its
 /// "+N more" tail counts the rest.
 const SIDEBAR_COLLAPSED_GROUP_AVATARS: usize = 4;
@@ -4113,6 +4166,31 @@ impl Waku {
                     combined.wrapping_add(mix_uuid(u64::from(archived), *id))
                 });
         fingerprint = mix(fingerprint, archived_employees);
+        // An employee held out for its avatar raster moves the snapshot
+        // on a wake the boss revision cannot see — each shown,
+        // expanded-group candidate's pending state joins the fingerprint
+        // so the raster landing or the wait lapsing rebuilds the rows.
+        let mut avatar_waits = std::collections::BTreeSet::new();
+        for id in self.boss_ui.recent.values().flatten() {
+            if !sidebar_employee_shown(
+                id,
+                &self.state.sessions,
+                &self.state.sidebar_archived_employees,
+                self.boss_ui.working.contains(id),
+            ) || self
+                .sidebar_collapsed_groups
+                .contains(&self.sidebar_employee_group(*id))
+            {
+                continue;
+            }
+            if !self.sidebar_employee_avatar_ready(*id) {
+                avatar_waits.insert(*id);
+            }
+        }
+        fingerprint = mix(fingerprint, avatar_waits.len() as u64);
+        for id in avatar_waits {
+            fingerprint = mix_uuid(fingerprint, id);
+        }
         // The Terminals group reads its ids in list order plus each row's
         // pin state — pinned rows survive the fold, so both feed the rows.
         // The selected standalone terminal survives the fold too, so while
@@ -4355,7 +4433,7 @@ impl Waku {
                                 self.boss_ui.working.contains(id),
                             )
                     };
-                    let active: Vec<_> = self
+                    let mut active: Vec<_> = self
                         .boss_ui
                         .active
                         .get(key)
@@ -4364,7 +4442,7 @@ impl Waku {
                         .filter(shown)
                         .copied()
                         .collect();
-                    let idle: Vec<_> = self
+                    let mut idle: Vec<_> = self
                         .boss_ui
                         .recent
                         .get(key)
@@ -4380,13 +4458,23 @@ impl Waku {
                             .or_default()
                             .extend(active.iter().chain(idle.iter()).copied());
                     }
+                    let group_collapsed = self.sidebar_collapsed_groups.contains(&group);
+                    // Member rows paint only while the group is expanded —
+                    // a folded roster keeps its header aggregates while a
+                    // face renders. An expanded member holds its row out
+                    // until its avatar raster lands or the wait lapses, so
+                    // a new face never letter-flashes on appearance.
+                    if !group_collapsed {
+                        active.retain(|id| self.sidebar_employee_avatar_ready(*id));
+                        idle.retain(|id| self.sidebar_employee_avatar_ready(*id));
+                    }
                     append_sidebar_employee_group(
                         &mut rows,
                         group,
                         *key,
                         &active,
                         &idle,
-                        self.sidebar_collapsed_groups.contains(&group),
+                        group_collapsed,
                         self.sidebar_employee_reveals(group)
                             .get(key)
                             .copied()
@@ -5624,6 +5712,72 @@ impl Waku {
             self.boss_ui.employee_purposes.get(&id).copied(),
             self.boss_ui.queued.contains_key(&id),
         )
+    }
+
+    /// Whether an employee's sidebar row may paint yet. A rostered face
+    /// still rendering holds its row out of the snapshot so the letter
+    /// placeholder never flashes on appearance: the render is requested
+    /// here and the row joins once the raster caches or the wait outlives
+    /// `SIDEBAR_EMPLOYEE_AVATAR_WAIT`. Employees with no resolvable
+    /// identity, and rows that have painted once, never wait.
+    fn sidebar_employee_avatar_ready(&self, id: Uuid) -> bool {
+        let Some(identity) = self.boss_ui.identities.get(&id) else {
+            return true;
+        };
+        let cached = self
+            .boss_avatar_cached(identity, boss::BOSS_EMPLOYEE_AVATAR)
+            .is_some();
+        match sidebar_employee_avatar_gate(
+            &mut self.sidebar_employee_avatar_waits.borrow_mut(),
+            &mut self.sidebar_employee_avatar_released.borrow_mut(),
+            id,
+            cached,
+            Instant::now(),
+        ) {
+            SidebarEmployeeAvatarGate::Ready => true,
+            SidebarEmployeeAvatarGate::Waiting { fresh } => {
+                let _ = self.boss_avatar_image(identity, boss::BOSS_EMPLOYEE_AVATAR);
+                if fresh {
+                    // An exhausted render keeps its dedup mark — no job
+                    // would signal for it then — so a newly armed wait
+                    // edges the pump itself for its deadline.
+                    signal_event_pump(&self.event_wake_tx);
+                }
+                false
+            }
+        }
+    }
+
+    /// The soonest avatar-wait deadline the pump must wake for — a row
+    /// held for its face reveals on the letter fallback if its render
+    /// outlives the wait.
+    pub(super) fn sidebar_employee_avatar_wake_delay(&self) -> Option<Duration> {
+        let now = Instant::now();
+        self.sidebar_employee_avatar_waits
+            .borrow()
+            .values()
+            .map(|deadline| deadline.saturating_duration_since(now))
+            .min()
+    }
+
+    /// Release every avatar wait whose deadline passed — the pump calls
+    /// this on the deadline wake and repaints when any did.
+    pub(super) fn expire_sidebar_employee_avatar_waits(&self, now: Instant) -> bool {
+        let mut waits = self.sidebar_employee_avatar_waits.borrow_mut();
+        let due: Vec<Uuid> = waits
+            .iter()
+            .filter(|(_, deadline)| **deadline <= now)
+            .map(|(id, _)| *id)
+            .collect();
+        if due.is_empty() {
+            return false;
+        }
+        let mut released = self.sidebar_employee_avatar_released.borrow_mut();
+        for id in due {
+            waits.remove(&id);
+            released.insert(id);
+        }
+        true
     }
 
     fn sidebar_employee_reveals(
@@ -7887,6 +8041,53 @@ pub(super) fn sidebar_session_selected(
 mod tests {
     use super::*;
     use waku_client::boss::{BossDeliverable, BossIdentity, BossResourcePolicy, BossState};
+
+    #[test]
+    fn employee_avatar_gate_reveals_on_raster_deadline_and_never_rehides() {
+        let id = Uuid::new_v4();
+        let now = Instant::now();
+        let mut waits = HashMap::new();
+        let mut released = HashSet::new();
+        // A missing raster arms the wait once and withholds the row.
+        assert_eq!(
+            sidebar_employee_avatar_gate(&mut waits, &mut released, id, false, now),
+            SidebarEmployeeAvatarGate::Waiting { fresh: true }
+        );
+        // Polls inside the window keep waiting without re-arming.
+        assert_eq!(
+            sidebar_employee_avatar_gate(&mut waits, &mut released, id, false, now),
+            SidebarEmployeeAvatarGate::Waiting { fresh: false }
+        );
+        // The raster landing reveals the row.
+        assert_eq!(
+            sidebar_employee_avatar_gate(&mut waits, &mut released, id, true, now),
+            SidebarEmployeeAvatarGate::Ready
+        );
+        // Once revealed a later cache miss never re-hides the row.
+        assert_eq!(
+            sidebar_employee_avatar_gate(&mut waits, &mut released, id, false, now),
+            SidebarEmployeeAvatarGate::Ready
+        );
+
+        // A render that never lands still reveals on its deadline.
+        let other = Uuid::new_v4();
+        assert_eq!(
+            sidebar_employee_avatar_gate(&mut waits, &mut released, other, false, now),
+            SidebarEmployeeAvatarGate::Waiting { fresh: true }
+        );
+        assert_eq!(
+            sidebar_employee_avatar_gate(
+                &mut waits,
+                &mut released,
+                other,
+                false,
+                now + SIDEBAR_EMPLOYEE_AVATAR_WAIT,
+            ),
+            SidebarEmployeeAvatarGate::Ready
+        );
+        assert!(released.contains(&other));
+        assert!(waits.is_empty());
+    }
 
     #[test]
     fn sidebar_group_header_status_distinguishes_queued_work_from_running() {

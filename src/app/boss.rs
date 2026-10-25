@@ -1964,6 +1964,22 @@ impl Waku {
                         .or_insert_with(|| employee.identity.clone());
                 }
             }
+            // Avatar waits and reveals key on roster membership — a row's
+            // hold only makes sense while the employee is still a sidebar
+            // candidate, and a re-admitted employee re-waits for its face.
+            let roster: HashSet<Uuid> = self
+                .boss_ui
+                .recent
+                .values()
+                .flatten()
+                .copied()
+                .collect();
+            self.sidebar_employee_avatar_waits
+                .borrow_mut()
+                .retain(|id, _| roster.contains(id));
+            self.sidebar_employee_avatar_released
+                .borrow_mut()
+                .retain(|id| roster.contains(id));
             // A ticket now carrying the force flag — or no longer queued at
             // all — has caught up with the press; the card reads the ticket.
             self.boss_ui.start_now_pending.retain(|id| {
