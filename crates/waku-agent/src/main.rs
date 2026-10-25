@@ -433,9 +433,9 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss chain --json-file chain.json".to_owned(),
         ),
         "boss view" => (
-            json!({}),
-            json!({"json":{"type":"state","state":"BossState including identity, employees, personas, deliverables, plans, and resource policy"}}),
-            "goddard-agent boss view".to_owned(),
+            json!({"SECTION":{"positional":true,"optional":true,"enum":["identity","employees","retired-employees","personas","planning","outcomes","deliverables","chains","waves","instruction-pins","outbox","resource-policy"],"notes":"prints only that slice of BossState"},"--full":{"type":"boolean flag","notes":"prints the complete BossState — the historical default; large for established bosses"}}),
+            json!({"json":{"type":"stateDigest","digest":"revision, sessionId, per-collection counts, and the selectable sections"},"notes":"a SECTION returns that collection keyed by its BossState field name; --full returns {type:state,state:BossState}"}),
+            "goddard-agent boss view outcomes".to_owned(),
         ),
         "boss context" => (
             json!({}),
@@ -1500,6 +1500,7 @@ fn flags(
                 "all"
                     | "new"
                     | "clear"
+                    | "full"
                     | "reference"
                     | "allow-burst"
                     | "finishes-outcome"
@@ -1586,10 +1587,25 @@ fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
         }
         "view" | "context" | "roster" => {
             if action == "view" {
-                if !args.is_empty() {
-                    bail!("boss view takes no arguments");
+                let (pos, opts) = flags(args, &["full"], true)?;
+                if pos.len() > 1 {
+                    bail!("usage: boss view [SECTION] [--full]");
                 }
-                print_boss(boss_request(BossOperation::View)?)
+                if opts.contains_key("full") && !pos.is_empty() {
+                    bail!("boss view --full takes no section");
+                }
+                let waku_protocol::boss::BossResult::State { state } =
+                    boss_request(BossOperation::View)?
+                else {
+                    bail!("unexpected Boss view result")
+                };
+                if opts.contains_key("full") {
+                    print_boss(waku_protocol::boss::BossResult::State { state })
+                } else if let Some(section) = pos.first() {
+                    print_view_section(&state, section)
+                } else {
+                    print_view_digest(&state)
+                }
             } else if action == "context" {
                 if !args.is_empty() {
                     bail!("boss context takes no arguments");
@@ -2999,6 +3015,88 @@ fn project_selector(
 
 fn print_boss(result: waku_protocol::boss::BossResult) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
+}
+
+/// Selectable `boss view` slices — kebab-case positional names.
+const VIEW_SECTIONS: &[&str] = &[
+    "identity",
+    "employees",
+    "retired-employees",
+    "personas",
+    "planning",
+    "outcomes",
+    "deliverables",
+    "chains",
+    "waves",
+    "instruction-pins",
+    "outbox",
+    "resource-policy",
+];
+
+fn print_view_digest(state: &waku_protocol::boss::BossState) -> anyhow::Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "type": "stateDigest",
+            "digest": {
+                "revision": state.revision,
+                "sessionId": state.session_id,
+                "counts": {
+                    "chains": state.chains.len(),
+                    "personas": state.personas.len(),
+                    "employees": state.employees.len(),
+                    "retiredEmployees": state.retired_employees.len(),
+                    "outcomes": state.outcomes.len(),
+                    "planning": state.planning.len(),
+                    "deliverables": state.deliverables.len(),
+                    "waves": state.waves.len(),
+                    "instructionPins": state.instruction_pins.len(),
+                    "outbox": state.outbox.len() + state.wave_outbox.len(),
+                },
+            },
+            "sections": VIEW_SECTIONS,
+            "notes": "boss view SECTION prints that slice; boss view --full prints the complete BossState",
+        }))?
+    );
+    Ok(())
+}
+
+fn print_view_section(
+    state: &waku_protocol::boss::BossState,
+    section: &str,
+) -> anyhow::Result<()> {
+    let value = match section {
+        "identity" => json!({
+            "identity": state.identity,
+            "personaId": state.persona_id,
+            "employeePersonaId": state.employee_persona_id,
+            "specialistPersonaIds": state.specialist_persona_ids,
+            "sessionId": state.session_id,
+            "rotation": state.rotation,
+            "personaDefaultNotice": state.persona_default_notice,
+            "goalsViewedAt": state.goals_viewed_at,
+            "nextSequence": state.next_sequence,
+            "nextEventId": state.next_event_id,
+            "revision": state.revision,
+        }),
+        "employees" => json!({"employees": state.employees}),
+        "retired-employees" => json!({"retiredEmployees": state.retired_employees}),
+        "personas" => json!({"personas": state.personas}),
+        "planning" => json!({"planning": state.planning}),
+        "outcomes" => json!({"outcomes": state.outcomes}),
+        "deliverables" => json!({"deliverables": state.deliverables}),
+        "chains" => json!({"chains": state.chains}),
+        "waves" => json!({"waves": state.waves}),
+        "instruction-pins" => json!({"instructionPins": state.instruction_pins}),
+        "outbox" => json!({"outbox": state.outbox, "waveOutbox": state.wave_outbox}),
+        "resource-policy" => json!({"resourcePolicy": state.resource_policy}),
+        _ => bail!(
+            "unknown section `{section}` — expected one of: {}",
+            VIEW_SECTIONS.join(", ")
+        ),
+    };
+    println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }
 

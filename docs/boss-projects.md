@@ -88,7 +88,7 @@ These commands require a daemon with chain selector support. Older daemons
 reject the new fields; upgrade or resolve the project and use `projectId`.
 
 1. List or resolve the project using the commands above. Obtain an open outcome
-   UUID from `goddard-agent boss view`, and choose an installed provider model.
+   UUID from `goddard-agent boss view outcomes`, and choose an installed provider model.
 2. Save this complete create operation as `chain.json`. Replace the illustrative
    outcome UUID and project name with your actual values; choose a new request
    UUID once for this logical creation. This one-step helping chain does not
