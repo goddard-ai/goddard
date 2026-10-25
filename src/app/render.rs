@@ -1710,14 +1710,14 @@ impl Waku {
                 }
             })
             .detach();
+            let focus = input.read(cx).focus();
             self.pending_ssh_prompts.front_mut().unwrap().input = Some(input);
+            window.on_next_frame(move |window, _| {
+                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+            });
         }
         let prompt = self.pending_ssh_prompts.front().unwrap();
         let input = prompt.input.clone().unwrap();
-        if !input.read(cx).focus().is_focused(window) {
-            let focus = input.read(cx).focus();
-            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
-        }
         let theme = Theme::current(cx);
         let button = |id: &'static str, label: String| {
             div()
@@ -1750,12 +1750,11 @@ impl Waku {
             .shadow_xl()
             .flex()
             .flex_col()
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key == "escape" {
+            .on_action(
+                cx.listener(|this, _: &crate::ui::menu::DismissMenu, _, cx| {
                     this.answer_ssh_prompt(true, cx);
-                    cx.stop_propagation();
-                }
-            }))
+                }),
+            )
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()

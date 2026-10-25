@@ -996,6 +996,11 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(
             "escape",
             crate::ui::menu::DismissMenu,
+            Some("KeyboardOptions > TextInput"),
+        ),
+        KeyBinding::new(
+            "escape",
+            crate::ui::menu::DismissMenu,
             Some("KeyboardOptions"),
         ),
         KeyBinding::new(
@@ -1151,6 +1156,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // mouse. Deep-links the GitHub browser when its project and
         // number are known, falls back to the external URL.
         KeyBinding::new("secondary-alt-i", OpenCreatedIssueInGitHub, None),
+        KeyBinding::new("escape", crate::ui::menu::DismissMenu, Some("SshPrompt")),
         // With focus outside the composer, ⌘↩ still activates the visible
         // suggestion in the workspace. TextInput's deeper binding keeps its
         // normal submit behavior when an editable field owns focus.

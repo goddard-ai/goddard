@@ -3009,6 +3009,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("menu.select_next", All, "down", KeyboardOptionsSearch),
     e("menu.select_previous", All, "up", KeyboardOptionsSearch),
     e("menu.confirm", All, "enter", KeyboardOptionsSearch),
+    e("menu.dismiss", All, "escape", KeyboardOptionsSearch),
     e("menu.dismiss", All, "escape", KeyboardOptions),
     e("menu.dismiss", All, "secondary-escape", KeyboardOptions),
     e(
@@ -3094,6 +3095,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("app.open_localhost_tab", All, "secondary-alt-shift-o", ""),
     e("app.view_unarchived_task", All, "secondary-alt-o", ""),
     e("app.open_created_issue", All, "secondary-alt-i", ""),
+    e("menu.dismiss", All, "escape", "SshPrompt"),
     // With focus outside the composer, ⌘↩ still activates the visible
     // suggestion; TextInput's deeper binding keeps its normal submit behavior.
     e("text.submit_steer", All, "secondary-enter", Workspace),

@@ -39,7 +39,10 @@ impl Waku {
             restart_focus: cx.focus_handle(),
             cancel_focus: cancel_focus.clone(),
         });
-        window.focus(&cancel_focus, cx);
+        // The deferred dialog must draw before it can receive key actions.
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |window, cx| window.focus(&cancel_focus, cx));
+        });
         cx.notify();
     }
 

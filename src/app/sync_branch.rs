@@ -32,8 +32,8 @@ use super::command_palette::{
 use super::git_panel::GitPanelPending;
 use super::*;
 
-/// List navigation lives beneath the focused one-line input; escape lives on
-/// the card so the field's own clear-on-escape outranks it while it has text.
+/// List navigation lives beneath the focused one-line input; Escape bubbles
+/// from the field to the card's dismiss action without clearing the query.
 const SEARCH_CONTEXT: &str = "SyncBranch > TextInput";
 const CARD_CONTEXT: &str = "SyncBranch";
 

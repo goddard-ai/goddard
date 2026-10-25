@@ -5622,7 +5622,11 @@ impl Waku {
             };
             let focus = self.open_provider_switch_dialog(session_id, pick, cx);
             let window_handle = self.window_handle;
-            let _ = window_handle.update(cx, |_, window, cx| window.focus(&focus, cx));
+            let _ = window_handle.update(cx, move |_, window, _| {
+                window.on_next_frame(move |window, _| {
+                    window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                });
+            });
             return;
         }
         // Picking a concrete model exits an Auto draft even when provider and
@@ -6589,7 +6593,9 @@ impl Waku {
             session_changed || remembered_changed,
         ) {
             let focus = self.open_full_access_dialog(cx);
-            window.focus(&focus, cx);
+            window.on_next_frame(move |window, _| {
+                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+            });
             return;
         }
         if session_changed {

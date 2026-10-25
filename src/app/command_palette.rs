@@ -81,9 +81,8 @@ pub fn init(cx: &mut App) {
         // the chord is a no-op. This context outranks the input's own
         // shift-enter newline binding.
         KeyBinding::new("shift-enter", ConfirmKeepOpen, Some(SEARCH_CONTEXT)),
-        // Bound at the palette, not the field: the query field's own
-        // clear-on-escape outranks this (deeper context) while it has text,
-        // and an empty field propagates the keystroke down to it.
+        // The query field propagates Escape without clearing its contents,
+        // so the palette closes on the first press.
         KeyBinding::new("escape", Dismiss, Some("CommandPalette")),
     ]);
 }

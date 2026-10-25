@@ -3194,7 +3194,10 @@ impl Waku {
             });
         if busy {
             let focus = self.open_terminal_close_dialog(terminal_id, cx);
-            window.focus(&focus, cx);
+            // The deferred dialog must draw before it can receive key actions.
+            window.on_next_frame(move |window, _| {
+                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+            });
         } else {
             self.close_terminal(terminal_id, cx);
         }
@@ -3695,7 +3698,10 @@ impl Waku {
                         // so it asks first.
                         if busy {
                             let focus = this.open_terminal_pane_close_dialog(terminal_id, cx);
-                            window.focus(&focus, cx);
+                            // The deferred dialog must draw before it can receive key actions.
+                            window.on_next_frame(move |window, _| {
+                                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                            });
                         } else {
                             this.close_terminal_pane(terminal_id, cx);
                         }

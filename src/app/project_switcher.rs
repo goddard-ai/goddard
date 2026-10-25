@@ -630,7 +630,6 @@ impl Waku {
             .get_or_insert_with(|| {
                 let search = cx.new(|cx| {
                     TextInput::new(window, cx)
-                        .clear_on_escape()
                         .placeholder(tr!("command_palette.new_task_in_placeholder"))
                         .accessibility_label(tr!("command_palette.new_task_in_placeholder"))
                 });

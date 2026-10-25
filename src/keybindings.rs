@@ -363,10 +363,9 @@ mod tests {
     }
 
     /// The option modal's Escape is a real binding, not an `on_key_down`
-    /// fallback: under the picker's stack it must resolve behind the
-    /// field's own `Clear` (so a filled filter clears first) and ahead of
-    /// the root `CancelTurn` (so a propagated `Clear` dismisses the modal
-    /// instead of stopping the turn underneath it).
+    /// fallback: under the picker's stack it must resolve before the
+    /// field's Clear and the root CancelTurn so even a filled filter
+    /// dismisses immediately without stopping the turn underneath it.
     #[gpui::test]
     fn option_modal_escape_resolves_to_dismiss(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
@@ -396,8 +395,8 @@ mod tests {
         let cancel = position(&crate::CancelTurn { immediate: false })
             .expect("root CancelTurn still matches");
         assert!(
-            clear < dismiss && dismiss < cancel,
-            "escape must resolve Clear → DismissMenu → CancelTurn"
+            dismiss < clear && clear < cancel,
+            "escape must resolve DismissMenu → Clear → CancelTurn"
         );
 
         // ⌘-held Escape during the picker's hold gesture must reach the
@@ -417,9 +416,47 @@ mod tests {
         );
     }
 
+    #[gpui::test]
+    fn ssh_prompt_escape_resolves_to_dismiss(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            crate::input::init(cx);
+            crate::bind_keys(cx);
+        });
+        for contexts in [
+            vec!["Workspace", "SshPrompt", "TextInput"],
+            vec!["Workspace", "SshPrompt"],
+        ] {
+            let stack: Vec<_> = contexts
+                .iter()
+                .map(|context| gpui::KeyContext::parse(context).unwrap())
+                .collect();
+            let (bindings, _) = cx.update(|cx| {
+                cx.key_bindings()
+                    .borrow()
+                    .bindings_for_input(&[gpui::Keystroke::parse("escape").unwrap()], &stack)
+            });
+            let dismiss = bindings
+                .iter()
+                .position(|binding| binding.action().partial_eq(&crate::ui::menu::DismissMenu))
+                .expect("SSH prompt must dismiss from the field or its buttons");
+            let cancel = bindings
+                .iter()
+                .position(|binding| {
+                    binding
+                        .action()
+                        .partial_eq(&crate::CancelTurn { immediate: false })
+                })
+                .expect("root CancelTurn still matches");
+            assert!(
+                dismiss < cancel,
+                "SSH dismissal must precede turn cancellation"
+            );
+        }
+    }
+
     /// The pickers' Escape follows the same contract: under their stacks the
-    /// field's `Clear` clears a filled query first, the card's `Dismiss`
-    /// closes next, and the root `CancelTurn` stays reachable last — where
+    /// field's `Clear` propagates without editing the query, the card's
+    /// `Dismiss` closes next, and `CancelTurn` stays reachable last — where
     /// `cancel_turn_action` routes it back to the picker's dismiss while
     /// the overlay is open but its deferred focus has not landed.
     #[gpui::test]

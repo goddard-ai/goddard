@@ -6777,7 +6777,10 @@ impl Waku {
                     })
             {
                 let focus = self.open_terminal_close_dialog(terminal_id, cx);
-                window.focus(&focus, cx);
+                // The deferred dialog must draw before it can receive key actions.
+                window.on_next_frame(move |window, _| {
+                    window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                });
                 return;
             }
             self.close_right_panel_surface(active, cx);

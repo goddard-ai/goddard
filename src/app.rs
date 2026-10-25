@@ -5627,19 +5627,16 @@ impl Waku {
         });
         let command_palette_search = cx.new(|cx| {
             TextInput::new(window, cx)
-                .clear_on_escape()
                 .accessibility_label(tr!("a11y.command_palette"))
                 .placeholder(tr!("command_palette.placeholder"))
         });
         let file_finder_search = cx.new(|cx| {
             TextInput::new(window, cx)
-                .clear_on_escape()
                 .accessibility_label(tr!("a11y.file_finder"))
                 .placeholder(tr!("file_finder.placeholder"))
         });
         let sync_branch_search = cx.new(|cx| {
             TextInput::new(window, cx)
-                .clear_on_escape()
                 .accessibility_label(tr!("a11y.sync_branch"))
                 .placeholder(tr!("input.search_branches"))
         });

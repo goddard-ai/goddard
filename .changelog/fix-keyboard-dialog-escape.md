@@ -1,0 +1,1 @@
+- Escape now dismisses confirmation and SSH authentication dialogs reliably, and closes search dialogs immediately even when their fields contain text.

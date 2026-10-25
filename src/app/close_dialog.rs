@@ -97,7 +97,10 @@ impl Waku {
         // back before asking.
         window.activate_window();
         let focus = self.open_close_dialog(CloseDialogIntent::Quit, window, cx);
-        window.focus(&focus, cx);
+        // The deferred dialog must draw before it can receive key actions.
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        });
     }
 
     /// The last ⌘W step and the red close button share this gate: hiding
@@ -115,7 +118,10 @@ impl Waku {
             return;
         }
         let focus = self.open_close_dialog(CloseDialogIntent::HideWindow, window, cx);
-        window.focus(&focus, cx);
+        // The deferred dialog must draw before it can receive key actions.
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        });
     }
 
     /// Opens the confirmation for `intent`, returning the handle to focus.
