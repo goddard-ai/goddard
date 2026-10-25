@@ -5099,6 +5099,54 @@ fn an_agent_prompt_envelope_names_its_sending_task() {
 }
 
 #[test]
+fn palette_task_allowlist_applies_before_the_search_limit() {
+    let root = std::env::temp_dir().join(format!("waku-palette-scope-{}", Uuid::new_v4()));
+    let store = StateStore::daemon(root.join("app.db"));
+    let mut state = PersistedState::fresh(root.join("focused"));
+    let wanted = state.sessions[0].id;
+    state.sessions[0].begin_turn("needle");
+    state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+    let other_project = Project::from_path(root.join("other"));
+    for _ in 0..60 {
+        let mut other = AgentSession::new(other_project.id, ProviderKind::Codex);
+        other.begin_turn("needle");
+        other.finish_active_turn(crate::model::TurnStatus::Completed);
+        other.updated_at = i64::MAX as u64;
+        state.push_session(other);
+    }
+    state.projects.push(other_project);
+    store.save(&mut state).unwrap();
+    let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+    let backend = WakuBackend::new(settings, store).unwrap();
+    let hits = backend
+        .search_session_messages(
+            "needle",
+            1,
+            SessionMessageSearchScope::Active,
+            None,
+            None,
+            Some(&[wanted]),
+        )
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].session_id, wanted);
+    assert!(
+        backend
+            .search_session_messages(
+                "needle",
+                1,
+                SessionMessageSearchScope::Active,
+                None,
+                None,
+                Some(&[]),
+            )
+            .unwrap()
+            .is_empty()
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
 fn agent_search_stays_inside_the_callers_project() {
     let root = std::env::temp_dir().join(format!("waku-agent-search-{}", Uuid::new_v4()));
     let store = StateStore::daemon(root.join("app.db"));

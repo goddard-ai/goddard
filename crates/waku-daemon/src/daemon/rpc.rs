@@ -1431,8 +1431,16 @@ impl Backend for WakuBackend {
                 query,
                 limit,
                 scope,
+                session_ids,
             } => {
-                let matches = self.search_session_messages(&query, limit, scope, None, None)?;
+                let matches = self.search_session_messages(
+                    &query,
+                    limit,
+                    scope,
+                    None,
+                    None,
+                    session_ids.as_deref(),
+                )?;
                 Ok(ResponsePayload::SessionMessageMatches { matches })
             }
             Command::ListProviderSessions { provider, limit } => {

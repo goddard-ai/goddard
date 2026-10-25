@@ -423,6 +423,10 @@ pub enum Command {
         /// pre-scope clients keep their palette behavior.
         #[serde(default)]
         scope: SessionMessageSearchScope,
+        /// Optional client-visible task allowlist, applied before the result cap.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        session_ids: Option<Vec<Uuid>>,
     },
     /// List one provider's resumable CLI conversations on the daemon host.
     ListProviderSessions {

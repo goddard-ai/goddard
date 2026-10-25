@@ -4228,6 +4228,17 @@ impl StateStore {
         limit: usize,
         scope: SessionMessageSearchScope,
     ) -> impl FnOnce() -> io::Result<Vec<SessionMessageMatch>> + Send + 'static {
+        self.session_message_search_in_sessions(query, limit, scope, None)
+    }
+
+    /// Search only client-visible tasks before applying the daemon's result cap.
+    pub fn session_message_search_in_sessions(
+        &self,
+        query: String,
+        limit: usize,
+        scope: SessionMessageSearchScope,
+        session_ids: Option<Vec<Uuid>>,
+    ) -> impl FnOnce() -> io::Result<Vec<SessionMessageMatch>> + Send + 'static {
         let daemons = self.daemons.clone();
         move || {
             let mut matches = Vec::new();
@@ -4240,6 +4251,7 @@ impl StateStore {
                         query: query.clone(),
                         limit,
                         scope,
+                        session_ids: session_ids.clone(),
                     },
                 ) {
                     Ok(ResponsePayload::SessionMessageMatches { matches: found }) => {

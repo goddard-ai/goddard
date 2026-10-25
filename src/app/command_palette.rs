@@ -2536,10 +2536,24 @@ impl Waku {
         let Some(token) = fetch else {
             return;
         };
-        let search = self.store.session_message_search(
+        let session_ids = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.has_started()
+                    && !session.is_side_chat()
+                    && self
+                        .focused_project_id()
+                        .is_none_or(|id| session.project_id == id)
+            })
+            .map(|session| session.id)
+            .collect();
+        let search = self.store.session_message_search_in_sessions(
             query.clone(),
             MESSAGE_SEARCH_LIMIT,
             crate::persistence::SessionMessageSearchScope::Active,
+            Some(session_ids),
         );
         cx.spawn(async move |this, cx| {
             cx.background_executor()

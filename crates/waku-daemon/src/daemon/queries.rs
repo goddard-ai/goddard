@@ -138,6 +138,7 @@ impl WakuBackend {
             SessionMessageSearchScope::Active,
             project_scope,
             last_turns,
+            None,
         )?;
         let state = self.task_state.lock();
         let hits = matches
@@ -965,11 +966,13 @@ impl WakuBackend {
         scope: SessionMessageSearchScope,
         project_scope: Option<Uuid>,
         last_turns: Option<usize>,
+        session_ids: Option<&[Uuid]>,
     ) -> anyhow::Result<Vec<SessionMessageMatch>> {
         let parsed = parse_session_message_search(query);
         if parsed.is_blank() {
             return Ok(Vec::new());
         }
+        let session_ids = session_ids.map(|ids| ids.iter().copied().collect::<HashSet<_>>());
         // `project:`/`status:` resolve against live task state into a
         // session-id allowlist; the store scan then only sees the survivors.
         let allowed = {
@@ -995,20 +998,25 @@ impl WakuBackend {
             if project_ids.as_ref().is_some_and(Vec::is_empty) {
                 return Ok(Vec::new());
             }
-            (project_ids.is_some() || !parsed.statuses.is_empty()).then(|| {
-                state
-                    .sessions
-                    .iter()
-                    .filter(|session| {
-                        project_ids
-                            .as_ref()
-                            .is_none_or(|ids| ids.contains(&session.project_id))
-                            && (parsed.statuses.is_empty()
-                                || parsed.statuses.contains(&session.status))
-                    })
-                    .map(|session| session.id)
-                    .collect::<Vec<_>>()
-            })
+            (project_ids.is_some() || !parsed.statuses.is_empty() || session_ids.is_some()).then(
+                || {
+                    state
+                        .sessions
+                        .iter()
+                        .filter(|session| {
+                            session_ids
+                                .as_ref()
+                                .is_none_or(|ids| ids.contains(&session.id))
+                                && project_ids
+                                    .as_ref()
+                                    .is_none_or(|ids| ids.contains(&session.project_id))
+                                && (parsed.statuses.is_empty()
+                                    || parsed.statuses.contains(&session.status))
+                        })
+                        .map(|session| session.id)
+                        .collect::<Vec<_>>()
+                },
+            )
         };
         let matches = self.task_store.session_message_search(
             parsed.text,

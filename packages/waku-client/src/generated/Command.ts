@@ -83,7 +83,11 @@ sessionTails: Array<SessionDetailTail>, } | { "type": "removeSession" } | { "typ
  * Which sessions the search scans; absent means active tasks, so
  * pre-scope clients keep their palette behavior.
  */
-scope: SessionMessageSearchScope, } | { "type": "listProviderSessions", provider: ProviderKind, limit: number, } | { "type": "loadProviderSession", cursor: ProviderResumeCursor, cwd: string,
+scope: SessionMessageSearchScope,
+/**
+ * Optional client-visible task allowlist, applied before the result cap.
+ */
+sessionIds?: Array<string>, } | { "type": "listProviderSessions", provider: ProviderKind, limit: number, } | { "type": "loadProviderSession", cursor: ProviderResumeCursor, cwd: string,
 /**
  * The catalog's last-activity stamp for this session. Providers whose
  * replayed updates carry no timestamps stamp imported turns and
