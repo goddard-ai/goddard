@@ -1,0 +1,1 @@
+- Search Settings by group name to show every setting in that group, alongside matches on individual settings.

@@ -570,8 +570,8 @@ pub(super) struct SettingSearch {
     /// Trimmed, lowercased field content; empty means "not searching".
     query: Rc<str>,
     hits: Rc<Cell<usize>>,
-    /// Set when the query matched the section's own title: every row in the
-    /// section stays visible instead of only the ones matching the query.
+    /// Set when the query matched the page or group title: every row in
+    /// that scope stays visible instead of only the matching rows.
     force: bool,
     /// `matched` calls so far this pass. A row's ordinal is stable between
     /// the results column and its natural page because both run the same
@@ -627,6 +627,14 @@ impl SettingSearch {
     fn forced(query: &str) -> Self {
         let mut search = Self::new(query);
         search.force = true;
+        search
+    }
+
+    /// Keep every row in a matching group while sharing the page's hit count,
+    /// row ordinals, and navigation context. Sibling groups stay independent.
+    fn for_group(&self, title: &str) -> Self {
+        let mut search = self.clone();
+        search.force |= !settings_match_ranges(title, &self.query).is_empty();
         search
     }
 
@@ -1872,6 +1880,7 @@ impl Waku {
         search: &SettingSearch,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let page_search = search;
         let theme = Theme::current(cx);
         let updater_available = cx
             .try_global::<crate::updater::UpdaterState>()
@@ -1986,6 +1995,7 @@ impl Waku {
             }
         }
 
+        let search = &page_search.for_group(&tr!("settings.group_sessions"));
         let mut session_cards: Vec<AnyElement> = [
             {
                 let default_workspace = self.state.default_workspace;
@@ -2238,6 +2248,7 @@ impl Waku {
 
         // What agents running inside tasks may do — daemon-owned so every
         // attached client honors the same switches.
+        let search = &page_search.for_group(&tr!("settings.group_agents"));
         let agent_cards: Vec<AnyElement> = [
             self.agent_tools_card(theme, search, cx),
             self.agent_settings_card(theme, search, cx),
@@ -2246,6 +2257,7 @@ impl Waku {
         .flatten()
         .collect();
 
+        let search = &page_search.for_group(&tr!("settings.group_git"));
         let git_cards: Vec<AnyElement> = [
             setting_card(
                 "icons/git-branch.svg",
@@ -2404,6 +2416,7 @@ impl Waku {
         .flatten()
         .collect();
 
+        let search = &page_search.for_group(&tr!("settings.group_notifications"));
         let notification_cards: Vec<AnyElement> = [
             settings_row_card(
                 vec![
@@ -2617,6 +2630,7 @@ impl Waku {
         .flatten()
         .collect();
 
+        let search = &page_search.for_group(&tr!("settings.group_voice"));
         let voice_cards: Vec<AnyElement> = [self.microphone_row(theme, search, cx)]
             .into_iter()
             .flatten()
@@ -5859,6 +5873,7 @@ impl Waku {
             },
         ];
         let groups = ExperimentGroup::ALL.into_iter().filter_map(|group| {
+            let search = &search.for_group(&tr!(group.title_key()));
             let cards: Vec<AnyElement> = experiments
                 .iter()
                 .filter(|experiment| experiment.group == group)
@@ -6078,6 +6093,7 @@ impl Waku {
         search: &SettingSearch,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let search = &search.for_group(&tr!("jev.group_prompts"));
         let theme = Theme::current(cx);
         let mut rows = Vec::new();
         let mut editor_visible = !search.active();
@@ -7025,6 +7041,7 @@ impl Waku {
         search: &SettingSearch,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let search = &search.for_group(&tr!("jev.group_prompts"));
         let entries = action_predictions::CANNED_PROMPTS.iter().copied();
         let mut editor_visible = !search.active();
         let rows = entries
@@ -7243,6 +7260,7 @@ impl Waku {
         search: &SettingSearch,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let search = &search.for_group(&tr!("jev.group_actions"));
         let rows = action_predictions::ACTIONABLE_SUGGESTIONS
             .iter()
             .map(|&id| {
@@ -7306,6 +7324,7 @@ impl Waku {
         search: &SettingSearch,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let search = &search.for_group(&tr!("jev.group_suggested_actions"));
         let rows = action_predictions::AUTOMATIC_ACTIONS
             .iter()
             .filter(|id| !self.state.disabled_suggested_actions.contains(**id))
@@ -9568,6 +9587,7 @@ impl Waku {
         // providers. Each provider gets its own card led by its mark and
         // name; an entirely unmapped provider leaves its sessions on the
         // provider default.
+        let provider_search = &search.for_group(&tr!("routing.provider_classes"));
         let provider_class_cards: Vec<AnyElement> = self
             .route_class_probes()
             .into_iter()
@@ -9592,7 +9612,7 @@ impl Waku {
                             }),
                             self.route_class_controls(*class, Some(provider), cx),
                             theme,
-                            search,
+                            provider_search,
                         )
                     })
                     .collect();
@@ -11762,6 +11782,7 @@ impl Waku {
             ),
         ]);
 
+        let search = &search.for_group(&tr!("settings.group_transcript"));
         let guided_reading_row = settings_row(
             "icons/book-open.svg",
             tr!("settings.guided_reading_title"),
@@ -17838,12 +17859,30 @@ mod tests {
     }
 
     #[test]
-    fn setting_search_forced_keeps_every_row() {
+    fn setting_search_forced_keeps_rows_within_the_matching_scope() {
         let search = super::SettingSearch::forced("appearance");
         assert!(search.matched("Theme", "ignored").is_some());
         // Rows with no hit stay too — the match was on the section title.
         assert!(search.matched("ignored", "also ignored").is_some());
         assert_eq!(search.hits(), 2);
+        assert!(
+            search
+                .for_group("Transcript")
+                .matched("Theme", "")
+                .is_some()
+        );
+
+        let search = super::SettingSearch::new("sessions");
+        let group = search.for_group("Sessions");
+        assert!(group.matched("Default workspace", "").is_some());
+        assert!(group.matched("Dormancy", "").is_some());
+        // The group shares page totals and ordinals without forcing siblings.
+        assert_eq!(search.hits(), 2);
+        assert_eq!(search.ordinal(), 2);
+        assert!(search.for_group("Git").matched("Base branch", "").is_none());
+        assert!(search.matched("Other", "").is_none());
+        assert!(search.for_group("Git").matched("Sessions", "").is_some());
+        assert_eq!(search.hits(), 3);
     }
 
     #[test]
