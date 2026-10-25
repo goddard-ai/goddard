@@ -747,7 +747,7 @@ fn free_local_port() -> anyhow::Result<u16> {
 }
 
 #[cfg(test)]
-mod tests {
+mod control_dir_tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
