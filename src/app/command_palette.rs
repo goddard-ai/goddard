@@ -492,6 +492,19 @@ fn order_sections_by_best_score(scored_results: &mut [ScoredPaletteItem]) {
     });
 }
 
+/// Background results may reorder rows, but never override a surviving selection.
+fn palette_selection_index(
+    results: &[CommandPaletteItem],
+    selected: Option<&PaletteAction>,
+    preferred: Option<&PaletteAction>,
+) -> usize {
+    [selected, preferred]
+        .into_iter()
+        .flatten()
+        .find_map(|action| results.iter().position(|item| &item.action == action))
+        .unwrap_or(0)
+}
+
 fn palette_labels_match_exactly(normalized_query: &str, label: &str) -> bool {
     normalized_query == label.trim().to_lowercase()
 }
@@ -2601,7 +2614,7 @@ impl Waku {
                     .map(|matched| (matched.session_id, matched))
                     .collect();
                 this.command_palette.message_search_pending = false;
-                this.refresh_command_palette_results(&query, false, cx);
+                this.refresh_command_palette_results(&query, true, cx);
                 cx.notify();
             });
         })
@@ -5346,20 +5359,18 @@ impl Waku {
             self.command_palette.message_search_pending,
             self.command_palette.results.len(),
         ) {
-            self.command_palette.selected = 0;
-            self.command_palette.scroll.scroll_to_item(0);
+            if !preserve_selection {
+                self.command_palette.selected = 0;
+                self.command_palette.scroll.scroll_to_item(0);
+            }
             return;
         }
+        self.command_palette.selected = palette_selection_index(
+            &next_results,
+            selected_action.flatten().as_ref(),
+            preferred_action.as_ref(),
+        );
         self.command_palette.results = next_results;
-        self.command_palette.selected = preferred_action
-            .or_else(|| selected_action.flatten())
-            .and_then(|action| {
-                self.command_palette
-                    .results
-                    .iter()
-                    .position(|item| item.action == action)
-            })
-            .unwrap_or(0);
         let scroll_index = self.command_palette_scroll_index(self.command_palette.selected);
         self.command_palette.scroll.scroll_to_item(scroll_index);
     }
@@ -6984,6 +6995,37 @@ mod tests {
         let mut matcher = crate::composer_complete::matcher();
         let mut buf = Vec::new();
         pattern.score(Utf32Str::new(candidate, &mut buf), &mut matcher)
+    }
+
+    #[test]
+    fn arriving_transcript_results_preserve_the_selected_task() {
+        let selected = PaletteAction::SelectTask(Uuid::new_v4());
+        let preferred = PaletteAction::NewTask;
+        let item = |action| {
+            CommandPaletteItem::command(
+                PaletteSection::Tasks,
+                "task".into(),
+                "icons/search.svg",
+                None,
+                action,
+                "",
+                0,
+            )
+        };
+        let reranked = vec![item(preferred.clone()), item(selected.clone())];
+        assert_eq!(
+            palette_selection_index(&reranked, Some(&selected), Some(&preferred)),
+            1
+        );
+        // A new query still chooses its best match; a removed selection falls back.
+        assert_eq!(
+            palette_selection_index(&reranked, None, Some(&preferred)),
+            0
+        );
+        assert_eq!(
+            palette_selection_index(&reranked[..1], Some(&selected), Some(&preferred)),
+            0
+        );
     }
 
     #[test]
