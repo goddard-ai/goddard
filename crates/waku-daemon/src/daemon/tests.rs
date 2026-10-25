@@ -19626,7 +19626,7 @@ fn chain_test_definition(
                 permissions: waku_protocol::boss::PersonaPermissions::default(),
                 resources: waku_protocol::resources::ResourceSet::default(),
                 workspace: waku_protocol::AgentWorkspace::Worktree,
-                base_revision: Some(base.clone()),
+                base_revision: Some(waku_protocol::chains::ChainBaseSource::Bare(base.clone())),
                 boundary: HandoffBoundary::ArtifactsReady,
                 required_checks: Vec::new(),
                 required_artifacts: Vec::new(),
@@ -19693,7 +19693,7 @@ fn chain_control_op(
     chain_id: Uuid,
     revision: u64,
     control: ChainControl,
-    source_revision: Option<String>,
+    source_revision: Option<waku_protocol::chains::ChainBaseSource>,
 ) -> BossOperation {
     BossOperation::Chain {
         action: ChainOperation::Control {
@@ -20150,7 +20150,7 @@ fn chain_successor_launch_error_reconciles_only_effect_free_attempts() {
                 chain.id,
                 chain.revision,
                 ChainControl::Retry,
-                Some(head.clone()),
+                Some(waku_protocol::chains::ChainBaseSource::Bare(head.clone())),
             ),
             &EventSink::detached(),
         );
@@ -20258,7 +20258,7 @@ fn chain_terminal_failure_pauses_once_and_retry_continues() {
                 chain_id,
                 chain.revision,
                 ChainControl::Retry,
-                Some(reconciled),
+                Some(waku_protocol::chains::ChainBaseSource::Bare(reconciled)),
             ),
             &EventSink::detached(),
         )
@@ -20301,6 +20301,179 @@ fn chain_terminal_failure_pauses_once_and_retry_continues() {
     let chain = backend.boss.document().chains[0].clone();
     assert_eq!(chain.current_step, 1);
     assert_eq!(chain.steps[0].status, StepStatus::Succeeded);
+    remove_tree(root);
+}
+
+/// A chain defined once can name moving bases: a bare ref resolves when
+/// the step admits, `previousStepLanded` cuts the successor's worktree at
+/// the accepted landing, and a symbolic retry source resolves the same
+/// way — the durable record only ever holds the commit id.
+#[test]
+fn chain_worktree_bases_resolve_at_step_admission() {
+    use waku_protocol::chains::{ChainBaseKind, ChainBaseSource, ChainCodeEvidence};
+    let root = std::env::temp_dir().join(format!("waku-chain-admit-base-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    let project = backend.task_state.lock().projects[0].clone();
+    let personas = backend.boss.document().personas.clone();
+    let outcome = backend
+        .boss
+        .create_outcome(Some(boss), "Land then extend", "both units landed")
+        .unwrap();
+    let git = |args: &[&str]| {
+        let output = crate::command_env::search_path_command("git")
+            .args(args)
+            .current_dir(&project.path)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?} failed");
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    };
+    let mut definition =
+        chain_test_definition(project.id, outcome.id, personas[0].id, 0, head.clone());
+    definition.steps[0].base_revision = Some(ChainBaseSource::Bare("main".into()));
+    definition.steps[1].workspace = waku_protocol::AgentWorkspace::Worktree;
+    definition.steps[1].base_revision =
+        Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded));
+    definition.steps[1].max_retries = 1;
+    let BossResult::State { state } = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Chain {
+                action: ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("chain state expected")
+    };
+    let chain_id = state.chains[0].id;
+    let first = state.employees[0].clone();
+    // The stored definition keeps the declared ref — the resolved commit
+    // lands on the attempt record once the worktree exists.
+    assert_eq!(
+        state.chains[0].steps[0].definition.base_revision,
+        Some(ChainBaseSource::Bare("main".into()))
+    );
+    backend.run_summon_scheduler();
+    let attempt0 = backend.boss.document().chains[0].steps[0].attempts[0].clone();
+    assert_eq!(attempt0.status, StepStatus::Working);
+    assert_eq!(attempt0.starting_revision.as_deref(), Some(head.as_str()));
+    let worktree0 = PathBuf::from(attempt0.workspace.clone().unwrap());
+    // Step one "lands" a unit on main — step two must fork from it, not
+    // from the create-time head.
+    std::fs::write(project.path.join("unit.txt"), "step one's work").unwrap();
+    git(&["add", "unit.txt"]);
+    git(&["commit", "--quiet", "-m", "step one lands"]);
+    let landed = git(&["rev-parse", "HEAD"]);
+    let BossOperation::Chain { mut action } =
+        chain_result_op(chain_id, &attempt0, ResultDisposition::Success)
+    else {
+        unreachable!()
+    };
+    if let ChainOperation::RecordResult { result, .. } = &mut action {
+        result.code = Some(ChainCodeEvidence {
+            workspace: worktree0.display().to_string(),
+            source_revision: head.clone(),
+            committed_revision: Some(landed.clone()),
+            landed_revision: Some(landed.clone()),
+            qa_branch: None,
+            submission_id: None,
+        });
+    }
+    backend
+        .handle_boss_operation(
+            Some(first.session_id),
+            BossOperation::Chain { action },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    write_employee_final(&backend, first.session_id, "unit landed");
+    backend
+        .finish_boss_employee(
+            first.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::TurnFinished,
+        )
+        .unwrap();
+    let document = backend.boss.document();
+    let second = document
+        .employees
+        .iter()
+        .find(|employee| employee.session_id != first.session_id)
+        .unwrap()
+        .clone();
+    backend.run_summon_scheduler();
+    let document = backend.boss.document();
+    let attempt1 = &document.chains[0].steps[1].attempts[0];
+    assert_eq!(attempt1.status, StepStatus::Working);
+    assert_eq!(
+        attempt1.starting_revision.as_deref(),
+        Some(landed.as_str()),
+        "step two's worktree forks at step one's landing"
+    );
+    let worktree1 = PathBuf::from(attempt1.workspace.clone().unwrap());
+    assert!(
+        worktree1.join("unit.txt").exists(),
+        "the landed file is present in the successor's checkout"
+    );
+    // Step two's employee dies mid-work — a symbolic retry source
+    // resolves to the same landing the reconciler recorded.
+    backend
+        .finish_boss_employee(
+            second.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::ProcessExited { mid_turn: true },
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.status, ChainStatus::Paused);
+    assert_eq!(
+        chain.steps[1].attempts[0]
+            .reconciled_retry_revision
+            .as_deref(),
+        Some(landed.as_str())
+    );
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            chain_control_op(
+                chain_id,
+                chain.revision,
+                ChainControl::Retry,
+                Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded)),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.steps[1].attempts.len(), 2);
+    assert_eq!(
+        chain.steps[1].attempts[1].starting_revision.as_deref(),
+        Some(landed.as_str())
+    );
+    backend.run_summon_scheduler();
+    let document = backend.boss.document();
+    let retried = &document.chains[0].steps[1].attempts[1];
+    assert_eq!(retried.status, StepStatus::Working);
+    let workspace = document
+        .employees
+        .iter()
+        .find(|employee| Some(employee.session_id) == retried.employee_id)
+        .and_then(|employee| {
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == employee.session_id)
+                .and_then(|session| session.workspace.path().map(Path::to_path_buf))
+        })
+        .unwrap();
+    assert!(workspace.join("unit.txt").exists());
     remove_tree(root);
 }
 
@@ -20366,7 +20539,7 @@ fn chain_retry_admission_survives_boss_rotation() {
                 chain_id,
                 chain.revision,
                 ChainControl::Retry,
-                Some(reconciled),
+                Some(waku_protocol::chains::ChainBaseSource::Bare(reconciled)),
             ),
             &EventSink::detached(),
         )

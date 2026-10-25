@@ -366,7 +366,10 @@ impl WakuBackend {
             "step": definition,
             "workspace": inputs.workspace,
             "adoptWorktree": inputs.adopt_worktree,
-            "baseRevision": inputs.base_revision,
+            // The declared source, not the resolved commit — a ref that
+            // moved since the ticket was queued must still bind the
+            // already-admitted employee on replay.
+            "baseRevision": &definition.base_revision,
         }));
         let Ok(fingerprint) = fingerprint else {
             return self.chain_admission_failed(chain, attempt, "chain step is not serializable");
@@ -854,7 +857,13 @@ impl WakuBackend {
             && let Some(revision) = attempt
                 .starting_revision
                 .clone()
-                .or_else(|| step.definition.base_revision.clone())
+                .or_else(|| {
+                    // The declared base resolved to a commit — refs and
+                    // kinded sources never reach the durable record.
+                    self.chain_step_base(&chain, chain.current_step)
+                        .ok()
+                        .flatten()
+                })
                 .or_else(|| {
                     // An unbound launch failure has no workspace effects.
                     // Successors need not declare a base: verify the project

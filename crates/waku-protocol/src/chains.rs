@@ -58,6 +58,28 @@ chain_enum!(ChainControl {
     Cancel
 });
 
+/// A base resolved from chain state at admission rather than pinned in
+/// the definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ChainBaseKind {
+    /// The previous step's accepted landed revision.
+    PreviousStepLanded,
+}
+
+/// Where a worktree step's fresh checkout starts. A bare string is a full
+/// commit id — pinned at intake — or a ref (branch, tag, remote-tracking)
+/// resolved to a commit when the step admits, so a chain can name a moving
+/// branch. The kinded form resolves from chain state at admission.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(untagged)]
+pub enum ChainBaseSource {
+    /// An explicit commit id, or a ref resolved when the step admits.
+    Bare(String),
+    /// A base resolved from chain state at admission.
+    Kinded(ChainBaseKind),
+}
+
 /// Explicit chain selector: names and registered roots never overload projectId.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -111,7 +133,10 @@ pub struct ChainStepDefinition {
     pub permissions: PersonaPermissions,
     pub resources: ResourceSet,
     pub workspace: AgentWorkspace,
-    pub base_revision: Option<String>,
+    /// Fresh-worktree base: a full commit id, a ref resolved at step
+    /// admission, or `{"type":"previousStepLanded"}` for the previous
+    /// step's accepted landing.
+    pub base_revision: Option<ChainBaseSource>,
     pub boundary: HandoffBoundary,
     pub required_checks: Vec<String>,
     pub required_artifacts: Vec<String>,
@@ -361,8 +386,10 @@ pub enum ChainOperation {
         chain_id: Uuid,
         expected_revision: u64,
         control: ChainControl,
+        /// Retry base — the same grammar as a step's `baseRevision`; the
+        /// daemon resolves symbolic values to a commit id at control time.
         #[serde(default)]
-        source_revision: Option<String>,
+        source_revision: Option<ChainBaseSource>,
     },
     Revise {
         chain_id: Uuid,

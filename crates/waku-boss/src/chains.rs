@@ -218,11 +218,19 @@ fn validate_step(
         Some(HandoffBoundary::CommittedWorkspace | HandoffBoundary::Landed)
     );
     if step.workspace == AgentWorkspace::Worktree && !inherited_base {
+        let declared = match &step.base_revision {
+            Some(ChainBaseSource::Bare(text)) => !text.trim().is_empty(),
+            Some(ChainBaseSource::Kinded(_)) => true,
+            None => false,
+        };
+        ensure!(declared, "worktree requires a source revision");
+    }
+    if let Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded)) =
+        &step.base_revision
+    {
         ensure!(
-            step.base_revision
-                .as_ref()
-                .is_some_and(|revision| !revision.trim().is_empty()),
-            "worktree requires a source revision"
+            predecessor.is_some(),
+            "previousStepLanded requires a previous step"
         );
     }
     unique_names(&step.required_checks, "check")?;
@@ -559,13 +567,22 @@ impl BossService {
                                 "retry limit reached"
                             );
                             // The old workspace is retained, never adopted or reset implicitly.
-                            let revision = source_revision
-                                .filter(|revision| !revision.trim().is_empty())
-                                .ok_or_else(|| {
-                                    anyhow!(
-                                        "retry requires explicit fresh-workspace source revision"
-                                    )
-                                })?;
+                            // Symbolic sources resolve at the daemon before
+                            // the reducer — the durable attempt base is
+                            // always a commit id.
+                            let revision = match source_revision {
+                                Some(ChainBaseSource::Bare(revision))
+                                    if !revision.trim().is_empty() =>
+                                {
+                                    revision
+                                }
+                                Some(ChainBaseSource::Kinded(_)) => {
+                                    bail!("chain-resolved retry bases resolve before the reducer")
+                                }
+                                _ => bail!(
+                                    "retry requires explicit fresh-workspace source revision"
+                                ),
+                            };
                             // A launch failure bound no employee and
                             // touched no workspace — nothing ran, so the
                             // explicit revision alone names the retry base.
@@ -1634,7 +1651,7 @@ mod tests {
                     expected_revision: revision,
                     control,
                     source_revision: (control == ChainControl::Retry)
-                        .then(|| "verified-source".into()),
+                        .then(|| ChainBaseSource::Bare("verified-source".into())),
                 },
             )
         }

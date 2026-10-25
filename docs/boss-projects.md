@@ -148,6 +148,27 @@ For a malformed UUID or memory-derived identifier, run project discovery and
 copy the canonical UUID, or use a name/root selector. Never reconstruct project
 UUIDs from memory bucket metadata.
 
+## Worktree bases
+
+A step with `"workspace": "worktree"` needs a base — where its fresh
+checkout forks. `baseRevision` accepts three forms:
+
+- `"<full commit id>"` — pinned at intake and verified to exist.
+- `"<ref>"` — a branch, tag, or remote-tracking ref resolved to a commit
+  when the step **admits**, not when the chain is created. A step can
+  name `"main"` and always fork at main's current head, including work
+  earlier steps landed after the chain was defined.
+- `{"type": "previousStepLanded"}` — the previous step's accepted
+  landing, taken from the `landedRevision` it recorded in its result.
+  Non-first steps only.
+
+A step whose previous step declared `boundary: "landed"` or
+`"committedWorkspace"` needs no `baseRevision` at all — the verified
+handoff supplies the base. A retry's `sourceRevision` accepts the same
+grammar and resolves when the control is accepted. `chain show` keeps
+the declared source on each step definition; the resolved commit lands
+on the attempt's `startingRevision` once its checkout exists.
+
 ## Revise an unstarted step
 
 Use a chain with at least two steps; the one-step creation example above has

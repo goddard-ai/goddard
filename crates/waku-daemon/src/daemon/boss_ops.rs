@@ -255,6 +255,21 @@ impl WakuBackend {
                         state: self.boss.document(),
                     });
                 }
+                // A symbolic retry source resolves against live Git state
+                // now — outside the operation lock like the other Git
+                // checks — so the durable attempt base stays a commit id.
+                let mut action = action;
+                if let ChainOperation::Control {
+                    chain_id,
+                    control: ChainControl::Retry,
+                    source_revision: Some(source),
+                    ..
+                } = &mut action
+                {
+                    *source = waku_protocol::chains::ChainBaseSource::Bare(
+                        self.chain_retry_base(*chain_id, source)?,
+                    );
+                }
                 let result = self.boss.with_operation_lock(|| {
                     anyhow::ensure!(
                         matches!(action, ChainOperation::RecordResult { .. })
@@ -327,12 +342,15 @@ impl WakuBackend {
                                 &step.prompt,
                                 true,
                             )?;
-                            if let Some(revision) = &step.base_revision {
-                                anyhow::ensure!(
-                                    (revision.len() == 40 || revision.len() == 64)
-                                        && revision.bytes().all(|byte| byte.is_ascii_hexdigit()),
-                                    "chain source revision must be a full commit id"
-                                );
+                            // A full commit id is verified at intake.
+                            // Refs and chain-resolved bases resolve at the
+                            // step's admission instead — a ref may not even
+                            // exist until an earlier step lands it.
+                            if let Some(waku_protocol::chains::ChainBaseSource::Bare(revision)) =
+                                &step.base_revision
+                                && (revision.len() == 40 || revision.len() == 64)
+                                && revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+                            {
                                 let output = std::process::Command::new("git")
                                     .arg("-C")
                                     .arg(&project.path)

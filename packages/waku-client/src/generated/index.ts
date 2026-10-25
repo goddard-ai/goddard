@@ -69,6 +69,8 @@ export type { ChainApproval } from "./ChainApproval";
 export type { ChainArtifact } from "./ChainArtifact";
 export type { ChainAttempt } from "./ChainAttempt";
 export type { ChainAttention } from "./ChainAttention";
+export type { ChainBaseKind } from "./ChainBaseKind";
+export type { ChainBaseSource } from "./ChainBaseSource";
 export type { ChainCheck } from "./ChainCheck";
 export type { ChainCodeEvidence } from "./ChainCodeEvidence";
 export type { ChainControl } from "./ChainControl";

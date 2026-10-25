@@ -272,6 +272,52 @@ fn git_revision(cwd: &Path, reference: &str) -> anyhow::Result<String> {
     .map(|revision| revision.trim().to_owned())
 }
 
+/// A declared worktree base resolved to a commit id. Bare text that is a
+/// full commit id passes through pinned; any other bare text resolves now
+/// as a ref — admission-time resolution is what lets a chain name a moving
+/// branch. A kinded source takes the previous step's accepted landing,
+/// verified in the repo the worktree will fork from.
+fn resolve_base_source(
+    repo: &Path,
+    source: &ChainBaseSource,
+    landed: Option<&str>,
+) -> anyhow::Result<String> {
+    match source {
+        ChainBaseSource::Bare(text) => {
+            let text = text.trim();
+            ensure!(!text.is_empty(), "chain source revision is empty");
+            if (text.len() == 40 || text.len() == 64)
+                && text.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Ok(text.to_owned());
+            }
+            git_revision(repo, &format!("{text}^{{commit}}"))
+                .with_context(|| format!("chain source ref {text:?} is unavailable"))
+        }
+        ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded) => {
+            let landed = landed
+                .map(str::trim)
+                .filter(|landed| !landed.is_empty())
+                .ok_or_else(|| anyhow!("the previous step reported no landed revision"))?;
+            git_revision(repo, &format!("{landed}^{{commit}}"))
+                .context("the previous step's landed revision is unavailable")
+        }
+    }
+}
+
+/// The landed revision a prior step's accepted handoff recorded, if any.
+fn accepted_landing(chain: &EmployeeChain, step_index: usize) -> Option<String> {
+    chain
+        .steps
+        .get(step_index)?
+        .attempts
+        .last()
+        .filter(|attempt| attempt.handoff_accepted)
+        .and_then(|attempt| attempt.sealed.as_ref())
+        .and_then(|handoff| handoff.result.code.as_ref())
+        .and_then(|code| code.landed_revision.clone())
+}
+
 /// The committed-workspace gate: registered daemon worktree of the step's
 /// project, clean under merge-submit rules, committed at the reported
 /// revision atop the recorded source, and still owned by its released
@@ -699,7 +745,7 @@ impl WakuBackend {
             step: chain.current_step,
             workspace: definition.workspace,
             adopt_worktree: None,
-            base_revision: definition.base_revision.clone(),
+            base_revision: None,
             expected_starting_revision: None,
             brief: None,
         };
@@ -719,7 +765,12 @@ impl WakuBackend {
         }
         if chain.current_step == 0 {
             if matches!(definition.workspace, AgentWorkspace::Worktree) {
-                inputs.expected_starting_revision = definition.base_revision.clone();
+                // Symbolic bases resolve at admission — the ticketed
+                // checkout and the durable record only ever see the
+                // commit id.
+                let base = self.chain_step_base(chain, 0)?;
+                inputs.base_revision = base.clone();
+                inputs.expected_starting_revision = base;
             }
             return Ok(inputs);
         }
@@ -780,12 +831,83 @@ impl WakuBackend {
             }
             HandoffBoundary::ArtifactsReady => {
                 if matches!(definition.workspace, AgentWorkspace::Worktree) {
-                    inputs.expected_starting_revision = definition.base_revision.clone();
+                    let base = self.chain_step_base(chain, chain.current_step)?;
+                    inputs.base_revision = base.clone();
+                    inputs.expected_starting_revision = base;
                 }
             }
         }
         inputs.brief = Some(brief(chain, producer_index, handoff));
         Ok(inputs)
+    }
+
+    /// The step's declared base resolved against its own project —
+    /// `None` when undeclared. The previous step's accepted landing feeds
+    /// `previousStepLanded`.
+    pub(crate) fn chain_step_base(
+        &self,
+        chain: &EmployeeChain,
+        step_index: usize,
+    ) -> anyhow::Result<Option<String>> {
+        let step = &chain.steps[step_index];
+        let Some(source) = &step.definition.base_revision else {
+            return Ok(None);
+        };
+        if matches!(source, ChainBaseSource::Kinded(_)) {
+            ensure!(
+                step_index > 0,
+                "previousStepLanded requires a previous step"
+            );
+        }
+        let project = self
+            .task_state
+            .lock()
+            .projects
+            .iter()
+            .find(|project| project.id == step.definition.project_id)
+            .cloned()
+            .ok_or_else(|| anyhow!(
+                "project_unavailable: accepted project {} is no longer registered; restore that registration or explicitly revise the chain; no replacement was selected",
+                step.definition.project_id))?;
+        let landed = step_index
+            .checked_sub(1)
+            .and_then(|prior| accepted_landing(chain, prior));
+        resolve_base_source(&project.path, source, landed.as_deref()).map(Some)
+    }
+
+    /// A retry control's source resolved to a commit id — the same
+    /// grammar as a step's declared base. Refs resolve against the
+    /// retried step's project now; the durable attempt record only ever
+    /// carries commit ids, so kinded sources resolve before the reducer.
+    pub(crate) fn chain_retry_base(
+        &self,
+        chain_id: Uuid,
+        source: &ChainBaseSource,
+    ) -> anyhow::Result<String> {
+        let document = self.boss.document();
+        let chain = chain(&document, chain_id)?;
+        if matches!(source, ChainBaseSource::Kinded(_)) {
+            ensure!(
+                chain.current_step > 0,
+                "previousStepLanded requires a previous step"
+            );
+        }
+        let step = &chain.steps[chain.current_step];
+        let project = self
+            .task_state
+            .lock()
+            .projects
+            .iter()
+            .find(|project| project.id == step.definition.project_id)
+            .cloned()
+            .ok_or_else(|| anyhow!(
+                "project_unavailable: accepted project {} is no longer registered; restore that registration or explicitly revise the chain; no replacement was selected",
+                step.definition.project_id))?;
+        let landed = chain
+            .current_step
+            .checked_sub(1)
+            .and_then(|prior| accepted_landing(chain, prior));
+        resolve_base_source(&project.path, source, landed.as_deref())
     }
 }
 
@@ -877,7 +999,10 @@ mod tests {
                 permissions: PersonaPermissions::default(),
                 resources: ResourceSet::default(),
                 workspace: AgentWorkspace::Worktree,
-                base_revision: Some(git(&self.repo, &["rev-parse", "HEAD"])),
+                base_revision: Some(ChainBaseSource::Bare(git(
+                    &self.repo,
+                    &["rev-parse", "HEAD"],
+                ))),
                 boundary,
                 required_checks: vec![],
                 required_artifacts: vec![],
@@ -1626,18 +1751,166 @@ mod tests {
         let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
         assert!(inputs.brief.is_none());
         assert_eq!(inputs.workspace, AgentWorkspace::Worktree);
-        assert_eq!(
-            inputs.expected_starting_revision.as_deref(),
-            fixture
-                .step(HandoffBoundary::ArtifactsReady)
-                .base_revision
-                .as_deref()
-        );
+        let Some(ChainBaseSource::Bare(pinned)) = fixture
+            .step(HandoffBoundary::ArtifactsReady)
+            .base_revision
+        else {
+            panic!("fixture declares a bare base")
+        };
+        assert_eq!(inputs.expected_starting_revision.as_deref(), Some(&*pinned));
         assert!(
             fixture
                 .backend
                 .chain_successor_inputs(Uuid::new_v4())
                 .is_err()
+        );
+    }
+
+    /// A bare ref resolves against the project repo when the successor
+    /// inputs are computed — at admission — so a moving branch always
+    /// forks at its current head while a commit id stays pinned.
+    #[test]
+    fn declared_refs_resolve_at_admission_not_at_create() {
+        let fixture = Fixture::new();
+        let first = git(&fixture.repo, &["rev-parse", "HEAD"]);
+        let mut step = fixture.step(HandoffBoundary::ArtifactsReady);
+        step.base_revision = Some(ChainBaseSource::Bare("main".into()));
+        let chain = fixture.create(vec![step]);
+        let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
+        assert_eq!(inputs.base_revision.as_deref(), Some(first.as_str()));
+        assert_eq!(
+            inputs.expected_starting_revision.as_deref(),
+            Some(first.as_str())
+        );
+        // A later main commit moves the resolved base — intake pinned
+        // nothing, and the stored definition still names the ref.
+        let moved = fixture.commit(&fixture.repo, "moved.txt", "moved");
+        let chain = fixture.show(chain.id);
+        assert_eq!(
+            chain.steps[0].definition.base_revision,
+            Some(ChainBaseSource::Bare("main".into()))
+        );
+        let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
+        assert_eq!(inputs.base_revision.as_deref(), Some(moved.as_str()));
+        // A ref that resolves to nothing fails admission — the dispatch
+        // pauses on the error rather than cutting at a stale guess.
+        let mut bogus = fixture.step(HandoffBoundary::ArtifactsReady);
+        bogus.base_revision = Some(ChainBaseSource::Bare("no-such-branch".into()));
+        let chain = fixture.create(vec![bogus]);
+        let error = fixture
+            .backend
+            .chain_successor_inputs(chain.id)
+            .err()
+            .expect("an unresolvable ref cannot admit");
+        assert!(format!("{error:#}").contains("no-such-branch"));
+        // A full commit id stays pinned verbatim.
+        let mut pinned = fixture.step(HandoffBoundary::ArtifactsReady);
+        pinned.base_revision = Some(ChainBaseSource::Bare(first.clone()));
+        let chain = fixture.create(vec![pinned]);
+        let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
+        assert_eq!(inputs.base_revision.as_deref(), Some(first.as_str()));
+    }
+
+    /// `previousStepLanded` cuts the successor's worktree at the previous
+    /// step's accepted landing — carried through the sealed handoff —
+    /// rather than a revision pinned at chain create.
+    #[test]
+    fn previous_step_landed_bases_the_successor_on_the_landing() {
+        let fixture = Fixture::new();
+        let base = git(&fixture.repo, &["rev-parse", "HEAD"]);
+        let worktree = fixture.managed_worktree(&base);
+        let landed = fixture.commit(&worktree, "unit.txt", "work");
+        let mut result = success_result();
+        result.code = Some(ChainCodeEvidence {
+            workspace: worktree.display().to_string(),
+            source_revision: base.clone(),
+            committed_revision: Some(landed.clone()),
+            landed_revision: Some(landed.clone()),
+            qa_branch: None,
+            submission_id: None,
+        });
+        let chain = fixture.create(vec![
+            fixture.step(HandoffBoundary::ArtifactsReady),
+            {
+                let mut step = fixture.step(HandoffBoundary::ArtifactsReady);
+                step.base_revision =
+                    Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded));
+                step
+            },
+        ]);
+        let chain = fixture.finish_attempt(&chain, &fixture.repo, result);
+        let chain = fixture.seal(&chain);
+        assert_eq!(
+            chain.status,
+            ChainStatus::Waiting,
+            "reason: {:?}",
+            chain.reason
+        );
+        let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
+        assert_eq!(inputs.workspace, AgentWorkspace::Worktree);
+        assert_eq!(inputs.base_revision.as_deref(), Some(landed.as_str()));
+        assert_eq!(
+            inputs.expected_starting_revision.as_deref(),
+            Some(landed.as_str())
+        );
+        // A producer that never reported a landing gives the source
+        // nothing to resolve — admission errors instead of guessing.
+        let mut result = success_result();
+        result.code = Some(ChainCodeEvidence {
+            workspace: worktree.display().to_string(),
+            source_revision: base.clone(),
+            committed_revision: Some(landed.clone()),
+            landed_revision: None,
+            qa_branch: None,
+            submission_id: None,
+        });
+        let chain = fixture.create(vec![
+            fixture.step(HandoffBoundary::ArtifactsReady),
+            {
+                let mut step = fixture.step(HandoffBoundary::ArtifactsReady);
+                step.base_revision =
+                    Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded));
+                step
+            },
+        ]);
+        let chain = fixture.finish_attempt(&chain, &fixture.repo, result);
+        let chain = fixture.seal(&chain);
+        let error = fixture
+            .backend
+            .chain_successor_inputs(chain.id)
+            .err()
+            .expect("an unreported landing cannot admit");
+        assert_eq!(
+            format!("{error:#}"),
+            "the previous step reported no landed revision"
+        );
+    }
+
+    /// The kinded source needs a producer to resolve against — a first
+    /// step cannot declare it.
+    #[test]
+    fn previous_step_landed_needs_a_predecessor() {
+        let fixture = Fixture::new();
+        let mut step = fixture.step(HandoffBoundary::ArtifactsReady);
+        step.base_revision = Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded));
+        let error = fixture
+            .backend
+            .boss
+            .chain_operation(
+                None,
+                ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition: ChainDefinition {
+                        outcome_id: fixture.outcome_id,
+                        finishes_outcome: false,
+                        steps: vec![step],
+                    },
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "previousStepLanded requires a previous step"
         );
     }
 }
