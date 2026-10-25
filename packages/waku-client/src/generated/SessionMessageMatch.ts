@@ -6,4 +6,12 @@ export type SessionMessageMatch = { session_id: string,
  * The matched message's id — lets a client deep-link the hit to its
  * transcript position instead of landing on the task's tail.
  */
-message_id: string, source: MessageRole, snippet: string, };
+message_id: string, source: MessageRole, snippet: string,
+/**
+ * Lexical relevance, computed before selecting a passage and limiting tasks.
+ */
+relevance?: number,
+/**
+ * Shared tie-breaker when merging results from independent daemons.
+ */
+session_updated_at?: number, };

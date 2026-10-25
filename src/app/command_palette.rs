@@ -692,6 +692,8 @@ fn employee_chat_hit_item(
             message_id: hit.message_id,
             source: hit.role,
             snippet: hit.excerpt.clone(),
+            relevance: None,
+            session_updated_at: Some(hit.updated_at),
         });
     CommandPaletteItem {
         section: PaletteSection::EmployeeChats,
@@ -5243,6 +5245,9 @@ impl Waku {
                     // A filters-only query lists the surviving tasks verbatim.
                     return Some(ScoredPaletteItem { score: 0, item });
                 }
+                if !message_matches_are_current && let Some(matched) = item.content_match.as_mut() {
+                    matched.relevance = None;
+                }
                 let metadata_score = pattern.score(
                     Utf32Str::new(&item.search_text, &mut utf32),
                     &mut self.command_palette.matcher,
@@ -5270,8 +5275,24 @@ impl Waku {
             })
             .collect::<Vec<_>>();
         tasks.sort_by(|a, b| {
-            b.score
-                .cmp(&a.score)
+            palette_labels_match_exactly(&normalized_needle, &b.item.label)
+                .cmp(&palette_labels_match_exactly(
+                    &normalized_needle,
+                    &a.item.label,
+                ))
+                .then_with(|| {
+                    b.item
+                        .content_match
+                        .as_ref()
+                        .map_or(0, |hit| hit.relevance.unwrap_or_default())
+                        .cmp(
+                            &a.item
+                                .content_match
+                                .as_ref()
+                                .map_or(0, |hit| hit.relevance.unwrap_or_default()),
+                        )
+                })
+                .then(b.score.cmp(&a.score))
                 .then(b.item.recency.cmp(&a.item.recency))
                 .then(a.item.order.cmp(&b.item.order))
         });

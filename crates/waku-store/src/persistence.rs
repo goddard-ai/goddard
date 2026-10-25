@@ -980,10 +980,20 @@ const SESSION_SEARCH_CONTEXT_BEFORE_CHARS: usize = 72;
 
 fn build_session_search_snippet(text: &str, query: &str) -> String {
     let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let terms = waku_protocol::persistence::parse_session_message_search(query).terms;
-    let match_byte = waku_protocol::persistence::session_message_match_ranges(&normalized, &terms)
-        .first()
-        .map_or(0, |range| range.start);
+    let parsed = waku_protocol::persistence::parse_session_message_search(query);
+    let match_byte = (!parsed.text.is_empty())
+        .then(|| {
+            normalized
+                .to_ascii_lowercase()
+                .find(&parsed.text.to_ascii_lowercase())
+        })
+        .flatten()
+        .or_else(|| {
+            waku_protocol::persistence::session_message_match_ranges(&normalized, &parsed.terms)
+                .first()
+                .map(|range| range.start)
+        })
+        .unwrap_or(0);
     session_search_snippet(normalized, match_byte)
 }
 
@@ -1031,7 +1041,9 @@ fn search_session_messages(
     last_turns: Option<usize>,
 ) -> io::Result<Vec<SessionMessageMatch>> {
     let query = query.trim();
-    let terms = waku_protocol::persistence::parse_session_message_search(query).terms;
+    let parsed = waku_protocol::persistence::parse_session_message_search(query);
+    let terms = parsed.terms;
+    let phrase = parsed.text;
     let terms_json = serde_json::to_string(&terms).map_err(to_io_error)?;
     // An empty needle still scans when a session-id allowlist narrows the
     // corpus — the daemon sends that for filter-only queries like
@@ -1103,20 +1115,26 @@ fn search_session_messages(
     };
     let mut statement = connection
         .prepare(&format!(
-            "WITH {turn_cte}ranked AS (
+            "WITH {turn_cte}matched AS MATERIALIZED (
                  SELECT messages.session_id,
                         messages.id,
                         messages.role,
                         messages.content,
                         messages.created_at,
+                        messages.position,
                         sessions.updated_at AS session_updated_at,
                         CASE messages.role WHEN 'user' THEN 0 ELSE 1 END AS source_rank,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY messages.session_id
-                            ORDER BY CASE messages.role WHEN 'user' THEN 0 ELSE 1 END,
-                                     messages.created_at DESC,
-                                     messages.position DESC
-                        ) AS session_match_rank
+                        CASE WHEN ?4 = '' THEN 0 ELSE
+                            CASE WHEN lower(trim(messages.content)) = lower(?4) THEN 2000000
+                                 WHEN instr(lower(messages.content), lower(?4)) > 0 THEN 1000000
+                                 ELSE 0 END
+                            + COALESCE((
+                                SELECT 100000 / (1 +
+                                    MAX(instr(lower(messages.content), lower(term.value)) + length(term.value))
+                                    - MIN(instr(lower(messages.content), lower(term.value))))
+                                  FROM json_each(?1) AS term
+                            ), 0)
+                        END AS relevance
                    FROM messages
                    INNER JOIN sessions ON sessions.id = messages.session_id
                    {turn_join}
@@ -1130,11 +1148,17 @@ fn search_session_messages(
                         SELECT 1 FROM json_each(?1) AS term
                          WHERE instr(lower(messages.content), lower(term.value)) = 0
                     )
+             ), ranked AS (
+                 SELECT *, ROW_NUMBER() OVER (
+                     PARTITION BY session_id
+                     ORDER BY relevance DESC, source_rank, created_at DESC, position DESC
+                 ) AS session_match_rank
+                   FROM matched
              )
-             SELECT session_id, id, role, content
+             SELECT session_id, id, role, content, relevance, session_updated_at
                FROM ranked
               WHERE session_match_rank = 1
-              ORDER BY source_rank, session_updated_at DESC, session_id
+              ORDER BY relevance DESC, source_rank, session_updated_at DESC, session_id
               LIMIT ?2",
         ))
         .map_err(to_io_error)?;
@@ -1145,20 +1169,21 @@ fn search_session_messages(
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, String>(3)?,
+            row.get::<_, u32>(4)?,
+            row.get::<_, u64>(5)?,
         ))
     };
-    let rows = match last_turns {
-        Some(turns) => {
-            let turns = i64::try_from(turns).unwrap_or(i64::MAX);
-            statement.query_map(params![terms_json, limit, turns], read_row)
-        }
-        None => statement.query_map(params![terms_json, limit], read_row),
-    }
-    .map_err(to_io_error)?;
+    let turns = last_turns
+        .map(|turns| i64::try_from(turns).unwrap_or(i64::MAX))
+        .unwrap_or(0);
+    let rows = statement
+        .query_map(params![terms_json, limit, turns, phrase], read_row)
+        .map_err(to_io_error)?;
 
     let mut matches = Vec::new();
     for row in rows {
-        let (session_id, message_id, role, content) = row.map_err(to_io_error)?;
+        let (session_id, message_id, role, content, relevance, session_updated_at) =
+            row.map_err(to_io_error)?;
         let (Ok(session_id), Ok(message_id)) =
             (Uuid::parse_str(&session_id), Uuid::parse_str(&message_id))
         else {
@@ -1174,6 +1199,8 @@ fn search_session_messages(
             message_id,
             source,
             snippet: build_session_search_snippet(&content, query),
+            relevance: Some(relevance),
+            session_updated_at: Some(session_updated_at),
         });
     }
     Ok(matches)
@@ -6069,6 +6096,42 @@ mod tests {
         assert!(hits("retry missing").is_empty());
         assert!(hits("\"retry token\"").is_empty());
         assert_eq!(hits("\"Retry an expired\" token").len(), 1);
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn message_search_ranks_the_best_passage_before_limiting_tasks() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let wanted = state.sessions[0].id;
+        state.sessions[0].begin_turn("retry an expired token");
+        state.sessions[0].push_message(MessageRole::Assistant, "retry token");
+        let message_id = state.sessions[0].messages.last().unwrap().id;
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        state.sessions[0].updated_at = 1;
+        for _ in 0..60 {
+            let mut newer = AgentSession::new(state.projects[0].id, ProviderKind::Codex);
+            newer.begin_turn("retry an expired token");
+            newer.finish_active_turn(crate::model::TurnStatus::Completed);
+            newer.updated_at = 100;
+            state.push_session(newer);
+        }
+        store.save(&mut state).unwrap();
+        let hits = store.session_message_search(
+            "retry token".into(),
+            1,
+            SessionMessageSearchScope::Active,
+            None,
+            None,
+        )()
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].session_id, wanted);
+        assert_eq!(hits[0].message_id, message_id);
+        assert_eq!(hits[0].source, MessageRole::Assistant);
+        assert_eq!(hits[0].snippet, "retry token");
+        assert!(hits[0].relevance.unwrap() > 2000000);
         fs::remove_dir_all(directory).ok();
     }
 

@@ -305,6 +305,32 @@ pub struct SessionMessageMatch {
     pub message_id: Uuid,
     pub source: MessageRole,
     pub snippet: String,
+    /// Lexical relevance, computed before selecting a passage and limiting tasks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub relevance: Option<u32>,
+    /// Shared tie-breaker when merging results from independent daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub session_updated_at: Option<u64>,
+}
+
+impl SessionMessageMatch {
+    /// Best first, with identical tie-breakers on the host and across hosts.
+    pub fn compare_relevance(&self, other: &Self) -> std::cmp::Ordering {
+        other
+            .relevance
+            .unwrap_or_default()
+            .cmp(&self.relevance.unwrap_or_default())
+            .then((other.source == MessageRole::User).cmp(&(self.source == MessageRole::User)))
+            .then(
+                other
+                    .session_updated_at
+                    .unwrap_or_default()
+                    .cmp(&self.session_updated_at.unwrap_or_default()),
+            )
+            .then(self.session_id.cmp(&other.session_id))
+    }
 }
 
 /// One per-source row the `history search` store scan returns — the best

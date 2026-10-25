@@ -6901,6 +6901,8 @@ fn archived_filter_matches_transcript_hits() {
             message_id: Uuid::new_v4(),
             source: MessageRole::User,
             snippet: "a needle in the transcript".into(),
+            relevance: None,
+            session_updated_at: None,
         },
     )]
     .into_iter()

@@ -1,0 +1,1 @@
+- Cmd+K transcript search favors exact phrases and closely grouped words, including older answers, and opens each task at its strongest matching message.
