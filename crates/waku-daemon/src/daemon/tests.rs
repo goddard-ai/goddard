@@ -12901,6 +12901,85 @@ fn an_employee_prompt_is_refused_with_the_report_channels() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A Boss prompt to a task outside the roster takes the ordinary
+/// task-prompt path — the managed-control branch only governs
+/// boss-managed targets. Interrupt delivery opens a turn on an idle
+/// task and steers into an open one, and the envelope attributes the
+/// boss session rather than the human.
+#[test]
+fn a_boss_prompt_reaches_a_standalone_task() {
+    let root = std::env::temp_dir().join(format!("boss-standalone-prompt-{}", Uuid::new_v4()));
+    let (backend, supervisor, _employee_id, _parent, _child) = employee_finish_fixture(&root);
+    let decoy = detach_boss_session(&backend, supervisor);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    let project_id = backend.task_state.lock().sessions[0].project_id;
+    let standalone = AgentSession::new(project_id, ProviderKind::Codex);
+    let standalone_id = standalone.id;
+    {
+        let mut state = backend.task_state.lock();
+        state.push_session(standalone);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let capture = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        standalone_id,
+        RuntimeEntry {
+            plan_gate: None,
+            runtime_id: Uuid::new_v4(),
+            driver: DriverHandle::from_control(capture.clone()),
+            stable: None,
+            last_active: std::time::Instant::now(),
+            resumable: false,
+            computer_use_available: false,
+            provider: ProviderKind::Codex,
+            cwd: std::env::temp_dir(),
+        },
+    );
+    // The idle task takes the prompt as a fresh turn — before this
+    // reached delivery it bounced as "not a Boss employee".
+    backend
+        .agent_prompt(
+            Some(decoy),
+            Some(standalone_id),
+            None,
+            None,
+            "summarize the findings".into(),
+            crate::protocol::AgentPromptDelivery::Interrupt,
+            EventSink::detached(),
+        )
+        .unwrap();
+    let prompts = capture.prompts.lock().clone();
+    assert_eq!(prompts.len(), 1);
+    assert!(prompts[0].contains("summarize the findings"));
+    assert!(prompts[0].contains(&decoy.to_string()));
+    // An open turn takes the same correction as a steer instead.
+    backend
+        .agent
+        .note_driver_event(standalone_id, &DriverEvent::TurnStarted);
+    backend
+        .agent_prompt(
+            Some(decoy),
+            Some(standalone_id),
+            None,
+            None,
+            "narrow the scope".into(),
+            crate::protocol::AgentPromptDelivery::Interrupt,
+            EventSink::detached(),
+        )
+        .unwrap();
+    assert!(
+        capture
+            .steers
+            .lock()
+            .iter()
+            .any(|text| text.contains("narrow the scope"))
+    );
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A prompt to a finished employee re-enters admission against
 /// current policy — a lowered cap keeps the revival queued rather
 /// than resurrecting around the pool.

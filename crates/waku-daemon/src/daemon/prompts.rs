@@ -151,7 +151,14 @@ impl WakuBackend {
         // An address resolved against a stale Boss pointer still means "the
         // Boss" — deliver it to the committed owner exactly once.
         let target = self.boss_active_alias(target);
-        if sender.is_some_and(|id| self.boss.is_managed(id)) || self.boss.is_managed(target) {
+        // The control branch speaks employee semantics — queue admission,
+        // expiry requeue — and rejects any target off the roster. A boss
+        // principal addressing an unmanaged task takes the ordinary
+        // task-prompt path below instead. Managed senders that are not boss
+        // principals cannot get here: employees are refused above.
+        if self.boss.is_managed(target)
+            || sender.is_some_and(|id| self.boss.is_managed(id) && !self.boss.is_boss_principal(id))
+        {
             use waku_protocol::boss::EmployeeLifecycle;
             self.boss.require_control(sender, target)?;
             // Queue delivery to a queued ticket joins its dispatch

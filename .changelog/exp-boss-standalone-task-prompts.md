@@ -1,0 +1,1 @@
+- The Boss can now prompt standalone tasks with `goddard-agent prompt TASK_ID`; the message delivers as a new turn or a steer instead of failing with "not a Boss employee".
