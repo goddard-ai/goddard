@@ -389,6 +389,7 @@ pub(super) const SETTINGS_SEARCH_TITLES: &[(SettingsPage, &[&str])] = &[
             "settings.border_intensity",
             "settings.high_contrast",
             "settings.guided_reading_title",
+            "settings.transcript_prompt_position",
             "settings.math_rendering",
             "settings.show_response_token_speed",
             "settings.markdown_files",
@@ -11769,6 +11770,24 @@ impl Waku {
         let transcript_card = settings_row_card(
             vec![
                 settings_row(
+                    "icons/pin.svg",
+                    tr!("settings.transcript_prompt_position"),
+                    tr!("settings.transcript_prompt_position_description"),
+                    self.setting_selector(
+                        "transcript-prompt-position-selector",
+                        vec![
+                            (false, tr!("settings.transcript_prompt_position_top")),
+                            (true, tr!("settings.transcript_prompt_position_compact")),
+                        ],
+                        self.state.transcript_compact_on_send,
+                        160.0,
+                        cx,
+                        |this, value, _, cx| this.set_transcript_compact_on_send(value, cx),
+                    ),
+                    theme,
+                    search,
+                ),
+                settings_row(
                     "icons/sigma.svg",
                     tr!("settings.math_rendering"),
                     tr!("settings.math_rendering_description"),
@@ -12581,6 +12600,15 @@ impl Waku {
         }
         self.state.composer_enter_steers = enabled;
         crate::input::install_composer_enter_swap(enabled, cx);
+        self.save();
+        cx.notify();
+    }
+
+    fn set_transcript_compact_on_send(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.transcript_compact_on_send == enabled {
+            return;
+        }
+        self.state.transcript_compact_on_send = enabled;
         self.save();
         cx.notify();
     }

@@ -1,0 +1,1 @@
+- Choose Appearance → Transcript → Sent prompt position → Compact to keep earlier conversation visible and follow new activity immediately; Start at top remains the default.

@@ -1461,6 +1461,9 @@ pub struct AppSettings {
     /// Sending a prompt leaves a scrolled-up transcript where the reader left
     /// it instead of jumping to the new message.
     pub transcript_keep_scroll_on_send: bool,
+    /// Place sent prompts at the transcript tail without reserving a viewport.
+    #[serde(default)]
+    pub transcript_compact_on_send: bool,
     /// Show the desktop composer's local Whistle dictation control.
     #[serde(default = "default_dictation_enabled")]
     pub composer_dictation_enabled: bool,
@@ -1721,6 +1724,7 @@ impl Default for AppSettings {
             sidebar_composer_drafts: false,
             composer_enter_steers: false,
             transcript_keep_scroll_on_send: false,
+            transcript_compact_on_send: false,
             composer_dictation_enabled: default_dictation_enabled(),
             composer_dictation_experiment_enabled: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
@@ -2265,6 +2269,9 @@ pub struct PersistedState {
     /// reader left it instead of jumping to the new message.
     #[serde(default)]
     pub transcript_keep_scroll_on_send: bool,
+    /// Place sent prompts at the transcript tail without reserving a viewport.
+    #[serde(default)]
+    pub transcript_compact_on_send: bool,
     /// Whether the desktop composer shows its local Whistle dictation control.
     #[serde(default = "default_dictation_enabled")]
     pub composer_dictation_enabled: bool,
@@ -2828,6 +2835,7 @@ impl PersistedState {
             sidebar_composer_drafts: false,
             composer_enter_steers: false,
             transcript_keep_scroll_on_send: false,
+            transcript_compact_on_send: false,
             composer_dictation_enabled: default_dictation_enabled(),
             composer_dictation_experiment_enabled: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
@@ -3329,6 +3337,7 @@ impl PersistedState {
             sidebar_composer_drafts: self.sidebar_composer_drafts,
             composer_enter_steers: self.composer_enter_steers,
             transcript_keep_scroll_on_send: self.transcript_keep_scroll_on_send,
+            transcript_compact_on_send: self.transcript_compact_on_send,
             composer_dictation_enabled: self.composer_dictation_enabled,
             composer_dictation_experiment_enabled: self.composer_dictation_experiment_enabled,
             sidebar_draft_preview_color: self.sidebar_draft_preview_color,
@@ -3504,6 +3513,7 @@ impl PersistedState {
         self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
         self.composer_enter_steers = settings.composer_enter_steers;
         self.transcript_keep_scroll_on_send = settings.transcript_keep_scroll_on_send;
+        self.transcript_compact_on_send = settings.transcript_compact_on_send;
         self.composer_dictation_enabled = settings.composer_dictation_enabled;
         self.composer_dictation_experiment_enabled = settings.composer_dictation_experiment_enabled;
         self.sidebar_draft_preview_color = settings.sidebar_draft_preview_color;
@@ -5455,6 +5465,28 @@ mod tests {
         );
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.transcript_keep_scroll_on_send);
+    }
+
+    #[test]
+    fn transcript_compact_on_send_preserves_legacy_default_and_round_trips() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.transcript_compact_on_send);
+        let mut state = PersistedState::empty();
+        assert!(!state.transcript_compact_on_send);
+        state.transcript_compact_on_send = true;
+        state.transcript_keep_scroll_on_send = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["transcript_compact_on_send"], true);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("transcript_compact_on_send")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.transcript_compact_on_send);
         assert!(restored.transcript_keep_scroll_on_send);
     }
 

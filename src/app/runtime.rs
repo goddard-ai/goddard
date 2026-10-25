@@ -8077,11 +8077,19 @@ impl Waku {
                 self.transcript_anchor_following.set(false);
                 self.splice_transcript_rows_after_visibility_change(&previous_kinds);
             } else {
-                self.transcript_anchor.set(transcript_anchor);
-                if hidden {
-                    // No sent row to anchor on — a hidden prompt renders nothing.
-                    // Hold the tail so the turn's work streams in where the
-                    // reader already sits.
+                let compact = self.state.transcript_compact_on_send;
+                let was_anchored = self.transcript_anchor.get().is_some();
+                self.transcript_anchor
+                    .set(if compact { None } else { transcript_anchor });
+                if was_anchored != self.transcript_anchor.get().is_some() {
+                    // The inactive list can lag behind streaming appends.
+                    // Reconcile it before applying the new turn's row splice.
+                    self.active_transcript_rows().reset(previous_kinds.len());
+                }
+                if hidden || compact {
+                    // Hidden prompts have no row to anchor. Compact sends use
+                    // the bottom-aligned list, so the prompt sits above the
+                    // composer and new activity immediately moves it upward.
                     self.transcript_anchor_end_space.set(Pixels::ZERO);
                     self.transcript_anchor_following.set(false);
                     self.splice_transcript_rows_after_visibility_change(&previous_kinds);
