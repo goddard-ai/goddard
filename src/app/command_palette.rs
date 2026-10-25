@@ -287,6 +287,7 @@ enum PaletteAction {
     ToggleRightPanel,
     ToggleBigPicture,
     OpenSettings(SettingsPage),
+    FindSetting(SettingsPage, String),
     SelectTask(Uuid),
     RunCustomCommand(Uuid),
     NewCustomCommand,
@@ -3632,6 +3633,85 @@ impl Waku {
                 next(),
             ));
         }
+        if searching {
+            for &(page, titles) in settings::SETTINGS_SEARCH_TITLES {
+                if !page.is_visible_in_navigation(
+                    self.state.computer_use_experiment_enabled,
+                    self.state.friends_enabled,
+                    self.jev_in_use(),
+                    self.state.integrations_enabled,
+                    self.state.git_worktree_management_enabled,
+                ) {
+                    continue;
+                }
+                let Some(group) = commands
+                    .iter()
+                    .find(|item| item.action == PaletteAction::OpenSettings(page))
+                else {
+                    continue;
+                };
+                let group_label = group.label.clone();
+                let icon = group.icon.clone();
+                for &title in titles {
+                    let available = match title {
+                        "settings.automatic_updates"
+                        | "settings.check_for_updates"
+                        | "settings.update_channel" => updater_available,
+                        "settings.composer_dictation" if page == SettingsPage::General => {
+                            self.state.composer_dictation_experiment_enabled
+                                && cfg!(all(target_os = "macos", target_arch = "aarch64"))
+                        }
+                        "settings.three_finger_swipe_navigation"
+                        | "settings.sidebar_transparency"
+                        | "settings.sidebar_transparency_amount" => cfg!(target_os = "macos"),
+                        "settings.sidebar_draft_preview_color" => {
+                            self.state.sidebar_composer_drafts
+                        }
+                        "boss.avatar_style" => self.state.boss_experiment_enabled,
+                        "daemon.new_task_environment" => self.state.sandbox_experiment_enabled,
+                        "daemon.external_title" => self.daemon.is_externally_managed(),
+                        "daemon.expose_title"
+                        | "daemon.connection_title"
+                        | "daemon.port"
+                        | "daemon.allowed_origins"
+                        | "daemon.credentials_title"
+                        | "daemon.websocket_url"
+                        | "daemon.token"
+                        | "daemon.qr_code" => !self.daemon.is_externally_managed(),
+                        "computer_use.macos_access"
+                        | "computer_use.screen_recording"
+                        | "computer_use.accessibility" => cfg!(target_os = "macos"),
+                        "computer_use.desktop_access" => !cfg!(target_os = "macos"),
+                        _ => true,
+                    };
+                    if !available {
+                        continue;
+                    }
+                    let label = if title == "settings.terminal_mouse_mode_click" {
+                        tr!(
+                            "settings.terminal_mouse_mode_click",
+                            modifier = crate::platform::primary_shortcut("⌘", "Ctrl")
+                        )
+                    } else {
+                        crate::i18n::translate(title)
+                    };
+                    let mut item = CommandPaletteItem::command(
+                        PaletteSection::Settings,
+                        label.clone(),
+                        "icons/settings.svg",
+                        None,
+                        PaletteAction::FindSetting(page, label),
+                        "settings preferences",
+                        next(),
+                    );
+                    item.search_text.push(' ');
+                    item.search_text.push_str(&group_label);
+                    item.detail = Some(group_label.clone());
+                    item.icon = icon.clone();
+                    commands.push(item);
+                }
+            }
+        }
         if !self.resume_available() {
             commands.retain(|item| item.action != PaletteAction::Resume);
         }
@@ -5817,6 +5897,18 @@ impl Waku {
             PaletteAction::OpenSettings(page) => {
                 self.open_settings_action(&OpenSettings, window, cx);
                 self.open_settings_page(page, window, cx);
+            }
+            PaletteAction::FindSetting(page, title) => {
+                self.open_settings_action(&OpenSettings, window, cx);
+                self.open_settings_page(page, window, cx);
+                // Keep the experiments acknowledgement gate intact.
+                if page != SettingsPage::Experiments || self.state.experiments_warning_acknowledged
+                {
+                    self.settings_search
+                        .update(cx, |input, cx| input.set_content(title, cx));
+                } else {
+                    self.settings_search.update(cx, |input, cx| input.clear(cx));
+                }
             }
             PaletteAction::NewCustomCommand => {
                 self.open_settings_action(&OpenSettings, window, cx);
