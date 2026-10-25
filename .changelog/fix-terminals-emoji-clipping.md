@@ -1,0 +1,1 @@
+- Fixed an emoji like ⚠️ in terminal output pushing the rest of its line sideways and clipping characters off the edge; it now draws in place over its own cell.

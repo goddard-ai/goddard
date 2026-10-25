@@ -32,7 +32,7 @@ use gpui::{
     KeyBinding, KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
     MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
     Render, ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, Styled, StyledText,
-    Subscription, Task, TextRun, UnderlineStyle, Window, actions, canvas, div, fill, font, point,
+    Subscription, Task, TextAlign, TextRun, UnderlineStyle, Window, actions, canvas, div, fill, font, point,
     px, rgb, size,
 };
 use parking_lot::Mutex;
@@ -975,6 +975,7 @@ impl TerminalSession {
             .then_some((cursor_row as usize, cursor_column));
         let mut cells = vec![TerminalCell::blank(theme); columns * rows];
         let mut mosaics = Vec::new();
+        let mut emojis = Vec::new();
 
         for indexed in content.display_iter {
             let row = indexed.point.line.0 + content.display_offset as i32;
@@ -989,14 +990,7 @@ impl TerminalSession {
             // Mosaic glyphs keep a space in the text so the run still advances
             // the cell; the glyph itself is painted as quads.
             let mosaic = if spacer { None } else { mosaic_glyph(cell.c) };
-            let mut text = if spacer || mosaic.is_some() {
-                " ".to_owned()
-            } else {
-                cell.c.to_string()
-            };
-            if let Some(zerowidth) = cell.zerowidth() {
-                text.extend(zerowidth);
-            }
+            let (text, emoji_text) = cell_row_text(cell, spacer, mosaic.is_some());
 
             let mut foreground = resolve_color(cell.fg, content.colors, theme, true);
             let mut background = resolve_color(cell.bg, content.colors, theme, false);
@@ -1031,6 +1025,15 @@ impl TerminalSession {
                     column,
                     glyph,
                     foreground,
+                });
+            }
+            if let Some(text) = emoji_text {
+                emojis.push(EmojiInstance {
+                    row: row as usize,
+                    column,
+                    text: text.into(),
+                    foreground,
+                    bold: cell.flags.contains(Flags::BOLD),
                 });
             }
             cells[row as usize * columns + column] = TerminalCell {
@@ -1072,6 +1075,7 @@ impl TerminalSession {
         TerminalSnapshot {
             rows: rendered_rows,
             mosaics,
+            emojis,
             outline_cursor,
         }
     }
@@ -1204,11 +1208,55 @@ fn mosaic_glyph(c: char) -> Option<MosaicGlyph> {
     })
 }
 
+/// Row text plus, for clusters the shaper renders wider than the single
+/// column alacritty budgets for them — VS16 (U+FE0F) or ZWJ (U+200D)
+/// sequences — the cluster text to paint over the grid instead. Putting
+/// them in the row string would let the fallback font's advance push the
+/// rest of the row off the grid.
+fn cell_row_text(
+    cell: &alacritty_terminal::term::cell::Cell,
+    spacer: bool,
+    mosaic: bool,
+) -> (String, Option<String>) {
+    if spacer || mosaic {
+        return (" ".to_owned(), None);
+    }
+    let emoji = cell.zerowidth().is_some_and(|zerowidth| {
+        zerowidth
+            .iter()
+            .any(|&c| c == '\u{FE0F}' || c == '\u{200D}')
+    });
+    let mut text = if emoji { " ".to_owned() } else { cell.c.to_string() };
+    let mut emoji_text = emoji.then(|| cell.c.to_string());
+    if let Some(zerowidth) = cell.zerowidth() {
+        if let Some(emoji_text) = emoji_text.as_mut() {
+            emoji_text.extend(zerowidth);
+            // alacritty spreads a ZWJ chain into one wide cell per member,
+            // so a trailing joiner's continuation lives in the next cell —
+            // drop it rather than shape a dangling ZWJ.
+            while emoji_text.ends_with('\u{200D}') {
+                emoji_text.pop();
+            }
+        } else {
+            text.extend(zerowidth);
+        }
+    }
+    (text, emoji_text)
+}
+
 struct MosaicInstance {
     row: usize,
     column: usize,
     glyph: MosaicGlyph,
     foreground: Hsla,
+}
+
+struct EmojiInstance {
+    row: usize,
+    column: usize,
+    text: SharedString,
+    foreground: Hsla,
+    bold: bool,
 }
 
 fn paint_mosaic(
@@ -1322,6 +1370,7 @@ struct TerminalRow {
 struct TerminalSnapshot {
     rows: Vec<TerminalRow>,
     mosaics: Vec<MosaicInstance>,
+    emojis: Vec<EmojiInstance>,
     outline_cursor: Option<(usize, usize)>,
 }
 
@@ -2987,6 +3036,7 @@ impl Render for TerminalView {
             let TerminalSnapshot {
                 rows: snapshot_rows,
                 mosaics,
+                emojis,
                 outline_cursor,
             } = snapshot;
             for row in snapshot_rows {
@@ -3029,11 +3079,35 @@ impl Render for TerminalView {
                         .child(StyledText::new(row.text).with_runs(runs)),
                 );
             }
-            if !mosaics.is_empty() {
+            if !mosaics.is_empty() || !emojis.is_empty() {
+                let code_family = code_family.clone();
                 screen = screen.child(
                     canvas(
-                        |_, _, _| (),
-                        move |bounds, _, window, _| {
+                        move |_, window, _| {
+                            let font = terminal_font(&code_family);
+                            emojis
+                                .iter()
+                                .map(|emoji| {
+                                    let mut font = font.clone();
+                                    if emoji.bold {
+                                        font.weight = FontWeight::BOLD;
+                                    }
+                                    let line = window.text_system().shape_line(
+                                        emoji.text.clone(),
+                                        px(font_size),
+                                        &[TextRun {
+                                            len: emoji.text.len(),
+                                            font,
+                                            color: emoji.foreground,
+                                            ..Default::default()
+                                        }],
+                                        None,
+                                    );
+                                    (emoji.row, emoji.column, line)
+                                })
+                                .collect::<Vec<_>>()
+                        },
+                        move |bounds, emoji_lines, window, cx| {
                             for mosaic in &mosaics {
                                 paint_mosaic(
                                     window,
@@ -3044,6 +3118,19 @@ impl Render for TerminalView {
                                     cell_width,
                                     cell_height,
                                     mosaic,
+                                );
+                            }
+                            for (row, column, line) in &emoji_lines {
+                                let _ = line.paint(
+                                    point(
+                                        bounds.origin.x + px(*column as f32 * cell_width),
+                                        bounds.origin.y + px(*row as f32 * cell_height),
+                                    ),
+                                    px(cell_height),
+                                    TextAlign::Left,
+                                    None,
+                                    window,
+                                    cx,
                                 );
                             }
                         },
@@ -4863,6 +4950,61 @@ mod tests {
                 TermMode::MOUSE_DRAG | TermMode::SGR_MOUSE
             ),
             None
+        );
+    }
+
+    #[test]
+    fn emoji_clusters_paint_over_their_cell_without_shifting_the_row() {
+        fn cell_at<'a>(
+            term: &'a Term<VoidListener>,
+            column: usize,
+        ) -> &'a alacritty_terminal::term::cell::Cell {
+            &term.grid()[TerminalPoint::new(Line(0), Column(column))]
+        }
+
+        // VS16 promotes the warning sign to a ~2-cell emoji but alacritty
+        // still budgets one column, so it paints over the grid and `b`
+        // keeps its own row-text cell right beside it.
+        let term = parse_terminal("a\u{26A0}\u{FE0F}b".as_bytes());
+        assert_eq!(
+            cell_row_text(cell_at(&term, 1), false, false),
+            (" ".to_owned(), Some("\u{26A0}\u{FE0F}".to_owned()))
+        );
+        assert_eq!(
+            cell_row_text(cell_at(&term, 2), false, false).0,
+            "b".to_owned()
+        );
+
+        // alacritty spreads a ZWJ chain into one wide cell per member; each
+        // paints over its own cell with the dangling joiner stripped.
+        let term = parse_terminal("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}".as_bytes());
+        assert_eq!(
+            cell_row_text(cell_at(&term, 0), false, false),
+            (" ".to_owned(), Some("\u{1F468}".to_owned()))
+        );
+        assert_eq!(
+            cell_row_text(cell_at(&term, 2), false, false),
+            (" ".to_owned(), Some("\u{1F469}".to_owned()))
+        );
+        // The chain's last member has no joiner, so it stays in the row
+        // where its two-cell advance still lines up with the grid.
+        assert_eq!(
+            cell_row_text(cell_at(&term, 4), false, false),
+            ("\u{1F467}".to_owned(), None)
+        );
+
+        // VS15 keeps the narrow text glyph, so it stays in the row.
+        let term = parse_terminal("\u{26A0}\u{FE0E}".as_bytes());
+        assert_eq!(
+            cell_row_text(cell_at(&term, 0), false, false),
+            ("\u{26A0}\u{FE0E}".to_owned(), None)
+        );
+
+        // Combining marks don't change the advance — they stay in the row.
+        let term = parse_terminal("e\u{0301}".as_bytes());
+        assert_eq!(
+            cell_row_text(cell_at(&term, 0), false, false),
+            ("e\u{0301}".to_owned(), None)
         );
     }
 
