@@ -598,7 +598,6 @@ impl Render for Waku {
             let commit_dialog = self.render_commit_dialog(cx);
             let issue_dialog = self.render_issue_dialog(cx);
             let archive_dialog = self.render_archive_dialog(cx);
-            let reclaim_dialog = self.render_reclaim_dialog(cx);
             let full_access_dialog = self.render_full_access_dialog(cx);
             let incognito_dialog = self.render_incognito_dialog(window, cx);
             let terminal_close_dialog = self.render_terminal_close_dialog(cx);
@@ -662,7 +661,6 @@ impl Render for Waku {
                 .children(commit_dialog)
                 .children(issue_dialog)
                 .children(archive_dialog)
-                .children(reclaim_dialog)
                 .children(full_access_dialog)
                 .children(incognito_dialog)
                 .children(terminal_close_dialog)
@@ -717,7 +715,6 @@ impl Render for Waku {
         let commit_dialog = self.render_commit_dialog(cx);
         let issue_dialog = self.render_issue_dialog(cx);
         let archive_dialog = self.render_archive_dialog(cx);
-        let reclaim_dialog = self.render_reclaim_dialog(cx);
         let full_access_dialog = self.render_full_access_dialog(cx);
         let incognito_dialog = self.render_incognito_dialog(window, cx);
         let terminal_close_dialog = self.render_terminal_close_dialog(cx);
@@ -1244,7 +1241,6 @@ impl Render for Waku {
             .children(commit_dialog)
             .children(issue_dialog)
             .children(archive_dialog)
-            .children(reclaim_dialog)
             .children(full_access_dialog)
             .children(incognito_dialog)
             .children(terminal_close_dialog)

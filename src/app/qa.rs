@@ -317,6 +317,7 @@ impl Waku {
                 branch: None,
                 base_branch: Some(record.checkout.base_branch.clone()),
                 adopted_by: None,
+                borrowed: false,
             };
             self.daemons
                 .claim_session(session.id, waku_client::DaemonKey::Local);

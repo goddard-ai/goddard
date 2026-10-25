@@ -4603,7 +4603,7 @@ pub use goal_dialog::{ConfirmGoalDialog, DismissGoalDialog};
 pub use image_preview::DismissImagePreview;
 pub use provider_switch_dialog::{ConfirmProviderSwitchDialog, DismissProviderSwitchDialog};
 pub use push_base::{ConfirmPushBaseDialog, DismissPushBaseDialog};
-pub use reclaim_dialog::{ConfirmReclaimDialog, DismissReclaimDialog};
+pub use reclaim_dialog::ConfirmReclaimDialog;
 pub use reset_credit_dialog::{ConfirmResetCreditDialog, DismissResetCreditDialog};
 pub use send_file_dialog::{ConfirmSendFileDialog, DismissSendFileDialog};
 pub use settings::{FocusNext, FocusPrevious};

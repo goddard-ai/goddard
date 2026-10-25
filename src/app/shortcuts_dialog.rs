@@ -13,7 +13,7 @@ use super::command_palette::{
     SelectPrevious,
 };
 use super::full_access_dialog::{ConfirmFullAccessDialog, DismissFullAccessDialog};
-use super::reclaim_dialog::{ConfirmReclaimDialog, DismissReclaimDialog};
+use super::reclaim_dialog::ConfirmReclaimDialog;
 use super::*;
 use crate::{
     AdjustFontSize, BrowserAddressCancel, BrowserBack, BrowserDevtools, BrowserForward,
@@ -771,11 +771,6 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     tr!("shortcuts.dismiss_dialog"),
                     DismissArchiveDialog,
                     Some("ArchiveDialog"),
-                ),
-                bound(
-                    tr!("shortcuts.dismiss_dialog"),
-                    DismissReclaimDialog,
-                    Some("ReclaimDialog"),
                 ),
                 bound(
                     tr!("shortcuts.dismiss_dialog"),
