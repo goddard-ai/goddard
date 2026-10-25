@@ -3474,6 +3474,13 @@ impl Waku {
             let Some(matched) = search.matched(&label, "") else {
                 continue;
             };
+            if search.active()
+                && let Some(editor) = &self.custom_command_editor
+                && editor.id == Some(id)
+            {
+                column = column.child(self.render_custom_command_editor(editor, theme, cx));
+                continue;
+            }
             column = column.child(
                 div()
                     .w_full()
@@ -4917,16 +4924,13 @@ impl Waku {
                     ),
                 theme,
             ));
-        // The editor form and the add button are chrome, not matches — a
-        // search renders the card's saved rows only.
-        if !search.active() {
-            if let Some(editor) = &self.remote_host_editor {
-                card = card.child(self.render_remote_host_editor(editor, theme, cx));
-            } else {
-                card = card.child(div().mt(px(12.0)).flex().justify_end().child(add_button));
-            }
+        // The matched card owns its editor, including while searching.
+        if let Some(editor) = &self.remote_host_editor {
+            card = card.child(self.render_remote_host_editor(editor, theme, cx));
+        } else if !search.active() {
+            card = card.child(div().mt(px(12.0)).flex().justify_end().child(add_button));
         }
-        if self.remote_host_editor.is_none() || search.active() {
+        if self.remote_host_editor.is_none() {
             card = card.when(!self.state.remote_hosts.is_empty(), |card| {
                 card.child(div().mt(px(6.0)).child(rows))
             });
@@ -6076,6 +6080,7 @@ impl Waku {
     ) -> Option<AnyElement> {
         let theme = Theme::current(cx);
         let mut rows = Vec::new();
+        let mut editor_visible = !search.active();
         for rule in &self.state.auto_prompts {
             let id = rule.id;
             let enabled = rule.enabled;
@@ -6117,14 +6122,23 @@ impl Waku {
                     cx,
                     move |this, _, cx| this.remove_auto_prompt(id, cx),
                 ));
-            rows.push(settings_row(
+            let row = settings_row(
                 "icons/zap.svg",
                 rule.name.clone(),
                 rule.prompt.clone(),
                 controls,
                 theme,
                 search,
-            ));
+            );
+            if row.is_some()
+                && self
+                    .auto_prompt_editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.id == id)
+            {
+                editor_visible = true;
+            }
+            rows.push(row);
         }
         if rows.is_empty() {
             rows.push(settings_row(
@@ -6155,8 +6169,18 @@ impl Waku {
             )
         });
         let mut cards = Vec::new();
+        // Add is available on the matched list, so a new rule's editor
+        // belongs to that list before the rule has a saved row of its own.
+        let creating_rule = self.auto_prompt_editor.as_ref().is_some_and(|editor| {
+            !self
+                .state
+                .auto_prompts
+                .iter()
+                .any(|rule| rule.id == editor.id)
+        });
+        editor_visible |= list.is_some() && creating_rule;
         cards.extend(list.map(|card| card.into_any_element()));
-        if !search.active() {
+        if editor_visible {
             cards.extend(self.render_auto_prompt_editor(cx));
         }
         settings_group(tr!("jev.group_prompts"), cards, theme)
@@ -7002,6 +7026,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let entries = action_predictions::CANNED_PROMPTS.iter().copied();
+        let mut editor_visible = !search.active();
         let rows = entries
             .map(|(id, _label_key)| {
                 let (_, chip_label) = self.suggestion_parts(id)?;
@@ -7038,21 +7063,30 @@ impl Waku {
                         cx,
                         move |this, _, cx| this.reset_suggested_prompt(id, cx),
                     ));
-                settings_row(
+                let row = settings_row(
                     "icons/sparkle.svg",
                     title,
                     description,
                     controls,
                     theme,
                     search,
-                )
+                );
+                if row.is_some()
+                    && self
+                        .suggested_prompt_editor
+                        .as_ref()
+                        .is_some_and(|editor| editor.id == id)
+                {
+                    editor_visible = true;
+                }
+                row
             })
             .collect::<Vec<_>>();
         let mut cards = Vec::new();
         if let Some(rows) = settings_row_card(rows, theme) {
             cards.push(rows.into_any_element());
         }
-        if !search.active() {
+        if editor_visible {
             if let Some(editor) = &self.suggested_prompt_editor {
                 let form = div()
                     .w_full()
@@ -13193,7 +13227,7 @@ impl Waku {
                     .flex()
                     .flex_col()
                     .child(header)
-                    .when(expanded && !search.active(), |element| {
+                    .when(expanded, |element| {
                         element.child(self.render_provider_expanded_settings(kind, theme, cx))
                     })
                     .into_any_element(),
@@ -13390,7 +13424,7 @@ impl Waku {
                     .flex()
                     .flex_col()
                     .child(header)
-                    .when(expanded && !search.active(), |element| {
+                    .when(expanded, |element| {
                         element.child(self.render_inference_expanded(provider, theme, cx))
                     })
                     .into_any_element(),
