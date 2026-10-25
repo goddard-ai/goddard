@@ -47,6 +47,15 @@ pub use waku_protocol::persistence::{
     parse_session_message_search, resolve_named_search_project, session_message_match_ranges,
 };
 
+/// A globally ranked snapshot as independent transcript-search hosts reply.
+#[derive(Clone, Debug)]
+pub struct SessionMessageSearchProgress {
+    pub matches: Vec<SessionMessageMatch>,
+    pub pending: usize,
+    pub failed: usize,
+    pub total: usize,
+}
+
 const STATE_VERSION: u32 = 5;
 const APP_STATE_VERSION: u32 = 1;
 
@@ -4239,39 +4248,113 @@ impl StateStore {
         scope: SessionMessageSearchScope,
         session_ids: Option<Vec<Uuid>>,
     ) -> impl FnOnce() -> io::Result<Vec<SessionMessageMatch>> + Send + 'static {
+        self.session_message_search_with_updates(query, limit, scope, session_ids, |_| {})
+    }
+
+    /// Run host requests concurrently. Each reply publishes the best merged
+    /// results so a slow or failed host cannot hold back available matches.
+    pub fn session_message_search_with_updates(
+        &self,
+        query: String,
+        limit: usize,
+        scope: SessionMessageSearchScope,
+        session_ids: Option<Vec<Uuid>>,
+        mut on_update: impl FnMut(SessionMessageSearchProgress) + Send + 'static,
+    ) -> impl FnOnce() -> io::Result<Vec<SessionMessageMatch>> + Send + 'static {
         let daemons = self.daemons.clone();
         move || {
-            let mut matches = Vec::new();
-            let mut first_error = None;
-            for (_, daemon) in daemons.connected() {
-                match daemon.client().request(
-                    Uuid::nil(),
-                    Uuid::nil(),
-                    Command::SearchSessionMessages {
-                        query: query.clone(),
-                        limit,
-                        scope,
-                        session_ids: session_ids.clone(),
-                    },
-                ) {
-                    Ok(ResponsePayload::SessionMessageMatches { matches: found }) => {
-                        matches.extend(found)
-                    }
-                    Ok(_) => {
-                        return Err(io::Error::other(
-                            "Goddard daemon returned an invalid message-search response",
-                        ));
-                    }
-                    Err(error) if first_error.is_none() => {
-                        first_error = Some(io::Error::other(error.to_string()));
-                    }
-                    Err(_) => {}
+            let mut by_host = session_ids.map(|ids| {
+                let mut grouped: HashMap<DaemonKey, Vec<Uuid>> = HashMap::new();
+                for id in ids {
+                    grouped
+                        .entry(daemons.session_owner(id))
+                        .or_default()
+                        .push(id);
                 }
+                grouped
+            });
+            let mut jobs = Vec::new();
+            for (key, daemon) in daemons.connected() {
+                let ids = if let Some(grouped) = by_host.as_mut() {
+                    let Some(ids) = grouped.remove(&key) else {
+                        continue;
+                    };
+                    Some(ids)
+                } else {
+                    None
+                };
+                jobs.push((daemon, ids));
             }
-            matches.truncate(limit);
-            match (matches.is_empty(), first_error) {
+            // Cached tasks can belong to a host that is currently disconnected.
+            let unavailable = by_host.as_ref().map_or(0, HashMap::len);
+            let mut progress = SessionMessageSearchProgress {
+                matches: Vec::new(),
+                pending: jobs.len(),
+                failed: unavailable,
+                total: jobs.len() + unavailable,
+            };
+            let mut first_error = (unavailable > 0).then(|| {
+                io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "Some transcript search hosts are disconnected",
+                )
+            });
+            if progress.pending == 0 || unavailable > 0 {
+                on_update(progress.clone());
+            }
+            std::thread::scope(|threads| {
+                let (sender, receiver) = std::sync::mpsc::channel();
+                for (daemon, ids) in jobs {
+                    let sender = sender.clone();
+                    let query = query.clone();
+                    threads.spawn(move || {
+                        let result = match daemon.client().request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            Command::SearchSessionMessages {
+                                query,
+                                limit,
+                                scope,
+                                session_ids: ids,
+                            },
+                        ) {
+                            Ok(ResponsePayload::SessionMessageMatches { matches }) => Ok(matches),
+                            Ok(_) => Err(io::Error::other(
+                                "Goddard daemon returned an invalid message-search response",
+                            )),
+                            Err(error) => Err(io::Error::other(error.to_string())),
+                        };
+                        let _ = sender.send(result);
+                    });
+                }
+                drop(sender);
+                for result in receiver {
+                    progress.pending -= 1;
+                    match result {
+                        Ok(found) => {
+                            progress.matches.extend(found);
+                            progress
+                                .matches
+                                .sort_by(SessionMessageMatch::compare_relevance);
+                            let mut seen = HashSet::new();
+                            progress.matches.retain(|hit| seen.insert(hit.session_id));
+                            // Taking the best N after every merge is equivalent to
+                            // taking N once at the end, regardless of arrival order.
+                            progress.matches.truncate(limit);
+                        }
+                        Err(error) => {
+                            progress.failed += 1;
+                            if first_error.is_none() {
+                                first_error = Some(error);
+                            }
+                        }
+                    }
+                    on_update(progress.clone());
+                }
+            });
+            match (progress.matches.is_empty(), first_error) {
                 (true, Some(error)) => Err(error),
-                _ => Ok(matches),
+                _ => Ok(progress.matches),
             }
         }
     }

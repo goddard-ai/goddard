@@ -7368,3 +7368,8 @@ qa.command_stopped:
 
 qa.actions:
   en: More
+
+command_palette.transcript_search_failed:
+  en: Transcript search failed. Edit the query to retry.
+command_palette.transcript_search_incomplete:
+  en: Some hosts could not be searched. Edit the query to retry.

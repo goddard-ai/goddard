@@ -1,0 +1,1 @@
+- Cmd+K shows transcript matches as hosts reply, ranks them across hosts, and reports incomplete or failed searches.

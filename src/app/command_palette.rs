@@ -770,6 +770,7 @@ pub(super) struct CommandPaletteUi {
     message_matches_query: Option<String>,
     message_matches: HashMap<Uuid, crate::persistence::SessionMessageMatch>,
     message_search_pending: bool,
+    message_search_error: Option<String>,
     provider_sessions: Vec<(waku_client::DaemonKey, ProviderSessionSummary)>,
     resume_provider: ProviderKind,
     provider_sessions_pending: bool,
@@ -857,6 +858,7 @@ impl CommandPaletteUi {
             message_matches_query: None,
             message_matches: HashMap::new(),
             message_search_pending: false,
+            message_search_error: None,
             provider_sessions: Vec::new(),
             resume_provider: ProviderKind::default(),
             provider_sessions_pending: false,
@@ -1019,6 +1021,7 @@ impl Waku {
         self.command_palette.focus_generation =
             self.command_palette.focus_generation.wrapping_add(1);
         self.command_palette.message_searches.clear();
+        self.command_palette.message_search_error = None;
         self.command_palette.active_message_query = None;
         self.command_palette.message_matches_query = None;
         self.command_palette.message_matches.clear();
@@ -2510,6 +2513,7 @@ impl Waku {
             return;
         }
         let query = query.trim().to_owned();
+        self.command_palette.message_search_error = None;
         self.command_palette.active_message_query = (!query.is_empty()).then(|| query.clone());
         let fetch = if query.is_empty() {
             self.command_palette.message_matches_query = None;
@@ -2557,11 +2561,16 @@ impl Waku {
             })
             .map(|session| session.id)
             .collect();
-        let search = self.store.session_message_search_in_sessions(
+        let focus_generation = self.command_palette.focus_generation;
+        let (updates_tx, updates_rx) = smol::channel::unbounded();
+        let search = self.store.session_message_search_with_updates(
             query.clone(),
             MESSAGE_SEARCH_LIMIT,
             crate::persistence::SessionMessageSearchScope::Active,
             Some(session_ids),
+            move |update| {
+                let _ = updates_tx.try_send(update);
+            },
         );
         cx.spawn(async move |this, cx| {
             cx.background_executor()
@@ -2570,6 +2579,8 @@ impl Waku {
             let current = this
                 .update(cx, |this, _| {
                     this.command_palette.open
+                        && this.command_palette.focus_generation == focus_generation
+                        && this.command_palette.view == CommandPaletteView::Commands
                         && this.command_palette.active_message_query.as_deref()
                             == Some(query.as_str())
                 })
@@ -2581,37 +2592,53 @@ impl Waku {
                 return;
             }
 
-            let matches = cx
-                .background_executor()
-                .spawn(async move { search().unwrap_or_default() })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if !this
-                    .command_palette
-                    .message_searches
-                    .fulfill(token, matches)
-                {
-                    return;
-                }
-                if !this.command_palette.open
-                    || this.command_palette.active_message_query.as_deref() != Some(query.as_str())
-                {
-                    return;
-                }
-                let Query::Ready(matches) = this.command_palette.message_searches.read(&query)
-                else {
-                    return;
-                };
-                this.command_palette.message_matches_query = Some(query.clone());
-                this.command_palette.message_matches = matches
-                    .iter()
-                    .cloned()
-                    .map(|matched| (matched.session_id, matched))
-                    .collect();
-                this.command_palette.message_search_pending = false;
-                this.refresh_command_palette_results(&query, true, cx);
-                cx.notify();
+            let search_task = cx.background_executor().spawn(async move {
+                // Progress carries failures separately; never turn an error into
+                // a successful, cacheable empty result.
+                let _ = search();
             });
+            while let Ok(update) = updates_rx.recv().await {
+                let _ = this.update(cx, |this, cx| {
+                    if update.pending == 0 {
+                        if update.failed == 0 {
+                            if !this
+                                .command_palette
+                                .message_searches
+                                .fulfill(token.clone(), update.matches.clone())
+                            {
+                                return;
+                            }
+                        } else {
+                            this.command_palette.message_searches.abandon(token.clone());
+                        }
+                    }
+                    if !this.command_palette.open
+                        || this.command_palette.focus_generation != focus_generation
+                        || this.command_palette.view != CommandPaletteView::Commands
+                        || this.command_palette.active_message_query.as_deref()
+                            != Some(query.as_str())
+                    {
+                        return;
+                    }
+                    this.command_palette.message_matches_query = Some(query.clone());
+                    this.command_palette.message_matches = update
+                        .matches
+                        .into_iter()
+                        .map(|matched| (matched.session_id, matched))
+                        .collect();
+                    this.command_palette.message_search_pending = update.pending > 0;
+                    this.command_palette.message_search_error = (update.failed > 0).then(|| {
+                        tr!(if update.failed == update.total {
+                            "command_palette.transcript_search_failed"
+                        } else {
+                            "command_palette.transcript_search_incomplete"
+                        })
+                    });
+                    this.refresh_command_palette_results(&query, true, cx);
+                    cx.notify();
+                });
+            }
+            search_task.await;
         })
         .detach();
     }
@@ -6294,14 +6321,19 @@ impl Waku {
             | CommandPaletteView::SavePrompt => false,
             CommandPaletteView::RecentPrompts => false,
         };
-        let show_empty_state = should_show_command_palette_empty_state(
-            if resume_view {
-                resume_session_count
-            } else {
-                self.command_palette.results.len()
-            },
-            results_pending,
-        );
+        let search_error = (view == CommandPaletteView::Commands)
+            .then(|| self.command_palette.message_search_error.as_ref())
+            .flatten();
+        let search_status_height = if search_error.is_some() { 40.0 } else { 0.0 };
+        let show_empty_state = search_error.is_none()
+            && should_show_command_palette_empty_state(
+                if resume_view {
+                    resume_session_count
+                } else {
+                    self.command_palette.results.len()
+                },
+                results_pending,
+            );
         let show_loading_state = (resume_view
             && resume_session_count == 0
             && self.command_palette.provider_sessions_pending)
@@ -6330,8 +6362,11 @@ impl Waku {
         let show_placeholder_state = show_empty_state || show_loading_state;
         let results_height =
             command_palette_results_height(&self.command_palette.results, show_placeholder_state)
-                .min((card_max_height - SEARCH_ROW_HEIGHT - FOOTER_HEIGHT).max(0.0));
-        let card_height = SEARCH_ROW_HEIGHT + results_height + FOOTER_HEIGHT;
+                .min(
+                    (card_max_height - SEARCH_ROW_HEIGHT - FOOTER_HEIGHT - search_status_height)
+                        .max(0.0),
+                );
+        let card_height = SEARCH_ROW_HEIGHT + results_height + FOOTER_HEIGHT + search_status_height;
 
         let mut results = div()
             .id("command-palette-results")
@@ -6937,6 +6972,19 @@ impl Waku {
                         ),
                 )
                 .child(results)
+                .when_some(search_error, |card, error| {
+                    card.child(
+                        div()
+                            .h(px(search_status_height))
+                            .flex_none()
+                            .px(px(19.0))
+                            .flex()
+                            .items_center()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(error.clone()),
+                    )
+                })
                 .child(
                     div()
                         .h(px(FOOTER_HEIGHT))
