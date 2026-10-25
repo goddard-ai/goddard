@@ -7235,8 +7235,8 @@ impl Waku {
             .map(|(_, name)| name.clone())
             .unwrap_or_else(|| tr!("boss.memory_all_projects"));
         let weak = cx.entity().downgrade();
-        let project_handle = self.menu_handle("boss-memory-project", cx);
-        let project_menu = dropdown_menu(
+        let project_handle = self.project_picker_handle("boss-memory-project", cx);
+        let project_menu = project_dropdown_menu(
             MenuChip::new("boss-memory-project")
                 .icon("icons/folder.svg", theme.text_tertiary)
                 .label(selected_label)
@@ -7245,9 +7245,9 @@ impl Waku {
                 .selected(project_handle.is_open())
                 .max_w(px(200.0))
                 .flex_none(),
-            "boss-memory-project-menu",
             &project_handle,
             MenuAlign::BelowLeft,
+            ProjectPickerVariant::ListFilter,
             move |_| {
                 let mut items = Vec::with_capacity(options.len() + 1);
                 items.push(
@@ -7704,7 +7704,7 @@ impl Waku {
 
         let project_options = self.boss_history_project_options(key);
         let weak = cx.entity().downgrade();
-        let project_handle = self.menu_handle("boss-history-project", cx);
+        let project_handle = self.project_picker_handle("boss-history-project", cx);
         let project_label = project_filter
             .and_then(|id| {
                 project_options
@@ -7720,7 +7720,7 @@ impl Waku {
                     })
             })
             .unwrap_or_else(|| tr!("boss.history_all_projects"));
-        let project_menu = dropdown_menu(
+        let project_menu = project_dropdown_menu(
             MenuChip::new("boss-history-project")
                 .icon("icons/folder.svg", theme.text_tertiary)
                 .label(project_label)
@@ -7729,9 +7729,9 @@ impl Waku {
                 .selected(project_handle.is_open())
                 .max_w(px(180.0))
                 .flex_none(),
-            "boss-history-project-menu",
             &project_handle,
             MenuAlign::BelowLeft,
+            ProjectPickerVariant::ListFilter,
             move |_| {
                 let mut items = Vec::with_capacity(project_options.len() + 1);
                 items.push(

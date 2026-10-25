@@ -412,54 +412,66 @@ impl Waku {
             editor.outcome_label.clone()
         }
         .unwrap_or_else(|| default.clone());
-        let handle = self.menu_handle(id, cx);
         let weak = cx.entity().downgrade();
-        dropdown_menu(
-            MenuChip::new(id)
-                .label(label)
-                .outlined()
-                .background(theme.raised)
-                .selected(handle.is_open()),
-            id,
-            &handle,
-            MenuAlign::BelowLeft,
-            move |_| {
-                std::iter::once((None, default.clone()))
-                    .chain(options.iter().map(|(id, label)| (Some(*id), label.clone())))
-                    .map(|(choice, label)| {
-                        let weak = weak.clone();
-                        MenuItem::new(label.clone(), move |_, cx| {
-                            if let Some(entity) = weak.upgrade() {
-                                entity.update(cx, |this, cx| {
-                                    if let Some(editor) = &mut this.boss_ui.pin_editor {
-                                        if scope {
-                                            editor.project_id = choice;
-                                            editor.project_label = choice.map(|_| label.clone());
-                                        } else {
-                                            editor.retire_on = choice.map(|outcome_id| {
-                                                InstructionPinRetirement::OutcomeCompleted {
-                                                    outcome_id,
-                                                }
-                                            });
-                                            editor.outcome_label = choice.map(|_| label.clone());
-                                            editor.automatic_condition = choice
-                                                .map(|_| format!("Outcome '{label}' is completed"));
-                                            if let Some(condition) = &editor.automatic_condition {
-                                                editor.condition.update(cx, |input, cx| {
-                                                    input.set_content(condition.clone(), cx)
-                                                });
+        let trigger = MenuChip::new(id)
+            .label(label)
+            .outlined()
+            .background(theme.raised);
+        let items = move |_: &mut App| {
+            std::iter::once((None, default.clone()))
+                .chain(options.iter().map(|(id, label)| (Some(*id), label.clone())))
+                .map(|(choice, label)| {
+                    let weak = weak.clone();
+                    MenuItem::new(label.clone(), move |_, cx| {
+                        if let Some(entity) = weak.upgrade() {
+                            entity.update(cx, |this, cx| {
+                                if let Some(editor) = &mut this.boss_ui.pin_editor {
+                                    if scope {
+                                        editor.project_id = choice;
+                                        editor.project_label = choice.map(|_| label.clone());
+                                    } else {
+                                        editor.retire_on = choice.map(|outcome_id| {
+                                            InstructionPinRetirement::OutcomeCompleted {
+                                                outcome_id,
                                             }
+                                        });
+                                        editor.outcome_label = choice.map(|_| label.clone());
+                                        editor.automatic_condition = choice
+                                            .map(|_| format!("Outcome '{label}' is completed"));
+                                        if let Some(condition) = &editor.automatic_condition {
+                                            editor.condition.update(cx, |input, cx| {
+                                                input.set_content(condition.clone(), cx)
+                                            });
                                         }
                                     }
-                                    cx.notify();
-                                });
-                            }
-                        })
-                        .selected(choice == selected)
+                                }
+                                cx.notify();
+                            });
+                        }
                     })
-                    .collect()
-            },
-        )
+                    .selected(choice == selected)
+                })
+                .collect()
+        };
+        if scope {
+            let handle = self.project_picker_handle(id, cx);
+            project_dropdown_menu(
+                trigger.selected(handle.is_open()),
+                &handle,
+                MenuAlign::BelowLeft,
+                ProjectPickerVariant::ListFilter,
+                items,
+            )
+        } else {
+            let handle = self.menu_handle(id, cx);
+            dropdown_menu(
+                trigger.selected(handle.is_open()),
+                id,
+                &handle,
+                MenuAlign::BelowLeft,
+                items,
+            )
+        }
     }
 
     fn render_instruction_pin_editor(&self, cx: &mut Context<Self>) -> AnyElement {

@@ -57,6 +57,7 @@ use crate::ui::menu::{
     SelectNextEntry, SelectNextTab, SelectPreviousEntry, SelectPreviousTab, context_menu,
     dropdown_menu, dropdown_menu_on_hover, popover,
 };
+use crate::ui::project_picker::{ProjectPickerHandle, ProjectPickerVariant, project_dropdown_menu};
 use crate::ui::scrollbar::{self, ScrollbarState};
 use crate::ui::slider::{self, SliderState};
 use crate::ui::tooltip::Tooltip;
@@ -298,15 +299,6 @@ enum BranchPickerMode {
 enum BranchPickerAction {
     Checkout(String),
     Create,
-}
-
-/// The composer project picker's keyboard targets: a project row, then the
-/// pinned footer entries.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ProjectPickerAction {
-    Project(Uuid),
-    NewProject,
-    NoProject,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -2960,16 +2952,6 @@ pub struct Waku {
     branch_picker_highlight: Option<usize>,
     branch_picker_list_state: ListState,
     branch_picker_row_cache: RefCell<Vec<crate::git_branch::BranchEntry>>,
-    /// Filter field in the composer project picker — its own entity for the
-    /// same reason as the branch picker's: focus lives inside the popover.
-    project_search: Entity<TextInput>,
-    /// Keyboard cursor over the project picker's actions — its project rows
-    /// plus the pinned footer entries.
-    project_picker_highlight: Option<usize>,
-    project_picker_list_state: ListState,
-    /// The project ids the open picker's rows were built from, so a keyboard
-    /// step can map an action back onto a list row for scrolling.
-    project_picker_row_cache: RefCell<Vec<Uuid>>,
     /// Name field in the composer worktree picker; empty means the daemon
     /// generates a random name.
     worktree_name_input: Entity<TextInput>,
@@ -4437,6 +4419,7 @@ pub struct Waku {
     /// Every menu site in the app, keyed by a stable id. Handles are created on
     /// first use and live as long as the window.
     menus: RefCell<HashMap<SharedString, ContextMenuHandle>>,
+    project_pickers: RefCell<HashMap<SharedString, ProjectPickerHandle>>,
     navigation_rail: Entity<ConversationNavigationRail>,
     navigation_rail_reset_generation: Cell<u64>,
     /// Cached islands of the root view; see [`WakuPane`].
@@ -4513,6 +4496,7 @@ mod piper;
 mod plan_approval;
 mod plan_wireframe;
 mod press_to_talk;
+mod project_picker;
 mod project_switcher;
 mod projects;
 mod provider_switch;
@@ -5686,12 +5670,6 @@ impl Waku {
                 .accessibility_label(tr!("workspace.find_worktree"))
                 .placeholder(tr!("workspace.find_worktree"))
         });
-        let project_search = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .clear_on_escape()
-                .accessibility_label(tr!("input.search_projects"))
-                .placeholder(tr!("input.search_projects"))
-        });
         let settings_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .tab_index(0)
@@ -6243,7 +6221,6 @@ impl Waku {
         let sidebar_list_state = ListState::new(0, ListAlignment::Top, px(256.0));
         let usage_projects_list = ListState::new(0, ListAlignment::Top, px(256.0));
         let branch_picker_list_state = ListState::new(0, ListAlignment::Top, px(152.0));
-        let project_picker_list_state = ListState::new(0, ListAlignment::Top, px(152.0));
         let transcript_is_scrolled = Rc::new(Cell::new(false));
         let transcript_anchor_following = Rc::new(Cell::new(false));
         let transcript_tail_recheck = Rc::new(Cell::new(false));
@@ -6841,22 +6818,6 @@ impl Waku {
                     if matches!(event, InputEvent::Edited) {
                         cx.notify();
                     }
-                },
-            )
-            .detach();
-            cx.subscribe(
-                &project_search,
-                |this: &mut Self, search, event: &InputEvent, cx| {
-                    if !matches!(event, InputEvent::Edited) {
-                        return;
-                    }
-                    if search.read(cx).content().trim().is_empty() {
-                        this.project_picker_highlight = None;
-                    } else {
-                        this.project_picker_highlight = Some(0);
-                        this.project_picker_list_state.scroll_to_reveal_item(0);
-                    }
-                    cx.notify();
                 },
             )
             .detach();
@@ -7518,10 +7479,6 @@ impl Waku {
                 branch_picker_highlight: None,
                 branch_picker_list_state,
                 branch_picker_row_cache: RefCell::new(Vec::new()),
-                project_search,
-                project_picker_highlight: None,
-                project_picker_list_state,
-                project_picker_row_cache: RefCell::new(Vec::new()),
                 branch_snapshots: QueryCache::coalescing(MAX_CACHED_WORKSPACES),
                 remote_files: QueryCache::new(4 * MAX_CACHED_WORKSPACES),
                 base_push_states: RefCell::new(QueryCache::coalescing(MAX_CACHED_WORKSPACES)),
@@ -8104,6 +8061,7 @@ impl Waku {
                 transcript_scrollbar: ScrollbarState::new(),
                 composer_lane_height: Rc::new(Cell::new(0.0)),
                 menus: RefCell::new(HashMap::new()),
+                project_pickers: RefCell::new(HashMap::new()),
                 navigation_rail: navigation_rail.clone(),
                 navigation_rail_reset_generation: Cell::new(0),
                 sidebar_pane: sidebar_pane.clone(),

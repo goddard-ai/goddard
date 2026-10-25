@@ -13560,8 +13560,8 @@ impl Waku {
             .map(|(_, name)| name.clone())
             .unwrap_or_else(|| tr!("boss.history_all_projects"));
         let weak = cx.entity().downgrade();
-        let handle = self.menu_handle("boss-goals-project", cx);
-        let project_menu = dropdown_menu(
+        let handle = self.project_picker_handle("boss-goals-project", cx);
+        let project_menu = project_dropdown_menu(
             MenuChip::new("boss-goals-project")
                 .icon("icons/folder.svg", theme.text_tertiary)
                 .label(project_label)
@@ -13569,9 +13569,9 @@ impl Waku {
                 .height(px(28.0))
                 .max_w(px(220.0))
                 .selected(handle.is_open()),
-            "boss-goals-project-menu",
             &handle,
             MenuAlign::BelowLeft,
+            ProjectPickerVariant::ListFilter,
             move |_| {
                 let mut items = vec![
                     MenuItem::new(tr!("boss.history_all_projects"), {

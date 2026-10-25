@@ -4004,10 +4004,20 @@ impl Waku {
             .find(|project| project.id == project_id)
             .map(|project| project.display_name())
             .unwrap_or_else(|| tr!("sidebar.unknown_project"));
-        let menu_handle = self.menu_handle("git-settings-project-selector", cx);
+        let menu_handle = self.project_picker_handle("git-settings-project-selector", cx);
         let selector_open = menu_handle.is_open();
         let weak = cx.entity().downgrade();
-        let selector = dropdown_menu(
+        let projects = if menu_handle.is_open() {
+            self.state
+                .projects
+                .iter()
+                .filter(|project| !project.is_projectless())
+                .map(|project| (project.id, project.display_name()))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let selector = project_dropdown_menu(
             MenuChip::new("git-settings-project-selector")
                 .icon("icons/folder.svg", theme.text_tertiary)
                 .label(project_name)
@@ -4015,22 +4025,13 @@ impl Waku {
                 .selected(selector_open)
                 .max_w(px(220.0))
                 .flex_none(),
-            "git-settings-project-selector-menu",
             &menu_handle,
             MenuAlign::BelowLeft,
-            move |cx| {
-                let items = weak
-                    .update(cx, |this, _| {
-                        this.state
-                            .projects
-                            .iter()
-                            .filter(|project| !project.is_projectless())
-                            .map(|project| (project.id, project.display_name()))
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                items
-                    .into_iter()
+            ProjectPickerVariant::ProjectSelection,
+            move |_| {
+                projects
+                    .iter()
+                    .cloned()
                     .map(|(id, label)| {
                         let weak = weak.clone();
                         MenuItem::new(label, move |_, cx| {

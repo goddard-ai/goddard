@@ -8,6 +8,7 @@ use gpui::{
 pub mod column_resize;
 pub mod menu;
 pub mod motion;
+pub mod project_picker;
 pub mod scrollbar;
 pub mod shortcut;
 pub mod slider;

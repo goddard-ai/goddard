@@ -10847,8 +10847,8 @@ impl Waku {
                         .map(|(_, name)| name.clone())
                 })
                 .unwrap_or_else(|| tr!("settings.archived_all_projects"));
-            let menu_handle = self.menu_handle("archived-project-selector", cx);
-            toolbar = toolbar.child(dropdown_menu(
+            let menu_handle = self.project_picker_handle("archived-project-selector", cx);
+            toolbar = toolbar.child(project_dropdown_menu(
                 MenuChip::new("archived-project-selector")
                     .icon("icons/folder.svg", theme.text_tertiary)
                     .label(selected_label)
@@ -10856,9 +10856,9 @@ impl Waku {
                     .selected(menu_handle.is_open())
                     .max_w(px(220.0))
                     .flex_none(),
-                "archived-project-selector-menu",
                 &menu_handle,
                 MenuAlign::BelowRight,
+                ProjectPickerVariant::ListFilter,
                 move |_| {
                     let mut items = Vec::with_capacity(project_options.len() + 1);
                     items.push(

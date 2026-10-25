@@ -2008,7 +2008,7 @@ impl Waku {
         );
 
         // Project picker: the daemon's projects by display path.
-        let project_handle = self.menu_handle("automation-editor-project", cx);
+        let project_handle = self.project_picker_handle("automation-editor-project", cx);
         let project_label = editor
             .project_path
             .as_ref()
@@ -2024,15 +2024,15 @@ impl Waku {
             .map(|project| project.path.clone())
             .collect();
         let current_path = editor.project_path.clone();
-        let project_menu = dropdown_menu(
+        let project_menu = project_dropdown_menu(
             MenuChip::new("automation-editor-project")
                 .label(project_label)
                 .outlined()
                 .background(theme.raised)
                 .selected(project_handle.is_open()),
-            "automation-editor-project-menu",
             &project_handle,
             MenuAlign::BelowRight,
+            ProjectPickerVariant::ProjectSelection,
             move |_| {
                 projects
                     .iter()
