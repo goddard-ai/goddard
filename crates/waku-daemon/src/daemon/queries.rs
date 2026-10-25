@@ -1019,7 +1019,7 @@ impl WakuBackend {
             )
         };
         let matches = self.task_store.session_message_search(
-            parsed.text,
+            query.to_owned(),
             parsed.limit.unwrap_or(limit),
             parsed.scope.unwrap_or(scope),
             allowed,

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -394,8 +395,10 @@ pub enum SessionMessageSearchScope {
 /// value, and different filters intersect.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SessionMessageSearchQuery {
-    /// The remaining free text: one case-insensitive substring needle.
+    /// Remaining free text for fuzzy metadata matching.
     pub text: String,
+    /// Literal terms that must all occur within a message; quotes keep a phrase together.
+    pub terms: Vec<String>,
     /// `project:` values as typed — the caller resolves them to project ids.
     pub projects: Vec<String>,
     /// `status:` values; `busy` expands to [`SessionStatus::is_busy`]'s set.
@@ -544,10 +547,42 @@ pub fn parse_session_message_search(query: &str) -> SessionMessageSearchQuery {
         if !text.is_empty() {
             text.push(' ');
         }
-        text.push_str(unquote(raw));
+        let term = unquote(raw).trim();
+        text.push_str(term);
+        let term = term.to_ascii_lowercase();
+        if !term.is_empty() && !parsed.terms.contains(&term) {
+            parsed.terms.push(term);
+        }
     }
     parsed.text = text;
     parsed
+}
+
+/// Byte ranges for every literal term, merged so overlapping terms paint once.
+/// ASCII folding agrees with SQLite's built-in lower() and preserves UTF-8 offsets.
+pub fn session_message_match_ranges(text: &str, terms: &[String]) -> Vec<Range<usize>> {
+    let lowered = text.to_ascii_lowercase();
+    let mut ranges = terms
+        .iter()
+        .filter(|term| !term.is_empty())
+        .flat_map(|term| {
+            lowered
+                .match_indices(term.as_str())
+                .map(move |(start, _)| start..start + term.len())
+        })
+        .collect::<Vec<_>>();
+    ranges.sort_by_key(|range| range.start);
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for range in ranges {
+        if let Some(last) = merged.last_mut()
+            && range.start <= last.end
+        {
+            last.end = last.end.max(range.end);
+        } else {
+            merged.push(range);
+        }
+    }
+    merged
 }
 
 #[cfg(test)]
@@ -555,13 +590,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_bare_query_stays_one_literal_needle() {
+    fn bare_words_become_independent_literal_terms() {
         let parsed = parse_session_message_search("  retry   logic  ");
         assert_eq!(parsed.text, "retry logic");
+        assert_eq!(parsed.terms, ["retry", "logic"]);
         assert!(parsed.projects.is_empty());
         assert!(parsed.statuses.is_empty());
         assert_eq!(parsed.scope, None);
         assert_eq!(parsed.limit, None);
+    }
+
+    #[test]
+    fn transcript_terms_highlight_literal_identifiers_and_overlapping_hits() {
+        let parsed =
+            parse_session_message_search(r#"status:idle retry "expired token" retry 100%_id"#);
+        assert_eq!(parsed.terms, ["retry", "expired token", "100%_id"]);
+        let text = "界 RETRY an expired token: 100%_id";
+        let hits = session_message_match_ranges(text, &parsed.terms);
+        assert_eq!(
+            hits.iter()
+                .map(|range| &text[range.clone()])
+                .collect::<Vec<_>>(),
+            ["RETRY", "expired token", "100%_id"]
+        );
+        assert_eq!(
+            session_message_match_ranges("foobar", &["foo".into(), "foobar".into()]),
+            vec![0..6]
+        );
     }
 
     #[test]
@@ -608,6 +663,7 @@ mod tests {
         let parsed = parse_session_message_search("project:\"my app\" \"the fix\" tail");
         assert_eq!(parsed.projects, ["my app"]);
         assert_eq!(parsed.text, "the fix tail");
+        assert_eq!(parsed.terms, ["the fix", "tail"]);
     }
 
     #[test]

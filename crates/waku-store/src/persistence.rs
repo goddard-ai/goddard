@@ -980,13 +980,10 @@ const SESSION_SEARCH_CONTEXT_BEFORE_CHARS: usize = 72;
 
 fn build_session_search_snippet(text: &str, query: &str) -> String {
     let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    // ASCII folding preserves UTF-8 byte offsets while covering the provider
-    // and source-code text people search most often. Non-ASCII queries still
-    // match exactly, including Simplified Chinese.
-    let match_byte = normalized
-        .to_ascii_lowercase()
-        .find(&query.to_ascii_lowercase())
-        .unwrap_or(0);
+    let terms = waku_protocol::persistence::parse_session_message_search(query).terms;
+    let match_byte = waku_protocol::persistence::session_message_match_ranges(&normalized, &terms)
+        .first()
+        .map_or(0, |range| range.start);
     session_search_snippet(normalized, match_byte)
 }
 
@@ -1034,6 +1031,8 @@ fn search_session_messages(
     last_turns: Option<usize>,
 ) -> io::Result<Vec<SessionMessageMatch>> {
     let query = query.trim();
+    let terms = waku_protocol::persistence::parse_session_message_search(query).terms;
+    let terms_json = serde_json::to_string(&terms).map_err(to_io_error)?;
     // An empty needle still scans when a session-id allowlist narrows the
     // corpus — the daemon sends that for filter-only queries like
     // `status:idle` — and each session's newest user message becomes the
@@ -1127,7 +1126,10 @@ fn search_session_messages(
                     AND messages.role IN ('user', 'assistant')
                     AND messages.hidden = 0
                     AND messages.notice IS NULL
-                    AND instr(lower(messages.content), lower(?1)) > 0
+                    AND NOT EXISTS (
+                        SELECT 1 FROM json_each(?1) AS term
+                         WHERE instr(lower(messages.content), lower(term.value)) = 0
+                    )
              )
              SELECT session_id, id, role, content
                FROM ranked
@@ -1148,9 +1150,9 @@ fn search_session_messages(
     let rows = match last_turns {
         Some(turns) => {
             let turns = i64::try_from(turns).unwrap_or(i64::MAX);
-            statement.query_map(params![query, limit, turns], read_row)
+            statement.query_map(params![terms_json, limit, turns], read_row)
         }
-        None => statement.query_map(params![query, limit], read_row),
+        None => statement.query_map(params![terms_json, limit], read_row),
     }
     .map_err(to_io_error)?;
 
@@ -6029,6 +6031,44 @@ mod tests {
         assert!(hits("unturned needle", Some(3)).is_empty());
         assert!(hits("needle", Some(0)).is_empty());
 
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn message_search_requires_all_words_and_preserves_quoted_phrases() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        state.sessions[0].begin_turn("Retry an expired\ntoken at src/auth.rs:100%_literal");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        let mut split = AgentSession::new(state.projects[0].id, ProviderKind::Codex);
+        split.begin_turn("retry");
+        split.push_message(MessageRole::Assistant, "token");
+        split.finish_active_turn(crate::model::TurnStatus::Completed);
+        state.push_session(split);
+        store.save(&mut state).unwrap();
+        let hits = |query: &str| {
+            store.session_message_search(
+                query.into(),
+                10,
+                SessionMessageSearchScope::Active,
+                None,
+                None,
+            )()
+            .unwrap()
+        };
+        for query in [
+            "retry token",
+            "token retry",
+            "token src/auth.rs:100%_literal",
+        ] {
+            let found = hits(query);
+            assert_eq!(found.len(), 1, "{query}");
+            assert!(found[0].snippet.contains("Retry an expired token"));
+        }
+        assert!(hits("retry missing").is_empty());
+        assert!(hits("\"retry token\"").is_empty());
+        assert_eq!(hits("\"Retry an expired\" token").len(), 1);
         fs::remove_dir_all(directory).ok();
     }
 

@@ -592,19 +592,8 @@ pub(super) fn palette_content_match_text(
         strikethrough: None,
     }];
 
-    // The highlight needle is the parsed free text — `status:idle retry`
-    // should emphasize "retry" in the excerpt, not hunt for the filter.
-    let query = crate::persistence::parse_session_message_search(query).text;
-    let query = query.trim();
-    let match_range = (!query.is_empty())
-        .then(|| {
-            matched
-                .snippet
-                .to_ascii_lowercase()
-                .find(&query.to_ascii_lowercase())
-                .map(|start| start..start + query.len())
-        })
-        .flatten();
+    let terms = crate::persistence::parse_session_message_search(query).terms;
+    let match_ranges = crate::persistence::session_message_match_ranges(&matched.snippet, &terms);
     let mut push = |len: usize, font, color| {
         if len > 0 {
             runs.push(TextRun {
@@ -617,17 +606,21 @@ pub(super) fn palette_content_match_text(
             });
         }
     };
-    if let Some(range) = match_range {
-        push(range.start, normal_font.clone(), theme.text_tertiary);
-        push(range.len(), emphasized_font, theme.text_secondary);
+    let mut offset = 0;
+    for range in match_ranges {
         push(
-            matched.snippet.len().saturating_sub(range.end),
-            normal_font,
+            range.start - offset,
+            normal_font.clone(),
             theme.text_tertiary,
         );
-    } else {
-        push(matched.snippet.len(), normal_font, theme.text_tertiary);
+        push(range.len(), emphasized_font.clone(), theme.text_secondary);
+        offset = range.end;
     }
+    push(
+        matched.snippet.len() - offset,
+        normal_font,
+        theme.text_tertiary,
+    );
     StyledText::new(text).with_runs(runs)
 }
 
@@ -5965,8 +5958,7 @@ impl Waku {
                             .command_palette
                             .message_matches_query
                             .as_deref()
-                            .map(crate::persistence::parse_session_message_search)
-                            .map(|parsed| parsed.text)
+                            .map(str::to_owned)
                             .unwrap_or_default(),
                     });
                 }

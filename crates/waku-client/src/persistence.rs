@@ -44,7 +44,7 @@ pub use waku_protocol::persistence::{
     ComposerDraftChange, ComposerDraftFileAnnotation, ComposerDraftInlineAtom,
     ComposerDraftInlineAtomKind, ComposerDraftKey, ComposerDraftTarget, ComposerDrafts,
     SessionMessageMatch, SessionMessageSearchQuery, SessionMessageSearchScope,
-    parse_session_message_search, resolve_named_search_project,
+    parse_session_message_search, resolve_named_search_project, session_message_match_ranges,
 };
 
 const STATE_VERSION: u32 = 5;

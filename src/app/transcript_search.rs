@@ -432,10 +432,20 @@ impl Waku {
         // The same glyph washes ⌘F paints — computed once here so a frame
         // never scans the message again.
         let query = pending.query.trim();
-        let (highlights, active) = if query.is_empty() || hidden {
+        let mut terms = crate::persistence::parse_session_message_search(query).terms;
+        let (highlights, active) = if terms.is_empty() || hidden {
             (Rc::new(Vec::new()), None)
         } else {
-            let regex = literal_find_regex(query);
+            terms.sort_by_key(|term| std::cmp::Reverse(term.len()));
+            let pattern = terms
+                .iter()
+                .map(|term| regex::escape(term))
+                .collect::<Vec<_>>()
+                .join("|");
+            let regex = RegexBuilder::new(&pattern)
+                .case_insensitive(true)
+                .build()
+                .expect("escaped search terms form a valid regex");
             let (matches, _) = if matches!(role, MessageRole::User | MessageRole::Assistant) {
                 md::render::markdown_search_matches(&content, &regex, MAX_TRANSCRIPT_SEARCH_MATCHES)
             } else {

@@ -1,0 +1,1 @@
+- Search Cmd+K transcripts with words in any order, or quote a phrase to require that exact text.
