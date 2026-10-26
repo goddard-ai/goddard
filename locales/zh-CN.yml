@@ -2263,8 +2263,6 @@ experiments.gate_confirm: 我已了解风险 — 显示实验功能
 experiments.gate_title: 实验功能可能导致问题
 experiments.git_panel_description: 在会话旁新增 ⌘⌥G 面板，包含提交图谱、可展开的差异、上游跟踪，以及将工作树合入其基准分支的 /land 命令。
 experiments.git_panel_title: Git 面板
-experiments.github_description: 浏览项目的 GitHub issue 和拉取请求，从中启动任务，并在侧边栏行和右侧面板中查看检查与审查状态。
-experiments.github_title: GitHub 集成
 experiments.group_git: Git 与审查
 experiments.group_sessions: 会话与智能体
 experiments.group_surfaces: 应用界面
@@ -3637,3 +3635,50 @@ workspace.loading_worktrees: "正在加载工作树…"
 workspace.load_worktrees_failed: "无法加载工作树。请返回后重试。"
 workspace.no_existing_worktrees: "没有现有工作树。"
 workspace.no_matching_worktrees: "没有匹配的工作树。"
+
+experiments.git_worktree_management_title: Git 工作树管理
+experiments.git_worktree_management_description: 在设置中添加 Git 页面，便于浏览工作树和分支、从这些工作区启动任务并管理仓库检出。
+experiments.github_references_title: GitHub 引用
+experiments.github_references_description: "输入 # 可补全 Issue 和拉取请求编号，在聊天中显示关联引用，并将相关上下文加入代理提示。"
+experiments.github_task_pull_requests_title: 任务拉取请求
+experiments.github_task_pull_requests_description: 在任务上显示关联的拉取请求，查看检查和审阅评论，并从 PR 面板准备修复。
+experiments.github_browser_title: Issue 和拉取请求
+experiments.github_browser_description: 在“项目”页面浏览、搜索和评论 GitHub Issue 与拉取请求，并从中启动任务。
+experiments.github_inbox_title: GitHub 收件箱
+experiments.github_inbox_description: 接收 GitHub 通知，管理未读和已完成的话题，并返回拥有某个拉取请求的任务。
+experiments.github_activity_title: 仓库活动
+experiments.github_activity_description: 在“项目”页面浏览发布版本和工作流运行，包括运行详情和日志。
+projects.no_enabled_tabs: 请在“设置 → 实验”中启用“Issue 和拉取请求”“仓库活动”或“开发审查”。
+settings.transcript_prompt_position: 发送提示的位置
+settings.transcript_prompt_position_description: “从顶部开始”为每个新回合预留一屏空间。“紧凑”会将提示放在输入框上方，并立即跟随新活动。更改将在下次发送提示时生效。
+settings.transcript_prompt_position_top: 从顶部开始
+settings.transcript_prompt_position_compact: 紧凑
+terminal.split_right: 将终端向右拆分
+terminal.split_down: 将终端向下拆分
+qa.start_action: 开始 QA 会话…
+qa.edit_action: 编辑 QA 设置…
+qa.choose_project: 选择一个用于 QA 的项目…
+qa.dev_command: 开发服务器命令
+qa.install_command: 安装命令
+qa.install_optional: 安装命令（可选）
+qa.branch: QA 分支
+qa.required: 请输入开发服务器命令和 QA 分支。
+qa.preparing: 正在准备 QA…
+qa.window_title: Goddard — QA
+qa.server: QA 开发服务器
+qa.setup: QA 设置
+qa.start: 开始 QA
+qa.wait_agent: 丢弃此 QA 检出前，请等待代理完成工作。
+qa.discarded: QA 审查已结束。对话已保留。
+qa.next: 审查下一个提交
+qa.pushing: 正在处理…
+qa.approve: 批准并推送到 %{branch}
+qa.restart_server: 重启服务器
+qa.discard: 丢弃
+qa.promoted: 已批准并推送到 %{branch}。
+qa.command_running: 安装/服务器命令正在运行
+qa.command_exited: 已退出（%{code}）
+qa.command_stopped: 服务器已停止
+qa.actions: 更多
+command_palette.transcript_search_failed: 对话记录搜索失败。编辑查询后重试。
+command_palette.transcript_search_incomplete: 部分主机无法搜索。编辑查询后重试。

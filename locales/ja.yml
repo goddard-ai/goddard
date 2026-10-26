@@ -2311,8 +2311,6 @@ experiments.gate_confirm: リスクを理解しました — 実験的機能を�
 experiments.gate_title: 実験的機能は不具合を起こす可能性があります
 experiments.git_panel_description: セッションの横に ⌘⌥G で開くパネルです。コミットグラフ、展開できる差分、upstream の追跡、ワークツリーをベースに取り込む /land コマンドを備えます。
 experiments.git_panel_title: Git パネル
-experiments.github_description: プロジェクトの GitHub Issue とプルリクエストを閲覧し、そこからタスクを開始し、チェックとレビューの状態をサイドバーの行と右パネルで確認できます。
-experiments.github_title: GitHub 連携
 experiments.group_git: Git とレビュー
 experiments.group_sessions: セッションとエージェント
 experiments.group_surfaces: アプリの画面
@@ -3686,3 +3684,50 @@ workspace.loading_worktrees: "ワークツリーを読み込み中…"
 workspace.load_worktrees_failed: "ワークツリーを読み込めませんでした。戻って再試行してください。"
 workspace.no_existing_worktrees: "既存のワークツリーはありません。"
 workspace.no_matching_worktrees: "一致するワークツリーはありません。"
+
+experiments.git_worktree_management_title: Git ワークツリー管理
+experiments.git_worktree_management_description: 設定に Git ページを追加し、ワークツリーやブランチの閲覧、そこからのタスク開始、リポジトリのチェックアウト管理を行えます。
+experiments.github_references_title: GitHub の参照
+experiments.github_references_description: "# で Issue とプルリクエスト番号を補完し、チャットに関連する参照を表示して、そのコンテキストをエージェントのプロンプトに含めます。"
+experiments.github_task_pull_requests_title: タスクのプルリクエスト
+experiments.github_task_pull_requests_description: タスクに関連するプルリクエストを表示し、チェックやレビューコメントを確認して、PR パネルから修正を準備できます。
+experiments.github_browser_title: Issue とプルリクエスト
+experiments.github_browser_description: Projects ページで GitHub の Issue とプルリクエストを閲覧・検索・コメントし、そこからタスクを開始できます。
+experiments.github_inbox_title: GitHub の受信トレイ
+experiments.github_inbox_description: GitHub 通知を受け取り、未読・完了済みのスレッドを管理して、プルリクエストを担当するタスクに戻れます。
+experiments.github_activity_title: リポジトリのアクティビティ
+experiments.github_activity_description: Projects ページで、実行の詳細やログを含むリリースとワークフロー実行を確認できます。
+projects.no_enabled_tabs: 設定 → 実験で「Issue とプルリクエスト」「リポジトリのアクティビティ」「開発レビュー」のいずれかを有効にしてください。
+settings.transcript_prompt_position: 送信したプロンプトの表示位置
+settings.transcript_prompt_position_description: 「上部から開始」では新しいターンごとに1画面分の余白を確保します。「コンパクト」ではプロンプトを入力欄の上に置き、新しいアクティビティをすぐに追います。次回プロンプト送信時から適用されます。
+settings.transcript_prompt_position_top: 上部から開始
+settings.transcript_prompt_position_compact: コンパクト
+terminal.split_right: ターミナルを右に分割
+terminal.split_down: ターミナルを下に分割
+qa.start_action: QA セッションを開始…
+qa.edit_action: QA 設定を編集…
+qa.choose_project: QA 用のプロジェクトを選択…
+qa.dev_command: 開発サーバーのコマンド
+qa.install_command: インストールコマンド
+qa.install_optional: インストールコマンド（任意）
+qa.branch: QA ブランチ
+qa.required: 開発サーバーのコマンドと QA ブランチを入力してください。
+qa.preparing: QA を準備中…
+qa.window_title: Goddard — QA
+qa.server: QA 開発サーバー
+qa.setup: QA 設定
+qa.start: QA を開始
+qa.wait_agent: この QA チェックアウトを破棄する前に、エージェントの作業完了を待ってください。
+qa.discarded: QA レビューは終了しました。会話は保持されています。
+qa.next: 次のコミットをレビュー
+qa.pushing: 処理中…
+qa.approve: 承認して %{branch} にプッシュ
+qa.restart_server: サーバーを再起動
+qa.discard: 破棄
+qa.promoted: 承認して %{branch} にプッシュしました。
+qa.command_running: インストール／サーバーコマンドを実行中
+qa.command_exited: 終了しました（%{code}）
+qa.command_stopped: サーバーを停止しました
+qa.actions: その他
+command_palette.transcript_search_failed: 会話ログの検索に失敗しました。クエリを編集して再試行してください。
+command_palette.transcript_search_incomplete: 一部のホストを検索できませんでした。クエリを編集して再試行してください。
