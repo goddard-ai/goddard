@@ -1426,7 +1426,10 @@ fn is_wireframe_document(relative_path: &str) -> bool {
     Path::new(relative_path)
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.to_ascii_lowercase().ends_with(".wireframe.json"))
+        .is_some_and(|name| {
+            let name = name.to_ascii_lowercase();
+            name.ends_with(".wireframe.json") || name.ends_with(".wireframe.html")
+        })
 }
 
 /// Whether the pane draws this `.wireframe.json` as themed elements
@@ -5187,10 +5190,44 @@ impl Waku {
             && let Some(path) = self.pending_wireframes.remove(&session_id)
         {
             self.sync_right_panel_owner(cx);
+            let key = self.daemons.session_owner(session_id);
+            let companion_plan = self
+                .boss_ui
+                .states
+                .get(&key)
+                .and_then(|state| {
+                    state.planning.iter().find(|plan| {
+                        plan.session_id == session_id
+                            && plan.plan_file.strip_suffix(".md").is_some_and(|stem| {
+                                path == format!("{stem}.wireframe.html")
+                                    || path == format!("{stem}.wireframe.json")
+                            })
+                    })
+                })
+                .map(|plan| plan.plan_file.clone());
+            if let Some(plan_file) = companion_plan {
+                // Planning documents live under the Boss files root. Reuse
+                // its revision-bound reader instead of the project file tab.
+                self.plan_wireframes.remove(&session_id);
+                self.ensure_plan_wireframe(key, session_id, &plan_file, cx);
+                if let Some(preview) = self.plan_wireframes.get_mut(&session_id) {
+                    preview.selected = true;
+                }
+                self.open_right_panel_surface(
+                    RightPanelSurface::Plan {
+                        session_id,
+                        plan_file,
+                    },
+                    cx,
+                );
+                self.set_right_panel_visible(true, cx);
+                return true;
+            }
             if let Some(editor) = self.right_panel_file_editors.get_mut(&path) {
                 editor.show_source = false;
             }
-            self.open_right_panel_file(path, cx);
+            self.open_right_panel_file(path.clone(), cx);
+            self.reload_right_panel_file_if_clean(&path, cx);
             self.set_right_panel_visible(true, cx);
             changed = true;
         }
@@ -8192,9 +8229,6 @@ impl Waku {
     /// settings page and overlay menus all funnel through here, so a webview
     /// can never linger over unrelated UI.
     pub(super) fn sync_browser_webviews(&mut self, cx: &mut Context<Self>) {
-        if self.right_panel_browsers.is_empty() {
-            return;
-        }
         // With the scene overlay compositing GPUI's deferred draws above
         // native views, open menus never occlude the webview — the snapshot
         // swap is purely the fallback for a window where enabling it failed.
@@ -8216,6 +8250,29 @@ impl Waku {
             browser.update(cx, |view, cx| {
                 view.sync_native_state(surface_visible, overlay_open, cx);
             });
+        }
+        if let Some(preview) = &self.html_wireframe_preview {
+            if let Some(view) = &preview.view {
+                let visible = self.html_wireframe_visible(&preview.path)
+                    && self.state.wireframes_experiment_enabled
+                    && self.settings_page.is_none()
+                    && self.right_panel_content_visible()
+                    && self.right_panel_slide.is_none();
+                view.update(cx, |view, cx| {
+                    view.sync_native_state(visible, overlay_open, cx)
+                });
+                let refresh = visible && !preview.was_visible;
+                if let Some(preview) = self.html_wireframe_preview.as_mut() {
+                    preview.was_visible = visible;
+                }
+                if refresh {
+                    let weak = cx.entity().downgrade();
+                    cx.defer(move |cx| {
+                        let _ =
+                            weak.update(cx, |this, cx| this.refresh_html_wireframe_comments(cx));
+                    });
+                }
+            }
         }
     }
 
@@ -9786,7 +9843,14 @@ impl Waku {
         let body = if modes.image_mode {
             self.render_file_image_preview(&relative_path, cx)
         } else if modes.wireframe_mode {
-            self.render_file_wireframe_preview(&relative_path, &editor_state, cx)
+            if relative_path
+                .to_ascii_lowercase()
+                .ends_with(".wireframe.html")
+            {
+                self.render_html_wireframe(&relative_path, window, cx)
+            } else {
+                self.render_file_wireframe_preview(&relative_path, &editor_state, cx)
+            }
         } else if modes.preview {
             self.render_file_markdown_preview(
                 &relative_path,
@@ -10447,6 +10511,13 @@ impl Waku {
                 }
                 // Any content change — typing, a replace, a reload from disk —
                 // moves the text out from under an open find's match list.
+                if this
+                    .html_wireframe_preview
+                    .as_ref()
+                    .is_some_and(|p| p.path == subscribed_path)
+                {
+                    this.html_wireframe_preview = None;
+                }
                 this.refresh_file_search_for_edit(subscribed_path.as_str(), cx);
             },
         )
@@ -11735,7 +11806,7 @@ impl Waku {
                 .flex()
                 .flex_col()
                 .children(header)
-                .child(self.render_plan_wireframe(session_id, cx));
+                .child(self.render_plan_wireframe(session_id, window, cx));
         }
         let doc = self.plan_docs.get(&session_id);
         let document = match doc.and_then(|doc| doc.content.as_ref()) {

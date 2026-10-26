@@ -3706,6 +3706,7 @@ pub struct Waku {
     /// holds only text plus the Boss revision it answered.
     plan_docs: HashMap<Uuid, PlanDoc>,
     plan_wireframes: HashMap<Uuid, plan_wireframe::Preview>,
+    html_wireframe_preview: Option<html_wireframe::Preview>,
     plan_wireframe_scroll_handle: ScrollHandle,
     plan_markdown: RefCell<Option<(Uuid, MarkdownView)>>,
     plan_preview_selection: TranscriptSelection,
@@ -4146,6 +4147,8 @@ pub struct Waku {
     speech_events: Receiver<(waku_client::DaemonKey, Uuid, Vec<String>)>,
     wireframe_tx: Sender<(waku_client::DaemonKey, Uuid, String)>,
     wireframe_events: Receiver<(waku_client::DaemonKey, Uuid, String)>,
+    wireframe_comment_tx: Sender<(waku_client::DaemonKey, Option<(Uuid, String)>)>,
+    wireframe_comment_events: Receiver<(waku_client::DaemonKey, Option<(Uuid, String)>)>,
     pending_wireframes: HashMap<Uuid, String>,
     boss_browse_tx: Sender<(waku_client::DaemonKey, Uuid, Uuid, String, Option<String>)>,
     boss_browse_events: Receiver<(waku_client::DaemonKey, Uuid, Uuid, String, Option<String>)>,
@@ -4508,6 +4511,7 @@ mod github;
 mod github_media;
 mod go_to_line;
 mod goal_dialog;
+mod html_wireframe;
 mod image_preview;
 mod incognito_dialog;
 mod issue_dialog;
@@ -6177,6 +6181,7 @@ impl Waku {
         let (boss_tx, boss_events) = unbounded();
         let (speech_tx, speech_events) = unbounded();
         let (wireframe_tx, wireframe_events) = unbounded();
+        let (wireframe_comment_tx, wireframe_comment_events) = unbounded();
         let (boss_browse_tx, boss_browse_events) = unbounded();
         let (boss_voice_gate_tx, boss_voice_gate_events) = unbounded();
         let (voice_scratchpad_tx, voice_scratchpad_events) = unbounded();
@@ -7786,6 +7791,7 @@ impl Waku {
                 wireframe_preview_scrollbar: ScrollbarState::new(),
                 plan_docs: HashMap::new(),
                 plan_wireframes: HashMap::new(),
+                html_wireframe_preview: None,
                 plan_wireframe_scroll_handle: ScrollHandle::new(),
                 plan_annotations,
                 plan_markdown: RefCell::new(None),
@@ -7987,6 +7993,8 @@ impl Waku {
                 speech_events,
                 wireframe_tx,
                 wireframe_events,
+                wireframe_comment_tx,
+                wireframe_comment_events,
                 pending_wireframes: HashMap::new(),
                 boss_browse_tx,
                 boss_browse_events,

@@ -2,6 +2,16 @@
 use super::*;
 use waku_client::boss::{BossOperation, BossResult};
 use waku_protocol::wireframe::Wireframe;
+use waku_protocol::wireframe_html::HtmlWireframe;
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum Document {
+    Json(Wireframe),
+    Html {
+        path: String,
+        document: HtmlWireframe,
+    },
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Request {
@@ -15,7 +25,7 @@ pub(super) struct Preview {
     pub request: Request,
     pub pending: bool,
     /// None is verified absence; errors include transport and schema failures.
-    pub content: Option<Result<Option<Wireframe>, String>>,
+    pub content: Option<Result<Option<Document>, String>>,
     pub selected: bool,
     pub screen: usize,
 }
@@ -25,13 +35,13 @@ impl Preview {
         self.pending && self.request == *request
     }
 
-    pub fn finish(&mut self, request: &Request, result: Result<Option<Wireframe>, String>) -> bool {
+    pub fn finish(&mut self, request: &Request, result: Result<Option<Document>, String>) -> bool {
         if !self.accepts(request) {
             return false;
         }
         self.pending = false;
         self.content = Some(result);
-        if let Some(Ok(Some(wireframe))) = &self.content {
+        if let Some(Ok(Some(Document::Json(wireframe)))) = &self.content {
             self.screen = self.screen.min(wireframe.screens.len().saturating_sub(1));
         }
         if !self.visible(true) {
@@ -55,8 +65,31 @@ pub(super) fn companion_path(plan: &str) -> Option<String> {
 pub(super) fn read(
     path: &str,
     mut request: impl FnMut(BossOperation) -> Result<BossResult, String>,
-) -> Result<Option<Wireframe>, String> {
+) -> Result<Option<Document>, String> {
     let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
+    let html_path = path
+        .strip_suffix(".wireframe.json")
+        .map(|stem| format!("{stem}.wireframe.html"));
+    let listing = match request(BossOperation::ListFiles {
+        path: parent.to_owned(),
+    })? {
+        BossResult::Files { files } => files,
+        _ => return Err("unexpected companion listing response".to_owned()),
+    };
+    let path = if let Some(html) = html_path.as_ref().filter(|html| {
+        listing
+            .iter()
+            .any(|file| file.path == **html && !file.directory)
+    }) {
+        html.as_str()
+    } else if listing
+        .iter()
+        .any(|file| file.path == path && !file.directory)
+    {
+        path
+    } else {
+        return Ok(None);
+    };
     let exists =
         |request: &mut dyn FnMut(BossOperation) -> Result<BossResult, String>| match request(
             BossOperation::ListFiles {
@@ -68,15 +101,25 @@ pub(super) fn read(
                 .any(|file| file.path == path && !file.directory)),
             _ => Err("unexpected companion listing response".to_owned()),
         };
-    if !exists(&mut request)? {
-        return Ok(None);
-    }
     match request(BossOperation::ReadFile {
         path: path.to_owned(),
     }) {
-        Ok(BossResult::File { content, .. }) => Wireframe::parse(&content)
-            .map(Some)
-            .map_err(|error| error.to_string()),
+        Ok(BossResult::File { content, .. }) => {
+            if path.ends_with(".wireframe.html") {
+                HtmlWireframe::parse(&content)
+                    .map(|document| {
+                        Some(Document::Html {
+                            path: path.to_owned(),
+                            document,
+                        })
+                    })
+                    .map_err(|e| e.to_string())
+            } else {
+                Wireframe::parse(&content)
+                    .map(|document| Some(Document::Json(document)))
+                    .map_err(|e| e.to_string())
+            }
+        }
         Ok(_) => Err("unexpected companion read response".to_owned()),
         Err(error) => {
             if exists(&mut request)? {
@@ -182,8 +225,17 @@ impl Waku {
                     return;
                 };
                 let was_selected = preview.selected;
+                let changed = preview.content.as_ref() != Some(&result);
                 if !preview.finish(&request, result) {
                     return;
+                }
+                if changed
+                    && waku
+                        .html_wireframe_preview
+                        .as_ref()
+                        .is_some_and(|p| p.task == session_id)
+                {
+                    waku.html_wireframe_preview = None;
                 }
                 if was_selected
                     && !preview.selected
@@ -266,6 +318,18 @@ impl Waku {
                     .child(tr!("boss.plan_wireframe_updating")),
             );
         }
+        if let Some(Ok(Some(Document::Html { path, .. }))) = self
+            .plan_wireframes
+            .get(&session_id)
+            .and_then(|p| p.content.as_ref())
+        {
+            header = header.child(
+                div()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_tertiary)
+                    .child(path.clone()),
+            );
+        }
         header
     }
 
@@ -273,14 +337,25 @@ impl Waku {
     pub(super) fn render_plan_wireframe(
         &mut self,
         session_id: Uuid,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         use crate::ui::ActivationExt;
         let theme = Theme::current(cx);
+        if let Some(Ok(Some(Document::Html { path, document }))) = self
+            .plan_wireframes
+            .get(&session_id)
+            .and_then(|p| p.content.as_ref())
+        {
+            let path = path.clone();
+            let source =
+                (!self.html_preview_matches(session_id, &path)).then(|| document.html().to_owned());
+            return self.render_html_document(&path, session_id, source, window, cx);
+        }
         let preview = self.plan_wireframes.get(&session_id);
         let mut body = div().flex_1().min_h_0().min_w_0().flex().flex_col();
         match preview.and_then(|preview| preview.content.as_ref()) {
-            Some(Ok(Some(wireframe))) if !wireframe.screens.is_empty() => {
+            Some(Ok(Some(Document::Json(wireframe)))) if !wireframe.screens.is_empty() => {
                 let index = preview
                     .map_or(0, |preview| preview.screen)
                     .min(wireframe.screens.len() - 1);
@@ -428,6 +503,51 @@ mod tests {
             }
             _ => unreachable!(),
         })
+        .map(|document| {
+            document.map(|document| match document {
+                Document::Json(document) => document,
+                _ => panic!("expected JSON fixture"),
+            })
+        })
+    }
+
+    #[test]
+    fn html_companions_win_over_json_and_invalid_html_is_visible() {
+        let html_path = "plans/ui.wireframe.html";
+        for source in [
+            include_str!("../../crates/waku-protocol/tests/fixtures/tasks.wireframe.html"),
+            "invalid",
+        ] {
+            let result = read(PATH, |operation| match operation {
+                BossOperation::ListFiles { .. } => Ok(BossResult::Files {
+                    files: vec![
+                        BossFile {
+                            path: PATH.into(),
+                            directory: false,
+                        },
+                        BossFile {
+                            path: html_path.into(),
+                            directory: false,
+                        },
+                    ],
+                }),
+                BossOperation::ReadFile { path } => {
+                    assert_eq!(path, html_path);
+                    Ok(BossResult::File {
+                        path,
+                        content: source.into(),
+                    })
+                }
+                _ => unreachable!(),
+            });
+            if source == "invalid" {
+                assert!(result.is_err());
+            } else {
+                assert!(
+                    matches!(result, Ok(Some(Document::Html { path, .. })) if path == html_path)
+                );
+            }
+        }
     }
 
     #[test]
@@ -513,7 +633,7 @@ mod tests {
         preview.request.revision = 2;
         let latest = preview.request.clone();
         assert!(preview.finish(&latest, Ok(None)));
-        assert!(!preview.finish(&older, Ok(Some(Wireframe::default()))));
+        assert!(!preview.finish(&older, Ok(Some(Document::Json(Wireframe::default())))));
         assert!(matches!(preview.content, Some(Ok(None))));
         assert!(!preview.accepts(&latest));
 
@@ -542,11 +662,11 @@ mod tests {
             None,
             Some(Ok(None)),
             Some(Err("invalid".into())),
-            Some(Ok(Some(Wireframe {
+            Some(Ok(Some(Document::Json(Wireframe {
                 version: 1,
                 name: "Saved".into(),
                 screens: vec![],
-            }))),
+            })))),
         ] {
             preview.content = content;
             assert!(!preview.visible(false));
@@ -555,17 +675,8 @@ mod tests {
                 !matches!(preview.content, None | Some(Ok(None)))
             );
         }
-        assert_eq!(
-            preview
-                .content
-                .as_ref()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .name,
-            "Saved"
+        assert!(
+            matches!(preview.content, Some(Ok(Some(Document::Json(Wireframe { ref name, .. })))) if name == "Saved")
         );
     }
 }

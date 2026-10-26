@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-{{nonce}}'; style-src 'unsafe-inline'; frame-src 'self' about:; form-action 'none'; base-uri 'none'">
+<style>{{css}}</style></head><body>
+<header><label>Screen <select id="screens" aria-label="Wireframe screen"></select></label><button id="comment-mode" aria-pressed="false">Add comment</button><button id="comments">Comments</button><select id="anchors" aria-label="Comment on element" hidden></select><button id="new-comment" hidden>Comment here</button></header>
+<div id="status" role="status" aria-live="polite"></div>
+<div class="layout"><div class="viewport"><div class="stage"><iframe title="Wireframe design" tabindex="-1" sandbox="allow-same-origin"></iframe><div class="pins"></div></div></div><aside id="threads" aria-label="Comment threads" hidden></aside></div>
+<dialog aria-labelledby="thread-title"><h2 id="thread-title"></h2><div id="messages"></div><label>Reply<textarea aria-label="Comment or reply" maxlength="16384"></textarea></label><div class="actions"><button id="save">Save comment</button><button id="stage">Add to message</button><button id="resolve">Resolve</button><button id="close">Close</button></div></dialog>
+<script nonce="{{nonce}}">(() => { const config = {{config}}; {{controller}} })();</script>
+</body></html>

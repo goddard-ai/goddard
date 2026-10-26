@@ -417,9 +417,11 @@ mod host {
     use webview2_com::{
         CreateCoreWebView2CompositionControllerCompletedHandler,
         CreateCoreWebView2EnvironmentCompletedHandler, CursorChangedEventHandler,
-        DocumentTitleChangedEventHandler, FocusChangedEventHandler, MoveFocusRequestedEventHandler,
-        NavigationCompletedEventHandler, NavigationStartingEventHandler,
-        NewWindowRequestedEventHandler, SourceChangedEventHandler, take_pwstr,
+        DocumentTitleChangedEventHandler, DownloadStartingEventHandler, FocusChangedEventHandler,
+        MoveFocusRequestedEventHandler, NavigationCompletedEventHandler,
+        NavigationStartingEventHandler, NewWindowRequestedEventHandler,
+        PermissionRequestedEventHandler, SourceChangedEventHandler, WebMessageReceivedEventHandler,
+        take_pwstr,
     };
     use windows::Win32::Foundation::{E_FAIL, E_NOINTERFACE, HWND, POINT, RECT};
     use windows::core::{BOOL, HSTRING, IUnknown, Interface, PCWSTR, PWSTR};
@@ -430,6 +432,8 @@ mod host {
     /// is called on the UI thread from a WebView2 event and hops through
     /// `Deferred`, so none may assume the app is un-borrowed.
     pub(super) struct Callbacks {
+        pub restricted: bool,
+        pub message: Box<dyn Fn(String)>,
         pub page_load: Box<dyn Fn(PageLoad, String)>,
         pub url_changed: Box<dyn Fn(String)>,
         pub title: Box<dyn Fn(String)>,
@@ -577,6 +581,11 @@ mod host {
             unsafe { self.0.Navigate(&HSTRING::from(url)) }
         }
 
+        pub fn load_html(&self, html: &str) -> windows::core::Result<()> {
+            // SAFETY: the HSTRING remains alive through this synchronous call.
+            unsafe { self.0.NavigateToString(&HSTRING::from(html)) }
+        }
+
         /// Fire and forget: nothing in the surface reads a script's result,
         /// and passing no completion handler keeps the call synchronous from
         /// the caller's point of view.
@@ -634,10 +643,13 @@ mod host {
             ready: Box<dyn FnOnce(Result<Rc<WebviewHost>, String>)>,
         ) {
             let ready: Ready = Rc::new(RefCell::new(Some(ready)));
-            let Some(user_data) = user_data_folder() else {
+            let Some(mut user_data) = user_data_folder() else {
                 deliver(&ready, Err("no local application data folder".to_owned()));
                 return;
             };
+            if callbacks.restricted {
+                user_data = HSTRING::from(format!("{}-wireframes", user_data.to_string_lossy()));
+            }
 
             let handler = CreateCoreWebView2EnvironmentCompletedHandler::create(Box::new({
                 let ready = ready.clone();
@@ -939,10 +951,12 @@ mod host {
         // portal clips it along with everything else, and a link preview on
         // hover is worth having.
         if let Ok(settings) = unsafe { webview.Settings() } {
-            let _ = unsafe { settings.SetAreDevToolsEnabled(true) };
+            let _ = unsafe { settings.SetAreDevToolsEnabled(!callbacks.restricted) };
         }
 
         let Callbacks {
+            restricted,
+            message,
             page_load,
             url_changed,
             title,
@@ -963,15 +977,56 @@ mod host {
             let page_load = page_load.clone();
             move |_, args| {
                 let mut uri = PWSTR::null();
-                let uri = match args {
+                let uri = match args.as_ref() {
                     Some(args) if unsafe { args.Uri(&mut uri) }.is_ok() => take_pwstr(uri),
                     _ => String::new(),
                 };
+                if restricted && !matches!(uri.as_str(), "about:blank" | "about:srcdoc") {
+                    if let Some(args) = args {
+                        let _ = unsafe { args.SetCancel(true) };
+                    }
+                    return Ok(());
+                }
                 page_load(PageLoad::Started, uri);
                 Ok(())
             }
         }));
         unsafe { webview.add_NavigationStarting(&started, &mut token) }?;
+
+        if restricted {
+            let received = WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    let mut value = PWSTR::null();
+                    // SAFETY: the runtime initializes value; take_pwstr owns
+                    // and releases the returned COM allocation.
+                    if unsafe { args.TryGetWebMessageAsString(&mut value) }.is_ok() {
+                        let body = take_pwstr(value);
+                        if body.len() <= 65_536 {
+                            message(body);
+                        }
+                    }
+                }
+                Ok(())
+            }));
+            unsafe { webview.add_WebMessageReceived(&received, &mut token) }?;
+            let permission = PermissionRequestedEventHandler::create(Box::new(|_, args| {
+                if let Some(args) = args {
+                    unsafe { args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY) }?;
+                }
+                Ok(())
+            }));
+            unsafe { webview.add_PermissionRequested(&permission, &mut token) }?;
+            let download = DownloadStartingEventHandler::create(Box::new(|_, args| {
+                if let Some(args) = args {
+                    unsafe { args.SetCancel(true) }?;
+                }
+                Ok(())
+            }));
+            // Download events were added in WebView2's fourth interface.
+            // Fail preview creation if the runtime cannot enforce this guard.
+            let downloads = webview.cast::<ICoreWebView2_4>()?;
+            unsafe { downloads.add_DownloadStarting(&download, &mut token) }?;
+        }
 
         let completed = NavigationCompletedEventHandler::create(Box::new({
             let page_load = page_load.clone();
@@ -1011,7 +1066,7 @@ mod host {
         let new_window = NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
             if let Some(args) = args.as_ref() {
                 let mut uri = PWSTR::null();
-                if unsafe { args.Uri(&mut uri) }.is_ok() {
+                if !restricted && unsafe { args.Uri(&mut uri) }.is_ok() {
                     open_url(take_pwstr(uri));
                 }
                 let _ = unsafe { args.SetHandled(true) };
@@ -1151,7 +1206,14 @@ impl Deferred {
     }
 }
 
+/// Bounded message from the trusted wireframe shell, never from authored HTML.
+pub(crate) struct WireframeEvent(pub String);
+
+impl gpui::EventEmitter<WireframeEvent> for BrowserView {}
+
 pub struct BrowserView {
+    /// Trusted shell for a static wireframe; isolated from ordinary browsing.
+    preview_html: Option<String>,
     focus_handle: FocusHandle,
     address: Entity<TextInput>,
     host: Option<Rc<WebviewHost>>,
@@ -1192,6 +1254,18 @@ pub struct BrowserView {
 
 impl BrowserView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_inner(None, window, cx)
+    }
+
+    pub(crate) fn new_wireframe(html: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_inner(Some(html), window, cx)
+    }
+
+    fn new_inner(
+        preview_html: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let address = cx.new(|cx| {
             TextInput::new(window, cx)
                 .select_all_on_focus_click()
@@ -1269,13 +1343,14 @@ impl BrowserView {
         });
 
         let mut this = Self {
+            navigation_requested: preview_html.is_some(),
+            preview_html,
             focus_handle,
             address,
             host: None,
             host_error: None,
             #[cfg(target_os = "windows")]
             pending_url: None,
-            navigation_requested: false,
             current_url: None,
             page_title: None,
             loading: false,
@@ -1292,6 +1367,18 @@ impl BrowserView {
         };
         this.build_webview(window, cx);
         this
+    }
+
+    /// Update only the trusted shell. Call from deferred state changes, never
+    /// synchronously from a render path.
+    pub(crate) fn wireframe_script(&self, script: &str) {
+        if self.preview_html.is_none() {
+            return;
+        }
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        if let Some(host) = &self.host {
+            let _ = host.webview.evaluate_script(script);
+        }
     }
 
     pub fn refresh_localized_text(&mut self, cx: &mut Context<Self>) {
@@ -1325,6 +1412,8 @@ impl BrowserView {
         let on_page_load = deferred.clone();
         let on_title = deferred.clone();
         let on_new_window = deferred.clone();
+        let on_message = deferred.clone();
+        let restricted = self.preview_html.is_some();
 
         // The responder observer's decision needs the window (GPUI focus
         // moves), which `Deferred` cannot reach; go through the window handle.
@@ -1348,7 +1437,7 @@ impl BrowserView {
             })
         };
 
-        let built = wry::WebViewBuilder::new()
+        let builder = wry::WebViewBuilder::new()
             .with_bounds(wry::Rect {
                 position: LogicalPosition::new(0.0, 0.0).into(),
                 size: LogicalSize::new(0.0, 0.0).into(),
@@ -1356,9 +1445,12 @@ impl BrowserView {
             .with_visible(false)
             .with_focused(false)
             .with_accept_first_mouse(true)
-            .with_devtools(true)
+            .with_devtools(!restricted)
+            .with_incognito(restricted)
             .with_user_agent(USER_AGENT)
-            .with_navigation_handler(|_| true)
+            .with_navigation_handler(move |url| {
+                !restricted || matches!(url.as_str(), "about:blank" | "about:srcdoc")
+            })
             .with_on_page_load_handler(move |event, url| {
                 let event = match event {
                     wry::PageLoadEvent::Started => PageLoad::Started,
@@ -1370,6 +1462,9 @@ impl BrowserView {
                 on_title.update(move |this, cx| this.title_changed(title, cx));
             })
             .with_new_window_req_handler(move |url, _features| {
+                if restricted {
+                    return wry::NewWindowResponse::Deny;
+                }
                 // One surface, one page: pop-ups and `target="_blank"` links
                 // navigate in place instead of spawning windows.
                 on_new_window.update(move |this, cx| this.navigate_to_url(url, cx));
@@ -1386,8 +1481,21 @@ impl BrowserView {
                 if success && let Some(path) = path {
                     reveal_in_finder(&path);
                 }
-            })
-            .build_as_child(window);
+            });
+        let builder = if let Some(html) = &self.preview_html {
+            builder
+                .with_html(html)
+                .with_ipc_handler(move |request| {
+                    if request.body().len() <= 65_536 {
+                        let body = request.body().clone();
+                        on_message.update(move |_, cx| cx.emit(WireframeEvent(body)));
+                    }
+                })
+                .with_download_started_handler(|_, _| false)
+        } else {
+            builder
+        };
+        let built = builder.build_as_child(window);
 
         match built {
             Ok(webview) => {
@@ -1464,11 +1572,16 @@ impl BrowserView {
         let on_cursor = deferred.clone();
         let on_focus = deferred.clone();
         let on_ready = deferred.clone();
+        let on_message = deferred.clone();
 
         host::WebviewHost::create(
             parent,
             surface,
             host::Callbacks {
+                restricted: self.preview_html.is_some(),
+                message: Box::new(move |body| {
+                    on_message.update(move |_, cx| cx.emit(WireframeEvent(body)));
+                }),
                 page_load: Box::new(move |event, url| {
                     on_page_load.update(move |this, cx| this.page_load_changed(event, url, cx));
                 }),
@@ -1500,6 +1613,15 @@ impl BrowserView {
         match outcome {
             Ok(host) => {
                 self.host = Some(host);
+                if let Some(html) = &self.preview_html {
+                    if let Some(host) = &self.host {
+                        if let Err(error) = host.webview.load_html(html) {
+                            self.host_error = Some(error.to_string());
+                        }
+                    }
+                    cx.notify();
+                    return;
+                }
                 // A URL typed before the page existed waits here rather than
                 // being dropped on the floor.
                 if let Some(url) = self.pending_url.take() {
@@ -1598,6 +1720,9 @@ impl BrowserView {
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub fn navigate_to_url(&mut self, url: String, cx: &mut Context<Self>) {
+        if self.preview_html.is_some() {
+            return;
+        }
         let Some(host) = &self.host else {
             #[cfg(target_os = "windows")]
             {
@@ -1897,6 +2022,9 @@ impl BrowserView {
     }
 
     fn toggle_devtools(&mut self) {
+        if self.preview_html.is_some() {
+            return;
+        }
         #[cfg(target_os = "macos")]
         if let Some(host) = &self.host {
             if host.webview.is_devtools_open() {
@@ -2503,10 +2631,29 @@ impl Render for BrowserView {
             self.render_start_page(theme).into_any_element()
         };
 
+        let toolbar = self.preview_html.is_none().then(|| self.render_toolbar(cx));
         div()
             .id("browser-surface")
             .track_focus(&self.focus_handle)
-            .key_context("Browser")
+            .when(self.preview_html.is_some(), |element| {
+                element
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_1().border_color(theme.info))
+                    .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            this.focus_page(cx);
+                            this.wireframe_script("document.querySelector('#screens')?.focus();");
+                            cx.stop_propagation();
+                        }
+                    }))
+            })
+            .key_context(if self.preview_html.is_some() {
+                "WireframePreview"
+            } else {
+                "Browser"
+            })
             .on_action(cx.listener(|this, _: &BrowserBack, _, cx| this.go_back(cx)))
             .on_action(cx.listener(|this, _: &BrowserForward, _, cx| this.go_forward(cx)))
             .on_action(cx.listener(|this, _: &BrowserReload, _, cx| this.reload(cx)))
@@ -2524,7 +2671,7 @@ impl Render for BrowserView {
             .min_h_0()
             .flex()
             .flex_col()
-            .child(self.render_toolbar(cx))
+            .children(toolbar)
             .child(body)
     }
 }

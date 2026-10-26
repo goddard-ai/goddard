@@ -1664,6 +1664,7 @@ impl Waku {
         let boss_updates = self.boss_tx.clone();
         let speech_updates = self.speech_tx.clone();
         let wireframe_updates = self.wireframe_tx.clone();
+        let wireframe_comment_updates = self.wireframe_comment_tx.clone();
         let boss_browse_updates = self.boss_browse_tx.clone();
         let review_updates = self.review_tx.clone();
         let closed_updates = self.friend_session_closed_tx.clone();
@@ -1717,6 +1718,8 @@ impl Waku {
                     let session_closed = client.subscribe_friend_session_closed();
                     let speech = client.subscribe_speech();
                     let wireframes = client.subscribe_wireframes();
+                    let wireframe_comments = client.subscribe_wireframe_comments();
+                    let _ = wireframe_comment_updates.send((key, None));
                     let boss_browse = client.subscribe_boss_browse();
                     // Seed the document before broadcasts arrive — a client
                     // connecting after the last change sees no event until
@@ -1887,6 +1890,14 @@ impl Waku {
                                 if wireframe_updates.send((key, session_id, path)).is_err() {
                                     return;
                                 }
+                                signal_event_pump(&event_wake);
+                            }
+                            recv(wireframe_comments) -> update => {
+                                let Ok(update) = update else {
+                                    let Ok(replacement) = clients.recv() else { return; };
+                                    break replacement;
+                                };
+                                if wireframe_comment_updates.send((key, Some(update))).is_err() { return; }
                                 signal_event_pump(&event_wake);
                             }
                             recv(boss_browse) -> request => {
@@ -8646,6 +8657,7 @@ impl Waku {
             | self.drain_automations_events(cx)
             | self.drain_boss_events(cx)
             | self.drain_wireframe_events(cx)
+            | self.drain_wireframe_comment_events(cx)
             | self.drain_boss_browse_events(cx)
             | self.drain_speech_events(cx)
             | self.drain_voice_gate_events(cx)

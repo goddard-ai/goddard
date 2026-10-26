@@ -1,0 +1,32 @@
+:root { color-scheme: var(--wf-color-scheme); }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; background: var(--wf-canvas); color: var(--wf-text); font: 13px/1.5 system-ui; }
+body { display: flex; flex-direction: column; }
+button, select, textarea { font: inherit; color: inherit; background: var(--wf-surface); border: 1px solid var(--wf-border); border-radius: 6px; padding: 6px 10px; }
+button { cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+:focus-visible { outline: 2px solid var(--wf-info); outline-offset: 2px; }
+header { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 8px; border-bottom: 1px solid var(--wf-border); }
+header label { flex: 1; }
+#status { padding: 0 8px; color: var(--wf-secondary); }
+#status:empty { display: none; }
+.layout { flex: 1; min-height: 0; display: flex; }
+.viewport { flex: 1; min-width: 0; overflow: auto; padding: 16px; }
+.stage { position: relative; margin: auto; }
+iframe { display: block; border: 0; background: var(--wf-canvas); transform-origin: top left; }
+.pins { position: absolute; inset: 0; pointer-events: none; }
+.pin { pointer-events: auto; position: absolute; width: 28px; height: 28px; padding: 0; border: 0; background: transparent; }
+.pin::before { content: ''; display: block; width: 10px; height: 10px; margin: auto; border-radius: 50%; background: var(--wf-info); outline: 2px solid var(--wf-canvas); }
+.pin.unread::before { outline: 2px solid var(--wf-info); outline-offset: 3px; }
+#threads { width: 220px; flex-shrink: 0; overflow: auto; padding: 8px; border-left: 1px solid var(--wf-border); }
+#threads[hidden] { display: none; }
+#threads button { display: block; width: 100%; margin-bottom: 8px; text-align: left; overflow-wrap: anywhere; }
+dialog { color: var(--wf-text); background: var(--wf-surface); border: 1px solid var(--wf-border); border-radius: 10px; padding: 16px; width: min(380px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; }
+dialog::backdrop { background: transparent; }
+dialog h2 { font-size: 14px; margin: 0 0 12px; }
+.message { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.author { color: var(--wf-secondary); font-size: 12px; }
+textarea { display: block; width: 100%; min-height: 80px; resize: vertical; margin: 12px 0; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.muted { color: var(--wf-secondary); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
