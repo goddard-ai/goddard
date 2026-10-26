@@ -3744,16 +3744,17 @@ impl Waku {
         self.save();
 
         let remote = waku_client::DaemonKey::Remote(host);
-        let removed_sessions = self
+        let retired = self
             .state
             .sessions
-            .iter()
-            .filter(|session| self.daemons.session_owner(session.id) == remote)
-            .map(|session| session.id)
+            .extract_if(.., |session| {
+                self.daemons.session_owner(session.id) == remote
+            })
             .collect::<Vec<_>>();
-        self.state
-            .sessions
-            .retain(|session| self.daemons.session_owner(session.id) != remote);
+        let removed_sessions = retired.iter().map(|session| session.id).collect::<Vec<_>>();
+        self.background_executor
+            .spawn(async move { drop(retired) })
+            .detach();
         self.state
             .projects
             .retain(|project| self.daemons.project_owner(project.id) != remote);
@@ -3793,6 +3794,8 @@ impl Waku {
         }
 
         for session_id in &removed_sessions {
+            self.session_metadata_saves.remove(session_id);
+            self.pending_session_metadata.remove(session_id);
             self.runtime_attach_pending.remove(session_id);
             self.runtime_attach_misses.remove(session_id);
             if let Some(runtime) = self.runtimes.remove(session_id) {
@@ -6195,14 +6198,22 @@ impl Waku {
             }
             self.mark_background_work_lost(session_id);
         } else if let Some(runtime) = self.runtimes.get_mut(&session_id) {
-            runtime
-                .pending_events
-                .retain(|event| matches!(event, DriverEvent::BackgroundWork(_)));
+            let (retained, retired): (VecDeque<_>, VecDeque<_>) =
+                std::mem::take(&mut runtime.pending_events)
+                    .into_iter()
+                    .partition(|event| matches!(event, DriverEvent::BackgroundWork(_)));
+            runtime.pending_events = retained;
             runtime.stream_remeasure_pending = false;
             runtime.stream_phase = None;
-            runtime.pending_permission = None;
-            runtime.pending_user_input = None;
-            runtime.pending_computer_approval = None;
+            let retired = (
+                retired,
+                runtime.pending_permission.take(),
+                runtime.pending_user_input.take(),
+                runtime.pending_computer_approval.take(),
+            );
+            self.background_executor
+                .spawn(async move { drop(retired) })
+                .detach();
         }
         self.invalidate_checkpoint_refs();
         if self
