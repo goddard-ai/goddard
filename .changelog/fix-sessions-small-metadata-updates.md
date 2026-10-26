@@ -1,0 +1,1 @@
+- Mobile task metadata edits and web task renames now send small updates without loading or resending transcripts; older saves cannot undo newer metadata changes.

@@ -714,6 +714,8 @@ export async function removeDaemonSession(
   expectResponse(await client.request({ type: 'removeSession' }, sessionId), 'ack');
 }
 
+export { updateSessionMetadata } from '@waku/client';
+
 export async function persistSession(
   client: WakuClient,
   session: AgentSession,

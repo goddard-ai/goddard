@@ -89,6 +89,7 @@ function atLocalNoon(year: number, month: number, day: number): number {
 
 function session(patch: Partial<AgentSession>): AgentSession {
   return {
+    metadata_revision: 0,
     id: 'session',
     title: 'New Task',
     project_id: 'project',

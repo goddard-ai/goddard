@@ -310,6 +310,7 @@ function event(kind: string, payload: unknown): SequencedEvent {
 
 function runningSession(): AgentSession {
   return {
+    metadata_revision: 0,
     id: 'session',
     title: 'New task',
     project_id: 'project',

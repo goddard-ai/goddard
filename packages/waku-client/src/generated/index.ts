@@ -322,6 +322,7 @@ export type { SessionDetailTail } from "./SessionDetailTail";
 export type { SessionEnvironment } from "./SessionEnvironment";
 export type { SessionMessageMatch } from "./SessionMessageMatch";
 export type { SessionMessageSearchScope } from "./SessionMessageSearchScope";
+export type { SessionMetadataChange } from "./SessionMetadataChange";
 export type { SessionPhase } from "./SessionPhase";
 export type { SessionPlanning } from "./SessionPlanning";
 export type { SessionStatus } from "./SessionStatus";

@@ -601,7 +601,13 @@ fn merge_session_catalog_row(
     remote: AgentSession,
     has_local_runtime: bool,
 ) {
-    local.title = remote.title;
+    if remote.metadata_revision >= local.metadata_revision {
+        local.title = remote.title;
+        local.archived_at = remote.archived_at;
+        local.pinned_at = remote.pinned_at;
+        local.metadata_revision = remote.metadata_revision;
+        local.metadata_mutation_id = remote.metadata_mutation_id;
+    }
     local.auto_title = remote.auto_title;
     local.project_id = remote.project_id;
     // A snapshot that predates the confirmed activation cannot own
@@ -617,8 +623,6 @@ fn merge_session_catalog_row(
     local.config_activation = local.config_activation.max(remote.config_activation);
     local.created_at = remote.created_at;
     local.last_reply_at = remote.last_reply_at;
-    local.archived_at = remote.archived_at;
-    local.pinned_at = remote.pinned_at;
     local.dormant_at = remote.dormant_at;
     local.dormant_exempt_until = remote.dormant_exempt_until;
     local.side_chat_of = remote.side_chat_of;

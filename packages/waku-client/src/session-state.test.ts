@@ -4,6 +4,7 @@ import type { AgentSession, QueuedMessage } from "./generated";
 import {
   appendQueuedSteerPreview,
   dropQueuedMessage,
+  mergeSessionMetadata,
   queuedMessageIsPendingSteer,
   sessionAcceptsImmediateSteer,
   sessionProviderLocked,
@@ -100,4 +101,18 @@ test("dropping a queued message clears its preview row too", () => {
   const dropped = dropQueuedMessage(queued, "queued-1");
   expect(dropped.messages.map((message) => message.id)).toEqual(["prompt", "answer"]);
   expect(dropped.queued_messages).toEqual([other]);
+});
+
+
+test("metadata replies preserve live transcript state and reject older versions", () => {
+  const latest = session({ metadata_revision: 2, updated_at: 200, title: "old" });
+  const saved = session({ metadata_revision: 3, updated_at: 100, title: "new", archived_at: 100, messages: [], turns: [] });
+  const merged = mergeSessionMetadata(latest, saved);
+  expect(merged.title).toBe("new");
+  expect(merged.archived_at).toBe(100);
+  expect(merged.messages).toBe(latest.messages);
+  expect(merged.turns).toBe(latest.turns);
+  expect(merged.status).toBe(latest.status);
+  expect(merged.updated_at).toBe(200);
+  expect(mergeSessionMetadata(merged, latest)).toBe(merged);
 });

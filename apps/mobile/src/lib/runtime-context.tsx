@@ -7,6 +7,7 @@ import type {
   PendingUserInput,
   ProviderKind,
   SequencedEvent,
+  SessionMetadataChange,
   UserInputAnswer,
 } from '@waku/client';
 import {
@@ -17,6 +18,7 @@ import {
   managedGoalEvaluation,
   managedGoalOperation,
   MANAGED_GOAL_QUESTION,
+  mergeSessionMetadata,
   sessionAcceptsImmediateSteer,
 } from '@waku/client';
 import { isAgentQueuedMessage, reduceRuntimeEvent } from '@waku/client/event-reducer';
@@ -40,6 +42,7 @@ import {
   loadTaskState,
   materializeWorktree,
   persistSession,
+  updateSessionMetadata,
   probeProvider,
   removeDaemonSession,
   type TaskState,
@@ -289,6 +292,61 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
     return operation;
   }, [daemon.activeProfile?.id, daemon.client, queryClient, writeSessionCache]);
+
+  /** Share the per-task ordering lane with transcript saves. Read the
+   * revision when this operation starts, after earlier operations settle. */
+  const updateMetadataOrdered = useCallback((sessionId: string, change: SessionMetadataChange) => {
+    const client = daemon.client;
+    const profileId = daemon.activeProfile?.id;
+    if (!client || !profileId) return Promise.reject(new Error('Goddard daemon is disconnected'));
+    const mutationId = Crypto.randomUUID();
+    const previous = persistTails.current.get(sessionId);
+    const operation = (previous ?? Promise.resolve(undefined)).catch(() => undefined).then(async () => {
+      const current = queryClient.getQueryData<AgentSession>(daemonKeys.session(profileId, sessionId))
+        ?? entries.current.get(sessionId)?.session
+        ?? queryClient.getQueryData<TaskState>(daemonKeys.taskState(profileId))?.sessions.find((session) => session.id === sessionId);
+      if (!current) throw new Error('This task is no longer in the catalog');
+      if (!sessionHasStarted(current)) {
+        if (change.type === 'title') {
+          const next = { ...current, title: change.title, agent_rename_allowed: false, updated_at: clock.nowSeconds() };
+          cacheSession(next);
+          return next;
+        }
+        return current;
+      }
+      if (change.type === 'pin' && current.archived_at != null) return current;
+      if (change.type === 'archive' && current.side_chat_of != null) return current;
+      if (change.type === 'archive' && current.boss_managed) {
+        // Managed archival keeps its existing lifecycle save path.
+        const full = await loadFullSession(sessionId);
+        const runtime = entries.current.get(sessionId);
+        if (change.archived && runtime) {
+          await client.request({ type: 'closeSession' }, sessionId, runtime.runtimeId);
+        }
+        const saved = await persistSession(client, {
+          ...full, archived_at: change.archived ? clock.nowSeconds() : null, updated_at: clock.nowSeconds(),
+        });
+        const latest = queryClient.getQueryData<AgentSession>(daemonKeys.session(profileId, sessionId)) ?? full;
+        const next = mergeSessionMetadata(latest, saved);
+        cacheSession(next);
+        return next;
+      }
+      const response = await updateSessionMetadata(client, sessionId, current.metadata_revision ?? 0, mutationId, change);
+      const latest = queryClient.getQueryData<AgentSession>(daemonKeys.session(profileId, sessionId)) ?? current;
+      const saved = response.session;
+      // Adopt only list metadata: events received while the RPC was pending
+      // still own the local transcript, queue, runtime status, and checkpoints.
+      const next = mergeSessionMetadata(latest, saved);
+      cacheSession(next);
+      if (!response.applied) throw new Error('This task changed on another client. Retry the action.');
+      return next;
+    });
+    persistTails.current.set(sessionId, operation);
+    void operation.catch(() => {}).finally(() => {
+      if (persistTails.current.get(sessionId) === operation) persistTails.current.delete(sessionId);
+    });
+    return operation;
+  }, [cacheSession, daemon.activeProfile?.id, daemon.client, loadFullSession, queryClient]);
 
   const schedulePersist = useCallback((sessionId: string) => {
     const profileId = daemon.activeProfile?.id;
@@ -1161,17 +1219,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   }, [cacheSession, daemon.activeProfile?.id, daemon.client, daemon.phase, loadFullSession, persistOrdered, removeRuntime]);
 
   const renameSession = useCallback(async (sessionId: string, title: string) => {
-    const current = await loadFullSession(sessionId);
-    const trimmed = title.trim();
-    const next = {
-      ...current,
-      title: trimmed || 'New task',
-      agent_rename_allowed: false,
-      updated_at: clock.nowSeconds(),
-    };
-    cacheSession(next);
-    await persistOrdered(next);
-  }, [cacheSession, loadFullSession, persistOrdered]);
+    await updateMetadataOrdered(sessionId, { type: 'title', title: title.trim() || 'New task' });
+  }, [updateMetadataOrdered]);
 
   const grantAgentRename = useCallback(async (sessionId: string) => {
     const current = await loadFullSession(sessionId);
@@ -1188,50 +1237,22 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   /** Pin/unpin — desktop's toggle_session_pin: a plain flag flip plus save,
    * limited to started, unarchived tasks. */
   const setSessionPinned = useCallback(async (sessionId: string, pinned: boolean) => {
-    const current = await loadFullSession(sessionId);
-    if (!sessionHasStarted(current) || current.archived_at != null) return;
-    const now = clock.nowSeconds();
-    const next = {
-      ...current,
-      pinned_at: pinned ? now : null,
-      updated_at: now,
-    };
-    cacheSession(next);
-    await persistOrdered(next);
-  }, [cacheSession, loadFullSession, persistOrdered]);
+    await updateMetadataOrdered(sessionId, { type: 'pin', pinned });
+  }, [updateMetadataOrdered]);
 
   /** Archive/unarchive — desktop's finish_archive_session minus its
    * app-local bookkeeping. The daemon cascades the flag to side chats and
    * purges past the retention window; a busy runtime is closed first so a
    * mobile archive stops the turn the way desktop's does. */
   const setSessionArchived = useCallback(async (sessionId: string, archived: boolean) => {
-    const client = daemon.client;
-    const current = await loadFullSession(sessionId);
-    if (!sessionHasStarted(current) || current.side_chat_of != null) return;
-    if ((current.archived_at != null) === archived) return;
+    await updateMetadataOrdered(sessionId, { type: 'archive', archived });
     if (archived) {
-      const runtime = entries.current.get(sessionId);
-      if (runtime && client) {
-        await client
-          .request({ type: 'closeSession' }, sessionId, runtime.runtimeId)
-          .catch(() => {});
-        removeRuntime(sessionId);
-      }
-    }
-    const now = clock.nowSeconds();
-    const next = {
-      ...current,
-      archived_at: archived ? now : null,
-      updated_at: now,
-    };
-    cacheSession(next);
-    await persistOrdered(next);
-    if (archived) {
+      removeRuntime(sessionId);
       setPermissions((values) => removeKey(values, sessionId));
       setDaemonRequests((values) => removeKey(values, sessionId));
       setUserInputs((values) => removeKey(values, sessionId));
     }
-  }, [cacheSession, daemon.client, loadFullSession, persistOrdered, removeRuntime]);
+  }, [updateMetadataOrdered, removeRuntime]);
 
   const deleteSession = useCallback(async (sessionId: string) => {
     const client = daemon.client;
@@ -1431,9 +1452,10 @@ function errorMessage(cause: unknown): string {
   return cause instanceof Error && cause.message.trim() ? cause.message : String(cause);
 }
 
-/** The daemon captures ending checkpoints itself, so a reply's checkpoint for
- * a turn is the one part of it that can be newer than the local cache. */
+/** Keep live transcript state while accepting newer daemon metadata and
+ * ending checkpoints from the save acknowledgment. */
 function withDaemonCheckpoints(latest: AgentSession, saved: AgentSession): AgentSession {
+  latest = mergeSessionMetadata(latest, saved);
   let changed = false;
   const turns = latest.turns.map((turn) => {
     const stored = saved.turns.find((candidate) => candidate.turn_count === turn.turn_count);

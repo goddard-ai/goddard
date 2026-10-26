@@ -90,6 +90,7 @@ export function createSession(
   return {
     id: clock.randomUUID(),
     title: 'New task',
+    metadata_revision: 0,
     auto_title: null,
     project_id: projectId,
     workspace: isolated

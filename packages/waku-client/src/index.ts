@@ -25,3 +25,5 @@ export * from "./composer-preferences";
 export * from "./provider-probe-cache";
 export * from "./session-state";
 export * from './managed-goal'
+
+export * from './session-metadata'

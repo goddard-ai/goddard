@@ -1482,6 +1482,9 @@ struct Storage {
     /// Sessions known to have a row. Used to spot deletions and to catch a
     /// session that became persistable without being marked dirty.
     persisted_sessions: HashSet<Uuid>,
+    /// Side chats explicitly removed by a metadata cascade. Fence batches
+    /// prepared before that removal but written after it.
+    removed_sessions: HashSet<Uuid>,
     /// Per session, the fingerprint of each message row as this connection last
     /// wrote it, so a save only touches the messages that actually changed.
     /// See [`write_messages`].
@@ -1825,7 +1828,8 @@ impl StateStore {
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
                         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
                         agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-                        friend_peer_id, friend_peer_name, reasoning_effort, config_activation
+                        friend_peer_id, friend_peer_name, reasoning_effort, config_activation,
+                        metadata_revision, metadata_mutation_id
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1858,6 +1862,8 @@ impl StateStore {
                     row.get::<_, Option<String>>(22)?,
                     row.get::<_, Option<String>>(23)?,
                     row.get::<_, Option<String>>(24)?,
+                    row.get::<_, i64>(25)?,
+                    row.get::<_, Option<String>>(26)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1889,6 +1895,8 @@ impl StateStore {
         *self.storage.lock() = Some(Storage {
             connection,
             persisted_sessions,
+            removed_sessions: HashSet::new(),
+
             // A fresh connection has written nothing yet. Sessions loaded here
             // are skeletons anyway, so the first save of one is a full write.
             written_messages: HashMap::new(),
@@ -1936,25 +1944,62 @@ impl StateStore {
     /// callers merge with [`apply_session_detail`] instead of adopting it.
     pub fn load_session_detail(&self, session_id: Uuid) -> io::Result<Option<AgentSession>> {
         let connection = self.open()?;
+        let transaction = connection.unchecked_transaction().map_err(to_io_error)?;
         let id = session_id.to_string();
 
-        let data: Option<String> = connection
+        let row = transaction
             .query_row(
-                "SELECT data FROM session_details WHERE session_id = ?1",
+                "SELECT detail.data, sessions.title, sessions.archived_at, sessions.pinned_at,
+                    sessions.metadata_revision, sessions.metadata_mutation_id, sessions.updated_at, sessions.agent_rename_allowed
+             FROM session_details AS detail INNER JOIN sessions ON sessions.id = detail.session_id
+             WHERE sessions.id = ?1",
                 params![id],
-                |row| row.get(0),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, bool>(7)?,
+                    ))
+                },
             )
             .optional()
             .map_err(to_io_error)?;
-        let Some(data) = data else {
+        let Some((
+            data,
+            title,
+            archived_at,
+            pinned_at,
+            revision,
+            mutation,
+            updated_at,
+            rename_allowed,
+        )) = row
+        else {
             return Ok(None);
         };
         let mut stored = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
+        // Small metadata updates deliberately leave the large detail JSON
+        // untouched. Its old columns never override the authoritative list.
+        stored.title = title;
+        stored.agent_rename_allowed = rename_allowed;
+        stored.archived_at = archived_at.map(|at| at as u64);
+        stored.pinned_at = pinned_at.map(|at| at as u64);
+        stored.metadata_revision = revision as u64;
+        stored.metadata_mutation_id = mutation.and_then(|id| Uuid::parse_str(&id).ok());
+        stored.updated_at = updated_at as u64;
+        if stored.archived_at.is_none() {
+            stored.details_pruned = false;
+        }
         // Detail rows predate worktree names; the list row's migration is
         // overwritten when the stored workspace is copied over it.
         stored.workspace.backfill_worktree_name();
 
-        let mut statement = connection
+        let mut statement = transaction
             .prepare(
                 "SELECT id, turn_id, role, content, display_content, attachments, atoms,
                         created_at, streaming, sent_by_task, hidden, notice, context_mark,
@@ -2051,6 +2096,7 @@ impl StateStore {
             *guard = Some(Storage {
                 connection: self.open()?,
                 persisted_sessions: HashSet::new(),
+                removed_sessions: HashSet::new(),
                 written_messages: HashMap::new(),
                 terminal_checkpoints: HashMap::new(),
                 saved_projects: 0,
@@ -2170,6 +2216,7 @@ impl StateStore {
             *guard = Some(Storage {
                 connection: self.open()?,
                 persisted_sessions: HashSet::new(),
+                removed_sessions: HashSet::new(),
                 written_messages: HashMap::new(),
                 terminal_checkpoints: HashMap::new(),
                 saved_projects: 0,
@@ -2238,6 +2285,69 @@ impl StateStore {
         }
         transaction.commit().map_err(to_io_error)?;
         Ok(pruned)
+    }
+
+    /// Commit a small list mutation and its side-chat cascade without reading,
+    /// cloning, or serializing any transcript. Requires the loaded daemon store.
+    pub fn write_session_metadata(
+        &self,
+        session: &AgentSession,
+        expected_revision: u64,
+        removed: &HashSet<Uuid>,
+    ) -> io::Result<()> {
+        let mut guard = self.storage.lock();
+        let storage = guard.as_mut().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotConnected, "task store is not loaded")
+        })?;
+        let transaction = storage
+            .connection
+            .unchecked_transaction()
+            .map_err(to_io_error)?;
+        let changed = transaction
+            .execute(
+                "UPDATE sessions SET title = ?2, archived_at = ?3, pinned_at = ?4,
+                 updated_at = max(updated_at, ?5), metadata_revision = ?6, metadata_mutation_id = ?7,
+                 agent_rename_allowed = ?9
+             WHERE id = ?1 AND metadata_revision = ?8",
+                params![
+                    session.id.to_string(),
+                    session.title,
+                    session.archived_at.map(|at| at as i64),
+                    session.pinned_at.map(|at| at as i64),
+                    session.updated_at as i64,
+                    session.metadata_revision as i64,
+                    session.metadata_mutation_id.map(|id| id.to_string()),
+                    expected_revision as i64,
+                    session.agent_rename_allowed
+                ],
+            )
+            .map_err(to_io_error)?;
+        if changed != 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "task metadata changed before commit",
+            ));
+        }
+        for id in removed {
+            let id = id.to_string();
+            transaction
+                .execute("DELETE FROM sessions WHERE id = ?1", [&id])
+                .map_err(to_io_error)?;
+            transaction
+                .execute("DELETE FROM session_details WHERE session_id = ?1", [&id])
+                .map_err(to_io_error)?;
+            transaction
+                .execute("DELETE FROM messages WHERE session_id = ?1", [&id])
+                .map_err(to_io_error)?;
+        }
+        transaction.commit().map_err(to_io_error)?;
+        for id in removed {
+            storage.removed_sessions.insert(*id);
+            storage.persisted_sessions.remove(id);
+            storage.written_messages.remove(id);
+            storage.terminal_checkpoints.remove(id);
+        }
+        Ok(())
     }
 
     /// Persists whatever the app marked as changed, so a streaming turn writes
@@ -2364,6 +2474,7 @@ impl StateStore {
             *guard = Some(Storage {
                 connection: self.open()?,
                 persisted_sessions: HashSet::new(),
+                removed_sessions: HashSet::new(),
                 written_messages: HashMap::new(),
                 terminal_checkpoints: HashMap::new(),
                 saved_projects: 0,
@@ -2431,6 +2542,9 @@ impl StateStore {
         let mut written_messages = Vec::new();
         let mut persisted_checkpoints = Vec::new();
         for session in &batch.sessions {
+            if storage.removed_sessions.contains(&session.id) {
+                continue;
+            }
             // A skeleton's empty transcript means "not fetched", not "empty".
             // Its promoted list columns may still have changed (for example,
             // an inactive sidebar row was renamed), so update only those and
@@ -2498,6 +2612,9 @@ impl StateStore {
         // Now that the rows are durable, and not before.
         storage.saved_projects = projects_fingerprint;
         for session in &batch.sessions {
+            if storage.removed_sessions.contains(&session.id) {
+                continue;
+            }
             storage.persisted_sessions.insert(session.id);
         }
         for id in removed {
@@ -2590,6 +2707,8 @@ type SessionColumns = (
     Option<String>,
     Option<String>,
     Option<String>,
+    i64,
+    Option<String>,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -2624,6 +2743,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         friend_peer_name,
         reasoning_effort,
         config_activation,
+        metadata_revision,
+        metadata_mutation_id,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
     // it. Rows migrated before the column existed or whose JSON fails to parse
@@ -2675,6 +2796,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         updated_at: updated_at as u64,
         last_reply_at: last_reply_at.map(|at| at as u64),
         archived_at: archived_at.map(|at| at as u64),
+        metadata_revision: metadata_revision as u64,
+        metadata_mutation_id: metadata_mutation_id.and_then(|id| Uuid::parse_str(&id).ok()),
         pinned_at: pinned_at.map(|at| at as u64),
         dormant_at: dormant_at.map(|at| at as u64),
         dormant_exempt_until: dormant_exempt_until.map(|at| at as u64),
@@ -3367,33 +3490,35 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
          dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
          agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-         friend_peer_id, friend_peer_name, reasoning_effort, config_activation
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
+         friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision, metadata_mutation_id
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
-         title         = excluded.title,
+         title         = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.title ELSE sessions.title END,
          auto_title    = excluded.auto_title,
          provider      = excluded.provider,
          model         = excluded.model,
          status        = excluded.status,
          created_at    = excluded.created_at,
-         updated_at    = excluded.updated_at,
+         updated_at    = max(sessions.updated_at, excluded.updated_at),
          last_reply_at = excluded.last_reply_at,
-         archived_at   = excluded.archived_at,
-         pinned_at     = excluded.pinned_at,
+         archived_at   = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.archived_at ELSE sessions.archived_at END,
+         pinned_at     = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.pinned_at ELSE sessions.pinned_at END,
          dormant_at    = excluded.dormant_at,
          dormant_exempt_until = excluded.dormant_exempt_until,
          landed_at     = excluded.landed_at,
          workspace     = excluded.workspace,
          side_chat_of  = excluded.side_chat_of,
-         agent_rename_allowed = excluded.agent_rename_allowed,
+         agent_rename_allowed = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.agent_rename_allowed ELSE sessions.agent_rename_allowed END,
          boss_managed = excluded.boss_managed,
          planning = excluded.planning,
          runtime_event_cursor = excluded.runtime_event_cursor,
          friend_peer_id = excluded.friend_peer_id,
          friend_peer_name = excluded.friend_peer_name,
          reasoning_effort = excluded.reasoning_effort,
-         config_activation = excluded.config_activation";
+         config_activation = excluded.config_activation,
+         metadata_mutation_id = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.metadata_mutation_id ELSE sessions.metadata_mutation_id END,
+         metadata_revision = max(sessions.metadata_revision, excluded.metadata_revision)";
 
 const INSERT_PROJECT: &str =
     "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred, submissions_enabled, qa_branch, friend_peer_id, kind)
@@ -3501,6 +3626,10 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
             .as_ref()
             .and_then(|mark| serde_json::to_string(mark).ok())
             .map_or(Value::Null, Value::Text),
+        Value::Integer(session.metadata_revision as i64),
+        session
+            .metadata_mutation_id
+            .map_or(Value::Null, |id| Value::Text(id.to_string())),
     ]
 }
 
@@ -3829,6 +3958,65 @@ mod tests {
 
     fn temporary_directory() -> PathBuf {
         std::env::temp_dir().join(format!("waku-state-{}", Uuid::new_v4()))
+    }
+
+    #[test]
+    fn metadata_commit_keeps_detail_bytes_and_fences_delayed_batches() {
+        let root = temporary_directory();
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(root.join("project"));
+        let id = state.sessions[0].id;
+        state
+            .session_mut(id)
+            .unwrap()
+            .begin_turn("retained transcript");
+        let mut child = AgentSession::new(state.sessions[0].project_id, ProviderKind::Codex);
+        child.side_chat_of = Some(id);
+        child.begin_turn("side chat");
+        let child_id = child.id;
+        state.push_session(child);
+        store.save(&mut state).unwrap();
+        let before: String = store
+            .open()
+            .unwrap()
+            .query_row(
+                "SELECT data FROM session_details WHERE session_id = ?1",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        state.mark_session_dirty(id);
+        state.mark_session_dirty(child_id);
+        let delayed = store.save_batch(&mut state);
+        let mut metadata = state.sessions[0].list_projection();
+        metadata.archived_at = Some(crate::model::unix_time());
+        metadata.metadata_revision = 1;
+        metadata.metadata_mutation_id = Some(Uuid::new_v4());
+        store
+            .write_session_metadata(&metadata, 0, &HashSet::from([child_id]))
+            .unwrap();
+        let after: String = store
+            .open()
+            .unwrap()
+            .query_row(
+                "SELECT data FROM session_details WHERE session_id = ?1",
+                [id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            before, after,
+            "list mutation must not rewrite the transcript JSON"
+        );
+        // A save prepared before that atomic mutation may arrive afterward.
+        store.write_batch(&delayed).unwrap();
+        let stored = store.load_session_detail(id).unwrap().unwrap();
+        assert_eq!(stored.archived_at, metadata.archived_at);
+        assert_eq!(stored.metadata_revision, 1);
+        assert_eq!(stored.messages[0].content, "retained transcript");
+        assert!(store.load_session_detail(child_id).unwrap().is_none());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn store_in(directory: &Path) -> StateStore {

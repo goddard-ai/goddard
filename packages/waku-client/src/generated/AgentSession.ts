@@ -140,6 +140,11 @@ last_reply_at?: number | null,
  */
 archived_at?: number | null,
 /**
+ * Daemon-owned version for title/archive/pin mutations. Older full
+ * transcript saves cannot overwrite a newer metadata decision.
+ */
+metadata_revision: number, metadata_mutation_id?: string | null,
+/**
  * When the session was pinned to the top of the sidebar, unix seconds.
  * `None` while the session sits in its ordinary group.
  */

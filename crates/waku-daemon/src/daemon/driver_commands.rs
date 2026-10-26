@@ -103,6 +103,7 @@ pub(super) fn handle_driver_command(
         | Command::SetSkillsEnabled { .. }
         | Command::TrashSkills { .. }
         | Command::LoadTaskState
+        | Command::UpdateSessionMetadata { .. }
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
         | Command::RemoveProject { .. }

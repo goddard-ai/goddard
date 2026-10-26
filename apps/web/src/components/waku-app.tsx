@@ -12,6 +12,7 @@ import type {
   ProviderSessionSummary,
   ReviewDiffSource,
 } from '@waku/client'
+import { mergeSessionMetadata, updateSessionMetadata } from '@waku/client'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -806,28 +807,34 @@ export function WakuApp() {
       ? { ...session, title, agent_rename_allowed: false, updated_at: updatedAt }
       : session)
     try {
-      const hydrated = await hydrateSession(client, sessionId)
-      if (!hydrated) throw new Error(t('errors.task_not_found'))
-      await saveSession({ ...hydrated, title, agent_rename_allowed: false, updated_at: updatedAt })
+      const expectedRevision = Math.max(previousSummary?.metadata_revision ?? 0, previousHydrated?.metadata_revision ?? 0)
+      const response = await updateSessionMetadata(client, sessionId, expectedRevision, crypto.randomUUID(), { type: 'title', title })
+      queryClient.setQueryData<TaskState>(stateKey, (state) => state && ({
+        ...state, sessions: state.sessions.map((session) => session.id === sessionId ? mergeSessionMetadata(session, response.session) : session),
+      }))
+      queryClient.setQueryData<AgentSession>(sessionKey, (session) => session && mergeSessionMetadata(session, response.session))
+      if (!response.applied) throw new Error('This task changed on another client. Retry the action.')
     } catch (error) {
       if (previousSummary) {
         queryClient.setQueryData<TaskState>(stateKey, (currentState) => currentState && ({
           ...currentState,
-          sessions: currentState.sessions.map((session) => session.id === sessionId
+          sessions: currentState.sessions.map((session) => session.id === sessionId && session.title === title && session.metadata_revision === previousSummary.metadata_revision
             ? {
                 ...session,
                 title: previousSummary.title,
+                agent_rename_allowed: previousSummary.agent_rename_allowed,
                 updated_at: previousSummary.updated_at,
               }
             : session),
         }))
       }
       if (previousHydrated) {
-        queryClient.setQueryData<AgentSession>(sessionKey, (session) => session && ({
+        queryClient.setQueryData<AgentSession>(sessionKey, (session) => session && session.title === title && session.metadata_revision === previousHydrated.metadata_revision ? ({
           ...session,
           title: previousHydrated.title,
+          agent_rename_allowed: previousHydrated.agent_rename_allowed,
           updated_at: previousHydrated.updated_at,
-        }))
+        }) : session)
       }
       toast.error(t('errors.rename_task', { error: errorMessage(error) }))
       throw error

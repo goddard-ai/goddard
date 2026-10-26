@@ -344,6 +344,7 @@ function idleSession(): AgentSession {
 
 function runningSession(): AgentSession {
   return {
+    metadata_revision: 0,
     id: 'session',
     title: 'New task',
     project_id: 'project',

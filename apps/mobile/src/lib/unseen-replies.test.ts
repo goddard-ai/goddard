@@ -90,6 +90,7 @@ describe('unseen reply watermarks', () => {
 
 function session(overrides: Partial<AgentSession> & Pick<AgentSession, 'id'>): AgentSession {
   return {
+    metadata_revision: 0,
     title: 'Task',
     project_id: 'project',
     provider: 'codex',

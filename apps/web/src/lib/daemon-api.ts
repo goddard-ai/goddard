@@ -688,6 +688,7 @@ export function createSession(
 ): AgentSession {
   const now = unixTime()
   return {
+    metadata_revision: 0,
     id: crypto.randomUUID(),
     title: 'New task',
     auto_title: null,

@@ -89,6 +89,19 @@ pub fn is_daemon_request(request_id: &str) -> bool {
         || request_id.starts_with(PLAN_FINALIZE_REQUEST_PREFIX)
 }
 
+/// Small user-owned list changes; no transcript hydration or payload required.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum SessionMetadataChange {
+    Archive { archived: bool },
+    Pin { pinned: bool },
+    Title { title: String },
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonReady {
@@ -387,6 +400,11 @@ pub enum Command {
         dirs: Vec<PathBuf>,
     },
     LoadTaskState,
+    UpdateSessionMetadata {
+        expected_revision: u64,
+        mutation_id: Uuid,
+        change: SessionMetadataChange,
+    },
     SaveTaskState {
         projects: Vec<Project>,
         live_session_ids: Vec<Uuid>,
@@ -1434,6 +1452,10 @@ pub struct SubprocessLabelSample {
     rename_all_fields = "camelCase"
 )]
 pub enum ResponsePayload {
+    SessionMetadataUpdated {
+        session: AgentSession,
+        applied: bool,
+    },
     WhistleStatus {
         available: bool,
         downloaded: bool,

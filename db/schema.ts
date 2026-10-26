@@ -60,6 +60,9 @@ export const sessions = sqliteTable(
     lastReplyAt: integer("last_reply_at"),
     /** When the session was archived, unix seconds; NULL while active. */
     archivedAt: integer("archived_at"),
+    /** Daemon-owned CAS version and retry identity for title/archive/pin edits. */
+    metadataRevision: integer("metadata_revision").notNull().default(0),
+    metadataMutationId: text("metadata_mutation_id"),
     /** When the session was pinned to the sidebar top, unix seconds. */
     pinnedAt: integer("pinned_at"),
     /** When the session was swept into the Dormant group, unix seconds. */

@@ -1895,6 +1895,12 @@ pub struct AgentSession {
     /// window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<u64>,
+    /// Daemon-owned version for title/archive/pin mutations. Older full
+    /// transcript saves cannot overwrite a newer metadata decision.
+    #[serde(default)]
+    pub metadata_revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_mutation_id: Option<Uuid>,
     /// When the session was pinned to the top of the sidebar, unix seconds.
     /// `None` while the session sits in its ordinary group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2096,6 +2102,8 @@ impl AgentSession {
             updated_at: now,
             last_reply_at: None,
             archived_at: None,
+            metadata_revision: 0,
+            metadata_mutation_id: None,
             pinned_at: None,
             dormant_at: None,
             dormant_exempt_until: None,
@@ -2166,6 +2174,8 @@ impl AgentSession {
             updated_at: self.updated_at,
             last_reply_at: self.last_reply_at,
             archived_at: self.archived_at,
+            metadata_revision: self.metadata_revision,
+            metadata_mutation_id: self.metadata_mutation_id,
             pinned_at: self.pinned_at,
             dormant_at: self.dormant_at,
             dormant_exempt_until: self.dormant_exempt_until,

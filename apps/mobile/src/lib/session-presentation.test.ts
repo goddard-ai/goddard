@@ -16,6 +16,7 @@ import {
   relativeSessionTime,
   rewindableTurnIds,
   sessionDateGroup,
+  sessionHasStarted,
   stabilizeTranscriptRows,
 } from './session-presentation';
 
@@ -487,6 +488,7 @@ function turn(overrides: Partial<AgentTurn> & Pick<AgentTurn, 'id' | 'status'>):
 
 function session(overrides: Partial<AgentSession>): AgentSession {
   return {
+    metadata_revision: 0,
     id: 'session',
     title: 'Task',
     project_id: 'project',
@@ -514,3 +516,9 @@ function session(overrides: Partial<AgentSession>): AgentSession {
 function epoch(year: number, month: number, day: number, hour: number) {
   return Math.floor(new Date(year, month, day, hour).getTime() / 1_000);
 }
+
+
+test('catalog skeletons are actionable without hydrating a transcript', () => {
+  expect(sessionHasStarted(session({ detail_loaded: false, messages: [], turns: [], provider_cursor: null, last_reply_at: null }))).toBe(true);
+  expect(sessionHasStarted(session({ detail_loaded: true, messages: [], turns: [], provider_cursor: null, last_reply_at: null }))).toBe(false);
+});

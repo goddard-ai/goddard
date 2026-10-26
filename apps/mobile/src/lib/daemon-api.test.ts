@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import type { WakuClient } from '@waku/client';
+import { WakuConnectionError, type WakuClient } from '@waku/client';
 
-import { browseDaemonDirectory, createProject, daemonKeys, discoverComposerCommands, listComposerFiles, persistProject, providerSessionKey } from './daemon-api';
+import { browseDaemonDirectory, createProject, daemonKeys, discoverComposerCommands, listComposerFiles, persistProject, providerSessionKey, updateSessionMetadata } from './daemon-api';
 
 describe('mobile daemon API', () => {
   test('requests composer catalogs from the selected daemon workspace and provider override', async () => {
@@ -113,4 +113,22 @@ describe('mobile daemon API', () => {
       sessionTails: [],
     });
   });
+});
+
+
+test('metadata actions retry the same small command after an ambiguous disconnect', async () => {
+  const calls: unknown[][] = [];
+  const response = { type: 'sessionMetadataUpdated', applied: true, session: { id: 'task', metadata_revision: 1 } };
+  const client = {
+    request: async (...args: unknown[]) => {
+      calls.push(args);
+      if (calls.length === 1) throw new WakuConnectionError('closed', 'response lost');
+      return response;
+    },
+  } as unknown as WakuClient;
+  expect((await updateSessionMetadata(client, 'task', 0, 'same-operation', { type: 'archive', archived: true })).applied).toBe(true);
+  expect(calls).toEqual([
+    [{ type: 'updateSessionMetadata', expectedRevision: 0, mutationId: 'same-operation', change: { type: 'archive', archived: true } }, 'task'],
+    [{ type: 'updateSessionMetadata', expectedRevision: 0, mutationId: 'same-operation', change: { type: 'archive', archived: true } }, 'task'],
+  ]);
 });

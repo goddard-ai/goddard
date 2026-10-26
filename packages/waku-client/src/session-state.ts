@@ -1,5 +1,20 @@
 import type { AgentSession, QueuedMessage } from './generated'
 
+/** Accept a newer daemon metadata version without rolling back live output. */
+export function mergeSessionMetadata(latest: AgentSession, saved: AgentSession): AgentSession {
+  if ((saved.metadata_revision ?? 0) <= (latest.metadata_revision ?? 0)) return latest
+  return {
+    ...latest,
+    title: saved.title,
+    archived_at: saved.archived_at,
+    pinned_at: saved.pinned_at,
+    agent_rename_allowed: saved.agent_rename_allowed,
+    metadata_revision: saved.metadata_revision,
+    metadata_mutation_id: saved.metadata_mutation_id,
+    updated_at: Math.max(latest.updated_at, saved.updated_at),
+  }
+}
+
 /** Whether the session has a provider conversation whose provider must be preserved. */
 export function sessionProviderLocked(session: AgentSession): boolean {
   return session.detail_loaded === false

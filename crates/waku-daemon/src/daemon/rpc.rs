@@ -1017,6 +1017,17 @@ impl Backend for WakuBackend {
                 crate::skills::trash_skills(&dirs).map_err(|error| anyhow!(error))?;
                 Ok(ResponsePayload::Ack)
             }
+            Command::UpdateSessionMetadata {
+                expected_revision,
+                mutation_id,
+                change,
+            } => {
+                anyhow::ensure!(
+                    agent.is_none(),
+                    "list metadata mutations require a human client"
+                );
+                self.update_session_metadata(session_id, expected_revision, mutation_id, change)
+            }
             Command::LoadTaskState => {
                 self.start_archive_retention();
                 self.start_archive_detail_prune();
@@ -1143,6 +1154,29 @@ impl Backend for WakuBackend {
                         .find(|existing| existing.id == session_id)
                     {
                         let employee = self.boss.employee_including_retired(session_id);
+                        // Full transcript saves are also metadata writers.
+                        // Fence stale versions before any projection merge;
+                        // clients cannot mint a future daemon-owned revision.
+                        if session.metadata_revision != existing.metadata_revision {
+                            session.title.clone_from(&existing.title);
+                            session.archived_at = existing.archived_at;
+                            session.pinned_at = existing.pinned_at;
+                            session.agent_rename_allowed = existing.agent_rename_allowed;
+                            session.metadata_revision = existing.metadata_revision;
+                            session.metadata_mutation_id = existing.metadata_mutation_id;
+                        } else if session.updated_at >= existing.updated_at
+                            && (session.title != existing.title
+                                || session.archived_at != existing.archived_at
+                                || session.pinned_at != existing.pinned_at
+                                || session.agent_rename_allowed != existing.agent_rename_allowed)
+                        {
+                            session.metadata_revision = existing
+                                .metadata_revision
+                                .checked_add(1)
+                                .filter(|revision| *revision <= i64::MAX as u64)
+                                .context("task metadata revision exhausted")?;
+                            session.metadata_mutation_id = None;
+                        }
                         // Boss chat archival belongs to rotation, never a client
                         // projection. Preserve both the active and retired flags.
                         if employee.is_none()
@@ -1232,6 +1266,8 @@ impl Backend for WakuBackend {
                             true
                         }
                     } else if session.detail_loaded && session.has_started() {
+                        session.metadata_revision = 0;
+                        session.metadata_mutation_id = None;
                         state.sessions.push(session);
                         true
                     } else {
