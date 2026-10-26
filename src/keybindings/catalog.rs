@@ -572,6 +572,24 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "project_picker.first",
+        action: || Box::new(crate::ui::project_picker::FirstProject),
+        title_key: "shortcuts.select_first",
+        title_index: None,
+        category: C::Menus,
+        editability: MODAL_NAV,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "project_picker.last",
+        action: || Box::new(crate::ui::project_picker::LastProject),
+        title_key: "shortcuts.select_last",
+        title_index: None,
+        category: C::Menus,
+        editability: MODAL_NAV,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "palette.select_next",
         action: || Box::new(crate::app::SelectNext),
         title_key: "shortcuts.select_next",
@@ -2764,6 +2782,13 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("menu.dismiss", All, "escape", Annotation),
     e("menu.dismiss", All, "escape", MemoryNote),
     // === app::init_composer_keys =========================================================
+    e("menu.select_next", All, "down", ProjectPickerInput),
+    e("menu.select_previous", All, "up", ProjectPickerInput),
+    e("menu.next_tab", All, "tab", ProjectPickerInput),
+    e("menu.previous_tab", All, "shift-tab", ProjectPickerInput),
+    e("menu.confirm", All, "enter", ProjectPickerInput),
+    e("project_picker.first", All, "home", ProjectPickerInput),
+    e("project_picker.last", All, "end", ProjectPickerInput),
     e("menu.dismiss", All, "escape", PastedText),
     // === app::init_image_preview_keys ======================================================
     e("dialog.image_preview.dismiss", All, "escape", ImagePreview),
@@ -3169,6 +3194,7 @@ mod ctx {
     pub const TaskSwitcher: &str = "TaskSwitcher";
     pub const ProjectSwitcher: &str = "ProjectSwitcher";
     pub const ProjectSwitcherInput: &str = "ProjectSwitcher > TextInput";
+    pub const ProjectPickerInput: &str = "ProjectPicker > TextInput";
     pub const KeyboardOptions: &str = "KeyboardOptions";
     pub const TranscriptOrEditor: &str = "Transcript || FileEditorPane";
     pub const NotBrowser: &str = "!Browser";
