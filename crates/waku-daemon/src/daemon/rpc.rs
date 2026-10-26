@@ -2015,6 +2015,35 @@ impl Backend for WakuBackend {
                 )
             }
             Command::AgentWireframe { path } => self.agent_wireframe(agent, &path, &events),
+            Command::WireframeComments {
+                path,
+                document,
+                revision,
+                operation,
+            } => {
+                let changed = !matches!(
+                    operation,
+                    waku_protocol::wireframe_comments::WireframeCommentOperation::List { .. }
+                        | waku_protocol::wireframe_comments::WireframeCommentOperation::Get { .. }
+                );
+                let response = self.wireframe_comments(
+                    agent,
+                    session_id,
+                    &path,
+                    document.as_deref(),
+                    revision.as_deref(),
+                    operation,
+                )?;
+                if changed {
+                    if let ResponsePayload::WireframeComments { page } = &response {
+                        events.wireframe_comments_changed(
+                            agent.unwrap_or(session_id),
+                            page.document.clone(),
+                        );
+                    }
+                }
+                Ok(response)
+            }
             Command::AgentRenameSelf { title } => self.agent_rename_self(agent, &title, &events),
             Command::AgentProposeArchive { task_ids, reason } => {
                 self.agent_propose_archive(agent, task_ids, reason, &events)

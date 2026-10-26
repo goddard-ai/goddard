@@ -11685,6 +11685,7 @@ dependencies = [
  "rust-i18n",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "similar",
  "ts-rs",
  "url",

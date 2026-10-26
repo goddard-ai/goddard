@@ -1,5 +1,6 @@
 /* The host supplies these variables from Goddard's active theme. */
 * { box-sizing: border-box; }
+:root { color-scheme: var(--wf-color-scheme); }
 html, body { margin: 0; background: var(--wf-canvas); color: var(--wf-text); }
 body, button, input, textarea, select { font: 14px/1.5 var(--wf-font-family, system-ui); }
 [data-wireframe-screen] { position: relative; overflow: hidden; }

@@ -133,6 +133,7 @@ pub(super) fn handle_driver_command(
         | Command::AgentCreateSession { .. }
         | Command::AgentPrompt { .. }
         | Command::AgentWireframe { .. }
+        | Command::WireframeComments { .. }
         | Command::AgentRenameSelf { .. }
         | Command::AgentProposeArchive { .. }
         | Command::AgentMergeSubmit

@@ -36,6 +36,7 @@ import type { UserInputQuestion } from "./UserInputQuestion";
 import type { WireComputerToolRequest } from "./WireComputerToolRequest";
 import type { WireDriverStartOptions } from "./WireDriverStartOptions";
 import type { WireSessionOptions } from "./WireSessionOptions";
+import type { WireframeCommentOperation } from "./WireframeCommentOperation";
 import type { WorkspaceOperation } from "./WorkspaceOperation";
 import type { JsonValue } from "./serde_json/JsonValue";
 
@@ -171,7 +172,7 @@ taskId?: string | null,
  * daemon-known tasks. `provider` disambiguates when more than one
  * task carries the id.
  */
-threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentWireframe", path: string, } | { "type": "agentRenameSelf", title: string, } | { "type": "agentProposeArchive",
+threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentWireframe", path: string, } | { "type": "wireframeComments", path: string, document: string | null, revision: string | null, operation: WireframeCommentOperation, } | { "type": "agentRenameSelf", title: string, } | { "type": "agentProposeArchive",
 /**
  * Waku task ids to archive. Each must name a started, unarchived
  * task in the caller's own project; side chats leave with their

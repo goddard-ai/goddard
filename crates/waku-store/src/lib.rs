@@ -9,3 +9,4 @@ pub(crate) use waku_protocol::model;
 pub mod boss_context;
 pub mod migration;
 pub mod persistence;
+pub mod wireframe_comments;

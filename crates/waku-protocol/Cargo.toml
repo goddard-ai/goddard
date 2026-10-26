@@ -15,6 +15,7 @@ dom_query = "0.28"
 rust-i18n = "4"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
+sha2 = "0.10"
 similar = "3"
 # ts-rs warns on every serde attribute it does not model. The ones used here,
 # such as `alias`, only widen what deserializes and leave the TypeScript shape

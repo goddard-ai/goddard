@@ -699,6 +699,16 @@ pub enum Command {
     AgentWireframe {
         path: String,
     },
+    /// Persistent discussion in the request's owning task. Agent credentials
+    /// are always restricted to their own task, regardless of request IDs.
+    WireframeComments {
+        path: String,
+        #[serde(default)]
+        document: Option<String>,
+        #[serde(default)]
+        revision: Option<String>,
+        operation: crate::wireframe_comments::WireframeCommentOperation,
+    },
     /// Set the calling task's title with single-use user approval, requesting it if needed.
     AgentRenameSelf {
         title: String,
@@ -1215,6 +1225,11 @@ pub enum ServerMessage {
         session_id: Uuid,
         path: String,
     },
+    /// Discussion changed; clients refresh only their active document.
+    WireframeCommentsChanged {
+        session_id: Uuid,
+        document: String,
+    },
     /// The pairing document changed — a pair request arrived or resolved,
     /// or a paired client was revoked. Carries the whole document.
     PairingChanged {
@@ -1434,6 +1449,9 @@ pub struct SubprocessLabelSample {
     rename_all_fields = "camelCase"
 )]
 pub enum ResponsePayload {
+    WireframeComments {
+        page: crate::wireframe_comments::WireframeCommentsPage,
+    },
     WhistleStatus {
         available: bool,
         downloaded: bool,

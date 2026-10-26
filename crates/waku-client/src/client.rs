@@ -103,6 +103,7 @@ struct ClientInner {
     /// client's voice pipeline.
     speech_subscribers: Mutex<Vec<Sender<(Uuid, Vec<String>)>>>,
     wireframe_subscribers: Mutex<Vec<Sender<(Uuid, String)>>>,
+    wireframe_comment_subscribers: Mutex<Vec<Sender<(Uuid, String)>>>,
     boss_browse_subscribers: Mutex<Vec<Sender<(Uuid, Uuid, String, Option<String>)>>>,
     last_sequences: Mutex<HashMap<(Uuid, Uuid), LastSequence>>,
     disconnected: AtomicBool,
@@ -374,6 +375,7 @@ impl DaemonClient {
             friend_session_closed_subscribers: Mutex::new(Vec::new()),
             speech_subscribers: Mutex::new(Vec::new()),
             wireframe_subscribers: Mutex::new(Vec::new()),
+            wireframe_comment_subscribers: Mutex::new(Vec::new()),
             boss_browse_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
@@ -599,6 +601,12 @@ impl DaemonClient {
     pub fn subscribe_wireframes(&self) -> Receiver<(Uuid, String)> {
         let (events, receiver) = unbounded();
         self.inner.wireframe_subscribers.lock().push(events);
+        receiver
+    }
+
+    pub fn subscribe_wireframe_comments(&self) -> Receiver<(Uuid, String)> {
+        let (events, receiver) = unbounded();
+        self.inner.wireframe_comment_subscribers.lock().push(events);
         receiver
     }
 
@@ -943,6 +951,17 @@ fn run_client(
                             subscriber.send((session_id, path.clone())).is_ok()
                         });
                     }
+                    ServerMessage::WireframeCommentsChanged {
+                        session_id,
+                        document,
+                    } => {
+                        inner
+                            .wireframe_comment_subscribers
+                            .lock()
+                            .retain(|subscriber| {
+                                subscriber.send((session_id, document.clone())).is_ok()
+                            });
+                    }
                     ServerMessage::BossBrowseRequested {
                         request_id,
                         session_id,
@@ -1037,6 +1056,7 @@ fn fail_connection(inner: &ClientInner) {
     inner.friend_session_closed_subscribers.lock().clear();
     inner.speech_subscribers.lock().clear();
     inner.wireframe_subscribers.lock().clear();
+    inner.wireframe_comment_subscribers.lock().clear();
     inner.boss_browse_subscribers.lock().clear();
 }
 

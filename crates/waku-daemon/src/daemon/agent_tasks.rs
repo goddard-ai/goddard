@@ -40,8 +40,24 @@ impl WakuBackend {
         if !self.settings.get().wireframes_experiment_enabled {
             bail!("enable Wireframes in Settings → Experiments first");
         }
-        if !path.to_ascii_lowercase().ends_with(".wireframe.json") {
-            bail!("wireframe paths must end in .wireframe.json");
+        let (_, relative, content) = self.read_task_wireframe(caller, path)?;
+        if path.to_ascii_lowercase().ends_with(".wireframe.html") {
+            waku_protocol::wireframe_html::HtmlWireframe::parse(&content)?;
+        } else {
+            waku_protocol::wireframe::Wireframe::parse(&content)?;
+        }
+        events.wireframe_preview_requested(caller, relative.to_string_lossy().into_owned());
+        Ok(ResponsePayload::Ack)
+    }
+
+    fn read_task_wireframe(
+        &self,
+        caller: Uuid,
+        path: &str,
+    ) -> anyhow::Result<(PathBuf, PathBuf, String)> {
+        let lower = path.to_ascii_lowercase();
+        if !lower.ends_with(".wireframe.json") && !lower.ends_with(".wireframe.html") {
+            bail!("wireframe paths must end in .wireframe.json or .wireframe.html");
         }
         let relative = validate_workspace_relative_path(Path::new(path))?;
         let root = {
@@ -57,6 +73,13 @@ impl WakuBackend {
                 .find(|project| project.id == session.project_id)
                 .ok_or_else(|| anyhow!("task has no project"))?;
             session.workspace.path().unwrap_or(&project.path).to_owned()
+        };
+        // Planning providers run in the Boss files root, independently of the
+        // task's project row. Match the runtime's workspace selection.
+        let root = if self.boss.plan(caller).is_some() {
+            self.boss.workspace(caller)?
+        } else {
+            root
         }
         .canonicalize()?;
         let file = root.join(&relative).canonicalize()?;
@@ -75,9 +98,99 @@ impl WakuBackend {
         if content.len() > 1_048_576 {
             bail!("wireframe exceeds the 1 MiB limit");
         }
-        waku_protocol::wireframe::Wireframe::parse(&content)?;
-        events.wireframe_preview_requested(caller, relative.to_string_lossy().into_owned());
-        Ok(ResponsePayload::Ack)
+        Ok((root, relative, content))
+    }
+
+    pub(super) fn wireframe_comments(
+        &self,
+        agent: Option<Uuid>,
+        session: Uuid,
+        path: &str,
+        expected_document: Option<&str>,
+        expected_revision: Option<&str>,
+        operation: waku_protocol::wireframe_comments::WireframeCommentOperation,
+    ) -> anyhow::Result<ResponsePayload> {
+        use waku_protocol::wireframe_comments::WireframeCommentOperation;
+        use waku_protocol::wireframe_html::HtmlWireframe;
+        use waku_store::wireframe_comments::CommentDocument;
+        if !self.settings.get().wireframes_experiment_enabled {
+            bail!("enable Wireframes in Settings → Experiments first");
+        }
+        if agent.is_some_and(|caller| !session.is_nil() && caller != session) {
+            bail!("wireframe comments must belong to the calling task");
+        }
+        let task = agent.unwrap_or(session);
+        let (root, relative, content) = self.read_task_wireframe(task, path)?;
+        if !path.to_ascii_lowercase().ends_with(".wireframe.html") {
+            bail!("anchored comment threads require an HTML wireframe");
+        }
+        let document = HtmlWireframe::parse(&content)?;
+        if expected_document.is_some_and(|id| id != document.id()) {
+            bail!("wireframe document identity changed; reload the preview before commenting");
+        }
+        let relative = relative.to_string_lossy();
+        let previous = self
+            .task_store
+            .wireframe_comment_path(task, document.id())?;
+        if let Some(previous) = &previous {
+            if previous != relative.as_ref() && root.join(previous).exists() {
+                bail!(
+                    "another file already uses wireframe document ID {}; assign a new ID to a separate proposal",
+                    document.id()
+                );
+            }
+        }
+        let actor = agent.map_or_else(|| "user".to_owned(), |id| format!("agent:{id}"));
+        let retry = match &operation {
+            WireframeCommentOperation::Add { key, .. }
+            | WireframeCommentOperation::Reply { key, .. } => self
+                .task_store
+                .wireframe_comment_retry(task, document.id(), &actor, key)?,
+            _ => false,
+        };
+        let label = match &operation {
+            _ if retry => "",
+            WireframeCommentOperation::Add { screen, anchor, .. } => {
+                if expected_revision.is_some_and(|revision| revision != document.revision()) {
+                    bail!(
+                        "wireframe changed on disk; save or reload the preview before starting a thread"
+                    );
+                }
+                let screen_info = document
+                    .screens()
+                    .iter()
+                    .find(|s| &s.id == screen)
+                    .ok_or_else(|| anyhow!("unknown wireframe screen"))?;
+                match anchor {
+                    Some(anchor) => document
+                        .anchor(screen, anchor)
+                        .ok_or_else(|| anyhow!("unknown wireframe anchor"))?
+                        .label
+                        .as_str(),
+                    None => screen_info.name.as_str(),
+                }
+            }
+            _ => "",
+        };
+        let author_label = if agent.is_some() { "Agent" } else { "User" };
+        let revision = document.revision();
+        let page = self.task_store.wireframe_comments(
+            CommentDocument {
+                task,
+                id: document.id(),
+                path: &relative,
+                revision: &revision,
+                label,
+                allow_path_move: previous
+                    .as_deref()
+                    .is_some_and(|old| old != relative && !root.join(old).exists()),
+                previous_path: previous.as_deref(),
+            },
+            &actor,
+            author_label,
+            operation,
+        )?;
+        Ok(ResponsePayload::WireframeComments { page })
     }
 
     /// A scoped `rename` consumes the user's single-use `/rename` grant

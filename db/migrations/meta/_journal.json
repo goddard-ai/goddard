@@ -218,6 +218,13 @@
       "when": 1791870903232,
       "tag": "0030_rich_tattoo",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1793039338384,
+      "tag": "0031_black_preak",
+      "breakpoints": true
     }
   ]
 }

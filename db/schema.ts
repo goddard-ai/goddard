@@ -14,6 +14,17 @@
 
 import { blob, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+/** Independent of transcript saves: design regeneration never replaces discussion. */
+export const wireframeDiscussions = sqliteTable("wireframe_discussions", {
+  /** Task UUID and validated document ID, joined with a colon. */
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  documentId: text("document_id").notNull(),
+  path: text("path").notNull(),
+  revision: text("revision").notNull(),
+  data: text("data").notNull(),
+});
+
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),

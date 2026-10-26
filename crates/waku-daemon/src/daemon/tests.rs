@@ -22123,6 +22123,134 @@ fn boss_projects_discovery_exposes_canonical_identity() {
 }
 
 #[test]
+fn html_wireframe_comments_validate_task_identity_and_survive_removed_anchors() {
+    use waku_protocol::wireframe_comments::WireframeCommentOperation as Op;
+    let root = std::env::temp_dir().join(format!("waku-wireframe-comments-{}", Uuid::new_v4()));
+    let (backend, task, _) = read_scope_test_backend(&root);
+    let mut settings = backend.settings.get();
+    settings.wireframes_experiment_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    let source = include_str!("../../../waku-protocol/tests/fixtures/tasks.wireframe.html");
+    let path = "design.wireframe.html";
+    std::fs::write(root.join("repo").join(path), source).unwrap();
+    assert!(matches!(
+        backend
+            .agent_wireframe(Some(task), path, &EventSink::detached())
+            .unwrap(),
+        ResponsePayload::Ack
+    ));
+    let add = || Op::Add {
+        screen: "tasks".into(),
+        anchor: Some("task-sidebar".into()),
+        body: "Keep this visible".into(),
+        key: "sidebar-v1".into(),
+    };
+    assert!(
+        backend
+            .wireframe_comments(Some(task), Uuid::new_v4(), path, None, None, add())
+            .is_err()
+    );
+    assert!(
+        backend
+            .wireframe_comments(None, task, path, Some("wrong-document"), None, add())
+            .is_err()
+    );
+    assert!(
+        backend
+            .wireframe_comments(None, task, path, None, Some("stale-preview"), add())
+            .is_err()
+    );
+    let page = match backend
+        .wireframe_comments(Some(task), task, path, Some("task-review"), None, add())
+        .unwrap()
+    {
+        ResponsePayload::WireframeComments { page } => page,
+        _ => panic!("expected discussion"),
+    };
+    let thread = &page.threads[0];
+    assert_eq!(thread.messages[0].author_id, format!("agent:{task}"));
+    assert_eq!(thread.label, "Task navigation");
+    std::fs::write(root.join("repo/copy.wireframe.html"), source).unwrap();
+    assert!(
+        backend
+            .wireframe_comments(
+                None,
+                task,
+                "copy.wireframe.html",
+                None,
+                None,
+                Op::List { offset: 0 }
+            )
+            .is_err()
+    );
+    std::fs::write(
+        root.join("repo").join(path),
+        source.replace(
+            "data-wireframe-id=\"task-sidebar\"",
+            "data-wireframe-id=\"renamed-sidebar\"",
+        ),
+    )
+    .unwrap();
+    // An accepted creation can be retried after the design removes its anchor.
+    assert!(
+        backend
+            .wireframe_comments(Some(task), task, path, None, Some("older-revision"), add())
+            .is_ok()
+    );
+    let page = match backend
+        .wireframe_comments(
+            None,
+            task,
+            path,
+            None,
+            None,
+            Op::Reply {
+                thread: thread.id,
+                body: "Keep the comment after redesign".into(),
+                key: "reply-v1".into(),
+            },
+        )
+        .unwrap()
+    {
+        ResponsePayload::WireframeComments { page } => page,
+        _ => panic!("expected discussion"),
+    };
+    assert_eq!(page.threads[0].anchor.as_deref(), Some("task-sidebar"));
+    assert_eq!(page.threads[0].messages.len(), 2);
+    assert_eq!(page.threads[0].messages[1].author_id, "user");
+    assert!(!page.threads[0].resolved);
+    backend
+        .boss
+        .add_plan(waku_protocol::boss::BossPlan {
+            id: Uuid::new_v4(),
+            session_id: task,
+            plan_file: "plans/proposal.md".into(),
+            idea: "Review".into(),
+            approved_revisions: Vec::new(),
+            finalized_at: None,
+            items: Vec::new(),
+            outcome: None,
+            history: Vec::new(),
+        })
+        .unwrap();
+    let planning_root = backend.boss.workspace(task).unwrap();
+    std::fs::create_dir_all(planning_root.join("plans")).unwrap();
+    std::fs::write(planning_root.join("plans/proposal.wireframe.html"), source).unwrap();
+    assert!(matches!(
+        backend
+            .agent_wireframe(
+                Some(task),
+                "plans/proposal.wireframe.html",
+                &EventSink::detached()
+            )
+            .unwrap(),
+        ResponsePayload::Ack
+    ));
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn task_wireframes_require_opt_in_valid_documents_and_workspace_containment() {
     let root = std::env::temp_dir().join(format!("waku-wireframe-{}", Uuid::new_v4()));
     let (backend, task, _) = read_scope_test_backend(&root);

@@ -508,6 +508,18 @@ impl EventSink {
         );
     }
 
+    pub fn wireframe_comments_changed(&self, session_id: Uuid, document: String) {
+        let mut state = self.hub.state.lock();
+        Hub::broadcast(
+            &mut state,
+            &ServerMessage::WireframeCommentsChanged {
+                session_id,
+                document,
+            },
+            None,
+        );
+    }
+
     /// Ask connected clients to open a URL in the boss chat's right panel.
     pub fn boss_browse_requested(
         &self,
@@ -2524,6 +2536,7 @@ fn is_agent_command(command: &Command) -> bool {
             | Command::AgentCreateSession { .. }
             | Command::AgentPrompt { .. }
             | Command::AgentWireframe { .. }
+            | Command::WireframeComments { .. }
             | Command::AgentRenameSelf { .. }
             | Command::AgentProposeArchive { .. }
             | Command::AgentMergeSubmit
@@ -2603,6 +2616,7 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::AgentMergeSubmit
             | Command::AgentProjectMap { .. }
             | Command::AgentWireframe { .. }
+            | Command::WireframeComments { .. }
             | Command::StartIntegrationAuth { .. }
             | Command::ConnectIntegration { .. }
     )
@@ -2950,6 +2964,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::AgentCreateSession { .. } => "agentCreateSession",
         Command::AgentPrompt { .. } => "agentPrompt",
         Command::AgentWireframe { .. } => "agentWireframe",
+        Command::WireframeComments { .. } => "wireframeComments",
         Command::AgentRenameSelf { .. } => "agentRenameSelf",
         Command::AgentProposeArchive { .. } => "agentProposeArchive",
         Command::AgentMergeSubmit => "agentMergeSubmit",

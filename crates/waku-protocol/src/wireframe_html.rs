@@ -7,6 +7,7 @@ use std::collections::HashSet;
 
 use anyhow::{Result, bail};
 use dom_query::{Document, NodeRef};
+use sha2::{Digest, Sha256};
 
 /// Maximum UTF-8 document size, checked before HTML parsing.
 pub const MAX_HTML_BYTES: usize = 1_048_576;
@@ -26,10 +27,11 @@ pub struct HtmlWireframe {
     name: String,
     screens: Vec<HtmlScreen>,
     html: String,
+    revision: String,
 }
 
 /// A screen and the stable elements to which discussion can attach.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct HtmlScreen {
     pub id: String,
     pub name: String,
@@ -39,7 +41,7 @@ pub struct HtmlScreen {
 }
 
 /// Stable anchor ID with a short human-readable fallback if the element disappears.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct HtmlAnchor {
     pub id: String,
     pub label: String,
@@ -86,7 +88,7 @@ impl HtmlWireframe {
                     id: id.to_string(),
                     name: node
                         .attr("aria-label")
-                        .map_or_else(|| id.to_string(), |s| s.to_string()),
+                        .map_or_else(|| id.to_string(), |s| s.chars().take(160).collect()),
                     width: dimension(node, "data-wireframe-width", 800.0)?,
                     height: dimension(node, "data-wireframe-height", 600.0)?,
                     anchors: Vec::new(),
@@ -136,7 +138,8 @@ impl HtmlWireframe {
             id,
             name,
             screens,
-            html: document.html().to_string(),
+            html: source.to_owned(),
+            revision: format!("{:x}", Sha256::digest(source.as_bytes())),
         })
     }
 
@@ -152,9 +155,13 @@ impl HtmlWireframe {
     pub fn screens(&self) -> &[HtmlScreen] {
         &self.screens
     }
-    /// Normalized HTML to load only inside the restricted preview.
+    /// Authored HTML to load only inside the restricted preview.
     pub fn html(&self) -> &str {
         &self.html
+    }
+    /// SHA-256 of the authored bytes, identifying the displayed revision.
+    pub fn revision(&self) -> &str {
+        &self.revision
     }
 
     /// Look up an element without interpreting IDs as CSS selectors.

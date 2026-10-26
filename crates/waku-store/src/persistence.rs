@@ -1636,7 +1636,7 @@ impl StateStore {
         &self.path
     }
 
-    fn open(&self) -> io::Result<Connection> {
+    pub(crate) fn open(&self) -> io::Result<Connection> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
