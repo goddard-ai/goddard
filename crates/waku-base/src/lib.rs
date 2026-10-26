@@ -59,6 +59,7 @@ pub mod attachments;
 pub mod blob_store;
 pub mod frontmatter;
 pub mod fs_ext;
+pub mod host_load;
 pub mod http_wire;
 pub mod i18n;
 pub mod identity;

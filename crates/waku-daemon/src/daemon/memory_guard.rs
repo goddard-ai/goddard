@@ -346,7 +346,14 @@ impl WakuBackend {
 
     #[cfg(unix)]
     fn memory_guard_tick(&self, watches: &mut HashMap<Uuid, Watch>, now: Instant) {
-        let pressure = crate::pressure::sample();
+        let observation = waku_base::host_load::Monitor::shared().snapshot();
+        // Preserve immediate emergency sampling during monitor warmup or a
+        // sampler failure; normal ticks reuse the cheap shared observation.
+        let pressure = if observation.fresh(now) && observation.memory.is_some() {
+            observation.memory
+        } else {
+            crate::pressure::sample()
+        };
         let critical = pressure == Some(Level::Critical);
         self.memory_guard
             .critical
