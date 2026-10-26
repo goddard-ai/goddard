@@ -223,11 +223,6 @@ fn protected_employee_transcripts(
         .collect()
 }
 
-/// Detail rows rewritten per prune batch. Bound so a batch transaction
-/// holds the shared storage lock for tens of milliseconds, not seconds —
-/// the sweep drains its backlog over repeated batches instead.
-const ARCHIVE_PRUNE_BATCH: usize = 8;
-
 /// How long a projectless project may sit in the catalog without a task.
 /// Clients that provision a workspace ahead of the first prompt — mobile
 /// and web save the project row, then submit — need the row to survive the
@@ -559,9 +554,6 @@ pub struct WakuBackend {
     runtime_test_env: Option<Arc<dyn Fn(&crate::agent::AgentLaunchEnv) + Send + Sync>>,
     #[cfg(test)]
     runtime_test_forward: Option<RuntimeForwardHook>,
-    /// Whether an archive-detail prune sweep is running on its own thread.
-    /// `LoadTaskState` retriggers the sweep; the flag keeps one in flight.
-    archive_detail_prune_running: Arc<std::sync::atomic::AtomicBool>,
     /// Guards spawning the idle-runtime reaper — `set_event_source` may be
     /// installed more than once in tests that bind two servers to one
     /// backend.
@@ -629,6 +621,7 @@ impl WakuBackend {
     /// scoped command dispatch without creating a cycle.
     pub fn install_weak_self(self: &Arc<Self>) {
         *self.weak_self.lock() = Arc::downgrade(self);
+        self.start_archive_retention();
     }
 
     pub(crate) fn weak_self(&self) -> Weak<WakuBackend> {

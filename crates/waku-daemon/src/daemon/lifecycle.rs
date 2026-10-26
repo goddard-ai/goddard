@@ -91,7 +91,6 @@ impl WakuBackend {
             runtime_test_env: None,
             #[cfg(test)]
             runtime_test_forward: None,
-            archive_detail_prune_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             idle_reaper_started: std::sync::atomic::AtomicBool::new(false),
             daemon_address: Arc::new(Mutex::new(None)),
             exposed_port: Arc::new(Mutex::new(None)),
@@ -160,7 +159,6 @@ impl WakuBackend {
                 }
             }
         }
-        backend.purge_expired_archived_sessions();
         backend.sweep_retired_plan_delivery();
         backend.start_archive_detail_prune();
         backend.install_link_handlers();
@@ -674,6 +672,14 @@ impl WakuBackend {
     /// a projectless workspace, that workspace leaves with it — its live
     /// directory and any archive zip — since no session can reach it again.
     pub(super) fn remove_session(&self, session_id: Uuid) -> anyhow::Result<()> {
+        self.remove_session_matching(session_id, None).map(|_| ())
+    }
+
+    fn remove_session_matching(
+        &self,
+        session_id: Uuid,
+        retention_cutoff: Option<u64>,
+    ) -> anyhow::Result<bool> {
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let _owner = lifecycle.lock();
         // A queued shell can be memory-only. Record cancellation before
@@ -683,11 +689,34 @@ impl WakuBackend {
         {
             self.stop_queued_employee(session_id)?;
         }
+        let protected = retention_cutoff.map(|_| {
+            protected_employee_transcripts(&self.boss.document(), crate::model::unix_time())
+        });
         let mut removed_workspace = None;
         let mut removed_ids;
         let mut workspace_roots: Vec<PathBuf>;
         {
             let mut state = self.task_state.lock();
+            if let Some(cutoff) = retention_cutoff {
+                // Recheck under the same lease that removes the row. An
+                // unarchive after the candidate scan cancels retention.
+                let eligible = state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .is_some_and(|session| {
+                        session.archived_at.is_some_and(|at| at <= cutoff)
+                            && !session.is_busy()
+                            && session.queued_messages.is_empty()
+                    });
+                if !eligible
+                    || protected
+                        .as_ref()
+                        .is_some_and(|ids| ids.contains(&session_id))
+                {
+                    return Ok(false);
+                }
+            }
             // Side chats die with their parent: walk the descendant set
             // first so a removal can never leave orphans behind.
             removed_ids = vec![session_id];
@@ -762,7 +791,7 @@ impl WakuBackend {
             .collect::<Vec<_>>();
         drop_detached(removed_runtimes);
         self.cleanup_plan_delivery(&removed_ids);
-        Ok(())
+        Ok(true)
     }
 
     /// Removes a project and every task under it. The ids are remembered for
@@ -995,102 +1024,164 @@ impl WakuBackend {
     /// Deletes archived tasks whose archive has outlived the retention
     /// window.
     ///
-    /// Runs whenever task state loads — daemon startup and every client
-    /// `LoadTaskState` — so retention does not depend on a timer inside a
-    /// daemon clients may keep alive for weeks. As with ordinary removal, the
+    /// Queued at daemon startup and on client `LoadTaskState` requests, then
+    /// admitted by the host maintenance scheduler. As with ordinary removal, the
     /// task's Git worktree is deliberately left on disk; only its checkpoint
     /// refs are deleted. A projectless workspace does leave with its last
     /// task — `remove_session` drops the live directory and any archive zip.
-    pub(super) fn purge_expired_archived_sessions(&self) {
+    pub(super) fn start_archive_retention(&self) {
+        use waku_base::maintenance::{Progress, Scheduler, Unit};
+        let backend = self.weak_self();
+        let key = format!("archive-retention:{}", self.task_store.path().display());
+        let result = Scheduler::shared().and_then(|scheduler| {
+            scheduler.submit(key, Unit::Heavy, move |permit| {
+                let Some(backend) = backend.upgrade() else {
+                    return Ok(Progress::Complete);
+                };
+                if !permit.should_continue() {
+                    return Ok(Progress::More);
+                }
+                backend
+                    .purge_expired_archived_sessions()
+                    .map(|more| {
+                        if more {
+                            Progress::More
+                        } else {
+                            Progress::Complete
+                        }
+                    })
+                    .map_err(std::io::Error::other)
+            })
+        });
+        if let Err(error) = result {
+            eprintln!("could not schedule archive retention: {error}");
+        }
+    }
+
+    /// Remove at most one expired task per admitted maintenance unit.
+    pub(super) fn purge_expired_archived_sessions(&self) -> anyhow::Result<bool> {
         let now = crate::model::unix_time();
         let cutoff = now.saturating_sub(ARCHIVED_SESSION_RETENTION_SECONDS);
         let protected = protected_employee_transcripts(&self.boss.document(), now);
         let expired = {
             let state = self.task_state.lock();
-            let mut expired = Vec::new();
-            for index in 0..state.sessions.len() {
-                if state.sessions[index]
-                    .archived_at
-                    .is_none_or(|archived_at| archived_at > cutoff)
-                {
-                    continue;
-                }
-                let session_id = state.sessions[index].id;
-                if protected.contains(&session_id) {
-                    continue;
-                }
-                // Checkpoint refs live in the repository's shared
-                // namespace, so delete them from the project checkout —
-                // the task's worktree may already be gone, and a missing
-                // cwd would silently leave the refs behind.
-                let workspace = state
-                    .projects
-                    .iter()
-                    .find(|project| project.id == state.sessions[index].project_id)
-                    .map(|project| project.path.clone())
-                    .or_else(|| {
-                        state.sessions[index]
-                            .workspace
-                            .path()
-                            .map(Path::to_path_buf)
-                    });
-                expired.push((session_id, workspace));
-            }
-            expired
+            state
+                .sessions
+                .iter()
+                .find(|session| {
+                    session.archived_at.is_some_and(|at| at <= cutoff)
+                        && !protected.contains(&session.id)
+                        && !session.is_busy()
+                        && session.queued_messages.is_empty()
+                })
+                .map(|session| {
+                    let workspace = state
+                        .projects
+                        .iter()
+                        .find(|project| project.id == session.project_id)
+                        .map(|project| project.path.clone())
+                        .or_else(|| session.workspace.path().map(Path::to_path_buf));
+                    (session.id, workspace)
+                })
         };
-        for (session_id, workspace) in expired {
+        let Some((session_id, workspace)) = expired else {
+            return Ok(false);
+        };
+        if self.remove_session_matching(session_id, Some(cutoff))? {
+            // Delete refs only after the guarded removal commits. A task that
+            // was unarchived while queued retains its restore checkpoint.
             if let Some(cwd) = workspace {
                 let _ = crate::checkpoint::delete_all_session_refs(&cwd, session_id);
             }
-            let _ = self.remove_session(session_id);
+            self.notify_task_state();
         }
+        Ok(true)
     }
 
-    /// Strips heavyweight transcript payloads from detail rows archived past
-    /// [`ARCHIVED_DETAIL_RETENTION_SECONDS`]. Scheduled from the same places
-    /// as the full archive purge — startup and every `LoadTaskState` — but
-    /// runs on its own thread in small committed batches: parsing and
-    /// rewriting hundreds of megabytes of session JSON is far too slow for
-    /// the request path that triggers it.
+    /// Enqueue only a descriptor. Each admitted unit rewrites at most one
+    /// detail row, then releases the host permit before another unit starts.
     pub(super) fn start_archive_detail_prune(&self) {
-        use std::sync::atomic::Ordering;
-        if self
-            .archive_detail_prune_running
-            .swap(true, Ordering::AcqRel)
-        {
-            return;
-        }
-        let store = Arc::clone(&self.task_store);
-        let boss = Arc::clone(&self.boss);
-        let running = Arc::clone(&self.archive_detail_prune_running);
-        let _ = std::thread::Builder::new()
-            .name("waku-archive-prune".to_owned())
-            .spawn(move || {
-                let cutoff =
-                    crate::model::unix_time().saturating_sub(ARCHIVED_DETAIL_RETENTION_SECONDS);
-                loop {
-                    // Read per batch: the Boss document only exists once the
-                    // experiment activates, and an identity read before then
-                    // would prune chats the exemption covers.
-                    let document = boss.document();
-                    let boss_project = document.identity.id;
-                    let protected =
-                        protected_employee_transcripts(&document, crate::model::unix_time());
-                    match store.prune_archived_session_details(
-                        cutoff,
-                        ARCHIVE_PRUNE_BATCH,
-                        boss_project,
-                        &protected,
-                    ) {
-                        Ok(0) => break,
-                        Ok(_) => std::thread::yield_now(),
-                        Err(error) => {
-                            eprintln!("archive detail prune failed: {error:#}");
-                            break;
-                        }
-                    }
+        use waku_base::maintenance::{Progress, Scheduler, Unit};
+        let store = Arc::downgrade(&self.task_store);
+        let boss = Arc::downgrade(&self.boss);
+        let key = format!("archive-details:{}", self.task_store.path().display());
+        let result = Scheduler::shared().and_then(|scheduler| {
+            scheduler.submit(key, Unit::Heavy, move |permit| {
+                let (Some(store), Some(boss)) = (store.upgrade(), boss.upgrade()) else {
+                    return Ok(Progress::Complete);
+                };
+                if !permit.should_continue() {
+                    return Ok(Progress::More);
                 }
-                running.store(false, Ordering::Release);
-            });
+                let now = crate::model::unix_time();
+                let document = boss.document();
+                let protected = protected_employee_transcripts(&document, now);
+                let pruned = store.prune_archived_session_details(
+                    now.saturating_sub(ARCHIVED_DETAIL_RETENTION_SECONDS),
+                    1,
+                    document.identity.id,
+                    &protected,
+                )?;
+                Ok(if pruned == 0 {
+                    Progress::Complete
+                } else {
+                    Progress::More
+                })
+            })
+        });
+        if let Err(error) = result {
+            // The persisted archive timestamps remain the source of truth;
+            // startup or the next catalog request retries a rejected enqueue.
+            eprintln!("could not schedule archive detail prune: {error}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::*;
+
+    #[test]
+    fn archive_retention_rechecks_unarchive_and_removes_one_task_per_unit() {
+        let root = std::env::temp_dir().join(format!("archive-retention-{}", Uuid::new_v4()));
+        let (backend, selected) = super::super::tests::surface_test_backend(&root);
+        let cutoff = crate::model::unix_time().saturating_sub(ARCHIVED_SESSION_RETENTION_SECONDS);
+        let ids = {
+            let mut state = backend.task_state.lock();
+            let project_id = state.sessions[0].project_id;
+            let mut ids = Vec::new();
+            for _ in 0..3 {
+                let mut session = AgentSession::new(project_id, ProviderKind::Codex);
+                session.begin_turn("retained task");
+                session.finish_active_turn(crate::model::TurnStatus::Completed);
+                session.archived_at = Some(cutoff - 1);
+                ids.push(session.id);
+                state.push_session(session);
+            }
+            backend.task_store.save(&mut state).unwrap();
+            ids
+        };
+        // Simulate an unarchive after the worker's descriptor was chosen.
+        backend
+            .task_state
+            .lock()
+            .session_mut(ids[0])
+            .unwrap()
+            .archived_at = None;
+        assert!(
+            !backend
+                .remove_session_matching(ids[0], Some(cutoff))
+                .unwrap()
+        );
+        assert!(backend.purge_expired_archived_sessions().unwrap());
+        let state = backend.task_store.load().unwrap();
+        assert!(state.sessions.iter().any(|session| session.id == selected));
+        assert!(state.sessions.iter().any(|session| session.id == ids[0]));
+        assert!(!state.sessions.iter().any(|session| session.id == ids[1]));
+        assert!(state.sessions.iter().any(|session| session.id == ids[2]));
+        assert!(backend.purge_expired_archived_sessions().unwrap());
+        assert!(!backend.purge_expired_archived_sessions().unwrap());
+        drop(backend);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

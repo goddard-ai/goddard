@@ -1018,7 +1018,7 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::Ack)
             }
             Command::LoadTaskState => {
-                self.purge_expired_archived_sessions();
+                self.start_archive_retention();
                 self.start_archive_detail_prune();
                 let boss = self.boss.document();
                 // Boss-managed rows ride the catalog even unstarted — a

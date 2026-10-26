@@ -17904,7 +17904,7 @@ fn employee_tool_outputs_survive_48_hours_after_expiry_and_retirement() {
         .unwrap();
     assert_eq!(backend.boss.retire_expired(now).unwrap().len(), 1);
     // Even an archive already older than the outer purge survives next day.
-    backend.purge_expired_archived_sessions();
+    backend.purge_expired_archived_sessions().unwrap();
     assert!(
         backend
             .task_state

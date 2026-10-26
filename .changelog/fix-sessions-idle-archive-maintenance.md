@@ -1,0 +1,1 @@
+- Archive retention and old transcript cleanup now wait for low CPU use and normal memory pressure, process one task at a time, and keep catalog requests responsive.
