@@ -113,23 +113,54 @@ impl Waku {
             cx.notify();
             return;
         }
-        self.push_draft_use_undo(DraftUseUndo {
-            kind: DraftUndoKind::Create,
-            applied: draft.clone(),
-            saved: Some(saved),
-            index: 0,
-            key,
-            previous: Some(draft),
-        });
-        // Clear the slot before the composer so the debounced autosave can't
-        // file the payload back under the composer key on its next pass.
-        self.composer_drafts.remove(key);
-        self.apply_composer_draft(Some(key), ComposerDraft::default(), cx);
-        self.schedule_composer_draft_save(cx);
-        self.show_success_toast(tr!("drafts.saved_toast"));
+        let Some(ticket) = self.store.app_save_ticket() else {
+            return;
+        };
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
-        cx.notify();
+        let window_handle = window.window_handle();
+        cx.spawn(async move |waku, cx| {
+            let result = ticket.wait().await;
+            let _ = window_handle.update(cx, move |_, _window, cx| {
+                let _ = waku.update(cx, |this, cx| {
+                    if let Err(error) = result {
+                        this.state.saved_drafts.retain(|item| item.id != saved.id);
+                        this.save();
+                        this.show_toast(tr!("errors.save_local_state", error = error));
+                        cx.notify();
+                        return;
+                    }
+                    if !this
+                        .state
+                        .saved_drafts
+                        .iter()
+                        .any(|item| item.id == saved.id)
+                    {
+                        return;
+                    }
+                    // The disk may have been slow. Never clear text typed or a
+                    // different composer selected while the save was pending.
+                    if this.composer_draft_key() == Some(key)
+                        && this.current_composer_draft(Some(key), cx) == draft
+                    {
+                        this.push_draft_use_undo(DraftUseUndo {
+                            kind: DraftUndoKind::Create,
+                            applied: draft.clone(),
+                            saved: Some(saved),
+                            index: 0,
+                            key,
+                            previous: Some(draft),
+                        });
+                        this.composer_drafts.remove(key);
+                        this.apply_composer_draft(Some(key), ComposerDraft::default(), cx);
+                        this.schedule_composer_draft_save(cx);
+                    }
+                    this.show_success_toast(tr!("drafts.saved_toast"));
+                    cx.notify();
+                });
+            });
+        })
+        .detach();
     }
 
     /// The project the composer's draft slot belongs to — the store the

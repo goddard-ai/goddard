@@ -5109,7 +5109,7 @@ impl Waku {
         };
         let app_error = if self.friend_sessions.is_empty() {
             self.store
-                .save(&mut self.state)
+                .queue_save(&mut self.state)
                 .err()
                 .map(|error| error.to_string())
         } else {
@@ -5123,7 +5123,7 @@ impl Waku {
             self.state.sessions = kept;
             let result = self
                 .store
-                .save(&mut self.state)
+                .queue_save(&mut self.state)
                 .err()
                 .map(|error| error.to_string());
             self.state.sessions.extend(watched);
@@ -5135,6 +5135,7 @@ impl Waku {
         } else {
             self.stream_state_dirty = false;
         }
+        signal_event_pump(&self.event_wake_tx);
         app_saved
     }
 
@@ -8695,12 +8696,19 @@ impl Waku {
             self.flush_daemon_recovery_report(cx);
         }
 
+        let (app_write_pending, app_write_error) = self.store.app_write_status();
+        if let Some(error) = app_write_error {
+            self.show_toast(tr!("errors.save_local_state", error = error));
+            cx.notify();
+        }
         if self.runtimes.values().any(|runtime| {
             !runtime.events.is_empty()
                 || !runtime.pending_events.is_empty()
                 || runtime.stream_remeasure_pending
         }) {
             EventPumpSchedule::StreamFrame
+        } else if app_write_pending {
+            EventPumpSchedule::BackgroundOutput(Duration::from_millis(50))
         } else if let Some(delay) = self.next_timed_pump_delay() {
             EventPumpSchedule::BackgroundOutput(delay)
         } else {

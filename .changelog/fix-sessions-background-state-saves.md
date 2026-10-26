@@ -1,0 +1,1 @@
+- Desktop state saves no longer wait for disk writes on the interface thread; saving a draft preserves any text you type while the save is pending.

@@ -6676,7 +6676,12 @@ impl Waku {
             // is what lands the final position and size on disk.
             cx.on_app_quit(|this, _| {
                 this.save();
-                async {}
+                let ticket = this.store.app_save_ticket();
+                async move {
+                    if let Some(ticket) = ticket {
+                        let _ = ticket.wait().await;
+                    }
+                }
             })
             .detach();
 

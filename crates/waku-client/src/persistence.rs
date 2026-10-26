@@ -1,5 +1,8 @@
 //! Desktop-owned preferences and RPC proxies for daemon-owned task state.
 
+mod app_writer;
+pub use app_writer::AppSaveTicket;
+
 #[cfg(test)]
 #[path = "persistence/startup_tests.rs"]
 mod startup_tests;
@@ -4148,6 +4151,7 @@ pub struct StateStore {
     /// stream tick and skips the atomic rewrite while they are unchanged.
     written_app_settings: Mutex<u64>,
     written_app_state: Mutex<u64>,
+    app_writer: Mutex<Option<app_writer::Writer>>,
 }
 
 /// One provider's resumable sessions merged across connected daemons, plus
@@ -4200,6 +4204,7 @@ impl StateStore {
             save_cursors: Mutex::new(HashMap::new()),
             written_app_settings: Mutex::new(0),
             written_app_state: Mutex::new(0),
+            app_writer: Mutex::new(None),
         }
     }
 
@@ -4599,8 +4604,46 @@ impl StateStore {
     /// or is unreachable keeps its dirty ids queued for the next save while
     /// the rest still commit.
     pub fn save(&self, state: &mut PersistedState) -> io::Result<()> {
-        self.write_app_settings(&state.app_settings())?;
-        self.write_app_state(&state.app_state())?;
+        smol::block_on(self.queue_save(state)?.wait())
+    }
+
+    /// Enqueue desktop files without waiting for serialization or disk. The
+    /// returned ticket is required before discarding user-owned draft contents.
+    pub fn queue_save(&self, state: &mut PersistedState) -> io::Result<AppSaveTicket> {
+        let writer = {
+            let mut writer = self.app_writer.lock();
+            if writer.is_none() {
+                *writer = Some(app_writer::Writer::start()?);
+            }
+            writer.as_ref().expect("writer initialized above").clone()
+        };
+        let ticket = writer.queue(app_writer::Snapshot {
+            settings: (!self.is_auxiliary()).then(|| state.app_settings()),
+            state: state.app_state(),
+            settings_path: self.app_settings_path.clone(),
+            state_path: self.app_state_path.clone(),
+        })?;
+        self.save_task_state(state)?;
+        Ok(ticket)
+    }
+
+    pub fn app_save_ticket(&self) -> Option<AppSaveTicket> {
+        self.app_writer
+            .lock()
+            .as_ref()
+            .map(app_writer::Writer::ticket)
+    }
+
+    /// Pending status and errors are read together so a completion racing the
+    /// event pump cannot leave an unreported error without a scheduled wake.
+    pub fn app_write_status(&self) -> (bool, Option<String>) {
+        self.app_writer
+            .lock()
+            .as_ref()
+            .map_or((false, None), app_writer::Writer::status)
+    }
+
+    fn save_task_state(&self, state: &mut PersistedState) -> io::Result<()> {
         if !self.task_state_loaded.load(Ordering::Acquire) {
             return Err(io::Error::new(
                 io::ErrorKind::NotConnected,
