@@ -6371,30 +6371,22 @@ impl Waku {
             .map(|(model, effort, fast)| (session.provider, model, effort, fast));
         let mut items = Vec::with_capacity(combos.len() + if auto_available { 1 } else { 0 });
         if auto_available {
-            items.push(keyboard_options::KeyboardOptionItem::Choice(
-                keyboard_options::KeyboardOptionChoice::new(
-                    tr!("keyboard_options.automatic_routing"),
-                    Some(tr!("keyboard_options.automatic_routing_description").to_string()),
-                    None,
-                    session.auto_route,
-                    true,
-                    keyboard_options::KeyboardOptionAction::AutoRoute,
-                ),
-            ));
+            items.push(keyboard_options::KeyboardOptionItem::Model {
+                row: model_picker::PickerRow::Policy(model_picker::PolicyRowId::Auto),
+                selected: session.auto_route,
+                enabled: true,
+            });
         }
         items.extend(combos.iter().map(|(provider, model, effort, fast)| {
-            let label = self
+            let catalog_model = self
                 .provider_probe_on(session_key, *provider)
                 .and_then(|probe| probe.model(model))
-                .map(|model| model.name.clone())
-                .unwrap_or_else(|| model.clone());
-            let mut details = vec![provider.display_name().to_string()];
-            if let Some(effort) = effort {
-                details.push(effort.clone());
-            }
-            if *fast {
-                details.push(tr!("keyboard_options.fast").to_string());
-            }
+                .cloned()
+                .unwrap_or_else(|| ProviderModel::new(model.clone(), model.clone()));
+            let favorite_index = self.state.favorite_models.iter().position(|favorite| {
+                self.favorite_model_combo(favorite)
+                    == (*provider, model.clone(), effort.clone(), *fast)
+            });
             let selected = !session.auto_route
                 && current.as_ref().is_some_and(
                     |(current_provider, current_model, current_effort, current_fast)| {
@@ -6404,29 +6396,23 @@ impl Waku {
                             && current_fast == fast
                     },
                 );
-            keyboard_options::KeyboardOptionItem::Choice(
-                keyboard_options::KeyboardOptionChoice::new(
-                    label,
-                    Some(details.join(" · ")),
-                    None,
-                    selected,
-                    true,
-                    keyboard_options::KeyboardOptionAction::Model {
-                        provider: *provider,
-                        model: model.clone(),
-                        effort: effort.clone(),
-                        fast: *fast,
-                    },
-                ),
-            )
+            keyboard_options::KeyboardOptionItem::Model {
+                row: model_picker::PickerRow::Combo(model_picker::ModelPickerRow {
+                    provider: *provider,
+                    model: catalog_model,
+                    effort: effort.clone(),
+                    fast: *fast,
+                    favorite_index,
+                    favorite_rank: None,
+                    recent_rank: None,
+                }),
+                selected,
+                enabled: true,
+            }
         }));
-        let highlighted = items.iter().position(|item| {
-            matches!(
-                item,
-                keyboard_options::KeyboardOptionItem::Choice(choice)
-                    if choice.selected
-            )
-        });
+        let highlighted = items
+            .iter()
+            .position(keyboard_options::KeyboardOptionItem::selected);
         self.open_keyboard_options(
             tr!("keyboard_options.favorite_models").to_string(),
             items,

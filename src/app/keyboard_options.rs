@@ -65,9 +65,8 @@ impl KeyboardOptionChoice {
 pub(super) enum KeyboardOptionItem {
     Section(String),
     Choice(KeyboardOptionChoice),
-    /// A row straight from the shared model picker's list — carries the
-    /// full [`PickerRow`] so the ⌘/ modal can draw the same row chrome the
-    /// anchored panel does instead of flattening it to label/description.
+    /// A model selection carrying the full [`PickerRow`] so the ⌘/ picker
+    /// and ⌥Tab cycler share the anchored panel's model row presentation.
     Model {
         row: model_picker::PickerRow,
         selected: bool,
@@ -431,6 +430,8 @@ impl Waku {
         let weak = cx.entity().downgrade();
         let row_theme = theme.clone();
         let jev_credential_missing = self.jev_credential_missing();
+        let show_favorite_stars =
+            self.keyboard_options.chord != Some(KeyboardOptionsChord::Favorites);
 
         let content = if creating_branch {
             div()
@@ -590,6 +591,7 @@ impl Waku {
                             enabled,
                             highlighted == Some(index),
                             jev_credential_missing,
+                            show_favorite_stars,
                             &weak,
                             window,
                             cx,
@@ -1097,9 +1099,9 @@ impl Waku {
     }
 }
 
-/// A model row in the ⌘/ modal, drawn with the anchored picker's own
-/// chrome: the same shell, two-line body, star, and favorite chord hint —
-/// only the rail, the drag-reorder, and the popover's own close are absent.
+/// A model row shared by the ⌘/ picker and ⌥Tab cycler. Both use the
+/// anchored picker's shell, two-line body, and favorite chord hint; the
+/// cycler omits the favorite star control.
 fn model_option_row(
     index: usize,
     row: &model_picker::PickerRow,
@@ -1107,6 +1109,7 @@ fn model_option_row(
     enabled: bool,
     is_highlighted: bool,
     jev_credential_missing: bool,
+    show_favorite_stars: bool,
     weak: &WeakEntity<Waku>,
     window: &mut Window,
     cx: &mut App,
@@ -1314,53 +1317,55 @@ fn model_option_row(
                 .child(SharedString::from(hint)),
         )
     })
-    .child(
-        div()
-            .id(SharedString::from(format!(
-                "favorite-model-{}-{}-{}-{}",
-                kind.id(),
-                model.id,
-                row.effort.as_deref().unwrap_or("base"),
-                row.fast
-            )))
-            .w(px(28.0))
-            .h(px(28.0))
-            .rounded(px(8.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .hover(|element| element.bg(theme.overlay_strong))
-            .child(icon(
-                if is_favorite {
-                    "icons/star-filled.svg"
-                } else {
-                    "icons/star.svg"
-                },
-                14.0,
-                if is_favorite {
-                    theme.favorite
-                } else {
-                    theme.text_ghost
-                },
-            ))
-            .on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                let _ = favorite_weak.update(cx, |this, cx| {
-                    this.toggle_favorite_model(
-                        kind,
-                        favorite_model_id.clone(),
-                        favorite_effort.clone(),
-                        fast,
-                        cx,
-                    );
-                    // Rebuild so stars and block order catch up; the
-                    // highlight lands back on this combo's new slot.
-                    this.refilter_model_keyboard_options(
-                        Some((kind, model_id.clone(), effort.clone(), fast)),
-                        cx,
-                    );
-                });
-            }),
-    )
+    .when(show_favorite_stars, |element| {
+        element.child(
+            div()
+                .id(SharedString::from(format!(
+                    "favorite-model-{}-{}-{}-{}",
+                    kind.id(),
+                    model.id,
+                    row.effort.as_deref().unwrap_or("base"),
+                    row.fast
+                )))
+                .w(px(28.0))
+                .h(px(28.0))
+                .rounded(px(8.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .hover(|element| element.bg(theme.overlay_strong))
+                .child(icon(
+                    if is_favorite {
+                        "icons/star-filled.svg"
+                    } else {
+                        "icons/star.svg"
+                    },
+                    14.0,
+                    if is_favorite {
+                        theme.favorite
+                    } else {
+                        theme.text_ghost
+                    },
+                ))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    let _ = favorite_weak.update(cx, |this, cx| {
+                        this.toggle_favorite_model(
+                            kind,
+                            favorite_model_id.clone(),
+                            favorite_effort.clone(),
+                            fast,
+                            cx,
+                        );
+                        // Rebuild so stars and block order catch up; the
+                        // highlight lands back on this combo's new slot.
+                        this.refilter_model_keyboard_options(
+                            Some((kind, model_id.clone(), effort.clone(), fast)),
+                            cx,
+                        );
+                    });
+                }),
+        )
+    })
     .into_any_element()
 }
