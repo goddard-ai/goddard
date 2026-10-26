@@ -125,6 +125,33 @@ fn attach_changed_files(session: &mut AgentSession, files: Vec<CheckpointFile>) 
 }
 
 #[test]
+fn remote_catalog_claims_include_client_drafts_only_for_its_projects() {
+    let project = Project::from_path(std::path::PathBuf::from("/remote/project"));
+    let draft = AgentSession::new(project.id, ProviderKind::Codex);
+    let local_draft = AgentSession::new(Uuid::new_v4(), ProviderKind::Pi);
+    let mut catalog = super::RemoteTaskStateSnapshot {
+        projects: vec![project],
+        sessions: Vec::new(),
+    };
+    let mut sessions = vec![draft.clone(), local_draft];
+    // Startup's cached snapshot and a subsequent empty live snapshot both
+    // need to route the standing draft's picker and first prompt remotely.
+    for _ in 0..2 {
+        assert_eq!(
+            super::remote_catalog_session_ids(&catalog, &sessions),
+            vec![draft.id]
+        );
+        merge_remote_session_catalog(&mut sessions, Vec::new(), |_| true, |_| false, true);
+    }
+    let reported = AgentSession::new(catalog.projects[0].id, ProviderKind::Claude);
+    catalog.sessions.push(reported.clone());
+    let claims = super::remote_catalog_session_ids(&catalog, &sessions);
+    assert_eq!(claims.len(), 2);
+    assert!(claims.contains(&draft.id));
+    assert!(claims.contains(&reported.id));
+}
+
+#[test]
 fn remote_task_catalog_adds_web_tasks_without_replacing_hydrated_detail() {
     let project_id = Uuid::new_v4();
     let mut local = AgentSession::new(project_id, ProviderKind::Codex);

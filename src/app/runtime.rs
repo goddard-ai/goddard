@@ -2842,11 +2842,7 @@ impl Waku {
                     .iter()
                     .map(|project| project.id)
                     .collect::<Vec<_>>(),
-                &snapshot
-                    .sessions
-                    .iter()
-                    .map(|session| session.id)
-                    .collect::<Vec<_>>(),
+                &remote_catalog_session_ids(&snapshot, &self.state.sessions),
             );
             for project in self.boss_ui.projects.values() {
                 if self

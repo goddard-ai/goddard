@@ -7773,13 +7773,7 @@ impl Waku {
                 subject_session_id.map(|session_id| self.daemons.session_owner(session_id)),
                 subject_project.is_some_and(Project::is_projectless),
                 subject_project
-                    .map(|project| {
-                        if project.is_projectless() {
-                            tr!("project.choose_project")
-                        } else {
-                            project.display_name()
-                        }
-                    })
+                    .map(|project| self.composer_project_label(project))
                     .unwrap_or_else(|| tr!("project.choose_project")),
                 subject_project
                     .filter(|project| !project.is_projectless())
@@ -7812,7 +7806,14 @@ impl Waku {
 
         let project_handle = self.project_picker_handle("workspace-project", cx);
         let project_trigger = MenuChip::new("workspace-project")
-            .icon("icons/folder.svg", theme.text_tertiary)
+            .icon(
+                if subject_project_id.is_some_and(|id| self.is_remote_project(id)) {
+                    "icons/server.svg"
+                } else {
+                    "icons/folder.svg"
+                },
+                theme.text_tertiary,
+            )
             .label(project_name)
             .caret(false)
             .disabled(!can_pick_project)
@@ -8328,11 +8329,17 @@ impl Waku {
             .cloned();
         let project_name = project
             .as_ref()
-            .filter(|project| !project.is_projectless())
-            .map(Project::display_name)
+            .map(|project| self.composer_project_label(project))
             .unwrap_or_else(|| tr!("project.choose_project"));
         let project_chip = MenuChip::new(format!("side-chat-{session_id}-workspace-project"))
-            .icon("icons/folder.svg", theme.text_tertiary)
+            .icon(
+                if self.is_remote_project(session.project_id) {
+                    "icons/server.svg"
+                } else {
+                    "icons/folder.svg"
+                },
+                theme.text_tertiary,
+            )
             .label(project_name)
             .caret(false)
             .disabled(true)

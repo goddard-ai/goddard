@@ -3,6 +3,21 @@ use super::*;
 use crate::ui::project_picker::{ProjectPickerContent, ProjectPickerOption, project_popover};
 
 impl Waku {
+    pub(super) fn composer_project_label(&self, project: &Project) -> String {
+        let name = if project.is_projectless() {
+            tr!("project.choose_project")
+        } else {
+            project.display_name()
+        };
+        match self.daemons.project_owner(project.id) {
+            waku_client::DaemonKey::Remote(host) => self
+                .remote_host_name(host)
+                .map(|host| format!("{name} · {host}"))
+                .unwrap_or(name),
+            waku_client::DaemonKey::Local => name,
+        }
+    }
+
     pub(super) fn project_picker_handle(
         &self,
         id: impl Into<SharedString>,

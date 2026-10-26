@@ -1190,6 +1190,28 @@ struct PreparedDriver {
 /// tagged with the daemon it came from so writes route back to the owner.
 type RemoteTaskStateSnapshot = waku_client::persistence::TaskCatalog;
 
+/// Client-only drafts and retained transcripts belong to their project's
+/// host even when the daemon's catalog does not report them.
+fn remote_catalog_session_ids(
+    catalog: &RemoteTaskStateSnapshot,
+    sessions: &[AgentSession],
+) -> Vec<Uuid> {
+    let projects: HashSet<Uuid> = catalog.projects.iter().map(|project| project.id).collect();
+    catalog
+        .sessions
+        .iter()
+        .map(|session| session.id)
+        .chain(
+            sessions
+                .iter()
+                .filter(|session| projects.contains(&session.project_id))
+                .map(|session| session.id),
+        )
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 /// Fold a cached remote catalog into the merged view before the host's
 /// supervisor exists. Rows are claimed to the host immediately so a local
 /// `SaveTaskState` never claims them and RPCs route correctly the moment the
@@ -1226,11 +1248,7 @@ fn seed_remote_catalog(
             .iter()
             .map(|project| project.id)
             .collect::<Vec<_>>(),
-        &catalog
-            .sessions
-            .iter()
-            .map(|session| session.id)
-            .collect::<Vec<_>>(),
+        &remote_catalog_session_ids(catalog, &state.sessions),
     );
 }
 
