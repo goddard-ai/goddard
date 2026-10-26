@@ -33,6 +33,7 @@ baseRevision: ChainBaseSource | null, boundary: HandoffBoundary, requiredChecks:
  */
 requiredApprovals: Array<string>,
 /**
- * Manual retry budget; capacity waiting consumes none of it.
+ * Manual retry budget; capacity waiting and attempts that produced no
+ * structured result (launch failures, mid-work deaths) consume none of it.
  */
 maxRetries: number, planId: string | null, itemId: string | null, successorBrief: string, };

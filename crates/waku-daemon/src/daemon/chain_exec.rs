@@ -546,6 +546,36 @@ impl WakuBackend {
         if let Some(brief) = brief {
             prompt.push_str(&format!("\n{brief}\n"));
         }
+        // The seal matches check/artifact names verbatim — hand the employee
+        // the exact strings so a shortened report name can't false-fail a gate.
+        if !step.definition.required_checks.is_empty() {
+            prompt.push_str(&format!(
+                "\nRequired checks — report each under this EXACT name (status + evidence):\n{}\n",
+                step.definition
+                    .required_checks
+                    .iter()
+                    .map(|name| format!("- {name}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if !step.definition.required_artifacts.is_empty() {
+            prompt.push_str(&format!(
+                "\nRequired artifacts — report each under this EXACT name (reference):\n{}\n",
+                step.definition
+                    .required_artifacts
+                    .iter()
+                    .map(|name| format!("- {name}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if !step.definition.required_approvals.is_empty() {
+            prompt.push_str(&format!(
+                "\nThis step requires human approval for: {} — state it in your final message.\n",
+                step.definition.required_approvals.join(", ")
+            ));
+        }
         prompt.push_str(&format!(
             "\nRecord your structured result before finishing:\n\n```\ngoddard-agent boss chain --json '{{\"type\":\"recordResult\",\"chainId\":\"{}\",\"attemptId\":\"{}\",\"definitionVersion\":{},\"result\":{{\"disposition\":\"success|blocked|needsGuidance|failed\",\"checks\":[{{\"name\":\"...\",\"status\":\"pass|fail|notRun\",\"evidence\":\"...\"}}],\"artifacts\":[{{\"name\":\"...\",\"reference\":\"commit:<full sha>\"}}],\"code\":{{\"workspace\":\"...\",\"sourceRevision\":\"...\",\"committedRevision\":null,\"landedRevision\":null,\"qaBranch\":null,\"submissionId\":null}},\"limitations\":[]}}}}'\n```\n\nYour terminal message is sealed verbatim as this step's handoff to the next employee.",
             chain.id, attempt.id, attempt.definition_version,

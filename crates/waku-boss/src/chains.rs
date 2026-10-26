@@ -494,6 +494,10 @@ impl BossService {
                         control == ChainControl::Retry || source_revision.is_none(),
                         "source revision applies only to retry"
                     );
+                    ensure!(
+                        control != ChainControl::Accept || chain.status == ChainStatus::Paused,
+                        "accept requires a paused chain"
+                    );
                     let step = &mut chain.steps[chain.current_step];
                     let released = step.attempts.last().is_none_or(|attempt| {
                         attempt.employee_id.is_none()
@@ -544,6 +548,34 @@ impl BossService {
                                 chain.reason = Some(ADMISSION_PENDING.into());
                             }
                         }
+                        ChainControl::Accept => {
+                            // Owner verdict on a sealed, gate-failed handoff —
+                            // mirrors the gate-repair acceptance path: sets the
+                            // live flag, keeps the sealed packet immutable, and
+                            // still requires an explicit resume to advance.
+                            ensure!(released, "shutdown must be confirmed before accept");
+                            let attempt = step
+                                .attempts
+                                .last_mut()
+                                .ok_or_else(|| anyhow!("no attempt to accept"))?;
+                            let handoff = attempt
+                                .sealed
+                                .as_ref()
+                                .ok_or_else(|| anyhow!("accept requires a sealed attempt"))?;
+                            ensure!(
+                                !handoff.accepted,
+                                "handoff already accepted; resume advances"
+                            );
+                            ensure!(
+                                !attempt.handoff_accepted,
+                                "handoff already accepted; resume advances"
+                            );
+                            attempt.handoff_accepted = true;
+                            attempt.status = StepStatus::Succeeded;
+                            step.status = StepStatus::Succeeded;
+                            chain.reason =
+                                Some("handoff accepted by owner; explicit resume required".into());
+                        }
                         ChainControl::Retry => {
                             ensure!(
                                 chain.status == ChainStatus::Paused && released,
@@ -560,14 +592,23 @@ impl BossService {
                                     .is_some_and(|handoff| !handoff.accepted),
                                 "prior effects must be reconciled before retry"
                             );
+                            // Only attempts that produced a structured result
+                            // consume the budget — an employee dying mid-work
+                            // or a launch failure yields no evidence.
+                            let substantive = step
+                                .attempts
+                                .iter()
+                                .filter(|attempt| attempt.provisional_result.is_some())
+                                .count();
                             ensure!(
-                                step.attempts.len() <= step.definition.max_retries as usize,
+                                substantive <= step.definition.max_retries as usize,
                                 "retry limit reached"
                             );
                             // The old workspace is retained, never adopted or reset implicitly.
                             // Symbolic sources resolve at the daemon before
                             // the reducer — the durable attempt base is
-                            // always a commit id.
+                            // always a commit id. An omitted source falls
+                            // back to the recorded reconciliation.
                             let revision = match source_revision {
                                 Some(ChainBaseSource::Bare(revision))
                                     if !revision.trim().is_empty() =>
@@ -577,9 +618,14 @@ impl BossService {
                                 Some(ChainBaseSource::Kinded(_)) => {
                                     bail!("chain-resolved retry bases resolve before the reducer")
                                 }
-                                _ => bail!(
-                                    "retry requires explicit fresh-workspace source revision"
-                                ),
+                                _ => previous
+                                    .reconciled_retry_revision
+                                    .clone()
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "retry requires a fresh-workspace source revision"
+                                        )
+                                    })?,
                             };
                             // A launch failure bound no employee and
                             // touched no workspace — nothing ran, so the
@@ -591,7 +637,11 @@ impl BossService {
                                 effect_free
                                     || previous.reconciled_retry_revision.as_ref()
                                         == Some(&revision),
-                                "uncertain prior effects must be reconciled before retry"
+                                "uncertain prior effects must be reconciled before retry; recorded retry base is {}",
+                                previous
+                                    .reconciled_retry_revision
+                                    .as_deref()
+                                    .unwrap_or("none")
                             );
                             let mut attempt = new_attempt(chain.definition_version);
                             attempt.starting_revision = Some(revision);
@@ -603,7 +653,10 @@ impl BossService {
                     }
                     if matches!(
                         control,
-                        ChainControl::Resume | ChainControl::Retry | ChainControl::Cancel
+                        ChainControl::Resume
+                            | ChainControl::Retry
+                            | ChainControl::Cancel
+                            | ChainControl::Accept
                     ) {
                         if let Some(attention) = &mut chain.attention {
                             attention.handled_at = Some(now);
@@ -660,10 +713,14 @@ impl BossService {
                         .steps
                         .get_mut(step)
                         .ok_or_else(|| anyhow!("unknown chain step"))?;
-                    ensure!(
-                        target.status == StepStatus::NotStarted && target.attempts.is_empty(),
-                        "accepted steps cannot be revised"
-                    );
+                    // Unstarted steps are always revisable. The paused current
+                    // step too — its sealed attempt evidence stays immutable
+                    // under its own version; the revision shapes the next
+                    // attempt (amended prompt, checks, or retry budget).
+                    let revisable = (target.status == StepStatus::NotStarted
+                        && target.attempts.is_empty())
+                        || (step == chain.current_step && target.status != StepStatus::Succeeded);
+                    ensure!(revisable, "accepted steps cannot be revised");
                     target.definition = definition;
                     validate_workspace_run(chain.steps.iter().map(|step| &step.definition))?;
                     chain.definition_version = chain
@@ -1895,9 +1952,11 @@ mod tests {
         );
         assert!(fixture.control(chain.id, ChainControl::Resume).is_err());
         let error = fixture.control(chain.id, ChainControl::Retry).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "uncertain prior effects must be reconciled before retry"
+        assert!(
+            error
+                .to_string()
+                .starts_with("uncertain prior effects must be reconciled before retry"),
+            "unexpected error: {error}"
         );
         fixture.observe(
             &chain,
@@ -2437,6 +2496,188 @@ mod tests {
         )
         .unwrap();
         assert!(BossService::open(fixture.root.clone()).is_err());
+    }
+
+    #[test]
+    fn owner_accept_resolves_a_gate_failed_seal_and_resume_advances() {
+        let fixture = Fixture::new();
+        let chain = fixture.create();
+        fixture.admit(&chain);
+        fixture.packet(&chain, ResultDisposition::Success);
+        fixture.terminal(&chain, ResultDisposition::Success);
+        fixture.release(&chain);
+        // Empty verification fails the artifact gate — deliberate pause.
+        fixture
+            .seal(&chain, &HandoffVerification::default())
+            .unwrap();
+        let paused = fixture.read(chain.id);
+        assert_eq!(paused.status, ChainStatus::Paused);
+        assert_eq!(paused.steps[0].status, StepStatus::Failed);
+        // Accept on an unsealed attempt is rejected.
+        let other = fixture.create();
+        fixture.control(other.id, ChainControl::Pause).unwrap();
+        assert!(fixture.control(other.id, ChainControl::Accept).is_err());
+        // Owner verdict accepts the sealed handoff; resume still advances.
+        let accepted = fixture.control(chain.id, ChainControl::Accept).unwrap();
+        assert_eq!(accepted.steps[0].status, StepStatus::Succeeded);
+        assert!(accepted.steps[0].attempts[0].handoff_accepted);
+        // The sealed packet stays immutable — only the live flag moved.
+        assert!(!accepted.steps[0].attempts[0].sealed.as_ref().unwrap().accepted);
+        assert!(accepted.attention.as_ref().unwrap().handled_at.is_some());
+        assert!(
+            fixture
+                .control(chain.id, ChainControl::Accept)
+                .unwrap_err()
+                .to_string()
+                .contains("already accepted")
+        );
+        let resumed = fixture.control(chain.id, ChainControl::Resume).unwrap();
+        assert_eq!(resumed.current_step, 1);
+        assert_eq!(resumed.steps[1].status, StepStatus::Waiting);
+    }
+
+    #[test]
+    fn paused_current_step_is_revisable_and_retry_keeps_evidence_versioned() {
+        let fixture = Fixture::new();
+        let chain = fixture.create();
+        let paused = fixture.control(chain.id, ChainControl::Pause).unwrap();
+        let mut definition = fixture.definition.steps[0].clone();
+        definition.prompt = "Amended scope".into();
+        definition.max_retries = 5;
+        let revised = fixture
+            .service
+            .chain_operation(
+                None,
+                ChainOperation::Revise {
+                    chain_id: chain.id,
+                    expected_revision: paused.revision,
+                    expected_definition_version: paused.definition_version,
+                    step: 0,
+                    definition,
+                },
+            )
+            .unwrap();
+        assert_eq!(revised.steps[0].definition.prompt, "Amended scope");
+        assert_eq!(revised.steps[0].definition.max_retries, 5);
+        assert_eq!(revised.definition_version, 2);
+        // The parked attempt keeps its snapshot version — terminal events
+        // for it stay bound, they don't go stale on the revision.
+        assert_eq!(revised.steps[0].attempts[0].definition_version, 1);
+        // Steps that already succeeded stay untouchable.
+        let chain2 = fixture.create();
+        fixture.admit(&chain2);
+        fixture.packet(&chain2, ResultDisposition::Success);
+        fixture.terminal(&chain2, ResultDisposition::Success);
+        fixture.release(&chain2);
+        fixture.seal(&chain2, &verified()).unwrap();
+        let accepted = fixture.read(chain2.id);
+        fixture.control(chain2.id, ChainControl::Pause).unwrap();
+        let paused2 = fixture.read(chain2.id);
+        assert!(
+            fixture
+                .service
+                .chain_operation(
+                    None,
+                    ChainOperation::Revise {
+                        chain_id: chain2.id,
+                        expected_revision: paused2.revision,
+                        expected_definition_version: paused2.definition_version,
+                        step: 0,
+                        definition: fixture.definition.steps[0].clone(),
+                    },
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("accepted steps cannot be revised"),
+            "accepted chain {:?}",
+            accepted.steps[0].status
+        );
+    }
+
+    #[test]
+    fn retries_fall_back_to_the_recorded_reconciliation() {
+        let fixture = Fixture::new();
+        let chain = fixture.create();
+        fixture.observe(
+            &chain,
+            ChainObservation::LaunchError {
+                reason: "summon failed".into(),
+            },
+        );
+        fixture.release(&chain);
+        fixture.seal(&chain, &verified()).unwrap();
+        fixture.observe(
+            &chain,
+            ChainObservation::EffectsReconciled {
+                source_revision: "reconciled-base".into(),
+            },
+        );
+        let current = fixture.read(chain.id);
+        let retry = fixture
+            .service
+            .chain_operation(
+                None,
+                ChainOperation::Control {
+                    chain_id: chain.id,
+                    expected_revision: current.revision,
+                    control: ChainControl::Retry,
+                    source_revision: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            retry.steps[0].attempts[1].starting_revision.as_deref(),
+            Some("reconciled-base")
+        );
+    }
+
+    #[test]
+    fn retry_budget_counts_only_attempts_with_evidence() {
+        let mut fixture = Fixture::new();
+        fixture.definition.steps[0].max_retries = 1;
+        let chain = fixture.create();
+        // Attempt one: launch error — no structured result, no budget spent.
+        fixture.observe(
+            &chain,
+            ChainObservation::LaunchError {
+                reason: "summon failed".into(),
+            },
+        );
+        fixture.release(&chain);
+        fixture.seal(&chain, &verified()).unwrap();
+        // Under attempt-count accounting this would already exhaust
+        // max_retries=1; evidence-based accounting lets it through.
+        let retry = fixture.control(chain.id, ChainControl::Retry).unwrap();
+        assert_eq!(retry.steps[0].attempts.len(), 2);
+        // A substantive attempt: bound, reported, failed — counts.
+        let chain2 = fixture.read(chain.id);
+        fixture.admit(&chain2);
+        fixture.packet(&chain2, ResultDisposition::Failed);
+        fixture.terminal(&chain2, ResultDisposition::Failed);
+        fixture.release(&chain2);
+        fixture.seal(&chain2, &verified()).unwrap();
+        fixture.observe(
+            &chain2,
+            ChainObservation::EffectsReconciled {
+                source_revision: "verified-source".into(),
+            },
+        );
+        // substantive = 1 <= max_retries=1 → allowed.
+        fixture.control(chain.id, ChainControl::Retry).unwrap();
+        // Third run also produces evidence → substantive = 2 > 1 → blocked.
+        let chain3 = fixture.read(chain.id);
+        fixture.admit(&chain3);
+        fixture.packet(&chain3, ResultDisposition::Failed);
+        fixture.terminal(&chain3, ResultDisposition::Failed);
+        fixture.release(&chain3);
+        fixture.seal(&chain3, &verified()).unwrap();
+        assert_eq!(
+            fixture
+                .control(chain.id, ChainControl::Retry)
+                .unwrap_err()
+                .to_string(),
+            "retry limit reached"
+        );
     }
 
     #[test]

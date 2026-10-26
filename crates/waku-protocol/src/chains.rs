@@ -51,11 +51,14 @@ chain_enum!(ResultDisposition {
     Failed
 });
 chain_enum!(CheckStatus { Pass, Fail, NotRun });
+// Accept — owner verdict: accept the current step's sealed but unaccepted
+// handoff despite the gate. Explicit resume still advances.
 chain_enum!(ChainControl {
     Pause,
     Resume,
     Retry,
-    Cancel
+    Cancel,
+    Accept
 });
 
 /// A base resolved from chain state at admission rather than pinned in
@@ -142,7 +145,8 @@ pub struct ChainStepDefinition {
     pub required_artifacts: Vec<String>,
     /// An explicit decision is required for each name; elapsed time is not approval.
     pub required_approvals: Vec<String>,
-    /// Manual retry budget; capacity waiting consumes none of it.
+    /// Manual retry budget; capacity waiting and attempts that produced no
+    /// structured result (launch failures, mid-work deaths) consume none of it.
     pub max_retries: u32,
     pub plan_id: Option<Uuid>,
     pub item_id: Option<Uuid>,

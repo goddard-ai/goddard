@@ -429,7 +429,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         "boss chain" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"schema":{"$ref":"#/definitions/ChainOperation"}},"notes":"Create/revise steps require exactly one of projectId (registered UUID), project.name (exact ASCII case-insensitive name), or project.path (absolute registered root). Run boss projects list or boss projects resolve for discovery. Selectors bind canonical IDs before acceptance; duplicate matches reject with candidates. Retry an unchanged create with the same requestId and supervisor after a lost response. Changed definitions conflict. Controls require expectedRevision."}),
-            json!({"json":"BossResult::State with durable chains, canonical projectId and current projectMetadata (null when missing); RecordResult returns Saved; project selection errors return ProjectRejected with stable code, selector, step, nextAction and candidates"}),
+            json!({"json":"compact acknowledgement {type:accepted,chainId,requestId,revision,definitionVersion,status,reason}; show returns {type:chain,chain} with canonical projectId and current projectMetadata (null when missing); RecordResult returns Saved; project selection errors return ProjectRejected with stable code, selector, step, nextAction and candidates"}),
             "goddard-agent boss chain --json-file chain.json".to_owned(),
         ),
         "boss view" => (
@@ -1581,9 +1581,16 @@ fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
     match action {
         "chain" => {
             let (_, opts) = flags(args, &["json", "json-file"], false)?;
-            let action = serde_json::from_str(&json_input(&opts)?)
-                .context("invalid typed chain operation; provide exactly one of projectId (registered UUID), project.name, or project.path; memory bucket IDs are not project IDs; run `goddard-agent boss projects list`; older daemons need an upgrade or projectId")?;
-            print_boss(boss_request(BossOperation::Chain { action })?)
+            let payload = json_input(&opts)?;
+            let mut deserializer = serde_json::Deserializer::from_str(&payload);
+            let action: waku_protocol::chains::ChainOperation =
+                serde_path_to_error::deserialize(&mut deserializer).context(
+                    "invalid typed chain operation; provide exactly one of projectId (registered UUID), project.name, or project.path; memory bucket IDs are not project IDs; run `goddard-agent boss projects list`; older daemons need an upgrade or projectId",
+                )?;
+            let result = boss_request(BossOperation::Chain {
+                action: action.clone(),
+            })?;
+            print_chain_result(&action, result)
         }
         "view" | "context" | "roster" => {
             if action == "view" {
@@ -3015,6 +3022,44 @@ fn project_selector(
 
 fn print_boss(result: waku_protocol::boss::BossResult) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
+}
+
+/// Chain operations get a compact acknowledgement — the full BossState the
+/// daemon returns is megabytes for established bosses. `show` prints only
+/// the requested chain; mutations print the accepted marker plus ids and
+/// status, mirroring the script `op` projection.
+fn print_chain_result(
+    action: &waku_protocol::chains::ChainOperation,
+    result: waku_protocol::boss::BossResult,
+) -> anyhow::Result<()> {
+    use waku_protocol::chains::ChainOperation;
+    let state = match result {
+        waku_protocol::boss::BossResult::State { state } => state,
+        other => return print_boss(other),
+    };
+    let chain = state.chains.iter().find(|chain| match &action {
+        ChainOperation::Create { request_id, .. } => chain.request_id == *request_id,
+        ChainOperation::Show { chain_id }
+        | ChainOperation::Control { chain_id, .. }
+        | ChainOperation::Revise { chain_id, .. }
+        | ChainOperation::Approve { chain_id, .. }
+        | ChainOperation::RecordResult { chain_id, .. } => chain.id == *chain_id,
+    });
+    let value = if matches!(action, ChainOperation::Show { .. }) {
+        json!({"type": "chain", "chain": chain})
+    } else {
+        json!({
+            "type": "accepted", "accepted": true,
+            "chainId": chain.map(|chain| chain.id),
+            "requestId": chain.map(|chain| chain.request_id),
+            "revision": chain.map(|chain| chain.revision),
+            "definitionVersion": chain.map(|chain| chain.definition_version),
+            "status": chain.map(|chain| chain.status),
+            "reason": chain.and_then(|chain| chain.reason.clone()),
+        })
+    };
+    println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }
 

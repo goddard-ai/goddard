@@ -232,7 +232,9 @@ pub fn run(
         }
         match rx.recv_timeout(remaining) {
             Ok(EvalMessage::Call { operation, reply }) => {
-                let answer = serde_json::from_value::<BossOperation>(operation)
+                let parsed: Result<BossOperation, _> =
+                    serde_path_to_error::deserialize(operation);
+                let answer = parsed
                     .context("not a Boss operation")
                     .and_then(|operation| {
                         if matches!(operation, BossOperation::Eval { .. }) {

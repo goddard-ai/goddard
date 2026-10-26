@@ -165,15 +165,34 @@ checkout forks. `baseRevision` accepts three forms:
 A step whose previous step declared `boundary: "landed"` or
 `"committedWorkspace"` needs no `baseRevision` at all — the verified
 handoff supplies the base. A retry's `sourceRevision` accepts the same
-grammar and resolves when the control is accepted. `chain show` keeps
+grammar and resolves when the control is accepted — or omit it entirely
+to reuse the `reconciledRetryRevision` the daemon already recorded on the
+attempt. `chain show` keeps
 the declared source on each step definition; the resolved commit lands
 on the attempt's `startingRevision` once its checkout exists.
 
-## Revise an unstarted step
+## Recover a paused chain
 
-Use a chain with at least two steps; the one-step creation example above has
-no unstarted successor to revise. Pause the chain with a control operation
-using its current `revision`. Only an unstarted step without attempts can be revised. Save this operation as
+A failed seal pauses the chain deliberately and preserves all evidence. The
+owner's resolutions, in order of escalation:
+
+- `{"type":"control","control":"resume",...}` — when the pause was a transient
+  gate (access, files, landing) you repaired; the daemon re-verifies first.
+- `{"type":"control","control":"accept",...}` — owner verdict: the sealed
+  handoff is accepted despite the failed gate (e.g. a non-required check
+  reported fail). The step becomes Succeeded; `resume` then advances.
+- `revise` the current step, then `{"type":"control","control":"retry",...}` —
+  re-dispatch with an amended definition. `retry` only burns `maxRetries`
+  on attempts that produced a structured result.
+- `cancel` preserves the work but ends the chain.
+
+## Revise a step
+
+Pause the chain with a control operation using its current `revision`. An
+unstarted step without attempts is always revisable — and so is the paused
+current step, which is how you amend scope, checks, or `maxRetries` before a
+`retry` re-dispatches it. Steps whose handoff was already accepted stay sealed.
+Save this operation as
 `revise.json`, replacing the illustrative chain UUID, revision numbers, registered root,
 and model with values from your chain and catalog:
 
