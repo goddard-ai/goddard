@@ -11678,6 +11678,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dirs 6.0.0",
+ "dom_query",
  "dunce",
  "libc",
  "objc2-foundation 0.3.2",

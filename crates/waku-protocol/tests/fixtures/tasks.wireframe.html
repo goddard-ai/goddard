@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="goddard-wireframe-version" content="1">
+  <meta name="goddard-wireframe-id" content="task-review">
+  <title>Task review proposal</title>
+  <style>
+    section { display: flex; gap: 16px; padding: 24px; }
+    aside { width: 240px; padding: 16px; background: var(--wf-surface); }
+    main { flex: 1; }
+  </style>
+</head>
+<body>
+  <section data-wireframe-screen="tasks" aria-label="Tasks populated" data-wireframe-width="960" data-wireframe-height="640">
+    <aside data-wireframe-id="task-sidebar" aria-label="Task navigation">Tasks</aside>
+    <main data-wireframe-id="task-detail"><h1>Review onboarding</h1><p>Ready for review</p></main>
+  </section>
+  <section data-wireframe-screen="empty" aria-label="No tasks yet">
+    <aside data-wireframe-id="task-sidebar">Tasks</aside>
+    <main data-wireframe-id="empty-state"><h1>No tasks yet</h1><button>Create task</button></main>
+  </section>
+</body>
+</html>

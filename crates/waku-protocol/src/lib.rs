@@ -69,6 +69,7 @@ pub mod theme;
 pub mod usage;
 pub mod usage_history;
 pub mod wireframe;
+pub mod wireframe_html;
 pub mod workspace;
 
 mod protocol;

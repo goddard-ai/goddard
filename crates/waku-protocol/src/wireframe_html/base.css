@@ -1,0 +1,13 @@
+/* The host supplies these variables from Goddard's active theme. */
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--wf-canvas); color: var(--wf-text); }
+body, button, input, textarea, select { font: 14px/1.5 var(--wf-font-family, system-ui); }
+[data-wireframe-screen] { position: relative; overflow: hidden; }
+h1 { font-size: 24px; line-height: 1.25; }
+h2 { font-size: 18px; line-height: 1.3; }
+p, h1, h2, h3 { margin: 0 0 12px; }
+button, input, textarea, select { color: inherit; background: var(--wf-surface); border: 1px solid var(--wf-border); border-radius: 6px; padding: 6px 10px; }
+:focus-visible { outline: 2px solid var(--wf-info); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
