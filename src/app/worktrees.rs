@@ -891,6 +891,10 @@ impl Waku {
                 deferred.insert(session_id);
                 continue;
             }
+            if self.pending_session_metadata.contains_key(&session_id) {
+                deferred.insert(session_id);
+                continue;
+            }
             let quiet = !session.is_busy()
                 && session.queued_messages.is_empty()
                 && !self.submission_preparations.contains(&session_id)

@@ -3921,7 +3921,13 @@ impl Waku {
         };
         if let Some(title) = title {
             self.composer.update(cx, |input, cx| input.clear(cx));
-            if self
+            if self.update_session_metadata(
+                session_id,
+                waku_client::SessionMetadataChange::Title {
+                    title: title.to_owned(),
+                },
+                cx,
+            ) || self
                 .state
                 .session_mut(session_id)
                 .is_some_and(|session| session.set_title_from_user(title))
@@ -4264,7 +4270,13 @@ impl Waku {
             return true;
         };
         chat.composer.update(cx, |input, cx| input.clear(cx));
-        if self
+        if self.update_session_metadata(
+            session_id,
+            waku_client::SessionMetadataChange::Title {
+                title: title.to_owned(),
+            },
+            cx,
+        ) || self
             .state
             .session_mut(session_id)
             .is_some_and(|session| session.set_title_from_user(title))

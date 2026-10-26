@@ -1,1 +1,1 @@
-- Mobile task metadata edits and web task renames now send small updates without loading or resending transcripts; older saves cannot undo newer metadata changes.
+- Ordinary task metadata edits now use small background requests on desktop and mobile, and for web renames, without loading or resending transcripts; older saves cannot undo newer changes.

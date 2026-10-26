@@ -2483,6 +2483,8 @@ impl Waku {
             cx.notify();
             return;
         }
+        self.session_metadata_saves.remove(&session_id);
+        self.pending_session_metadata.remove(&session_id);
         self.pending_session_cancels.remove(&session_id);
         // A task's side chats are not independent sessions — closing or
         // archiving their parent deletes them with it.
@@ -2975,12 +2977,15 @@ impl Waku {
             self.transcript_landing = None;
         }
         let now = unix_time();
-        if let Some(session) = self.state.session_mut(session_id) {
-            session.archived_at = Some(now);
-            // Archiving is a mutation: bumping `updated_at` keeps merge
-            // precedence honest so a stale client save cannot resurrect or
-            // clobber the flag.
-            session.updated_at = now;
+        if !self.update_session_metadata(
+            session_id,
+            waku_client::SessionMetadataChange::Archive { archived: true },
+            cx,
+        ) {
+            if let Some(session) = self.state.session_mut(session_id) {
+                session.archived_at = Some(now);
+                session.updated_at = now;
+            }
         }
         self.record_action(
             Some(session_id),
@@ -3050,9 +3055,15 @@ impl Waku {
             return;
         }
         let now = unix_time();
-        if let Some(session) = self.state.session_mut(session_id) {
-            session.archived_at = None;
-            session.updated_at = now;
+        if !self.update_session_metadata(
+            session_id,
+            waku_client::SessionMetadataChange::Archive { archived: false },
+            cx,
+        ) {
+            if let Some(session) = self.state.session_mut(session_id) {
+                session.archived_at = None;
+                session.updated_at = now;
+            }
         }
         // Restored by any path, it's no longer the palette's undoable
         // archive.
@@ -3347,6 +3358,161 @@ impl Waku {
         }
     }
 
+    /// Mutate only list metadata and send it on a per-task ordered worker
+    /// lane. Keep preexisting transcript dirty marks; this action adds none.
+    /// Drafts, incognito rows, and managed lifecycle saves keep their own path.
+    pub(super) fn update_session_metadata(
+        &mut self,
+        session_id: Uuid,
+        change: waku_client::SessionMetadataChange,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        use futures::FutureExt as _;
+        use waku_client::SessionMetadataChange;
+        let Some(daemon) = self.daemon_for_session(session_id) else {
+            return false;
+        };
+        let Some(session) = self
+            .state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .filter(|session| session.has_started() && !session.incognito && !session.boss_managed)
+        else {
+            return false;
+        };
+        let previous = session.list_projection();
+        match &change {
+            SessionMetadataChange::Title { title } => {
+                session.set_title_from_user(title);
+            }
+            SessionMetadataChange::Archive { archived } => {
+                session.archived_at = archived.then(unix_time);
+            }
+            SessionMetadataChange::Pin { pinned } => {
+                session.pinned_at = pinned.then(unix_time);
+            }
+        }
+        session.updated_at = unix_time();
+        let previous_task = self.session_metadata_saves.remove(&session_id);
+        let generation = previous_task
+            .as_ref()
+            .map_or(1, |(generation, _)| generation.saturating_add(1));
+        self.pending_session_metadata.insert(session_id, generation);
+        let task = cx
+            .spawn(async move |waku, cx| {
+                let revision = match previous_task {
+                    Some((_, task)) => task.await.unwrap_or(0).max(previous.metadata_revision),
+                    None => previous.metadata_revision,
+                };
+                let mutation_id = Uuid::new_v4();
+                let requested = change.clone();
+                let result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let client = daemon.client();
+                        let command = waku_client::Command::UpdateSessionMetadata {
+                            expected_revision: revision,
+                            mutation_id,
+                            change,
+                        };
+                        // The first commit may outlive its response. An identical
+                        // retry cannot apply the mutation twice.
+                        client
+                            .request(session_id, Uuid::nil(), command.clone())
+                            .or_else(|_| client.request(session_id, Uuid::nil(), command))
+                    })
+                    .await;
+                let acknowledged = match &result {
+                    Ok(waku_client::ResponsePayload::SessionMetadataUpdated {
+                        session: saved,
+                        applied,
+                    }) => {
+                        let achieved = match &requested {
+                            SessionMetadataChange::Title { title } => &saved.title == title,
+                            SessionMetadataChange::Archive { archived } => {
+                                saved.archived_at.is_some() == *archived
+                            }
+                            SessionMetadataChange::Pin { pinned } => {
+                                saved.pinned_at.is_some() == *pinned
+                            }
+                        };
+                        (*applied || achieved).then_some(saved.metadata_revision)
+                    }
+                    _ => None,
+                };
+                let _ = waku.update(cx, |waku, cx| {
+                    let latest =
+                        waku.pending_session_metadata.get(&session_id) == Some(&generation);
+                    if latest {
+                        waku.pending_session_metadata.remove(&session_id);
+                    }
+                    // Do not dirty a transcript when acknowledging list metadata.
+                    let Some(session) = waku
+                        .state
+                        .sessions
+                        .iter_mut()
+                        .find(|session| session.id == session_id)
+                    else {
+                        return;
+                    };
+                    let error = match result {
+                        Ok(waku_client::ResponsePayload::SessionMetadataUpdated {
+                            session: saved,
+                            applied: _,
+                        }) => {
+                            if saved.metadata_revision >= session.metadata_revision {
+                                session.metadata_revision = saved.metadata_revision;
+                                session.metadata_mutation_id = saved.metadata_mutation_id;
+                                if latest {
+                                    session.title = saved.title;
+                                    session.archived_at = saved.archived_at;
+                                    session.pinned_at = saved.pinned_at;
+                                    session.agent_rename_allowed = saved.agent_rename_allowed;
+                                    session.updated_at = session.updated_at.max(saved.updated_at);
+                                }
+                            }
+                            acknowledged.is_none().then(|| {
+                                "Task changed on another client; retry the action".to_owned()
+                            })
+                        }
+                        result => {
+                            if latest {
+                                session.title = previous.title;
+                                session.archived_at = previous.archived_at;
+                                session.pinned_at = previous.pinned_at;
+                                session.agent_rename_allowed = previous.agent_rename_allowed;
+                            }
+                            Some(match result {
+                                Err(error) => error.to_string(),
+                                Ok(_) => "Unexpected task metadata response".to_owned(),
+                            })
+                        }
+                    };
+                    if let Some(error) = error {
+                        waku.show_toast(tr!("errors.save_local_state", error = error));
+                    }
+                    if latest {
+                        waku.drain_pending_workspace_cleanups(cx);
+                    }
+                    waku.save();
+                    cx.notify();
+                });
+                acknowledged
+            })
+            .shared();
+        // Closing a window must not cancel an already accepted user action.
+        // Shared handles also let quit wait and later edits preserve ordering.
+        let completion = task.clone();
+        cx.spawn(async move |_, _| {
+            let _ = completion.await;
+        })
+        .detach();
+        self.session_metadata_saves
+            .insert(session_id, (generation, task));
+        true
+    }
+
     /// Moves a task into or out of the sidebar's top Pinned group.
     ///
     /// Like archiving, the toggle is a mutation: bumping `updated_at` keeps
@@ -3370,9 +3536,15 @@ impl Waku {
             return None;
         };
         let now = unix_time();
-        if let Some(session) = self.state.session_mut(session_id) {
-            session.pinned_at = if pinned { None } else { Some(now) };
-            session.updated_at = now;
+        if !self.update_session_metadata(
+            session_id,
+            waku_client::SessionMetadataChange::Pin { pinned: !pinned },
+            cx,
+        ) {
+            if let Some(session) = self.state.session_mut(session_id) {
+                session.pinned_at = if pinned { None } else { Some(now) };
+                session.updated_at = now;
+            }
         }
         self.save();
         cx.notify();
@@ -3421,9 +3593,15 @@ impl Waku {
             if current == pinned {
                 continue;
             }
-            if let Some(session) = self.state.session_mut(*session_id) {
-                session.pinned_at = pinned.then_some(now);
-                session.updated_at = now;
+            if !self.update_session_metadata(
+                *session_id,
+                waku_client::SessionMetadataChange::Pin { pinned },
+                cx,
+            ) {
+                if let Some(session) = self.state.session_mut(*session_id) {
+                    session.pinned_at = pinned.then_some(now);
+                    session.updated_at = now;
+                }
             }
             changed += 1;
         }

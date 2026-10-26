@@ -6229,10 +6229,16 @@ impl Waku {
                 .find(|session| session.id == session_id)
                 .is_some_and(|session| session.title != title);
         if should_update
-            && self
+            && (self.update_session_metadata(
+                session_id,
+                waku_client::SessionMetadataChange::Title {
+                    title: title.clone(),
+                },
+                cx,
+            ) || self
                 .state
                 .session_mut(session_id)
-                .is_some_and(|session| session.set_title_from_user(&title))
+                .is_some_and(|session| session.set_title_from_user(&title)))
         {
             self.save();
         }

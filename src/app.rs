@@ -3319,6 +3319,10 @@ pub struct Waku {
     /// session is busy immediately, while the composer draws a spinner until
     /// the non-cancellable preparation is complete.
     submission_preparations: HashSet<Uuid>,
+    /// Ordered user metadata writes; finished handles keep the next action in
+    /// the same task's lane. Payloads contain no transcript data.
+    session_metadata_saves: HashMap<Uuid, (u64, futures::future::Shared<gpui::Task<Option<u64>>>)>,
+    pending_session_metadata: HashMap<Uuid, u64>,
     /// Stage cells for submissions whose preparation can outlive a frame —
     /// keyed by session, populated alongside `submission_preparations`.
     submission_stages: HashMap<Uuid, Arc<AtomicU8>>,
@@ -6674,10 +6678,17 @@ impl Waku {
 
             // Window-frame changes are only mirrored in memory; the quit save
             // is what lands the final position and size on disk.
-            cx.on_app_quit(|this, _| {
+            cx.on_app_quit(|this, cx| {
                 this.save();
                 let ticket = this.store.app_save_ticket();
+                let metadata = std::mem::take(&mut this.session_metadata_saves);
+                // Ordered metadata tasks finish their UI acknowledgment too.
+                let keep_alive = cx.entity();
                 async move {
+                    for (_, (_, task)) in metadata {
+                        let _ = task.await;
+                    }
+                    drop(keep_alive);
                     if let Some(ticket) = ticket {
                         let _ = ticket.wait().await;
                     }
@@ -7605,6 +7616,8 @@ impl Waku {
                 background_work: HashMap::new(),
                 last_background_work_tick: Instant::now(),
                 submission_preparations: HashSet::new(),
+                session_metadata_saves: HashMap::new(),
+                pending_session_metadata: HashMap::new(),
                 submission_stages: HashMap::new(),
                 escape_stop_confirmation: EscapeStopConfirmation::default(),
                 response_fork_preparations: HashMap::new(),

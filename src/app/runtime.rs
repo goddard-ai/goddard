@@ -2788,9 +2788,32 @@ impl Waku {
             .collect::<HashSet<_>>();
         // Only this daemon's rows may be removed or replaced — the merged
         // list also carries every other host's sessions and projects.
+        // Keep pending optimistic fields and their original CAS version
+        // together until acknowledgment. A broadcast arriving first must
+        // neither flip the toggle nor let a transcript save claim its version.
+        let mut catalog_sessions = snapshot.sessions.clone();
+        if !self.pending_session_metadata.is_empty() {
+            let pending = self
+                .state
+                .sessions
+                .iter()
+                .filter(|session| self.pending_session_metadata.contains_key(&session.id))
+                .map(|session| (session.id, session.list_projection()))
+                .collect::<HashMap<_, _>>();
+            for remote in &mut catalog_sessions {
+                if let Some(local) = pending.get(&remote.id) {
+                    remote.title.clone_from(&local.title);
+                    remote.archived_at = local.archived_at;
+                    remote.pinned_at = local.pinned_at;
+                    remote.agent_rename_allowed = local.agent_rename_allowed;
+                    remote.metadata_revision = local.metadata_revision;
+                    remote.metadata_mutation_id = local.metadata_mutation_id;
+                }
+            }
+        }
         let removed = merge_remote_session_catalog(
             &mut self.state.sessions,
-            snapshot.sessions.clone(),
+            catalog_sessions,
             // Watched friend sessions are borrowed from a peer — no
             // daemon's catalog owns or retires them.
             |session_id| {
