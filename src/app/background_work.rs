@@ -805,6 +805,8 @@ impl Waku {
             );
             if keep_runtime {
                 self.runtimes.insert(session_id, runtime);
+            } else {
+                runtime.retire_payloads(&self.background_executor);
             }
             self.state.mark_session_dirty(session_id);
             cx.notify();

@@ -2835,7 +2835,10 @@ impl Waku {
                                     if let Some(existing) =
                                         this.state.sessions.iter_mut().find(|entry| entry.id == id)
                                     {
-                                        *existing = *session;
+                                        let retired = std::mem::replace(existing, *session);
+                                        cx.background_executor()
+                                            .spawn(async move { drop(retired) })
+                                            .detach();
                                     } else {
                                         this.state.sessions.push(*session);
                                     }
@@ -2845,13 +2848,18 @@ impl Waku {
                                     // and rotation links, just as catalog sync does.
                                     let runtime_ids: HashSet<_> =
                                         this.runtimes.keys().copied().collect();
-                                    super::runtime::merge_remote_session_catalog(
+                                    let retired = super::runtime::merge_remote_session_catalog(
                                         &mut this.state.sessions,
                                         vec![*session],
                                         |_| false,
                                         |id| runtime_ids.contains(&id),
                                         false,
                                     );
+                                    if !retired.is_empty() {
+                                        cx.background_executor()
+                                            .spawn(async move { drop(retired) })
+                                            .detach();
+                                    }
                                 }
                                 let navigates = matches!(reply, BossReply::Open | BossReply::Clear)
                                     && boss_open_reply_navigates(

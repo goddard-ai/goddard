@@ -1,0 +1,1 @@
+- Large retired transcripts and queued provider events are now freed in the background when tasks are closed, removed, or switched.

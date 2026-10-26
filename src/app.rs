@@ -1709,6 +1709,62 @@ struct SessionRuntime {
     sandbox_setup: Option<crate::model::SandboxSetupStatus>,
 }
 
+impl SessionRuntime {
+    /// Keep previews, decode tasks, and UI annotations here; reclaim queued
+    /// protocol events and plain data without waiting for idle CPU.
+    fn retire_payloads(self, executor: &BackgroundExecutor) {
+        let Self {
+            events,
+            pending_events,
+            pending_steers,
+            deferred_steers,
+            pending_permission,
+            pending_daemon_request,
+            pending_user_input,
+            pending_computer_approval,
+            computer_session_grants,
+            last_driver_error,
+            ..
+        } = self;
+        let steer_payloads = pending_steers
+            .into_iter()
+            .map(|submission| {
+                let ComposerSubmission {
+                    prompt,
+                    display_content,
+                    human_content,
+                    attachments,
+                    message_atoms,
+                    ..
+                } = submission;
+                (
+                    prompt,
+                    display_content,
+                    human_content,
+                    attachments,
+                    message_atoms,
+                )
+            })
+            .collect::<Vec<_>>();
+        executor
+            .spawn(async move {
+                drop((
+                    events,
+                    pending_events,
+                    steer_payloads,
+                    deferred_steers,
+                    pending_permission,
+                    pending_daemon_request,
+                    pending_user_input,
+                    pending_computer_approval,
+                    computer_session_grants,
+                    last_driver_error,
+                ));
+            })
+            .detach();
+    }
+}
+
 /// A supervisor recovery report held open briefly: `RuntimeLost` arrives
 /// only after the replacement client answers `AttachSession`, so the
 /// analytics event waits out this window to count the resumes it caused.

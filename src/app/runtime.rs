@@ -503,7 +503,7 @@ pub(super) fn merge_remote_session_catalog(
     owns: impl Fn(Uuid) -> bool,
     has_local_runtime: impl Fn(Uuid) -> bool,
     fresh: bool,
-) -> Vec<Uuid> {
+) -> Vec<AgentSession> {
     let remote_ids = remote
         .iter()
         .map(|session| session.id)
@@ -513,22 +513,16 @@ pub(super) fn merge_remote_session_catalog(
     // through the catalog when its owner re-pushes it.
     let survives_restart =
         |session: &AgentSession| fresh && session.incognito && session.detail_loaded;
+    // Return removed records without dropping their potentially large
+    // transcripts. UI callers transfer them to a reclamation worker.
     let removed = local
-        .iter()
-        .filter(|session| {
+        .extract_if(.., |session| {
             session.has_started()
                 && owns(session.id)
                 && !remote_ids.contains(&session.id)
                 && !survives_restart(session)
         })
-        .map(|session| session.id)
         .collect::<Vec<_>>();
-    local.retain(|session| {
-        !session.has_started()
-            || !owns(session.id)
-            || remote_ids.contains(&session.id)
-            || survives_restart(session)
-    });
 
     // Build once after retention: finding every remote row by a fresh scan
     // made each catalog refresh quadratic in the number of tasks.
@@ -2645,10 +2639,18 @@ impl Waku {
         }
         if let Some(runtime) = self.runtimes.remove(&session_id) {
             runtime.driver.close();
+            runtime.retire_payloads(&self.background_executor);
         }
-        self.state
+        let retired = self
+            .state
             .sessions
-            .retain(|session| session.id != session_id);
+            .extract_if(.., |session| session.id == session_id)
+            .collect::<Vec<_>>();
+        if !retired.is_empty() {
+            cx.background_executor()
+                .spawn(async move { drop(retired) })
+                .detach();
+        }
         self.transcript_scroll_positions.remove(&session_id);
         self.background_work.remove(&session_id);
         self.right_panel_states
@@ -2811,7 +2813,7 @@ impl Waku {
                 }
             }
         }
-        let removed = merge_remote_session_catalog(
+        let retired = merge_remote_session_catalog(
             &mut self.state.sessions,
             catalog_sessions,
             // Watched friend sessions are borrowed from a peer — no
@@ -2823,6 +2825,12 @@ impl Waku {
             |session_id| runtime_ids.contains(&session_id),
             fresh,
         );
+        let removed = retired.iter().map(|session| session.id).collect::<Vec<_>>();
+        if !retired.is_empty() {
+            cx.background_executor()
+                .spawn(async move { drop(retired) })
+                .detach();
+        }
         // Incognito rows the restarted daemon forgot ride the next save back:
         // SaveTaskState adopts a detail-loaded started session it does not
         // know, `provider_cursor` included, so an idle one simply reappears
@@ -2849,10 +2857,14 @@ impl Waku {
             }
         }
         for session_id in &removed {
+            self.session_metadata_saves.remove(session_id);
+            self.pending_session_metadata.remove(session_id);
             self.runtime_attach_pending.remove(session_id);
             self.pending_session_cancels.remove(session_id);
             self.runtime_attach_misses.remove(session_id);
-            self.runtimes.remove(session_id);
+            if let Some(runtime) = self.runtimes.remove(session_id) {
+                runtime.retire_payloads(&self.background_executor);
+            }
             self.background_work.remove(session_id);
             self.remove_right_panel_session_state(*session_id, cx);
             self.remove_side_chat_surface(*session_id, cx);
@@ -2899,7 +2911,12 @@ impl Waku {
                     self.daemons.claim_project(project.id, key);
                 }
             }
-            self.remote_catalogs.insert(host, snapshot);
+            let previous = self.remote_catalogs.insert(host, snapshot);
+            if previous.is_some() {
+                cx.background_executor()
+                    .spawn(async move { drop(previous) })
+                    .detach();
+            }
             self.save_remote_catalogs();
         }
 
@@ -3783,7 +3800,9 @@ impl Waku {
         for session_id in &removed_sessions {
             self.runtime_attach_pending.remove(session_id);
             self.runtime_attach_misses.remove(session_id);
-            self.runtimes.remove(session_id);
+            if let Some(runtime) = self.runtimes.remove(session_id) {
+                runtime.retire_payloads(&self.background_executor);
+            }
             self.background_work.remove(session_id);
             self.remove_right_panel_session_state(*session_id, cx);
             self.task_switcher.remove(*session_id);
@@ -5606,6 +5625,7 @@ impl Waku {
                     // lazily from the source cursor on its next prompt.
                     if let Some(runtime) = self.runtimes.remove(&session_id) {
                         runtime.driver.close();
+                        runtime.retire_payloads(&self.background_executor);
                     }
                 }
                 self.drain_queued_message(session_id, cx);
@@ -6176,6 +6196,7 @@ impl Waku {
             // them lazily so the next prompt resumes the fork instead.
             if let Some(runtime) = self.runtimes.remove(&session_id) {
                 runtime.driver.close();
+                runtime.retire_payloads(&self.background_executor);
             }
             self.mark_background_work_lost(session_id);
         } else if let Some(runtime) = self.runtimes.get_mut(&session_id) {
@@ -6345,6 +6366,7 @@ impl Waku {
             // second desktop or browser client.
             if let Some(runtime) = self.runtimes.remove(&session_id) {
                 runtime.driver.close();
+                runtime.retire_payloads(&self.background_executor);
             }
         }
         self.reap_idle_agy_terminals();
@@ -8926,7 +8948,7 @@ impl Waku {
                 // Another client can already have started a successor. Drop
                 // the old subscription and check now: its catalog update may
                 // have arrived while the old handle still owned our status.
-                drop(runtime);
+                runtime.retire_payloads(&self.background_executor);
                 self.start_runtime_attachment(session_id, cx);
             }
             changed |= runtime_changed || background_changed;

@@ -2565,7 +2565,10 @@ impl Waku {
         self.agy_pending_spawns.remove(&session_id);
         self.remove_right_panel_session_state(session_id, cx);
         self.remove_composer_draft(composer_draft_key, cx);
-        self.state.sessions.remove(index);
+        let retired = self.state.sessions.remove(index);
+        cx.background_executor()
+            .spawn(async move { drop(retired) })
+            .detach();
         // A deleted chat's scratchpad goes with it — this also pauses the
         // mic when the removed row was the selected one.
         self.sync_voice_scratchpad_capture(cx);
@@ -5652,12 +5655,19 @@ impl Waku {
                 message_markdown.remove(id);
             }
         }
+        drop(message_markdown);
+        // Reclamation is immediate background work, never idle-gated. Only
+        // the plain transcript payload moves; GPUI render entities stay here.
+        self.background_executor
+            .spawn(async move { drop(released) })
+            .detach();
     }
 
     pub(super) fn reset_session_runtime(&mut self, session_id: Uuid) {
         if let Some(runtime) = self.runtimes.remove(&session_id) {
             runtime.driver.cancel();
             runtime.driver.close();
+            runtime.retire_payloads(&self.background_executor);
             self.mark_background_work_lost(session_id);
         }
         self.project_switch_reset_pending.remove(&session_id);
@@ -5669,6 +5679,7 @@ impl Waku {
             // Busy tasks were cancelled by the caller. Closing this handle
             // now makes the daemon release the provider process.
             runtime.driver.close();
+            runtime.retire_payloads(&self.background_executor);
             self.mark_background_work_lost(session_id);
             self.cancel_drains.remove(&session_id);
             return;
@@ -7239,6 +7250,7 @@ impl Waku {
         } else if let Some(runtime) = runtime {
             self.cancel_drains.remove(&session_id);
             runtime.driver.close();
+            runtime.retire_payloads(&self.background_executor);
         }
         self.remeasure_transcript_tail();
         self.save();

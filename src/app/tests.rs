@@ -336,7 +336,11 @@ fn fresh_catalog_keeps_incognito_sessions_but_still_removes_ordinary_ones() {
     let mut catalog = vec![incognito, ordinary, skeleton];
     let removed = merge_remote_session_catalog(&mut catalog, Vec::new(), |_| true, |_| false, true);
 
-    assert_eq!(removed, vec![ordinary_id, skeleton_id]);
+    assert_eq!(
+        removed.iter().map(|session| session.id).collect::<Vec<_>>(),
+        vec![ordinary_id, skeleton_id]
+    );
+    assert_eq!(removed[0].messages[0].content, "on the record");
     assert_eq!(catalog.len(), 1);
     assert!(catalog.iter().any(|session| session.id == incognito_id));
 }
@@ -356,7 +360,10 @@ fn non_fresh_catalog_removes_incognito_sessions_like_any_other() {
     let removed =
         merge_remote_session_catalog(&mut catalog, Vec::new(), |_| true, |_| false, false);
 
-    assert_eq!(removed, vec![incognito_id]);
+    assert_eq!(
+        removed.iter().map(|session| session.id).collect::<Vec<_>>(),
+        vec![incognito_id]
+    );
     assert!(catalog.is_empty());
 }
 

@@ -35,9 +35,9 @@ use waku_protocol::computer_use::ComputerAppGrant;
 use waku_protocol::i18n::AppLanguage;
 use waku_protocol::identity::DATA_DIRECTORY_NAME;
 use waku_protocol::model::{
-    AgentSession, FavoriteModel, Project, ProviderKind, ProviderResumeCursor,
-    ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, RuntimeMode,
-    SessionEnvironment, SessionWorkspace, detail_prefix_signature,
+    AgentSession, AgentTurn, FavoriteModel, Message, Project, ProviderKind, ProviderResumeCursor,
+    ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, QueuedMessage,
+    RuntimeMode, SessionEnvironment, SessionWorkspace, TranscriptBlock, detail_prefix_signature,
 };
 use waku_protocol::theme::ThemeSettings;
 
@@ -2708,6 +2708,17 @@ pub struct ReleasedTranscript {
     pub session_id: Uuid,
     pub message_ids: Vec<Uuid>,
     pub activity_ids: Vec<Uuid>,
+    /// Owned plain data. After evicting render caches, move this record to a
+    /// worker for destruction instead of freeing large transcripts on the UI.
+    pub payload: ReleasedTranscriptPayload,
+}
+
+#[derive(Debug, Default)]
+pub struct ReleasedTranscriptPayload {
+    pub messages: Vec<Message>,
+    pub transcript_blocks: Vec<TranscriptBlock>,
+    pub turns: Vec<AgentTurn>,
+    pub queued_messages: Vec<QueuedMessage>,
 }
 
 impl PersistedState {
@@ -2786,8 +2797,14 @@ impl PersistedState {
                         .iter()
                         .flat_map(|block| block.activities.iter().map(|activity| activity.id))
                         .collect(),
+                    payload: ReleasedTranscriptPayload {
+                        messages: std::mem::take(&mut session.messages),
+                        transcript_blocks: std::mem::take(&mut session.transcript_blocks),
+                        turns: std::mem::take(&mut session.turns),
+                        queued_messages: std::mem::take(&mut session.queued_messages),
+                    },
                 };
-                session.release_transcript();
+                session.detail_loaded = false;
                 released
             })
             .collect()
@@ -6728,6 +6745,11 @@ mod tests {
         );
         for transcript in &released {
             assert!(!transcript.message_ids.is_empty());
+            assert_eq!(
+                transcript.payload.messages.len(),
+                transcript.message_ids.len()
+            );
+            assert!(!transcript.payload.turns.is_empty());
         }
         for session in state.sessions.iter().filter(|session| {
             session.id == oldest_releasable_id || session.id == middle_releasable_id
