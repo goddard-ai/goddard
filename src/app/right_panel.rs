@@ -5342,8 +5342,6 @@ impl Waku {
                 let location = file_link_location(target);
                 self.open_right_panel_surface(RightPanelSurface::Files, cx);
                 self.open_right_panel_file(relative_path.clone(), cx);
-                self.right_panel_file_tree_visible = false;
-                cx.notify();
                 if location.is_some() || heading.is_some() {
                     self.right_panel_pending_file_focus = Some(PendingFileFocus {
                         path: relative_path,
@@ -6483,11 +6481,24 @@ impl Waku {
     }
 
     pub(super) fn open_right_panel_file(&mut self, relative_path: String, cx: &mut Context<Self>) {
+        self.select_right_panel_file(relative_path, true, cx);
+    }
+
+    fn select_right_panel_file(
+        &mut self,
+        relative_path: String,
+        hide_tree: bool,
+        cx: &mut Context<Self>,
+    ) {
         // The Files-active path below reuses the tab rather than opening a
         // surface, so the owner's admission check has to cover this entry
         // too — files can't open where the owner takes none.
         if !self.right_panel_owner_allows(&RightPanelSurface::File(relative_path.clone())) {
             return;
+        }
+        if hide_tree {
+            self.right_panel_file_tree_visible = false;
+            cx.notify();
         }
         self.ensure_initial_right_panel_file_editor_width();
         let Some(active) = self.right_panel_active_surface else {
@@ -6561,7 +6572,7 @@ impl Waku {
         } else if let Some((session_id, message_id, _, _)) = self.selected_transfer_notice() {
             self.open_transfer_path(session_id, message_id, absolute_path, false, cx);
         } else {
-            self.open_right_panel_file(relative_path, cx);
+            self.select_right_panel_file(relative_path, false, cx);
         }
     }
 

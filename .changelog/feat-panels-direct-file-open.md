@@ -1,0 +1,1 @@
+- Opening a file from a transcript link or Cmd+P hides the right panel's file tree by default; you can show it again with the tree toggle.
