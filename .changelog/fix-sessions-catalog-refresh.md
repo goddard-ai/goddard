@@ -1,0 +1,1 @@
+- Reduced work when synchronizing large task lists across connected clients.

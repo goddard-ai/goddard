@@ -530,10 +530,18 @@ pub(super) fn merge_remote_session_catalog(
             || survives_restart(session)
     });
 
+    // Build once after retention: finding every remote row by a fresh scan
+    // made each catalog refresh quadratic in the number of tasks.
+    let mut positions = HashMap::with_capacity(local.len());
+    for (index, session) in local.iter().enumerate() {
+        positions.entry(session.id).or_insert(index);
+    }
     for remote in remote {
-        if let Some(local) = local.iter_mut().find(|session| session.id == remote.id) {
+        if let Some(&index) = positions.get(&remote.id) {
+            let local = &mut local[index];
             merge_session_catalog_row(local, remote, has_local_runtime(local.id));
         } else {
+            positions.insert(remote.id, local.len());
             local.push(remote);
         }
     }
@@ -558,10 +566,15 @@ pub(super) fn merge_remote_project_catalog(
         .map(|project| project.id)
         .collect::<HashSet<_>>();
     local.retain(|project| !owns(project.id) || remote_ids.contains(&project.id));
+    let mut positions = HashMap::with_capacity(local.len());
+    for (index, project) in local.iter().enumerate() {
+        positions.entry(project.id).or_insert(index);
+    }
     for remote in remote {
-        if let Some(local) = local.iter_mut().find(|project| project.id == remote.id) {
-            *local = remote;
+        if let Some(&index) = positions.get(&remote.id) {
+            local[index] = remote;
         } else {
+            positions.insert(remote.id, local.len());
             local.push(remote);
         }
     }
