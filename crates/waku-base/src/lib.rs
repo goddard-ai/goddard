@@ -65,6 +65,7 @@ pub mod i18n;
 pub mod identity;
 pub mod issue_templates;
 pub mod lan;
+pub mod maintenance;
 pub mod pairing;
 pub mod power;
 pub mod pressure;
