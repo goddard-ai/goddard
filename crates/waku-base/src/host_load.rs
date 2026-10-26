@@ -17,6 +17,9 @@ pub struct Observation {
     pub cpu_percent: Option<f32>,
     pub memory: Option<Level>,
     pub observed_at: Instant,
+    /// Start of uninterrupted healthy samples, reset by busy, pressured, or
+    /// unavailable telemetry even when no maintenance job is asking to run.
+    pub healthy_since: Option<Instant>,
 }
 
 impl Observation {
@@ -40,6 +43,7 @@ impl Monitor {
                     cpu_percent: None,
                     memory: None,
                     observed_at: Instant::now(),
+                    healthy_since: None,
                 }),
             });
             let weak = Arc::downgrade(&monitor);
@@ -53,10 +57,21 @@ impl Monitor {
                         let next = cpu_ticks();
                         let cpu_percent = previous.zip(next).and_then(|(a, b)| utilization(a, b));
                         previous = next;
-                        *monitor.latest.lock() = Observation {
+                        let memory = pressure::sample();
+                        let observed_at = Instant::now();
+                        let mut latest = monitor.latest.lock();
+                        let healthy_since = if cpu_percent.is_some_and(|cpu| cpu < 40.0)
+                            && memory == Some(Level::Normal)
+                        {
+                            latest.healthy_since.or(Some(observed_at))
+                        } else {
+                            None
+                        };
+                        *latest = Observation {
                             cpu_percent,
-                            memory: pressure::sample(),
-                            observed_at: Instant::now(),
+                            memory,
+                            observed_at,
+                            healthy_since,
                         };
                     }
                 })

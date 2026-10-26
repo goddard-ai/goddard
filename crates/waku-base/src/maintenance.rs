@@ -202,6 +202,8 @@ impl Policy {
             return Err(WaitReason::CpuBusy);
         }
         let since = *self.healthy_since.get_or_insert(now);
+        let since = since.max(sample.healthy_since.unwrap_or(since));
+        self.healthy_since = Some(since);
         if now.saturating_duration_since(since) < HEALTHY_WINDOW {
             Err(WaitReason::HealthyWindow)
         } else {
@@ -379,7 +381,30 @@ mod tests {
             cpu_percent: cpu,
             memory,
             observed_at: now,
+            healthy_since: None,
         }
+    }
+
+    #[test]
+    fn a_busy_gap_between_admissions_requires_a_new_sampled_healthy_window() {
+        let start = Instant::now();
+        let mut policy = Policy::default();
+        let _ = policy.eligibility(
+            observation(start, Some(10.0), Some(Level::Normal)),
+            start,
+            Unit::Heavy,
+        );
+        let now = start + Duration::from_secs(100);
+        let since = now - Duration::from_secs(3);
+        let mut sample = observation(now, Some(10.0), Some(Level::Normal));
+        sample.healthy_since = Some(since);
+        assert_eq!(
+            policy.eligibility(sample, now, Unit::Heavy),
+            Err(WaitReason::HealthyWindow)
+        );
+        let now = now + Duration::from_secs(7);
+        sample.observed_at = now;
+        assert_eq!(policy.eligibility(sample, now, Unit::Heavy), Ok(false));
     }
 
     #[test]
