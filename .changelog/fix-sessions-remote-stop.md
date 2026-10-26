@@ -1,0 +1,1 @@
+- Remote desktop clients now show manual interruptions as Stopped and release closed agent runtimes so they can follow the next prompt's stream.

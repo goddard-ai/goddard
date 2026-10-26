@@ -19,6 +19,25 @@ const SUBMISSION = {
   messageId: '20000000-0000-4000-8000-000000000002',
 }
 
+test('a remote Stop stays interrupted through its settle and the next prompt streams', () => {
+  const stopped = reduceRuntimeEvent(runningSession(), event('turnCancelled', null), clock)
+  expect(stopped.settled).toBe(false)
+  let session = stopped.session
+  expect(session.status).toBe('idle')
+  expect(session.turns.at(-1)).toMatchObject({ status: 'interrupted', interruption: 'you' })
+  expect(session.messages.at(-1)?.notice).toEqual({ type: 'status', kind: 'stopped' })
+  session = apply(session, 'turnStarted', null)
+  session = apply(session, 'textDelta', 'late output')
+  session = apply(session, 'turnFinished', { success: false })
+  expect(session.status).toBe('idle')
+  expect(session.messages.at(-1)?.content).toBe('Stopped')
+  session = apply(session, 'promptSubmitted', SUBMISSION)
+  session = apply(session, 'turnStarted', null)
+  session = apply(session, 'textDelta', 'next answer')
+  expect(session.status).toBe('working')
+  expect(session.messages.at(-1)).toMatchObject({ content: 'next answer', turn_id: SUBMISSION.turnId })
+})
+
 describe('promptSubmitted', () => {
   test('an employee submission preserves its reference checkout in the live projection', () => {
     const origin = { projectRoot: '/employee-project', worktree: '/employee-worktree' }

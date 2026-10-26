@@ -25,6 +25,28 @@ pub(super) fn record_boss_event(
         return Ok(());
     };
     task_store.hydrate(session)?;
+    let user_stopped = session.turns.last().is_some_and(|turn| {
+        turn.status == TurnStatus::Interrupted
+            && turn.interruption == Some(crate::model::TurnInterruption::You)
+    });
+    // Output already in flight at Stop still belongs to the interrupted
+    // turn. A new PromptSubmitted opens the next turn.
+    if user_stopped
+        && matches!(
+            event,
+            DriverEvent::TurnStarted
+                | DriverEvent::TurnParked
+                | DriverEvent::TextDelta(_)
+                | DriverEvent::ReasoningDelta(_)
+                | DriverEvent::Activity { .. }
+                | DriverEvent::RichActivity(_)
+                | DriverEvent::Permission { .. }
+                | DriverEvent::UserInputRequested { .. }
+                | DriverEvent::TurnFinished { .. }
+        )
+    {
+        return Ok(());
+    }
     if matches!(
         event,
         DriverEvent::PromptSubmitted { .. } | DriverEvent::TurnStarted
@@ -74,6 +96,42 @@ pub(super) fn record_boss_event(
             session.status = SessionStatus::Working;
         }
         DriverEvent::TurnParked => session.status = SessionStatus::Background,
+        DriverEvent::TurnCancelled => {
+            if let Some(turn) = session
+                .turns
+                .last()
+                .filter(|turn| turn.status == TurnStatus::Running)
+                && !session.messages.iter().any(|message| {
+                    message.turn_id == Some(turn.id) && message.role == MessageRole::Assistant
+                })
+            {
+                let text = if turn.provider_turn_started {
+                    crate::tr!("session.stopped")
+                } else {
+                    crate::tr!("session.stopped_before_start")
+                };
+                session.push_notice_message(
+                    MessageRole::Assistant,
+                    text,
+                    crate::model::TranscriptNotice::Status {
+                        kind: crate::model::TranscriptNoticeStatus::Stopped,
+                    },
+                );
+            }
+            for message in &mut session.messages {
+                message.streaming = false;
+            }
+            for block in &mut session.transcript_blocks {
+                for item in &mut block.activities {
+                    item.complete = true;
+                    if let Some(reasoning) = &mut item.reasoning {
+                        reasoning.finished_at_ms = crate::model::unix_time() * 1000;
+                    }
+                }
+            }
+            session.interrupt_active_turn(crate::model::TurnInterruption::You);
+            session.status = SessionStatus::Idle;
+        }
         DriverEvent::TextDelta(text) => {
             let turn = session.active_turn_id();
             let boundary = session.transcript_blocks.last().is_some_and(|block| {

@@ -392,6 +392,11 @@ impl Waku {
                 }
             }
             DriverEvent::TurnStarted => {
+                // A start already in flight when another client pressed
+                // Stop belongs to the cancelled turn until its settle lands.
+                if self.session_is_draining_cancel(session_id) {
+                    return true;
+                }
                 runtime.last_driver_error = None;
                 if let Some(session) = self.state.session_mut(session_id) {
                     if session.active_turn_id().is_some() {
@@ -422,6 +427,11 @@ impl Waku {
                         session.status = SessionStatus::Working;
                         self.state.mark_session_dirty(session_id);
                     }
+                }
+            }
+            DriverEvent::TurnCancelled => {
+                if self.settle_cancelled_turn(session_id, Some(runtime), cx) {
+                    self.cancel_drains.insert(session_id, Instant::now());
                 }
             }
             DriverEvent::TurnParked => {

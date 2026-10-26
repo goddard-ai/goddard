@@ -6877,6 +6877,96 @@ impl Waku {
         cx.notify();
     }
 
+    /// Apply a user Stop from this client or another attached client without
+    /// sending another cancellation command back to the daemon.
+    pub(super) fn settle_cancelled_turn(
+        &mut self,
+        session_id: Uuid,
+        runtime: Option<&mut SessionRuntime>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.pending_goal_operations.remove(&session_id);
+        self.pending_queue_drains.retain(|id| *id != session_id);
+        let has_active_turn = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(AgentSession::active_turn_id)
+            .is_some();
+        let previous_kinds = has_active_turn
+            .then(|| self.snapshot_selected_transcript_rows(session_id))
+            .flatten();
+        self.finish_streaming_assistant(session_id);
+        self.complete_turn_blocks(session_id);
+        self.settle_foreground_work(session_id, BackgroundWorkStatus::Stopped);
+        if let Some(runtime) = runtime {
+            runtime.stream_phase = None;
+            runtime.pending_permission = None;
+            runtime.pending_user_input = None;
+            runtime.pending_computer_approval = None;
+            // A steer still awaiting its provider echo must not acknowledge
+            // into the settled session; the user asked to stop, not to
+            // continue.
+            runtime.pending_steers.clear();
+            runtime.computer_use_previews.clear();
+        }
+        if has_active_turn {
+            let needs_fallback = !self.turn_has_assistant_message(session_id);
+            // Stop can land after the prompt was dispatched but before the
+            // provider confirmed the turn — it may never have seen the
+            // message, which a bare "Stopped" doesn't say.
+            let provider_never_confirmed = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| session.turns.last())
+                .is_some_and(|turn| {
+                    turn.status == TurnStatus::Running && !turn.provider_turn_started
+                });
+            if let Some(session) = self.state.session_mut(session_id) {
+                session.status = SessionStatus::Idle;
+                if needs_fallback {
+                    session.push_notice_message(
+                        MessageRole::Assistant,
+                        if provider_never_confirmed {
+                            tr!("session.stopped_before_start")
+                        } else {
+                            tr!("session.stopped")
+                        },
+                        TranscriptNotice::Status {
+                            kind: TranscriptNoticeStatus::Stopped,
+                        },
+                    );
+                }
+            }
+            self.finish_active_turn_with_analytics(
+                session_id,
+                TurnStatus::Interrupted,
+                crate::analytics::TurnOutcome::Cancelled,
+            );
+            // This stop was the user's — attribute it so the fold reads
+            // "You stopped" rather than a daemon or provider interrupt.
+            if let Some(turn) = self
+                .state
+                .session_mut(session_id)
+                .and_then(|session| session.turns.last_mut())
+                .filter(|turn| turn.status == TurnStatus::Interrupted)
+            {
+                turn.interruption = Some(waku_protocol::model::TurnInterruption::You);
+            }
+        }
+        if has_active_turn {
+            self.capture_latest_turn_checkpoint_for(session_id);
+            self.start_pending_checkpoint_captures(cx);
+        }
+        if let Some(previous_kinds) = previous_kinds.as_deref() {
+            self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
+        }
+        has_active_turn
+    }
+
     pub(super) fn cancel_session_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         self.escape_stop_confirmation.clear();
         if !self.runtimes.contains_key(&session_id)
@@ -6949,84 +7039,7 @@ impl Waku {
                 }
             }
         }
-        self.pending_queue_drains.retain(|id| *id != session_id);
-        let has_active_turn = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .and_then(AgentSession::active_turn_id)
-            .is_some();
-        let previous_kinds = has_active_turn
-            .then(|| self.snapshot_selected_transcript_rows(session_id))
-            .flatten();
-        self.finish_streaming_assistant(session_id);
-        self.complete_turn_blocks(session_id);
-        self.settle_foreground_work(session_id, BackgroundWorkStatus::Stopped);
-        if let Some(runtime) = runtime.as_mut() {
-            runtime.stream_phase = None;
-            runtime.pending_permission = None;
-            runtime.pending_user_input = None;
-            runtime.pending_computer_approval = None;
-            // A steer still awaiting its provider echo must not acknowledge
-            // into the settled session; the user asked to stop, not to
-            // continue.
-            runtime.pending_steers.clear();
-            runtime.computer_use_previews.clear();
-        }
-        if has_active_turn {
-            let needs_fallback = !self.turn_has_assistant_message(session_id);
-            // Stop can land after the prompt was dispatched but before the
-            // provider confirmed the turn — it may never have seen the
-            // message, which a bare "Stopped" doesn't say.
-            let provider_never_confirmed = self
-                .state
-                .sessions
-                .iter()
-                .find(|session| session.id == session_id)
-                .and_then(|session| session.turns.last())
-                .is_some_and(|turn| {
-                    turn.status == TurnStatus::Running && !turn.provider_turn_started
-                });
-            if let Some(session) = self.state.session_mut(session_id) {
-                session.status = SessionStatus::Idle;
-                if needs_fallback {
-                    session.push_notice_message(
-                        MessageRole::Assistant,
-                        if provider_never_confirmed {
-                            tr!("session.stopped_before_start")
-                        } else {
-                            tr!("session.stopped")
-                        },
-                        TranscriptNotice::Status {
-                            kind: TranscriptNoticeStatus::Stopped,
-                        },
-                    );
-                }
-            }
-            self.finish_active_turn_with_analytics(
-                session_id,
-                TurnStatus::Interrupted,
-                crate::analytics::TurnOutcome::Cancelled,
-            );
-            // This stop was the user's — attribute it so the fold reads
-            // "You stopped" rather than a daemon or provider interrupt.
-            if let Some(turn) = self
-                .state
-                .session_mut(session_id)
-                .and_then(|session| session.turns.last_mut())
-                .filter(|turn| turn.status == TurnStatus::Interrupted)
-            {
-                turn.interruption = Some(waku_protocol::model::TurnInterruption::You);
-            }
-        }
-        if has_active_turn {
-            self.capture_latest_turn_checkpoint_for(session_id);
-            self.start_pending_checkpoint_captures(cx);
-        }
-        if let Some(previous_kinds) = previous_kinds.as_deref() {
-            self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
-        }
+        let has_active_turn = self.settle_cancelled_turn(session_id, runtime.as_mut(), cx);
         // A retained runtime keeps the provider process — and its native
         // session — warm for the next prompt. Amp is the exception: with no
         // stream interrupt, Stop must end the process and resume the thread

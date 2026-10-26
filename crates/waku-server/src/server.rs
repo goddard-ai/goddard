@@ -849,6 +849,21 @@ impl Hub {
 
     fn begin_runtime(&self, session_id: Uuid, runtime_id: Uuid) {
         let mut state = self.state.lock();
+        if let Some(previous) = state.active_runtimes.get(&session_id).copied() {
+            if previous == runtime_id {
+                return;
+            }
+            // Start can race the old runtime's CloseSession. Tell its
+            // clients to release their handles before switching routing;
+            // an exit emitted by the old forwarder afterwards is stale.
+            self.emit_locked(
+                &mut state,
+                session_id,
+                previous,
+                WireDriverEvent::new("processExited", serde_json::Value::Null),
+                false,
+            );
+        }
         state.active_runtimes.insert(session_id, runtime_id);
         state
             .next_sequences
@@ -876,6 +891,17 @@ impl Hub {
 
     fn emit(&self, session_id: Uuid, runtime_id: Uuid, event: WireDriverEvent, replayable: bool) {
         let mut state = self.state.lock();
+        self.emit_locked(&mut state, session_id, runtime_id, event, replayable);
+    }
+
+    fn emit_locked(
+        &self,
+        state: &mut HubState,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        event: WireDriverEvent,
+        replayable: bool,
+    ) {
         if state.active_runtimes.get(&session_id) != Some(&runtime_id) {
             return;
         }
@@ -900,9 +926,9 @@ impl Hub {
         }
         let message = ServerMessage::Event(event);
         if let Some(&owner) = state.terminal_owners.get(&session_id) {
-            Self::deliver(&mut state, owner, &message);
+            Self::deliver(state, owner, &message);
         } else {
-            Self::broadcast(&mut state, &message, None);
+            Self::broadcast(state, &message, None);
         }
     }
 
@@ -4558,6 +4584,11 @@ mod tests {
         ));
 
         hub.begin_runtime(session_id, new_runtime_id);
+        let ServerMessage::Event(ended) = events.recv().unwrap() else {
+            panic!("expected the replaced runtime's exit");
+        };
+        assert_eq!(ended.runtime_id, old_runtime_id);
+        assert_eq!(ended.event.kind, "processExited");
         old_sink
             .send(WireDriverEvent::new("stale", serde_json::Value::Null))
             .unwrap();

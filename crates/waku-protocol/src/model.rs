@@ -4655,6 +4655,10 @@ pub enum DriverEvent {
         reference_context: Option<ReferenceContext>,
     },
     TurnStarted,
+    /// A user requested Stop on this runtime. Every client settles its
+    /// current turn as interrupted; the provider's later `TurnFinished`
+    /// only confirms that the cancelled turn has drained.
+    TurnCancelled,
     /// The provider's turn ended while detached work it will wake the
     /// session for is still running. The turn stays open — the wake's
     /// `TurnStarted` continues it — and the session shows it is waiting.

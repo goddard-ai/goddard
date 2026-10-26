@@ -236,6 +236,7 @@ export function reduceRuntimeEvent(
       break
     }
     case 'turnStarted': {
+      if (session.turns.at(-1)?.interruption === 'you') break
       const turn = activeTurn(session)
       if (turn) {
         turn.provider_turn_started = true
@@ -393,6 +394,25 @@ export function reduceRuntimeEvent(
         setTitleFromPrompt(session, goal.objective)
       }
       session.thread_goal = goal
+      break
+    }
+    case 'turnCancelled': {
+      const turn = activeTurn(session)
+      if (!turn) break
+      const needsNotice = !session.messages.some(
+        (message) => message.turn_id === turn.id && message.role === 'assistant',
+      )
+      // The settled signal starts queued follow-ups in clients. A user
+      // Stop closes this turn without draining that queue.
+      settleTurn(session, 'interrupted', 'Stopped', clock)
+      turn.interruption = 'you'
+      session.status = 'idle'
+      const notice = session.messages.at(-1)
+      if (needsNotice && notice) {
+        notice.notice = { type: 'status', kind: 'stopped' }
+      }
+      result.permission = null
+      result.userInput = null
       break
     }
     case 'turnFinished': {

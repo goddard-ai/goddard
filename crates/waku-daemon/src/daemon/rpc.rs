@@ -451,6 +451,11 @@ impl Backend for WakuBackend {
                 Ok(ResponsePayload::ManagedGoalTurnClaimed { claimed })
             }
             Command::AttachSession => {
+                // A runtime-ended event can immediately trigger a client's
+                // reattach. Wait for teardown to finish before reporting
+                // whether the old runtime or its successor still exists.
+                let lifecycle = self.runtime_lifecycles.session(session_id);
+                let _owner = lifecycle.lock();
                 let sessions = self.sessions.lock();
                 let Some(entry) = sessions.get(&session_id) else {
                     return Ok(ResponsePayload::SessionRuntime {
@@ -1942,10 +1947,13 @@ impl Backend for WakuBackend {
                 })
             }
             Command::CloseSession => {
+                let lifecycle = self.runtime_lifecycles.session(session_id);
+                let _owner = lifecycle.lock();
                 let expected = (!runtime_id.is_nil()).then_some(runtime_id);
                 let removed = self.remove_runtime(session_id, expected, false);
                 if let Some(entry) = &removed {
                     let sink = events.for_session(session_id, entry.runtime_id);
+                    sink.notify_runtime_ended();
                     sink.end_session_runtime();
                 }
                 drop_detached(removed);
@@ -2184,15 +2192,6 @@ impl Backend for WakuBackend {
                 self.cancel_queued_prompt(session_id, queued_message_id, &events)
             }
             command => {
-                if matches!(command, Command::Cancel) {
-                    self.agent.cancel_resources(session_id);
-                    // A user stop on a Boss-owned chat holds its parked
-                    // agent deliveries — the settle must not drain them
-                    // into an immediate resume.
-                    if self.boss.is_boss_principal(session_id) {
-                        self.agent.note_user_stop(session_id);
-                    }
-                }
                 // The user's next prompt or steer is the resume the held
                 // deliveries waited for — release the hold.
                 if matches!(command, Command::Prompt { .. } | Command::Steer { .. }) {
@@ -2285,6 +2284,8 @@ impl Backend for WakuBackend {
                 // prompts — the sandbox is the boundary, and the quarantine
                 // flag only keeps unattended senders (agent prompts,
                 // automations) out until the user trusts the transfer.
+                let lifecycle = self.runtime_lifecycles.session(session_id);
+                let _cancel_owner = matches!(command, Command::Cancel).then(|| lifecycle.lock());
                 let (driver, stable) = {
                     let mut sessions = self.sessions.lock();
                     let entry = sessions
@@ -2304,6 +2305,28 @@ impl Backend for WakuBackend {
                     }
                     (entry.driver.clone(), entry.stable.is_some())
                 };
+                if matches!(command, Command::Cancel) {
+                    self.agent.cancel_resources(session_id);
+                    // Hold parked Boss deliveries until the user's next
+                    // prompt, and publish Stop before the provider can settle.
+                    if self.boss.is_boss_principal(session_id) {
+                        self.agent.note_user_stop(session_id);
+                    }
+                    // The lifecycle gate keeps provider events behind the
+                    // Stop broadcast. Still cancel if transcript persistence
+                    // fails: a storage error must not leave the agent running.
+                    driver.cancel();
+                    let cancelled = DriverEvent::TurnCancelled;
+                    let recorded = record_boss_event(
+                        &self.task_state,
+                        &self.task_store,
+                        session_id,
+                        &cancelled,
+                    );
+                    events.send(event_to_wire(cancelled)?)?;
+                    recorded?;
+                    return Ok(ResponsePayload::Ack);
+                }
                 if let Command::Prompt {
                     prompt,
                     turn_id,

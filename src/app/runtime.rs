@@ -8837,6 +8837,7 @@ impl Waku {
                         | DriverEvent::SteerAccepted { .. }
                         | DriverEvent::SteerRejected { .. }
                         | DriverEvent::TurnFinished { .. }
+                        | DriverEvent::TurnCancelled
                         | DriverEvent::Error(_)
                         | DriverEvent::RuntimeLost
                         | DriverEvent::ProcessExited
@@ -8871,6 +8872,12 @@ impl Waku {
                 if runtime_changed {
                     self.retry_deferred_steers(session_id, cx);
                 }
+            } else {
+                // Another client can already have started a successor. Drop
+                // the old subscription and check now: its catalog update may
+                // have arrived while the old handle still owned our status.
+                drop(runtime);
+                self.start_runtime_attachment(session_id, cx);
             }
             changed |= runtime_changed || background_changed;
             persisted_state_changed |= runtime_changed;
