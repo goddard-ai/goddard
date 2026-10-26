@@ -1,0 +1,1 @@
+- Fixed duplicate responses appearing after different clients save the same task transcript.

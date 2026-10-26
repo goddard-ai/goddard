@@ -3132,8 +3132,8 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
 
 /// Replaces a session's messages with the given list.
 ///
-/// Appending during a turn touches only the new rows; the delete clears any
-/// tail left behind when a conversation is forked or truncated.
+/// Appending during a turn touches only the new rows; obsolete identities are
+/// removed even when another client replaces a message at the same position.
 /// Writes the messages whose stored row would actually differ.
 ///
 /// A streaming turn saves once a second, and every one of those saves used to
@@ -3153,11 +3153,24 @@ fn write_messages(
 ) -> io::Result<HashMap<Uuid, u64>> {
     use rusqlite::types::Value;
     let session_id = session.id.to_string();
+    let mut stored_ids = {
+        let mut statement = transaction
+            .prepare("SELECT id FROM messages WHERE session_id = ?1")
+            .map_err(to_io_error)?;
+        statement
+            .query_map(params![session_id], |row| row.get::<_, String>(0))
+            .map_err(to_io_error)?
+            .collect::<Result<HashSet<_>, _>>()
+            .map_err(to_io_error)?
+    };
     let mut current = HashMap::with_capacity(session.messages.len());
     for (position, message) in session.messages.iter().enumerate() {
+        let message_id = message.id.to_string();
+        let stored = stored_ids.remove(&message_id);
         let fingerprint = message_fingerprint(message, position);
         current.insert(message.id, fingerprint);
-        if written.get(&message.id) == Some(&fingerprint) {
+        // Another writer may have removed a row this connection still caches.
+        if stored && written.get(&message.id) == Some(&fingerprint) {
             continue;
         }
         let attachments = if message.attachments.is_empty() {
@@ -3192,7 +3205,7 @@ fn write_messages(
             .execute(
                 UPSERT_MESSAGE,
                 rusqlite::params_from_iter([
-                    Value::Text(message.id.to_string()),
+                    Value::Text(message_id),
                     Value::Text(session_id.clone()),
                     message
                         .turn_id
@@ -3219,12 +3232,14 @@ fn write_messages(
             )
             .map_err(to_io_error)?;
     }
-    transaction
-        .execute(
-            "DELETE FROM messages WHERE session_id = ?1 AND position >= ?2",
-            params![session_id, session.messages.len() as i64],
-        )
-        .map_err(to_io_error)?;
+    for obsolete_id in stored_ids {
+        transaction
+            .execute(
+                "DELETE FROM messages WHERE session_id = ?1 AND id = ?2",
+                params![session_id, obsolete_id],
+            )
+            .map_err(to_io_error)?;
+    }
     Ok(current)
 }
 
@@ -6290,6 +6305,40 @@ mod tests {
         assert_eq!(total, 4);
         assert_eq!(all.len(), 4);
         assert!(all.iter().all(|matched| !matched.excerpt_matched));
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn competing_projections_replace_message_ids_without_leaving_duplicates() {
+        let directory = temporary_directory();
+        let first_store = store_in(&directory);
+        let second_store = store_in(&directory);
+        let mut first = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        first.sessions[0].begin_turn("Ask");
+        first.sessions[0].push_message(MessageRole::Assistant, "answer");
+        first.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        let session_id = first.sessions[0].id;
+        let mut second = first.clone();
+        second.sessions[0].messages.last_mut().unwrap().id = Uuid::new_v4();
+
+        first_store.save(&mut first).unwrap();
+        second_store.save(&mut second).unwrap();
+        let restored = load_hydrated(&store_in(&directory));
+        assert_eq!(
+            serde_json::to_value(&restored.sessions[0].messages).unwrap(),
+            serde_json::to_value(&second.sessions[0].messages).unwrap()
+        );
+
+        // The first connection still caches its original message fingerprint.
+        // Its next save must restore that row after the other writer removed it.
+        first.mark_session_dirty(session_id);
+        first_store.save(&mut first).unwrap();
+        let restored = load_hydrated(&store_in(&directory));
+        assert_eq!(
+            serde_json::to_value(&restored.sessions[0].messages).unwrap(),
+            serde_json::to_value(&first.sessions[0].messages).unwrap()
+        );
 
         fs::remove_dir_all(directory).ok();
     }
