@@ -40,8 +40,8 @@ interface SidebarProps {
 const GROUP_TRANSLATION_KEYS: Record<DateGroup, string> = {
   today: 'sidebar.today',
   yesterday: 'sidebar.yesterday',
-  week: 'sidebar.this_week',
-  month: 'sidebar.this_month',
+  week: 'sidebar.last_7_days',
+  month: 'sidebar.last_30_days',
   year: 'sidebar.this_year',
   more: 'sidebar.more',
 }

@@ -12,12 +12,34 @@ import {
 } from './sidebar-presentation'
 
 describe('desktop sidebar presentation', () => {
-  test('uses a Monday-based current week instead of a rolling seven days', () => {
-    const wednesday = new Date(2026, 7, 12, 12)
-    expect(dateGroup(atLocalNoon(2026, 7, 12), wednesday)).toBe('today')
-    expect(dateGroup(atLocalNoon(2026, 7, 11), wednesday)).toBe('yesterday')
-    expect(dateGroup(atLocalNoon(2026, 7, 10), wednesday)).toBe('week')
-    expect(dateGroup(atLocalNoon(2026, 7, 9), wednesday)).toBe('month')
+  test('groups recent local dates across week, month, year, and DST boundaries', () => {
+    for (const now of [
+      new Date(2026, 9, 26, 10),
+      new Date(2026, 10, 2, 10),
+      new Date(2027, 0, 4, 10),
+      new Date(2026, 2, 10, 10),
+    ]) {
+      for (const [age, expected] of [
+        [0, 'today'], [1, 'yesterday'], [2, 'week'], [6, 'week'],
+        [7, 'month'], [29, 'month'],
+      ] as const) {
+        const updated = new Date(now.getFullYear(), now.getMonth(), now.getDate() - age, 18)
+        expect(dateGroup(updated.getTime() / 1_000, now)).toBe(expected)
+      }
+      const older = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30, 18)
+      expect(dateGroup(older.getTime() / 1_000, now)).toBe(
+        older.getFullYear() === now.getFullYear() ? 'year' : 'more',
+      )
+    }
+    const monday = new Date(2026, 9, 26, 10)
+    const saturday = new Date(2026, 9, 24, 18)
+    expect(formatTimeAgo((monday.getTime() - saturday.getTime()) / 1_000)).toBe('1d')
+    const groups = groupSessions([], [session({
+      last_reply_at: saturday.getTime() / 1_000,
+      messages: [{ id: 'message' } as never],
+    })], monday)
+    expect(groups[0]?.id).toBe('week')
+    expect(groups[0]?.label).toBe('Last 7 days')
   })
 
   test('keeps Add Project in an empty history through the first group header', () => {
@@ -82,10 +104,6 @@ describe('desktop sidebar presentation', () => {
     expect(groups[0]?.sessions[0]?.projectName).toBe('プロジェクトなし')
   })
 })
-
-function atLocalNoon(year: number, month: number, day: number): number {
-  return Math.floor(new Date(year, month, day, 12).getTime() / 1_000)
-}
 
 function session(patch: Partial<AgentSession>): AgentSession {
   return {

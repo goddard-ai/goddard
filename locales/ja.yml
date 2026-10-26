@@ -734,8 +734,8 @@ sidebar.dormant: 休眠
 sidebar.chats: チャット
 sidebar.recent_deliverables: 最近の成果物
 sidebar.yesterday: 昨日
-sidebar.this_week: 今週
-sidebar.this_month: 今月
+sidebar.last_7_days: 過去7日間
+sidebar.last_30_days: 過去30日間
 sidebar.this_year: 今年
 sidebar.more: さらに前
 sidebar.just_now: たった今

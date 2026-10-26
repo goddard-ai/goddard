@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use gpui::{KeyBinding, actions};
 
 use super::*;
@@ -57,8 +57,8 @@ pub fn init(cx: &mut App) {
 pub(super) enum SessionDateGroup {
     Today,
     Yesterday,
-    ThisWeek,
-    ThisMonth,
+    Last7Days,
+    Last30Days,
     ThisYear,
     More,
 }
@@ -67,8 +67,8 @@ impl SessionDateGroup {
     const ALL: [Self; 6] = [
         Self::Today,
         Self::Yesterday,
-        Self::ThisWeek,
-        Self::ThisMonth,
+        Self::Last7Days,
+        Self::Last30Days,
         Self::ThisYear,
         Self::More,
     ];
@@ -77,8 +77,8 @@ impl SessionDateGroup {
         match self {
             Self::Today => 0,
             Self::Yesterday => 1,
-            Self::ThisWeek => 2,
-            Self::ThisMonth => 3,
+            Self::Last7Days => 2,
+            Self::Last30Days => 3,
             Self::ThisYear => 4,
             Self::More => 5,
         }
@@ -88,8 +88,8 @@ impl SessionDateGroup {
         match self {
             Self::Today => tr!("sidebar.today"),
             Self::Yesterday => tr!("sidebar.yesterday"),
-            Self::ThisWeek => tr!("sidebar.this_week"),
-            Self::ThisMonth => tr!("sidebar.this_month"),
+            Self::Last7Days => tr!("sidebar.last_7_days"),
+            Self::Last30Days => tr!("sidebar.last_30_days"),
             Self::ThisYear => tr!("sidebar.this_year"),
             Self::More => tr!("sidebar.more"),
         }
@@ -253,15 +253,12 @@ fn session_date_group_for_dates(session_date: NaiveDate, today: NaiveDate) -> Se
         return SessionDateGroup::Yesterday;
     }
 
-    let week_start = today
-        .checked_sub_days(Days::new(today.weekday().num_days_from_monday().into()))
-        .unwrap_or(today);
-    if session_date >= week_start {
-        return SessionDateGroup::ThisWeek;
+    let age_days = today.signed_duration_since(session_date).num_days();
+    if age_days < 7 {
+        return SessionDateGroup::Last7Days;
     }
-
-    if session_date.year() == today.year() && session_date.month() == today.month() {
-        return SessionDateGroup::ThisMonth;
+    if age_days < 30 {
+        return SessionDateGroup::Last30Days;
     }
 
     if session_date.year() == today.year() {
@@ -8447,20 +8444,33 @@ mod tests {
     }
 
     #[test]
-    fn groups_sessions_by_calendar_period() {
-        let today = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
-        let cases = [
-            ((2026, 8, 12), SessionDateGroup::Today),
-            ((2026, 8, 11), SessionDateGroup::Yesterday),
-            ((2026, 8, 10), SessionDateGroup::ThisWeek),
-            ((2026, 8, 1), SessionDateGroup::ThisMonth),
-            ((2026, 1, 1), SessionDateGroup::ThisYear),
-            ((2025, 12, 31), SessionDateGroup::More),
-        ];
-
-        for ((year, month, day), expected) in cases {
-            let session_date = NaiveDate::from_ymd_opt(year, month, day).unwrap();
-            assert_eq!(session_date_group_for_dates(session_date, today), expected);
+    fn groups_sessions_by_recent_local_dates() {
+        // Monday and the starts of a month and year must not split recent tasks.
+        for today in [
+            NaiveDate::from_ymd_opt(2026, 10, 26).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
+            NaiveDate::from_ymd_opt(2027, 1, 4).unwrap(),
+        ] {
+            for (age, expected) in [
+                (0, SessionDateGroup::Today),
+                (1, SessionDateGroup::Yesterday),
+                (2, SessionDateGroup::Last7Days),
+                (6, SessionDateGroup::Last7Days),
+                (7, SessionDateGroup::Last30Days),
+                (29, SessionDateGroup::Last30Days),
+            ] {
+                let date = today - chrono::Days::new(age);
+                assert_eq!(session_date_group_for_dates(date, today), expected);
+            }
+            for age in [30, 365] {
+                let date = today - chrono::Days::new(age);
+                let expected = if date.year() == today.year() {
+                    SessionDateGroup::ThisYear
+                } else {
+                    SessionDateGroup::More
+                };
+                assert_eq!(session_date_group_for_dates(date, today), expected);
+            }
         }
     }
 

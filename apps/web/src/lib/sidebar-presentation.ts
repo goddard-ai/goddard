@@ -28,8 +28,8 @@ export type SidebarListRow =
 const GROUP_LABELS: Record<DateGroup, string> = {
   today: 'Today',
   yesterday: 'Yesterday',
-  week: 'This Week',
-  month: 'This Month',
+  week: 'Last 7 days',
+  month: 'Last 30 days',
   year: 'This Year',
   more: 'More',
 }
@@ -156,14 +156,11 @@ export function dateGroup(timestamp: number, now = new Date()): DateGroup {
   yesterday.setDate(yesterday.getDate() - 1)
   if (sessionDay.getTime() === yesterday.getTime()) return 'yesterday'
 
-  const weekStart = new Date(today)
-  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7))
-  if (sessionDay >= weekStart) return 'week'
-
-  if (
-    sessionDay.getFullYear() === today.getFullYear()
-      && sessionDay.getMonth() === today.getMonth()
-  ) return 'month'
+  // Compare local calendar dates in UTC so DST does not change the day count.
+  const dayNumber = (day: Date) => Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()) / 86_400_000
+  const ageDays = dayNumber(today) - dayNumber(sessionDay)
+  if (ageDays < 7) return 'week'
+  if (ageDays < 30) return 'month'
   if (sessionDay.getFullYear() === today.getFullYear()) return 'year'
   return 'more'
 }

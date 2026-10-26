@@ -2409,10 +2409,10 @@ sidebar.deliverables_view_all:
   en: View all deliverables
 sidebar.yesterday:
   en: Yesterday
-sidebar.this_week:
-  en: This Week
-sidebar.this_month:
-  en: This Month
+sidebar.last_7_days:
+  en: Last 7 days
+sidebar.last_30_days:
+  en: Last 30 days
 sidebar.this_year:
   en: This Year
 sidebar.more:

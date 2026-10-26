@@ -1,0 +1,1 @@
+- Find recent tasks in “Last 7 days” and “Last 30 days” sidebar date groups, even across calendar week, month, and year boundaries.
