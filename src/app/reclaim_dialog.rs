@@ -321,12 +321,7 @@ impl Waku {
         if self.reclaim_dialog.take().is_none() {
             return;
         }
-        if let Some(handle) = self
-            .menus
-            .borrow()
-            .get(RECLAIM_PROGRESS_MENU_ID)
-            .cloned()
-        {
+        if let Some(handle) = self.menus.borrow().get(RECLAIM_PROGRESS_MENU_ID).cloned() {
             handle.close(window, cx);
         }
         let focus = self.composer_focus(cx);
@@ -370,8 +365,7 @@ impl Waku {
         // and the latter's spawn has no window — so `reveal` is honored
         // from the render path, where defer_in lands after the entity
         // lease releases.
-        if dialog.is_some_and(|dialog| dialog.reveal)
-            || result.is_some_and(|result| result.reveal)
+        if dialog.is_some_and(|dialog| dialog.reveal) || result.is_some_and(|result| result.reveal)
         {
             cx.defer_in(window, |this, window, _cx| {
                 if let Some(result) = this.reclaim_result.as_mut() {
@@ -380,11 +374,7 @@ impl Waku {
                 if let Some(dialog) = this.reclaim_dialog.as_mut() {
                     dialog.reveal = false;
                 }
-                let Some(handle) = this
-                    .menus
-                    .borrow()
-                    .get(RECLAIM_PROGRESS_MENU_ID)
-                    .cloned()
+                let Some(handle) = this.menus.borrow().get(RECLAIM_PROGRESS_MENU_ID).cloned()
                 else {
                     return;
                 };

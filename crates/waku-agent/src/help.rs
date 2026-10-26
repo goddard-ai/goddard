@@ -155,7 +155,9 @@ fn purpose(path: &str) -> &str {
         "boss prompt" | "prompt" => "Send work or a correction with explicit delivery semantics.",
         "boss transcript" | "read" => "Read retained transcript turns without starting work.",
         "boss roster" => "Inspect employee status; --all includes finished employees.",
-        "boss view" => "Inspect Boss state: a digest by default, one slice with SECTION, the complete state with --full.",
+        "boss view" => {
+            "Inspect Boss state: a digest by default, one slice with SECTION, the complete state with --full."
+        }
         "boss context" => "Read a bounded digest of current projects, tasks and schedules.",
         "boss stop" => "Stop an employee's active work.",
         "boss resume" => "Revive an expired employee in place, retaining transcript and workspace.",

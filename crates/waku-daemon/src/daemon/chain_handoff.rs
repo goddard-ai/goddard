@@ -1751,9 +1751,8 @@ mod tests {
         let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
         assert!(inputs.brief.is_none());
         assert_eq!(inputs.workspace, AgentWorkspace::Worktree);
-        let Some(ChainBaseSource::Bare(pinned)) = fixture
-            .step(HandoffBoundary::ArtifactsReady)
-            .base_revision
+        let Some(ChainBaseSource::Bare(pinned)) =
+            fixture.step(HandoffBoundary::ArtifactsReady).base_revision
         else {
             panic!("fixture declares a bare base")
         };
@@ -1829,15 +1828,11 @@ mod tests {
             qa_branch: None,
             submission_id: None,
         });
-        let chain = fixture.create(vec![
-            fixture.step(HandoffBoundary::ArtifactsReady),
-            {
-                let mut step = fixture.step(HandoffBoundary::ArtifactsReady);
-                step.base_revision =
-                    Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded));
-                step
-            },
-        ]);
+        let chain = fixture.create(vec![fixture.step(HandoffBoundary::ArtifactsReady), {
+            let mut step = fixture.step(HandoffBoundary::ArtifactsReady);
+            step.base_revision = Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded));
+            step
+        }]);
         let chain = fixture.finish_attempt(&chain, &fixture.repo, result);
         let chain = fixture.seal(&chain);
         assert_eq!(
@@ -1864,15 +1859,11 @@ mod tests {
             qa_branch: None,
             submission_id: None,
         });
-        let chain = fixture.create(vec![
-            fixture.step(HandoffBoundary::ArtifactsReady),
-            {
-                let mut step = fixture.step(HandoffBoundary::ArtifactsReady);
-                step.base_revision =
-                    Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded));
-                step
-            },
-        ]);
+        let chain = fixture.create(vec![fixture.step(HandoffBoundary::ArtifactsReady), {
+            let mut step = fixture.step(HandoffBoundary::ArtifactsReady);
+            step.base_revision = Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded));
+            step
+        }]);
         let chain = fixture.finish_attempt(&chain, &fixture.repo, result);
         let chain = fixture.seal(&chain);
         let error = fixture

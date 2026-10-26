@@ -1691,7 +1691,9 @@ pub(super) fn dead_navigation_task_entry(
     current: Option<Uuid>,
 ) -> bool {
     !sessions.iter().any(|session| session.id == id)
-        || Some(boss_chat_activation_target(sessions, identities, rotated, id)) == current
+        || Some(boss_chat_activation_target(
+            sessions, identities, rotated, id,
+        )) == current
 }
 
 /// Whether the session is a Boss chat a rotation retired — an archived,
@@ -1984,13 +1986,7 @@ impl Waku {
             // Avatar waits and reveals key on roster membership — a row's
             // hold only makes sense while the employee is still a sidebar
             // candidate, and a re-admitted employee re-waits for its face.
-            let roster: HashSet<Uuid> = self
-                .boss_ui
-                .recent
-                .values()
-                .flatten()
-                .copied()
-                .collect();
+            let roster: HashSet<Uuid> = self.boss_ui.recent.values().flatten().copied().collect();
             self.sidebar_employee_avatar_waits
                 .borrow_mut()
                 .retain(|id, _| roster.contains(id));

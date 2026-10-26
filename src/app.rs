@@ -5425,7 +5425,9 @@ impl Waku {
         let composer_drafts = composer_draft_store.load().unwrap_or_default();
         let mut state = store.load_or_fresh(cwd);
         if let Some(qa) = &qa_window {
-            state.sessions.retain(|session| session.id == qa.record.session_id);
+            state
+                .sessions
+                .retain(|session| session.id == qa.record.session_id);
             state.selected_project = Some(qa.record.project_id);
             state.selected_session = Some(qa.record.session_id);
             state.remote_hosts.clear();

@@ -2745,7 +2745,9 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if let Some(qa) = &self.qa_window {
-            snapshot.sessions.retain(|session| session.id == qa.record.session_id);
+            snapshot
+                .sessions
+                .retain(|session| session.id == qa.record.session_id);
         }
         let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
         let known_session_ids = self

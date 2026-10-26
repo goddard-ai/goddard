@@ -3062,10 +3062,7 @@ fn print_view_digest(state: &waku_protocol::boss::BossState) -> anyhow::Result<(
     Ok(())
 }
 
-fn print_view_section(
-    state: &waku_protocol::boss::BossState,
-    section: &str,
-) -> anyhow::Result<()> {
+fn print_view_section(state: &waku_protocol::boss::BossState, section: &str) -> anyhow::Result<()> {
     let value = match section {
         "identity" => json!({
             "identity": state.identity,

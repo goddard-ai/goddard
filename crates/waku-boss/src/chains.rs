@@ -225,9 +225,7 @@ fn validate_step(
         };
         ensure!(declared, "worktree requires a source revision");
     }
-    if let Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded)) =
-        &step.base_revision
-    {
+    if let Some(ChainBaseSource::Kinded(ChainBaseKind::PreviousStepLanded)) = &step.base_revision {
         ensure!(
             predecessor.is_some(),
             "previousStepLanded requires a previous step"

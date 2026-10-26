@@ -8617,7 +8617,8 @@ impl Waku {
             let closable = right_panel_surface_is_closable(&surface)
                 && !(self.qa_window.is_some() && surface == RightPanelSurface::Diff);
             let tab_focus = self.transcript_control_focus(format!("right-panel-tab-{index}"), cx);
-            let close_focus = self.transcript_control_focus(format!("close-right-panel-tab-{index}"), cx);
+            let close_focus =
+                self.transcript_control_focus(format!("close-right-panel-tab-{index}"), cx);
             let activate_weak = cx.entity().downgrade();
             let close_weak = cx.entity().downgrade();
             tabs = tabs.child(
@@ -8834,7 +8835,12 @@ impl Waku {
             );
 
         if self.qa_window.is_some() {
-            return header.child(div().text_size(sp(11.0)).text_color(theme.text_secondary).child(self.qa_server_status(cx)));
+            return header.child(
+                div()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_secondary)
+                    .child(self.qa_server_status(cx)),
+            );
         }
 
         if let Some(terminal_id) = self
