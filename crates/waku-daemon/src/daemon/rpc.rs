@@ -1759,7 +1759,7 @@ impl Backend for WakuBackend {
                 bytes: self.attachments.read_file(&reference, &path)?,
             }),
             Command::SweepBlobs => {
-                self.task_store.blob_sweep()();
+                self.task_store.schedule_blob_sweep()?;
                 Ok(ResponsePayload::Ack)
             }
             Command::ForkSessionFromResponse { turn_count } => {

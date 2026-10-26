@@ -139,7 +139,7 @@ impl AttachmentStore {
     /// persisted messages or composer drafts. In-progress staging directories
     /// are deliberately ignored so an upload cannot race a cleanup pass.
     pub fn retain(&self, live: &HashSet<String>) -> io::Result<u64> {
-        self.retain_with_cutoff(live, None)
+        self.retain_with_cutoff(live, None, &|| true)
     }
 
     /// Reclaims only attachment trees old enough that no upload-to-draft or
@@ -149,19 +149,33 @@ impl AttachmentStore {
         live: &HashSet<String>,
         cutoff: SystemTime,
     ) -> io::Result<u64> {
-        self.retain_with_cutoff(live, Some(cutoff))
+        self.retain_unreferenced_older_than_while(live, cutoff, &|| true)
+    }
+
+    /// Checks load before each independently removable attachment tree.
+    pub fn retain_unreferenced_older_than_while(
+        &self,
+        live: &HashSet<String>,
+        cutoff: SystemTime,
+        should_continue: &impl Fn() -> bool,
+    ) -> io::Result<u64> {
+        self.retain_with_cutoff(live, Some(cutoff), should_continue)
     }
 
     fn retain_with_cutoff(
         &self,
         live: &HashSet<String>,
         cutoff: Option<SystemTime>,
+        should_continue: &impl Fn() -> bool,
     ) -> io::Result<u64> {
         let Ok(entries) = fs::read_dir(&self.root) else {
             return Ok(0);
         };
         let mut reclaimed = 0;
         for entry in entries.flatten() {
+            if !should_continue() {
+                return Err(io::ErrorKind::Interrupted.into());
+            }
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
@@ -180,6 +194,9 @@ impl AttachmentStore {
                 continue;
             }
             reclaimed += directory_size(&entry.path()).unwrap_or_default();
+            if !should_continue() {
+                return Err(io::ErrorKind::Interrupted.into());
+            }
             fs::remove_dir_all(entry.path())?;
         }
         Ok(reclaimed)

@@ -1,0 +1,1 @@
+- Unused image and attachment cleanup now waits for spare host resources, yields when load increases, and preserves assets if their stored references cannot be read.

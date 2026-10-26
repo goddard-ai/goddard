@@ -916,15 +916,11 @@ fn externalize_blobs<'a>(
 /// Read from the database rather than from memory: a session that has not been
 /// hydrated has an empty transcript in memory, and treating that as "owns no
 /// images" would delete screenshots that are still in use.
-fn live_blob_references(connection: &Connection) -> io::Result<HashSet<String>> {
-    live_references(connection, crate::blob_store::BLOB_SCHEME)
-}
-
-fn live_attachment_references(connection: &Connection) -> io::Result<HashSet<String>> {
-    live_references(connection, crate::attachments::ATTACHMENT_SCHEME)
-}
-
-fn live_references(connection: &Connection, scheme: &str) -> io::Result<HashSet<String>> {
+fn live_references(
+    connection: &Connection,
+    scheme: &str,
+    should_continue: &impl Fn() -> bool,
+) -> io::Result<HashSet<String>> {
     let mut statement = connection
         .prepare(
             "SELECT data FROM session_details
@@ -936,7 +932,13 @@ fn live_references(connection: &Connection, scheme: &str) -> io::Result<HashSet<
     let rows = statement
         .query_map([], |row| row.get::<_, String>(0))
         .map_err(to_io_error)?;
-    for data in rows.filter_map(Result::ok) {
+    for data in rows {
+        if !should_continue() {
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        // A missing reference due to a read error must never authorize
+        // deleting the payload it protects.
+        let data = data.map_err(to_io_error)?;
         collect_references(&data, scheme, &mut references);
     }
     Ok(references)
@@ -2643,42 +2645,67 @@ impl StateStore {
     pub fn blob_sweep(&self) -> impl FnOnce() + Send + 'static {
         let blobs = Arc::clone(&self.blobs);
         let path = self.path.clone();
-        let attachments_root = path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join("attachments");
-        let drafts_path = path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(COMPOSER_DRAFTS_FILENAME);
         move || {
-            let cutoff = SystemTime::now()
-                .checked_sub(ASSET_SWEEP_GRACE_PERIOD)
-                .unwrap_or(SystemTime::UNIX_EPOCH);
-            let Ok(connection) = Connection::open(&path) else {
-                return;
-            };
-            let Ok(mut live) = live_blob_references(&connection) else {
-                return;
-            };
-            if let Ok(drafts) = fs::read_to_string(drafts_path) {
-                collect_blob_references(&drafts, &mut live);
-            }
-            let _ = blobs.retain_unreferenced_older_than(&live, cutoff);
-            let Ok(mut live_attachments) = live_attachment_references(&connection) else {
-                return;
-            };
-            if let Ok(drafts) = fs::read_to_string(
-                path.parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join(COMPOSER_DRAFTS_FILENAME),
-            ) {
-                collect_attachment_references(&drafts, &mut live_attachments);
-            }
-            let _ = crate::attachments::AttachmentStore::new(attachments_root)
-                .retain_unreferenced_older_than(&live_attachments, cutoff);
+            let _ = sweep_assets(&path, &blobs, &|| true);
         }
     }
+
+    /// Optional asset GC: deduplicated per database and admitted by the host
+    /// scheduler. Enqueueing performs no reference scans or filesystem walks.
+    pub fn schedule_blob_sweep(&self) -> io::Result<()> {
+        use waku_base::maintenance::{Progress, Scheduler, Unit};
+        let blobs = Arc::clone(&self.blobs);
+        let path = self.path.clone();
+        let key = format!("asset-sweep:{}", path.display());
+        Scheduler::shared()?.submit(key, Unit::Heavy, move |permit| {
+            match sweep_assets(&path, &blobs, &|| permit.should_continue()) {
+                Ok(()) => Ok(Progress::Complete),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok(Progress::More),
+                Err(error) => Err(error),
+            }
+        })?;
+        Ok(())
+    }
+}
+
+fn sweep_assets(
+    path: &Path,
+    blobs: &BlobStore,
+    should_continue: &impl Fn() -> bool,
+) -> io::Result<()> {
+    if !should_continue() {
+        return Err(io::ErrorKind::Interrupted.into());
+    }
+    let attachments_root = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("attachments");
+    let drafts_path = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(COMPOSER_DRAFTS_FILENAME);
+    let cutoff = SystemTime::now()
+        .checked_sub(ASSET_SWEEP_GRACE_PERIOD)
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let connection =
+        Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(to_io_error)?;
+    let mut live = live_references(&connection, crate::blob_store::BLOB_SCHEME, should_continue)?;
+    let drafts = match fs::read_to_string(drafts_path) {
+        Ok(drafts) => drafts,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error),
+    };
+    collect_blob_references(&drafts, &mut live);
+    blobs.retain_unreferenced_older_than_while(&live, cutoff, should_continue)?;
+    let mut live_attachments = live_references(
+        &connection,
+        crate::attachments::ATTACHMENT_SCHEME,
+        should_continue,
+    )?;
+    collect_attachment_references(&drafts, &mut live_attachments);
+    crate::attachments::AttachmentStore::new(attachments_root)
+        .retain_unreferenced_older_than_while(&live_attachments, cutoff, should_continue)?;
+    Ok(())
 }
 
 type SessionColumns = (
@@ -5158,6 +5185,52 @@ mod tests {
         );
 
         fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn blob_sweep_preserves_assets_when_reference_rows_cannot_be_read() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(directory.join("project"));
+        state.sessions[0].begin_turn("Keep the stored reference source");
+        store.save(&mut state).unwrap();
+        let reference = store
+            .blobs()
+            .store_image_bytes("image/png", b"old payload")
+            .unwrap();
+        let asset = store.blobs().path_for(&reference).unwrap();
+        let old = SystemTime::now() - ASSET_SWEEP_GRACE_PERIOD - Duration::from_secs(60);
+        fs::File::open(&asset)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(old))
+            .unwrap();
+
+        let connection = Connection::open(store.path()).unwrap();
+        connection
+            .execute(
+                "UPDATE session_details SET data = ?1",
+                params![vec![0xffu8]],
+            )
+            .unwrap();
+        assert!(sweep_assets(store.path(), &store.blobs(), &|| true).is_err());
+        assert_eq!(fs::read(&asset).unwrap(), b"old payload");
+
+        connection
+            .execute("UPDATE session_details SET data = '{}'", [])
+            .unwrap();
+        assert_eq!(
+            sweep_assets(store.path(), &store.blobs(), &|| false)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Interrupted
+        );
+        assert!(asset.exists());
+        sweep_assets(store.path(), &store.blobs(), &|| true).unwrap();
+        assert!(
+            !asset.exists(),
+            "a later complete scan may reclaim the unused asset"
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

@@ -161,7 +161,7 @@ impl BlobStore {
 
     /// Deletes blobs no longer named by any live reference.
     pub fn retain(&self, live: &std::collections::HashSet<String>) -> io::Result<u64> {
-        self.retain_with_cutoff(live, None)
+        self.retain_with_cutoff(live, None, &|| true)
     }
 
     /// Deletes unreferenced blobs only when their last write predates
@@ -172,23 +172,41 @@ impl BlobStore {
         live: &std::collections::HashSet<String>,
         cutoff: SystemTime,
     ) -> io::Result<u64> {
-        self.retain_with_cutoff(live, Some(cutoff))
+        self.retain_unreferenced_older_than_while(live, cutoff, &|| true)
+    }
+
+    /// Checks maintenance admission between files. Interrupted sweeps can
+    /// restart safely after rebuilding their live-reference set.
+    pub fn retain_unreferenced_older_than_while(
+        &self,
+        live: &std::collections::HashSet<String>,
+        cutoff: SystemTime,
+        should_continue: &impl Fn() -> bool,
+    ) -> io::Result<u64> {
+        self.retain_with_cutoff(live, Some(cutoff), should_continue)
     }
 
     fn retain_with_cutoff(
         &self,
         live: &std::collections::HashSet<String>,
         cutoff: Option<SystemTime>,
+        should_continue: &impl Fn() -> bool,
     ) -> io::Result<u64> {
         let mut reclaimed = 0;
         let Ok(shards) = fs::read_dir(&self.root) else {
             return Ok(0);
         };
         for shard in shards.flatten() {
+            if !should_continue() {
+                return Err(io::ErrorKind::Interrupted.into());
+            }
             if !shard.file_type().is_ok_and(|kind| kind.is_dir()) {
                 continue;
             }
             for entry in fs::read_dir(shard.path())?.flatten() {
+                if !should_continue() {
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
                 let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                     continue;
                 };
@@ -314,6 +332,37 @@ mod tests {
             store.store_data_url("https://example.com/a.png"),
             "https://example.com/a.png"
         );
+    }
+
+    #[test]
+    fn interrupted_sweep_preserves_live_blobs_and_can_resume() {
+        let root = temporary_root();
+        let store = BlobStore::new(root.clone());
+        let kept = store.store_image_bytes("image/png", b"keep").unwrap();
+        let first = store
+            .store_image_bytes("image/png", b"first unused")
+            .unwrap();
+        let second = store
+            .store_image_bytes("image/png", b"second unused")
+            .unwrap();
+        let first_path = store.path_for(&first).unwrap();
+        let second_path = store.path_for(&second).unwrap();
+        let live = HashSet::from([kept.clone()]);
+        let cutoff = SystemTime::now() + std::time::Duration::from_secs(60);
+        let error = store
+            .retain_unreferenced_older_than_while(&live, cutoff, &|| {
+                first_path.exists() && second_path.exists()
+            })
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_ne!(first_path.exists(), second_path.exists());
+        assert!(store.path_for(&kept).unwrap().exists());
+        store
+            .retain_unreferenced_older_than_while(&live, cutoff, &|| true)
+            .unwrap();
+        assert!(!first_path.exists() && !second_path.exists());
+        assert_eq!(fs::read(store.path_for(&kept).unwrap()).unwrap(), b"keep");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
