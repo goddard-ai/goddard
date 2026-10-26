@@ -2380,7 +2380,7 @@ impl Waku {
         }
         let owner = self.daemons.project_owner(project_id);
         if let Err(error) = self.store.remove_project(project_id) {
-            self.show_toast(tr!("errors.save_local_state", error = error));
+            eprintln!("could not remove project {project_id}: {error}");
             cx.notify();
             return;
         }
@@ -2587,7 +2587,7 @@ impl Waku {
         self.side_chat_views.remove(&session_id);
         self.side_chat_composers.remove(&session_id);
         if let Err(error) = self.store.remove_session(session_id) {
-            self.show_toast(tr!("errors.save_local_state", error = error));
+            eprintln!("could not remove task {session_id}: {error}");
         }
         if self
             .pending_session_activation

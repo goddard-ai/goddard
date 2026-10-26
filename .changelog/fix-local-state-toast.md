@@ -1,0 +1,1 @@
+- Removed the repeated “Could not save local state” toast; save failures remain in diagnostic logs.

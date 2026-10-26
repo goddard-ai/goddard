@@ -3988,8 +3988,6 @@ errors.capture_pre_turn_checkpoint:
   en: "Could not capture the pre-turn checkpoint: %{error}"
 errors.capture_turn_checkpoint:
   en: "Could not capture the turn checkpoint: %{error}"
-errors.save_local_state:
-  en: "Could not save local state: %{error}"
 errors.task_project_not_found:
   en: The task's project could not be found
 errors.task_link_unknown:

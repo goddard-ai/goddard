@@ -9348,7 +9348,7 @@ impl Waku {
         }
         if let Err(error) = self.daemon.update_settings(document) {
             // The fields keep their contents so a retry only needs Apply.
-            self.show_toast(tr!("errors.save_local_state", error = error.to_string()));
+            eprintln!("could not save inference settings: {error}");
             cx.notify();
             return;
         }
@@ -9371,7 +9371,7 @@ impl Waku {
         let mut document = self.state.daemon_settings();
         document.inference.entry(provider).or_default().api_key = Some(String::new());
         if let Err(error) = self.daemon.update_settings(document) {
-            self.show_toast(tr!("errors.save_local_state", error = error.to_string()));
+            eprintln!("could not clear inference credential: {error}");
             cx.notify();
             return;
         }

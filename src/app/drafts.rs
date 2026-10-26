@@ -606,10 +606,7 @@ impl Waku {
                 .spawn(async move { store.save(drafts, generation) })
                 .await;
             if let Err(error) = result {
-                let _ = waku.update(cx, |waku, cx| {
-                    waku.show_toast(tr!("errors.save_local_state", error = error));
-                    cx.notify();
-                });
+                eprintln!("could not save composer drafts: {error}");
             }
         })
         .detach();

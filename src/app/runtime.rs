@@ -5125,7 +5125,7 @@ impl Waku {
         };
         let app_saved = app_error.is_none();
         if let Some(error) = daemon_error.or(app_error) {
-            self.show_toast(tr!("errors.save_local_state", error = error));
+            eprintln!("could not save local state: {error}");
         } else {
             self.stream_state_dirty = false;
         }

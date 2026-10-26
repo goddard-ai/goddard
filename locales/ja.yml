@@ -1449,7 +1449,6 @@ errors.remote_host_path: このパスはデーモンホスト上にあるため�
 errors.change_branch: "ブランチを変更できませんでした：%{error}"
 errors.capture_pre_turn_checkpoint: "ターン開始前のチェックポイントを取得できませんでした：%{error}"
 errors.capture_turn_checkpoint: "ターンのチェックポイントを取得できませんでした：%{error}"
-errors.save_local_state: "ローカルの状態を保存できませんでした：%{error}"
 errors.task_project_not_found: タスクのプロジェクトが見つかりませんでした
 errors.task_link_unknown: そのタスクが見つかりませんでした
 errors.provider_native_session_unavailable: "%{provider} のネイティブセッションは利用できません"
