@@ -5829,6 +5829,17 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Git,
+                id: "qa-sessions-experiment-toggle",
+                icon: "icons/git-branch.svg",
+                title_key: "experiments.qa_sessions_title",
+                description_key: "experiments.qa_sessions_description",
+                enabled: self.state.qa_sessions_enabled,
+                set: Self::set_qa_sessions_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Git,
                 id: "github-references-experiment-toggle",
                 icon: "icons/github.svg",
                 title_key: "experiments.github_references_title",
@@ -7808,6 +7819,12 @@ impl Waku {
                 self.settings_page = Some(SettingsPage::General);
             }
         }
+        self.save();
+        cx.notify();
+    }
+
+    fn set_qa_sessions_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.qa_sessions_enabled = enabled;
         self.save();
         cx.notify();
     }

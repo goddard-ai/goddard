@@ -992,6 +992,10 @@ experiments.git_worktree_management_title:
   en: Git worktree management
 experiments.git_worktree_management_description:
   en: Add a Git page to Settings for browsing worktrees and branches, starting tasks from them, and managing repository checkouts.
+experiments.qa_sessions_title:
+  en: QA sessions
+experiments.qa_sessions_description:
+  en: Add Command Palette actions to configure QA and test a project in an isolated worktree.
 experiments.github_references_title:
   en: GitHub references
 experiments.github_references_description:

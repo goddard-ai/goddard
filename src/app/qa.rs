@@ -40,6 +40,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.state.qa_sessions_enabled {
+            return;
+        }
         if self.qa_pending_projects.contains(&project_id) {
             self.show_toast(tr!("qa.preparing"));
             return;

@@ -3763,6 +3763,11 @@ impl Waku {
         if !self.resume_available() {
             commands.retain(|item| item.action != PaletteAction::Resume);
         }
+        if !self.state.qa_sessions_enabled {
+            commands.retain(|item| {
+                item.action != PaletteAction::StartQa && item.action != PaletteAction::EditQaSetup
+            });
+        }
         commands
     }
 
@@ -5725,6 +5730,9 @@ impl Waku {
 
         match action {
             PaletteAction::StartQa | PaletteAction::EditQaSetup => {
+                if !self.state.qa_sessions_enabled {
+                    return;
+                }
                 let edit = action == PaletteAction::EditQaSetup;
                 self.open_command_palette_run_script_projects_view(cx);
                 self.qa_project_picker = Some(edit);

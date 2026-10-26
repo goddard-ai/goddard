@@ -3638,6 +3638,8 @@ workspace.no_matching_worktrees: "没有匹配的工作树。"
 
 experiments.git_worktree_management_title: Git 工作树管理
 experiments.git_worktree_management_description: 在设置中添加 Git 页面，便于浏览工作树和分支、从这些工作区启动任务并管理仓库检出。
+experiments.qa_sessions_title: QA 会话
+experiments.qa_sessions_description: 在命令面板中添加 QA 配置操作，并在隔离的工作树中测试项目。
 experiments.github_references_title: GitHub 引用
 experiments.github_references_description: "输入 # 可补全 Issue 和拉取请求编号，在聊天中显示关联引用，并将相关上下文加入代理提示。"
 experiments.github_task_pull_requests_title: 任务拉取请求

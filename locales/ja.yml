@@ -3687,6 +3687,8 @@ workspace.no_matching_worktrees: "一致するワークツリーはありませ�
 
 experiments.git_worktree_management_title: Git ワークツリー管理
 experiments.git_worktree_management_description: 設定に Git ページを追加し、ワークツリーやブランチの閲覧、そこからのタスク開始、リポジトリのチェックアウト管理を行えます。
+experiments.qa_sessions_title: QA セッション
+experiments.qa_sessions_description: コマンドパレットに QA の設定操作を追加し、分離されたワークツリーでプロジェクトをテストします。
 experiments.github_references_title: GitHub の参照
 experiments.github_references_description: "# で Issue とプルリクエスト番号を補完し、チャットに関連する参照を表示して、そのコンテキストをエージェントのプロンプトに含めます。"
 experiments.github_task_pull_requests_title: タスクのプルリクエスト

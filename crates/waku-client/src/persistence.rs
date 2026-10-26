@@ -1548,6 +1548,10 @@ pub struct AppSettings {
     /// Experimental: the Settings → Friends page and friend-to-friend file
     /// transfers. Defaults on in debug builds.
     pub friends_enabled: bool,
+    /// Experimental: starting and configuring isolated QA sessions. Defaults
+    /// on in debug builds.
+    #[serde(default = "default_experiment_enabled")]
+    pub qa_sessions_enabled: bool,
     /// Legacy form of `auto_model_routing`: the experiment toggle's
     /// recorded answer. Still written so older builds keep the same
     /// behavior; resolved reads go through the tri-state.
@@ -1758,6 +1762,7 @@ impl Default for AppSettings {
             projects_page_enabled: default_experiment_enabled(),
             review_queue_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
+            qa_sessions_enabled: default_experiment_enabled(),
             model_router_enabled: true,
             auto_model_routing: None,
             status_markers_enabled: true,
@@ -2349,6 +2354,10 @@ pub struct PersistedState {
     pub review_queue_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub friends_enabled: bool,
+    /// Experimental: starting and configuring isolated QA sessions. Defaults
+    /// on in debug builds.
+    #[serde(default = "default_experiment_enabled")]
+    pub qa_sessions_enabled: bool,
     /// The Auto-routing experiment toggle's recorded answer — the
     /// migration input for `auto_model_routing` and the field older
     /// builds still read. Resolved reads go through
@@ -2869,6 +2878,7 @@ impl PersistedState {
             projects_page_enabled: default_experiment_enabled(),
             review_queue_enabled: default_experiment_enabled(),
             friends_enabled: default_experiment_enabled(),
+            qa_sessions_enabled: default_experiment_enabled(),
             model_router_enabled: true,
             auto_model_routing: None,
             status_markers_enabled: true,
@@ -3371,6 +3381,7 @@ impl PersistedState {
             projects_page_enabled: self.projects_page_enabled,
             review_queue_enabled: self.review_queue_enabled,
             friends_enabled: self.friends_enabled,
+            qa_sessions_enabled: self.qa_sessions_enabled,
             // The legacy flag mirrors the resolved mode so downgraded
             // builds keep the same routing behavior.
             model_router_enabled: self.auto_model_routing() != AutoModelRouting::Disabled,
@@ -3548,6 +3559,7 @@ impl PersistedState {
         self.projects_page_enabled = settings.projects_page_enabled;
         self.review_queue_enabled = settings.review_queue_enabled;
         self.friends_enabled = settings.friends_enabled;
+        self.qa_sessions_enabled = settings.qa_sessions_enabled;
         self.model_router_enabled = settings.model_router_enabled;
         self.auto_model_routing = settings.auto_model_routing;
         self.status_markers_enabled = settings.status_markers_enabled;
