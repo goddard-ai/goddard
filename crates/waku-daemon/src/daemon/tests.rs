@@ -8692,6 +8692,30 @@ fn set_model_policy(
         .unwrap();
 }
 
+/// Pick a provider model and an effort that differs from its effective
+/// default, keeping setModel fixtures valid with either the shipped or
+/// locally discovered catalog.
+fn catalog_model_and_non_default_effort(provider: ProviderKind) -> (String, String) {
+    let catalog = crate::model_catalog::cached_models(provider)
+        .unwrap_or_else(|| crate::model_catalog::fallback_models(provider));
+    catalog
+        .iter()
+        .find_map(|model| {
+            let default_effort = model.default_reasoning_effort.as_deref().or_else(|| {
+                model
+                    .reasoning_efforts
+                    .first()
+                    .map(|option| option.id.as_str())
+            });
+            let effort = model
+                .reasoning_efforts
+                .iter()
+                .find(|option| Some(option.id.as_str()) != default_effort)?;
+            Some((model.id.clone(), effort.id.clone()))
+        })
+        .expect("the provider catalog must list a model with a non-default reasoning effort")
+}
+
 /// Windows keeps a directory undeletable while a handle inside it is still
 /// draining — retry the teardown briefly rather than racing shutdown.
 fn remove_tree(path: impl AsRef<Path>) {
@@ -11752,19 +11776,14 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
     use waku_protocol::resources::{AdmissionClaim, ResourceSet};
     let root = std::env::temp_dir().join(format!("summon-setmodel-place-{}", Uuid::new_v4()));
     let (backend, boss) = summon_test_backend(&root);
-    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 2);
-    let _held = hold_model_slot(&backend, ProviderKind::Codex, "gpt-5.5");
+    let (model, effort) = catalog_model_and_non_default_effort(ProviderKind::Codex);
+    set_model_policy(&backend, ProviderKind::Codex, &model, 1, 2);
+    let _held = hold_model_slot(&backend, ProviderKind::Codex, &model);
 
     let BossResult::Summoned { session_id, .. } = backend
         .handle_boss_operation(
             Some(boss),
-            summon_op(
-                &backend,
-                &root,
-                "retune",
-                ProviderKind::Codex,
-                Some("gpt-5.5"),
-            ),
+            summon_op(&backend, &root, "retune", ProviderKind::Codex, Some(&model)),
             &EventSink::detached(),
         )
         .unwrap()
@@ -11783,7 +11802,7 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
             AdmissionClaim {
                 daemon: backend.boss.document().identity.id,
                 provider: ProviderKind::Codex.id().into(),
-                model: "gpt-5.5".into(),
+                model: model.clone(),
                 live_limit: 1,
                 hard_cap: 2,
                 allow_burst: true,
@@ -11839,8 +11858,8 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
                 session_id,
                 action: EmployeeControl::SetModel {
                     provider: ProviderKind::Codex,
-                    model: "gpt-5.5".into(),
-                    reasoning_effort: Some("high".into()),
+                    model: model.clone(),
+                    reasoning_effort: Some(effort.clone()),
                 },
             },
             &EventSink::detached(),
@@ -11854,8 +11873,11 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
     {
         let options = capture.options.lock();
         assert_eq!(options.len(), 1);
-        assert_eq!(options[0].model.as_deref(), Some("gpt-5.5"));
-        assert_eq!(options[0].reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(options[0].model.as_deref(), Some(model.as_str()));
+        assert_eq!(
+            options[0].reasoning_effort.as_deref(),
+            Some(effort.as_str())
+        );
     }
     assert!(backend.agent.has_queued(session_id));
     let employee = backend.boss.employee(session_id).unwrap();
@@ -11865,7 +11887,7 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
             .ticket
             .as_ref()
             .and_then(|ticket| ticket.reasoning_effort.as_deref()),
-        Some("high"),
+        Some(effort.as_str()),
         "a later resume replays the ticket — its stored effort moves too"
     );
     let state = backend.task_state.lock();
@@ -11874,7 +11896,7 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
         .iter()
         .find(|session| session.id == session_id)
         .unwrap();
-    assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+    assert_eq!(session.reasoning_effort.as_deref(), Some(effort.as_str()));
     drop(state);
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
@@ -11928,10 +11950,11 @@ fn setmodel_dispatch_uses_the_current_ticket_after_a_script_switch() {
 #[test]
 fn setmodel_recovers_an_expired_employee_atomically() {
     use waku_protocol::boss::{BossOperation, EmployeeControl, EmployeeLifecycle};
+    let (initial_codex_model, _) = catalog_model_and_non_default_effort(ProviderKind::Codex);
     for provider in [ProviderKind::Codex, ProviderKind::Claude] {
         let root = std::env::temp_dir().join(format!("expired-model-{}", Uuid::new_v4()));
         let (backend, boss) = summon_test_backend(&root);
-        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+        set_model_policy(&backend, ProviderKind::Codex, &initial_codex_model, 1, 1);
         backend
             .handle_boss_operation(
                 Some(boss),
@@ -11940,7 +11963,7 @@ fn setmodel_recovers_an_expired_employee_atomically() {
                     &root,
                     "recover",
                     ProviderKind::Codex,
-                    Some("gpt-5.5"),
+                    Some(&initial_codex_model),
                 ),
                 &EventSink::detached(),
             )
@@ -11984,12 +12007,8 @@ fn setmodel_recovers_an_expired_employee_atomically() {
             )
         };
         assert!(control("no-such-model", None).is_err());
-        let model = if provider == ProviderKind::Codex {
-            "gpt-5.5"
-        } else {
-            "claude-opus-4-5"
-        };
-        assert!(control(model, Some("light-speed".into())).is_err());
+        let (model, valid_effort) = catalog_model_and_non_default_effort(provider);
+        assert!(control(&model, Some("light-speed".into())).is_err());
         let unchanged = backend.boss.employee(session_id).unwrap();
         assert!(unchanged.expired());
         assert_eq!(
@@ -11997,17 +12016,17 @@ fn setmodel_recovers_an_expired_employee_atomically() {
             before.ticket.as_ref().unwrap().generation
         );
         assert!(!backend.sessions.lock().contains_key(&session_id));
-        set_model_policy(&backend, provider, model, 0, 1);
-        let requested_effort = (provider == ProviderKind::Codex).then(|| "high".to_owned());
+        set_model_policy(&backend, provider, &model, 0, 1);
+        let requested_effort = (provider == ProviderKind::Codex).then(|| valid_effort.clone());
         let (_, effort) = backend
-            .validate_employee_model(provider, model, requested_effort)
+            .validate_employee_model(provider, &model, requested_effort)
             .unwrap();
         if provider == ProviderKind::Claude {
             backend.handle_boss_operation(Some(boss), BossOperation::Eval {
                 script: format!("control(\"{session_id}\", #{{type: \"setModel\", provider: \"claude\", model: \"{model}\"}})"),
             }, &EventSink::detached()).unwrap();
         } else {
-            control(model, effort.clone()).unwrap();
+            control(&model, effort.clone()).unwrap();
         }
         let employee = backend.boss.employee(session_id).unwrap();
         assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
@@ -12025,7 +12044,7 @@ fn setmodel_recovers_an_expired_employee_atomically() {
         assert!(!ticket.blocked_by.is_empty());
         assert!(!backend.sessions.lock().contains_key(&session_id));
         let capture = Arc::new(CaptureDriver::default());
-        set_model_policy(&backend, provider, model, 1, 1);
+        set_model_policy(&backend, provider, &model, 1, 1);
         backend.sessions.lock().insert(
             session_id,
             RuntimeEntry {
@@ -12048,7 +12067,7 @@ fn setmodel_recovers_an_expired_employee_atomically() {
         let state = backend.task_state.lock();
         let session = state.sessions.iter().find(|s| s.id == session_id).unwrap();
         assert_eq!(session.provider, provider);
-        assert_eq!(session.model.as_deref(), Some(model));
+        assert_eq!(session.model.as_deref(), Some(model.as_str()));
         assert_eq!(session.reasoning_effort, effort);
         assert!(
             session
