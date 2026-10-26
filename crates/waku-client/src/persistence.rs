@@ -2,6 +2,8 @@
 
 mod app_writer;
 pub use app_writer::AppSaveTicket;
+mod catalog_writer;
+pub use catalog_writer::{CatalogCacheUpdate, CatalogCacheWriter};
 
 #[cfg(test)]
 #[path = "persistence/startup_tests.rs"]

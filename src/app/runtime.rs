@@ -2911,13 +2911,10 @@ impl Waku {
                     self.daemons.claim_project(project.id, key);
                 }
             }
-            let previous = self.remote_catalogs.insert(host, snapshot);
-            if previous.is_some() {
-                cx.background_executor()
-                    .spawn(async move { drop(previous) })
-                    .detach();
-            }
-            self.save_remote_catalogs();
+            self.update_remote_catalog_cache(
+                host,
+                waku_client::persistence::CatalogCacheUpdate::Replace(snapshot),
+            );
         }
 
         let attach = self
@@ -3270,27 +3267,23 @@ impl Waku {
             .unwrap_or(waku_client::DaemonKey::Local)
     }
 
-    /// Persist the per-host catalog cache off the UI thread.
-    pub(super) fn save_remote_catalogs(&self) {
-        // Incognito projections exist only to keep a live client connected —
-        // they never touch the catalog cache on disk.
-        let mut catalogs = self.remote_catalogs.clone();
-        for catalog in catalogs.values_mut() {
-            catalog.sessions.retain(|session| !session.incognito);
+    pub(super) fn update_remote_catalog_cache(
+        &self,
+        host: Uuid,
+        update: waku_client::persistence::CatalogCacheUpdate,
+    ) {
+        if let Some(writer) = &self.remote_catalog_writer {
+            let retired = writer.queue(host, update);
+            if retired.is_some() {
+                self.background_executor
+                    .spawn(async move { drop(retired) })
+                    .detach();
+            }
+        } else {
+            self.background_executor
+                .spawn(async move { drop(update) })
+                .detach();
         }
-        let path = self.remote_catalogs_path.clone();
-        std::thread::Builder::new()
-            .name("waku-remote-catalogs".into())
-            .spawn(move || {
-                if let Some(parent) = path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                let Ok(bytes) = serde_json::to_vec_pretty(&catalogs) else {
-                    return;
-                };
-                let _ = std::fs::write(path, bytes);
-            })
-            .ok();
     }
 
     /// Connect every saved remote host. Each gets its own retry loop so one
@@ -3788,8 +3781,10 @@ impl Waku {
         #[cfg(unix)]
         self.ssh_repair_requests.remove(&host);
         self.restore_pending_remote_submissions(host, cx);
-        self.remote_catalogs.remove(&host);
-        self.save_remote_catalogs();
+        self.update_remote_catalog_cache(
+            host,
+            waku_client::persistence::CatalogCacheUpdate::Remove,
+        );
         if self.skills_catalogs.remove(&remote).is_some() {
             self.rebuild_skills_catalog();
         }

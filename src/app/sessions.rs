@@ -2384,14 +2384,11 @@ impl Waku {
             cx.notify();
             return;
         }
-        if let waku_client::DaemonKey::Remote(host) = owner
-            && let Some(catalog) = self.remote_catalogs.get_mut(&host)
-        {
-            catalog.projects.retain(|project| project.id != project_id);
-            catalog
-                .sessions
-                .retain(|session| session.project_id != project_id);
-            self.save_remote_catalogs();
+        if let waku_client::DaemonKey::Remote(host) = owner {
+            self.update_remote_catalog_cache(
+                host,
+                waku_client::persistence::CatalogCacheUpdate::RemoveProject(project_id),
+            );
         }
 
         // Project-keyed surfaces and drafts die with the catalog row; session

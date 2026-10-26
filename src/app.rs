@@ -2564,8 +2564,7 @@ pub struct Waku {
     remote_daemon_settings: HashMap<Uuid, waku_client::DaemonSettings>,
     /// Each remote host's last applied catalog, persisted so an unreachable
     /// host still renders its rows at launch.
-    remote_catalogs: HashMap<Uuid, RemoteTaskStateSnapshot>,
-    remote_catalogs_path: std::path::PathBuf,
+    remote_catalog_writer: Option<waku_client::persistence::CatalogCacheWriter>,
     /// Live ssh channels under connected remote hosts, host id → transport
     /// plus the local forward port the supervisor dials.
     #[cfg(unix)]
@@ -5512,7 +5511,12 @@ impl Waku {
                 seed_remote_catalog(&mut state, &daemons, host, catalog);
             }
         }
-        let remote_catalogs_path = store.remote_catalogs_path();
+        let remote_catalog_writer = waku_client::persistence::CatalogCacheWriter::start(
+            store.remote_catalogs_path(),
+            remote_catalogs,
+        )
+        .map_err(|error| eprintln!("could not start remote catalog cache writer: {error}"))
+        .ok();
         let home_directory = crate::projectless::home_directory();
         // Custom commands moved from this app's settings file into the
         // daemon's document. Seed the daemon list with any file-side commands
@@ -7345,8 +7349,7 @@ impl Waku {
                 ssh_prompt_cancelled: false,
                 ssh_interactive_permit: std::sync::Arc::new(futures::lock::Mutex::new(())),
                 ssh_repair_requests: HashSet::new(),
-                remote_catalogs,
-                remote_catalogs_path,
+                remote_catalog_writer,
                 daemon_hostname,
                 daemon_lan_ip,
                 session_hydrations: sessions::SessionHydrations::default(),

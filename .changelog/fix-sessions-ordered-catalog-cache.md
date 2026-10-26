@@ -1,0 +1,1 @@
+- Remote task catalog caching now coalesces updates on one background worker, avoiding full-cache copies on the interface thread and preventing older writes from overwriting newer state.
