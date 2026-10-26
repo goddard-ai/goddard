@@ -1,0 +1,1 @@
+- Tasks started from a desktop connected to a remote host now use that host’s Computer Use settings.

@@ -157,6 +157,13 @@ pub(super) fn start_driver(
         }
     };
     options.cwd = cwd;
+    // Both direct and routed starts must use the task-owning host's settings,
+    // not the connecting desktop's settings captured in the start request.
+    let settings = daemon.settings();
+    options.computer_use_enabled = crate::computer_use::resolve_enabled(
+        settings.computer_use_enabled,
+        settings.computer_use_experiment_enabled,
+    );
     let (event_tx, events) = driver::event_channel(event_wake);
     let handle = driver::start_remote(daemon, session_id, provider, options, event_tx)?;
     Ok(PreparedDriver {
@@ -9056,5 +9063,113 @@ mod remote_retry_delay_tests {
         let delays: std::collections::HashSet<_> =
             (0..16).map(|_| remote_retry_delay(3).as_secs()).collect();
         assert!(delays.len() > 1, "jitter produced a single delay");
+    }
+}
+
+#[cfg(test)]
+mod computer_use_launch_tests {
+    use super::*;
+    use waku_protocol::{ClientMessage, ResponseOutcome, ResponsePayload, ServerMessage};
+
+    #[test]
+    fn desktop_launch_uses_host_computer_use_settings() {
+        // The request snapshot may come from a different desktop or predate a
+        // settings update. Exercise the real launch boundary and wire payload.
+        for (requested, enabled, experiment, expected) in [
+            (false, true, true, true),
+            (true, false, true, false),
+            (true, true, false, false),
+        ] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap().to_string();
+            let server = std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut socket = tungstenite::accept(stream).unwrap();
+                loop {
+                    let tungstenite::Message::Text(text) = socket.read().unwrap() else {
+                        continue;
+                    };
+                    let (reply, launched) = match serde_json::from_str(&text).unwrap() {
+                        ClientMessage::Hello {
+                            protocol_version, ..
+                        } => (
+                            ServerMessage::Hello {
+                                protocol_version,
+                                daemon_version: "test".into(),
+                                daemon_commit: None,
+                                agent_cli_available: false,
+                            },
+                            None,
+                        ),
+                        ClientMessage::Request(request) => {
+                            let (payload, launched) = match request.command {
+                                waku_protocol::Command::GetSettings => (
+                                    ResponsePayload::Settings {
+                                        settings: waku_client::DaemonSettings {
+                                            computer_use_enabled: enabled,
+                                            computer_use_experiment_enabled: experiment,
+                                            ..Default::default()
+                                        },
+                                    },
+                                    None,
+                                ),
+                                waku_protocol::Command::Start { options } => {
+                                    // Stop before a provider or Computer Use helper
+                                    // starts; only inspect the outbound request.
+                                    (ResponsePayload::Ack, Some(options.computer_use_enabled))
+                                }
+                                other => panic!("unexpected command: {other:?}"),
+                            };
+                            (
+                                ServerMessage::Response {
+                                    request_id: request.request_id,
+                                    outcome: ResponseOutcome::Ok { payload },
+                                },
+                                launched,
+                            )
+                        }
+                        other => panic!("unexpected client message: {other:?}"),
+                    };
+                    socket
+                        .send(tungstenite::Message::Text(
+                            serde_json::to_string(&reply).unwrap().into(),
+                        ))
+                        .unwrap();
+                    if let Some(launched) = launched {
+                        return launched;
+                    }
+                }
+            });
+            let daemon = waku_client::DaemonSupervisor::connect(&address, "test".into()).unwrap();
+            let (event_wake, _wake_events) = smol::channel::bounded(1);
+            let request = DriverStartRequest {
+                session_id: Uuid::new_v4(),
+                provider: ProviderKind::Codex,
+                binary: ProviderBinary::Resolved("controlled-provider".into()),
+                options: DriverStartOptions {
+                    binary: PathBuf::new(),
+                    cwd: PathBuf::new(),
+                    mode: RuntimeMode::FullAccess,
+                    model: None,
+                    reasoning_effort: None,
+                    service_tier: None,
+                    context_window: None,
+                    agent_preset: None,
+                    computer_use_enabled: requested,
+                    read_own_transcript: false,
+                    provider_cursor: None,
+                },
+                event_wake,
+                daemon,
+            };
+            let error = start_driver(request, PathBuf::from("controlled-workspace"))
+                .err()
+                .expect("the controlled peer does not start a provider");
+            assert!(error.to_string().contains("invalid start response"));
+            assert_eq!(server.join().unwrap(), expected);
+        }
     }
 }
