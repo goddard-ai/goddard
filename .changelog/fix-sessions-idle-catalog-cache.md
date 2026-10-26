@@ -1,0 +1,1 @@
+- Optional remote catalog cache writes now wait for low CPU use and normal memory pressure, preserving the previous cache if load rises during a write.
