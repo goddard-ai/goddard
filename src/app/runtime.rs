@@ -2751,6 +2751,7 @@ impl Waku {
         fresh: bool,
         cx: &mut Context<Self>,
     ) {
+        let _timing = waku_client::diagnostics::measure(waku_client::diagnostics::Work::Catalog);
         if let Some(qa) = &self.qa_window {
             snapshot
                 .sessions
@@ -5095,6 +5096,7 @@ impl Waku {
     }
 
     pub(super) fn save(&mut self) -> bool {
+        let _timing = waku_client::diagnostics::measure(waku_client::diagnostics::Work::Save);
         self.capture_ui_state();
         self.last_stream_save = Instant::now();
         let daemon_error = if self.store.is_auxiliary() {

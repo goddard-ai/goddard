@@ -4013,6 +4013,7 @@ fn wire_session(
     cursor: Option<SaveCursor>,
     tails: &mut Vec<SessionDetailTail>,
 ) -> (AgentSession, Option<SaveCursor>) {
+    let _timing = crate::diagnostics::measure(crate::diagnostics::Work::SessionPrepare);
     // Skeletons ship list columns only; they own no detail baseline.
     if !session.detail_loaded {
         return (session.clone(), None);
@@ -4852,6 +4853,7 @@ fn content_fingerprint(data: &[u8]) -> u64 {
 }
 
 fn write_bytes_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
+    let _timing = crate::diagnostics::measure(crate::diagnostics::Work::FileWrite);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }

@@ -5486,6 +5486,7 @@ impl Waku {
     }
 
     pub(super) fn evict_session_runtime(&mut self, session_id: Uuid) {
+        let _timing = waku_client::diagnostics::measure(waku_client::diagnostics::Work::Teardown);
         if let Some(runtime) = self.runtimes.remove(&session_id) {
             // Busy tasks were cancelled by the caller. Closing this handle
             // now makes the daemon release the provider process.
