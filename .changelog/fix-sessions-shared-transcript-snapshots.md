@@ -1,0 +1,1 @@
+- Long transcript snapshots now share unchanged history instead of copying it, reducing work during saves, imports, and background actions; grouped activity rendering also avoids copying tool output.

@@ -252,7 +252,7 @@ pub(super) fn record_boss_event(
         });
         if let Some(existing) = existing {
             item.id = existing.id;
-            *existing = item;
+            *existing = item.into();
         } else {
             if !session.transcript_blocks.last().is_some_and(|block| {
                 block.turn_id == turn && block.after_message == session.messages.len()
@@ -260,7 +260,7 @@ pub(super) fn record_boss_event(
                 session.transcript_blocks.push(TranscriptBlock {
                     after_message: session.messages.len(),
                     turn_id: turn,
-                    activities: Vec::new(),
+                    activities: Default::default(),
                 });
             }
             session

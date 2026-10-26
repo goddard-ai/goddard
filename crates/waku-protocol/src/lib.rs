@@ -63,6 +63,7 @@ pub mod provider_session;
 pub mod resources;
 pub mod routing;
 pub mod settings;
+pub mod shared_history;
 pub mod skills;
 pub mod terminal_command;
 pub mod theme;

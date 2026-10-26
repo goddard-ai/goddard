@@ -217,11 +217,13 @@ pub(super) fn project_reference_target(payload: &str) -> Option<&str> {
     (!target.is_empty()).then_some(target)
 }
 
-pub(super) fn recent_project_targets_in_messages(messages: &[Message]) -> Vec<String> {
+pub(super) fn recent_project_targets_in_messages<'a>(
+    messages: impl IntoIterator<Item = &'a Message, IntoIter: DoubleEndedIterator>,
+) -> Vec<String> {
     let mut targets = Vec::new();
     let mut seen = HashSet::new();
     for message in messages
-        .iter()
+        .into_iter()
         .rev()
         .filter(|message| message.role == MessageRole::User)
     {

@@ -123,21 +123,21 @@ fn transcript_file_link_paths(session: &AgentSession, root: &Path) -> Vec<String
 
 /// Extract mentions without touching the filesystem. Autocomplete runs this on
 /// a background snapshot; the file finder keeps its existing link-only policy.
-pub(super) fn transcript_mention_paths(
-    messages: &[Message],
-    blocks: &[TranscriptBlock],
+pub(super) fn transcript_mention_paths<'a>(
+    messages: impl IntoIterator<Item = &'a Message>,
+    blocks: impl IntoIterator<Item = &'a TranscriptBlock>,
     root: &Path,
     include_plain_paths: bool,
 ) -> Vec<String> {
     let mut paths = BTreeSet::new();
-    for message in messages.iter().filter(|message| !message.hidden) {
+    for message in messages.into_iter().filter(|message| !message.hidden) {
         let content = super::transcript::display_message_content(message);
         let tree = md::parser::parse(&content);
         for block in &tree.blocks {
             collect_transcript_link_block(&block.block, root, &mut paths, include_plain_paths);
         }
     }
-    for activity in blocks.iter().flat_map(|block| &block.activities) {
+    for activity in blocks.into_iter().flat_map(|block| &block.activities) {
         if let Some(target) = super::components::activity_file_link_path(activity) {
             let path = super::right_panel::markdown_file_link_path(&target)
                 .unwrap_or_else(|| PathBuf::from(target));

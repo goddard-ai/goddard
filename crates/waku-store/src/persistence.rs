@@ -2846,10 +2846,10 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         config_activation: config_activation
             .and_then(|mark| serde_json::from_str::<ConfigActivation>(&mark).ok()),
         provider_session_id: None,
-        messages: Vec::new(),
-        transcript_blocks: Vec::new(),
-        turns: Vec::new(),
-        queued_messages: Vec::new(),
+        messages: Default::default(),
+        transcript_blocks: Default::default(),
+        turns: Default::default(),
+        queued_messages: Default::default(),
         // The flag lives in the detail blob a skeleton stands in for, so a
         // list row cannot know it — false is a placeholder, not a claim.
         details_pruned: false,
@@ -4829,7 +4829,7 @@ mod tests {
         delivered.id = consumed.id;
         let pending = crate::model::QueuedMessage::new("still waiting");
         state.sessions[0].messages.push(delivered);
-        state.sessions[0].queued_messages = vec![consumed, pending.clone()];
+        state.sessions[0].queued_messages = vec![consumed, pending.clone()].into();
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
         store.save(&mut state).unwrap();
 
@@ -5258,7 +5258,8 @@ mod tests {
                 activities: vec![
                     ActivityItem::new(None, ActivityKind::Tool, "Screenshot", None, true)
                         .with_image_urls(vec![data_url]),
-                ],
+                ]
+                .into(),
             });
         store.save(&mut state).unwrap();
 
@@ -5514,7 +5515,8 @@ mod tests {
                     Some("{\"path\":\"src/main.rs\"}".into()),
                     true,
                 ),
-            ],
+            ]
+            .into(),
         });
         let daemon_settings = state.daemon_settings();
         store.save(&mut state).unwrap();
@@ -6947,7 +6949,8 @@ mod tests {
                     });
                     tool
                 },
-            ],
+            ]
+            .into(),
         });
         let mut recent = state.new_session(state.projects[0].id, ProviderKind::Codex);
         let recent_id = recent.id;
@@ -6959,7 +6962,8 @@ mod tests {
             activities: vec![
                 ActivityItem::new(None, ActivityKind::Tool, "Kept output", None, true)
                     .with_output(Some("still here".into())),
-            ],
+            ]
+            .into(),
         });
         state.sessions.push(recent);
         let mut active = state.new_session(state.projects[0].id, ProviderKind::Codex);
@@ -7064,7 +7068,8 @@ mod tests {
                 activities: vec![
                     ActivityItem::new(None, ActivityKind::Tool, "Ran command", None, true)
                         .with_output(Some("boss keeps this output".into())),
-                ],
+                ]
+                .into(),
             });
             session.boss_managed = true;
             session.archived_at = Some(1_000_000);
@@ -7181,7 +7186,8 @@ mod tests {
                 activities: vec![
                     ActivityItem::new(None, ActivityKind::Tool, "Screenshot", None, true)
                         .with_image_urls(vec![data_url]),
-                ],
+                ]
+                .into(),
             });
 
         store.save(&mut state).unwrap();

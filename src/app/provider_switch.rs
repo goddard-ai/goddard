@@ -927,7 +927,8 @@ mod tests {
                     "Ran cargo build",
                     Some("ok".to_owned()),
                     true,
-                )],
+                )]
+                .into(),
             });
         session
     }

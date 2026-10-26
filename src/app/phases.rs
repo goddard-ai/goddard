@@ -65,7 +65,7 @@ mod tests {
         TranscriptBlock {
             after_message: 0,
             turn_id: Some(turn_id),
-            activities,
+            activities: activities.into(),
         }
     }
 
@@ -135,7 +135,7 @@ mod tests {
             completed_at: Some(unix_time()),
             checkpoint: None,
         };
-        session.turns = vec![turn(turn_one), turn(turn_two)];
+        session.turns = vec![turn(turn_one), turn(turn_two)].into();
         session
             .messages
             .push(waku_protocol::model::Message::new_for_turn(
@@ -152,7 +152,8 @@ mod tests {
                 vec![activity(ActivityKind::FileRead, Some("a.rs"), false)],
             ),
             turn_block(turn_two, vec![file_change("src/main.rs")]),
-        ];
+        ]
+        .into();
         session.phase = Some(SessionPhase::Executing);
         session.truncate_after_turn(1);
         assert_eq!(session.phase, Some(SessionPhase::Planning));

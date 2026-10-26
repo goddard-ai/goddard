@@ -718,8 +718,9 @@ pub(super) fn turn_eval_state(
         .position(|message| message.turn_id == Some(turn_id) && message.role == MessageRole::User);
     let prompt = prompt_index.map(|index| {
         head_chars(
-            &session.messages[index..]
-                .iter()
+            &session
+                .messages
+                .range(index..)
                 .filter(|message| {
                     message.turn_id == Some(turn_id) && message.role == MessageRole::User
                 })
@@ -731,8 +732,9 @@ pub(super) fn turn_eval_state(
             PROMPT_STATE_CHARS,
         )
     });
-    let prior_users: Vec<&Message> = session.messages[..prompt_index.unwrap_or(0)]
-        .iter()
+    let prior_users: Vec<&Message> = session
+        .messages
+        .range(..prompt_index.unwrap_or(0))
         .filter(|message| message.role == MessageRole::User)
         .collect();
     let prior_prompts: Vec<String> = prior_users
@@ -2436,7 +2438,8 @@ mod tests {
                     },
                     true,
                 ),
-            ],
+            ]
+            .into(),
         });
         session.turns.last_mut().unwrap().checkpoint = Some(Checkpoint {
             turn_count: 2,

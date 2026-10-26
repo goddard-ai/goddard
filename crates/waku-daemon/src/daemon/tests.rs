@@ -113,8 +113,8 @@ fn tail_save_splices_onto_the_resident_prefix() {
         full.messages.last().unwrap().content
     );
     assert_eq!(
-        wire.messages[..2]
-            .iter()
+        wire.messages
+            .range(..2)
             .map(|m| m.content.clone())
             .collect::<Vec<_>>(),
         vec!["Ask".to_owned(), "an answer".to_owned()]
@@ -199,7 +199,8 @@ fn a_save_cannot_resurrect_pruned_archive_payloads() {
             "Ran tests",
             None,
             true,
-        )],
+        )]
+        .into(),
     });
     existing.details_pruned = true;
 
@@ -704,7 +705,7 @@ fn client_saves_cannot_resurrect_or_erase_daemon_queue_entries() {
     agent_entry.created_at = 20;
     let mut user_entry = crate::model::QueuedMessage::new("mine");
     user_entry.created_at = 10;
-    existing.queued_messages = vec![user_entry.clone(), agent_entry.clone()];
+    existing.queued_messages = vec![user_entry.clone(), agent_entry.clone()].into();
 
     // Stale path: a client projection still holding a delivered agent
     // chip must not re-add it — rehydration would deliver it twice.
@@ -740,7 +741,7 @@ fn a_managed_merge_drops_client_removed_queue_entries() {
     let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     let agent_entry = crate::model::QueuedMessage::agent("parked", None);
     let user_entry = crate::model::QueuedMessage::new("mine");
-    existing.queued_messages = vec![user_entry, agent_entry.clone()];
+    existing.queued_messages = vec![user_entry, agent_entry.clone()].into();
 
     // Every client save of a managed session takes this path: the
     // projection that dropped its own follow-up is a removal, and the
@@ -17893,7 +17894,8 @@ fn employee_tool_outputs_survive_48_hours_after_expiry_and_retirement() {
                     true,
                 )
                 .with_output(Some("file evidence".into())),
-            ],
+            ]
+            .into(),
         });
         state.push_session(child);
         backend.task_store.save(&mut state).unwrap();

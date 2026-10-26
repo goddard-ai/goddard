@@ -3115,9 +3115,13 @@ pub(super) fn fenced_code(content: &str) -> Option<String> {
     (!code_blocks.is_empty()).then(|| code_blocks.join("\n\n"))
 }
 
-pub(super) fn activity_summary(activities: &[ActivityItem]) -> String {
+pub(super) fn activity_summary<'a>(
+    activities: impl IntoIterator<Item = &'a ActivityItem>,
+) -> String {
     let mut counts: Vec<(crate::model::ActivityKind, usize)> = Vec::new();
+    let mut running = false;
     for activity in activities {
+        running |= !activity.complete;
         if let Some(entry) = counts.iter_mut().find(|(kind, _)| *kind == activity.kind) {
             entry.1 += 1;
         } else {
@@ -3135,7 +3139,6 @@ pub(super) fn activity_summary(activities: &[ActivityItem]) -> String {
             )
         })
         .collect::<Vec<_>>();
-    let running = activities.iter().any(|activity| !activity.complete);
     if running {
         tr!("activity.running", activities = parts.join(" · "))
     } else {
@@ -3152,24 +3155,28 @@ pub(super) fn activity_group_is_live(
     live_turn && latest_block && after_message == message_count
 }
 
-pub(super) fn activity_header_title(
-    activities: &[ActivityItem],
+pub(super) fn activity_header_title<'a>(
+    activities: impl IntoIterator<Item = &'a ActivityItem, IntoIter: DoubleEndedIterator>,
     live_group: bool,
     live_reasoning_id: Option<Uuid>,
 ) -> String {
-    if let [activity] = activities
-        && activity.title == "Spoken aloud"
-    {
-        return activity_display_title(activity);
+    let mut activities = activities.into_iter();
+    let Some(first) = activities.next() else {
+        return activity_summary(std::iter::empty());
+    };
+    let second = activities.next();
+    if second.is_none() && first.title == "Spoken aloud" {
+        return activity_display_title(first);
     }
-    if live_group && let Some(activity) = activities.last() {
+    if live_group {
+        let activity = activities.next_back().or(second).unwrap_or(first);
         return activity.reasoning.as_ref().map_or_else(
             || activity_display_title(activity),
             |reasoning| reasoning_activity_title(reasoning, live_reasoning_id == Some(activity.id)),
         );
     }
 
-    activity_summary(activities)
+    activity_summary(std::iter::once(first).chain(second).chain(activities))
 }
 
 fn tool_name_leaf(name: &str) -> &str {

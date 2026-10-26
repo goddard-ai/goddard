@@ -41,6 +41,7 @@ use waku_protocol::model::{
     ProviderSessionCatalogStatus, ProviderSessionHistory, ProviderSessionSummary, QueuedMessage,
     RuntimeMode, SessionEnvironment, SessionWorkspace, TranscriptBlock, detail_prefix_signature,
 };
+use waku_protocol::shared_history::SharedHistory;
 use waku_protocol::theme::ThemeSettings;
 
 pub use waku_protocol::custom_commands::{CustomCommand, CustomCommandIcon};
@@ -2717,10 +2718,10 @@ pub struct ReleasedTranscript {
 
 #[derive(Debug, Default)]
 pub struct ReleasedTranscriptPayload {
-    pub messages: Vec<Message>,
-    pub transcript_blocks: Vec<TranscriptBlock>,
-    pub turns: Vec<AgentTurn>,
-    pub queued_messages: Vec<QueuedMessage>,
+    pub messages: SharedHistory<Message>,
+    pub transcript_blocks: SharedHistory<TranscriptBlock>,
+    pub turns: SharedHistory<AgentTurn>,
+    pub queued_messages: SharedHistory<QueuedMessage>,
 }
 
 impl PersistedState {
@@ -4045,8 +4046,8 @@ fn wire_session(
             && session.messages.len() >= cursor.messages
             && session.transcript_blocks.len() >= cursor.blocks
             && detail_prefix_signature(
-                &session.messages[..cursor.messages],
-                &session.transcript_blocks[..cursor.blocks],
+                session.messages.iter().take(cursor.messages),
+                session.transcript_blocks.iter().take(cursor.blocks),
             ) == cursor.signature
     });
     let (wire, tail_sends) = match cursor {

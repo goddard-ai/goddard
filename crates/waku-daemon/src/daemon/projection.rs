@@ -67,8 +67,8 @@ pub(super) fn splice_session_tail(
         base.messages.len() >= messages_from
             && base.transcript_blocks.len() >= blocks_from
             && detail_prefix_signature(
-                &base.messages[..messages_from],
-                &base.transcript_blocks[..blocks_from],
+                base.messages.iter().take(messages_from),
+                base.transcript_blocks.iter().take(blocks_from),
             ) == tail.prefix_signature
     };
 
@@ -77,9 +77,9 @@ pub(super) fn splice_session_tail(
         .find(|resident| resident.id == tail.session_id && resident.detail_loaded)
     {
         if verified(resident) {
-            let mut messages = resident.messages[..messages_from].to_vec();
+            let mut messages = resident.messages.slice(..messages_from);
             messages.append(&mut session.messages);
-            let mut blocks = resident.transcript_blocks[..blocks_from].to_vec();
+            let mut blocks = resident.transcript_blocks.slice(..blocks_from);
             blocks.append(&mut session.transcript_blocks);
             session.messages = messages;
             session.transcript_blocks = blocks;

@@ -1471,7 +1471,6 @@ impl Waku {
                 .position(|block| block.activities.iter().any(|activity| activity.id == id))
         } else if self.state.selected_session == Some(session_id) {
             self.selected_transcript_blocks()
-                .iter()
                 .position(|block| block.activities.iter().any(|activity| activity.id == id))
         } else {
             self.state
@@ -4221,24 +4220,18 @@ impl Waku {
     pub(super) fn render_activities_row(
         &self,
         session_id: Uuid,
-        activities: &[ActivityItem],
+        activities: &waku_protocol::shared_history::SharedHistory<ActivityItem>,
         block_index: usize,
         theme: &Theme,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let visible: Vec<ActivityItem>;
-        let activities = if activities.iter().any(crate::model::is_context_compaction) {
-            visible = activities
+        let visible = || {
+            activities
                 .iter()
                 .filter(|activity| !crate::model::is_context_compaction(activity))
-                .cloned()
-                .collect();
-            visible.as_slice()
-        } else {
-            activities
         };
-        if activities.is_empty() {
+        if visible().next().is_none() {
             return div().into_any_element();
         }
         // `boss_summon` and `memory_record` markers land in the transcript
@@ -4246,21 +4239,19 @@ impl Waku {
         // card, a recorded memory its compact card — and both are lifted
         // out of the activity fold entirely.
         let summons: Vec<waku_protocol::model::BossSummonCard> =
-            activities.iter().filter_map(boss_summon_card).collect();
+            visible().filter_map(boss_summon_card).collect();
         let memories: Vec<waku_protocol::model::MemoryRecordCard> =
-            activities.iter().filter_map(memory_record_card).collect();
-        if !activities.is_empty()
-            && activities.iter().all(|activity| {
-                boss_summon_session_id(activity).is_some() || memory_record_card(activity).is_some()
-            })
-        {
+            visible().filter_map(memory_record_card).collect();
+        if visible().all(|activity| {
+            boss_summon_session_id(activity).is_some() || memory_record_card(activity).is_some()
+        }) {
             return div()
                 .w_full()
                 .min_w_0()
                 .flex()
                 .flex_col()
                 .gap(px(6.0))
-                .children(activities.iter().filter_map(|activity| {
+                .children(visible().filter_map(|activity| {
                     if let Some(card) = boss_summon_card(activity) {
                         Some(self.render_summon_card(session_id, &card, theme, cx))
                     } else {
@@ -4271,19 +4262,13 @@ impl Waku {
                 }))
                 .into_any_element();
         }
-        let plain: Vec<ActivityItem>;
-        let activities: &[ActivityItem] = if summons.is_empty() && memories.is_empty() {
-            activities
-        } else {
-            plain = activities
-                .iter()
-                .filter(|activity| {
-                    boss_summon_session_id(activity).is_none()
-                        && memory_record_card(activity).is_none()
-                })
-                .cloned()
-                .collect();
-            &plain
+        let has_cards = !summons.is_empty() || !memories.is_empty();
+        let ordinary = || {
+            visible().filter(move |activity| {
+                !has_cards
+                    || (boss_summon_session_id(activity).is_none()
+                        && memory_record_card(activity).is_none())
+            })
         };
         // A completed child is not a group boundary: providers commonly emit
         // the next tool after the previous result. The group leaves the live
@@ -4326,14 +4311,13 @@ impl Waku {
             && session.is_some_and(|session| session.status == SessionStatus::Working)
             && block_index + 1 == session.map_or(0, |session| session.transcript_blocks.len()))
         .then(|| {
-            activities
-                .iter()
+            ordinary()
                 .rev()
                 .find(|activity| activity.reasoning.is_some())
                 .map(|activity| activity.id)
         })
         .flatten();
-        let header_title = activity_header_title(activities, live_group, live_reasoning_id);
+        let header_title = activity_header_title(ordinary(), live_group, live_reasoning_id);
         let header_id = format!("activity-toggle-{session_id}-{block_index}");
         let header_focus = self.transcript_control_focus(header_id.clone(), cx);
         let cluster = div()
@@ -4414,7 +4398,7 @@ impl Waku {
             .flex()
             .flex_col()
             .gap(px(8.0));
-        for activity in activities {
+        for activity in ordinary() {
             let id = activity.id;
             let background_work = activity
                 .source_id

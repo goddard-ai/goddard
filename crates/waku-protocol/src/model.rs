@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::git::CommitEntry;
 use crate::routing::RouteDecision;
+use crate::shared_history::SharedHistory;
 
 #[derive(
     Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, TS,
@@ -1985,13 +1986,17 @@ pub struct AgentSession {
     /// Not stored in the session JSON — these are rows in the `messages`
     /// table, reattached when the session is hydrated.
     #[serde(default)]
-    pub messages: Vec<Message>,
+    #[ts(as = "Vec<Message>")]
+    pub messages: SharedHistory<Message>,
     #[serde(default)]
-    pub transcript_blocks: Vec<TranscriptBlock>,
+    #[ts(as = "Vec<TranscriptBlock>")]
+    pub transcript_blocks: SharedHistory<TranscriptBlock>,
     #[serde(default)]
-    pub turns: Vec<AgentTurn>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub queued_messages: Vec<QueuedMessage>,
+    #[ts(as = "Vec<AgentTurn>")]
+    pub turns: SharedHistory<AgentTurn>,
+    #[serde(default, skip_serializing_if = "SharedHistory::is_empty")]
+    #[ts(as = "Vec<QueuedMessage>")]
+    pub queued_messages: SharedHistory<QueuedMessage>,
     /// The archive-retention sweep stripped this session's stored activity
     /// payloads: transcript rows keep their kind, title and status, but tool
     /// `output`/`arguments`, `detail`, `reasoning`, `file_changes` diffs and
@@ -2122,10 +2127,10 @@ impl AgentSession {
             context_usage: None,
             runtime_event_cursor: None,
             provider_session_id: None,
-            messages: Vec::new(),
-            transcript_blocks: Vec::new(),
-            turns: Vec::new(),
-            queued_messages: Vec::new(),
+            messages: SharedHistory::new(),
+            transcript_blocks: SharedHistory::new(),
+            turns: SharedHistory::new(),
+            queued_messages: SharedHistory::new(),
             details_pruned: false,
         }
     }
@@ -2206,10 +2211,10 @@ impl AgentSession {
             // hydrating the session.
             runtime_event_cursor: self.runtime_event_cursor,
             provider_session_id: None,
-            messages: Vec::new(),
-            transcript_blocks: Vec::new(),
-            turns: Vec::new(),
-            queued_messages: Vec::new(),
+            messages: SharedHistory::new(),
+            transcript_blocks: SharedHistory::new(),
+            turns: SharedHistory::new(),
+            queued_messages: SharedHistory::new(),
             details_pruned: false,
             detail_loaded: false,
         }
@@ -2584,10 +2589,10 @@ impl AgentSession {
     /// its list columns and cursors, and a later save of the skeleton only
     /// touches those columns, never the untouched detail row.
     pub fn release_transcript(&mut self) {
-        self.messages = Vec::new();
-        self.transcript_blocks = Vec::new();
-        self.turns = Vec::new();
-        self.queued_messages = Vec::new();
+        self.messages = SharedHistory::new();
+        self.transcript_blocks = SharedHistory::new();
+        self.turns = SharedHistory::new();
+        self.queued_messages = SharedHistory::new();
         self.detail_loaded = false;
     }
 
@@ -2731,7 +2736,7 @@ impl AgentSession {
                 merged_blocks.push(block);
             }
         }
-        self.transcript_blocks = merged_blocks;
+        self.transcript_blocks = merged_blocks.into();
 
         for block in &mut self.transcript_blocks {
             for activity in &mut block.activities {
@@ -2796,12 +2801,15 @@ impl AgentSession {
                 .unwrap_or(self.messages.len());
             let id = Uuid::new_v4();
             let started_at = self.messages[start].created_at;
-            let completed_at = self.messages[start..end]
+            let completed_at = self
+                .messages
                 .iter()
+                .skip(start)
+                .take(end - start)
                 .map(|message| message.created_at)
                 .max()
                 .unwrap_or(started_at);
-            for message in &mut self.messages[start..end] {
+            for message in self.messages.iter_mut().skip(start).take(end - start) {
                 message.turn_id = Some(id);
             }
             for block in &mut self.transcript_blocks {
@@ -3033,10 +3041,10 @@ impl AgentSession {
             .chain(agent_messages)
             .collect();
         combined.sort_by_key(|queued| queued.created_at);
-        if combined == self.queued_messages {
+        if self.queued_messages == combined {
             return false;
         }
-        self.queued_messages = combined;
+        self.queued_messages = combined.into();
         self.updated_at = unix_time();
         true
     }
@@ -6538,13 +6546,13 @@ pub struct TranscriptBlock {
     /// The persisted field keeps its historical tagged shape so existing
     /// sessions remain readable while the runtime model stays activity-only.
     #[ts(rename = "content", as = "StoredTranscriptBlockContent")]
-    pub activities: Vec<ActivityItem>,
+    pub activities: SharedHistory<ActivityItem>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "data")]
 enum StoredTranscriptBlockContentRef<'a> {
-    Activities(&'a [ActivityItem]),
+    Activities(&'a SharedHistory<ActivityItem>),
 }
 
 #[derive(Deserialize, TS)]
@@ -6598,7 +6606,7 @@ impl<'de> Deserialize<'de> for TranscriptBlock {
         Ok(Self {
             after_message: repr.after_message,
             turn_id: repr.turn_id,
-            activities,
+            activities: activities.into(),
         })
     }
 }
@@ -6613,7 +6621,10 @@ impl<'de> Deserialize<'de> for TranscriptBlock {
 /// large transcripts; small structured fields go through their serialized
 /// form. Coverage does not need to be exhaustive — a field that escapes the
 /// hash only delays a divergence until the periodic full save.
-pub fn detail_prefix_signature(messages: &[Message], transcript_blocks: &[TranscriptBlock]) -> u64 {
+pub fn detail_prefix_signature<'a>(
+    messages: impl IntoIterator<Item = &'a Message>,
+    transcript_blocks: impl IntoIterator<Item = &'a TranscriptBlock>,
+) -> u64 {
     let mut hash = PrefixSignature::default();
     for message in messages {
         hash.marker(0x01);
@@ -7961,7 +7972,7 @@ mod tests {
         session.transcript_blocks.push(TranscriptBlock {
             after_message: 2,
             turn_id: Some(first_turn),
-            activities: Vec::new(),
+            activities: Vec::new().into(),
         });
         session.finish_active_turn(TurnStatus::Completed);
 
@@ -7970,7 +7981,7 @@ mod tests {
         session.transcript_blocks.push(TranscriptBlock {
             after_message: 4,
             turn_id: Some(second_turn),
-            activities: Vec::new(),
+            activities: Vec::new().into(),
         });
         session.finish_active_turn(TurnStatus::Completed);
 
@@ -8004,7 +8015,8 @@ mod tests {
                 "Read src/main.rs",
                 None,
                 true,
-            )],
+            )]
+            .into(),
         });
         session.finish_active_turn(TurnStatus::Completed);
         session.truncate_after_turn(1);
@@ -8051,7 +8063,8 @@ mod tests {
                     },
                     true,
                 ),
-            ],
+            ]
+            .into(),
         });
         session.push_message(MessageRole::Assistant, "first answer");
         session.finish_active_turn(TurnStatus::Completed);
@@ -8150,7 +8163,8 @@ mod tests {
             activities: vec![
                 ActivityItem::new(None, ActivityKind::Command, "Ran ls", None, true)
                     .with_output(Some("src/\nREADME.md".into())),
-            ],
+            ]
+            .into(),
         });
         session.push_message(MessageRole::Assistant, "first answer\nmore detail");
         session.finish_active_turn(TurnStatus::Completed);
@@ -8343,7 +8357,7 @@ mod tests {
         user_entry.created_at = 10;
         let mut old_agent = QueuedMessage::agent("parked", None);
         old_agent.created_at = 20;
-        session.queued_messages = vec![user_entry.clone(), old_agent];
+        session.queued_messages = vec![user_entry.clone(), old_agent].into();
 
         let mut new_agent = QueuedMessage::agent("freshly parked", Some(Uuid::new_v4()));
         new_agent.created_at = 30;
@@ -8549,7 +8563,8 @@ mod tests {
                 "Search for ",
                 None,
                 true,
-            )],
+            )]
+            .into(),
         });
 
         session.migrate_legacy_state();
@@ -8609,7 +8624,8 @@ mod tests {
                         finished_at_ms: 2_000,
                     },
                     true,
-                )],
+                )]
+                .into(),
             },
             TranscriptBlock {
                 after_message: 1,
@@ -8620,7 +8636,8 @@ mod tests {
                     "Ran tests",
                     None,
                     true,
-                )],
+                )]
+                .into(),
             },
         ]);
 
@@ -8658,7 +8675,8 @@ mod tests {
                     .to_string(),
                 ),
                 true,
-            )],
+            )]
+            .into(),
         });
 
         session.migrate_legacy_state();
@@ -8696,7 +8714,8 @@ mod tests {
                     true,
                 ),
                 cached,
-            ],
+            ]
+            .into(),
         });
 
         session.migrate_legacy_state();
@@ -8714,13 +8733,13 @@ mod tests {
             Some("/tmp/waku/src/persisted.rs")
         );
         assert!(
-            activities[..2]
-                .iter()
+            activities
+                .range(..2)
                 .all(|activity| activity.detail.is_none())
         );
         assert!(
-            activities[..2]
-                .iter()
+            activities
+                .range(..2)
                 .all(|activity| activity.arguments.is_some())
         );
     }
@@ -9003,7 +9022,8 @@ mod tests {
                 "Inspect files",
                 None,
                 false,
-            )],
+            )]
+            .into(),
         });
         session
             .queued_messages
@@ -9038,7 +9058,8 @@ mod tests {
                 "Inspect files",
                 None,
                 false,
-            )],
+            )]
+            .into(),
         });
 
         let signature = detail_prefix_signature(&session.messages, &session.transcript_blocks);
@@ -9053,8 +9074,11 @@ mod tests {
         assert_eq!(
             signature,
             detail_prefix_signature(
-                &extended.messages[..session.messages.len()],
-                &extended.transcript_blocks[..session.transcript_blocks.len()],
+                extended.messages.iter().take(session.messages.len()),
+                extended
+                    .transcript_blocks
+                    .iter()
+                    .take(session.transcript_blocks.len()),
             )
         );
 

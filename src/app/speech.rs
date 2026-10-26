@@ -679,7 +679,7 @@ impl Waku {
                 session.transcript_blocks.push(TranscriptBlock {
                     after_message: session.messages.len(),
                     turn_id: session.active_turn_id(),
-                    activities: vec![item],
+                    activities: vec![item].into(),
                 });
                 session.updated_at = unix_time();
                 self.stream_state_dirty = true;

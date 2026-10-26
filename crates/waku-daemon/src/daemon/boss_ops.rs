@@ -1584,7 +1584,7 @@ impl WakuBackend {
                     card.retracted = true;
                     activity.title = "Removed a memory".to_owned();
                     activity.arguments = serde_json::to_string(&card).ok();
-                    return Some(activity.clone());
+                    return Some((**activity).clone());
                 }
             }
             None

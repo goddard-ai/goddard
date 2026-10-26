@@ -5146,10 +5146,10 @@ impl Waku {
             .or_else(|| self.model_for_session(session))
     }
 
-    pub(super) fn selected_transcript_blocks(&self) -> &[TranscriptBlock] {
+    pub(super) fn selected_transcript_blocks(&self) -> impl Iterator<Item = &TranscriptBlock> {
         self.selected_session()
-            .map(|session| session.transcript_blocks.as_slice())
-            .unwrap_or(&[])
+            .into_iter()
+            .flat_map(|session| session.transcript_blocks.iter())
     }
 
     pub(super) fn save(&mut self) -> bool {
@@ -6072,7 +6072,7 @@ impl Waku {
         edit: MessageEdit,
         submission: ComposerSubmission,
         edited_message_id: Uuid,
-        original_message: Message,
+        original_message: waku_protocol::shared_history::SharedValue<Message>,
         previous_status: SessionStatus,
         result: Result<PreparedMessageRewind, String>,
         cx: &mut Context<Self>,

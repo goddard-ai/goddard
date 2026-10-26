@@ -15,6 +15,11 @@ use super::*;
 use crate::git_branch::BranchUpstreamSnapshot;
 use crate::ui::shortcut::ShortcutHint;
 
+struct PreparedProviderHistory {
+    messages: waku_protocol::shared_history::SharedHistory<Message>,
+    turns: waku_protocol::shared_history::SharedHistory<crate::model::AgentTurn>,
+}
+
 actions!(
     waku_command_palette,
     [
@@ -5542,7 +5547,7 @@ impl Waku {
         &mut self,
         key: waku_client::DaemonKey,
         summary: ProviderSessionSummary,
-        history: ProviderSessionHistory,
+        history: PreparedProviderHistory,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -5558,6 +5563,9 @@ impl Waku {
             })
             .map(|session| session.id)
         {
+            cx.background_executor()
+                .spawn(async move { drop(history) })
+                .detach();
             self.close_command_palette(window, cx);
             self.settings_page = None;
             self.select_session(session_id, cx);
@@ -5664,7 +5672,20 @@ impl Waku {
         cx.notify();
 
         cx.spawn(async move |waku, cx| {
-            let result = cx.background_executor().spawn(async move { fetch() }).await;
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    fetch().map(|loaded| {
+                        (
+                            loaded.resolved_cwd,
+                            PreparedProviderHistory {
+                                messages: loaded.history.messages.into(),
+                                turns: loaded.history.turns.into(),
+                            },
+                        )
+                    })
+                })
+                .await;
             let update = waku.update(cx, |waku, cx| {
                 if !waku.command_palette.open
                     || waku.command_palette.view != CommandPaletteView::Resume
@@ -5675,15 +5696,18 @@ impl Waku {
                         .as_ref()
                         .is_none_or(|pending| !same_provider_session(pending, &cursor))
                 {
+                    cx.background_executor()
+                        .spawn(async move { drop(result) })
+                        .detach();
                     return None;
                 }
                 match result {
-                    Ok(loaded) => {
+                    Ok((resolved_cwd, history)) => {
                         let mut summary = summary;
-                        if let Some(resolved) = loaded.resolved_cwd {
+                        if let Some(resolved) = resolved_cwd {
                             summary.cwd = resolved;
                         }
-                        Some((summary, loaded.history))
+                        Some((summary, history))
                     }
                     Err(error) => {
                         let error = error.to_string();
@@ -5705,6 +5729,10 @@ impl Waku {
                         && waku.command_palette.provider_session_generation == generation
                     {
                         waku.import_provider_session(key, summary, history, window, cx);
+                    } else {
+                        cx.background_executor()
+                            .spawn(async move { drop(history) })
+                            .detach();
                     }
                 });
             });

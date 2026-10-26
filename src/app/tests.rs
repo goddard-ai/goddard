@@ -594,7 +594,7 @@ fn deferred_steers_deliver_once_in_order_when_text_yields_to_tools() {
     let expected = vec![first.id, second.id];
     append_queued_steer_preview(&mut session, &first);
     append_queued_steer_preview(&mut session, &second);
-    session.queued_messages = vec![follow_up, first, second, rejected];
+    session.queued_messages = vec![follow_up, first, second, rejected].into();
 
     // Preview rows must not hide the still-streaming assistant message.
     assert!(!session_accepts_immediate_steer(&session));
@@ -683,7 +683,7 @@ fn parked_steer_previews_trail_the_working_indicator() {
     let second = QueuedMessage::new("second steer");
     assert!(append_queued_steer_preview(&mut session, &first));
     assert!(append_queued_steer_preview(&mut session, &second));
-    session.queued_messages = vec![first, second];
+    session.queued_messages = vec![first, second].into();
 
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::new(), None),
@@ -4127,7 +4127,8 @@ fn settling_an_anchored_turn_splices_without_resetting_its_prompt() {
                 finished_at_ms: 2_000,
             },
             true,
-        )],
+        )]
+        .into(),
     });
     session.push_message(MessageRole::Assistant, "Here is the overview.");
 
@@ -4164,12 +4165,13 @@ fn settling_an_anchored_turn_splices_without_resetting_its_prompt() {
 
 #[test]
 fn only_later_user_messages_start_followup_turns() {
-    let messages = vec![
+    let messages: waku_protocol::shared_history::SharedHistory<_> = vec![
         Message::new(MessageRole::User, "first"),
         Message::new(MessageRole::Assistant, "answer"),
         Message::new(MessageRole::User, "follow-up"),
         Message::new(MessageRole::Assistant, "answer"),
-    ];
+    ]
+    .into();
     assert!(!message_starts_followup_turn(&messages, 0));
     assert!(!message_starts_followup_turn(&messages, 1));
     assert!(message_starts_followup_turn(&messages, 2));
@@ -4899,7 +4901,8 @@ fn row_kinds_and_row_count_describe_the_same_rows() {
                 true,
             ),
             ActivityItem::new(None, ActivityKind::Command, "Ran tests", None, true),
-        ],
+        ]
+        .into(),
     });
     session.push_message(MessageRole::Assistant, "Done.");
     session.finish_active_turn(TurnStatus::Completed);
@@ -4959,7 +4962,7 @@ fn compaction_never_appears_in_the_transcript() {
     session.transcript_blocks.push(TranscriptBlock {
         after_message: session.messages.len(),
         turn_id: Some(compact_turn),
-        activities: vec![compacting],
+        activities: vec![compacting].into(),
     });
     assert_eq!(
         folded_transcript_row_kinds(&session, &HashSet::from([compact_turn]), None),
@@ -5039,7 +5042,8 @@ fn response_hover_owns_every_response_row_but_not_the_prompt() {
             "Inspected the project",
             None,
             true,
-        )],
+        )]
+        .into(),
     });
     session.push_message(MessageRole::Assistant, "Done.");
     session.finish_active_turn(TurnStatus::Completed);
@@ -5070,7 +5074,8 @@ fn changed_files_remain_visible_when_an_interrupted_turn_has_no_answer() {
             "Edited a file",
             None,
             true,
-        )],
+        )]
+        .into(),
     });
     session.push_message(MessageRole::Assistant, "");
     session.finish_active_turn(TurnStatus::Interrupted);
@@ -5241,7 +5246,8 @@ fn the_row_fingerprint_moves_whenever_the_fold_does() {
                 finished_at_ms: 2_000,
             },
             true,
-        )],
+        )]
+        .into(),
     });
     base.push_message(MessageRole::Assistant, "I found the relevant code.");
     base.transcript_blocks.push(TranscriptBlock {
@@ -5253,7 +5259,8 @@ fn the_row_fingerprint_moves_whenever_the_fold_does() {
             "Ran tests",
             None,
             true,
-        )],
+        )]
+        .into(),
     });
     base.push_message(MessageRole::Assistant, "Done. The change is ready.");
     base.finish_active_turn(TurnStatus::Completed);
@@ -5291,7 +5298,8 @@ fn the_row_fingerprint_moves_whenever_the_fold_does() {
                     "Ran tests",
                     None,
                     true,
-                )],
+                )]
+                .into(),
             });
         }),
         // `update_activity` re-anchors the block it is still appending to, so
@@ -5354,7 +5362,8 @@ fn a_settled_turn_folds_all_of_its_work_above_the_answer() {
                 finished_at_ms: 2_000,
             },
             true,
-        )],
+        )]
+        .into(),
     });
     session.push_message(MessageRole::Assistant, "I found the relevant code.");
     session.transcript_blocks.push(TranscriptBlock {
@@ -5366,7 +5375,8 @@ fn a_settled_turn_folds_all_of_its_work_above_the_answer() {
             "Ran tests",
             None,
             true,
-        )],
+        )]
+        .into(),
     });
     session.push_message(MessageRole::Assistant, "Done. The change is ready.");
     session.finish_active_turn(TurnStatus::Completed);
@@ -5663,7 +5673,8 @@ fn consecutive_trailing_text_parts_all_stay_out_of_the_fold() {
                 finished_at_ms: 2_000,
             },
             true,
-        )],
+        )]
+        .into(),
     });
     session.push_message(MessageRole::Assistant, "First half of the answer.");
     session.push_message(MessageRole::Assistant, "Second half of the answer.");
@@ -5696,7 +5707,8 @@ fn a_turn_without_an_answer_folds_completely() {
             "Ran tests",
             None,
             true,
-        )],
+        )]
+        .into(),
     });
     // The streaming placeholder never received any text.
     session.push_message(MessageRole::Assistant, "");
@@ -5727,7 +5739,8 @@ fn assistant_response_footer_is_owned_by_the_terminal_part_and_copies_the_visibl
                 finished_at_ms: 2_000,
             },
             true,
-        )],
+        )]
+        .into(),
     });
     session.push_message(MessageRole::Assistant, "Interim commentary.");
     session.transcript_blocks.push(TranscriptBlock {
@@ -5739,7 +5752,8 @@ fn assistant_response_footer_is_owned_by_the_terminal_part_and_copies_the_visibl
             "Ran tests",
             None,
             true,
-        )],
+        )]
+        .into(),
     });
     session.push_message(MessageRole::Assistant, "First half of the answer.");
     session.push_message(MessageRole::Assistant, "Second half of the answer.");
@@ -5759,8 +5773,9 @@ fn assistant_response_footer_is_owned_by_the_terminal_part_and_copies_the_visibl
     assert_eq!(assistant_response_footer_time(&session, 1), None);
     assert_eq!(assistant_response_footer_time(&session, 3), Some(200));
     assert!(
-        session.messages[1..]
-            .iter()
+        session
+            .messages
+            .range(1..)
             .all(|message| message.turn_id == Some(turn_id))
     );
 }
@@ -5779,7 +5794,8 @@ fn response_footer_follows_trailing_tool_activity() {
             "Searched the source",
             None,
             true,
-        )],
+        )]
+        .into(),
     });
     session.finish_active_turn(TurnStatus::Interrupted);
 
@@ -5891,7 +5907,8 @@ fn running_turn_keeps_its_ordered_work_visible() {
                 finished_at_ms: 2_000,
             },
             false,
-        )],
+        )]
+        .into(),
     });
     session.push_message(MessageRole::Assistant, "Interim update");
 
@@ -6157,7 +6174,8 @@ fn a_pending_checkpoint_shows_a_pending_card_after_the_settled_turn() {
                 finished_at_ms: 2_000,
             },
             true,
-        )],
+        )]
+        .into(),
     });
     session.finish_active_turn(TurnStatus::Completed);
     session.status = SessionStatus::Idle;

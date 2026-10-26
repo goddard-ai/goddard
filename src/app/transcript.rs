@@ -1083,8 +1083,9 @@ pub(super) fn transcript_navigation_turns(
             .copied()
             .unwrap_or(session.messages.len())
             .min(
-                session.messages[message_index + 1..]
-                    .iter()
+                session
+                    .messages
+                    .range(message_index + 1..)
                     .position(|candidate| candidate.role == MessageRole::User)
                     .map(|offset| message_index + 1 + offset)
                     .unwrap_or(session.messages.len()),
@@ -1094,8 +1095,9 @@ pub(super) fn transcript_navigation_turns(
             .is_some_and(|turn_id| running_turns.contains(&turn_id));
         let response = (!turn_running)
             .then(|| {
-                session.messages[message_index + 1..next_user_index]
-                    .iter()
+                session
+                    .messages
+                    .range(message_index + 1..next_user_index)
                     .rev()
                     .find(|candidate| {
                         candidate.role == MessageRole::Assistant
@@ -2114,7 +2116,10 @@ pub(super) fn format_working_elapsed(seconds: u64) -> String {
 /// checkpoints and provider rollback are per turn, not per message. Messages
 /// of a turn are contiguous, so this walks back only while the turn id holds
 /// rather than scanning the session, which a per-frame row builder must avoid.
-pub(super) fn message_opens_turn(messages: &[Message], message_index: usize) -> bool {
+pub(super) fn message_opens_turn(
+    messages: &waku_protocol::shared_history::SharedHistory<Message>,
+    message_index: usize,
+) -> bool {
     let Some(turn_id) = messages
         .get(message_index)
         .filter(|message| message.role == MessageRole::User)
@@ -2122,19 +2127,22 @@ pub(super) fn message_opens_turn(messages: &[Message], message_index: usize) -> 
     else {
         return false;
     };
-    !messages[..message_index]
-        .iter()
+    !messages
+        .range(..message_index)
         .rev()
         .take_while(|earlier| earlier.turn_id == Some(turn_id))
         .any(|earlier| earlier.role == MessageRole::User)
 }
 
-pub(super) fn message_starts_followup_turn(messages: &[Message], message_index: usize) -> bool {
+pub(super) fn message_starts_followup_turn(
+    messages: &waku_protocol::shared_history::SharedHistory<Message>,
+    message_index: usize,
+) -> bool {
     messages
         .get(message_index)
         .is_some_and(|message| message.role == MessageRole::User)
-        && messages[..message_index]
-            .iter()
+        && messages
+            .range(..message_index)
             .any(|message| message.role == MessageRole::User)
 }
 
@@ -2291,7 +2299,7 @@ fn is_steer_finish_in_opening_burst(
 /// separates the messages at `lo` and `hi`. Hidden prompts are invisible,
 /// so an accepted run closes over them; another marker still separates.
 fn steer_run_separated(session: &AgentSession, lo: usize, hi: usize) -> bool {
-    session.messages[lo + 1..hi].iter().any(|message| {
+    session.messages.range(lo + 1..hi).any(|message| {
         !message.hidden
             || message.report_trigger.as_ref().is_some_and(|trigger| {
                 trigger.boundary == crate::model::ReportTriggerBoundary::Opening

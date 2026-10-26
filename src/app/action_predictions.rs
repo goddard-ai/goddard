@@ -2059,7 +2059,7 @@ mod tests {
         session.transcript_blocks.push(TranscriptBlock {
             after_message: 0,
             turn_id: Some(turn_id),
-            activities: vec![activity],
+            activities: vec![activity].into(),
         });
         assert!(candidate_ids(&session, turn_id).contains(&"fix-errors"));
     }

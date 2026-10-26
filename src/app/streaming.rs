@@ -1545,7 +1545,7 @@ pub(super) fn push_transcript_activity(
         session.transcript_blocks.push(TranscriptBlock {
             after_message,
             turn_id,
-            activities: vec![item],
+            activities: vec![item].into(),
         });
     }
 }

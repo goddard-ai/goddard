@@ -1683,23 +1683,12 @@ impl Waku {
                     .map(|activity| activity.id)
             })
             .flatten();
-        let visible: Vec<ActivityItem>;
-        let activities = if block
+        let mut activities = block
             .activities
             .iter()
-            .any(crate::model::is_context_compaction)
-        {
-            visible = block
-                .activities
-                .iter()
-                .filter(|activity| !crate::model::is_context_compaction(activity))
-                .cloned()
-                .collect();
-            visible.as_slice()
-        } else {
-            block.activities.as_slice()
-        };
-        if activities.is_empty() {
+            .filter(|activity| !crate::model::is_context_compaction(activity))
+            .peekable();
+        if activities.peek().is_none() {
             return div().into_any_element();
         }
         let title = activity_header_title(activities, live_group, live_reasoning_id);
