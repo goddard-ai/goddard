@@ -335,7 +335,7 @@ exit 1
     }
     let root = PathBuf::from(std::env::var_os("GODDARD_SSH_TEST_ROOT").unwrap());
     let transport = SshTransport::new(Uuid::new_v4(), "fixture-host");
-    fs::create_dir_all(transport.control_path().parent().unwrap()).unwrap();
+    prepare_control_dir(transport.control_path().parent().unwrap()).unwrap();
     fs::write(transport.control_path(), "fixture master").unwrap();
     transport.add_forward(SshAuth::Batch, 31337, 4000).unwrap();
     // A daemon restart changes its ephemeral port while SSH remains alive.
