@@ -1,1 +1,0 @@
-- Large Git diffs use compact context when needed and report an error when the complete changes exceed the preview limit.

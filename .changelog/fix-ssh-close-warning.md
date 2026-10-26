@@ -1,1 +1,0 @@
-- Closing or quitting Goddard no longer warns about active tasks running on remote hosts.

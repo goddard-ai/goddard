@@ -1,1 +1,0 @@
-- Combine page or group names with setting keywords in Settings search, such as “Transcript markdown”; direct setting matches appear before group matches, then page matches.

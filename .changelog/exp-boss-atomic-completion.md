@@ -1,1 +1,0 @@
-- Boss employee completion now saves its outcome or pending handoff together with the finished employee, preventing a restart from losing the outcome update.

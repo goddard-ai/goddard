@@ -1,1 +1,0 @@
-- Choose GitHub references, task pull requests, issue and PR browsing, the notification inbox, and repository activity independently in Settings → Experiments; existing GitHub preferences carry over to all five switches.

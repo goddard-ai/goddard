@@ -1,1 +1,0 @@
-- Reduced duplicate background Git requests when checkout changes arrive during a refresh.

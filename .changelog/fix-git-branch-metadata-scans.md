@@ -1,1 +1,0 @@
-- Branch pickers, sidebar branch labels, and terminal labels avoid scanning file changes, reducing background Git work in large repositories.

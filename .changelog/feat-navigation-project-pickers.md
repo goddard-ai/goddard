@@ -1,2 +1,0 @@
-- Project dropdowns now share a searchable, scrollable picker with a limited list height, including project filters and configuration forms.
-- The picker’s navigation keys can be customized.

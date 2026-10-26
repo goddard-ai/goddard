@@ -1,1 +1,0 @@
-- Cmd+K transcript search finds matching tasks in the focused project even when other projects have many matches.

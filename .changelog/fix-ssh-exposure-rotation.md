@@ -1,1 +1,0 @@
-- Change the remote daemon token or allowed browser origins without an address-in-use error when keeping the same port.

@@ -1,1 +1,0 @@
-- Copying a selection that stays inside one blockquote no longer includes the `>` markers at the start of each line. Selections that also reach unquoted text still keep them.

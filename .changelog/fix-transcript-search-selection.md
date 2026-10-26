@@ -1,1 +1,0 @@
-- Cmd+K keeps your selected result when transcript search finishes and reorders the list.

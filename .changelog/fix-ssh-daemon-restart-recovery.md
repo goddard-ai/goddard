@@ -1,1 +1,0 @@
-- SSH connections recover after the remote daemon restarts, including when its SSH connection stays open and its daemon port changes.

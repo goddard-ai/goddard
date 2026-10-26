@@ -1,1 +1,0 @@
-- SSH connections use the bundled daemon fallback when an incompatible remote daemon needs an upgrade and no matching release is published.

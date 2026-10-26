@@ -1,1 +1,0 @@
-- Dropped remote connections release their subscriptions and terminal ownership immediately.

@@ -1,1 +1,0 @@
-- **Reclaim disk space:** the command now opens a dropdown anchored to a new topbar button instead of a centered dialog. The button stays for the whole flow — hiding the dropdown never cancels a scan or deletion — and disappears when you cancel or confirm the finished result.

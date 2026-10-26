@@ -4,6 +4,88 @@ Release notes for Goddard Desktop and features shared across clients.
 Changes specific to the mobile app are in
 [the mobile changelog](CHANGELOG.mobile.md).
 
+## [0.17.0]
+
+### Features
+
+- **Git**
+  - Start QA Session from the command palette to test the next local QA-branch commit in its own window, with saved server commands, agent chat, diff comments, and approval to push that commit to the default branch.
+  - **Reclaim disk space:** the command now opens a dropdown anchored to a new topbar button instead of a centered dialog. The button stays for the whole flow — hiding the dropdown never cancels a scan or deletion — and disappears when you cancel or confirm the finished result.
+- **Transcript**
+  - Cmd+K transcript search favors exact phrases and closely grouped words, including older answers, and opens each task at its strongest matching message.
+  - Search Cmd+K transcripts with words in any order, or quote a phrase to require that exact text.
+  - Choose Appearance → Transcript → Sent prompt position → Compact to keep earlier conversation visible and follow new activity immediately; Start at top remains the default.
+- **Terminals**
+  - Split terminals right or down from the command palette, or hold Alt/Option to switch the terminal split button to split down.
+  - Run saved custom commands in remote project terminals using the remote host's shell and environment, with completion notifications and close-on-success behavior.
+- Press Cmd+Shift+Enter in an empty task composer to push the current branch in a local workspace when it tracks an upstream, has outgoing commits, and has no incoming commits.
+- Project dropdowns now share a searchable, scrollable picker with a limited list height, including project filters and configuration forms.
+- The picker’s navigation keys can be customized.
+- Find individual settings by name in Cmd+K and open their matching settings controls.
+- Combine page or group names with setting keywords in Settings search, such as “Transcript markdown”; direct setting matches appear before group matches, then page matches.
+
+### Experiments
+
+- **Boss**
+  - Boss employee completion now saves its outcome or pending handoff together with the finished employee, preventing a restart from losing the outcome update.
+  - **Boss chains:** worktree steps can name a moving base. `baseRevision` now accepts a ref resolved when the step admits (for example `"main"`) or `{"type":"previousStepLanded"}` to fork at the previous step's accepted landing, so a sequential chain no longer pins every step to one commit captured at creation. Retry `sourceRevision` takes the same values, and full commit ids still pin an exact base.
+  - Fixed Back navigation getting stuck on the Boss chat after `/clear` — the button showed earlier history that presses could no longer reach.
+  - Reduced the work needed to save Boss updates when there are many retired employees.
+  - Three-finger swipes and mouse back/forward buttons now navigate while the pointer is over a memory-note editor in Boss Brain.
+  - Boss resource queues no longer retain stopped devices because another platform's inventory failed, block new builds on cancelled rentals, or leave spare build slots unused behind device waits.
+  - New Boss employees appear in the sidebar with their avatar already drawn instead of flashing a letter placeholder first.
+  - The Boss can now prompt standalone tasks with `goddard-agent prompt TASK_ID`; the message delivers as a new turn or a steer instead of failing with "not a Boss employee".
+  - Failed Boss employee summons no longer leave orphan outcomes, and new outcomes and finishing assignments are saved together.
+  - Retrying a Boss employee summon with the same request ID returns the original employee even after retirement and restart.
+  - Boss chats recover from provider compaction without becoming permanently blocked, preserve conversation history and queued messages, and show recovery notices in the transcript. Automatic and manual refreshes use ordinary provider startup.
+  - `goddard-agent boss view` now prints a compact state digest instead of the full Boss state; pass a section name such as `boss view outcomes` for one slice, or `--full` for the previous complete dump.
+- **Git**
+  - Choose GitHub references, task pull requests, issue and PR browsing, the notification inbox, and repository activity independently in Settings → Experiments; existing GitHub preferences carry over to all five switches.
+  - Enable Git worktree management in Settings → Experiments to show the Git settings page for managing worktrees and branches.
+- Three-finger swipes and mouse back/forward buttons now navigate while the pointer is over VoicePad dictation cards.
+
+### Fixed
+
+- **Sidebar**
+  - Reduced background Git work in large task histories by refreshing visible checkout badges and backing off failed requests.
+  - Reduced repeated Git history work when refreshing task sidebar badges, while keeping working-tree changes current.
+- **Composer**
+  - Steering submitted while assistant text streams now sends when the same turn resumes reasoning or tool work, instead of waiting for the turn to finish.
+  - Fixed `/compact` and other provider commands disappearing from the slash-command picker when resuming Devin sessions.
+- **Providers**
+  - **Remote Auto option:** The model picker shows Auto for a new task only when that project's daemon has Jev configured. Remote projects without Jev no longer offer an option that can only fall back to the last-used model.
+  - Favorited models keep their model-picker rows and shortcut hints when a provider omits them from its catalog, so you can still select, reorder, or remove them.
+- **Git**
+  - Branch pickers, sidebar branch labels, and terminal labels avoid scanning file changes, reducing background Git work in large repositories.
+  - Bounded Git output and process cleanup so slow or noisy commands consume fewer resources and failed reads cannot return partial results.
+  - Reduced duplicate background Git requests when checkout changes arrive during a refresh.
+  - Large Git diffs use compact context when needed and report an error when the complete changes exceed the preview limit.
+  - Prevented overloaded subprocess queues from starting extra Git processes after their requests expire.
+- **Transcript**
+  - Fixed duplicate responses appearing after different clients save the same task transcript.
+  - Sending a prompt follows the new turn when you are already reading the latest turn, even with Keep scroll position when sending enabled.
+  - Copying a selection that stays inside one blockquote no longer includes the `>` markers at the start of each line. Selections that also reach unquoted text still keep them.
+  - Cmd+K shows transcript matches as hosts reply, ranks them across hosts, and reports incomplete or failed searches.
+  - Cmd+K transcript search finds matching tasks in the focused project even when other projects have many matches.
+  - Cmd+K keeps your selected result when transcript search finishes and reorders the list.
+- **Navigation**
+  - Three-finger swipes and mouse back/forward buttons now navigate while the pointer is over a pasted-text editor.
+  - Three-finger navigation swipes now retain movement through brief touch interruptions and count the final movement as fingers lift from the trackpad.
+- **SSH**
+  - Closing or quitting Goddard no longer warns about active tasks running on remote hosts.
+  - Fixed SSH connections failing with “too long for Unix domain socket” when Goddard uses a long checkout or data directory path.
+  - SSH connections recover after the remote daemon restarts, including when its SSH connection stays open and its daemon port changes.
+  - Change the remote daemon token or allowed browser origins without an address-in-use error when keeping the same port.
+  - Failed remote task deletions retain their host ownership, keeping retries from reaching the local daemon.
+  - The SSH host picker handles Unicode comments without crashing and no longer lists inline comment words as host aliases.
+  - Connect to remote daemons using IPv6 addresses without connection timeouts caused by address parsing.
+  - SSH password answers and cancellations are no longer lost when delivered immediately after a prompt appears.
+  - **Remote project duplicates:** Fixed remote projects appearing twice in the project picker and sidebar after a remote host's connection details were edited or the app reconnected — and fixed a leak that could write a remote host's projects into the local daemon's own catalog.
+  - SSH connections use the bundled daemon fallback when an incompatible remote daemon needs an upgrade and no matching release is published.
+- Escape now dismisses confirmation and SSH authentication dialogs reliably, and closes search dialogs immediately even when their fields contain text.
+- Expand providers and open inline editors directly from Settings search results.
+- Dropped remote connections release their subscriptions and terminal ownership immediately.
+
 ## [0.16.0]
 
 ### Features

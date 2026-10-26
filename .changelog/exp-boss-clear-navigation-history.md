@@ -1,1 +1,0 @@
-- Fixed Back navigation getting stuck on the Boss chat after `/clear` — the button showed earlier history that presses could no longer reach.

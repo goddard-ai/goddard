@@ -1,1 +1,0 @@
-- Favorited models keep their model-picker rows and shortcut hints when a provider omits them from its catalog, so you can still select, reorder, or remove them.

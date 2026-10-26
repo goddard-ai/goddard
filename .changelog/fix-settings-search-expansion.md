@@ -1,1 +1,0 @@
-- Expand providers and open inline editors directly from Settings search results.

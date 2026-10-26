@@ -1,1 +1,0 @@
-- Enable Git worktree management in Settings → Experiments to show the Git settings page for managing worktrees and branches.

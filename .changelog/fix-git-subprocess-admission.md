@@ -1,1 +1,0 @@
-- Prevented overloaded subprocess queues from starting extra Git processes after their requests expire.

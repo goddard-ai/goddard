@@ -1,1 +1,0 @@
-- Start QA Session from the command palette to test the next local QA-branch commit in its own window, with saved server commands, agent chat, diff comments, and approval to push that commit to the default branch.

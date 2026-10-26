@@ -1,1 +1,0 @@
-- `goddard-agent boss view` now prints a compact state digest instead of the full Boss state; pass a section name such as `boss view outcomes` for one slice, or `--full` for the previous complete dump.

@@ -1,1 +1,0 @@
-- Split terminals right or down from the command palette, or hold Alt/Option to switch the terminal split button to split down.

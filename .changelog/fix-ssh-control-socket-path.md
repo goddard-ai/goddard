@@ -1,1 +1,0 @@
-- Fixed SSH connections failing with “too long for Unix domain socket” when Goddard uses a long checkout or data directory path.

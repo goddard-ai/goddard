@@ -1,1 +1,0 @@
-- Find individual settings by name in Cmd+K and open their matching settings controls.

@@ -1,1 +1,0 @@
-- Fixed `/compact` and other provider commands disappearing from the slash-command picker when resuming Devin sessions.

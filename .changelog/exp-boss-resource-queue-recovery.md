@@ -1,1 +1,0 @@
-- Boss resource queues no longer retain stopped devices because another platform's inventory failed, block new builds on cancelled rentals, or leave spare build slots unused behind device waits.

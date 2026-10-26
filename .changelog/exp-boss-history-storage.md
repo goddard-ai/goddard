@@ -1,1 +1,0 @@
-- Reduced the work needed to save Boss updates when there are many retired employees.

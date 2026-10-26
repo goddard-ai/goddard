@@ -1,1 +1,0 @@
-- The model picker's Auto option now only appears for a new task when the project's daemon has Jev configured — a remote project on a host without it no longer offers routing that could only fall back to the last-used model.

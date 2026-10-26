@@ -1,1 +1,0 @@
-- Fixed remote projects appearing twice in the project picker and sidebar after a remote host's connection details were edited or the app reconnected — and fixed a leak that could write a remote host's projects into the local daemon's own catalog.

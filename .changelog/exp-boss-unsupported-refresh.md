@@ -1,1 +1,0 @@
-- Boss chats recover from provider compaction without becoming permanently blocked, preserve conversation history and queued messages, and show recovery notices in the transcript. Automatic and manual refreshes use ordinary provider startup.

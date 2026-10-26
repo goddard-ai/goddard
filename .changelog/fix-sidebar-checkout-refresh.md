@@ -1,1 +1,0 @@
-- Reduced background Git work in large task histories by refreshing visible checkout badges and backing off failed requests.
