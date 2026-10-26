@@ -23,6 +23,7 @@ mod help;
 mod instruction_pins;
 mod resources;
 mod transport;
+mod wireframe;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -808,9 +809,29 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent merge submit".to_owned(),
         ),
         "wireframe" => (
-            json!({"PATH":{"positional":true,"required":true,"type":"workspace-relative .wireframe.json file"},"description":"Write the JSON file, then invoke this command to validate it and request a right-panel preview in this task. Requires Settings → Experiments → Wireframes. See the formatGuide reference for the complete JSON format."}),
+            json!({"PATH":{"positional":true,"required":true,"type":"workspace-relative .wireframe.html or .wireframe.json file"},"description":"Write the document, then validate it and request a right-panel preview. HTML previews use the active Goddard theme on macOS and Windows. Requires Settings → Experiments → Wireframes. See formatGuide for authoring and anchored comments."}),
             json!({"accepted":{"ok":true},"meaning":"document validated and preview request broadcast; does not confirm a client opened it"}),
             "goddard-agent wireframe designs/main.wireframe.json".to_owned(),
+        ),
+        "wireframe comment add" => (
+            json!({"PATH":{"positional":true,"required":true,"type":"workspace-relative .wireframe.html file"},"--screen":{"required":true,"type":"stable screen ID"},"--anchor":{"type":"stable element ID; omit for screen-level comment"},"--text|--file":{"required":true,"exactlyOne":true,"type":"plain text or file path; - reads stdin"},"--idempotency-key":{"required":true,"type":"stable retry key, 1–128 bytes"}}),
+            json!({"json":"WireframeCommentsPage; author is the authenticated agent; discussion persists independently of HTML"}),
+            "goddard-agent wireframe comment add designs/main.wireframe.html --screen tasks --anchor sidebar --idempotency-key sidebar-v1 --text 'Keep navigation visible.'".to_owned(),
+        ),
+        "wireframe comment reply" => (
+            json!({"PATH":{"positional":true,"required":true,"type":"workspace-relative .wireframe.html file"},"--thread":{"required":true,"type":"thread UUID"},"--text|--file":{"required":true,"exactlyOne":true,"type":"plain text or file path; - reads stdin"},"--idempotency-key":{"required":true,"type":"stable retry key, 1–128 bytes"}}),
+            json!({"json":"WireframeCommentsPage; replies append without replacing earlier comments"}),
+            "goddard-agent wireframe comment reply designs/main.wireframe.html --thread THREAD_UUID --idempotency-key answer-v1 --text 'The sidebar stays fixed.'".to_owned(),
+        ),
+        "wireframe comment read" => (
+            json!({"PATH":{"positional":true,"required":true,"type":"workspace-relative .wireframe.html file"},"--thread":{"required":true,"type":"thread UUID"}}),
+            json!({"json":"WireframeCommentsPage containing the requested thread; does not change the user's unread state"}),
+            "goddard-agent wireframe comment read designs/main.wireframe.html --thread THREAD_UUID".to_owned(),
+        ),
+        "wireframe comment list" => (
+            json!({"PATH":{"positional":true,"required":true,"type":"workspace-relative .wireframe.html file"},"--offset":{"type":"unsigned page offset","default":0}}),
+            json!({"json":"WireframeCommentsPage; follow nextOffset until null"}),
+            "goddard-agent wireframe comment list designs/main.wireframe.html".to_owned(),
         ),
         "rename" => (
             json!({"TITLE":{"positional":true,"required":true,"type":"this task's new title; inspect read first and preserve its unique purpose"}}),
@@ -872,6 +893,10 @@ fn schema() -> serde_json::Value {
         "history search",
         "map",
         "wireframe",
+        "wireframe comment add",
+        "wireframe comment list",
+        "wireframe comment read",
+        "wireframe comment reply",
         "rename",
         "archive",
         "ask",
@@ -1322,15 +1347,7 @@ fn run() -> anyhow::Result<()> {
         "wireframe" | "rename" | "archive" | "ask" => {
             let args: Vec<String> = arguments.collect();
             let command = match subcommand.as_str() {
-                "wireframe" => {
-                    let (pos, _) = flags(args, &[], true)?;
-                    if pos.len() != 1 {
-                        bail!("usage: goddard-agent wireframe PATH.wireframe.json");
-                    }
-                    Command::AgentWireframe {
-                        path: pos[0].clone(),
-                    }
-                }
+                "wireframe" => wireframe::command(args)?,
                 "rename" => {
                     let (pos, _) = flags(args, &[], true)?;
                     if pos.len() != 1 {
@@ -1372,6 +1389,9 @@ fn run() -> anyhow::Result<()> {
                 client.request(request_session_id(), Uuid::nil(), command)?
             };
             match response {
+                ResponsePayload::WireframeComments { page } => {
+                    println!("{}", serde_json::to_string_pretty(&page)?);
+                }
                 ResponsePayload::Boss { result } => {
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 }
@@ -4092,6 +4112,15 @@ mod tests {
                 .0;
             let document = waku_protocol::wireframe::Wireframe::parse(example).unwrap();
             assert!(!document.screens.is_empty());
+            let html = reference
+                .split_once("```html")
+                .unwrap()
+                .1
+                .split_once("```")
+                .unwrap()
+                .0;
+            let document = waku_protocol::wireframe_html::HtmlWireframe::parse(html).unwrap();
+            assert!(document.anchor("tasks", "sidebar").is_some());
         }
     }
 

@@ -106,7 +106,7 @@ fn authority(path: &str) -> &str {
         p if p.starts_with("computer ") => {
             "Context-dependent; Computer Use must be enabled and granted; read the bundled Computer Use skill first; existing approval prompts apply"
         }
-        "wireframe" => {
+        p if p == "wireframe" || p.starts_with("wireframe comment ") => {
             "Any scoped task, including planning sessions; Wireframes experiment must be enabled"
         }
         "create" | "rename" => {
@@ -151,6 +151,12 @@ fn purpose(path: &str) -> &str {
         "wireframe" => {
             "Validate a workspace wireframe and request its preview in the owning task’s right panel."
         }
+        "wireframe comment add" => {
+            "Attach a persistent agent comment to a named screen or element."
+        }
+        "wireframe comment list" => "List a bounded page of this task's wireframe comment threads.",
+        "wireframe comment read" => "Read one thread, including user replies and removed anchors.",
+        "wireframe comment reply" => "Append an agent reply with a stable retry identity.",
         "boss summon" => "Assign a new employee job; acceptance can queue before execution.",
         "boss prompt" | "prompt" => "Send work or a correction with explicit delivery semantics.",
         "boss transcript" | "read" => "Read retained transcript turns without starting work.",
