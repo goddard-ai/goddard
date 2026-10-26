@@ -183,6 +183,11 @@ impl Policy {
             self.healthy_since = None;
             return Err(WaitReason::MemoryPressure);
         }
+        if sample.fresh(now) && sample.cpu_percent.is_some_and(|cpu| cpu >= 40.0) {
+            self.healthy_since = None;
+            self.unknown_since = None;
+            return Err(WaitReason::CpuBusy);
+        }
         let known = sample.fresh(now) && sample.cpu_percent.is_some() && sample.memory.is_some();
         if !known {
             self.healthy_since = None;
@@ -197,10 +202,6 @@ impl Policy {
             };
         }
         self.unknown_since = None;
-        if sample.cpu_percent.is_none_or(|cpu| cpu >= 40.0) {
-            self.healthy_since = None;
-            return Err(WaitReason::CpuBusy);
-        }
         let since = *self.healthy_since.get_or_insert(now);
         let since = since.max(sample.healthy_since.unwrap_or(since));
         self.healthy_since = Some(since);
@@ -348,6 +349,19 @@ pub fn lower_thread_priority() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_memory_telemetry_does_not_override_known_busy_cpu() {
+        let start = Instant::now();
+        let mut policy = Policy::default();
+        for elapsed in [0, 30, 60] {
+            let now = start + Duration::from_secs(elapsed);
+            assert_eq!(
+                policy.eligibility(observation(now, Some(80.0), None), now, Unit::Bounded),
+                Err(WaitReason::CpuBusy)
+            );
+        }
+    }
 
     #[test]
     fn queue_deduplicates_and_applies_backpressure_before_accepting_work() {

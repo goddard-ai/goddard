@@ -29,6 +29,7 @@ impl CatalogCacheWriter {
         std::thread::Builder::new()
             .name("waku-catalog-cache".into())
             .spawn(move || {
+                waku_maintenance::maintenance::lower_thread_priority();
                 while receiver.recv().is_ok() {
                     loop {
                         let updates = std::mem::take(&mut *shared.lock());

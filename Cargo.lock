@@ -11463,6 +11463,7 @@ dependencies = [
  "url",
  "uuid",
  "waku-localization",
+ "waku-maintenance",
  "waku-protocol",
  "windows-sys 0.61.2",
  "zip 8.6.0",
@@ -11502,6 +11503,7 @@ dependencies = [
  "tungstenite 0.30.0",
  "url",
  "uuid",
+ "waku-maintenance",
  "waku-protocol",
  "waku-share",
 ]
@@ -11644,6 +11646,18 @@ dependencies = [
  "ctor",
  "rust-i18n",
  "waku-protocol",
+]
+
+[[package]]
+name = "waku-maintenance"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "dirs 6.0.0",
+ "libc",
+ "parking_lot",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
