@@ -1354,8 +1354,6 @@ pub(super) enum SidebarRow {
     Projects,
     /// Opens the GitHub notification inbox and scrolls with history.
     Inbox,
-    /// Opens the Automations page and scrolls with history.
-    Automations,
     /// Reveals the next batch of finished employees in the boss's Outcomes
     /// group.
     BossShowMore(waku_client::DaemonKey),
@@ -1491,7 +1489,7 @@ pub(super) fn sidebar_shortcut_chip_label(index: usize) -> String {
 
 fn sidebar_row_height(row: SidebarRow) -> Pixels {
     px(match row {
-        SidebarRow::Search | SidebarRow::Projects | SidebarRow::Inbox | SidebarRow::Automations => {
+        SidebarRow::Search | SidebarRow::Projects | SidebarRow::Inbox => {
             SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP
         }
         SidebarRow::Header(SidebarGroup::Terminals | SidebarGroup::Deliverables) => {
@@ -2309,44 +2307,42 @@ impl Waku {
             .child(row)
     }
 
-    /// The Automations page's entry — the same action-row contract as
-    /// Projects and Inbox.
-    fn render_sidebar_automations(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    /// The Automations page's footer button, alongside Settings and Keybindings.
+    fn render_sidebar_automations(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
-        let open = self.automations_page;
-        let row = self
-            .render_sidebar_action_row(
-                "sidebar-automations",
-                "icons/automations.svg",
+        div()
+            .id("sidebar-automations")
+            .tab_index(0)
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .w(px(26.0))
+            .h(px(26.0))
+            .flex_none()
+            .rounded(px(8.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .when(self.automations_page, |element| {
+                element.bg(theme.sidebar_item_background)
+            })
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text_with_action(
                 tr!("sidebar.automations"),
-                ShortcutHint::action(&ToggleAutomationsPage),
-                window,
-                cx,
-            )
-            .when(open, |element| element.bg(theme.sidebar_item_background))
+                &ToggleAutomationsPage,
+            ))
+            .child(icon("icons/automations.svg", 14.0, theme.text_tertiary))
             .on_click(cx.listener(|this, _, window, cx| {
-                if this.automations_page {
-                    this.close_automations_page(cx);
-                } else {
-                    this.open_automations_page(window, cx);
-                }
+                this.toggle_automations_page_action(&ToggleAutomationsPage, window, cx);
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    if this.automations_page {
-                        this.close_automations_page(cx);
-                    } else {
-                        this.open_automations_page(window, cx);
-                    }
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.toggle_automations_page_action(&ToggleAutomationsPage, window, cx);
                     cx.stop_propagation();
                 }
-            }));
-        div()
-            .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_ACTION_ROW_GAP))
-            .pt(px(SIDEBAR_ACTION_ROW_GAP))
-            .flex_none()
-            .child(row)
+            }))
     }
 
     /// The notification inbox's entry — same action-row contract as
@@ -2703,6 +2699,9 @@ impl Waku {
                                 }
                             })),
                     )
+            })
+            .when(self.state.automations_enabled, |footer| {
+                footer.child(self.render_sidebar_automations(cx))
             })
             .when_some(self.render_transfer_indicator(cx), |footer, ring| {
                 footer.child(ring)
@@ -4288,10 +4287,6 @@ impl Waku {
         if self.state.github.inbox_enabled {
             rows.push(SidebarRow::Inbox);
         }
-        // Automations is an experiment too — the row leaves with the card.
-        if self.state.automations_enabled {
-            rows.push(SidebarRow::Automations);
-        }
 
         // The Terminals group sits between the search field and the session
         // history. Its header renders even with no terminals — expanding an
@@ -4837,9 +4832,6 @@ impl Waku {
             SidebarRow::Search => self.render_sidebar_search(window, cx).into_any_element(),
             SidebarRow::Projects => self.render_sidebar_projects(window, cx).into_any_element(),
             SidebarRow::Inbox => self.render_sidebar_inbox(window, cx).into_any_element(),
-            SidebarRow::Automations => self
-                .render_sidebar_automations(window, cx)
-                .into_any_element(),
             SidebarRow::BossShowMore(key) => {
                 self.render_boss_employee_show_more(key, SidebarGroup::Outcomes, cx)
             }
