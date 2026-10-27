@@ -1,1 +1,1 @@
-- Workspace cleanup waits for daemon checkpoint captures that are already queued or running, including their durable checkpoint writes.
+- Workspace cleanup waits for daemon checkpoint captures that are already queued or running, including their durable checkpoint writes. Successful retries now release failed checkpoint-save holds without clearing unconfirmed provider stops.

@@ -513,13 +513,24 @@ impl WakuBackend {
         let capture_writer = self
             .runtime_lifecycles
             .observe_starting_writer(&cwd, witness.clone());
+        let key = self
+            .runtime_lifecycles
+            .checkpoint_owed(&cwd, session_id, turn_count);
+        // Before a Git operation starts, this attempt owns no process. A
+        // successful Git result restores that proof even if persistence fails.
+        let mut physical_writer_quiet = true;
         let result = crate::checkpoint::with_turn_capture_deadline(|| {
-            self.capture_turn_checkpoint_inner(cwd, session_id, turn_count, untouched)
+            self.capture_turn_checkpoint_inner(
+                cwd,
+                session_id,
+                turn_count,
+                untouched,
+                &mut physical_writer_quiet,
+            )
         });
-        if result.is_ok() {
-            // Successful capture includes joined process readers and a
-            // positively waited child. A failed capture may lack that proof.
-            witness.confirm();
+        if result.is_ok() || physical_writer_quiet {
+            self.runtime_lifecycles
+                .checkpoint_completed(&key, &witness, result.is_ok());
         } else {
             capture_writer.unqualified();
         }
@@ -532,6 +543,7 @@ impl WakuBackend {
         session_id: Uuid,
         turn_count: usize,
         untouched: bool,
+        physical_writer_quiet: &mut bool,
     ) -> anyhow::Result<Checkpoint> {
         let capture_lock = self
             .checkpoint_capture_locks
@@ -597,6 +609,7 @@ impl WakuBackend {
         );
 
         let capture_started = std::time::Instant::now();
+        *physical_writer_quiet = false;
         let checkpoint = if untouched {
             crate::checkpoint::capture_untouched_turn(&cwd, session_id, turn_count)?
         } else {
@@ -606,6 +619,9 @@ impl WakuBackend {
             || crate::checkpoint::capture_turn(&cwd, session_id, turn_count),
             Ok,
         )?;
+        // Capture returned successfully after its command/readers completed.
+        // Durable checkpoint persistence is a separate obligation below.
+        *physical_writer_quiet = true;
         // The transcript holds a "checking for changes" card open for this
         // round trip — the elapsed line is the only record of how long the
         // worktree snapshot actually took.

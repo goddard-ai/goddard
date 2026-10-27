@@ -6,12 +6,23 @@
 use super::*;
 use driver::{WriterCompletion, WriterCompletionState};
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub(super) struct CheckpointCaptureKey {
+    cwd: PathBuf,
+    session_id: Uuid,
+    turn_count: usize,
+}
+
 #[derive(Default)]
 pub(super) struct RetiredWriters {
     pending: Vec<(PathBuf, WriterCompletion)>,
     // An unqualified transport leaves one conservative marker per workspace,
     // rather than retaining a driver or accumulating one marker per restart.
     unknown: HashSet<PathBuf>,
+    // A capture/persistence request is still owed even when its own physical
+    // Git work is known quiet. Matching successful retries can fulfill it;
+    // they must never erase the unrelated unknown-provider set above.
+    checkpoints: HashSet<CheckpointCaptureKey>,
 }
 
 /// Keep attempted launches visible before a RuntimeEntry exists. A failed
@@ -82,6 +93,39 @@ impl Drop for StartingWriter {
 }
 
 impl RuntimeLifecycles {
+    pub(super) fn checkpoint_owed(
+        &self,
+        cwd: &Path,
+        session_id: Uuid,
+        turn_count: usize,
+    ) -> CheckpointCaptureKey {
+        let key = CheckpointCaptureKey {
+            cwd: dunce::canonicalize(cwd).unwrap_or_else(|_| cwd.to_owned()),
+            session_id,
+            turn_count,
+        };
+        // Publish debt before entering the capture lock. A successful same-key
+        // capture can fulfill concurrent duplicate requests too; late failures
+        // never reinsert already-fulfilled debt.
+        self.retired_writers.lock().checkpoints.insert(key.clone());
+        key
+    }
+
+    pub(super) fn checkpoint_completed(
+        &self,
+        key: &CheckpointCaptureKey,
+        witness: &WriterCompletion,
+        persisted: bool,
+    ) {
+        let mut writers = self.retired_writers.lock();
+        if persisted {
+            writers.checkpoints.remove(key);
+        }
+        // Publish debt/fulfillment and physical completion under the same lock
+        // observed by cleanup; there is no unaccounted writer transition.
+        witness.confirm();
+    }
+
     pub(super) fn observe_starting_writer(
         self: &Arc<Self>,
         cwd: &Path,
@@ -134,6 +178,7 @@ impl RuntimeLifecycles {
             .iter()
             .cloned()
             .chain(retired.pending.iter().map(|(path, _)| path.clone()))
+            .chain(retired.checkpoints.iter().map(|key| key.cwd.clone()))
             .collect()
     }
 }
@@ -670,7 +715,7 @@ while not pathlib.Path('release-' + name).exists():
     }
 
     #[test]
-    fn failed_ending_checkpoint_keeps_bounded_unqualified_workspace_evidence() {
+    fn failed_checkpoint_persistence_keeps_retryable_debt_without_erasing_unknown_writers() {
         let root =
             std::env::temp_dir().join(format!("checkpoint-failure-writer-{}", Uuid::new_v4()));
         let (backend, session) = super::super::tests::surface_test_backend(&root);
@@ -700,12 +745,96 @@ while not pathlib.Path('release-' + name).exists():
             );
         }
         let observations = backend.runtime_lifecycles.retired_writers.lock();
-        assert_eq!(observations.unknown.len(), 1);
         assert!(
-            observations.pending.is_empty(),
-            "failed retries accumulated per-attempt witnesses"
+            observations.unknown.is_empty(),
+            "completed Git work became unknown ownership"
+        );
+        assert_eq!(observations.checkpoints.len(), 1);
+        assert!(
+            observations
+                .pending
+                .iter()
+                .all(|(_, witness)| witness.state() == WriterCompletionState::Confirmed),
+            "failed persistence left an unconfirmed physical capture"
         );
         drop(observations);
+        // A distinct provider whose ownership is unknown cannot be cleared by
+        // a checkpoint retry, even in the same workspace.
+        let unknown = backend
+            .runtime_lifecycles
+            .observe_starting_writer(&path, WriterCompletion::default());
+        drop(unknown);
+        rusqlite::Connection::open(backend.task_store.path())
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_checkpoint;")
+            .unwrap();
+        assert!(
+            backend
+                .capture_turn_checkpoint(path.clone(), session, count, false)
+                .is_ok()
+        );
+        assert!(
+            backend
+                .runtime_lifecycles
+                .retired_writers
+                .lock()
+                .checkpoints
+                .is_empty()
+        );
+        assert!(
+            backend
+                .require_no_observed_workspace_writers(&path)
+                .is_err(),
+            "successful retry cleared unrelated provider uncertainty"
+        );
+        // Exercise the same production retry path without an unknown provider.
+        let other = root.join("other");
+        let (clean_backend, clean_session) = super::super::tests::surface_test_backend(&other);
+        let clean_path = other.join("repo");
+        let clean_count = clean_backend
+            .task_store
+            .load_session_detail(clean_session)
+            .unwrap()
+            .unwrap()
+            .turns
+            .last()
+            .unwrap()
+            .turn_count;
+        let connection = rusqlite::Connection::open(clean_backend.task_store.path()).unwrap();
+        connection.execute_batch("CREATE TRIGGER fail_checkpoint BEFORE UPDATE ON session_details BEGIN SELECT RAISE(ABORT, 'fixture checkpoint persistence failure'); END;").unwrap();
+        assert!(
+            clean_backend
+                .capture_turn_checkpoint(clean_path.clone(), clean_session, clean_count, false)
+                .is_err()
+        );
+        assert!(
+            clean_backend
+                .require_no_observed_workspace_writers(&clean_path)
+                .is_err()
+        );
+        connection
+            .execute_batch("DROP TRIGGER fail_checkpoint;")
+            .unwrap();
+        assert!(
+            clean_backend
+                .capture_turn_checkpoint(clean_path.clone(), clean_session, clean_count + 1, false)
+                .is_ok()
+        );
+        assert!(
+            clean_backend
+                .require_no_observed_workspace_writers(&clean_path)
+                .is_err(),
+            "a different checkpoint cleared the failed capture's debt"
+        );
+        assert!(
+            clean_backend
+                .capture_turn_checkpoint(clean_path.clone(), clean_session, clean_count, false)
+                .is_ok()
+        );
+        clean_backend
+            .require_no_observed_workspace_writers(&clean_path)
+            .unwrap();
+        drop(clean_backend);
         drop(backend);
         std::fs::remove_dir_all(root).unwrap();
     }

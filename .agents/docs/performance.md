@@ -114,10 +114,15 @@
 - Daemon turn checkpoints register workspace-writer evidence before waiting for
   their capture lock, and retain it through Git capture and durable checkpoint
   persistence. Cleanup must check that evidence even after the provider exits.
-  Successful capture confirms completion; errors retain one unqualified marker
-  per workspace. This process-local precondition does not replace destructive
-  workspace admission, durable failure recovery, or queued desktop work that has
-  not yet reached the daemon.
+  Successful capture confirms completion. Publish owed checkpoint work, keyed
+  by canonical workspace/session/turn, before waiting for its lock. Errors before
+  spawning Git or after successful Git completion retain that debt without
+  inventing an unknown physical writer; only a matching successful retry clears
+  it. An error during Git capture still retains unqualified writer evidence per
+  workspace. Checkpoint success must never erase unrelated unknown providers.
+  These process-local preconditions do not replace destructive workspace
+  admission, durable failure recovery, or queued desktop work that has not yet
+  reached the daemon.
 - Keep per-frame work proportional to what is on screen. Long collections are
   virtualized with `list()`, and a row builder must not rebuild whole-session
   state; hoist that to a cache refreshed once per frame.
