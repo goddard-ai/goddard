@@ -24,6 +24,9 @@ pub(super) fn remove_runtime_entry(
     }
     owner.set(None);
     let removed = sessions.remove(&session_id);
+    if let Some(entry) = &removed {
+        lifecycles.remember_retired_writer(entry);
+    }
     drop(sessions);
     if clear {
         agent.clear_session(session_id);
@@ -381,6 +384,9 @@ impl WakuBackend {
         }
         // A launch that never came up keeps no credential.
         let sandboxed_launch = options.sandbox.is_some();
+        let _starting_writer = self
+            .runtime_lifecycles
+            .observe_starting_writer(&cwd, event_sender.writer_completion());
         let (handle, stable) = self.start_runtime_driver(
             session_id,
             runtime_id,
@@ -560,6 +566,7 @@ impl WakuBackend {
         let mut registered = self.sessions.lock();
         let previous = registered.insert(session_id, entry);
         if let Some(previous) = &previous {
+            self.runtime_lifecycles.remember_retired_writer(previous);
             previous.driver.begin_shutdown();
         }
         drop_detached(previous);

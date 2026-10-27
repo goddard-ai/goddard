@@ -1023,6 +1023,10 @@ impl driver::DriverControl for PlanGate {
     fn begin_shutdown(&self) {
         self.driver.begin_shutdown();
     }
+
+    fn writer_completion(&self) -> driver::WriterCompletion {
+        self.driver.writer_completion()
+    }
     fn respond(&self, request_id: String, option_id: String) {
         self.driver.respond(request_id, option_id);
     }

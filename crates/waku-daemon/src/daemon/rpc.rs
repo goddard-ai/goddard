@@ -1887,6 +1887,28 @@ impl Backend for WakuBackend {
                 },
             }),
             Command::Workspace { operation } => {
+                match &operation {
+                    WorkspaceOperation::RemoveWorktree { path, .. }
+                    | WorkspaceOperation::ArchiveProjectlessWorkspace { path } => {
+                        self.require_no_observed_workspace_writers(path)?;
+                    }
+                    WorkspaceOperation::CaptureRef { cwd, git_ref }
+                        if git_ref
+                            .strip_prefix("refs/waku/session-")
+                            .and_then(|name| name.strip_suffix("-archive"))
+                            .and_then(|id| Uuid::parse_str(id).ok())
+                            .is_some_and(|id| {
+                                waku_git::checkpoint::archive_ref(id) == *git_ref
+                            }) =>
+                    {
+                        // Preservation must follow writer completion too: a
+                        // writer stopping after an earlier snapshot can leave
+                        // changes that snapshot never captured. Ordinary turn
+                        // checkpoints deliberately remain available while live.
+                        self.require_no_observed_workspace_writers(cwd)?;
+                    }
+                    _ => {}
+                }
                 // Commit/push/land move local refs — prompt the share
                 // poll so synced branches push and notify promptly
                 // rather than waiting out the interval.

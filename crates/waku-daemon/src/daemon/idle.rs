@@ -38,6 +38,7 @@ pub(super) fn reap_idle_runtimes(
                 return None;
             }
             let entry = sessions.remove(&session_id)?;
+            lifecycles.remember_retired_writer(&entry);
             drop(sessions);
             drop(state);
             owner.set(None);
@@ -61,6 +62,7 @@ impl WakuBackend {
             return None;
         }
         let entry = sessions.remove(&session)?;
+        self.runtime_lifecycles.remember_retired_writer(&entry);
         drop(sessions);
         drop(state);
         owner.set(None);

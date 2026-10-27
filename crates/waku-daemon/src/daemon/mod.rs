@@ -481,6 +481,7 @@ type RotationObserver = Arc<dyn Fn(waku_boss::rotation_oracle::RotationObservati
 
 #[derive(Default)]
 struct RuntimeLifecycles {
+    retired_writers: Mutex<workspace_writers::RetiredWriters>,
     locks: Mutex<HashMap<Uuid, Arc<ReentrantMutex<std::cell::Cell<Option<Uuid>>>>>>,
     shutting_down: std::sync::atomic::AtomicBool,
     #[cfg(test)]
@@ -723,6 +724,7 @@ mod runtime;
 mod summon;
 mod task_creation;
 mod transfer;
+mod workspace_writers;
 
 use driver_commands::*;
 use events::*;

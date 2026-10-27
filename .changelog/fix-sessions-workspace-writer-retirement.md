@@ -1,0 +1,1 @@
+- Archive snapshots and workspace removal now defer while an observed provider writer is running or its stop remains unconfirmed, including after its task runtime has been detached.

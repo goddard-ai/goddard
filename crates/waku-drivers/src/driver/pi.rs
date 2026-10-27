@@ -777,8 +777,11 @@ impl PiDriver {
             .name("waku-pi-process".into())
             .spawn(move || {
                 let status = child.wait();
-                let _ = reader_thread.join();
-                let _ = stderr_thread.join();
+                let reader_stopped = reader_thread.join().is_ok();
+                let stderr_stopped = stderr_thread.join().is_ok();
+                if status.is_ok() && reader_stopped && stderr_stopped {
+                    events.confirm_writer_stopped();
+                }
                 match status {
                     Ok(status) if !status.success() && last_visible_stderr.lock().is_none() => {
                         let _ = events.send(DriverEvent::localized_error(localized!(

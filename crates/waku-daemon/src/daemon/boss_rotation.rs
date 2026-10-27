@@ -1512,6 +1512,10 @@ impl crate::driver::DriverControl for RotationObservedDriver {
         self.inner.begin_shutdown();
     }
 
+    fn writer_completion(&self) -> driver::WriterCompletion {
+        self.inner.writer_completion()
+    }
+
     fn cancel_computer_use(&self) {
         self.inner.cancel_computer_use();
     }
@@ -1925,6 +1929,10 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
 
     fn begin_shutdown(&self) {
         self.inner.begin_shutdown();
+    }
+
+    fn writer_completion(&self) -> driver::WriterCompletion {
+        self.inner.writer_completion()
     }
 
     fn cancel_computer_use(&self) {

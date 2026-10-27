@@ -21,6 +21,8 @@ mod stable_projection;
 mod support;
 pub use stable_projection::NativeEventProjection;
 mod title_refresh;
+mod writer_completion;
+pub use writer_completion::{WriterCompletion, WriterCompletionState};
 
 pub use computer_use::ComputerUseRuntime;
 pub use computer_use::cli::Service as ComputerUseService;
@@ -60,6 +62,7 @@ pub struct DriverEventSender {
     events: Sender<DriverEvent>,
     wake: smol::channel::Sender<()>,
     process_anchor: Option<Arc<PathBuf>>,
+    writer_completion: WriterCompletion,
 }
 
 impl DriverEventSender {
@@ -70,11 +73,16 @@ impl DriverEventSender {
         self
     }
 
+    pub fn writer_completion(&self) -> WriterCompletion {
+        self.writer_completion.clone()
+    }
+
     pub fn process_anchor(&self) -> Option<&std::path::Path> {
         self.process_anchor.as_deref().map(PathBuf::as_path)
     }
 
     pub fn record_process(&self, pid: u32) -> std::io::Result<()> {
+        self.writer_completion.register();
         if let Some(path) = self.process_anchor() {
             let birth = i32::try_from(pid)
                 .ok()
@@ -83,6 +91,12 @@ impl DriverEventSender {
             std::fs::write(path, format!("{pid} {birth}"))?;
         }
         Ok(())
+    }
+
+    /// Confirm only after successfully reaping the owned child and joining
+    /// its readers. Deliberately independent of ProcessExited notifications.
+    pub(super) fn confirm_writer_stopped(&self) {
+        self.writer_completion.confirm();
     }
 
     pub fn send(&self, event: DriverEvent) -> Result<(), SendError<DriverEvent>> {
@@ -118,6 +132,7 @@ pub fn event_channel(
             events,
             wake,
             process_anchor: None,
+            writer_completion: WriterCompletion::default(),
         },
         receiver,
     )
@@ -132,11 +147,20 @@ pub fn test_event_channel() -> (DriverEventSender, Receiver<DriverEvent>) {
 #[derive(Clone)]
 pub struct DriverHandle {
     inner: Arc<dyn DriverControl>,
+    writer_completion: WriterCompletion,
 }
 
 impl DriverHandle {
     pub fn from_control(control: Arc<dyn DriverControl>) -> Self {
-        Self { inner: control }
+        let writer_completion = control.writer_completion();
+        Self {
+            inner: control,
+            writer_completion,
+        }
+    }
+
+    pub fn writer_completion(&self) -> WriterCompletion {
+        self.writer_completion.clone()
     }
 
     pub fn coordinator_control(&self) -> &dyn DriverControl {
@@ -275,6 +299,12 @@ pub enum AgentSurfaceDelivery {
 }
 
 pub trait DriverControl: Send + Sync {
+    /// Wrappers forward their underlying writer's witness. Unqualified
+    /// transports stay unknown; a shutdown request never manufactures proof.
+    fn writer_completion(&self) -> WriterCompletion {
+        WriterCompletion::default()
+    }
+
     /// Default adapters cannot deliver exact persistent Boss instructions.
     /// This must never fall back to `prompt` or synthesize a receipt.
     fn submit_coordinator_package(
@@ -471,6 +501,7 @@ pub fn start_cloud(
     events: DriverEventSender,
 ) -> anyhow::Result<DriverHandle> {
     Ok(DriverHandle {
+        writer_completion: events.writer_completion.clone(),
         inner: Arc::new(cloud::CloudDriver::start(provider, options, events)?),
     })
 }
@@ -480,6 +511,7 @@ pub fn start_local(
     options: DriverStartOptions,
     events: DriverEventSender,
 ) -> anyhow::Result<DriverHandle> {
+    let writer_completion = events.writer_completion.clone();
     let inner: Arc<dyn DriverControl> = match provider {
         // Antigravity has no driver: its sessions are the CLI's own TUI
         // running in a client-owned terminal, so there is nothing for the
@@ -523,7 +555,10 @@ pub fn start_local(
         // runtime since the SDK's process and transport code is Tokio-native.
         ProviderKind::Copilot => Arc::new(copilot::CopilotDriver::start(options, events)?),
     };
-    Ok(DriverHandle { inner })
+    Ok(DriverHandle {
+        inner,
+        writer_completion,
+    })
 }
 
 #[cfg(test)]
@@ -555,6 +590,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
         use std::time::{Duration, Instant};
 
+        let mut previous_witness: Option<WriterCompletion> = None;
         for provider in [
             ProviderKind::Claude,
             ProviderKind::Amp,
@@ -602,6 +638,12 @@ pathlib.Path("provider-stopped").write_text("stdin closed")
                 events,
             )
             .unwrap();
+            let witness = driver.writer_completion();
+            assert_eq!(witness.state(), WriterCompletionState::Pending);
+            if let Some(previous) = &previous_witness {
+                assert_eq!(previous.state(), WriterCompletionState::Confirmed);
+                assert!(!previous.same_writer(&witness));
+            }
             let forwarder = driver.clone();
             // The real forwarder retains its handle until ProcessExited. A
             // shutdown deferred to final Drop creates a circular wait here.
@@ -624,6 +666,8 @@ pathlib.Path("provider-stopped").write_text("stdin closed")
                 root.join("provider-stopped").is_file(),
                 "{provider:?} did not close provider stdin"
             );
+            assert_eq!(witness.state(), WriterCompletionState::Confirmed);
+            previous_witness = Some(witness);
             drop(forwarder);
             std::fs::remove_dir_all(root).unwrap();
         }

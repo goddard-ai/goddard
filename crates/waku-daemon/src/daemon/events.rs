@@ -641,7 +641,13 @@ pub(super) fn forward_driver_events(
                     sessions
                         .get(&session_id)
                         .is_some_and(|entry| entry.runtime_id == runtime_id)
-                        .then(|| sessions.remove(&session_id))
+                        .then(|| {
+                            let removed = sessions.remove(&session_id);
+                            if let Some(entry) = &removed {
+                                lifecycles.remember_retired_writer(entry);
+                            }
+                            removed
+                        })
                         .flatten()
                 };
                 if removed.is_some() {
@@ -1224,6 +1230,9 @@ pub(super) fn forward_driver_events(
                     .is_some_and(|entry| entry.runtime_id == runtime_id)
                 {
                     let removed = sessions.remove(&session_id);
+                    if let Some(entry) = &removed {
+                        lifecycles.remember_retired_writer(entry);
+                    }
                     agent.clear_session(session_id);
                     repo_maps.0.lock().sessions.remove(&session_id);
                     removed
