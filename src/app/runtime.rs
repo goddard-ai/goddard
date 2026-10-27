@@ -1667,7 +1667,12 @@ impl Waku {
         supervisor: waku_client::DaemonSupervisor,
     ) {
         let clients = supervisor.subscribe_clients();
-        let results = self.task_state_sync_tx.clone();
+        let (results, retired) = self.task_state_sync_tx.bind(key);
+        if retired.is_some() {
+            self.background_executor
+                .spawn(async move { drop(retired) })
+                .detach();
+        }
         let settings_updates = self.daemon_settings_tx.clone();
         let friends_updates = self.friends_tx.clone();
         let pairing_updates = self.pairing_tx.clone();
@@ -1766,7 +1771,7 @@ impl Waku {
                     let result = load_remote_task_state(&client).map_err(|error| error.to_string());
                     // Fresh connection: the daemon may have restarted and
                     // lost its in-memory incognito sessions.
-                    if results.send((key, result, true)).is_err() {
+                    if results.send((result, true)).is_err() {
                         return;
                     }
                     signal_event_pump(&event_wake);
@@ -1798,7 +1803,7 @@ impl Waku {
                                 }
                                 let result = load_remote_task_state(&client)
                                     .map_err(|error| error.to_string());
-                                if results.send((key, result, false)).is_err() {
+                                if results.send((result, false)).is_err() {
                                     return;
                                 }
                                 signal_event_pump(&event_wake);
@@ -1921,34 +1926,14 @@ impl Waku {
     }
 
     fn drain_task_state_sync_events(&mut self, cx: &mut Context<Self>) -> bool {
-        // Snapshots from several daemons interleave on one channel; keep the
-        // newest per daemon rather than only the newest overall.
-        let mut latest: HashMap<
-            waku_client::DaemonKey,
-            (Result<RemoteTaskStateSnapshot, String>, bool),
-        > = HashMap::new();
-        while let Ok((key, result, fresh)) = self.task_state_sync_events.try_recv() {
-            // Keep the newest snapshot but OR the fresh marker: a same-daemon
-            // revision that overtakes a post-reconnect load must not strip it
-            // — a wrongly retained incognito session self-heals on the next
-            // sync, a wrongly dropped one is lost.
-            if let Some((slot, was_fresh)) = latest.get_mut(&key) {
-                *slot = result;
-                *was_fresh |= fresh;
-            } else {
-                latest.insert(key, (result, fresh));
-            }
-        }
-        if latest.is_empty() {
+        let Some((key, update)) = self.task_state_sync_events.take_next() else {
             return false;
+        };
+        if let Some(error) = update.error {
+            eprintln!("could not refresh daemon task state: {error}");
         }
-        for (key, (result, fresh)) in latest {
-            match result {
-                Ok(snapshot) => self.apply_remote_task_state(key, snapshot, fresh, cx),
-                Err(error) => {
-                    eprintln!("could not refresh daemon task state: {error}");
-                }
-            }
+        if let Some(snapshot) = update.catalog {
+            self.apply_remote_task_state(key, snapshot, update.fresh, cx);
         }
         true
     }
@@ -3758,6 +3743,12 @@ impl Waku {
         self.state
             .projects
             .retain(|project| self.daemons.project_owner(project.id) != remote);
+        let retired = self.task_state_sync_events.revoke(remote);
+        if retired.is_some() {
+            self.background_executor
+                .spawn(async move { drop(retired) })
+                .detach();
+        }
         self.daemons.remove_remote(host);
         self.remote_daemon_settings.remove(&host);
         // Every probe answer the host left behind goes with it — the next
@@ -8775,7 +8766,7 @@ impl Waku {
                 || runtime.stream_remeasure_pending
         }) {
             EventPumpSchedule::StreamFrame
-        } else if app_write_pending {
+        } else if app_write_pending || self.task_state_sync_events.has_pending() {
             EventPumpSchedule::BackgroundOutput(Duration::from_millis(50))
         } else if let Some(delay) = self.next_timed_pump_delay() {
             EventPumpSchedule::BackgroundOutput(delay)

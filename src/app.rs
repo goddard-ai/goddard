@@ -3182,20 +3182,9 @@ pub struct Waku {
     /// Coalesced edge trigger for provider and background result queues. The
     /// payloads stay in their typed channels; this channel only wakes the UI.
     event_wake_tx: smol::channel::Sender<()>,
-    /// The bool marks a snapshot loaded over a fresh daemon connection —
-    /// true on first connect and every replacement after a restart, false
-    /// for same-daemon revision bumps. Incognito sessions read it to tell
-    /// "the daemon forgot me" apart from "someone deleted me".
-    task_state_sync_tx: Sender<(
-        waku_client::DaemonKey,
-        Result<RemoteTaskStateSnapshot, String>,
-        bool,
-    )>,
-    task_state_sync_events: Receiver<(
-        waku_client::DaemonKey,
-        Result<RemoteTaskStateSnapshot, String>,
-        bool,
-    )>,
+    /// Latest background catalog per host, preserving reconnect information.
+    task_state_sync_tx: waku_client::persistence::CatalogInboxSender,
+    task_state_sync_events: waku_client::persistence::CatalogInboxReceiver,
     /// `settingsChanged` broadcasts forwarded by the task-state sync worker:
     /// the authoritative daemon document each time another client — or an
     /// agent — rewrites it.
@@ -6213,7 +6202,8 @@ impl Waku {
         let (reset_credit_tx, reset_credit_events) = unbounded();
         let (agy_poll_tx, agy_poll_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
-        let (task_state_sync_tx, task_state_sync_events) = unbounded();
+        let (task_state_sync_tx, task_state_sync_events) =
+            waku_client::persistence::catalog_inbox();
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (daemon_recovery_tx, daemon_recovery_events) = unbounded();
         let (daemon_status_tx, daemon_status_events) = unbounded();

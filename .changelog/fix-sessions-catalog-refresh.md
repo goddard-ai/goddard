@@ -1,1 +1,1 @@
-- Reduced work when saving and synchronizing large task lists, including lists with many archived tasks and side chats.
+- Large task lists take less work to save and sync. Refreshes coalesce per host and apply across separate interface updates; late results cannot restore a removed host’s tasks.

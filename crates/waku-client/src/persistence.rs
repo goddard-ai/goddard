@@ -1,6 +1,9 @@
 //! Desktop-owned preferences and RPC proxies for daemon-owned task state.
 
 mod app_writer;
+mod catalog_inbox;
+pub use catalog_inbox::{CatalogInboxReceiver, CatalogInboxSender, CatalogSource, catalog_inbox};
+
 pub use app_writer::AppSaveTicket;
 mod catalog_writer;
 pub use catalog_writer::{CatalogCacheUpdate, CatalogCacheWriter};
