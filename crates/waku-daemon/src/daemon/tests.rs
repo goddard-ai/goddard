@@ -3912,7 +3912,7 @@ fn archived_runtime_stop_requires_current_archive_and_physical_generation() {
             let mut state = backend.task_state.lock();
             state.session_mut(id).unwrap().archived_at = Some(1234);
             backend.task_store.save(&mut state).unwrap();
-            backend.archived_runtime_retirements(&[id])
+            backend.archived_runtime_retirements(&[id], false)
         };
         assert_eq!(retirements.len(), 1);
         let generation = backend
@@ -4070,7 +4070,7 @@ fn archived_runtime_stop_revokes_parked_credentials_without_claiming_a_successor
             let mut state = backend.task_state.lock();
             state.session_mut(id).unwrap().archived_at = Some(1234);
             backend.task_store.save(&mut state).unwrap();
-            backend.archived_runtime_retirements(&[id])
+            backend.archived_runtime_retirements(&[id], false)
         };
         assert_eq!(retirements.len(), 1);
         let capture = Arc::new(CaptureDriver::default());
@@ -22692,3 +22692,6 @@ fn task_wireframes_require_opt_in_valid_documents_and_workspace_containment() {
     drop(backend);
     remove_tree(root);
 }
+
+#[path = "tests/metadata_retirement.rs"]
+mod metadata_retirement;

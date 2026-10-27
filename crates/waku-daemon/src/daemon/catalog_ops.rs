@@ -106,6 +106,11 @@ impl WakuBackend {
         if current.archived_at.is_none() {
             current.details_pruned = false;
         }
+        let retirements = if next.archived_at.is_some() {
+            self.archived_runtime_retirements(&[session_id], true)
+        } else {
+            Vec::new()
+        };
         let roots = state
             .sessions
             .iter()
@@ -132,9 +137,7 @@ impl WakuBackend {
         for id in ids {
             drop_detached(self.remove_runtime(id, None, true));
         }
-        if next.archived_at.is_some() {
-            drop_detached(self.remove_runtime(session_id, None, true));
-        }
+        self.retire_archived_runtimes(&retirements);
         Ok(ResponsePayload::SessionMetadataUpdated {
             session: next,
             applied: true,

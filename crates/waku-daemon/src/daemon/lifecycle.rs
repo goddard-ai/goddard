@@ -1006,7 +1006,7 @@ impl WakuBackend {
             }
             removed_ids = removed.into_iter().collect::<Vec<_>>();
             self.task_store.save(&mut state)?;
-            retirements = self.archived_runtime_retirements(&archived_ids);
+            retirements = self.archived_runtime_retirements(&archived_ids, false);
         }
         // A queued employee's shell is memory-only — the archived flag a
         // restart would never see. The roster record carries the stop

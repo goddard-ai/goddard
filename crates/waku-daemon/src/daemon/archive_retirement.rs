@@ -6,6 +6,7 @@ pub(super) struct ArchivedRuntimeRetirement {
     session_id: Uuid,
     archive_generation: Uuid,
     runtime: Option<(Uuid, WriterCompletion)>,
+    clear_state: bool,
 }
 
 impl WakuBackend {
@@ -15,6 +16,7 @@ impl WakuBackend {
     pub(super) fn archived_runtime_retirements(
         &self,
         ids: &[Uuid],
+        clear_state: bool,
     ) -> Vec<ArchivedRuntimeRetirement> {
         let mut retirements = Vec::new();
         for id in ids {
@@ -28,6 +30,7 @@ impl WakuBackend {
                     session_id: *id,
                     archive_generation,
                     runtime,
+                    clear_state,
                 }),
                 Ok(None) => {}
                 Err(error) => eprintln!("could not qualify archived runtime stop: {error}"),
@@ -82,7 +85,7 @@ impl WakuBackend {
                 drop_detached(self.remove_runtime(
                     retirement.session_id,
                     retirement.runtime.as_ref().map(|(id, _)| *id),
-                    false,
+                    retirement.clear_state,
                 ));
             }
         }
