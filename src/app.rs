@@ -1676,6 +1676,8 @@ struct SessionRuntime {
     options_generation: u64,
     events: Receiver<driver::DriverEventBatch>,
     pending_events: VecDeque<DriverEvent>,
+    /// Finite received prefix which must land before local Stop settles.
+    cancel_backlog: Option<cancel_backlog::CancelBacklog>,
     /// Presentation metadata for steering messages awaiting the provider's
     /// accepted/rejected acknowledgement, in transport order.
     pending_steers: VecDeque<ComposerSubmission>,
@@ -4529,6 +4531,7 @@ mod boss;
 mod boss_history;
 mod boss_moods;
 mod branches;
+mod cancel_backlog;
 mod catalog_sync;
 mod checkout_status;
 mod close_dialog;

@@ -21,6 +21,20 @@
 - Move the work to `cx.background_executor().spawn`, store the result on the
   entity, and `cx.notify()` when it lands. Render then reads only that store,
   and a miss means "not known yet" and must degrade gracefully.
+- Local Stop captures a finite received-event prefix without walking it.
+  Apply it through the normal bounded event pump before settling the turn;
+  preserve smoothing text and replay cursors and suppress queued follow-ups
+  through that prefix. Further deliveries cannot extend it. Provider Cancel
+  and required CloseSession commands still go out immediately. Archive/Dormant
+  retain the local attachment until its received prefix lands, and final
+  retirement must not send a second close that could target a successor.
+  Workspace cleanup and new submissions wait for this local drain. Remember
+  new sends during it separately from pre-Stop queued messages, so a buffered
+  finish cannot strand a new send or restart an old queue by itself. A buffered
+  runtime-loss event must not auto-resume while this local Stop is pending.
+  This is cooperative slicing; an individual handler and final settlement
+  still need auditing, and a drained UI queue does not prove physical writer
+  retirement.
 - Resolve a whole session or collection in one background pass instead of
   probing per item, and guard it with a generation counter so a result from a
   superseded pass cannot overwrite newer state.

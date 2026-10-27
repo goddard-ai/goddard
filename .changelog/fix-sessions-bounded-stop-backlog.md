@@ -1,0 +1,1 @@
+- Stopping, archiving, or making a task dormant now applies buffered provider output in small batches instead of draining it all at once.

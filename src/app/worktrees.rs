@@ -899,6 +899,10 @@ impl Waku {
             let quiet = !session.is_busy()
                 && session.queued_messages.is_empty()
                 && !self.submission_preparations.contains(&session_id)
+                && !self
+                    .runtimes
+                    .get(&session_id)
+                    .is_some_and(|runtime| runtime.cancel_backlog.is_some())
                 && !self.session_has_live_detached_work(session_id)
                 && !self.ending_checkpoint_pending(session_id);
             if !quiet {

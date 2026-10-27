@@ -1265,7 +1265,8 @@ impl Waku {
                 if runtime_lost {
                     // A resumable turn moves onto a fresh runtime; the dead
                     // handle still leaves the map via `false` below.
-                    if self.resume_lost_runtime(session_id, cx) {
+                    if runtime.cancel_backlog.is_none() && self.resume_lost_runtime(session_id, cx)
+                    {
                         if let Some(previous_kinds) = previous_kinds.as_deref() {
                             self.splice_active_transcript_rows_after_visibility_change(
                                 previous_kinds,

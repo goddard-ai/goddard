@@ -5646,6 +5646,16 @@ impl Waku {
 
     pub(super) fn evict_session_runtime(&mut self, session_id: Uuid) {
         let _timing = waku_client::diagnostics::measure(waku_client::diagnostics::Work::Teardown);
+        if let Some(runtime) = self.runtimes.get_mut(&session_id)
+            && let Some(backlog) = runtime.cancel_backlog.as_mut()
+        {
+            // Close the provider now, retaining this local subscription until
+            // the normal budgeted pump has applied its received text/cursors.
+            if backlog.evict() {
+                runtime.driver.close();
+            }
+            return;
+        }
         if let Some(runtime) = self.runtimes.remove(&session_id) {
             // Busy tasks were cancelled by the caller. Closing this handle
             // now makes the daemon release the provider process.
@@ -6975,9 +6985,13 @@ impl Waku {
     /// `CANCEL_DRAIN_TIMEOUT` the entry is dead: a provider that never
     /// resolves the cancelled prompt must not park the queue forever.
     pub(super) fn session_is_draining_cancel(&self, session_id: Uuid) -> bool {
-        self.cancel_drains
+        self.runtimes
             .get(&session_id)
-            .is_some_and(|since| since.elapsed() < CANCEL_DRAIN_TIMEOUT)
+            .is_some_and(|runtime| runtime.cancel_backlog.is_some())
+            || self
+                .cancel_drains
+                .get(&session_id)
+                .is_some_and(|since| since.elapsed() < CANCEL_DRAIN_TIMEOUT)
     }
 
     /// A submission whose preparation the user stopped never reached a
@@ -7130,6 +7144,13 @@ impl Waku {
 
     pub(super) fn cancel_session_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         self.escape_stop_confirmation.clear();
+        if self
+            .runtimes
+            .get(&session_id)
+            .is_some_and(|runtime| runtime.cancel_backlog.is_some())
+        {
+            return;
+        }
         if !self.runtimes.contains_key(&session_id)
             && self.state.sessions.iter().any(|session| {
                 session.id == session_id
@@ -7175,7 +7196,7 @@ impl Waku {
                 self.stop_background_work(session_id, key, cx);
             }
         }
-        let mut runtime = self.runtimes.remove(&session_id);
+        let runtime = self.runtimes.remove(&session_id);
         if let Some(runtime) = runtime.as_ref() {
             runtime.driver.cancel();
             if retain_runtime {
@@ -7185,43 +7206,23 @@ impl Waku {
                 runtime.driver.cancel_computer_use();
             }
         }
-        // Do not leave already-received text in the smoothing queue: once the
-        // message is marked complete, a later delta would otherwise create a
-        // second assistant bubble. Show the received portion immediately.
-        // Buffered turn-completion events also must not start queued
-        // follow-ups: the user asked to stop, not to continue.
-        let mut keep_runtime = true;
-        if let Some(runtime) = runtime.as_mut() {
-            Self::collect_runtime_events(runtime, usize::MAX);
-            while let Some(event) = runtime.pending_events.pop_front() {
-                keep_runtime &= self.handle_driver_event(session_id, runtime, event, false, cx);
-                if !keep_runtime {
-                    break;
-                }
+        if let Some(mut runtime) = runtime {
+            // Capture a finite prefix without walking the inbox. New deliveries
+            // cannot make Stop an unbounded drain. Keep the turn open until the
+            // normal budgeted pump applies this prefix, so its text retains its
+            // original bubble and buffered finishes cannot launch follow-ups.
+            let mut backlog =
+                cancel_backlog::CancelBacklog::new(runtime.events.len(), retain_runtime);
+            // Amp has no stream interrupt. Stop its process now, while keeping
+            // this attachment's already-received prefix for the UI pump.
+            if !retain_runtime && backlog.evict() {
+                runtime.driver.close();
             }
-        }
-        let has_active_turn = self.settle_cancelled_turn(session_id, runtime.as_mut(), cx);
-        // A retained runtime keeps the provider process — and its native
-        // session — warm for the next prompt. Amp is the exception: with no
-        // stream interrupt, Stop must end the process and resume the thread
-        // later. A detached process or subagent also forces retention so
-        // Goddard can keep observing and stopping it.
-        if retain_runtime && keep_runtime {
-            if let Some(runtime) = runtime.take() {
-                self.runtimes.insert(session_id, runtime);
-                // The driver is still parked inside the cancelled turn's
-                // in-flight prompt: until the provider resolves it — killing
-                // its foreground terminal on the way — commands sent to the
-                // driver queue invisibly. Submissions take the visible
-                // follow-up queue until the settle lands.
-                if has_active_turn {
-                    self.cancel_drains.insert(session_id, Instant::now());
-                }
-            }
-        } else if let Some(runtime) = runtime {
-            self.cancel_drains.remove(&session_id);
-            runtime.driver.close();
-            runtime.retire_payloads(&self.background_executor);
+            runtime.cancel_backlog = Some(backlog);
+            self.runtimes.insert(session_id, runtime);
+            signal_event_pump(&self.event_wake_tx);
+        } else {
+            self.settle_cancelled_turn(session_id, None, cx);
         }
         self.remeasure_transcript_tail();
         self.save();

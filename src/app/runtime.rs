@@ -2529,6 +2529,7 @@ impl Waku {
                 options_generation: 0,
                 events,
                 pending_events: VecDeque::new(),
+                cancel_backlog: None,
                 pending_steers: VecDeque::new(),
                 deferred_steers: VecDeque::new(),
                 stream_phase: None,
@@ -6102,11 +6103,12 @@ impl Waku {
                     .sessions
                     .iter()
                     .find(|session| session.id == **session_id);
-                session_is_reapable(
-                    session,
-                    runtime.last_active_at.elapsed(),
-                    self.session_has_live_background_work(**session_id),
-                )
+                runtime.cancel_backlog.is_none()
+                    && session_is_reapable(
+                        session,
+                        runtime.last_active_at.elapsed(),
+                        self.session_has_live_background_work(**session_id),
+                    )
             })
             .map(|(session_id, _)| *session_id)
             .collect::<Vec<_>>();
@@ -6459,6 +6461,7 @@ impl Waku {
                 options_generation: 0,
                 events: prepared.events,
                 pending_events: VecDeque::new(),
+                cancel_backlog: None,
                 pending_steers: VecDeque::new(),
                 deferred_steers: VecDeque::new(),
                 stream_phase: None,
@@ -7649,6 +7652,18 @@ impl Waku {
             .detach();
             return;
         }
+        // Stop is still applying its received prefix. Record this explicit
+        // new send separately from follow-ups queued before Stop: even if a
+        // buffered finish settles the old turn, this send must resume later.
+        if let Some(backlog) = self
+            .runtimes
+            .get_mut(&session_id)
+            .and_then(|runtime| runtime.cancel_backlog.as_mut())
+        {
+            backlog.note_follow_up();
+            self.enqueue_follow_up_submission(session_id, submission, cx);
+            return;
+        }
         if self.ending_checkpoint_pending(session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
@@ -8443,13 +8458,10 @@ impl Waku {
     }
 
     pub(super) fn collect_runtime_events(runtime: &mut SessionRuntime, limit: usize) {
-        for batch in runtime.events.try_iter().take(limit) {
-            runtime.pending_events.push_back(batch.event);
-            if let Some(cursor) = batch.cursor {
-                runtime
-                    .pending_events
-                    .push_back(DriverEvent::RuntimeEventCursorAdvanced(cursor));
-            }
+        if let Some(backlog) = runtime.cancel_backlog.as_mut() {
+            backlog.collect(&runtime.events, &mut runtime.pending_events, limit);
+        } else {
+            cancel_backlog::collect(&runtime.events, &mut runtime.pending_events, limit);
         }
     }
 
@@ -8527,7 +8539,8 @@ impl Waku {
             cx.notify();
         }
         if self.runtimes.values().any(|runtime| {
-            !runtime.events.is_empty()
+            runtime.cancel_backlog.is_some()
+                || !runtime.events.is_empty()
                 || !runtime.pending_events.is_empty()
                 || runtime.stream_remeasure_pending
         }) {
@@ -8632,6 +8645,7 @@ impl Waku {
             let Some(mut runtime) = self.runtimes.remove(&session_id) else {
                 continue;
             };
+            let cancelling = runtime.cancel_backlog.is_some();
             let follow_up_remeasure = std::mem::take(&mut runtime.stream_remeasure_pending);
             if runtime.pending_events.is_empty() {
                 Self::collect_runtime_events(&mut runtime, EVENTS_PER_RUNTIME);
@@ -8702,15 +8716,49 @@ impl Waku {
                 } else {
                     runtime_changed = true;
                 }
-                keep_runtime &= self.handle_driver_event(session_id, &mut runtime, event, true, cx);
+                keep_runtime &=
+                    self.handle_driver_event(session_id, &mut runtime, event, !cancelling, cx);
                 if !keep_runtime {
                     break;
                 }
             }
+            if cancelling
+                && (!keep_runtime
+                    || runtime
+                        .cancel_backlog
+                        .as_ref()
+                        .is_some_and(|backlog| backlog.finished(&runtime.pending_events)))
+            {
+                // Received text and its replay cursors have landed. Only now
+                // close the turn and retire an evicted local attachment.
+                let backlog = runtime
+                    .cancel_backlog
+                    .take()
+                    .expect("cancellation was checked");
+                let has_active_turn =
+                    self.settle_cancelled_turn(session_id, Some(&mut runtime), cx);
+                keep_runtime = backlog.retains_runtime(keep_runtime);
+                self.cancel_drains.remove(&session_id);
+                if keep_runtime {
+                    if has_active_turn {
+                        self.cancel_drains.insert(session_id, Instant::now());
+                    }
+                } else {
+                    // Required closes went out at Stop/eviction. Exit/reset
+                    // handlers own their teardown too; never close a successor
+                    // by sending a delayed session-scoped CloseSession here.
+                    self.mark_background_work_lost(session_id);
+                }
+                if backlog.follow_up_requested() {
+                    self.defer_queue_drain(session_id);
+                }
+                runtime_changed = true;
+                force_save = true;
+            }
             runtime.stream_remeasure_pending = markdown_changed;
             if keep_runtime {
                 self.runtimes.insert(session_id, runtime);
-                if runtime_changed {
+                if runtime_changed && !cancelling {
                     self.retry_deferred_steers(session_id, cx);
                 }
             } else {
@@ -8718,7 +8766,9 @@ impl Waku {
                 // the old subscription and check now: its catalog update may
                 // have arrived while the old handle still owned our status.
                 runtime.retire_payloads(&self.background_executor);
-                self.start_runtime_attachment(session_id, cx);
+                if !cancelling {
+                    self.start_runtime_attachment(session_id, cx);
+                }
             }
             changed |= runtime_changed || background_changed;
             persisted_state_changed |= runtime_changed;
