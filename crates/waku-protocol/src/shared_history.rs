@@ -133,6 +133,22 @@ impl<T> SharedHistory<T> {
             remaining: self.len(),
         }
     }
+    /// Physical payload identity, without hashing or reading payload bytes.
+    /// This is a content-stability check only for data without interior mutation.
+    pub fn shares_items_with(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (None, None) => true,
+            (Some(left), Some(right)) => {
+                Arc::ptr_eq(left, right)
+                    || (left.len() == right.len()
+                        && left
+                            .iter()
+                            .zip(right.iter())
+                            .all(|(left, right)| Arc::ptr_eq(&left.0, &right.0)))
+            }
+            _ => self.is_empty() && other.is_empty(),
+        }
+    }
     pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         let remaining = self.len();
         IterMut {

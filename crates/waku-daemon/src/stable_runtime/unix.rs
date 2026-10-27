@@ -2802,6 +2802,7 @@ mod tests {
                     session_id: Uuid::nil(),
                     runtime_id: Uuid::nil(),
                     command: crate::Command::SaveTaskState {
+                        compact_response: None,
                         projects: Vec::new(),
                         live_session_ids: vec![session_id],
                         sessions: vec![stale_client],

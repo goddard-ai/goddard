@@ -329,6 +329,7 @@ mod metadata_tests {
                     session_id: Uuid::nil(),
                     runtime_id: Uuid::nil(),
                     command: Command::SaveTaskState {
+                        compact_response: None,
                         projects: Vec::new(),
                         live_session_ids: vec![id],
                         sessions: vec![stale],

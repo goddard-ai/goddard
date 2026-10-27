@@ -175,6 +175,30 @@ pub struct SessionDetailTail {
     pub prefix_signature: u64,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SessionDetailSaveOutcome {
+    /// The submitted message/block prefix is the committed prefix.
+    Applied,
+    /// Detail was saved with storage rewrites; do not reuse its input cursor.
+    Rewritten,
+    /// An explicit removal won the race; discard this stale save.
+    Removed,
+    /// The daemon kept its authoritative transcript while applying metadata.
+    DaemonOwned,
+    /// A tail could not be verified; retry a complete snapshot.
+    FullRequired,
+    /// Only metadata was applied; do not advance an incremental cursor.
+    MetadataOnly,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSaveReceipt {
+    pub session_id: Uuid,
+    pub detail: SessionDetailSaveOutcome,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(
     tag = "type",
@@ -415,6 +439,11 @@ pub enum Command {
         /// are complete sessions as before.
         #[serde(default)]
         session_tails: Vec<SessionDetailTail>,
+        /// Return list projections and precise save receipts instead of
+        /// echoing potentially large transcripts. Absent preserves old clients.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        compact_response: Option<bool>,
     },
     /// Explicitly remove one daemon-owned task. Ordinary state saves are
     /// merge-only so a stale client snapshot cannot delete tasks another
@@ -1571,6 +1600,9 @@ pub enum ResponsePayload {
     },
     TaskStateSaved {
         sessions: Vec<AgentSession>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        receipts: Option<Vec<SessionSaveReceipt>>,
     },
     /// The daemon-owned friends document, as read for `getFriends`.
     Friends {
@@ -1886,10 +1918,12 @@ mod tests {
                 transcript_blocks_from: 2,
                 prefix_signature: 42,
             }],
+            compact_response: None,
         };
 
         let json = serde_json::to_value(&command).unwrap();
         assert_eq!(json["type"], "saveTaskState");
+        assert!(json.get("compactResponse").is_none());
         assert_eq!(
             json["sessionTails"][0]["sessionId"],
             "00000000-0000-0000-0000-000000000007"
@@ -1902,11 +1936,24 @@ mod tests {
         // session entry is a complete save, as before.
         let mut legacy = json.clone();
         legacy.as_object_mut().unwrap().remove("sessionTails");
-        let Command::SaveTaskState { session_tails, .. } = serde_json::from_value(legacy).unwrap()
+        let Command::SaveTaskState {
+            session_tails,
+            compact_response,
+            ..
+        } = serde_json::from_value(legacy).unwrap()
         else {
             panic!("unexpected command variant");
         };
         assert!(session_tails.is_empty());
+        assert!(compact_response.is_none());
+        let legacy_ack: ResponsePayload = serde_json::from_value(serde_json::json!({
+            "type": "taskStateSaved", "sessions": [],
+        }))
+        .unwrap();
+        assert!(matches!(
+            legacy_ack,
+            ResponsePayload::TaskStateSaved { receipts: None, .. }
+        ));
     }
 
     #[test]

@@ -2830,7 +2830,7 @@ fn handle_request(
             (
                 TaskCatalogAction::Save { projects },
                 ResponseOutcome::Ok {
-                    payload: ResponsePayload::TaskStateSaved { sessions },
+                    payload: ResponsePayload::TaskStateSaved { sessions, .. },
                 },
             ) => hub.task_state_saved(source_subscriber_id, projects, sessions),
             (TaskCatalogAction::RemoveProject { project_id }, ResponseOutcome::Ok { .. }) => {
@@ -3456,6 +3456,7 @@ mod tests {
                     }
                     Ok(ResponsePayload::TaskStateSaved {
                         sessions: stored.clone(),
+                        receipts: None,
                     })
                 }
                 Command::LoadTaskState => Ok(ResponsePayload::TaskState {
@@ -3862,6 +3863,7 @@ mod tests {
                     Uuid::nil(),
                     Uuid::nil(),
                     Command::SaveTaskState {
+                        compact_response: None,
                         projects: Vec::new(),
                         live_session_ids: vec![session_id],
                         sessions: vec![session],
@@ -3895,6 +3897,7 @@ mod tests {
                 Uuid::nil(),
                 Uuid::nil(),
                 Command::SaveTaskState {
+                    compact_response: None,
                     projects: Vec::new(),
                     live_session_ids: vec![session_id],
                     sessions: vec![checkpoint],
@@ -3918,6 +3921,7 @@ mod tests {
                 Uuid::nil(),
                 Uuid::nil(),
                 Command::SaveTaskState {
+                    compact_response: None,
                     projects: Vec::new(),
                     live_session_ids: vec![session_id, second_id],
                     sessions: vec![second],

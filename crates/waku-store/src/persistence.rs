@@ -895,8 +895,35 @@ fn externalize_blobs<'a>(
     blobs: &BlobStore,
 ) {
     for session in sessions {
+        if !session.transcript_blocks.iter().any(|block| {
+            block.activities.iter().any(|activity| {
+                activity
+                    .image_urls
+                    .iter()
+                    .any(|image| image.starts_with("data:"))
+            })
+        }) {
+            continue;
+        }
         for block in &mut session.transcript_blocks {
+            // Read first: touching a mutable payload merely to discover it
+            // has no inline images would copy large tool output in snapshots.
+            if !block.activities.iter().any(|activity| {
+                activity
+                    .image_urls
+                    .iter()
+                    .any(|image| image.starts_with("data:"))
+            }) {
+                continue;
+            }
             for activity in &mut block.activities {
+                if !activity
+                    .image_urls
+                    .iter()
+                    .any(|image| image.starts_with("data:"))
+                {
+                    continue;
+                }
                 for image in &mut activity.image_urls {
                     if crate::blob_store::is_blob_reference(image) {
                         continue;
@@ -2930,6 +2957,13 @@ pub struct SaveBatch {
     /// up front and re-add them on failure, so a session re-dirtied mid-write
     /// keeps its flag.
     pub dirty_ids: HashSet<Uuid>,
+}
+
+impl SaveBatch {
+    /// The canonical snapshot this batch writes, after storage normalization.
+    pub fn session(&self, id: Uuid) -> Option<&AgentSession> {
+        self.sessions.iter().find(|session| session.id == id)
+    }
 }
 
 type MessageColumns = (

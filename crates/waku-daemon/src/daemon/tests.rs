@@ -14,6 +14,185 @@ fn detailed_session() -> AgentSession {
 }
 
 #[test]
+fn compact_save_receipts_distinguish_committed_prefixes_from_rejected_tails() {
+    use base64::Engine as _;
+    use waku_protocol::{SessionDetailSaveOutcome, SessionDetailTail};
+    let root = std::env::temp_dir().join(format!("compact-save-{}", Uuid::new_v4()));
+    let (backend, id) = surface_test_backend(&root);
+    let mut session = backend.task_store.load_session_detail(id).unwrap().unwrap();
+    session.push_message(MessageRole::Assistant, "large answer".repeat(50_000));
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: session.messages.len(),
+        turn_id: None,
+        activities: vec![
+            ActivityItem::new(None, crate::model::ActivityKind::Tool, "Build", None, true)
+                .with_output(Some("large tool output".repeat(50_000))),
+        ]
+        .into(),
+    });
+    let save = |session: AgentSession, tails: Vec<SessionDetailTail>, compact: bool| {
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::SaveTaskState {
+                        projects: Vec::new(),
+                        live_session_ids: vec![id],
+                        sessions: vec![session],
+                        session_tails: tails,
+                        compact_response: Some(compact),
+                    },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap()
+    };
+    let payload = save(session.clone(), Vec::new(), true);
+    assert!(serde_json::to_vec(&payload).unwrap().len() < 16 * 1024);
+    let ResponsePayload::TaskStateSaved {
+        sessions,
+        receipts: Some(receipts),
+    } = payload
+    else {
+        panic!("expected compact receipts")
+    };
+    assert_eq!(receipts[0].session_id, id);
+    assert_eq!(receipts[0].detail, SessionDetailSaveOutcome::Applied);
+    assert!(!sessions[0].detail_loaded && sessions[0].messages.is_empty());
+    let stored = backend.task_store.load_session_detail(id).unwrap().unwrap();
+    assert_eq!(
+        stored.messages.last().unwrap().content,
+        session.messages.last().unwrap().content
+    );
+
+    let mut tail = session.clone();
+    tail.messages = vec![crate::model::Message::new(
+        MessageRole::Assistant,
+        "uncommitted tail",
+    )]
+    .into();
+    tail.transcript_blocks.clear();
+    let payload = save(
+        tail,
+        vec![SessionDetailTail {
+            session_id: id,
+            messages_from: session.messages.len() as u32,
+            transcript_blocks_from: session.transcript_blocks.len() as u32,
+            prefix_signature: crate::model::detail_prefix_signature(
+                &session.messages,
+                &session.transcript_blocks,
+            )
+            .wrapping_add(1),
+        }],
+        true,
+    );
+    let ResponsePayload::TaskStateSaved {
+        receipts: Some(receipts),
+        ..
+    } = payload
+    else {
+        panic!("expected tail rejection receipt")
+    };
+    assert_eq!(receipts[0].detail, SessionDetailSaveOutcome::FullRequired);
+    assert!(
+        !backend
+            .task_store
+            .load_session_detail(id)
+            .unwrap()
+            .unwrap()
+            .messages
+            .iter()
+            .any(|message| message.content == "uncommitted tail")
+    );
+
+    let ResponsePayload::TaskStateSaved { sessions, receipts } = save(session, Vec::new(), false)
+    else {
+        panic!("expected legacy echo")
+    };
+    assert!(receipts.is_none());
+    assert!(sessions[0].detail_loaded && !sessions[0].messages.is_empty());
+
+    // Storing inline images rewrites their references. The data is durable,
+    // but the submitted prefix is no longer a valid incremental-save cursor.
+    let mut with_image = backend.task_store.load_session_detail(id).unwrap().unwrap();
+    with_image.transcript_blocks.push(TranscriptBlock {
+        after_message: with_image.messages.len(),
+        turn_id: None,
+        activities: vec![
+            ActivityItem::new(
+                None,
+                crate::model::ActivityKind::Tool,
+                "Screenshot",
+                None,
+                true,
+            )
+            .with_image_urls(vec![format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(vec![7u8; 16 * 1024])
+            )]),
+        ]
+        .into(),
+    });
+    let ResponsePayload::TaskStateSaved {
+        receipts: Some(receipts),
+        ..
+    } = save(with_image, Vec::new(), true)
+    else {
+        panic!("expected rewritten-prefix receipt")
+    };
+    assert_eq!(receipts[0].detail, SessionDetailSaveOutcome::Rewritten);
+    let stored = backend.task_store.load_session_detail(id).unwrap().unwrap();
+    assert!(crate::blob_store::is_blob_reference(
+        &stored.transcript_blocks.last().unwrap().activities[0].image_urls[0]
+    ));
+
+    {
+        let mut state = backend.task_state.lock();
+        state.session_mut(id).unwrap().boss_managed = true;
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let mut stale_body = stored;
+    stale_body.push_message(
+        MessageRole::Assistant,
+        "client cannot replace daemon history",
+    );
+    let ResponsePayload::TaskStateSaved {
+        receipts: Some(receipts),
+        ..
+    } = save(stale_body, Vec::new(), true)
+    else {
+        panic!("expected daemon ownership receipt")
+    };
+    assert_eq!(receipts[0].detail, SessionDetailSaveOutcome::DaemonOwned);
+    assert!(
+        !backend
+            .task_store
+            .load_session_detail(id)
+            .unwrap()
+            .unwrap()
+            .messages
+            .iter()
+            .any(|message| message.content == "client cannot replace daemon history")
+    );
+    let removed = backend.task_store.load_session_detail(id).unwrap().unwrap();
+    backend.remove_session(id).unwrap();
+    let ResponsePayload::TaskStateSaved {
+        sessions,
+        receipts: Some(receipts),
+    } = save(removed, Vec::new(), true)
+    else {
+        panic!("expected removal receipt")
+    };
+    assert!(sessions.is_empty());
+    assert_eq!(receipts[0].detail, SessionDetailSaveOutcome::Removed);
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn employee_archive_guard_preserves_dirty_and_unlanded_work() {
     let root = std::env::temp_dir().join(format!("archive-guard-{}", Uuid::new_v4()));
     let repository = root.join("repository");
@@ -1280,6 +1459,7 @@ fn removing_a_project_removes_its_tasks_and_blocks_stale_saves() {
                 session_id: Uuid::nil(),
                 runtime_id: Uuid::nil(),
                 command: Command::SaveTaskState {
+                    compact_response: None,
                     projects: vec![project.clone(), other_project.clone()],
                     live_session_ids: vec![parent.id, other_session.id],
                     sessions: vec![parent.clone(), other_session.clone()],
@@ -9543,6 +9723,7 @@ fn archiving_a_queued_employee_drops_its_ticket() {
                 session_id: Uuid::nil(),
                 runtime_id: Uuid::nil(),
                 command: Command::SaveTaskState {
+                    compact_response: None,
                     projects: Vec::new(),
                     live_session_ids: vec![session_id],
                     sessions: vec![shell],
@@ -11483,7 +11664,8 @@ fn setmodel_selection_survives_stale_saves_broadcast_hydration_and_reload() {
                 prefix_signature: crate::model::detail_prefix_signature(&[], &[]),
             });
         }
-        let ResponsePayload::TaskStateSaved { sessions } = request(Command::SaveTaskState {
+        let ResponsePayload::TaskStateSaved { sessions, .. } = request(Command::SaveTaskState {
+            compact_response: None,
             projects: Vec::new(),
             live_session_ids: Vec::new(),
             sessions: vec![incoming],
@@ -11527,6 +11709,7 @@ fn setmodel_selection_survives_stale_saves_broadcast_hydration_and_reload() {
     incoming.title = "Stale working client metadata edit".into();
     incoming.reasoning_effort = None;
     request(Command::SaveTaskState {
+        compact_response: None,
         projects: Vec::new(),
         live_session_ids: Vec::new(),
         sessions: vec![incoming],
@@ -11565,7 +11748,8 @@ fn setmodel_selection_survives_stale_saves_broadcast_hydration_and_reload() {
     chat.model = Some(target.id.clone());
     chat.reasoning_effort = Some(effort.clone());
     chat.updated_at += 30_000;
-    let ResponsePayload::TaskStateSaved { sessions } = request(Command::SaveTaskState {
+    let ResponsePayload::TaskStateSaved { sessions, .. } = request(Command::SaveTaskState {
+        compact_response: None,
         projects: Vec::new(),
         live_session_ids: Vec::new(),
         sessions: vec![chat],
@@ -11580,6 +11764,7 @@ fn setmodel_selection_survives_stale_saves_broadcast_hydration_and_reload() {
     chat.reasoning_effort = None;
     chat.updated_at += 1;
     request(Command::SaveTaskState {
+        compact_response: None,
         projects: Vec::new(),
         live_session_ids: Vec::new(),
         sessions: vec![chat],
@@ -15266,6 +15451,7 @@ fn client_state_save_preserves_daemon_project_fields() {
                 session_id: Uuid::nil(),
                 runtime_id: Uuid::nil(),
                 command: Command::SaveTaskState {
+                    compact_response: None,
                     projects: vec![echoed],
                     live_session_ids: Vec::new(),
                     sessions: Vec::new(),
@@ -17210,6 +17396,7 @@ fn employee_client_archive_remains_allowed_even_in_the_boss_project() {
                 session_id: Uuid::nil(),
                 runtime_id: Uuid::nil(),
                 command: Command::SaveTaskState {
+                    compact_response: None,
                     projects: Vec::new(),
                     live_session_ids: Vec::new(),
                     sessions: vec![incoming],
@@ -17275,6 +17462,7 @@ fn active_boss_archive_is_rejected_from_client_saves_and_bulk_archive() {
                     session_id: Uuid::nil(),
                     runtime_id: Uuid::nil(),
                     command: Command::SaveTaskState {
+                        compact_response: None,
                         projects: Vec::new(),
                         live_session_ids: Vec::new(),
                         sessions: vec![incoming],

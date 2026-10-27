@@ -79,7 +79,12 @@ queuedMessage?: QueuedMessage | null, } | { "type": "compact" } | { "type": "can
  * stored prefix rather than replacing it. Entries not listed here
  * are complete sessions as before.
  */
-sessionTails: Array<SessionDetailTail>, } | { "type": "removeSession" } | { "type": "removeProject", projectId: string, } | { "type": "hydrateSession", sessionId: string, } | { "type": "indexSession" } | { "type": "searchSessionMessages", query: string, limit: number,
+sessionTails: Array<SessionDetailTail>,
+/**
+ * Return list projections and precise save receipts instead of
+ * echoing potentially large transcripts. Absent preserves old clients.
+ */
+compactResponse?: boolean, } | { "type": "removeSession" } | { "type": "removeProject", projectId: string, } | { "type": "hydrateSession", sessionId: string, } | { "type": "indexSession" } | { "type": "searchSessionMessages", query: string, limit: number,
 /**
  * Which sessions the search scans; absent means active tasks, so
  * pre-scope clients keep their palette behavior.

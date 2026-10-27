@@ -57,6 +57,7 @@ fn stale_projection_cannot_resurrect_a_removed_session() {
             Uuid::nil(),
             Uuid::nil(),
             Command::SaveTaskState {
+                compact_response: None,
                 projects: vec![project.clone()],
                 live_session_ids: vec![session.id],
                 sessions: vec![session.clone()],
@@ -67,11 +68,12 @@ fn stale_projection_cannot_resurrect_a_removed_session() {
     remover
         .request(session.id, Uuid::nil(), Command::RemoveSession)
         .unwrap();
-    let ResponsePayload::TaskStateSaved { sessions } = stale_client
+    let ResponsePayload::TaskStateSaved { sessions, .. } = stale_client
         .request(
             Uuid::nil(),
             Uuid::nil(),
             Command::SaveTaskState {
+                compact_response: None,
                 projects: vec![project],
                 live_session_ids: vec![session.id],
                 sessions: vec![session],
@@ -128,11 +130,12 @@ fn an_unstarted_draft_is_never_catalogued() {
     let project = Project::from_path(root.join("repo"));
     // A detail-loaded draft: real to the client, but it owns no row.
     let draft = AgentSession::new(project.id, ProviderKind::Codex);
-    let ResponsePayload::TaskStateSaved { sessions } = client
+    let ResponsePayload::TaskStateSaved { sessions, .. } = client
         .request(
             Uuid::nil(),
             Uuid::nil(),
             Command::SaveTaskState {
+                compact_response: None,
                 projects: vec![project.clone()],
                 live_session_ids: vec![draft.id],
                 sessions: vec![draft.clone()],
@@ -155,11 +158,12 @@ fn an_unstarted_draft_is_never_catalogued() {
     // Once the draft starts it is catalogued like any other session.
     let mut started = draft;
     started.begin_turn("run it");
-    let ResponsePayload::TaskStateSaved { sessions } = client
+    let ResponsePayload::TaskStateSaved { sessions, .. } = client
         .request(
             Uuid::nil(),
             Uuid::nil(),
             Command::SaveTaskState {
+                compact_response: None,
                 projects: vec![project],
                 live_session_ids: vec![started.id],
                 sessions: vec![started.clone()],
@@ -243,6 +247,7 @@ fn a_fresh_projectless_project_survives_until_its_first_task() {
             Uuid::nil(),
             Uuid::nil(),
             Command::SaveTaskState {
+                compact_response: None,
                 projects: vec![project.clone()],
                 live_session_ids: vec![],
                 sessions: vec![],
@@ -274,6 +279,7 @@ fn a_fresh_projectless_project_survives_until_its_first_task() {
             Uuid::nil(),
             Uuid::nil(),
             Command::SaveTaskState {
+                compact_response: None,
                 projects: vec![stale.clone()],
                 live_session_ids: vec![],
                 sessions: vec![],
@@ -306,6 +312,7 @@ fn a_fresh_projectless_project_survives_until_its_first_task() {
             Uuid::nil(),
             Uuid::nil(),
             Command::SaveTaskState {
+                compact_response: None,
                 projects: vec![claimed.clone()],
                 live_session_ids: vec![session.id],
                 sessions: vec![session],
@@ -510,6 +517,7 @@ fn a_skeleton_save_updates_columns_without_erasing_detail() {
             Uuid::nil(),
             Uuid::nil(),
             Command::SaveTaskState {
+                compact_response: None,
                 projects: Vec::new(),
                 live_session_ids: vec![session_id],
                 sessions: vec![skeleton],
@@ -591,6 +599,7 @@ fn a_skeleton_save_merges_columns_and_never_creates_a_row() {
             Uuid::nil(),
             Uuid::nil(),
             Command::SaveTaskState {
+                compact_response: None,
                 projects: Vec::new(),
                 live_session_ids: vec![session_id],
                 sessions: vec![skeleton, ghost],
@@ -692,6 +701,7 @@ fn a_scoped_agent_token_reaches_only_agent_commands() {
             Uuid::nil(),
             Uuid::nil(),
             Command::SaveTaskState {
+                compact_response: None,
                 projects: vec![project],
                 live_session_ids: vec![],
                 sessions: vec![target],

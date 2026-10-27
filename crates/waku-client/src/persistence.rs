@@ -4746,6 +4746,7 @@ impl StateStore {
                         live_session_ids: live_session_ids.clone(),
                         sessions,
                         session_tails,
+                        compact_response: None,
                     },
                 ) {
                     Ok(()) => {

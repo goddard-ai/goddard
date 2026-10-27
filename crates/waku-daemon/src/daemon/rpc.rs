@@ -1080,7 +1080,10 @@ impl Backend for WakuBackend {
                 live_session_ids: _,
                 sessions,
                 session_tails,
+                compact_response,
             } => {
+                use waku_protocol::{SessionDetailSaveOutcome, SessionSaveReceipt};
+                let compact_response = compact_response.unwrap_or(false);
                 let active_runtimes = self
                     .sessions
                     .lock()
@@ -1136,18 +1139,37 @@ impl Backend for WakuBackend {
                     }
                 }
                 drop(removed_project_ids);
+                let mut receipts = Vec::new();
                 let removed_session_ids = self.removed_session_ids.lock();
                 let sessions = sessions
                     .into_iter()
-                    .filter(|session| !removed_session_ids.contains(&session.id))
+                    .filter(|session| {
+                        let removed = removed_session_ids.contains(&session.id);
+                        if removed && compact_response {
+                            receipts.push(SessionSaveReceipt {
+                                session_id: session.id,
+                                detail: SessionDetailSaveOutcome::Removed,
+                            });
+                        }
+                        !removed
+                    })
                     .collect::<Vec<_>>();
                 drop(removed_session_ids);
                 let mut saved_ids = Vec::with_capacity(sessions.len());
+                let mut submitted_bodies = HashMap::new();
                 for mut session in sessions {
                     let session_id = session.id;
+                    let had_detail = session.detail_loaded;
                     if let Some(tail) = tails.remove(&session_id) {
                         splice_session_tail(&state.sessions, &mut bases, &mut session, tail);
                     }
+                    let submitted_body = (compact_response && session.detail_loaded)
+                        .then(|| (session.messages.clone(), session.transcript_blocks.clone()));
+                    let mut detail = if had_detail && !session.detail_loaded {
+                        SessionDetailSaveOutcome::FullRequired
+                    } else {
+                        SessionDetailSaveOutcome::MetadataOnly
+                    };
                     let applied = if let Some(existing) = state
                         .sessions
                         .iter_mut()
@@ -1204,6 +1226,7 @@ impl Backend for WakuBackend {
                             || self.boss.is_managed(session_id)
                             || stable_sessions.contains(&session_id)
                         {
+                            detail = SessionDetailSaveOutcome::DaemonOwned;
                             // A queued employee's shell is memory-only — an
                             // archive flag a client saves on it dies at
                             // restart. The roster record carries the stop
@@ -1246,6 +1269,7 @@ impl Backend for WakuBackend {
                             merge_stale_session_metadata(existing, session);
                             true
                         } else {
+                            detail = SessionDetailSaveOutcome::Applied;
                             preserve_daemon_checkpoints(existing, &mut session);
                             preserve_daemon_queued_messages(existing, &mut session);
                             honor_details_pruned(existing, &mut session);
@@ -1266,6 +1290,7 @@ impl Backend for WakuBackend {
                             true
                         }
                     } else if session.detail_loaded && session.has_started() {
+                        detail = SessionDetailSaveOutcome::Applied;
                         session.metadata_revision = 0;
                         session.metadata_mutation_id = None;
                         state.sessions.push(session);
@@ -1279,6 +1304,15 @@ impl Backend for WakuBackend {
                     };
                     if applied {
                         saved_ids.push(session_id);
+                        if compact_response {
+                            if detail == SessionDetailSaveOutcome::Applied {
+                                submitted_bodies.insert(
+                                    session_id,
+                                    submitted_body.expect("an applied transcript was submitted"),
+                                );
+                            }
+                            receipts.push(SessionSaveReceipt { session_id, detail });
+                        }
                     }
                 }
                 let used_project_ids = state
@@ -1370,6 +1404,31 @@ impl Backend for WakuBackend {
                     .collect::<Vec<_>>();
                 drop_detached(removed_runtimes);
                 let mut state = self.task_state.lock();
+                // Compare the actual committed batch, not a newer live row.
+                // Storage rewrites invalidate the input cursor; physical
+                // identity avoids another full text hash.
+                for receipt in &mut receipts {
+                    if receipt.detail == SessionDetailSaveOutcome::Applied {
+                        let unchanged = submitted_bodies.get(&receipt.session_id).is_some_and(
+                            |(messages, blocks)| {
+                                batch
+                                    .session(receipt.session_id)
+                                    .or_else(|| {
+                                        state.sessions.iter().find(|entry| {
+                                            entry.id == receipt.session_id && entry.incognito
+                                        })
+                                    })
+                                    .is_some_and(|entry| {
+                                        entry.messages.shares_items_with(messages)
+                                            && entry.transcript_blocks.shares_items_with(blocks)
+                                    })
+                            },
+                        );
+                        if !unchanged {
+                            receipt.detail = SessionDetailSaveOutcome::Rewritten;
+                        }
+                    }
+                }
                 let sessions = saved_ids
                     .into_iter()
                     .filter_map(|session_id| {
@@ -1391,15 +1450,30 @@ impl Backend for WakuBackend {
                 // the client touched. Keep only the recent window resident;
                 // the echoed clones above still carry the saved detail.
                 trim_resident_transcripts(&mut state, &active_runtimes.keys().copied().collect());
-                let sessions = sessions
+                let sessions: Vec<_> = sessions
                     .into_iter()
                     .map(|mut session| {
                         let employee = self.boss.employee(session.id);
                         project_employee_selection(&mut session, employee.as_ref());
-                        session
+                        if compact_response {
+                            session.list_projection()
+                        } else {
+                            session
+                        }
                     })
                     .collect();
-                Ok(ResponsePayload::TaskStateSaved { sessions })
+                let retained = sessions
+                    .iter()
+                    .map(|session| session.id)
+                    .collect::<HashSet<_>>();
+                receipts.retain(|receipt| {
+                    receipt.detail == SessionDetailSaveOutcome::Removed
+                        || retained.contains(&receipt.session_id)
+                });
+                Ok(ResponsePayload::TaskStateSaved {
+                    sessions,
+                    receipts: compact_response.then_some(receipts),
+                })
             }
             Command::RemoveSession => {
                 self.remove_session(session_id)?;
