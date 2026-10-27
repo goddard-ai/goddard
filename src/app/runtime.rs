@@ -1933,7 +1933,7 @@ impl Waku {
             eprintln!("could not refresh daemon task state: {error}");
         }
         if let Some(snapshot) = update.catalog {
-            self.apply_remote_task_state(key, snapshot, update.fresh, cx);
+            self.apply_remote_task_state(key, snapshot, update.cache_catalog, update.fresh, cx);
         }
         true
     }
@@ -2752,6 +2752,7 @@ impl Waku {
         &mut self,
         key: waku_client::DaemonKey,
         mut snapshot: RemoteTaskStateSnapshot,
+        mut cache_catalog: Option<RemoteTaskStateSnapshot>,
         fresh: bool,
         cx: &mut Context<Self>,
     ) {
@@ -2760,6 +2761,11 @@ impl Waku {
             snapshot
                 .sessions
                 .retain(|session| session.id == qa.record.session_id);
+            if let Some(cache) = &mut cache_catalog {
+                cache
+                    .sessions
+                    .retain(|session| session.id == qa.record.session_id);
+            }
         }
         let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
         let known_session_ids = self
@@ -2778,7 +2784,7 @@ impl Waku {
         // Keep pending optimistic fields and their original CAS version
         // together until acknowledgment. A broadcast arriving first must
         // neither flip the toggle nor let a transcript save claim its version.
-        let mut catalog_sessions = snapshot.sessions.clone();
+        let mut catalog_sessions = std::mem::take(&mut snapshot.sessions);
         if !self.pending_session_metadata.is_empty() {
             let pending = self
                 .state
@@ -2859,9 +2865,14 @@ impl Waku {
             self.project_switcher.session_removed(*session_id);
             self.transcript_scroll_positions.remove(session_id);
         }
+        let project_ids = snapshot
+            .projects
+            .iter()
+            .map(|project| project.id)
+            .collect::<Vec<_>>();
         merge_remote_project_catalog(
             &mut self.state.projects,
-            snapshot.projects.clone(),
+            std::mem::take(&mut snapshot.projects),
             |project_id| self.daemons.project_owner(project_id) == key,
         );
         Project::resolve_display_names(&mut self.state.projects);
@@ -2875,16 +2886,8 @@ impl Waku {
         if let waku_client::DaemonKey::Remote(host) = key {
             self.daemons.replace_remote_catalog(
                 host,
-                &snapshot
-                    .projects
-                    .iter()
-                    .map(|project| project.id)
-                    .collect::<Vec<_>>(),
-                &snapshot
-                    .sessions
-                    .iter()
-                    .map(|session| session.id)
-                    .collect::<Vec<_>>(),
+                &project_ids,
+                &remote_ids.iter().copied().collect::<Vec<_>>(),
             );
             for project in self.boss_ui.projects.values() {
                 if self
@@ -2896,10 +2899,12 @@ impl Waku {
                     self.daemons.claim_project(project.id, key);
                 }
             }
-            self.update_remote_catalog_cache(
-                host,
-                waku_client::persistence::CatalogCacheUpdate::Replace(snapshot),
-            );
+            if let Some(cache) = cache_catalog {
+                self.update_remote_catalog_cache(
+                    host,
+                    waku_client::persistence::CatalogCacheUpdate::Replace(cache),
+                );
+            }
         }
 
         let attach = self

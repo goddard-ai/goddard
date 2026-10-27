@@ -12,6 +12,9 @@ use uuid::Uuid;
 #[derive(Default)]
 pub struct CatalogUpdate {
     pub catalog: Option<TaskCatalog>,
+    /// Unmodified remote-host cache input, copied by the polling worker so
+    /// optimistic UI overlays never enter the offline cache.
+    pub cache_catalog: Option<TaskCatalog>,
     pub error: Option<String>,
     /// Reconnection must survive a later same-connection update. Incognito
     /// history uses this distinction to recover after a daemon restart.
@@ -93,6 +96,12 @@ impl CatalogSource {
         &self,
         (result, fresh): (Result<TaskCatalog, String>, bool),
     ) -> Result<(), crossbeam_channel::SendError<()>> {
+        // Copy outside the shared lock and on the producer, never in the
+        // UI's apply path. Local catalogs do not need an offline host copy.
+        let cache_catalog = match (&self.key, &result) {
+            (DaemonKey::Remote(_), Ok(catalog)) => Some(catalog.clone()),
+            _ => None,
+        };
         let retired = {
             let mut pending = self.pending.lock();
             if pending.sources.get(&self.key) != Some(&self.source) {
@@ -106,11 +115,14 @@ impl CatalogSource {
             match result {
                 Ok(catalog) => {
                     slot.error = None;
-                    slot.catalog.replace(catalog)
+                    (
+                        slot.catalog.replace(catalog),
+                        std::mem::replace(&mut slot.cache_catalog, cache_catalog),
+                    )
                 }
                 Err(error) => {
                     slot.error = Some(error);
-                    None
+                    (None, None)
                 }
             }
         };
@@ -182,12 +194,15 @@ mod tests {
         assert_eq!(latest.len(), 2);
         let local = latest.remove(&DaemonKey::Local).unwrap();
         assert!(local.fresh);
+        assert!(local.cache_catalog.is_none());
         assert_eq!(local.catalog.unwrap().sessions[0].title, "latest");
         assert_eq!(local.error.as_deref(), Some("offline"));
-        assert_eq!(
-            latest.remove(&remote).unwrap().catalog.unwrap().sessions[0].title,
-            "remote"
-        );
+        let mut remote = latest.remove(&remote).unwrap();
+        assert_eq!(remote.catalog.as_ref().unwrap().sessions[0].title, "remote");
+        // Applying optimistic fields to the UI must never cache an edit the
+        // owning daemon has not acknowledged.
+        remote.catalog.as_mut().unwrap().sessions[0].title = "optimistic edit".into();
+        assert_eq!(remote.cache_catalog.unwrap().sessions[0].title, "remote");
         assert!(drain(&receiver).is_empty());
         local_source
             .send((Ok(catalog("recovered")), false))
