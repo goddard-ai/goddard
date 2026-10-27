@@ -3367,7 +3367,8 @@ mod tests {
                 .reasoning
                 .as_ref()
                 .unwrap()
-                .content,
+                .content
+                .as_str(),
             "thinking"
         );
 
@@ -3466,7 +3467,8 @@ mod tests {
                 .reasoning
                 .as_ref()
                 .unwrap()
-                .content,
+                .content
+                .as_str(),
             "thinking"
         );
         assert!(
