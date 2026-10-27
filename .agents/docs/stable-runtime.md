@@ -96,6 +96,22 @@ product edits cannot rebuild it. Keep it that way.
   events and cached stop receipts alone cannot. Unknown origin stays unknown.
   These process-local observations complement durable link/stop reconciliation;
   they do not exclude other workspace writers or authorize removal after restart.
+- **Durable writer origin.** `stable_runtime_writers` records the task, canonical
+  namespace root, host instance, physical session/generation and absolute launch
+  workspace before admission. New admissions send that same canonical workspace
+  in the launch payload, independently of the host process's cwd. Exact owners
+  cannot change origin; records survive link replacement and task deletion.
+  Reattachment may backfill original host-reported cwd for legacy links.
+  Workspace cleanup scans narrow keyset pages of 64 origins and checks matching
+  hosts through authenticated status without acquiring a control epoch. At most
+  eight host inventories/connections are cached. A positive current-generation
+  Terminated/Exited status, or a rejected original admission with no session,
+  supplies this provider precondition. Missing sessions, changed/unavailable
+  hosts and unqualified legacy links defer cleanup. A legacy link with unknown
+  workspace conservatively defers all cleanup until qualification or explicit
+  retirement. Final workspace admission and other-writer checks remain required;
+  this check is not a deletion permit. Reclaim origin history only after its
+  dependent workspace cleanup is durably finalized.
 - **Held dispatch.** `CancelTurn` records a hold; queued submits become
   `DispatchPending` until `PermitDispatch` — the controller's explicit
   policy release, never implicit unwind. The link sends that release only

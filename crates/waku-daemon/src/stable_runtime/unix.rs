@@ -2,9 +2,11 @@
 
 use super::STABLE_NAMESPACE;
 mod ingress_descriptor;
+mod workspace_writers;
 #[cfg(test)]
 use super::enabled;
 use ingress_descriptor::LockedDescriptor;
+pub(crate) use workspace_writers::require_quiet_workspace_writers;
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -398,15 +400,31 @@ pub(crate) fn start_link(
         }
         Attachment::Admit { mut row } => {
             let adapter = provider.id().to_string();
+            let workspace = dunce::canonicalize(&options.cwd)
+                .context("could not resolve the provider workspace")?;
+            let mut launch = launch_payload(provider, options, prepared.as_ref())?;
+            // The host can have a different working directory from this
+            // daemon. Persist exactly the absolute directory it will receive.
+            launch["cwd"] = serde_json::to_value(&workspace)?;
             // The runtime session id is the daemon's attempt id and the
             // admit's command id is the same value: a transport-lost admit
             // answers from its recorded receipt, never double-spawns.
             let action = CanonicalAction::AdmitSession {
                 session_id: runtime_id,
                 adapter,
-                launch: launch_payload(provider, options, prepared.as_ref())?,
+                launch,
                 requested: requested_config(provider, options),
             };
+            // The process may outlive this daemon or a lost admission reply.
+            // Persist its physical workspace before any provider contact.
+            task_store.stable_writer_begin(&crate::persistence::StableWriterOrigin {
+                session_id,
+                root: root.to_path_buf(),
+                runtime_instance: instance,
+                runtime_session_id: runtime_id,
+                generation: 1,
+                workspace,
+            })?;
             let receipt = execute_safe(
                 &mut client,
                 &ActionEnvelope {
@@ -488,6 +506,22 @@ pub(crate) fn start_link(
     // Read the admitted generation's own origin, never the replacement
     // request's cwd. Older hosts keep an unqualified witness conservatively.
     let writer_inventory = client.reconcile(grant.epoch).map_err(link_error)?;
+    if let Some(origin) = writer_inventory
+        .sessions
+        .iter()
+        .find(|session| session.session == sref)
+        .and_then(|session| session.launch_cwd.as_deref())
+    {
+        task_store.stable_writer_begin(&crate::persistence::StableWriterOrigin {
+            session_id,
+            root: root.to_path_buf(),
+            runtime_instance: instance,
+            runtime_session_id: sref.session_id,
+            generation: sref.generation,
+            workspace: dunce::canonicalize(origin)
+                .context("could not resolve the original provider workspace")?,
+        })?;
+    }
     let writer_completion = if writer_inventory
         .sessions
         .iter()
@@ -2717,6 +2751,186 @@ mod tests {
     }
 
     #[test]
+    fn durable_writer_origin_fences_a_replacement_daemon_before_reattachment() {
+        let rig = rig(&["codex"]);
+        let workspace = rig.runtime_root.join("owned-workspace");
+        let unrelated = rig.runtime_root.join("unrelated-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&unrelated).unwrap();
+        let mut opts = options();
+        opts.cwd = workspace.clone();
+        let (handle, original, _rx) =
+            link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        let store = Arc::new(StateStore::daemon(
+            rig.backend.task_store().path().to_path_buf(),
+        ));
+        let successor = WakuBackend::new(
+            crate::DaemonSettingsStore::open(rig.runtime_root.join("successor-settings.json"))
+                .unwrap(),
+            StateStore::daemon(store.path().to_path_buf()),
+        )
+        .unwrap();
+        let error = require_quiet_workspace_writers(&successor, &workspace).unwrap_err();
+        assert!(error.to_string().contains("durable provider writer"));
+        require_quiet_workspace_writers(&successor, &unrelated).unwrap();
+        let alias = rig.runtime_root.join("workspace-alias");
+        std::os::unix::fs::symlink(&workspace, &alias).unwrap();
+        assert!(require_quiet_workspace_writers(&successor, &alias).is_err());
+        // Read-only probing must not fence the original controller.
+        original
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(original.shared.epoch)
+            .unwrap();
+        let adapter = rig.factory.for_session(original.sref().session_id).unwrap();
+        adapter.script_terminate(waku_runtime::Termination::Unconfirmed {
+            detail: "still alive".into(),
+        });
+        handle.delete_provider_session();
+        assert!(require_quiet_workspace_writers(&successor, &workspace).is_err());
+        adapter.emit(ProviderEvent::Terminated {
+            reason: waku_runtime::TerminateReason::Exited {
+                detail: "owned exit".into(),
+            },
+        });
+        require_quiet_workspace_writers(&successor, &workspace).unwrap();
+        assert_eq!(
+            adapter.terminate_count(),
+            1,
+            "probing must not request termination"
+        );
+        let foreign = crate::persistence::StableWriterOrigin {
+            session_id: Uuid::new_v4(),
+            root: rig.runtime_root.canonicalize().unwrap(),
+            runtime_instance: Uuid::new_v4(),
+            runtime_session_id: Uuid::new_v4(),
+            generation: 1,
+            workspace: unrelated.clone(),
+        };
+        store.stable_writer_begin(&foreign).unwrap();
+        let error = require_quiet_workspace_writers(&successor, &unrelated).unwrap_err();
+        assert!(error.to_string().contains("provider host changed"));
+        original
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(original.shared.epoch)
+            .unwrap();
+        let missing_workspace = rig.runtime_root.join("missing-provider");
+        std::fs::create_dir_all(&missing_workspace).unwrap();
+        let mut missing = foreign;
+        missing.runtime_instance = original.shared.instance;
+        missing.workspace = missing_workspace.clone();
+        store.stable_writer_begin(&missing).unwrap();
+        assert!(
+            require_quiet_workspace_writers(&successor, &missing_workspace).is_err(),
+            "a missing session without a rejected admission is not a quiet writer"
+        );
+        // A legacy link without durable origin cannot vanish into an empty registry.
+        let legacy = StableLinkRow::admit(
+            STABLE_NAMESPACE,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            original.shared.instance,
+        );
+        store.stable_link_save(&legacy).unwrap();
+        let error = require_quiet_workspace_writers(&successor, &workspace).unwrap_err();
+        assert!(error.to_string().contains("unknown writer origin"));
+    }
+
+    #[test]
+    fn rejected_stable_admission_does_not_pin_workspace_cleanup() {
+        let rig = rig(&["codex"]);
+        let workspace = rig.runtime_root.join("refused-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut opts = options();
+        opts.cwd = workspace.clone();
+        opts.mode = crate::model::RuntimeMode::Ask;
+        // Fill the host's real admission capacity so it refuses this
+        // command durably before creating its physical session.
+        let mut client = controller(&rig);
+        let grant = client.acquire_control(&ClientHello::current()).unwrap();
+        client.reconcile(grant.epoch).unwrap();
+        let instance = client.status().unwrap().runtime_instance;
+        for _ in 0..Budgets::default().max_sessions {
+            execute_safe(
+                &mut client,
+                &ActionEnvelope {
+                    namespace: STABLE_NAMESPACE.into(),
+                    runtime_instance: instance,
+                    epoch: grant.epoch,
+                    retry_window_id: grant.retry_window_id,
+                    command_id: Uuid::new_v4(),
+                    session: None,
+                    action: CanonicalAction::AdmitSession {
+                        session_id: Uuid::new_v4(),
+                        adapter: "codex".into(),
+                        launch: json!({}),
+                        requested: Default::default(),
+                    },
+                },
+            )
+            .unwrap();
+        }
+        let attempt = Uuid::new_v4();
+        let (sender, _rx) = link_test_event_channel();
+        assert!(
+            start_link(
+                &rig.backend,
+                rig.backend.task_store(),
+                rig.session_id,
+                attempt,
+                ProviderKind::Codex,
+                &opts,
+                sender,
+                &rig.runtime_root,
+                None
+            )
+            .is_err()
+        );
+        assert!(rig.factory.for_session(attempt).is_none());
+        assert_eq!(
+            rig.backend
+                .task_store()
+                .stable_writer_page(None)
+                .unwrap()
+                .len(),
+            1
+        );
+        require_quiet_workspace_writers(&rig.backend, &workspace).unwrap();
+    }
+
+    #[test]
+    fn stable_writer_persistence_failure_prevents_provider_contact() {
+        let rig = rig(&["codex"]);
+        // Initialize the schema, then reject exactly the pre-admission write.
+        rig.backend.task_store().stable_writer_page(None).unwrap();
+        rusqlite::Connection::open(rig.backend.task_store().path()).unwrap().execute_batch(
+            "CREATE TRIGGER reject_writer BEFORE INSERT ON stable_runtime_writers BEGIN SELECT RAISE(ABORT, 'fixture'); END;"
+        ).unwrap();
+        let attempt = Uuid::new_v4();
+        let (sender, _rx) = link_test_event_channel();
+        assert!(
+            start_link(
+                &rig.backend,
+                rig.backend.task_store(),
+                rig.session_id,
+                attempt,
+                ProviderKind::Codex,
+                &options(),
+                sender,
+                &rig.runtime_root,
+                None
+            )
+            .is_err()
+        );
+        assert!(rig.factory.for_session(attempt).is_none());
+    }
+
+    #[test]
     fn stable_shutdown_detaches_local_threads_without_stopping_the_provider() {
         let rig = rig(&["codex"]);
         let (handle, original, receiver) = link(&rig, Uuid::new_v4(), None);
@@ -2820,7 +3034,7 @@ mod tests {
         assert_eq!(inventory.sessions.len(), 1);
         assert_eq!(
             inventory.sessions[0].launch_cwd.as_deref(),
-            original.to_str()
+            dunce::canonicalize(&original).unwrap().to_str()
         );
         assert_eq!(inventory.sessions[0].status, SessionStatus::Live);
         // Filesystem aliases still identify the same original workspace.
@@ -5335,11 +5549,10 @@ for line in sys.stdin:
             .find(|inv| inv.session == link.sref())
             .unwrap();
         assert!(inv.claims.is_empty());
-        assert!(inv.launch_cwd.is_none());
+        assert!(Path::new(inv.launch_cwd.as_deref().unwrap()).is_absolute());
         assert_eq!(
             link.writer_completion().state(),
-            crate::driver::WriterCompletionState::Unknown,
-            "an unqualified original workspace must not gain cleanup evidence"
+            crate::driver::WriterCompletionState::Pending
         );
     }
 }

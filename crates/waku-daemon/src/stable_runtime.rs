@@ -38,6 +38,19 @@ pub(crate) fn recover_stop(
     anyhow::bail!("stable runtime recovery is unavailable on this platform")
 }
 
+#[cfg(not(unix))]
+pub(crate) fn require_quiet_workspace_writers(
+    backend: &crate::daemon::WakuBackend,
+    _path: &Path,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        backend.task_store().stable_writer_page(None)?.is_empty()
+            && !backend.task_store().stable_writers_have_unknown_links()?,
+        "workspace cleanup deferred: surviving stable writer requires its owning platform"
+    );
+    Ok(())
+}
+
 // No stable transport exists on non-Unix hosts. This uninhabited type keeps
 // the shared runtime bookkeeping explicit without admitting a fake link.
 #[cfg(not(unix))]

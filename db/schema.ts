@@ -204,6 +204,18 @@ export const stableRuntimeLinks = sqliteTable("stable_runtime_links", {
   updatedAt: integer("updated_at").notNull(),
 });
 
+/** Physical writer origins survive task deletion, link replacement and daemon restart. */
+export const stableRuntimeWriters = sqliteTable("stable_runtime_writers", {
+  writerKey: text("writer_key").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  root: text("root").notNull(),
+  runtimeInstance: text("runtime_instance").notNull(),
+  runtimeSessionId: text("runtime_session_id").notNull(),
+  generation: integer("generation").notNull(),
+  workspace: text("workspace").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
 /**
  * Effect receipts for stable-runtime agent ingress. The request identity is
  * the durable key: a forwarded request whose answer the daemon already

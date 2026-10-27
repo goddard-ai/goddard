@@ -1,0 +1,1 @@
+- With the stable provider runtime enabled, workspace cleanup continues accounting for surviving providers after daemon restart and waits for matching-host termination evidence before proceeding.

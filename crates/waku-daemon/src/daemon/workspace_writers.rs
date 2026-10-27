@@ -151,7 +151,7 @@ impl WakuBackend {
                 "workspace cleanup deferred: a provider writer is still active or its stop is unconfirmed"
             );
         }
-        Ok(())
+        crate::stable_runtime::require_quiet_workspace_writers(self, &target)
     }
 }
 
@@ -513,7 +513,13 @@ while not pathlib.Path('release-' + name).exists():
             std::thread::sleep(Duration::from_millis(5));
         }
         drop(backend.remove_runtime(session, Some(natural_attempt), false));
-        assert!(backend.require_no_observed_workspace_writers(&path).is_ok());
+        while let Err(error) = backend.require_no_observed_workspace_writers(&path) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "natural exit cleanup precondition did not settle: {error:#}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
         drop(natural);
         drop(first);
         drop(replacement);

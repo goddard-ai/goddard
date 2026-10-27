@@ -14,6 +14,8 @@
 //! applied by [`apply_migrations`].
 
 mod stable_stop;
+mod stable_writer;
+pub use stable_writer::StableWriterOrigin;
 mod workspace_cleanup;
 pub use stable_stop::{StableIngressOwner, StableStopIntent, StableStopRecord};
 
