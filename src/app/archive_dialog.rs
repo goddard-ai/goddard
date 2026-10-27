@@ -4,17 +4,104 @@
 //! snapshot is about to carry away. Settled sessions with clean, fully
 //! pushed checkouts move directly; this dialog never opens for them.
 
-use gpui::{KeyBinding, actions};
+use gpui::{KeyBinding, ScrollStrategy, UniformListScrollHandle, actions, uniform_list};
 
 use super::*;
 
 actions!(
     waku_archive_dialog,
-    [ConfirmArchiveDialog, DismissArchiveDialog]
+    [
+        ConfirmArchiveDialog,
+        DismissArchiveDialog,
+        PreviewNextRow,
+        PreviewPreviousRow,
+        PreviewNextPage,
+        PreviewPreviousPage,
+        PreviewFirstRow,
+        PreviewLastRow,
+        OpenPreviewFile,
+        OpenPreviewFileMenu
+    ]
 );
 
 const DIALOG_CONTEXT: &str = "ArchiveDialog";
 const SUMMARY_MAX_HEIGHT: f32 = 220.0;
+const PREVIEW_ROW_HEIGHT: f32 = 24.0;
+const SUMMARY_BOTTOM_PADDING: f32 = 8.0;
+const PREVIEW_CONTEXT: &str = "ArchivePreview";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PreviewRow {
+    FilesHeading,
+    File(usize),
+    CommitsHeading,
+    Commit(usize),
+}
+
+/// Index the two sections without building or copying a row per preview entry.
+#[derive(Clone, Copy)]
+struct PreviewRows {
+    files: usize,
+    commits: usize,
+}
+
+impl PreviewRows {
+    fn new(preview: &crate::git_commit::ArchivePreview) -> Self {
+        Self {
+            files: preview.files.len(),
+            commits: preview.unpushed_commits.len(),
+        }
+    }
+
+    fn len(self) -> usize {
+        self.files + usize::from(self.files > 0) + self.commits + usize::from(self.commits > 0)
+    }
+
+    fn at(self, mut index: usize) -> Option<PreviewRow> {
+        if self.files > 0 {
+            if index == 0 {
+                return Some(PreviewRow::FilesHeading);
+            }
+            if index <= self.files {
+                return Some(PreviewRow::File(index - 1));
+            }
+            index -= self.files + 1;
+        }
+        if self.commits > 0 {
+            if index == 0 {
+                return Some(PreviewRow::CommitsHeading);
+            }
+            if index <= self.commits {
+                return Some(PreviewRow::Commit(index - 1));
+            }
+        }
+        None
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PreviewNavigation {
+    Next,
+    Previous,
+    NextPage,
+    PreviousPage,
+    First,
+    Last,
+}
+
+fn preview_cursor(current: usize, count: usize, movement: PreviewNavigation) -> usize {
+    let last = count.saturating_sub(1);
+    let page =
+        ((SUMMARY_MAX_HEIGHT - SUMMARY_BOTTOM_PADDING) / PREVIEW_ROW_HEIGHT).floor() as usize;
+    match movement {
+        PreviewNavigation::Next => current.saturating_add(1).min(last),
+        PreviewNavigation::Previous => current.saturating_sub(1).min(last),
+        PreviewNavigation::NextPage => current.saturating_add(page).min(last),
+        PreviewNavigation::PreviousPage => current.saturating_sub(page).min(last),
+        PreviewNavigation::First => 0,
+        PreviewNavigation::Last => last,
+    }
+}
 
 /// What confirming the dialog does: archive hides the task outright, while a
 /// sweep only parks it in the sidebar's Dormant group. Both snapshot and
@@ -29,6 +116,15 @@ pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("enter", ConfirmArchiveDialog, Some(DIALOG_CONTEXT)),
         KeyBinding::new("escape", DismissArchiveDialog, Some(DIALOG_CONTEXT)),
+        KeyBinding::new("down", PreviewNextRow, Some(PREVIEW_CONTEXT)),
+        KeyBinding::new("up", PreviewPreviousRow, Some(PREVIEW_CONTEXT)),
+        KeyBinding::new("pagedown", PreviewNextPage, Some(PREVIEW_CONTEXT)),
+        KeyBinding::new("pageup", PreviewPreviousPage, Some(PREVIEW_CONTEXT)),
+        KeyBinding::new("home", PreviewFirstRow, Some(PREVIEW_CONTEXT)),
+        KeyBinding::new("end", PreviewLastRow, Some(PREVIEW_CONTEXT)),
+        KeyBinding::new("enter", OpenPreviewFile, Some(PREVIEW_CONTEXT)),
+        KeyBinding::new("space", OpenPreviewFile, Some(PREVIEW_CONTEXT)),
+        KeyBinding::new("shift-f10", OpenPreviewFileMenu, Some(PREVIEW_CONTEXT)),
     ]);
 }
 
@@ -44,8 +140,10 @@ pub(super) struct ArchiveDialogState {
     active_turn: bool,
     // Every abandoned/closed/duplicate dialog retires its plain payload on
     // the worker pool; focus and scroll state stay on the UI thread.
-    preview: BackgroundOwned<crate::git_commit::ArchivePreview>,
-    scroll: ScrollHandle,
+    preview: Arc<BackgroundOwned<crate::git_commit::ArchivePreview>>,
+    scroll: UniformListScrollHandle,
+    preview_focus: FocusHandle,
+    preview_cursor: usize,
     archive_focus: FocusHandle,
     cancel_focus: FocusHandle,
     /// Confirmations from the same batch or overlapping background previews
@@ -137,8 +235,10 @@ impl Waku {
             landing_row,
             title,
             active_turn,
-            preview,
-            scroll: ScrollHandle::new(),
+            preview: Arc::new(preview),
+            scroll: UniformListScrollHandle::new(),
+            preview_focus: cx.focus_handle(),
+            preview_cursor: 0,
             cancel_focus: cx.focus_handle(),
             archive_focus: archive_focus.clone(),
             pending: VecDeque::new(),
@@ -192,12 +292,140 @@ impl Waku {
         true
     }
 
+    fn navigate_archive_preview(
+        &mut self,
+        movement: PreviewNavigation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(dialog) = self.archive_dialog.as_mut() {
+            dialog.preview_cursor = preview_cursor(
+                dialog.preview_cursor,
+                PreviewRows::new(dialog.preview.get()).len(),
+                movement,
+            );
+            dialog
+                .scroll
+                .scroll_to_item(dialog.preview_cursor, ScrollStrategy::Nearest);
+            window.focus(&dialog.preview_focus, cx);
+            cx.notify();
+        }
+        cx.stop_propagation();
+    }
+
+    fn archive_preview_file_path(&self) -> Option<std::path::PathBuf> {
+        let dialog = self.archive_dialog.as_ref()?;
+        let PreviewRow::File(index) =
+            PreviewRows::new(dialog.preview.get()).at(dialog.preview_cursor)?
+        else {
+            return None;
+        };
+        let path = &dialog.preview.get().files[index].path;
+        let workspace = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == dialog.session_id)
+            .and_then(|session| self.workspace_path_for_session(session));
+        Some(
+            workspace
+                .map(|root| root.join(path))
+                .unwrap_or_else(|| path.into()),
+        )
+    }
+
+    fn render_archive_preview_row(
+        &mut self,
+        preview: &crate::git_commit::ArchivePreview,
+        row: PreviewRow,
+        workspace: Option<&std::path::Path>,
+        selected: bool,
+        weak: &WeakEntity<Self>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let base = div()
+            .h(px(PREVIEW_ROW_HEIGHT))
+            .px(px(4.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .when(selected, |row| row.bg(theme.overlay));
+        match row {
+            PreviewRow::FilesHeading | PreviewRow::CommitsHeading => base
+                .text_size(sp(11.5))
+                .text_color(theme.text_secondary)
+                .child(match row {
+                    PreviewRow::FilesHeading => {
+                        tr!("archive.uncommitted", count = preview.files.len())
+                    }
+                    _ => tr!("archive.unpushed", count = preview.unpushed_commits.len()),
+                })
+                .into_any_element(),
+            PreviewRow::File(index) => {
+                let file = &preview.files[index];
+                let absolute = workspace
+                    .map(|root| root.join(&file.path))
+                    .unwrap_or_else(|| file.path.clone().into());
+                // The list is one keyboard stop; arrows/page/home/end reach
+                // every row, Enter/Space open the selected file, Shift-F10
+                // opens its menu. Individual pointer links keep their menus.
+                let focus = self
+                    .transcript_control_focus(format!("archive-file-{}", file.path), cx)
+                    .tab_stop(false);
+                base.child(
+                    div()
+                        .flex_none()
+                        .w(px(26.0))
+                        .font_family(crate::fonts::current(cx).code)
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_ghost)
+                        .child(file.status.clone()),
+                )
+                .child(file_link(
+                    div()
+                        .id(SharedString::from(format!("archive-file-{}", file.path)))
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .font_family(crate::fonts::current(cx).code)
+                        .text_size(sp(12.5))
+                        .text_color(theme.text)
+                        .child(file.path.clone()),
+                    &focus,
+                    absolute.to_string_lossy().into_owned(),
+                    self,
+                    weak,
+                    format!("file-link-menu-archive-file-{}", file.path),
+                    cx,
+                ))
+                .into_any_element()
+            }
+            PreviewRow::Commit(index) => base
+                .child(icon(
+                    "icons/git-commit-horizontal.svg",
+                    12.0,
+                    theme.text_ghost,
+                ))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text)
+                        .child(preview.unpushed_commits[index].clone()),
+                )
+                .into_any_element(),
+        }
+    }
+
     pub(super) fn render_archive_dialog(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.archive_dialog.as_ref()?;
         let theme = Theme::current(cx);
         let weak = cx.entity().downgrade();
-        let files = dialog.preview.get().files.clone();
-        let commits = dialog.preview.get().unpushed_commits.clone();
+        let preview = Arc::clone(&dialog.preview);
+        let rows = PreviewRows::new(preview.get());
         // The listed paths are relative to the session's checkout.
         let session_workspace = self
             .state
@@ -206,7 +434,7 @@ impl Waku {
             .find(|session| session.id == dialog.session_id)
             .and_then(|session| self.workspace_path_for_session(session))
             .map(std::path::Path::to_path_buf);
-        let has_checkout_work = !files.is_empty() || !commits.is_empty();
+        let has_checkout_work = rows.len() > 0;
         let description = match (dialog.active_turn, has_checkout_work) {
             (true, true) => match dialog.kind {
                 ArchiveDialogKind::Archive => tr!("archive.confirm_description_busy_worktree"),
@@ -238,105 +466,41 @@ impl Waku {
             }
         };
 
-        let mut sections = Vec::new();
-        if !files.is_empty() {
-            sections.push(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .px(px(4.0))
-                            .pb(px(4.0))
-                            .text_size(sp(11.5))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("archive.uncommitted", count = files.len())),
-                    )
-                    .children(files.into_iter().map(|file| {
-                        let absolute = session_workspace
-                            .as_ref()
-                            .map(|workspace| workspace.join(&file.path))
-                            .unwrap_or_else(|| std::path::PathBuf::from(&file.path));
-                        let focus = self
-                            .transcript_control_focus(format!("archive-file-{}", file.path), cx);
-                        div()
-                            .h(px(24.0))
-                            .px(px(4.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .w(px(26.0))
-                                    .font_family(crate::fonts::current(cx).code)
-                                    .text_size(sp(11.0))
-                                    .text_color(theme.text_ghost)
-                                    .child(file.status),
-                            )
-                            .child(file_link(
-                                div()
-                                    .id(SharedString::from(format!("archive-file-{}", file.path)))
-                                    .min_w_0()
-                                    .flex_1()
-                                    .truncate()
-                                    .font_family(crate::fonts::current(cx).code)
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text)
-                                    .child(file.path.clone()),
-                                &focus,
-                                absolute.to_string_lossy().into_owned(),
-                                self,
-                                &weak,
-                                format!("file-link-menu-archive-file-{}", file.path),
-                                cx,
-                            ))
-                            .into_any_element()
-                    }))
-                    .into_any_element(),
-            );
-        }
-        if !commits.is_empty() {
-            sections.push(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .px(px(4.0))
-                            .pb(px(4.0))
-                            .text_size(sp(11.5))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("archive.unpushed", count = commits.len())),
-                    )
-                    .children(commits.into_iter().map(|subject| {
-                        div()
-                            .h(px(24.0))
-                            .px(px(4.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(icon(
-                                "icons/git-commit-horizontal.svg",
-                                12.0,
-                                theme.text_ghost,
-                            ))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .flex_1()
-                                    .truncate()
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text)
-                                    .child(subject),
-                            )
-                            .into_any_element()
-                    }))
-                    .into_any_element(),
-            );
-        }
+        let row_weak = weak.clone();
+        let preview_focus = dialog.preview_focus.clone();
+        let cursor = dialog.preview_cursor;
+        let summary = uniform_list(
+            "archive-preview-rows",
+            rows.len(),
+            move |range, window, cx| {
+                let focused = preview_focus.is_focused(window);
+                // This follows the projects-list boundary: layout calls the range
+                // builder after the root render lease. Row helpers use that one
+                // explicit Waku lease and never re-enter it.
+                row_weak
+                    .update(cx, |this, cx| {
+                        range
+                            .filter_map(|index| {
+                                rows.at(index).map(|row| {
+                                    this.render_archive_preview_row(
+                                        preview.get(),
+                                        row,
+                                        session_workspace.as_deref(),
+                                        focused && index == cursor,
+                                        &row_weak,
+                                        cx,
+                                    )
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            },
+        )
+        .track_scroll(&dialog.scroll)
+        .h(px((rows.len() as f32 * PREVIEW_ROW_HEIGHT)
+            .min(SUMMARY_MAX_HEIGHT - SUMMARY_BOTTOM_PADDING)))
+        .w_full();
 
         let archive_row = render_archive_action_row(
             "archive-dialog-archive",
@@ -409,15 +573,48 @@ impl Waku {
             .child(
                 div()
                     .id("archive-dialog-summary")
+                    .key_context(PREVIEW_CONTEXT)
+                    .track_focus(&dialog.preview_focus)
+                    .tab_index(0)
+                    .on_action(cx.listener(|this, _: &PreviewNextRow, window, cx| {
+                        this.navigate_archive_preview(PreviewNavigation::Next, window, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &PreviewPreviousRow, window, cx| {
+                        this.navigate_archive_preview(PreviewNavigation::Previous, window, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &PreviewNextPage, window, cx| {
+                        this.navigate_archive_preview(PreviewNavigation::NextPage, window, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &PreviewPreviousPage, window, cx| {
+                        this.navigate_archive_preview(PreviewNavigation::PreviousPage, window, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &PreviewFirstRow, window, cx| {
+                        this.navigate_archive_preview(PreviewNavigation::First, window, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &PreviewLastRow, window, cx| {
+                        this.navigate_archive_preview(PreviewNavigation::Last, window, cx)
+                    }))
+                    .on_action(cx.listener(|this, _: &OpenPreviewFile, _, cx| {
+                        if let Some(path) = this.archive_preview_file_path() {
+                            this.open_path_in_default_app(&path.to_string_lossy(), cx);
+                        }
+                        cx.stop_propagation();
+                    }))
+                    .on_action(cx.listener(|this, _: &OpenPreviewFileMenu, window, cx| {
+                        if let Some(dialog) = this.archive_dialog.as_ref()
+                            && let Some(PreviewRow::File(index)) =
+                                PreviewRows::new(dialog.preview.get()).at(dialog.preview_cursor)
+                        {
+                            let path = &dialog.preview.get().files[index].path;
+                            this.menu_handle(format!("file-link-menu-archive-file-{path}"), cx)
+                                .open_context_menu(window, cx);
+                        }
+                        cx.stop_propagation();
+                    }))
                     .px(px(12.0))
-                    .pb(px(8.0))
-                    .max_h(px(SUMMARY_MAX_HEIGHT))
-                    .overflow_y_scroll()
-                    .track_scroll(&dialog.scroll)
-                    .flex()
-                    .flex_col()
-                    .gap(px(10.0))
-                    .children(sections),
+                    .pb(px(SUMMARY_BOTTOM_PADDING))
+                    .overflow_hidden()
+                    .child(summary),
             )
             .child(div().mx(px(8.0)).h(hairline()).bg(theme.separator))
             .child(
@@ -508,15 +705,131 @@ mod tests {
             landing_row: Some(session_id as usize),
             title: format!("Task {session_id}"),
             active_turn: true,
-            preview: BackgroundOwned::new(crate::git_commit::ArchivePreview {
+            preview: Arc::new(BackgroundOwned::new(crate::git_commit::ArchivePreview {
                 files: Vec::new(),
                 unpushed_commits: vec![format!("Commit {session_id}")],
-            }),
-            scroll: ScrollHandle::new(),
+            })),
+            scroll: UniformListScrollHandle::new(),
+            preview_focus: cx.focus_handle(),
+            preview_cursor: 0,
             archive_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
             pending: VecDeque::new(),
         })
+    }
+
+    #[test]
+    fn preview_sections_are_lossless_without_allocating_a_row_vector() {
+        for (files, commits, expected) in [
+            (0, 0, vec![]),
+            (
+                2,
+                0,
+                vec![
+                    PreviewRow::FilesHeading,
+                    PreviewRow::File(0),
+                    PreviewRow::File(1),
+                ],
+            ),
+            (
+                0,
+                1,
+                vec![PreviewRow::CommitsHeading, PreviewRow::Commit(0)],
+            ),
+            (
+                1,
+                2,
+                vec![
+                    PreviewRow::FilesHeading,
+                    PreviewRow::File(0),
+                    PreviewRow::CommitsHeading,
+                    PreviewRow::Commit(0),
+                    PreviewRow::Commit(1),
+                ],
+            ),
+        ] {
+            let rows = PreviewRows { files, commits };
+            assert_eq!(rows.len(), expected.len());
+            assert_eq!(
+                (0..rows.len())
+                    .map(|index| rows.at(index).unwrap())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(rows.at(rows.len()), None);
+            assert_eq!(rows.at(usize::MAX), None);
+        }
+        let rows = PreviewRows {
+            files: 100_000,
+            commits: 20_000,
+        };
+        assert_eq!(rows.at(100_000), Some(PreviewRow::File(99_999)));
+        assert_eq!(rows.at(100_001), Some(PreviewRow::CommitsHeading));
+        assert_eq!(rows.at(rows.len() - 1), Some(PreviewRow::Commit(19_999)));
+        let last = preview_cursor(0, rows.len(), PreviewNavigation::Last);
+        assert_eq!(last, rows.len() - 1);
+        assert_eq!(
+            preview_cursor(last, rows.len(), PreviewNavigation::Next),
+            last
+        );
+        assert_eq!(
+            preview_cursor(last, rows.len(), PreviewNavigation::First),
+            0
+        );
+        assert_eq!(
+            preview_cursor(0, rows.len(), PreviewNavigation::PreviousPage),
+            0
+        );
+        assert!(preview_cursor(0, rows.len(), PreviewNavigation::NextPage) > 1);
+        assert_eq!(preview_cursor(0, 0, PreviewNavigation::Last), 0);
+    }
+
+    struct PreviewKeyScope {
+        preview_focus: FocusHandle,
+        confirm_focus: FocusHandle,
+        opened: usize,
+        confirmed: usize,
+    }
+
+    impl Render for PreviewKeyScope {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .key_context(DIALOG_CONTEXT)
+                .on_action(cx.listener(|this, _: &ConfirmArchiveDialog, _, _| this.confirmed += 1))
+                .child(
+                    div()
+                        .key_context(PREVIEW_CONTEXT)
+                        .track_focus(&self.preview_focus)
+                        .on_action(cx.listener(|this, _: &OpenPreviewFile, _, cx| {
+                            this.opened += 1;
+                            cx.stop_propagation();
+                        })),
+                )
+                .child(div().track_focus(&self.confirm_focus))
+        }
+    }
+
+    #[gpui::test]
+    fn opening_a_preview_file_does_not_confirm_the_archive(cx: &mut TestAppContext) {
+        cx.update(init);
+        let (view, cx) = cx.add_window_view(|_, cx| PreviewKeyScope {
+            preview_focus: cx.focus_handle(),
+            confirm_focus: cx.focus_handle(),
+            opened: 0,
+            confirmed: 0,
+        });
+        let (preview, confirm) = view.read_with(cx, |this, _| {
+            (this.preview_focus.clone(), this.confirm_focus.clone())
+        });
+        cx.update(|window, cx| window.focus(&preview, cx));
+        cx.simulate_keystrokes("enter space");
+        view.read_with(cx, |this, _| {
+            assert_eq!(this.opened, 2);
+            assert_eq!(this.confirmed, 0);
+        });
+        cx.update(|window, cx| window.focus(&confirm, cx));
+        cx.simulate_keystrokes("enter");
+        view.read_with(cx, |this, _| assert_eq!(this.confirmed, 1));
     }
 
     #[gpui::test]

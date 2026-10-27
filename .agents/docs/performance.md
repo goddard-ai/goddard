@@ -113,7 +113,13 @@
   worker result through queued/dialog ownership. Abandoned weak updates,
   duplicate confirmations, no-warning results, confirm/dismiss and window close
   retire the plain preview payload off the UI thread; focus/scroll state stays
-  affine. Rendering those previews still needs bounded row preparation.
+  affine. Preview payloads are shared through an `Arc` around that owner;
+  rendering never clones the complete files/commits vectors. A uniform list
+  indexes section headings and entries from counts in constant space, preparing
+  only requested rows. Keep the capped viewport and keyboard list context:
+  arrows, paging and Home/End reveal off-screen rows; Enter/Space and Shift-F10
+  open the selected file or its menu without confirming archive. This bounds
+  preview row construction, not every enclosing dialog/catalog helper.
 - One-shot user actions such as a click or menu command may work synchronously
   when freshness matters more than latency; frames may not.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for

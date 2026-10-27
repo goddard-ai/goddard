@@ -1,0 +1,1 @@
+- Archive and dormant-task confirmations render visible changes on demand and support keyboard navigation through large previews.
