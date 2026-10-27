@@ -1,0 +1,1 @@
+- Archiving nested projects preserves sibling checkout changes and checks writer activity across the entire worktree before capture or removal.

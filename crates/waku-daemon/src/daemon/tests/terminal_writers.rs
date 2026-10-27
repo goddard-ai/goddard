@@ -196,3 +196,136 @@ fn terminal_validation_failure_does_not_record_an_unattempted_writer() {
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn nested_worktree_removal_checks_writers_across_the_entire_git_root() {
+    let root = std::env::temp_dir().join(format!("nested-worktree-writer-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let repo = backend.task_state.lock().projects[0].path.clone();
+    let git = |args: &[&str]| {
+        let output = crate::command_env::search_path_command("git")
+            .args([
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "-q", "--template="]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-qm",
+        "fixture",
+    ]);
+    let worktree = root.join("linked");
+    let clean = root.join("clean-linked");
+    git(&["worktree", "add", "--detach", worktree.to_str().unwrap()]);
+    git(&["worktree", "add", "--detach", clean.to_str().unwrap()]);
+    let project = worktree.join("project");
+    let sibling = worktree.join("sibling");
+    let clean_project = clean.join("project");
+    for path in [&project, &sibling, &clean_project] {
+        std::fs::create_dir(path).unwrap();
+    }
+    let contents = sibling.join("preserve.txt");
+    std::fs::write(&contents, "sibling work must survive").unwrap();
+    let backend = backend.with_terminal_shell(alacritty_terminal::tty::Shell::new(
+        "/bin/sh".into(),
+        vec!["-c".into(), "exit 0".into()],
+    ));
+    let terminal = backend
+        .open_terminal(&sibling, 80, 24, EventSink::detached(), None)
+        .unwrap();
+    drop(terminal);
+    // The old preflight accepted this nested project even though Git's
+    // actual deletion also contains the sibling's unresolved writer origin.
+    assert!(
+        backend
+            .require_no_observed_workspace_writers(&project)
+            .is_ok()
+    );
+    let capture = |cwd: PathBuf, git_ref: String| {
+        backend.handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command: Command::Workspace {
+                    operation: WorkspaceOperation::CaptureRef { cwd, git_ref },
+                },
+            },
+            EventSink::detached(),
+            None,
+        )
+    };
+    let blocked_ref = crate::checkpoint::archive_ref(Uuid::new_v4());
+    let error = capture(project.clone(), blocked_ref.clone()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("terminal descendants have no confirmed completion")
+    );
+    assert!(!crate::checkpoint::has_ref(&worktree, &blocked_ref));
+    let remove = |path: PathBuf, force| {
+        backend.handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command: Command::Workspace {
+                    operation: WorkspaceOperation::RemoveWorktree { path, force },
+                },
+            },
+            EventSink::detached(),
+            None,
+        )
+    };
+    let error = remove(project.clone(), true).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("terminal descendants have no confirmed completion")
+    );
+    assert!(worktree.is_dir());
+    assert!(project.is_dir());
+    assert_eq!(
+        std::fs::read_to_string(contents).unwrap(),
+        "sibling work must survive"
+    );
+    // An unrelated archive captures the sibling files outside the project,
+    // then its whole worktree still removes through the nested project path.
+    let clean_sibling = clean.join("sibling.txt");
+    std::fs::write(&clean_sibling, "archive this sibling").unwrap();
+    let preserved_ref = crate::checkpoint::archive_ref(Uuid::new_v4());
+    capture(clean_project.clone(), preserved_ref.clone()).unwrap();
+    let archived = crate::command_env::search_path_command("git")
+        .args(["show", &format!("{preserved_ref}:sibling.txt")])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(archived.status.success());
+    assert_eq!(archived.stdout, b"archive this sibling");
+    assert!(matches!(
+        remove(clean_project, true).unwrap(),
+        ResponsePayload::Workspace {
+            result: WorkspaceResult::Ack
+        }
+    ));
+    assert!(!clean.exists());
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}

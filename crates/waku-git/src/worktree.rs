@@ -374,6 +374,18 @@ fn is_worktree_namespace(repository: &Path, dir: &Path) -> bool {
 /// a discardable copy, or whose state has been captured into a ref as
 /// archived-session cleanup does; never a session's own live checkout.
 pub fn remove(path: &Path, force: bool) -> anyhow::Result<()> {
+    remove_guarded(path, force, |_| Ok(()))
+}
+
+/// Resolve the complete deletion scope before checking ownership. Keep the
+/// caller's guard through Git removal and empty-parent cleanup. A project
+/// path may be nested inside the worktree, while Git removes its entire root.
+/// This does not itself establish archive authority or writer quiescence.
+pub fn remove_guarded<G>(
+    path: &Path,
+    force: bool,
+    before_remove: impl FnOnce(&Path) -> anyhow::Result<G>,
+) -> anyhow::Result<()> {
     let path = dunce::canonicalize(path)
         .with_context(|| format!("could not open worktree {}", path.display()))?;
     let worktree_root = git_stdout(&path, &["rev-parse", "--show-toplevel"])
@@ -389,6 +401,7 @@ pub fn remove(path: &Path, force: bool) -> anyhow::Result<()> {
         .parent()
         .map(Path::to_owned)
         .context("could not resolve the Git repository root")?;
+    let _guard = before_remove(&worktree_root)?;
     let worktree_root_arg = worktree_root.to_string_lossy().into_owned();
     let mut arguments = vec!["worktree", "remove"];
     if force {
@@ -1390,8 +1403,35 @@ mod tests {
         fs::write(created.path.join("README.md"), "dirty\n").unwrap();
         fs::write(created.path.join("notes.txt"), "untracked\n").unwrap();
 
+        let root = created
+            .path
+            .ancestors()
+            .find(|path| path.join(".git").exists())
+            .unwrap()
+            .to_owned();
+        fs::write(root.join("root-notes.txt"), "root untracked work\n").unwrap();
+        let sibling = root.join("packages/other");
+        fs::create_dir_all(&sibling).unwrap();
+        fs::write(sibling.join("notes.txt"), "sibling untracked work\n").unwrap();
+        // A scoped safety capture warms the shared side index. Archive must
+        // expand beyond that scope without changing ordinary safety semantics.
+        let safety_ref = "refs/waku/nested-safety-fixture";
+        crate::checkpoint::capture_ref(&created.path, safety_ref).unwrap();
+        assert!(git_stdout(&root, &["show", &format!("{safety_ref}:root-notes.txt")]).is_err());
+        assert_eq!(
+            git_stdout(
+                &root,
+                &["show", &format!("{safety_ref}:packages/app/README.md")]
+            )
+            .unwrap(),
+            "dirty"
+        );
+        // Even a deeper caller cwd must preserve the modified tracked README
+        // above it, plus untracked files elsewhere in the checkout.
+        let archive_cwd = created.path.join("nested-capture");
+        fs::create_dir(&archive_cwd).unwrap();
         let git_ref = crate::checkpoint::archive_ref(Uuid::new_v4());
-        crate::checkpoint::capture_ref(&created.path, &git_ref).unwrap();
+        crate::checkpoint::capture_ref(&archive_cwd, &git_ref).unwrap();
         remove(&created.path, true).unwrap();
         assert!(!created.path.exists());
 
@@ -1417,6 +1457,14 @@ mod tests {
         assert_eq!(
             git_stdout(&worktree_root, &["rev-parse", "HEAD"]).unwrap(),
             git_stdout(&repository, &["rev-parse", "feature"]).unwrap()
+        );
+        assert_eq!(
+            fs::read_to_string(worktree_root.join("root-notes.txt")).unwrap(),
+            "root untracked work\n"
+        );
+        assert_eq!(
+            fs::read_to_string(worktree_root.join("packages/other/notes.txt")).unwrap(),
+            "sibling untracked work\n"
         );
         let status = git_stdout(&worktree_root, &["status", "--porcelain"]).unwrap();
         assert!(

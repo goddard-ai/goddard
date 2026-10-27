@@ -131,6 +131,14 @@
   defers on overflow, corrupt metadata or an unlocatable/replaced origin. This
   conservative inventory is not positive descendant completion, scalable paged
   admission, legacy-origin recovery or final destructive workspace authority.
+- Worktree archive/removal checks use the complete Git worktree root, even
+  when the request names a nested project. Canonical session archive refs capture
+  that whole root; ordinary turn and safety refs retain project-subtree scope.
+  `capture_ref_guarded` and `remove_guarded` resolve their actual effect scope
+  before the caller's check and retain its returned guard through publication or
+  removal. Checking only the requested nested cwd can miss sibling writers and
+  discard sibling changes. These hooks do not themselves provide admission or
+  archive-generation authority.
 - Keep per-frame work proportional to what is on screen. Long collections are
   virtualized with `list()`, and a row builder must not rebuild whole-session
   state; hoist that to a cache refreshed once per frame.

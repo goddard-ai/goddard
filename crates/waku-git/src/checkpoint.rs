@@ -146,6 +146,15 @@ pub fn archive_ref(session_id: Uuid) -> String {
     format!("refs/waku/session-{session_id}-archive")
 }
 
+/// Only the canonical session archive name carries whole-worktree semantics.
+pub fn is_archive_ref(git_ref: &str) -> bool {
+    git_ref
+        .strip_prefix("refs/waku/session-")
+        .and_then(|name| name.strip_suffix("-archive"))
+        .and_then(|id| Uuid::parse_str(id).ok())
+        .is_some_and(|id| archive_ref(id) == git_ref)
+}
+
 /// Capture the exact workspace state accepted for a turn before its provider
 /// starts. This is intentionally distinct from the preceding turn's ending
 /// checkpoint: a branch switch or terminal edit between turns must not be
@@ -364,16 +373,32 @@ fn capture_untouched_turn_inner(
     }))
 }
 
-/// Snapshot the whole worktree — including untracked files — into `git_ref`.
-/// The commit's first parent is the checkout's HEAD, so a worktree recreated
-/// from the ref can come up on the real commit with the snapshot's
-/// difference replayed as uncommitted work rather than as a detached root
-/// commit with no history.
+/// Snapshot the caller's subtree, or the entire worktree for a canonical
+/// session archive ref. The snapshot's first parent is the checkout's HEAD,
+/// preserving real history when archived work is restored as dirty state.
 pub fn capture_ref(cwd: &Path, git_ref: &str) -> anyhow::Result<()> {
+    capture_ref_guarded(cwd, git_ref, |_| Ok(()))
+}
+
+/// Resolve the effective capture scope before checking ownership. The returned
+/// guard remains held through capture and ref publication. Ordinary turn and
+/// safety refs retain their existing project-subtree scope.
+pub fn capture_ref_guarded<G>(
+    cwd: &Path,
+    git_ref: &str,
+    before_capture: impl FnOnce(&Path) -> anyhow::Result<G>,
+) -> anyhow::Result<()> {
     if !is_git_repository(cwd) {
         bail!("checkpoints require a Git repository");
     }
-
+    let archive_root = if is_archive_ref(git_ref) {
+        let root = git_output(cwd, ["rev-parse", "--show-toplevel"])?;
+        Some(dunce::canonicalize(root.trim()).context("resolve archived worktree root")?)
+    } else {
+        None
+    };
+    let cwd = archive_root.as_deref().unwrap_or(cwd);
+    let _guard = before_capture(cwd)?;
     let head = resolve_ref(cwd, "HEAD");
     let parents = head.iter().cloned().collect::<Vec<_>>();
     let commit =
