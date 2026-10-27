@@ -7897,7 +7897,7 @@ fn project_picker_ranks_projects_by_their_newest_task() {
     // A project ranks by when a task was last created inside it; a project
     // that never held one falls back to when it was added.
     let mut projects = vec![alpha.clone(), beta.clone(), gamma.clone()];
-    project_picker_order(&mut projects, &sessions, None);
+    project_picker_order(&mut projects, &sessions, None, None);
     assert_eq!(
         projects
             .iter()
@@ -7910,7 +7910,7 @@ fn project_picker_ranks_projects_by_their_newest_task() {
     // recency — the same treatment the branch picker gives the checked-out
     // row.
     let mut projects = vec![alpha.clone(), beta.clone(), gamma.clone()];
-    project_picker_order(&mut projects, &[], Some(gamma.id));
+    project_picker_order(&mut projects, &[], Some(gamma.id), None);
     assert_eq!(
         projects
             .iter()
@@ -7925,7 +7925,7 @@ fn project_picker_ranks_projects_by_their_newest_task() {
     beta.starred = true;
     gamma.starred = true;
     let mut projects = vec![alpha.clone(), beta.clone(), gamma.clone()];
-    project_picker_order(&mut projects, &sessions, Some(gamma.id));
+    project_picker_order(&mut projects, &sessions, Some(gamma.id), None);
     assert_eq!(
         projects
             .iter()
@@ -7933,6 +7933,48 @@ fn project_picker_ranks_projects_by_their_newest_task() {
             .collect::<Vec<_>>(),
         vec![beta.id, gamma.id, alpha.id]
     );
+}
+
+#[test]
+fn new_task_project_picker_frequency_respects_stars_selection_and_recency_ties() {
+    let mut starred = Project::from_path("/work/starred".into());
+    starred.starred = true;
+    let current = Project::from_path("/work/current".into());
+    let frequent = Project::from_path("/work/frequent".into());
+    let recent = Project::from_path("/work/recent".into());
+    let mut frequent_task = AgentSession::new(frequent.id, ProviderKind::Codex);
+    frequent_task.created_at = 100;
+    let mut recent_task = AgentSession::new(recent.id, ProviderKind::Codex);
+    recent_task.created_at = 200;
+    let sessions = [frequent_task, recent_task];
+    let scores = HashMap::from([(frequent.id, 10.0), (recent.id, 1.0)]);
+    let mut projects = vec![
+        recent.clone(),
+        frequent.clone(),
+        current.clone(),
+        starred.clone(),
+    ];
+    project_picker_order(&mut projects, &sessions, Some(current.id), Some(&scores));
+    assert_eq!(
+        projects
+            .iter()
+            .map(|project| project.id)
+            .collect::<Vec<_>>(),
+        vec![starred.id, current.id, frequent.id, recent.id]
+    );
+
+    // Equal scores fall back to recency. Existing-task pickers ignore usage.
+    let equal_scores = HashMap::from([(frequent.id, 1.0), (recent.id, 1.0)]);
+    for usage in [Some(&equal_scores), None] {
+        project_picker_order(&mut projects, &sessions, Some(current.id), usage);
+        assert_eq!(
+            projects
+                .iter()
+                .map(|project| project.id)
+                .collect::<Vec<_>>(),
+            vec![starred.id, current.id, recent.id, frequent.id]
+        );
+    }
 }
 
 #[test]

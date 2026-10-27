@@ -1923,6 +1923,23 @@ pub struct QaSessionRecord {
     pub config: waku_protocol::workspace::QaConfig,
 }
 
+/// A compact, client-local frequency counter for explicit new-task project picks.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct NewTaskProjectUse {
+    score: f64,
+    updated_at: u64,
+}
+
+impl NewTaskProjectUse {
+    fn score_at(&self, now: u64) -> f64 {
+        const HALF_LIFE_SECONDS: f64 = 30.0 * 24.0 * 60.0 * 60.0;
+        if !self.score.is_finite() || self.score < 0.0 {
+            return 0.0;
+        }
+        self.score * (-((now.saturating_sub(self.updated_at)) as f64) / HALF_LIFE_SECONDS).exp2()
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct AppState {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -1944,6 +1961,8 @@ struct AppState {
     recent_sessions: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     recent_project_scripts: Vec<RecentProjectScript>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    new_task_project_uses: HashMap<Uuid, NewTaskProjectUse>,
     /// Replies the voice briefing already played, so a restart does not
     /// re-speak them. Bounded by the runtime cap; dead ids are inert.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2126,6 +2145,9 @@ pub struct PersistedState {
     /// Project scripts run from the command palette, newest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_project_scripts: Vec<RecentProjectScript>,
+    /// Explicit new-task picker choices, with a 30-day frequency half-life.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub new_task_project_uses: HashMap<Uuid, NewTaskProjectUse>,
     /// Replies the voice briefing already played, so a restart does not
     /// re-speak them. Bounded by the runtime cap; dead ids are inert.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2826,6 +2848,7 @@ impl PersistedState {
             unseen_completions: HashMap::new(),
             recent_sessions: Vec::new(),
             recent_project_scripts: Vec::new(),
+            new_task_project_uses: HashMap::new(),
             briefed_messages: Vec::new(),
             last_provider: ProviderKind::Codex,
             last_auto_route: false,
@@ -3230,6 +3253,18 @@ impl PersistedState {
         self.recent_model_uses.truncate(RECENT_MODEL_USES_LIMIT);
     }
 
+    pub fn record_new_task_project_pick(&mut self, project_id: Uuid, now: u64) {
+        let usage = self.new_task_project_uses.entry(project_id).or_default();
+        usage.score = usage.score_at(now) + 1.0;
+        usage.updated_at = now.max(usage.updated_at);
+    }
+
+    pub fn new_task_project_score(&self, project_id: Uuid, now: u64) -> f64 {
+        self.new_task_project_uses
+            .get(&project_id)
+            .map_or(0.0, |usage| usage.score_at(now))
+    }
+
     /// Records a script run, moving its project-scoped key to the front.
     pub fn record_project_script_use(&mut self, project_id: Uuid, key: &str) {
         self.recent_project_scripts
@@ -3466,6 +3501,7 @@ impl PersistedState {
             unseen_completions: self.unseen_completions.clone(),
             recent_sessions: self.recent_sessions.clone(),
             recent_project_scripts: self.recent_project_scripts.clone(),
+            new_task_project_uses: self.new_task_project_uses.clone(),
             briefed_messages: self.briefed_messages.clone(),
             last_provider: self.last_provider,
             last_auto_route: self.last_auto_route,
@@ -3655,6 +3691,7 @@ impl PersistedState {
         self.unseen_completions = app_state.unseen_completions;
         self.recent_sessions = app_state.recent_sessions;
         self.recent_project_scripts = app_state.recent_project_scripts;
+        self.new_task_project_uses = app_state.new_task_project_uses;
         self.briefed_messages = app_state.briefed_messages;
         self.last_provider = app_state.last_provider;
         self.last_auto_route = app_state.last_auto_route;
@@ -6383,6 +6420,44 @@ mod tests {
         // Order survives the round trip; the slot for a task deleted while
         // the app was away is pruned on load.
         assert_eq!(restored.recent_sessions, vec![newer_id, older]);
+    }
+
+    #[test]
+    fn new_task_project_frequency_decays_and_survives_restart() {
+        const MONTH: u64 = 30 * 24 * 60 * 60;
+        let mut state = PersistedState::empty();
+        let frequent = Uuid::new_v4();
+        let occasional = Uuid::new_v4();
+        for _ in 0..4 {
+            state.record_new_task_project_pick(frequent, MONTH);
+        }
+        state.record_new_task_project_pick(occasional, MONTH * 2);
+        assert_eq!(state.new_task_project_score(frequent, MONTH * 2), 2.0);
+        assert!(
+            state.new_task_project_score(frequent, MONTH * 2)
+                > state.new_task_project_score(occasional, MONTH * 2)
+        );
+
+        let mut app_state = serde_json::to_value(state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(serde_json::from_value(app_state.clone()).unwrap());
+        assert_eq!(restored.new_task_project_score(frequent, MONTH * 3), 1.0);
+        // A newer choice can overtake an old habit; repeated picks of the
+        // same project count, including after restoring the client state.
+        restored.record_new_task_project_pick(occasional, MONTH * 3);
+        assert_eq!(restored.new_task_project_score(occasional, MONTH * 3), 1.5);
+        restored.record_new_task_project_pick(occasional, MONTH * 3);
+        assert_eq!(restored.new_task_project_score(occasional, MONTH * 3), 2.5);
+        // Clock rollback must not inflate a score.
+        assert_eq!(restored.new_task_project_score(occasional, 0), 2.5);
+
+        // Older app.json files have no usage history and retain recency ordering.
+        app_state
+            .as_object_mut()
+            .unwrap()
+            .remove("new_task_project_uses");
+        restored.apply_app_state(serde_json::from_value(app_state).unwrap());
+        assert_eq!(restored.new_task_project_score(frequent, MONTH * 3), 0.0);
     }
 
     #[test]

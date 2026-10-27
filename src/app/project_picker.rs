@@ -56,8 +56,28 @@ impl Waku {
             variant,
             ProjectPickerVariant::NewTask | ProjectPickerVariant::TaskProject
         ));
+        let new_task = matches!(variant, ProjectPickerVariant::NewTask);
         if !projects.is_empty() {
-            super::composer::project_picker_order(&mut projects, &self.state.sessions, selected);
+            // Decay once per project, rather than in the sort comparator. All
+            // scores decay at the same rate, so repainting cannot change order.
+            let usage_scores = new_task.then(|| {
+                let now = waku_protocol::model::unix_time();
+                projects
+                    .iter()
+                    .map(|project| {
+                        (
+                            project.id,
+                            self.state.new_task_project_score(project.id, now),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>()
+            });
+            super::composer::project_picker_order(
+                &mut projects,
+                &self.state.sessions,
+                selected,
+                usage_scores.as_ref(),
+            );
         }
         let projects = projects
             .into_iter()
@@ -85,11 +105,18 @@ impl Waku {
                     .to_lowercase(),
                     detail,
                     item: MenuItem::new(project.display_name(), move |window, cx| {
-                        if Some(id) != selected {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.select_project_from_composer(id, window, cx)
-                            });
-                        }
+                        let _ = weak.update(cx, |this, cx| {
+                            if new_task {
+                                this.state.record_new_task_project_pick(
+                                    id,
+                                    waku_protocol::model::unix_time(),
+                                );
+                                this.save();
+                            }
+                            if Some(id) != selected {
+                                this.select_project_from_composer(id, window, cx);
+                            }
+                        });
                     })
                     .icon(if remote {
                         "icons/server.svg"

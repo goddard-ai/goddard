@@ -8566,11 +8566,13 @@ pub(super) fn visible_branch_entries(
 /// "recently used", with never-used projects falling back to when they
 /// were added. An unstarred current project still leads its tail like the
 /// branch picker's selected row; a starred one just takes its recency
-/// slot. Name breaks every tie.
+/// slot. Optional new-task usage scores precede recency within each tier.
+/// Name breaks every tie.
 pub(super) fn project_picker_order(
     projects: &mut [Project],
     sessions: &[AgentSession],
     subject_project_id: Option<Uuid>,
+    usage_scores: Option<&HashMap<Uuid, f64>>,
 ) {
     let mut last_task_created = HashMap::with_capacity(projects.len());
     for session in sessions {
@@ -8590,6 +8592,15 @@ pub(super) fn project_picker_order(
             .then_with(|| {
                 (!right.starred && Some(right.id) == subject_project_id)
                     .cmp(&(!left.starred && Some(left.id) == subject_project_id))
+            })
+            .then_with(|| {
+                let score = |id| {
+                    usage_scores
+                        .and_then(|scores| scores.get(&id))
+                        .copied()
+                        .unwrap_or(0.0)
+                };
+                score(right.id).total_cmp(&score(left.id))
             })
             .then_with(|| recency(right).cmp(&recency(left)))
             .then_with(|| left.display_name().cmp(&right.display_name()))

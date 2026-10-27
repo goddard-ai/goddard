@@ -1,0 +1,1 @@
+- The new-task project picker boosts projects you choose frequently, with older choices gradually losing weight. Stars and the current project keep their priority, and preferences survive app restarts.
