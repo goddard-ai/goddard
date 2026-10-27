@@ -1,6 +1,8 @@
 //! Desktop-owned preferences and RPC proxies for daemon-owned task state.
 
 mod app_writer;
+mod background_owned;
+pub use background_owned::BackgroundOwned;
 mod catalog_batch;
 mod catalog_inbox;
 mod catalog_merge;
@@ -14,7 +16,9 @@ pub use catalog_inbox::{
     CatalogInboxReceiver, CatalogInboxSender, CatalogSource, CatalogUpdate, CatalogVersion,
     catalog_inbox,
 };
-pub use catalog_merge::{merge_remote_session_catalog, merge_session_catalog_row};
+pub use catalog_merge::{
+    merge_hydrated_session, merge_remote_session_catalog, merge_session_catalog_row,
+};
 pub use catalog_projects::{CatalogProjectBatch, CatalogProjectProgress};
 pub use project_names::{
     ProjectNameLabels, ProjectNameRefresh, ProjectNameSnapshot, ProjectNameStep,

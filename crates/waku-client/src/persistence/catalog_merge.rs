@@ -527,3 +527,62 @@ mod tests {
         assert_eq!(state.sessions[0].title, "latest");
     }
 }
+
+/// Preserve resident detail and newer list edits; abandoned detail and the
+/// replaced skeleton retain background ownership rather than dropping on UI.
+pub fn merge_hydrated_session(
+    existing: &mut AgentSession,
+    hydrated: BackgroundOwned<AgentSession>,
+) -> bool {
+    if existing.detail_loaded {
+        return false;
+    }
+    let columns = existing.list_projection();
+    let mut hydrated = hydrated.into_inner();
+    merge_session_catalog_row(&mut hydrated, columns, false);
+    let retired = std::mem::replace(existing, hydrated);
+    drop(BackgroundOwned::new(retired));
+    true
+}
+
+#[cfg(test)]
+mod hydration_tests {
+    use super::*;
+    use waku_protocol::model::ConfigActivation;
+    #[test]
+    fn startup_hydration_keeps_newer_list_edits_and_live_transcript_detail() {
+        let mut stored = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        stored.begin_turn("Stored prompt");
+        stored.config_activation = Some(ConfigActivation {
+            generation: 1,
+            revision: 1,
+        });
+        let mut current = stored.list_projection();
+        let current_project = Uuid::new_v4();
+        current.project_id = current_project;
+        current.metadata_revision = 10;
+        current.title = "Renamed while loading".into();
+        current.archived_at = Some(42);
+        current.provider = ProviderKind::Claude;
+        current.model = Some("newer selection".into());
+        current.config_activation = Some(ConfigActivation {
+            generation: 1,
+            revision: 2,
+        });
+
+        merge_hydrated_session(&mut current, BackgroundOwned::new(stored.clone()));
+        assert!(current.detail_loaded);
+        assert_eq!(current.title, "Renamed while loading");
+        assert_eq!(current.project_id, current_project);
+        assert_eq!(current.metadata_revision, 10);
+        assert_eq!(current.archived_at, Some(42));
+        assert_eq!(current.provider, ProviderKind::Claude);
+        assert_eq!(current.model.as_deref(), Some("newer selection"));
+        assert_eq!(current.messages[0].content, "Stored prompt");
+
+        current.begin_turn("Newer live prompt");
+        let before = serde_json::to_value(&current).unwrap();
+        merge_hydrated_session(&mut current, BackgroundOwned::new(stored));
+        assert_eq!(serde_json::to_value(&current).unwrap(), before);
+    }
+}

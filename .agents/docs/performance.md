@@ -91,6 +91,14 @@
   bounded attempt leaves ready work. Queue indexes reclaim off the UI thread
   on window closure. This bounds queue administration, not detail merge,
   transcript trimming, or the other hydration-completion helpers.
+- Wrap plain background detail/attachment results in `BackgroundOwned` before
+  crossing back to the UI. Keep that ownership through weak updates and stale
+  branches; unwrap only when installing the payload. A disappeared task,
+  duplicate attachment or already-loaded transcript must retire incoming data
+  on the worker pool. Both detail reads and attachment baselines use the shared
+  `merge_hydrated_session` overlay so newer list edits survive; replaced skeletons
+  and old runtime payloads also reclaim in the background. GPUI-affine state
+  keeps its owning-thread cleanup. Reclamation does not wait for idle admission.
 - One-shot user actions such as a click or menu command may work synchronously
   when freshness matters more than latency; frames may not.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for

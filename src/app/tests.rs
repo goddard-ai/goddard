@@ -55,10 +55,10 @@ use super::{
 use crate::git_branch::BranchEntry;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, AtomRefKind, Checkpoint, CheckpointFile,
-    CheckpointStatus, ConfigActivation, DriverEvent, Message, MessageAttachment, MessageRole,
-    Project, ProviderKind, QueuedMessage, ReasoningBlock, RuntimeEventCursor, SessionStatus,
-    TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus, TurnStatus, UserInputOption,
-    UserInputQuestion, unix_time,
+    CheckpointStatus, DriverEvent, Message, MessageAttachment, MessageRole, Project, ProviderKind,
+    QueuedMessage, ReasoningBlock, RuntimeEventCursor, SessionStatus, TranscriptBlock,
+    TranscriptNotice, TranscriptNoticeStatus, TurnStatus, UserInputOption, UserInputQuestion,
+    unix_time,
 };
 
 #[test]
@@ -4111,38 +4111,6 @@ fn startup_replay_batches_preserve_text_and_never_advance_the_cursor_past_applie
     };
     assert_eq!(text.len(), 64 * 1024);
     assert!(!large.is_empty());
-}
-
-#[test]
-fn startup_hydration_keeps_newer_list_edits_and_live_transcript_detail() {
-    let mut stored = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-    stored.begin_turn("Stored prompt");
-    stored.config_activation = Some(ConfigActivation {
-        generation: 1,
-        revision: 1,
-    });
-    let mut current = stored.list_projection();
-    current.title = "Renamed while loading".into();
-    current.archived_at = Some(42);
-    current.provider = ProviderKind::Claude;
-    current.model = Some("newer selection".into());
-    current.config_activation = Some(ConfigActivation {
-        generation: 1,
-        revision: 2,
-    });
-
-    super::runtime::merge_hydrated_session(&mut current, stored.clone());
-    assert!(current.detail_loaded);
-    assert_eq!(current.title, "Renamed while loading");
-    assert_eq!(current.archived_at, Some(42));
-    assert_eq!(current.provider, ProviderKind::Claude);
-    assert_eq!(current.model.as_deref(), Some("newer selection"));
-    assert_eq!(current.messages[0].content, "Stored prompt");
-
-    current.begin_turn("Newer live prompt");
-    let before = serde_json::to_value(&current).unwrap();
-    super::runtime::merge_hydrated_session(&mut current, stored);
-    assert_eq!(serde_json::to_value(&current).unwrap(), before);
 }
 
 #[test]

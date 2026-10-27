@@ -20,6 +20,7 @@ use gpui::{
     linear_gradient, list, point, prelude::*, pulsating_between, px, rgb, size,
 };
 use uuid::Uuid;
+use waku_client::persistence::BackgroundOwned;
 
 use crate::checkpoint;
 use crate::composer_complete::{ComposerWorkItem, FileEntry, SlashCommand};

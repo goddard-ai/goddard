@@ -816,22 +816,26 @@ impl Waku {
                 let result = cx
                     .background_executor()
                     .spawn(async move {
-                        let mut session =
-                            store.load_session_detail(session_id)?.ok_or_else(|| {
-                                std::io::Error::new(
-                                    std::io::ErrorKind::NotFound,
-                                    "the task no longer exists",
-                                )
-                            })?;
-                        session.migrate_legacy_state();
-                        let interrupted_turn = settle_idle_session_detail(&mut session);
-                        Ok::<_, std::io::Error>((session, interrupted_turn))
+                        let result = (|| {
+                            let mut session =
+                                store.load_session_detail(session_id)?.ok_or_else(|| {
+                                    std::io::Error::new(
+                                        std::io::ErrorKind::NotFound,
+                                        "the task no longer exists",
+                                    )
+                                })?;
+                            session.migrate_legacy_state();
+                            let interrupted_turn = settle_idle_session_detail(&mut session);
+                            Ok::<_, std::io::Error>((session, interrupted_turn))
+                        })();
+                        BackgroundOwned::new(result)
                     })
                     .await;
                 let _ = waku.update(cx, |waku, cx| {
                     waku.session_hydrations.finished(session_id);
-                    match result {
+                    match result.into_inner() {
                         Ok((session, interrupted_turn)) => {
+                            let session = BackgroundOwned::new(session);
                             waku.trim_resident_transcripts();
                             let applied = if let Some(existing) = waku
                                 .state

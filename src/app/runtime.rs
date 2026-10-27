@@ -514,34 +514,7 @@ pub(super) fn merge_remote_session_catalog(
     )
 }
 
-/// `merge_remote_session_catalog` for projects. Reported rows reconcile by
-/// id rather than replace-by-owner: a row still claimed to another daemon —
-/// or left unclaimed while a host record was being edited — must update in
-/// place instead of appending a second copy of the same project. `owns`
-/// scopes deletions to the merging daemon's rows for the same reason as
-/// sessions. Any surviving same-id rows collapse to one: claims can be lost
-/// to older bugs and both copies describe one project.
-/// Preserve newer resident detail and list edits while installing a stored baseline.
-pub(super) fn merge_hydrated_session(
-    existing: &mut AgentSession,
-    mut hydrated: AgentSession,
-) -> bool {
-    if existing.detail_loaded {
-        return false;
-    }
-    let columns = existing.list_projection();
-    merge_session_catalog_row(&mut hydrated, columns, false);
-    *existing = hydrated;
-    true
-}
-
-fn merge_session_catalog_row(
-    local: &mut AgentSession,
-    remote: AgentSession,
-    has_local_runtime: bool,
-) {
-    waku_client::persistence::merge_session_catalog_row(local, remote, has_local_runtime);
-}
+pub(super) use waku_client::persistence::merge_hydrated_session;
 
 /// Perform every blocking operation between accepting a submission and
 /// starting its provider. This function is called only from the background
@@ -2781,7 +2754,13 @@ impl Waku {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    attach_driver(daemon, session_id, replay_cursor, hydrate, event_wake)
+                    BackgroundOwned::new(attach_driver(
+                        daemon,
+                        session_id,
+                        replay_cursor,
+                        hydrate,
+                        event_wake,
+                    ))
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
@@ -3826,21 +3805,17 @@ impl Waku {
     fn finish_runtime_attachment(
         &mut self,
         session_id: Uuid,
-        result: anyhow::Result<Option<PreparedDriver>>,
+        result: BackgroundOwned<anyhow::Result<Option<PreparedDriver>>>,
         cx: &mut Context<Self>,
     ) {
         if !self.runtime_attach_pending.remove(&session_id) {
             return;
         }
-        match result {
+        match result.into_inner() {
             Ok(Some(prepared)) => {
+                let prepared = BackgroundOwned::new(prepared);
                 self.runtime_attach_misses.remove(&session_id);
-                let Some(index) = self
-                    .state
-                    .sessions
-                    .iter()
-                    .position(|candidate| candidate.id == session_id)
-                else {
+                let Some(session) = self.state.catalog_session(session_id) else {
                     return;
                 };
                 if !self.runtimes.contains_key(&session_id) {
@@ -3849,7 +3824,7 @@ impl Waku {
                     // own watchdog — an app restart abandons the timer, not
                     // the wedge. Re-arm it on the local projection; a session
                     // still on its skeleton has no turn history to arm from.
-                    let unstarted_turn = self.state.sessions[index]
+                    let unstarted_turn = session
                         .turns
                         .last()
                         .filter(|turn| {
@@ -3859,9 +3834,9 @@ impl Waku {
                     let boss_rows = (self.boss_chat_key().is_some()
                         && self.state.selected_session == Some(session_id))
                     .then(|| self.transcript_row_kinds.borrow().clone());
-                    let detail_arrived = !self.state.sessions[index].detail_loaded
-                        && prepared.hydrated_session.is_some();
-                    self.install_prepared_driver(session_id, prepared);
+                    let detail_arrived =
+                        !session.detail_loaded && prepared.get().hydrated_session.is_some();
+                    self.install_prepared_driver(session_id, prepared.into_inner());
                     if self.pending_session_cancels.remove(&session_id) {
                         self.cancel_session_turn(session_id, cx);
                     }
@@ -6431,7 +6406,7 @@ impl Waku {
     fn install_prepared_driver(
         &mut self,
         session_id: Uuid,
-        prepared: PreparedDriver,
+        mut prepared: PreparedDriver,
     ) -> DriverHandle {
         // A fresh driver is not mid-drain of a cancelled turn; clear any
         // entry the replaced runtime left behind.
@@ -6441,18 +6416,14 @@ impl Waku {
         // still a skeleton, or everything the stream rebuilds stays
         // unpersistable and the next hydration discards it. A row already
         // hydrated by a racing load keeps its newer copy.
-        if let Some(hydrated) = prepared.hydrated_session
-            && let Some(existing) = self.state.session_mut(session_id)
-            && !existing.detail_loaded
-        {
-            let project_changed = existing.project_id != hydrated.project_id;
-            *existing = hydrated;
-            if project_changed {
-                self.state.note_session_topology_change();
+        if let Some(hydrated) = prepared.hydrated_session.take() {
+            let hydrated = BackgroundOwned::new(hydrated);
+            if let Some(existing) = self.state.session_mut(session_id) {
+                merge_hydrated_session(existing, hydrated);
             }
         }
         let handle = prepared.handle.clone();
-        self.runtimes.insert(
+        let replaced = self.runtimes.insert(
             session_id,
             SessionRuntime {
                 driver: prepared.handle,
@@ -6478,6 +6449,9 @@ impl Waku {
                 sandbox_setup: None,
             },
         );
+        if let Some(replaced) = replaced {
+            replaced.retire_payloads(&self.background_executor);
+        }
         // Startup can emit before the background task hands this receiver to
         // the runtime map. Wake once after installation so those buffered
         // events cannot be stranded behind an already-consumed edge.
