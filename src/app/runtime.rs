@@ -1627,10 +1627,18 @@ impl Waku {
         let reports = supervisor.subscribe_recovery();
         let recovery_updates = self.daemon_recovery_tx.clone();
         let recovery_wake = self.event_wake_tx.clone();
+        let recovery_cancelled = results.revoked().clone();
         std::thread::Builder::new()
             .name(format!("waku-daemon-recovery-{key:?}"))
             .spawn(move || {
-                while let Ok(report) = reports.recv() {
+                loop {
+                    let report = crossbeam_channel::select_biased! {
+                        recv(recovery_cancelled) -> _ => return,
+                        recv(reports) -> report => report,
+                    };
+                    let Ok(report) = report else {
+                        return;
+                    };
                     if recovery_updates.send((key, report)).is_err() {
                         return;
                     }
@@ -1641,10 +1649,18 @@ impl Waku {
         let statuses = supervisor.subscribe_status();
         let status_updates = self.daemon_status_tx.clone();
         let status_wake = self.event_wake_tx.clone();
+        let status_cancelled = results.revoked().clone();
         std::thread::Builder::new()
             .name(format!("waku-daemon-status-{key:?}"))
             .spawn(move || {
-                while let Ok(status) = statuses.recv() {
+                loop {
+                    let status = crossbeam_channel::select_biased! {
+                        recv(status_cancelled) -> _ => return,
+                        recv(statuses) -> status => status,
+                    };
+                    let Ok(status) = status else {
+                        return;
+                    };
                     if status_updates.send((key, status)).is_err() {
                         return;
                     }
@@ -1655,10 +1671,23 @@ impl Waku {
         std::thread::Builder::new()
             .name(format!("waku-task-state-sync-{key:?}"))
             .spawn(move || {
-                let Ok(mut client) = clients.recv() else {
+                let cancelled = results.revoked();
+                let next_client = || {
+                    crossbeam_channel::select_biased! {
+                        recv(cancelled) -> _ => None,
+                        recv(clients) -> client => client.ok(),
+                    }
+                };
+                let Some(mut client) = next_client() else {
                     return;
                 };
                 loop {
+                    if cancelled
+                        .try_recv()
+                        .is_err_and(|error| error.is_disconnected())
+                    {
+                        return;
+                    }
                     while let Ok(newer) = clients.try_recv() {
                         client = newer;
                     }
@@ -1715,7 +1744,16 @@ impl Waku {
                     }
                     signal_event_pump(&event_wake);
                     client = loop {
+                        if cancelled
+                            .try_recv()
+                            .is_err_and(|error| error.is_disconnected())
+                        {
+                            return;
+                        }
+                        // Keep daemon event selection fair; cancellation gets
+                        // an explicit check before each wait and a wake arm.
                         crossbeam_channel::select! {
+                            recv(cancelled) -> _ => return,
                             recv(clients) -> replacement => {
                                 let Ok(mut replacement) = replacement else {
                                     return;
@@ -1731,7 +1769,7 @@ impl Waku {
                                     // client after the old socket closes. Wait
                                     // for that publication instead of exiting
                                     // the task-state sync worker permanently.
-                                    let Ok(replacement) = clients.recv() else {
+                                    let Some(replacement) = next_client() else {
                                         return;
                                     };
                                     break replacement;
@@ -1753,7 +1791,7 @@ impl Waku {
                                 // dropped; the client replacement above
                                 // resubscribes on the next connection.
                                 let Ok(settings) = settings else {
-                                    let Ok(replacement) = clients.recv() else {
+                                    let Some(replacement) = next_client() else {
                                         return;
                                     };
                                     break replacement;
@@ -1765,7 +1803,7 @@ impl Waku {
                             }
                             recv(friends) -> friends => {
                                 let Ok(state) = friends else {
-                                    let Ok(replacement) = clients.recv() else {
+                                    let Some(replacement) = next_client() else {
                                         return;
                                     };
                                     break replacement;
@@ -1777,7 +1815,7 @@ impl Waku {
                             }
                             recv(pairing) -> pairing => {
                                 let Ok(state) = pairing else {
-                                    let Ok(replacement) = clients.recv() else {
+                                    let Some(replacement) = next_client() else {
                                         return;
                                     };
                                     break replacement;
@@ -1789,7 +1827,7 @@ impl Waku {
                             }
                             recv(automations) -> automations => {
                                 let Ok(state) = automations else {
-                                    let Ok(replacement) = clients.recv() else {
+                                    let Some(replacement) = next_client() else {
                                         return;
                                     };
                                     break replacement;
@@ -1801,7 +1839,7 @@ impl Waku {
                             }
                             recv(review) -> review => {
                                 let Ok(origin_url) = review else {
-                                    let Ok(replacement) = clients.recv() else {
+                                    let Some(replacement) = next_client() else {
                                         return;
                                     };
                                     break replacement;
@@ -1813,7 +1851,7 @@ impl Waku {
                             }
                             recv(session_closed) -> closed => {
                                 let Ok(closed) = closed else {
-                                    let Ok(replacement) = clients.recv() else {
+                                    let Some(replacement) = next_client() else {
                                         return;
                                     };
                                     break replacement;
@@ -1825,7 +1863,7 @@ impl Waku {
                             }
                             recv(speech) -> request => {
                                 let Ok((request_id, parts)) = request else {
-                                    let Ok(replacement) = clients.recv() else {
+                                    let Some(replacement) = next_client() else {
                                         return;
                                     };
                                     break replacement;
@@ -1837,7 +1875,7 @@ impl Waku {
                             }
                             recv(wireframes) -> request => {
                                 let Ok((session_id, path)) = request else {
-                                    let Ok(replacement) = clients.recv() else { return; };
+                                    let Some(replacement) = next_client() else { return; };
                                     break replacement;
                                 };
                                 if wireframe_updates.send((key, session_id, path)).is_err() {
@@ -1847,7 +1885,7 @@ impl Waku {
                             }
                             recv(boss_browse) -> request => {
                                 let Ok((request_id, session_id, url, title)) = request else {
-                                    let Ok(replacement) = clients.recv() else { return; };
+                                    let Some(replacement) = next_client() else { return; };
                                     break replacement;
                                 };
                                 if boss_browse_updates

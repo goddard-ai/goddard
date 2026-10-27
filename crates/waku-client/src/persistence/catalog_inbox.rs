@@ -38,6 +38,8 @@ impl CatalogVersion {
 }
 
 struct SourceState {
+    // Dropping the sole sender broadcasts revocation to every worker waiter.
+    _cancel: Sender<()>,
     source: Uuid,
     generation: Option<Uuid>,
     fresh: bool,
@@ -68,6 +70,7 @@ pub struct CatalogSource {
     key: DaemonKey,
     source: Uuid,
     session_filter: Option<Uuid>,
+    revoked: Receiver<()>,
 }
 
 pub struct CatalogInboxReceiver {
@@ -110,14 +113,17 @@ impl CatalogInboxSender {
     /// plain data so the owner can reclaim it on its background executor.
     pub fn bind(&self, key: DaemonKey) -> (CatalogSource, Option<CatalogUpdate>) {
         let source = Uuid::new_v4();
+        let (cancel, revoked) = crossbeam_channel::bounded(0);
         let retired = {
             let mut pending = self.pending.lock();
             if pending.closed {
+                drop(cancel);
                 None
             } else {
                 pending.sources.insert(
                     key,
                     SourceState {
+                        _cancel: cancel,
                         source,
                         generation: None,
                         fresh: false,
@@ -134,6 +140,7 @@ impl CatalogInboxSender {
                 key,
                 source,
                 session_filter: None,
+                revoked,
             },
             retired,
         )
@@ -141,6 +148,13 @@ impl CatalogInboxSender {
 }
 
 impl CatalogSource {
+    /// Disconnected when this source is replaced, revoked, or its inbox closes.
+    /// No values are sent. Include this receiver in every worker channel wait;
+    /// clones all wake when ownership ends, even if no daemon event arrives.
+    pub fn revoked(&self) -> &Receiver<()> {
+        &self.revoked
+    }
+
     pub fn only_session(mut self, session: Option<Uuid>) -> Self {
         self.session_filter = session;
         self
@@ -348,6 +362,63 @@ mod tests {
     }
 
     #[test]
+    fn source_revocation_wakes_all_idle_workers_without_daemon_events() {
+        let (sender, receiver) = catalog_inbox();
+        let host = DaemonKey::Remote(Uuid::new_v4());
+        let (source, _) = sender.bind(host);
+        let (events, idle) = crossbeam_channel::unbounded::<()>();
+        let (ready_tx, ready_rx) = crossbeam_channel::bounded(3);
+        let (done_tx, done_rx) = crossbeam_channel::bounded(3);
+        let mut workers = Vec::new();
+        for _ in 0..3 {
+            let source = source.clone();
+            let idle = idle.clone();
+            let ready = ready_tx.clone();
+            let done = done_tx.clone();
+            workers.push(std::thread::spawn(move || {
+                ready.send(()).unwrap();
+                crossbeam_channel::select_biased! {
+                    recv(source.revoked()) -> result => assert!(result.is_err()),
+                    recv(idle) -> _ => panic!("daemon event arrived before revocation"),
+                    default(std::time::Duration::from_secs(2)) => panic!("idle worker leaked"),
+                }
+                done.send(()).unwrap();
+            }));
+        }
+        for _ in 0..3 {
+            ready_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap();
+        }
+        let (replacement, _) = sender.bind(host);
+        assert_eq!(
+            replacement.revoked().try_recv(),
+            Err(crossbeam_channel::TryRecvError::Empty)
+        );
+        for _ in 0..3 {
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap();
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        // Other source receivers and live daemon senders must not keep a
+        // replacement's cancellation channel alive after its window closes.
+        drop(receiver);
+        assert_eq!(
+            replacement.revoked().try_recv(),
+            Err(crossbeam_channel::TryRecvError::Disconnected)
+        );
+        let (late, _) = sender.bind(host);
+        assert_eq!(
+            late.revoked().try_recv(),
+            Err(crossbeam_channel::TryRecvError::Disconnected)
+        );
+        drop(events);
+    }
+
+    #[test]
     fn replaced_or_removed_host_cannot_publish_late_catalogs() {
         let (sender, receiver) = catalog_inbox();
         let host = DaemonKey::Remote(Uuid::new_v4());
@@ -361,6 +432,10 @@ mod tests {
         assert_eq!(latest.catalog.unwrap().sessions[0].title, "replacement");
         new.send((Ok(catalog("pending removal")), false)).unwrap();
         assert!(receiver.revoke(host).is_some());
+        assert_eq!(
+            new.revoked().try_recv(),
+            Err(crossbeam_channel::TryRecvError::Disconnected)
+        );
         assert!(
             new.send((Ok(catalog("late removed result")), false))
                 .is_err()

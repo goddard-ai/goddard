@@ -1,0 +1,1 @@
+- Closing a desktop window or removing a remote host now releases idle task-sync and daemon-status listeners without waiting for another daemon event.

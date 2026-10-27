@@ -28,6 +28,11 @@
   application and acknowledge only after the current snapshot is fully applied.
   Reconnect freshness survives superseded work and errors until that completion;
   it must not be consumed just by taking a snapshot from the inbox.
+- A catalog source also owns cancellation for its polling, status and recovery
+  waiters. Include `CatalogSource::revoked()` in every channel wait, including
+  reconnect waits. Replacing/removing a source or closing its inbox disconnects
+  that signal and wakes all receiver clones without waiting for a daemon event.
+  This ends idle waits; it does not interrupt an RPC already running.
 - `PersistedState::merge_session_catalog` retains a UUID lookup index across
   metadata-only refreshes. Session membership, identity, project assignment or order changes must
   call `note_session_topology_change`; `push_session` does that automatically.
