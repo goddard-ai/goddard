@@ -1029,6 +1029,9 @@ impl Backend for WakuBackend {
                 self.update_session_metadata(session_id, expected_revision, mutation_id, change)
             }
             Command::LoadTaskState => {
+                // Retry admission if the bounded maintenance queue was full
+                // during startup; successfully scheduled recovery runs once.
+                self.start_workspace_cleanup_recovery();
                 self.start_archive_retention();
                 self.start_archive_detail_prune();
                 let boss = self.boss.document();

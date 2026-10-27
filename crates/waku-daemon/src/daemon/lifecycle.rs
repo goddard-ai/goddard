@@ -59,6 +59,7 @@ impl WakuBackend {
         let task_state = Arc::new(Mutex::new(task_state));
         let task_store = Arc::new(task_store);
         let backend = Self {
+            workspace_cleanup_recovery_scheduled: std::sync::atomic::AtomicBool::new(false),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_goal_claims: Mutex::new(HashMap::new()),
             repo_maps: Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
@@ -1010,6 +1011,48 @@ impl WakuBackend {
             .and_then(|count| count.trim().parse::<u64>().ok())
             .unwrap_or(0);
         Ok((ahead > 0).then(|| (path.clone(), "unlanded commits")))
+    }
+
+    /// Recover legacy archive intent in bounded pages, without making startup
+    /// or catalog reads wait for optional maintenance writes.
+    pub(super) fn start_workspace_cleanup_recovery(&self) {
+        use std::sync::atomic::Ordering;
+        use waku_base::maintenance::{Progress, Scheduler, Unit};
+        if self
+            .workspace_cleanup_recovery_scheduled
+            .swap(true, Ordering::AcqRel)
+        {
+            return;
+        }
+        let backend = self.weak_self();
+        let key = format!(
+            "workspace-cleanup-recovery:{}:{:p}",
+            self.task_store.path().display(),
+            backend.as_ptr()
+        );
+        let mut cursor = None;
+        let result = Scheduler::shared().and_then(|scheduler| {
+            scheduler.submit(key, Unit::Heavy, move |permit| {
+                let Some(backend) = backend.upgrade() else {
+                    return Ok(Progress::Complete);
+                };
+                backend
+                    .task_store
+                    .recover_workspace_cleanup_intents(&mut cursor, || permit.should_continue())
+                    .map(|more| {
+                        if more {
+                            Progress::More
+                        } else {
+                            Progress::Complete
+                        }
+                    })
+            })
+        });
+        if let Err(error) = result {
+            self.workspace_cleanup_recovery_scheduled
+                .store(false, Ordering::Release);
+            eprintln!("could not schedule workspace cleanup recovery: {error}");
+        }
     }
 
     /// Deletes archived tasks whose archive has outlived the retention

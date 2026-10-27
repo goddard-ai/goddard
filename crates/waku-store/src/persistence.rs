@@ -13,6 +13,8 @@
 //! deserialize a transcript. The schema is defined in `db/schema.ts` and
 //! applied by [`apply_migrations`].
 
+mod workspace_cleanup;
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -2357,8 +2359,15 @@ impl StateStore {
                 "task metadata changed before commit",
             ));
         }
+        workspace_cleanup::sync(&transaction, session.id)?;
         for id in removed {
             let id = id.to_string();
+            transaction
+                .execute(
+                    "DELETE FROM workspace_cleanup_intents WHERE session_id = ?1",
+                    [&id],
+                )
+                .map_err(to_io_error)?;
             transaction
                 .execute("DELETE FROM sessions WHERE id = ?1", [&id])
                 .map_err(to_io_error)?;
@@ -2585,6 +2594,7 @@ impl StateStore {
                         rusqlite::params_from_iter(session_params(session)),
                     )
                     .map_err(to_io_error)?;
+                workspace_cleanup::sync(&transaction, session.id)?;
                 continue;
             }
             let checkpoint_cache = terminal_checkpoints_for_session(
@@ -2598,6 +2608,7 @@ impl StateStore {
                     rusqlite::params_from_iter(session_params(session)),
                 )
                 .map_err(to_io_error)?;
+            workspace_cleanup::sync(&transaction, session.id)?;
             transaction
                 .execute(UPSERT_SESSION_DETAIL, params![session.id.to_string(), data])
                 .map_err(to_io_error)?;
@@ -2612,6 +2623,10 @@ impl StateStore {
             persisted_checkpoints.push((session.id, checkpoint_cache));
         }
 
+        if projects_fingerprint != storage.saved_projects {
+            workspace_cleanup::sync_project_paths(&transaction)?;
+        }
+
         let removed = storage
             .persisted_sessions
             .iter()
@@ -2620,6 +2635,12 @@ impl StateStore {
             .collect::<Vec<_>>();
         for id in &removed {
             let key = id.to_string();
+            transaction
+                .execute(
+                    "DELETE FROM workspace_cleanup_intents WHERE session_id = ?1",
+                    params![key],
+                )
+                .map_err(to_io_error)?;
             transaction
                 .execute("DELETE FROM sessions WHERE id = ?1", params![key])
                 .map_err(to_io_error)?;

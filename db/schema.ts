@@ -222,3 +222,24 @@ export const stableRuntimeReceipts = sqliteTable("stable_runtime_receipts", {
   outcome: text("outcome").notNull(),
   recordedAt: integer("recorded_at").notNull(),
 });
+
+/** Durable archive-workspace intent. A row records work owed, never permission to delete. */
+export const workspaceCleanupIntents = sqliteTable(
+  "workspace_cleanup_intents",
+  {
+    sessionId: text("session_id").primaryKey(),
+    /** New opaque identity for each archive/workspace transition. */
+    generation: text("generation").notNull(),
+    projectId: text("project_id").notNull(),
+    projectPath: text("project_path"),
+    /** Exact promoted workspace descriptor; NULL means the project's ordinary cwd. */
+    workspace: text("workspace"),
+    archivedAt: integer("archived_at").notNull(),
+    /** pending | captured | verified | retired | complete | ignored */
+    phase: text("phase").notNull().default("pending"),
+    retryAt: integer("retry_at").notNull().default(0),
+    failures: integer("failures").notNull().default(0),
+    lastError: text("last_error"),
+  },
+  (table) => [index("workspace_cleanup_ready").on(table.phase, table.retryAt)],
+);

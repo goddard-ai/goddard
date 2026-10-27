@@ -498,6 +498,7 @@ impl RuntimeLifecycles {
 }
 
 pub struct WakuBackend {
+    workspace_cleanup_recovery_scheduled: std::sync::atomic::AtomicBool,
     sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
     managed_goal_claims: Mutex<HashMap<(Uuid, Uuid), HashSet<Uuid>>>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
@@ -622,6 +623,7 @@ impl WakuBackend {
     pub fn install_weak_self(self: &Arc<Self>) {
         *self.weak_self.lock() = Arc::downgrade(self);
         self.start_archive_retention();
+        self.start_workspace_cleanup_recovery();
     }
 
     pub(crate) fn weak_self(&self) -> Weak<WakuBackend> {
