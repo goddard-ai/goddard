@@ -1,0 +1,1 @@
+- Boss chat refreshes recover automatically from abandoned, unsubmitted transitions left behind by an earlier `/clear`, so those stale transitions no longer pause coordination again.

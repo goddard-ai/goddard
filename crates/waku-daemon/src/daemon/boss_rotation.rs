@@ -5,7 +5,7 @@ use crate::boss_rotation::{
 };
 use crate::model::MessageRole;
 use waku_boss::boss_rotation::{RotationCause, RotationMode};
-use waku_boss::rotation_continuity::ContinuityLedger;
+use waku_boss::rotation_continuity::{ContinuityDeliveryStatus, ContinuityLedger};
 #[cfg(test)]
 use waku_boss::rotation_oracle::{
     AdmissionBoundary, AdmissionDecision, DurableAction, DurableActionKind, DurableActionStatus,
@@ -63,6 +63,45 @@ const ROTATION_MARKERS: [&str; 2] = [
     "Boss session refreshed; active work preserved.",
 ];
 const ROTATION_MARKER: &str = ROTATION_MARKERS[1];
+const BOSS_CLEAR_REASON: &str = "user cleared the Boss chat";
+
+/// A committed clear supersedes an abandoned replacement of the same owner.
+/// Keep submitted work and reservations fenced; a clear is not a receipt.
+fn release_cleared_replacement(
+    ledger: &mut ContinuityLedger,
+    journal: &RotationJournal,
+    boss_id: Uuid,
+    active: Uuid,
+) -> anyhow::Result<()> {
+    let Some(frozen) = &ledger.frozen_coordinator else {
+        return Ok(());
+    };
+    if journal.active_session_id != Some(active)
+        || active == frozen.predecessor
+        || active == frozen.successor
+        || !journal.rotations.iter().any(|rotation| {
+            rotation.boss_id == boss_id
+                && rotation.old_session_id == frozen.predecessor
+                && rotation.old_generation == frozen.generation
+                && rotation.committed_at.is_some()
+                && rotation.reason.as_deref() == Some(BOSS_CLEAR_REASON)
+        })
+    {
+        return Ok(());
+    }
+    let owners = [frozen.predecessor, frozen.successor];
+    anyhow::ensure!(
+        ledger.deliveries.iter().all(|delivery| {
+            !owners.contains(&delivery.session_id)
+                || (delivery.status == ContinuityDeliveryStatus::Prepared && delivery.attempts == 0)
+        }) && ledger
+            .provider_receipts
+            .iter()
+            .all(|receipt| !owners.contains(&receipt.attempt.session_id)),
+        "cleared Boss replacement awaits reconciliation of submitted work"
+    );
+    ledger.release_unsubmitted_replacement(frozen.predecessor, frozen.successor)
+}
 
 /// Record a Boss compaction signal into the lifecycle journal — attempt,
 /// start, completion, or failure, correlated to the session's owner
@@ -716,6 +755,15 @@ impl WakuBackend {
         let continuity_path = self.boss_continuity_path();
         let mut journal = RotationJournal::load(&path)?;
         let mut ledger = ContinuityLedger::load(&continuity_path)?;
+        // Older clears committed a fresh owner without releasing the abandoned
+        // freeze. Recover before creating an intent, including after a crash
+        // between the clear's journal commit and its ledger cleanup.
+        if ledger.frozen_coordinator.is_some() {
+            ContinuityLedger::update(&continuity_path, |latest| {
+                release_cleared_replacement(latest, &journal, identity.id, active)
+            })??;
+            ledger = ContinuityLedger::load(&continuity_path)?;
+        }
         if journal.intent.is_none()
             && ledger
                 .replacement_leases
@@ -1346,7 +1394,8 @@ impl WakuBackend {
             journal.active_session_id = Some(active);
             journal.begin(identity.id, active, new_id, now)?;
             let intent = journal.intent.as_mut().expect("begun clear intent");
-            intent.reason = Some("user cleared the Boss chat".into());
+            intent.mode = RotationMode::BestEffort;
+            intent.reason = Some(BOSS_CLEAR_REASON.into());
             intent.diagnostics.cause = RotationCause::Requested;
             journal.commit(now)?;
         } else {
@@ -1373,9 +1422,20 @@ impl WakuBackend {
                 .collect()
         };
         if let Err(error) = ContinuityLedger::update(&continuity_path, |latest| {
-            latest
-                .deliveries
-                .retain(|delivery| !retired.contains(&delivery.session_id));
+            // Persist the release only after the clear commits. Recovery uses
+            // that same commit if this write fails or the process stops here.
+            // Do not delete receipt evidence when the release is unsafe.
+            if let Err(error) = release_cleared_replacement(latest, &journal, identity.id, new_id) {
+                eprintln!("could not release the cleared Boss replacement: {error:#}");
+            }
+            let frozen = latest.frozen_coordinator.as_ref();
+            latest.deliveries.retain(|delivery| {
+                !retired.contains(&delivery.session_id)
+                    || frozen.is_some_and(|frozen| {
+                        delivery.session_id == frozen.predecessor
+                            || delivery.session_id == frozen.successor
+                    })
+            });
             if latest.rotation_request == ledger.rotation_request && !latest.has_incident(new_id) {
                 latest.resolve_rotation_request();
             }

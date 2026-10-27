@@ -1477,6 +1477,178 @@ fn compaction_upgrade_recovers_unsubmitted_checkpoints_but_retains_unknown_attem
 }
 
 #[test]
+fn cleared_boss_replacement_allows_refresh_and_recovers_legacy_freezes_after_restart() {
+    use waku_boss::{
+        boss_rotation::{RotationJournal, RotationMode},
+        rotation_continuity::ContinuityLedger,
+    };
+    use waku_protocol::boss::{BossOperation, BossResult};
+
+    for recovery in ["clear", "legacy", "interrupted"] {
+        let root = std::env::temp_dir().join(format!("boss-clear-refresh-{}", Uuid::new_v4()));
+        let (backend, _) = surface_test_backend(&root);
+        let old = rotation_boss(&backend);
+        let now = crate::model::unix_time();
+        install_pending_boss_rotation(&backend, now);
+        assert!(backend.reconcile_boss_rotation(now).is_err());
+        let path = backend.boss_continuity_path();
+        let checkpoint = ContinuityLedger::load(&path).unwrap();
+        assert!(checkpoint.coordinator_frozen(old));
+        let BossResult::Session {
+            session: cleared, ..
+        } = backend
+            .handle_boss_operation(None, BossOperation::Clear, &EventSink::detached())
+            .unwrap()
+        else {
+            panic!("expected cleared chat")
+        };
+        assert!(
+            ContinuityLedger::load(&path)
+                .unwrap()
+                .frozen_coordinator
+                .is_none()
+        );
+        if recovery != "clear" {
+            // Old clears deleted deliveries but left the unrelated freeze.
+            // Also cover an already-paused best-effort refresh on that owner.
+            ContinuityLedger::update(&path, |ledger| {
+                ledger.frozen_coordinator = checkpoint.frozen_coordinator.clone();
+                if recovery == "interrupted" {
+                    // A crash before ledger cleanup also retains the package.
+                    ledger.deliveries = checkpoint.deliveries.clone();
+                }
+            })
+            .unwrap();
+            install_pending_boss_rotation(&backend, now);
+            let journal_path = backend.boss_journal_path();
+            let mut journal = RotationJournal::load(&journal_path).unwrap();
+            journal.intent.as_mut().unwrap().mode = RotationMode::BestEffort;
+            journal.record_attempt_failure(
+                "another coordinator replacement remains unresolved".into(),
+                now,
+            );
+            journal.persist(&journal_path).unwrap();
+        } else {
+            ContinuityLedger::update(&path, |ledger| {
+                ledger.request_rotation(now, "refresh after clear")
+            })
+            .unwrap();
+        }
+        let queued = crate::model::QueuedMessage::agent("preserve this follow-up", None);
+        {
+            let mut state = backend.task_state.lock();
+            state
+                .session_mut(cleared.id)
+                .unwrap()
+                .queued_messages
+                .push(queued.clone());
+            backend.task_store.save(&mut state).unwrap();
+        }
+        drop(backend);
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        backend.reconcile_boss_rotation(now).unwrap();
+        let next = backend.boss.identity_and_session().1.unwrap();
+        assert_ne!(next, cleared.id);
+        backend.reconcile_boss_rotation(now).unwrap();
+        assert_eq!(backend.boss.identity_and_session().1, Some(next));
+        assert!(
+            ContinuityLedger::load(&path)
+                .unwrap()
+                .frozen_coordinator
+                .is_none()
+        );
+        assert!(
+            RotationJournal::load(&backend.boss_journal_path())
+                .unwrap()
+                .intent
+                .is_none()
+        );
+        backend.ensure_coordinator_available(next).unwrap();
+        assert!(backend.ensure_coordinator_available(old).is_err());
+        assert!(backend.ensure_coordinator_available(cleared.id).is_err());
+        {
+            let mut state = backend.task_store.load().unwrap();
+            let session = state.session_mut(next).unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            assert_eq!(
+                session
+                    .queued_messages
+                    .iter()
+                    .filter(|message| message.id == queued.id)
+                    .count(),
+                1
+            );
+        }
+        // The recovered owner can cross the actual provider admission boundary.
+        let capture = boss_runtime(&backend, next, Uuid::new_v4());
+        let driver = backend.sessions.lock().get(&next).unwrap().driver.clone();
+        backend
+            .drain_agent_queue(next, &driver, &EventSink::detached())
+            .unwrap();
+        assert_eq!(capture.prompts.lock().len(), 1);
+        assert!(capture.prompts.lock()[0].contains("preserve this follow-up"));
+        drop(backend);
+        remove_tree(root);
+    }
+}
+
+#[test]
+fn cleared_boss_replacement_preserves_unknown_submissions_and_effects() {
+    use waku_boss::rotation_continuity::ContinuityLedger;
+    use waku_protocol::boss::BossOperation;
+
+    for submitted in [false, true] {
+        let root = std::env::temp_dir().join(format!("boss-clear-unknown-{}", Uuid::new_v4()));
+        let (backend, _) = surface_test_backend(&root);
+        rotation_boss(&backend);
+        let now = crate::model::unix_time();
+        install_pending_boss_rotation(&backend, now);
+        assert!(backend.reconcile_boss_rotation(now).is_err());
+        let path = backend.boss_continuity_path();
+        ContinuityLedger::update(&path, |ledger| {
+            let frozen = ledger.frozen_coordinator.as_ref().unwrap();
+            if submitted {
+                ledger
+                    .submit_package(
+                        &format!("boss-successor:{}", frozen.successor),
+                        Uuid::new_v4(),
+                        now,
+                    )
+                    .unwrap();
+            } else {
+                let binding = frozen.package.as_ref().unwrap().binding.clone();
+                ledger
+                    .begin_coordinator_effect("unknown-effect", &binding)
+                    .unwrap();
+            }
+        })
+        .unwrap();
+        let before = ContinuityLedger::load(&path).unwrap();
+        backend
+            .handle_boss_operation(None, BossOperation::Clear, &EventSink::detached())
+            .unwrap();
+        drop(backend);
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        assert!(backend.reconcile_boss_rotation(now).is_err());
+        let after = ContinuityLedger::load(&path).unwrap();
+        assert_eq!(after.frozen_coordinator, before.frozen_coordinator);
+        assert_eq!(after.deliveries, before.deliveries);
+        assert_eq!(after.coordinator_effects, before.coordinator_effects);
+        assert!(backend.sessions.lock().is_empty());
+        drop(backend);
+        remove_tree(root);
+    }
+}
+
+#[test]
 fn best_effort_rotation_recovers_each_side_of_pointer_publication_once() {
     use waku_boss::{
         boss_rotation::{RotationJournal, RotationMode},
