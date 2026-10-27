@@ -162,7 +162,7 @@ pub(super) fn record_boss_event(
             } else {
                 activity = Some(ActivityItem::from_reasoning(
                     ReasoningBlock {
-                        content: text.clone(),
+                        content: text.clone().into(),
                         started_at_ms: crate::model::unix_time() * 1000,
                         finished_at_ms: 0,
                     },

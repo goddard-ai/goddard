@@ -44,8 +44,11 @@
   too. For single-activity updates, locate the newest matching position through
   shared reads before borrowing that slot mutably. Searching blocks through
   mutable iteration detaches skipped blocks and their activity containers,
-  including a search with no match. Metadata scans and copying a changed large
-  payload still require auditing.
+  including a search with no match. Reasoning text uses its own shared payload:
+  copying an activity to change its flags keeps that text, and actual text edits
+  detach it from outstanding snapshots. JSON and TypeScript still expose a
+  string. Metadata scans and copying a changed large payload still require
+  auditing.
 - Resolve a whole session or collection in one background pass instead of
   probing per item, and guard it with a generation counter so a result from a
   superseded pass cannot overwrite newer state.

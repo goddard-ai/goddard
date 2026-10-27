@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::git::CommitEntry;
 use crate::routing::RouteDecision;
-use crate::shared_history::SharedHistory;
+use crate::shared_history::{SharedHistory, SharedValue};
 
 #[derive(
     Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, TS,
@@ -6532,7 +6532,8 @@ fn merge_file_change(changes: &mut Vec<ActivityFileChange>, change: ActivityFile
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct ReasoningBlock {
-    pub content: String,
+    #[ts(as = "String")]
+    pub content: SharedValue<String>,
     pub started_at_ms: u64,
     pub finished_at_ms: u64,
 }
@@ -8571,6 +8572,35 @@ mod tests {
 
         let activities = &session.transcript_blocks[0].activities;
         assert_eq!(activities[0].title, "Browsed the web");
+    }
+
+    #[test]
+    fn reasoning_text_shares_snapshots_and_keeps_its_string_wire_format() {
+        let fixture = serde_json::json!({
+            "content": "Reasoning 🦀\n".repeat(64 * 1024),
+            "started_at_ms": 17,
+            "finished_at_ms": 23,
+        });
+        let mut current: ReasoningBlock = serde_json::from_value(fixture.clone()).unwrap();
+        let saved = current.clone();
+        assert!(
+            std::ptr::eq(current.content.as_ptr(), saved.content.as_ptr()),
+            "snapshot copied the reasoning text"
+        );
+        current.content.push_str("more");
+        assert!(
+            !std::ptr::eq(current.content.as_ptr(), saved.content.as_ptr()),
+            "editing the live reasoning did not detach its saved text"
+        );
+        assert!(serde_json::to_value(&saved).unwrap() == fixture);
+        let encoded = serde_json::to_value(&current).unwrap();
+        assert!(encoded["content"].is_string());
+        assert_eq!(encoded["started_at_ms"], 17);
+        assert_eq!(encoded["finished_at_ms"], 23);
+        let decoded: ReasoningBlock = serde_json::from_value(encoded).unwrap();
+        assert!(decoded.content.as_str() == current.content.as_str());
+        assert!(decoded.content.ends_with("more"));
+        assert!(!saved.content.ends_with("more"));
     }
 
     #[test]

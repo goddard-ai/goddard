@@ -64,7 +64,7 @@ impl Waku {
                             // paragraph break left over from a previous
                             // block's trailing newline run; a fresh block
                             // never starts on a break.
-                            content: delta.trim_start_matches(['\n', '\r']).to_owned(),
+                            content: delta.trim_start_matches(['\n', '\r']).to_owned().into(),
                             started_at_ms: now,
                             finished_at_ms: now,
                         },

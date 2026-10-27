@@ -106,7 +106,7 @@ fn reasoning_completion_preserves_skipped_history_and_noop_identity() {
     for (block, item, complete) in [(4, 1, false), (8, 4, false), (20, 0, true)] {
         session.transcript_blocks[block].activities[item] = ActivityItem::from_reasoning(
             ReasoningBlock {
-                content: "thinking\n".repeat(256),
+                content: "thinking\n".repeat(64 * 1024).into(),
                 started_at_ms: 1,
                 finished_at_ms: 2,
             },
@@ -121,6 +121,23 @@ fn reasoning_completion_preserves_skipped_history_and_noop_identity() {
     assert!(!session.transcript_blocks[4].activities[1].complete);
     assert!(!session.transcript_blocks[31].activities[5].complete);
     assert!(!saved.transcript_blocks[8].activities[4].complete);
+    assert!(
+        std::ptr::eq(
+            session.transcript_blocks[8].activities[4]
+                .reasoning
+                .as_ref()
+                .unwrap()
+                .content
+                .as_ptr(),
+            saved.transcript_blocks[8].activities[4]
+                .reasoning
+                .as_ref()
+                .unwrap()
+                .content
+                .as_ptr(),
+        ),
+        "completing reasoning copied its text"
+    );
     for index in 0..session.transcript_blocks.len() {
         if index == 8 {
             for item in [0, 1, 2, 3, 5] {

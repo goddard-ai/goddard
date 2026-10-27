@@ -17,6 +17,12 @@ impl<T> From<T> for SharedValue<T> {
     }
 }
 
+impl From<&str> for SharedValue<String> {
+    fn from(value: &str) -> Self {
+        Self::from(value.to_owned())
+    }
+}
+
 impl<T> Clone for SharedValue<T> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
@@ -33,6 +39,24 @@ impl<T> Deref for SharedValue<T> {
 impl<T: Clone> DerefMut for SharedValue<T> {
     fn deref_mut(&mut self) -> &mut T {
         Arc::make_mut(&mut self.0)
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for SharedValue<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&**self, formatter)
+    }
+}
+
+impl<T: Serialize> Serialize for SharedValue<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (**self).serialize(serializer)
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for SharedValue<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        T::deserialize(deserializer).map(Self::from)
     }
 }
 
