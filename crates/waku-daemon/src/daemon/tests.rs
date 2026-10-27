@@ -3888,6 +3888,298 @@ fn runtime_generation_entry(
     }
 }
 
+#[test]
+fn archived_runtime_stop_requires_current_archive_and_physical_generation() {
+    for change in [
+        "rename",
+        "unarchive",
+        "rearchive",
+        "replacement",
+        "reattach",
+        "removed",
+        "corrupt",
+    ] {
+        let root = std::env::temp_dir().join(format!("archive-stop-{change}-{}", Uuid::new_v4()));
+        let (backend, id) = surface_test_backend(&root);
+        let runtime_id = Uuid::new_v4();
+        let old = Arc::new(CaptureDriver::default());
+        backend
+            .sessions
+            .lock()
+            .insert(id, runtime_generation_entry(runtime_id, old.clone(), &root));
+        let token = backend.agent.mint(id);
+        let retirements = {
+            let mut state = backend.task_state.lock();
+            state.session_mut(id).unwrap().archived_at = Some(1234);
+            backend.task_store.save(&mut state).unwrap();
+            backend.archived_runtime_retirements(&[id])
+        };
+        assert_eq!(retirements.len(), 1);
+        let generation = backend
+            .task_store
+            .workspace_cleanup_generation(id)
+            .unwrap()
+            .unwrap();
+        let successor = Arc::new(CaptureDriver::default());
+        match change {
+            "rename" => {
+                let mut state = backend.task_state.lock();
+                state.session_mut(id).unwrap().title = "renamed while archived".into();
+                backend.task_store.save(&mut state).unwrap();
+                assert_eq!(
+                    backend.task_store.workspace_cleanup_generation(id).unwrap(),
+                    Some(generation)
+                );
+            }
+            "unarchive" | "rearchive" => {
+                let mut state = backend.task_state.lock();
+                state.session_mut(id).unwrap().archived_at = None;
+                backend.task_store.save(&mut state).unwrap();
+                assert!(
+                    backend
+                        .task_store
+                        .workspace_cleanup_generation(id)
+                        .unwrap()
+                        .is_none()
+                );
+                if change == "rearchive" {
+                    // The same timestamp and physical owner still represent
+                    // a different archive, not a revival of the old permit.
+                    state.session_mut(id).unwrap().archived_at = Some(1234);
+                    backend.task_store.save(&mut state).unwrap();
+                    assert_ne!(
+                        backend.task_store.workspace_cleanup_generation(id).unwrap(),
+                        Some(generation)
+                    );
+                }
+            }
+            "replacement" => {
+                backend.sessions.lock().insert(
+                    id,
+                    runtime_generation_entry(runtime_id, successor.clone(), &root),
+                );
+            }
+            "reattach" => {
+                // Physical identity alone cannot authorize another logical
+                // runtime attempt, even if a stable host is shared.
+                backend.sessions.lock().get_mut(&id).unwrap().runtime_id = Uuid::new_v4();
+            }
+            "removed" => {
+                let mut state = backend.task_state.lock();
+                state.sessions.retain(|row| row.id != id);
+                backend.task_store.save(&mut state).unwrap();
+            }
+            "corrupt" => {
+                rusqlite::Connection::open(backend.task_store.path()).unwrap().execute(
+                    "UPDATE workspace_cleanup_intents SET generation = 'invalid' WHERE session_id = ?1",
+                    [id.to_string()],
+                ).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        backend.retire_archived_runtimes(&retirements);
+        if change == "rename" {
+            assert!(!backend.sessions.lock().contains_key(&id));
+            assert_eq!(*old.shutdowns.lock(), 1);
+            assert_eq!(backend.agent.resolve(&token), None);
+        } else {
+            assert!(backend.sessions.lock().contains_key(&id), "{change}");
+            assert_eq!(*old.shutdowns.lock(), 0, "{change}");
+            assert_eq!(*successor.shutdowns.lock(), 0, "{change}");
+            assert_eq!(backend.agent.resolve(&token), Some(id), "{change}");
+        }
+        drop(backend);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn delayed_bulk_archive_stop_preserves_an_unarchived_successor() {
+    let root = std::env::temp_dir().join(format!("delayed-archive-stop-{}", Uuid::new_v4()));
+    let (backend, id) = surface_test_backend(&root);
+    let backend = Arc::new(backend);
+    let runtime_id = Uuid::new_v4();
+    let old = Arc::new(CaptureDriver::default());
+    backend
+        .sessions
+        .lock()
+        .insert(id, runtime_generation_entry(runtime_id, old.clone(), &root));
+    let lifecycle = backend.runtime_lifecycles.session(id);
+    let owner = lifecycle.lock();
+    let archiving = {
+        let backend = backend.clone();
+        std::thread::spawn(move || backend.archive_sessions(&[id]))
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while backend
+        .task_store
+        .workspace_cleanup_generation(id)
+        .unwrap()
+        .is_none()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "archive did not commit"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let revision = backend
+        .task_state
+        .lock()
+        .sessions
+        .iter()
+        .find(|row| row.id == id)
+        .unwrap()
+        .metadata_revision;
+    backend
+        .update_session_metadata(
+            id,
+            revision,
+            Uuid::new_v4(),
+            waku_protocol::SessionMetadataChange::Archive { archived: false },
+        )
+        .unwrap();
+    let successor = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        id,
+        runtime_generation_entry(runtime_id, successor.clone(), &root),
+    );
+    let token = backend.agent.mint(id);
+    drop(owner);
+    archiving.join().unwrap().unwrap();
+    assert_eq!(*old.shutdowns.lock(), 0);
+    assert_eq!(*successor.shutdowns.lock(), 0);
+    assert_eq!(backend.sessions.lock()[&id].runtime_id, runtime_id);
+    assert_eq!(backend.agent.resolve(&token), Some(id));
+    // A new archive owns the successor and still performs its normal stop.
+    backend.archive_sessions(&[id]).unwrap();
+    assert_eq!(*successor.shutdowns.lock(), 1);
+    assert!(!backend.sessions.lock().contains_key(&id));
+    assert_eq!(backend.agent.resolve(&token), None);
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn archived_runtime_stop_revokes_parked_credentials_without_claiming_a_successor() {
+    for successor in [false, true] {
+        let root = std::env::temp_dir().join(format!("archive-parked-token-{}", Uuid::new_v4()));
+        let (backend, id) = surface_test_backend(&root);
+        let token = backend.agent.mint(id);
+        let retirements = {
+            let mut state = backend.task_state.lock();
+            state.session_mut(id).unwrap().archived_at = Some(1234);
+            backend.task_store.save(&mut state).unwrap();
+            backend.archived_runtime_retirements(&[id])
+        };
+        assert_eq!(retirements.len(), 1);
+        let capture = Arc::new(CaptureDriver::default());
+        let new_token = if successor {
+            backend.agent.revoke_session(id);
+            backend.sessions.lock().insert(
+                id,
+                runtime_generation_entry(Uuid::new_v4(), capture.clone(), &root),
+            );
+            Some(backend.agent.mint(id))
+        } else {
+            None
+        };
+        backend.retire_archived_runtimes(&retirements);
+        assert_eq!(backend.agent.resolve(&token), None);
+        if let Some(new_token) = new_token {
+            assert_eq!(backend.agent.resolve(&new_token), Some(id));
+            assert_eq!(*capture.shutdowns.lock(), 0);
+            assert!(backend.sessions.lock().contains_key(&id));
+        }
+        drop(backend);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn archive_during_provider_launch_retires_the_published_owner() {
+    for cold in [false, true] {
+        let root = std::env::temp_dir().join(format!("archive-during-launch-{}", Uuid::new_v4()));
+        let (mut backend, id) = runtime_generation_launch_fixture(&root, false);
+        runtime_generation_configure_launch(&mut backend, &root);
+        let capture = Arc::new(CaptureDriver::default());
+        let driver = capture.clone();
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let waiting = release.clone();
+        let (entered, entering) = crossbeam_channel::bounded(1);
+        let (finished, finishing) = crossbeam_channel::bounded(1);
+        let senders = Arc::new(Mutex::new(Vec::new()));
+        let held = senders.clone();
+        let token = Arc::new(Mutex::new(None));
+        let minted = token.clone();
+        backend.runtime_test_start = Some(Arc::new(move |_, options, sender| {
+            *minted.lock() = options.agent.as_ref().map(|env| env.token.clone());
+            held.lock().push(sender);
+            entered.send(()).unwrap();
+            waiting.wait();
+            Ok(DriverHandle::from_control(driver.clone()))
+        }));
+        backend.runtime_test_forward = Some(Arc::new(move |name, forward| {
+            let finished = finished.clone();
+            std::thread::Builder::new().name(name).spawn(move || {
+                forward();
+                finished.send(()).unwrap();
+            })
+        }));
+        let backend = Arc::new(backend);
+        let launching = {
+            let backend = backend.clone();
+            std::thread::spawn(move || {
+                runtime_generation_start(&backend, id, Uuid::new_v4(), &EventSink::detached(), cold)
+            })
+        };
+        entering
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        let archiving = {
+            let backend = backend.clone();
+            std::thread::spawn(move || backend.archive_sessions(&[id]))
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while backend
+            .task_store
+            .workspace_cleanup_generation(id)
+            .unwrap()
+            .is_none()
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "archive did not commit during launch"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        release.wait();
+        let error = launching.join().unwrap().unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("archived or removed during provider launch")
+        );
+        archiving.join().unwrap().unwrap();
+        assert_eq!(*capture.shutdowns.lock(), 1);
+        assert!(!backend.sessions.lock().contains_key(&id));
+        assert_eq!(backend.agent.resolve(token.lock().as_ref().unwrap()), None);
+        senders.lock().clear();
+        finishing
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        // Direct and cold launches also reject an already archived task
+        // before starting another physical provider.
+        let error =
+            runtime_generation_start(&backend, id, Uuid::new_v4(), &EventSink::detached(), cold)
+                .unwrap_err();
+        assert!(error.to_string().contains("is archived"));
+        assert_eq!(*capture.shutdowns.lock(), 1);
+        drop(backend);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
 fn runtime_generation_forward(
     backend: &WakuBackend,
     session_id: Uuid,

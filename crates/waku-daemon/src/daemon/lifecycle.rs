@@ -919,6 +919,7 @@ impl WakuBackend {
     /// through its bound backend handle.
     pub(crate) fn archive_sessions(&self, session_ids: &[Uuid]) -> anyhow::Result<()> {
         let mut archived_ids = Vec::new();
+        let retirements;
         let removed_ids;
         let workspace_roots: Vec<PathBuf>;
         {
@@ -985,6 +986,7 @@ impl WakuBackend {
             }
             removed_ids = removed.into_iter().collect::<Vec<_>>();
             self.task_store.save(&mut state)?;
+            retirements = self.archived_runtime_retirements(&archived_ids);
         }
         // A queued employee's shell is memory-only — the archived flag a
         // restart would never see. The roster record carries the stop
@@ -994,19 +996,11 @@ impl WakuBackend {
         drop_detached(removed_terminals);
         // An archived task keeps no live runtime — the same outcome as the
         // client's archive evicting it — and a removed side chat's dies too.
-        let gone: Vec<Uuid> = archived_ids.iter().chain(&removed_ids).copied().collect();
-        self.retire_archived_runtimes(&gone);
+        self.retire_archived_runtimes(&retirements);
         for id in removed_ids {
             drop_detached(self.remove_runtime(id, None, true));
         }
         Ok(())
-    }
-
-    /// Stop archived provider processes and revoke their scoped credentials.
-    pub(super) fn retire_archived_runtimes(&self, session_ids: &[Uuid]) {
-        for id in session_ids {
-            drop_detached(self.remove_runtime(*id, None, false));
-        }
     }
 
     /// Return the reason and path when archiving would discard employee work.

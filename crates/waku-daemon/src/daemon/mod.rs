@@ -709,6 +709,7 @@ enum ReviewMove {
 mod agent_tasks;
 mod boss_ops;
 mod boss_rotation;
+mod archive_retirement;
 mod catalog_ops;
 mod chain_exec;
 mod chain_handoff;

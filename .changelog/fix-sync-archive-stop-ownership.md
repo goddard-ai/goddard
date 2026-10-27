@@ -1,0 +1,1 @@
+- Delayed archive stops preserve unarchived or replacement runtimes, and providers that finish starting during an archive shut down their own launch.

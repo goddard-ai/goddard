@@ -68,6 +68,27 @@ pub(super) fn sync_project_paths(connection: &Connection) -> io::Result<()> {
 }
 
 impl StateStore {
+    /// Committed archive identity for fencing delayed maintenance effects.
+    /// This token alone is never permission to remove a workspace.
+    pub fn workspace_cleanup_generation(&self, session_id: Uuid) -> io::Result<Option<Uuid>> {
+        let guard = self.storage.lock();
+        let storage = guard.as_ref().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotConnected, "task store is not loaded")
+        })?;
+        let generation: Option<String> = storage
+            .connection
+            .query_row(
+                "SELECT generation FROM workspace_cleanup_intents WHERE session_id = ?1",
+                [session_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(to_io_error)?;
+        generation
+            .map(|value| Uuid::parse_str(&value).map_err(to_io_error))
+            .transpose()
+    }
+
     /// Backfill at most 128 narrow catalog rows during an admitted maintenance
     /// unit. The keyset cursor advances only after commit. New archive writes
     /// already record intent atomically, including rows behind this cursor.

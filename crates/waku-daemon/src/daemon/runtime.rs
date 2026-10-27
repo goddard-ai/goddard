@@ -73,6 +73,15 @@ impl WakuBackend {
                 !self.removed_session_ids.lock().contains(&session_id),
                 "task {session_id} was removed"
             );
+            anyhow::ensure!(
+                !self
+                    .task_state
+                    .lock()
+                    .sessions
+                    .iter()
+                    .any(|row| { row.id == session_id && row.archived_at.is_some() }),
+                "task {session_id} is archived"
+            );
             drop_detached(self.remove_runtime(session_id, None, false));
             owner.set(Some(runtime_id));
             self.spawn_runtime_inner(session_id, runtime_id, provider, options, events.clone())
@@ -452,6 +461,23 @@ impl WakuBackend {
             event_receiver,
             events,
         )?;
+        // Bulk archive/removal can commit while a provider is starting under
+        // its lifecycle gate. Publication precedes this final check: either
+        // we observe that commit and retire our own driver, or the later
+        // archive captures this published physical owner. There is no gap in
+        // which an absent-runtime snapshot can leave the launch running.
+        let removed_during_launch = self.removed_session_ids.lock().contains(&session_id);
+        let retired_during_launch = removed_during_launch
+            || self
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .any(|row| row.id == session_id && row.archived_at.is_some());
+        if retired_during_launch {
+            drop_detached(self.remove_runtime(session_id, Some(runtime_id), false));
+            bail!("task {session_id} was archived or removed during provider launch");
+        }
         Ok((handle, computer_use_available))
     }
 
