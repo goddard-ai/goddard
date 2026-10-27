@@ -1532,7 +1532,7 @@ struct Storage {
     written_messages: HashMap<Uuid, HashMap<Uuid, u64>>,
     /// Canonical terminal checkpoints are merged into full-session writes so
     /// an older queued batch cannot erase a checkpoint saved independently.
-    terminal_checkpoints: HashMap<Uuid, HashMap<usize, Checkpoint>>,
+    terminal_checkpoints: HashMap<Uuid, HashMap<(Uuid, usize), Checkpoint>>,
     saved_projects: u64,
     saved_app_settings: u64,
     saved_app_state: u64,
@@ -2178,6 +2178,7 @@ impl StateStore {
         else {
             return Ok(None);
         };
+        let turn_key = (turn.id, turn_count);
         if let Some(existing) = turn
             .checkpoint
             .as_ref()
@@ -2188,7 +2189,7 @@ impl StateStore {
                 .terminal_checkpoints
                 .entry(session_id)
                 .or_default()
-                .insert(turn_count, existing.clone());
+                .insert(turn_key, existing.clone());
             return Ok(Some(existing));
         }
         turn.checkpoint = Some(checkpoint.clone());
@@ -2214,7 +2215,7 @@ impl StateStore {
             .terminal_checkpoints
             .entry(session_id)
             .or_default()
-            .insert(turn_count, checkpoint.clone());
+            .insert(turn_key, checkpoint.clone());
         Ok(Some(checkpoint.clone()))
     }
 
@@ -3267,25 +3268,25 @@ fn session_data(session: &AgentSession) -> io::Result<String> {
     serde_json::to_string(&session_detail_value(session)?).map_err(to_io_error)
 }
 
-/// Only checkpoints on turns still present in the session are retained, so a
-/// rewind continues to drop its old turns and checkpoints.
+/// Retain checkpoints only for the same turn UUID and display count. Rewind
+/// can reuse a count for a new turn, which must not inherit its predecessor.
 fn terminal_checkpoints_for_session(
     session: &AgentSession,
-    existing: Option<&HashMap<usize, Checkpoint>>,
-) -> HashMap<usize, Checkpoint> {
+    existing: Option<&HashMap<(Uuid, usize), Checkpoint>>,
+) -> HashMap<(Uuid, usize), Checkpoint> {
     session
         .turns
         .iter()
         .filter_map(|turn| {
             existing
-                .and_then(|checkpoints| checkpoints.get(&turn.turn_count))
+                .and_then(|checkpoints| checkpoints.get(&(turn.id, turn.turn_count)))
                 .filter(|checkpoint| is_terminal_checkpoint(checkpoint))
                 .or_else(|| {
                     turn.checkpoint
                         .as_ref()
                         .filter(|checkpoint| is_terminal_checkpoint(checkpoint))
                 })
-                .map(|checkpoint| (turn.turn_count, checkpoint.clone()))
+                .map(|checkpoint| ((turn.id, turn.turn_count), checkpoint.clone()))
         })
         .collect()
 }
@@ -3294,7 +3295,7 @@ fn terminal_checkpoints_for_session(
 /// the detail row while that save was being prepared.
 fn session_data_with_checkpoints(
     session: &AgentSession,
-    checkpoints: &HashMap<usize, Checkpoint>,
+    checkpoints: &HashMap<(Uuid, usize), Checkpoint>,
 ) -> io::Result<String> {
     let mut value = session_detail_value(session)?;
     let Some(turns) = value
@@ -3307,7 +3308,7 @@ fn session_data_with_checkpoints(
         ));
     };
     for (serialized_turn, incoming) in turns.iter_mut().zip(&session.turns) {
-        let Some(checkpoint) = checkpoints.get(&incoming.turn_count) else {
+        let Some(checkpoint) = checkpoints.get(&(incoming.id, incoming.turn_count)) else {
             continue;
         };
         let checkpoint = serde_json::to_value(checkpoint).map_err(to_io_error)?;
@@ -4814,6 +4815,52 @@ mod tests {
         let restored = load_hydrated(&store);
         assert_eq!(
             restored.sessions[0].turns[0].checkpoint.as_ref(),
+            Some(&checkpoint)
+        );
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn checkpoint_cache_does_not_cross_a_reused_turn_count_after_rewind() {
+        let directory = temporary_directory();
+        fs::create_dir_all(&directory).unwrap();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let session_id = state.sessions[0].id;
+        let original = state.sessions[0].begin_turn("original");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        store.save(&mut state).unwrap();
+        store
+            .save_turn_checkpoint(session_id, 1, &test_checkpoint(1, "refs/waku/original"))
+            .unwrap();
+
+        state.sessions[0].truncate_after_turn(0);
+        let replacement = state.sessions[0].begin_turn("replacement");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        assert_ne!(original, replacement);
+        assert_eq!(state.sessions[0].turns[0].turn_count, 1);
+        state.mark_session_dirty(session_id);
+        let batch = store.save_batch(&mut state);
+        store.write_batch(&batch).unwrap();
+        let restored = load_hydrated(&store);
+        assert_eq!(restored.sessions[0].turns[0].id, replacement);
+        assert!(
+            restored.sessions[0].turns[0].checkpoint.is_none(),
+            "the replacement turn must not inherit the old cached checkpoint"
+        );
+
+        // Delayed saves of this same replacement must still retain its own
+        // independently written checkpoint, including after another save.
+        let checkpoint = test_checkpoint(1, "refs/waku/replacement");
+        store
+            .save_turn_checkpoint(session_id, 1, &checkpoint)
+            .unwrap();
+        store.write_batch(&batch).unwrap();
+        store.write_batch(&batch).unwrap();
+        assert_eq!(
+            load_hydrated(&store).sessions[0].turns[0]
+                .checkpoint
+                .as_ref(),
             Some(&checkpoint)
         );
         fs::remove_dir_all(directory).ok();

@@ -1,0 +1,1 @@
+- Rewinding and starting a replacement turn no longer inherits the old turn’s cached checkpoint during transcript saves.
