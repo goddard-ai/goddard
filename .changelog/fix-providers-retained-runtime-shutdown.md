@@ -1,1 +1,1 @@
-- Closed or archived tasks now release their task runtime even while background listeners are attached, preventing abandoned provider processes and subscriptions from lingering.
+- Closed or archived tasks release their runtime while background listeners are attached. ACP providers also stop when initialization stalls, and workspace cleanup waits for their confirmed exit.

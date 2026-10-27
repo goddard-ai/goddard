@@ -1,8 +1,9 @@
 //! Agent Client Protocol transport backed by the official Rust SDK.
 //!
 //! The SDK owns JSON-RPC framing, request IDs, response routing, cancellation,
-//! unknown-method errors, stdio lifetime, and protocol type validation. Goddard
-//! only adapts typed ACP messages to its provider-neutral [`DriverEvent`]s.
+//! unknown-method errors and protocol type validation. Goddard owns process
+//! lifetime and adapts typed ACP messages to provider-neutral [`DriverEvent`]s.
+//! Positive writer completion requires native reaping and reader drain.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -31,6 +32,7 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 
 use super::activity;
+mod process;
 use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
@@ -60,11 +62,13 @@ enum CommandMessage {
     /// the actor. The sender acknowledges the request resolved one way or
     /// the other so the caller is not racing the process's exit.
     DeleteSession(std::sync::mpsc::Sender<()>),
+    ProcessStopped,
     Shutdown,
 }
 
 pub struct AcpDriver {
     commands: smol::channel::Sender<CommandMessage>,
+    process: process::Control,
     supports_steer: bool,
     mode: RuntimeMode,
     computer_use: Option<super::computer_use::ComputerUseRuntime>,
@@ -180,7 +184,8 @@ impl AcpDriver {
 
         let computer_use = computer_use_runtime;
         let stderr_lines = Arc::new(Mutex::new(Vec::<String>::new()));
-        let agent = match &sandbox {
+        let (commands, command_rx) = smol::channel::unbounded();
+        let (agent, process, completion) = match &sandbox {
             Some(vm) => guest_transport(
                 &binary,
                 &cwd,
@@ -189,24 +194,41 @@ impl AcpDriver {
                 vm,
                 stderr_lines.clone(),
                 &events,
+                commands.clone(),
             )?,
-            None => AgentTransport::Host(sdk_agent(
-                &binary,
-                &cwd,
-                launch,
-                agent_env.as_ref(),
-                stderr_lines.clone(),
-                events.process_anchor(),
-            )?),
+            None => {
+                let agent = sdk_agent(
+                    &binary,
+                    &cwd,
+                    launch,
+                    agent_env.as_ref(),
+                    stderr_lines.clone(),
+                    events.process_anchor(),
+                )?;
+                let config = agent.config();
+                let mut command = std::process::Command::new(config.command());
+                command
+                    .args(config.arguments())
+                    .envs(config.environment())
+                    .current_dir(&cwd);
+                process::spawn(
+                    &command,
+                    None,
+                    stderr_lines.clone(),
+                    &events,
+                    commands.clone(),
+                )?
+            }
         };
-        let (commands, command_rx) = smol::channel::unbounded();
         let provider_name = provider.display_name();
         let thread_events = events.clone();
+        let process_completion = process.clone();
 
         thread::Builder::new()
             .name(format!("waku-{}-acp", provider.id()))
             .spawn(move || {
                 if let Err(error) = crate::command_env::unblock_sigchld_for_current_thread() {
+                    let _ = process_completion.finish(Ok(()), completion);
                     let _ = thread_events.send(DriverEvent::Error(format!(
                         "{provider_name}: failed to normalize the provider signal mask: {error}"
                     )));
@@ -231,6 +253,7 @@ impl AcpDriver {
                     command_rx,
                     thread_events.clone(),
                 ));
+                let result = process_completion.finish(result, completion);
                 if let Err(error) = result {
                     let stderr = super::support::provider_stderr_error(stderr_lines.lock().clone());
                     let detail = stderr.unwrap_or_else(|| error.to_string());
@@ -243,6 +266,7 @@ impl AcpDriver {
 
         Ok(Self {
             commands,
+            process,
             // Droid's behavior under a concurrent session/prompt is
             // unverified, so steering stays off until a live session proves
             // it queues or interleaves safely.
@@ -253,39 +277,8 @@ impl AcpDriver {
     }
 }
 
-/// What `run_sdk_connection` drives — the SDK-managed host process, or a
-/// line transport over a process spawned inside the session's sandbox VM.
-enum AgentTransport {
-    Host(AcpAgent),
-    Guest(GuestAcpTransport),
-}
-
-type GuestLines = agent_client_protocol::Lines<
-    std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>>,
-    std::pin::Pin<Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>>,
->;
-
-/// The line transport plus the child that owns it: dropping the child kills
-/// the in-guest process — the same teardown the SDK's process-group guard
-/// gives host spawns.
-struct GuestAcpTransport {
-    lines: GuestLines,
-    _child: crate::sandbox::DriverChild,
-}
-
-impl agent_client_protocol::ConnectTo<Client> for AgentTransport {
-    async fn connect_to(
-        self,
-        client: impl agent_client_protocol::ConnectTo<Agent>,
-    ) -> agent_client_protocol::Result<()> {
-        match self {
-            Self::Host(agent) => ConnectTo::<Client>::connect_to(agent, client).await,
-            Self::Guest(transport) => {
-                ConnectTo::<Client>::connect_to(transport.lines, client).await
-            }
-        }
-    }
-}
+/// The SDK line transport over an owned host or sandbox process.
+type AgentTransport = process::Transport;
 
 /// Spawn the ACP agent inside the session's VM and wrap its pipes as the
 /// SDK's `Lines` transport: guest stdin writes are channel sends into the
@@ -301,9 +294,8 @@ fn guest_transport(
     vm: &Arc<crate::sandbox::ShuruVm>,
     stderr_lines: Arc<Mutex<Vec<String>>>,
     events: &DriverEventSender,
-) -> anyhow::Result<AgentTransport> {
-    use std::io::{BufRead as _, BufReader, Write as _};
-
+    stopped: smol::channel::Sender<CommandMessage>,
+) -> anyhow::Result<(AgentTransport, process::Control, process::Completion)> {
     let mut environment = crate::command_env::shell_environment()
         .into_iter()
         .map(|(name, value)| {
@@ -322,71 +314,8 @@ fn guest_transport(
         .current_dir(cwd)
         .args(launch.args.iter())
         .envs(environment);
-    let mut child = crate::sandbox::spawn(&command, Some(vm))
-        .context("could not spawn the provider process in the sandbox VM")?;
-    events
-        .record_process(child.host_pid())
-        .context("could not register sandbox process")?;
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow!("sandboxed {} stdin unavailable", binary.display()))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| anyhow!("sandboxed {} stdout unavailable", binary.display()))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("sandboxed {} stderr unavailable", binary.display()))?;
-
-    // Mirror the SDK's capped stderr tail so connection errors report the
-    // provider's own diagnostics.
-    thread::Builder::new()
-        .name("waku-acp-guest-stderr".into())
-        .spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let mut lines = stderr_lines.lock();
-                if lines.len() == 128 {
-                    lines.remove(0);
-                }
-                lines.push(line.to_owned());
-            }
-        })
-        .context("could not start the sandbox stderr drain")?;
-
-    let (lines_tx, lines_rx) = futures::channel::mpsc::unbounded();
-    thread::Builder::new()
-        .name("waku-acp-guest-stdout".into())
-        .spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                let done = line.is_err();
-                if lines_tx.unbounded_send(line).is_err() || done {
-                    break;
-                }
-            }
-        })
-        .context("could not start the sandbox stdout pump")?;
-
-    let incoming: std::pin::Pin<Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>> =
-        Box::pin(lines_rx);
-    let outgoing: std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>> =
-        Box::pin(futures::sink::unfold(
-            stdin,
-            |mut writer, line: String| async move {
-                writer.write_all(line.as_bytes())?;
-                writer.write_all(b"\n")?;
-                Ok::<_, std::io::Error>(writer)
-            },
-        ));
-
-    Ok(AgentTransport::Guest(GuestAcpTransport {
-        lines: agent_client_protocol::Lines::new(outgoing, incoming),
-        _child: child,
-    }))
+    process::spawn(&command, Some(vm), stderr_lines, events, stopped)
+        .context("could not spawn the provider process in the sandbox VM")
 }
 
 fn sdk_agent(
@@ -1162,7 +1091,7 @@ async fn run_sdk_connection(
                         let _ = done.send(());
                         break;
                     }
-                    CommandMessage::Shutdown => break,
+                    CommandMessage::Shutdown | CommandMessage::ProcessStopped => break,
                 }
             }
             cancel_pending_permissions(&pending_permissions);
@@ -3683,6 +3612,7 @@ impl DriverControl for AcpDriver {
             computer_use.begin_shutdown();
         }
         let _ = self.commands.try_send(CommandMessage::Shutdown);
+        self.process.begin_shutdown();
     }
 
     fn cancel_computer_use(&self) {
@@ -3719,6 +3649,7 @@ impl DriverControl for AcpDriver {
     }
 
     fn delete_provider_session(&self) {
+        self.process.expect_exit();
         let (done, wait) = std::sync::mpsc::channel();
         if self
             .commands
@@ -3812,28 +3743,6 @@ mod tests {
         assert!(smol::block_on(child.status()).unwrap().success());
         drop((stdin, stdout, stderr));
         std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    /// Teardown must reach the actor through `begin_shutdown` while handle
-    /// clones keep the driver alive — the daemon's forwarder holds one until
-    /// the driver stops emitting, so a `Shutdown` sent only from `Drop`
-    /// would never arrive and the provider would keep its session lock.
-    #[test]
-    fn begin_shutdown_signals_the_actor_while_a_handle_is_held() {
-        let (commands, command_rx) = smol::channel::unbounded();
-        let handle = crate::driver::DriverHandle::from_control(Arc::new(AcpDriver {
-            commands,
-            supports_steer: false,
-            mode: RuntimeMode::Auto,
-            computer_use: None,
-        }));
-        let forwarders_clone = handle.clone();
-        handle.begin_shutdown();
-        assert!(matches!(
-            command_rx.try_recv(),
-            Ok(CommandMessage::Shutdown)
-        ));
-        drop(forwarders_clone);
     }
 
     #[test]
