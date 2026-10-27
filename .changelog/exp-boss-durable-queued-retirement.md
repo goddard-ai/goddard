@@ -1,0 +1,1 @@
+- Queued employees archived or removed with their project retain cancellation through interrupted stops and daemon restarts.

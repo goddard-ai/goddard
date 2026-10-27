@@ -1124,7 +1124,6 @@ impl Backend for WakuBackend {
                         }
                     }
                 }
-                let mut newly_archived = Vec::new();
                 let mut state = self.task_state.lock();
                 let stable_sessions = self.task_store.stable_link_session_ids()?;
                 let removed_project_ids = self.removed_project_ids.lock();
@@ -1147,6 +1146,7 @@ impl Backend for WakuBackend {
                 }
                 drop(removed_project_ids);
                 let mut receipts = Vec::new();
+                let mut queued_metadata_rollback = Vec::new();
                 let removed_session_ids = self.removed_session_ids.lock();
                 let sessions = sessions
                     .into_iter()
@@ -1188,6 +1188,14 @@ impl Backend for WakuBackend {
                     let applied = if let Some(&index) = session_positions.get(&session_id) {
                         let existing = &mut state.sessions[index];
                         let employee = self.boss.employee_including_retired(session_id);
+                        if employee.as_ref().is_some_and(|employee| {
+                            employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued
+                        }) && (session.archived_at.is_some() || existing.archived_at.is_some())
+                        {
+                            // Narrow plain metadata only: never copy a queued
+                            // transcript just to roll back a denied archive.
+                            queued_metadata_rollback.push(existing.list_projection());
+                        }
                         // Full transcript saves are also metadata writers.
                         // Fence stale versions before any projection merge;
                         // clients cannot mint a future daemon-owned revision.
@@ -1241,9 +1249,8 @@ impl Backend for WakuBackend {
                             detail = SessionDetailSaveOutcome::DaemonOwned;
                             // A queued employee's shell is memory-only — an
                             // archive flag a client saves on it dies at
-                            // restart. The roster record carries the stop
-                            // once the merge lock is released.
-                            let was_archived = existing.archived_at.is_some();
+                            // restart. Persist roster cancellation before
+                            // publishing this merge; finish runs unlocked.
                             // Ordinary stable chats keep user-owned archive
                             // changes; the managed merge otherwise makes this
                             // stamp monotonic for Boss and employee sessions.
@@ -1256,9 +1263,6 @@ impl Backend for WakuBackend {
                             merge_stale_session_metadata(existing, session);
                             if let Some(archive) = archive {
                                 existing.archived_at = archive;
-                            }
-                            if !was_archived && existing.archived_at.is_some() {
-                                newly_archived.push(session_id);
                             }
                             true
                         } else if !session.detail_loaded {
@@ -1327,6 +1331,41 @@ impl Backend for WakuBackend {
                             receipts.push(SessionSaveReceipt { session_id, detail });
                         }
                     }
+                }
+                // Include already-archived accepted rows: a prior roster
+                // failure must not turn the save retry into a false success.
+                let queued_retirements = saved_ids
+                    .iter()
+                    .filter_map(|id| {
+                        session_positions
+                            .get(id)
+                            .and_then(|index| state.sessions.get(*index))
+                            .filter(|session| session.archived_at.is_some())
+                            .map(|_| *id)
+                    })
+                    .collect::<Vec<_>>();
+                if let Err(error) = self
+                    .boss
+                    .cancel_queued_for_catalog_retirement(&queued_retirements)
+                {
+                    // No reader may observe a newly archived memory-only shell
+                    // after its durable cancellation was rejected. Reverse order
+                    // also handles duplicate projections of one row in a batch.
+                    for previous in queued_metadata_rollback.into_iter().rev() {
+                        if let Some(current) = session_positions
+                            .get(&previous.id)
+                            .and_then(|index| state.sessions.get_mut(*index))
+                        {
+                            current.title = previous.title;
+                            current.archived_at = previous.archived_at;
+                            current.pinned_at = previous.pinned_at;
+                            current.agent_rename_allowed = previous.agent_rename_allowed;
+                            current.updated_at = previous.updated_at;
+                            current.metadata_revision = previous.metadata_revision;
+                            current.metadata_mutation_id = previous.metadata_mutation_id;
+                        }
+                    }
+                    return Err(error);
                 }
                 let used_project_ids = state
                     .sessions
@@ -1399,7 +1438,7 @@ impl Backend for WakuBackend {
                     }
                     return Err(error.into());
                 }
-                self.stop_queued_employees(&newly_archived);
+                self.stop_queued_employees(&queued_retirements);
                 let cascaded = cascaded.into_iter().collect::<Vec<_>>();
                 let removed_terminals = self.sweep_orphaned_terminals(&cascaded, &cascaded_roots);
                 drop_detached(removed_terminals);

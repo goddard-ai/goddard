@@ -80,6 +80,14 @@ impl MemoryGuard {
         self.anchors.join(runtime.to_string())
     }
 
+    /// Record the native sampler's latest observation for admission readers.
+    pub(super) fn record_host_pressure(&self, pressure: Option<Level>) {
+        self.critical.store(
+            pressure == Some(Level::Critical),
+            std::sync::atomic::Ordering::Release,
+        );
+    }
+
     pub(super) fn host_critical(&self) -> bool {
         self.critical.load(std::sync::atomic::Ordering::Acquire)
     }
@@ -354,10 +362,7 @@ impl WakuBackend {
         } else {
             crate::pressure::sample()
         };
-        let critical = pressure == Some(Level::Critical);
-        self.memory_guard
-            .critical
-            .store(critical, std::sync::atomic::Ordering::Release);
+        self.memory_guard.record_host_pressure(pressure);
         let table = crate::stats::process_table();
         self.memory_guard
             .observe_idle_evictions(now, table.as_ref());
@@ -377,9 +382,7 @@ impl WakuBackend {
     ) {
         let critical = pressure == Some(Level::Critical);
         let pressured = matches!(pressure, Some(Level::Elevated | Level::Critical));
-        self.memory_guard
-            .critical
-            .store(critical, std::sync::atomic::Ordering::Release);
+        self.memory_guard.record_host_pressure(pressure);
         let live: Vec<_> = self
             .sessions
             .lock()

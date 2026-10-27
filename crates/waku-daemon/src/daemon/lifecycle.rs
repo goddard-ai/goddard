@@ -873,6 +873,10 @@ impl WakuBackend {
                     }
                 }
             }
+            // Publish cancellation before deleting memory-only queued shells.
+            // A roster write failure leaves the project/catalog intact.
+            self.boss
+                .cancel_queued_for_catalog_retirement(&removed_ids)?;
             self.removed_project_ids.lock().insert(project_id);
             {
                 let mut removed = self.removed_session_ids.lock();
@@ -935,13 +939,19 @@ impl WakuBackend {
                 if self.boss.is_boss(*id) {
                     continue;
                 }
-                let Some(session) = state.sessions.iter().find(|session| {
-                    session.id == *id
-                        && session.archived_at.is_none()
-                        && session.side_chat_of.is_none()
-                }) else {
+                let Some(session) = state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == *id && session.side_chat_of.is_none())
+                else {
                     continue;
                 };
+                // Retrying an archive must still fulfill its queued stop;
+                // only newly archived work needs its archive precondition.
+                if session.archived_at.is_some() {
+                    archived_ids.push(*id);
+                    continue;
+                }
                 if let Some((path, reason)) = WakuBackend::employee_archive_blocker(session)? {
                     // Bulk requests archive per task so one dirty employee
                     // does not prevent clean tasks in the same request.
@@ -950,18 +960,23 @@ impl WakuBackend {
                     }
                     continue;
                 }
-                let session = state
-                    .session_mut(*id)
-                    .expect("archivable session is present");
-                session.archived_at = Some(now);
-                // Bumping `updated_at` keeps merge precedence honest — the
-                // same guard the client's archive applies so a stale save
-                // cannot resurrect or clobber the flag.
-                session.updated_at = now;
                 archived_ids.push(*id);
             }
             if archived_ids.is_empty() {
                 return Ok(());
+            }
+            self.boss
+                .cancel_queued_for_catalog_retirement(&archived_ids)?;
+            for id in &archived_ids {
+                let session = state
+                    .session_mut(*id)
+                    .expect("archivable session is present");
+                if session.archived_at.is_none() {
+                    session.archived_at = Some(now);
+                    // Preserve metadata precedence without changing the archive
+                    // generation when an accepted request is retried.
+                    session.updated_at = now;
+                }
             }
             // Archiving a task deletes its side chats. Roots are every
             // archived row, not just this call's, so a side chat whose

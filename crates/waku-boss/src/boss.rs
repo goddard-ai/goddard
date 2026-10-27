@@ -3124,6 +3124,52 @@ impl BossService {
         })
     }
 
+    /// Persist queued cancellation before a daemon catalog archive/removal can
+    /// discard its memory-only shell. No notifier runs under the caller's
+    /// catalog lock: the caller publishes the catalog/finish afterward, and
+    /// queue recovery independently consults `cancelled` after a crash.
+    pub fn cancel_queued_for_catalog_retirement(&self, sessions: &[Uuid]) -> anyhow::Result<()> {
+        if sessions.is_empty() {
+            return Ok(());
+        }
+        let ids = sessions.iter().copied().collect::<HashSet<_>>();
+        let mut state = self.state.lock();
+        if !state.employees.iter().any(|entry| {
+            ids.contains(&entry.session_id)
+                && entry.lifecycle() == EmployeeLifecycle::Queued
+                && !entry.cancelled
+        }) {
+            return Ok(());
+        }
+        let mut next = state.clone();
+        let mut finishing = HashSet::new();
+        for entry in next.employees.iter_mut().filter(|entry| {
+            ids.contains(&entry.session_id) && entry.lifecycle() == EmployeeLifecycle::Queued
+        }) {
+            entry.cancelled = true;
+            if entry
+                .assignment
+                .as_ref()
+                .is_some_and(|assignment| assignment.finishes_outcome)
+            {
+                finishing.insert(entry.session_id);
+            }
+        }
+        for outcome in &mut next.outcomes {
+            if outcome
+                .finishing_assignment
+                .is_some_and(|id| finishing.contains(&id))
+            {
+                outcome.finishing_assignment = None;
+            }
+        }
+        crate::instruction_pins::reconcile(&mut next, waku_protocol::model::unix_time());
+        next.revision = next.revision.saturating_add(1);
+        self.save(&next)?;
+        *state = next;
+        Ok(())
+    }
+
     /// Start an employee's teardown: persist `finishing` so the model
     /// slot stays held through shutdown and the release can happen
     /// exactly once. Returns the employee only on the winning
@@ -3331,6 +3377,18 @@ impl BossService {
             current = parent.supervisor_id;
         }
         current
+    }
+
+    /// Mandatory stop recovery needs only identities, not clones of all
+    /// queued prompts/tickets when the host is under memory pressure.
+    pub fn queued_cancellation_ids(&self) -> Vec<Uuid> {
+        self.state
+            .lock()
+            .employees
+            .iter()
+            .filter(|entry| entry.cancelled && entry.lifecycle() == EmployeeLifecycle::Queued)
+            .map(|entry| entry.session_id)
+            .collect()
     }
 
     /// Every queued ticket in sequence order — position and blocked

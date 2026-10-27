@@ -134,6 +134,16 @@
   These process-local preconditions do not replace destructive workspace
   admission, durable failure recovery, or queued desktop work that has not yet
   reached the daemon.
+- Queued employee archive/removal records roster cancellation before publishing
+  catalog retirement: an unstarted shell may have no durable task row. Batch
+  cancellation emits no callback under the catalog lock. A rejected cancellation
+  leaves archive/project removal unpublished; full-save failure restores queued
+  archive metadata before unlocking. Later catalog/finish failure may leave the
+  explicit cancellation committed; do not silently resume it. Queue recovery
+  finishes cancelled tickets without requiring memory admission, including the
+  scheduler's critical-pressure branch. That branch reads narrow identities and
+  does not drive new chains or resources. Readmission still owns its lifecycle
+  gate and a replacement ticket clears the old cancellation intentionally.
 - Daemon terminals commit a narrow unqualified writer origin immediately before
   the PTY factory can create a child. A storage failure aborts before spawn;
   invalid-directory validation creates no origin. Neither terminal close, EOF,

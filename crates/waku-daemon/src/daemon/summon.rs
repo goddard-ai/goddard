@@ -320,6 +320,15 @@ impl WakuBackend {
     /// ticket without waiting for the next wakeup.
     pub(crate) fn run_summon_scheduler(&self) {
         if self.memory_guard.host_critical() {
+            // Cancellation is mandatory work. Avoid cloning every parked
+            // ticket or driving new chains/resources while reclaiming stops.
+            for id in self.boss.queued_cancellation_ids() {
+                if let Some(employee) = self.boss.employee(id)
+                    && let Err(error) = self.dispatch_queued_head(&employee)
+                {
+                    eprintln!("queued cancellation recovery for {id} failed: {error:#}");
+                }
+            }
             return;
         }
         // The boss document owns the policy; the broker's file follows it
@@ -494,9 +503,6 @@ impl WakuBackend {
         &self,
         employee: &waku_protocol::boss::BossEmployee,
     ) -> anyhow::Result<bool> {
-        if self.memory_guard.host_critical() || self.memory_guard.paused(employee.session_id) {
-            return Ok(false);
-        }
         let lifecycle = self.runtime_lifecycles.session(employee.session_id);
         let _owner = lifecycle.lock();
         // Scheduler heads are snapshots taken before acquiring this lock.
@@ -529,6 +535,11 @@ impl WakuBackend {
         {
             self.stop_queued_employee(session_id)?;
             return Ok(true);
+        }
+        // Mandatory cancellation/finish recovery does not wait for memory
+        // admission. Only dispatching actual work is suppressed by pressure.
+        if self.memory_guard.host_critical() || self.memory_guard.paused(session_id) {
+            return Ok(false);
         }
         let chain_project = match self.chain_employee_project(employee) {
             Ok(project) => project,
