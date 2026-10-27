@@ -72,6 +72,11 @@ product edits cannot rebuild it. Keep it that way.
   unconfirmed terminate stays visibly stopping and the command is
   `Uncertain { OutcomeUnknown }`. Interrupt (backpressure/crash/drain-forced)
   is reported as `Interrupted`, distinct from a clean `Terminated`.
+  A stream-ending interruption/backpressure event does not resolve an uncertain
+  stop. A confirmed exit observed during termination completes the same stop
+  without adding a second terminal event. Consumers still check generation
+  status because older pinned hosts and historical journals may contain the
+  earlier ambiguous completed receipts.
 - **Held dispatch.** `CancelTurn` records a hold; queued submits become
   `DispatchPending` until `PermitDispatch` — the controller's explicit
   policy release, never implicit unwind. The link sends that release only

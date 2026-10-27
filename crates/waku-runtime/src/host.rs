@@ -1778,9 +1778,12 @@ impl RuntimeHost {
             ProviderEvent::TurnCancelled { turn_id } => {
                 self.attribute_turn_end(session_id, generation, *turn_id, sequence, true);
             }
-            ProviderEvent::Terminated { .. } => {
+            ProviderEvent::Terminated {
+                reason: TerminateReason::Requested | TerminateReason::Exited { .. },
+            } => {
                 // A stop command whose termination was unconfirmed resolves
-                // when the generation's last word arrives.
+                // only on positive exit evidence. An interrupted generation
+                // can also end its stream without proving its owner stopped.
                 let target = SessionRef {
                     session_id,
                     generation,
@@ -2133,17 +2136,18 @@ impl RuntimeHost {
             CanonicalAction::StopSession => {
                 self.fence_and_terminate(session_id, FenceKind::Stop);
                 let status = self.sessions[&session_id].status;
-                let disposition = if status == SessionStatus::Terminated {
-                    CommandDisposition::Terminal {
-                        outcome: TerminalOutcome::Completed,
-                        event_sequence: None,
-                    }
-                } else {
-                    CommandDisposition::Uncertain {
-                        stage: UncertainStage::OutcomeUnknown,
-                        detail: "termination is not confirmed".into(),
-                    }
-                };
+                let disposition =
+                    if matches!(status, SessionStatus::Terminated | SessionStatus::Exited) {
+                        CommandDisposition::Terminal {
+                            outcome: TerminalOutcome::Completed,
+                            event_sequence: None,
+                        }
+                    } else {
+                        CommandDisposition::Uncertain {
+                            stage: UncertainStage::OutcomeUnknown,
+                            detail: "termination is not confirmed".into(),
+                        }
+                    };
                 self.set_disposition(command_id, disposition);
             }
             CanonicalAction::PermitDispatch => {

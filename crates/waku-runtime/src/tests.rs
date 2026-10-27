@@ -473,6 +473,82 @@ fn stop_fence_blocks_delayed_work_and_claims_only_confirmed_stop() {
 }
 
 #[test]
+fn stop_outcome_requires_confirmed_exit_evidence_across_journal_reopen() {
+    for (reason, confirmed) in [
+        (TerminateReason::Requested, true),
+        (
+            TerminateReason::Exited {
+                detail: "owned child exited".into(),
+            },
+            true,
+        ),
+        (
+            TerminateReason::Interrupted {
+                detail: "owner lost".into(),
+            },
+            false,
+        ),
+        (TerminateReason::Backpressure, false),
+    ] {
+        let root = TestRoot::new();
+        let mut rig = open(&root, Budgets::default());
+        let grant = rig.control();
+        let (session, _) = rig.admit(&grant);
+        let fake = rig.factory.for_session(session).unwrap();
+        fake.script_terminate(Termination::Unconfirmed {
+            detail: "late evidence".into(),
+        });
+        let envelope = rig.session_env(
+            &grant,
+            Uuid::new_v4(),
+            session,
+            CanonicalAction::StopSession,
+        );
+        let initial = rig.host.execute(&rig.creds().0, envelope.clone()).unwrap();
+        assert!(matches!(
+            initial.disposition,
+            CommandDisposition::Uncertain { .. }
+        ));
+        fake.emit(ProviderEvent::Terminated { reason });
+        rig.host.pump();
+        let receipt = rig.host.execute(&rig.creds().0, envelope.clone()).unwrap();
+        assert_eq!(
+            matches!(
+                receipt.disposition,
+                CommandDisposition::Terminal {
+                    outcome: TerminalOutcome::Completed,
+                    ..
+                }
+            ),
+            confirmed,
+            "an interruption is not confirmed writer termination"
+        );
+        assert_eq!(
+            fake.terminate_count(),
+            1,
+            "a recorded stop was dispatched twice"
+        );
+        drop(rig);
+        let reopened = open(&root, Budgets::default());
+        let receipt = reopened
+            .host
+            .command(&reopened.creds().0, envelope.command_id)
+            .unwrap();
+        assert_eq!(
+            matches!(
+                receipt.disposition,
+                CommandDisposition::Terminal {
+                    outcome: TerminalOutcome::Completed,
+                    ..
+                }
+            ),
+            confirmed,
+            "reopening changed stop truth"
+        );
+    }
+}
+
+#[test]
 fn cancel_holds_dispatch_until_controller_permits() {
     let root = TestRoot::new();
     let mut rig = open(&root, Budgets::default());

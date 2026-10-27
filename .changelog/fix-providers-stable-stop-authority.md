@@ -1,1 +1,1 @@
-- With the stable provider runtime enabled, stop retries keep their original request and preserve credentials belonging to replacement sessions. Failed credential cleanup remains recorded for retry.
+- With the stable provider runtime enabled, stop retries keep their original request and preserve replacement credentials. Lost provider ownership and failed credential cleanup remain pending for reconciliation.

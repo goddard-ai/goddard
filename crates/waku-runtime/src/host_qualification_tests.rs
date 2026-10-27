@@ -134,10 +134,11 @@ fn failed_intent_records_never_contact_an_adapter() {
     assert_eq!(fake.dispatch_count(), 0);
 }
 
-struct ClosingFactory;
+struct ClosingFactory(bool);
 struct ClosingHandle {
     sink: std::sync::mpsc::SyncSender<ProviderEvent>,
     alive: bool,
+    report_exit: bool,
 }
 impl AdapterFactory for ClosingFactory {
     fn spawn(
@@ -148,6 +149,7 @@ impl AdapterFactory for ClosingFactory {
         Ok(Box::new(ClosingHandle {
             sink: ctx.sink,
             alive: true,
+            report_exit: self.0,
         }))
     }
 }
@@ -170,6 +172,15 @@ impl crate::AdapterHandle for ClosingHandle {
     }
     fn terminate(&mut self) -> Termination {
         self.alive = false;
+        if self.report_exit {
+            self.sink
+                .send(ProviderEvent::Terminated {
+                    reason: TerminateReason::Exited {
+                        detail: "child exited during stop".into(),
+                    },
+                })
+                .unwrap();
+        }
         Termination::Confirmed
     }
     fn alive(&self) -> bool {
@@ -182,43 +193,68 @@ impl crate::AdapterHandle for ClosingHandle {
 
 #[test]
 fn confirmed_stop_and_pipe_closure_have_one_terminal_truth() {
-    let root = TestRoot::new();
-    let mut rig = open(&root, Budgets::default());
-    rig.host.factory = Arc::new(ClosingFactory);
-    let grant = rig.control();
-    let (session, _) = rig.admit(&grant);
-    let env = rig.session_env(
-        &grant,
-        Uuid::new_v4(),
-        session,
-        CanonicalAction::StopSession,
-    );
-    rig.host.execute(&rig.creds().0, env).unwrap();
-    rig.host.pump();
-    rig.host.pump();
-    let inventory = rig.host.reconcile(&rig.creds().0, grant.epoch).unwrap();
-    assert_eq!(inventory.sessions[0].status, SessionStatus::Terminated);
-    let events = rig.events(&grant, session, 0).events;
-    assert_eq!(
-        events
-            .iter()
-            .filter(|e| matches!(e.event, ProviderEvent::Terminated { .. }))
-            .count(),
-        1
-    );
-    assert!(matches!(
-        events.last().unwrap().event,
-        ProviderEvent::Terminated {
-            reason: TerminateReason::Requested
+    for report_exit in [false, true] {
+        let root = TestRoot::new();
+        let mut rig = open(&root, Budgets::default());
+        rig.host.factory = Arc::new(ClosingFactory(report_exit));
+        let grant = rig.control();
+        let (session, _) = rig.admit(&grant);
+        let env = rig.session_env(
+            &grant,
+            Uuid::new_v4(),
+            session,
+            CanonicalAction::StopSession,
+        );
+        let receipt = rig.host.execute(&rig.creds().0, env).unwrap();
+        assert!(matches!(
+            receipt.disposition,
+            CommandDisposition::Terminal {
+                outcome: TerminalOutcome::Completed,
+                ..
+            }
+        ));
+        rig.host.pump();
+        rig.host.pump();
+        let inventory = rig.host.reconcile(&rig.creds().0, grant.epoch).unwrap();
+        assert_eq!(
+            inventory.sessions[0].status,
+            if report_exit {
+                SessionStatus::Exited
+            } else {
+                SessionStatus::Terminated
+            }
+        );
+        let events = rig.events(&grant, session, 0).events;
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e.event, ProviderEvent::Terminated { .. }))
+                .count(),
+            1
+        );
+        if report_exit {
+            assert!(matches!(
+                events.last().unwrap().event,
+                ProviderEvent::Terminated {
+                    reason: TerminateReason::Exited { .. }
+                }
+            ));
+        } else {
+            assert!(matches!(
+                events.last().unwrap().event,
+                ProviderEvent::Terminated {
+                    reason: TerminateReason::Requested
+                }
+            ));
         }
-    ));
+    }
 }
 
 #[test]
 fn synchronous_answer_consumption_survives_post_dispatch_bookkeeping() {
     let root = TestRoot::new();
     let mut rig = open(&root, Budgets::default());
-    rig.host.factory = Arc::new(ClosingFactory);
+    rig.host.factory = Arc::new(ClosingFactory(false));
     let grant = rig.control();
     let (session, _) = rig.admit(&grant);
     rig.host.ingest(
@@ -278,14 +314,14 @@ fn unqualified_crash_cleanup_blocks_admission_and_drain() {
     let session;
     {
         let mut rig = open(&root, Budgets::default());
-        rig.host.factory = Arc::new(ClosingFactory);
+        rig.host.factory = Arc::new(ClosingFactory(false));
         let grant = rig.control();
         session = rig.admit(&grant).0;
     }
     let mut host = RuntimeHost::open(
         &root.0,
         HostOptions::new("test"),
-        Arc::new(ClosingFactory),
+        Arc::new(ClosingFactory(false)),
         Box::new(ManualClock::new(1000000)),
     )
     .unwrap();
