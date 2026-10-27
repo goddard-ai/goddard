@@ -46,6 +46,9 @@ pub enum ChainObservation {
 #[derive(Default)]
 pub struct HandoffVerification {
     pub accessible_artifacts: Vec<String>,
+    /// (reference, reason) for every artifact reference that failed to
+    /// resolve — feeds gate reasons and the successor's dispatch warning.
+    pub artifact_diagnostics: Vec<(String, String)>,
     pub clean_committed_workspace: Option<(String, String)>,
     // (landed revision, resolved QA branch, reported submission id) — the
     // submission id is the employee's own claim, echoed for traceability;
@@ -1155,11 +1158,19 @@ impl BossService {
                 .then(|| "terminal message is unavailable".to_owned());
             if terminal.disposition != ResultDisposition::Success {
                 packet.disposition = terminal.disposition;
-                reason = Some(if terminal.message.contains("project_unavailable:") {
-                    terminal.message.clone()
-                } else {
-                    "terminal execution did not succeed".to_owned()
-                });
+                // An attempt that never bound an employee died at
+                // admission — its terminal message is the daemon's own
+                // diagnostic (drifted landing, dead workspace, resolved
+                // project), which is the pause reason the owner needs.
+                reason = Some(
+                    if terminal.message.contains("project_unavailable:")
+                        || attempt.employee_id.is_none()
+                    {
+                        terminal.message.clone()
+                    } else {
+                        "terminal execution did not succeed".to_owned()
+                    },
+                );
             } else if packet.disposition != ResultDisposition::Success {
                 reason = Some("structured result missing or unsuccessful".to_owned());
             }
@@ -1293,6 +1304,16 @@ impl BossService {
     }
 }
 
+/// The host-recorded reason a reference failed to resolve, when known.
+fn artifact_reason<'a>(verification: &'a HandoffVerification, reference: &str) -> &'a str {
+    verification
+        .artifact_diagnostics
+        .iter()
+        .find(|(other, _)| other == reference)
+        .map(|(_, reason)| reason.as_str())
+        .unwrap_or("the reference is unreachable")
+}
+
 fn gate_reason(
     step: &ChainStep,
     result: &ChainResult,
@@ -1319,23 +1340,39 @@ fn gate_reason(
         }
     }
     for name in &step.definition.required_artifacts {
-        if !result.artifacts.iter().any(|artifact| {
-            &artifact.name == name
-                && !artifact.reference.trim().is_empty()
-                && verification
+        let supplied = result
+            .artifacts
+            .iter()
+            .find(|artifact| &artifact.name == name);
+        match supplied {
+            None => return Some(format!("required artifact missing: {name}")),
+            Some(artifact) if artifact.reference.trim().is_empty() => {
+                return Some(format!("required artifact {name} has no reference"));
+            }
+            Some(artifact)
+                if !verification
                     .accessible_artifacts
-                    .contains(&artifact.reference)
-        }) {
-            return Some(format!("required artifact missing or inaccessible: {name}"));
+                    .contains(&artifact.reference) =>
+            {
+                let reason = artifact_reason(verification, &artifact.reference);
+                return Some(format!(
+                    "required artifact is inaccessible: {name} — {reason}"
+                ));
+            }
+            _ => {}
         }
     }
     // Every supplied reference must be usable, including non-required evidence.
-    if result.artifacts.iter().any(|artifact| {
+    if let Some(artifact) = result.artifacts.iter().find(|artifact| {
         !verification
             .accessible_artifacts
             .contains(&artifact.reference)
     }) {
-        return Some("artifact reference is inaccessible".into());
+        let reason = artifact_reason(verification, &artifact.reference);
+        return Some(format!(
+            "artifact reference is inaccessible: {} — {reason}",
+            artifact.name
+        ));
     }
     for gate in &step.definition.required_approvals {
         if !step

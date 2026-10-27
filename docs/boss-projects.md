@@ -186,6 +186,12 @@ owner's resolutions, in order of escalation:
   on attempts that produced a structured result.
 - `cancel` preserves the work but ends the chain.
 
+Artifact references are verified at the seal, not again at dispatch. An
+accepted handoff whose reference still cannot resolve no longer blocks the
+next step's admission — the successor launches with the dead reference named
+as a warning in its handoff brief. An admission that does fail (for example a
+drifted landing or workspace) pauses the chain with the actual cause.
+
 ## Revise a step
 
 Pause the chain with a control operation using its current `revision`. An

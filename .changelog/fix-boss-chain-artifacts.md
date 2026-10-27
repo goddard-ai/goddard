@@ -1,0 +1,1 @@
+- **Boss chains:** An owner-accepted artifact reference that still cannot resolve no longer kills the next step's admission — the successor launches with the dead reference named as a warning in its handoff brief, gate reasons now say why a reference is inaccessible, and a failed admission pauses the chain with the actual cause instead of "terminal execution did not succeed".

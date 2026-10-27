@@ -152,36 +152,44 @@ fn transcript_exists(state: &BossState, session: Uuid) -> bool {
         .any(|employee| employee.session_id == session)
 }
 
-fn deliverable_accessible(
+fn deliverable_unreachable(
     state: &BossState,
     id: Uuid,
     subject: &HandoffSubject<'_>,
     adopt_root: Option<&Path>,
-) -> bool {
+) -> Option<String> {
     let Some(deliverable) = state
         .deliverables
         .iter()
         .find(|deliverable| deliverable.id == id)
     else {
-        return false;
+        return Some(format!("unknown deliverable {id}"));
     };
     let path = Path::new(&deliverable.path);
     // A copied deliverable's snapshot lives in the daemon store; a reference
     // deliverable's path is a live source that dies with its workspace.
     if deliverable.source_path.is_some() {
-        return path.exists();
+        return (!path.exists())
+            .then(|| format!("deliverable {id} source {} is gone", deliverable.path));
     }
     if !path.exists() {
-        return false;
+        return Some(format!(
+            "deliverable {id} snapshot {} is missing",
+            deliverable.path
+        ));
     }
     match subject {
-        HandoffSubject::Supervisor => true,
-        HandoffSubject::Successor { project_path, .. } => dunce::canonicalize(path)
-            .is_ok_and(|resolved| successor_path_root(adopt_root, project_path, &resolved)),
+        HandoffSubject::Supervisor => None,
+        HandoffSubject::Successor { project_path, .. } => (!dunce::canonicalize(path)
+            .is_ok_and(|resolved| successor_path_root(adopt_root, project_path, &resolved)))
+        .then(|| format!("deliverable {id} is outside the successor's roots")),
     }
 }
 
-fn artifact_accessible(
+/// Why `reference` cannot resolve to content for `subject` — `None` when
+/// the artifact is reachable. The reason names the failed resolution so a
+/// gate pause or dispatch warning points at the fix, not the symptom.
+fn artifact_unreachable(
     state: &BossState,
     files_root: &Path,
     known_buckets: &[String],
@@ -189,11 +197,14 @@ fn artifact_accessible(
     subject: &HandoffSubject<'_>,
     producer_repo: &Path,
     adopt_root: Option<&Path>,
-) -> bool {
+) -> Option<String> {
     let reference = reference.trim();
-    match (classify(reference), subject) {
+    Some(match (classify(reference), subject) {
         (ArtifactRef::File(relative), HandoffSubject::Supervisor) => {
-            boss_file(files_root, relative).is_some()
+            if boss_file(files_root, relative).is_some() {
+                return None;
+            }
+            format!("boss file {relative} does not exist")
         }
         (
             ArtifactRef::File(relative),
@@ -203,18 +214,31 @@ fn artifact_accessible(
                 ..
             },
         ) => {
-            file_granted(relative, pinned_files, *persona_id)
-                && boss_file(files_root, relative).is_some()
+            if !file_granted(relative, pinned_files, *persona_id) {
+                format!("file {relative} is outside the successor's grants")
+            } else if boss_file(files_root, relative).is_none() {
+                format!("boss file {relative} does not exist")
+            } else {
+                return None;
+            }
         }
         (ArtifactRef::Transcript(session), HandoffSubject::Supervisor) => {
-            transcript_exists(state, session)
+            if transcript_exists(state, session) {
+                return None;
+            }
+            format!("unknown employee session {session}")
         }
         // A chain successor is the producer's sibling — transcript grants
         // follow supervisor lineage only.
-        (ArtifactRef::Transcript(_), HandoffSubject::Successor { .. }) => false,
+        (ArtifactRef::Transcript(_), HandoffSubject::Successor { .. }) => {
+            "a sibling step cannot read another employee's transcript".to_owned()
+        }
         (ArtifactRef::Memory(value), HandoffSubject::Supervisor) => {
             let bucket = value.split(':').next().unwrap_or_default();
-            known_buckets.iter().any(|known| known == bucket)
+            if known_buckets.iter().any(|known| known == bucket) {
+                return None;
+            }
+            format!("unknown memory bucket {bucket}")
         }
         (
             ArtifactRef::Memory(value),
@@ -226,25 +250,52 @@ fn artifact_accessible(
         ) => {
             let bucket = value.split(':').next().unwrap_or_default();
             let own = crate::boss::project_bucket_id(project_path);
-            bucket == own || bucket_ids.iter().any(|granted| granted == bucket)
+            if bucket == own || bucket_ids.iter().any(|granted| granted == bucket) {
+                return None;
+            }
+            format!("memory bucket {bucket} is not granted to the successor")
         }
-        (ArtifactRef::Deliverable(id), _) => deliverable_accessible(state, id, subject, adopt_root),
+        (ArtifactRef::Deliverable(id), _) => {
+            return deliverable_unreachable(state, id, subject, adopt_root);
+        }
         (ArtifactRef::Commit(revision), HandoffSubject::Supervisor) => {
-            commit_available(producer_repo, revision)
+            if commit_available(producer_repo, revision) {
+                return None;
+            }
+            format!(
+                "commit {revision} is not an object in {}",
+                producer_repo.display()
+            )
         }
         (ArtifactRef::Commit(revision), HandoffSubject::Successor { project_path, .. }) => {
             let repo = adopt_root.unwrap_or(project_path);
-            commit_available(repo, revision)
+            if commit_available(repo, revision) {
+                return None;
+            }
+            format!(
+                "commit {revision} is not an object in the successor's repository {}",
+                repo.display()
+            )
         }
         (ArtifactRef::CheckoutPath(path), HandoffSubject::Supervisor) => {
-            dunce::canonicalize(path).is_ok()
+            if dunce::canonicalize(path).is_ok() {
+                return None;
+            }
+            format!("path {} does not exist", path.display())
         }
         (ArtifactRef::CheckoutPath(path), HandoffSubject::Successor { project_path, .. }) => {
-            dunce::canonicalize(path)
+            if dunce::canonicalize(path)
                 .is_ok_and(|resolved| successor_path_root(adopt_root, project_path, &resolved))
+            {
+                return None;
+            }
+            format!(
+                "path {} does not resolve inside the successor's roots",
+                path.display()
+            )
         }
-        (ArtifactRef::Unknown, _) => false,
-    }
+        (ArtifactRef::Unknown, _) => format!("unrecognized artifact reference {reference:?}"),
+    })
 }
 
 /// The session still owning `workspace`, when it is an unadopted daemon
@@ -703,31 +754,35 @@ impl WakuBackend {
             }
         };
         verification.successor_access = successor_access;
-        verification.accessible_artifacts = result
-            .artifacts
-            .iter()
-            .filter(|artifact| {
-                artifact_accessible(
-                    &document,
-                    &files_root,
-                    &known_buckets,
-                    &artifact.reference,
-                    &subject,
-                    &producer_repo,
-                    adopt_root.as_deref(),
-                )
-            })
-            .map(|artifact| artifact.reference.clone())
-            .collect();
+        for artifact in &result.artifacts {
+            match artifact_unreachable(
+                document,
+                &files_root,
+                &known_buckets,
+                &artifact.reference,
+                &subject,
+                &producer_repo,
+                adopt_root.as_deref(),
+            ) {
+                None => verification
+                    .accessible_artifacts
+                    .push(artifact.reference.clone()),
+                Some(reason) => verification
+                    .artifact_diagnostics
+                    .push((artifact.reference.clone(), reason)),
+            }
+        }
         Ok(verification)
     }
 
     /// Resolve what the next attempt's summon receives after an accepted
     /// handoff: adoption of the verified committed workspace, a fresh
     /// worktree at the recorded landed revision, or the step's declared
-    /// workspace. The sealed evidence is re-verified here — drift between
+    /// workspace. Dispatch inputs are re-verified here — drift between
     /// acceptance and dispatch surfaces as an error for the execution core
-    /// to pause on, never as a dispatch on dead references.
+    /// to pause on, never as a dispatch on a dead workspace or landing.
+    /// Artifact references were already the seal's verdict, so drift there
+    /// rides the successor brief as a warning instead of re-pausing.
     #[allow(dead_code)] // Consumed by the execution core's dispatch path.
     pub(crate) fn chain_successor_inputs(
         &self,
@@ -794,15 +849,24 @@ impl WakuBackend {
             .ok_or_else(|| anyhow!("the previous handoff is not accepted"))?;
         let verification =
             self.verify_attempt(&document, chain, producer_index, producer_attempt)?;
-        for artifact in &handoff.result.artifacts {
-            ensure!(
+        // Artifact reachability is a seal gate, not a dispatch gate — the
+        // owner may already have accepted flagged evidence, and a dead
+        // reference cannot be re-supplied here, so re-failing admission
+        // would only dead-end the chain. What still hard-verifies is the
+        // dispatch input itself (workspace, landing, base); unreachable
+        // references degrade to a warning in the successor's brief.
+        let artifact_warnings: Vec<(&ChainArtifact, &str)> = handoff
+            .result
+            .artifacts
+            .iter()
+            .filter_map(|artifact| {
                 verification
-                    .accessible_artifacts
-                    .contains(&artifact.reference),
-                "artifact is no longer reachable: {}",
-                artifact.name
-            );
-        }
+                    .artifact_diagnostics
+                    .iter()
+                    .find(|(reference, _)| reference == &artifact.reference)
+                    .map(|(_, reason)| (artifact, reason.as_str()))
+            })
+            .collect();
         let code = handoff.result.code.as_ref();
         match producer_step.definition.boundary {
             HandoffBoundary::CommittedWorkspace => {
@@ -837,7 +901,19 @@ impl WakuBackend {
                 }
             }
         }
-        inputs.brief = Some(brief(chain, producer_index, handoff));
+        let mut text = brief(chain, producer_index, handoff);
+        if !artifact_warnings.is_empty() {
+            text.push_str(
+                "\n\nUnreachable predecessor artifacts — accepted but not resolvable now:",
+            );
+            for (artifact, reason) in &artifact_warnings {
+                text.push_str(&format!(
+                    "\n- {} — {} ({reason})",
+                    artifact.name, artifact.reference
+                ));
+            }
+        }
+        inputs.brief = Some(text);
         Ok(inputs)
     }
 
@@ -1292,10 +1368,12 @@ mod tests {
         );
         let chain = fixture.seal(&chain);
         assert_eq!(chain.status, ChainStatus::Paused);
-        assert_eq!(
-            chain.reason.as_deref(),
-            Some("artifact reference is inaccessible")
+        let reason = chain.reason.as_deref().unwrap();
+        assert!(
+            reason.starts_with("artifact reference is inaccessible: hidden"),
+            "reason: {reason}"
         );
+        assert!(reason.contains("outside the successor's grants"));
         // Only reachable references — required or not — carry through.
         let mut clean = success_result();
         clean.artifacts = accessible.to_vec();
@@ -1409,6 +1487,75 @@ mod tests {
         let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
         assert_eq!(inputs.step, 1);
         assert!(inputs.brief.unwrap().contains("Exact final"));
+    }
+
+    /// The seal's artifact verdict is final: an owner-accepted reference
+    /// that still cannot resolve must not kill the successor's admission.
+    /// The dispatch hands off with the dead reference named as a warning —
+    /// re-failing here would dead-end the chain on a waived gate.
+    #[test]
+    fn accepted_unreachable_artifacts_warn_the_successor() {
+        let fixture = Fixture::new();
+        let bogus = "0".repeat(40);
+        let mut result = success_result();
+        result.artifacts = vec![ChainArtifact {
+            name: "parity report".into(),
+            reference: format!("commit:{bogus}"),
+        }];
+        let chain = fixture.create(vec![
+            {
+                let mut step = fixture.step(HandoffBoundary::ArtifactsReady);
+                step.required_artifacts = vec!["parity report".into()];
+                step
+            },
+            fixture.step(HandoffBoundary::ArtifactsReady),
+        ]);
+        let chain = fixture.finish_attempt(&chain, &fixture.repo, result);
+        let chain = fixture.seal(&chain);
+        assert_eq!(chain.status, ChainStatus::Paused);
+        let reason = chain.reason.as_deref().unwrap();
+        assert!(
+            reason.starts_with("required artifact is inaccessible: parity report"),
+            "reason: {reason}"
+        );
+        assert!(reason.contains(&bogus), "reason: {reason}");
+        // The owner accepts the gate-failed handoff; resume advances.
+        let chain = fixture
+            .backend
+            .boss
+            .chain_operation(
+                None,
+                ChainOperation::Control {
+                    chain_id: chain.id,
+                    expected_revision: chain.revision,
+                    control: ChainControl::Accept,
+                    source_revision: None,
+                },
+            )
+            .unwrap();
+        let chain = fixture
+            .backend
+            .boss
+            .chain_operation(
+                None,
+                ChainOperation::Control {
+                    chain_id: chain.id,
+                    expected_revision: chain.revision,
+                    control: ChainControl::Resume,
+                    source_revision: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(chain.status, ChainStatus::Waiting);
+        assert_eq!(chain.current_step, 1);
+        let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
+        let brief = inputs.brief.unwrap();
+        assert!(
+            brief.contains("Unreachable predecessor artifacts")
+                && brief.contains("parity report")
+                && brief.contains(&format!("commit:{bogus}")),
+            "brief: {brief}"
+        );
     }
 
     #[test]
