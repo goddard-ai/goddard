@@ -9,6 +9,7 @@ import { WakuIcon } from '@/components/waku-icon'
 import { displayTitle, type TaskState } from '@/lib/daemon-api'
 import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
+import { useSidebarDayStartHour } from '@/hooks/use-sidebar-day-start-hour'
 import {
   groupSessions,
   nextSidebarUpdateDelay,
@@ -68,24 +69,27 @@ export function Sidebar({
   const [collapsed, setCollapsed] = useState<Set<DateGroup>>(new Set())
   const [liveWidth, setLiveWidth] = useState(width)
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1_000))
+  const [dayStartHour] = useSidebarDayStartHour()
   const groups = groupSessions(
     taskState.projects,
     taskState.sessions,
     new Date(nowSeconds * 1_000),
     t('sidebar.unknown_project'),
     t('project.no_project_name'),
+    dayStartHour,
   )
   const rows = sidebarRows(groups, collapsed)
 
   useEffect(() => setLiveWidth(width), [width])
+  useEffect(() => setNowSeconds(Math.floor(Date.now() / 1_000)), [dayStartHour])
   useEffect(() => {
-    const delay = nextSidebarUpdateDelay(taskState.sessions, nowSeconds)
+    const delay = nextSidebarUpdateDelay(taskState.sessions, nowSeconds, dayStartHour)
     const timer = window.setTimeout(
       () => setNowSeconds(Math.floor(Date.now() / 1_000)),
       delay * 1_000,
     )
     return () => window.clearTimeout(timer)
-  }, [nowSeconds, taskState.sessions])
+  }, [nowSeconds, taskState.sessions, dayStartHour])
 
   return (
     <>

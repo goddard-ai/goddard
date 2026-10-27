@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike, Utc};
 use gpui::{KeyBinding, actions};
 
 use super::*;
@@ -235,25 +235,71 @@ fn sidebar_project_ordering_label(ordering: SidebarProjectOrdering) -> String {
     }
 }
 
-/// Match the row label's floored elapsed days, including across midnight and DST.
-fn session_date_group(timestamp: u64, now: u64, today: NaiveDate) -> SessionDateGroup {
-    match now.saturating_sub(timestamp) / 86_400 {
-        0 => return SessionDateGroup::Today,
-        1 => return SessionDateGroup::Yesterday,
-        2..=6 => return SessionDateGroup::Last7Days,
-        7..=29 => return SessionDateGroup::Last30Days,
-        _ => {}
-    }
+/// Calendar days for Today/Yesterday, followed by elapsed ages for older groups.
+#[derive(Clone, Copy)]
+struct SidebarDateContext {
+    now: u64,
+    today: NaiveDate,
+    calendar_year: i32,
+    day_start_hour: u32,
+}
 
-    let session_date = i64::try_from(timestamp)
+impl SidebarDateContext {
+    fn new(now: DateTime<Local>, day_start_hour: u32) -> Self {
+        let day_start_hour = day_start_hour.min(6);
+        Self {
+            now: now.timestamp().max(0) as u64,
+            today: sidebar_work_date(&now, day_start_hour),
+            calendar_year: now.year(),
+            day_start_hour,
+        }
+    }
+}
+
+fn sidebar_work_date(local: &DateTime<Local>, day_start_hour: u32) -> NaiveDate {
+    let date = local.date_naive();
+    if local.hour() < day_start_hour {
+        date.pred_opt().unwrap_or(date)
+    } else {
+        date
+    }
+}
+
+/// The first occurrence of an ambiguous hour wins; a skipped hour starts at
+/// the first valid local minute after it, matching the browser's Date behavior.
+pub(super) fn next_sidebar_day_start(now: u64, day_start_hour: u32) -> Option<u64> {
+    let local = DateTime::<Utc>::from_timestamp(i64::try_from(now).ok()?, 0)?.with_timezone(&Local);
+    let date = sidebar_work_date(&local, day_start_hour.min(6)).succ_opt()?;
+    let start = date.and_hms_opt(day_start_hour.min(6), 0, 0)?;
+    (0..=180).find_map(|minute| {
+        let local = start.checked_add_signed(chrono::Duration::minutes(minute))?;
+        let boundary = Local.from_local_datetime(&local).earliest()?;
+        u64::try_from(boundary.timestamp())
+            .ok()
+            .filter(|at| *at > now)
+    })
+}
+
+fn session_date_group(timestamp: u64, dates: SidebarDateContext) -> SessionDateGroup {
+    let Some(local) = i64::try_from(timestamp)
         .ok()
         .and_then(|timestamp| DateTime::<Utc>::from_timestamp(timestamp, 0))
-        .map(|timestamp| timestamp.with_timezone(&Local).date_naive())
-        .unwrap_or(today);
-    if session_date.year() == today.year() {
-        SessionDateGroup::ThisYear
-    } else {
-        SessionDateGroup::More
+        .map(|timestamp| timestamp.with_timezone(&Local))
+    else {
+        return SessionDateGroup::Today;
+    };
+    let date = sidebar_work_date(&local, dates.day_start_hour);
+    if date >= dates.today {
+        return SessionDateGroup::Today;
+    }
+    if Some(date) == dates.today.pred_opt() {
+        return SessionDateGroup::Yesterday;
+    }
+    match dates.now.saturating_sub(timestamp) / 86_400 {
+        0..=6 => SessionDateGroup::Last7Days,
+        7..=29 => SessionDateGroup::Last30Days,
+        _ if local.year() == dates.calendar_year => SessionDateGroup::ThisYear,
+        _ => SessionDateGroup::More,
     }
 }
 
@@ -814,12 +860,11 @@ fn sort_sidebar_sessions(sessions: &mut Vec<&AgentSession>, ordering: SidebarOrd
 /// Date buckets always follow last-updated recency, independent of the
 /// ordering preference: a task created last week but replied to today still
 /// lands under Today, sorted within the group by the ordering's key.
-fn date_sidebar_groups(sessions: &[&AgentSession], now: u64, today: NaiveDate) -> [Vec<Uuid>; 6] {
+fn date_sidebar_groups(sessions: &[&AgentSession], dates: SidebarDateContext) -> [Vec<Uuid>; 6] {
     let mut grouped_sessions: [Vec<Uuid>; 6] = std::array::from_fn(|_| Vec::new());
     for &session in sessions {
-        grouped_sessions
-            [session_date_group(sidebar_session_timestamp(session), now, today).index()]
-        .push(session.id);
+        grouped_sessions[session_date_group(sidebar_session_timestamp(session), dates).index()]
+            .push(session.id);
     }
     grouped_sessions
 }
@@ -1715,7 +1760,7 @@ impl Waku {
     /// informational-blue dot the sidebar draws in that row's status slot.
     fn render_unseen_completion_bell(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         let selected = self.state.selected_session;
         let pending = self
             .pending_session_activation
@@ -3517,7 +3562,7 @@ impl Waku {
             .panel_resize_drag
             .is_some_and(|drag| drag.target == PanelResizeTarget::Sidebar);
 
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         self.sync_sidebar_rows(&rows);
         // Restored selection exists before ListState knows the viewport size.
         // Retry after the first layout so nearest-edge alignment has a height.
@@ -3648,7 +3693,7 @@ impl Waku {
     /// Keep a newly selected task visible without disturbing the sidebar when
     /// its row is already fully inside the viewport.
     pub(super) fn reveal_sidebar_session(&self, session_id: Uuid) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         self.sync_sidebar_rows(&rows);
         if let Some(index) = sidebar_session_row_index(&rows, session_id) {
             reveal_sidebar_list_row(&self.sidebar_list_state, &rows, index);
@@ -3658,7 +3703,7 @@ impl Waku {
     /// Keep a terminal row visible without disturbing the sidebar when it
     /// is already fully inside the viewport.
     pub(super) fn reveal_sidebar_terminal(&self, terminal_id: Uuid) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         self.sync_sidebar_rows(&rows);
         if let Some(index) = rows
             .iter()
@@ -3764,7 +3809,7 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         let Some(session_id) = sidebar_shortcut_target_ids(&rows).nth(action.index) else {
             return;
         };
@@ -3952,9 +3997,13 @@ impl Waku {
     /// fingerprint is an allocation-free scan of exactly what
     /// [`Self::sidebar_rows`] reads: started sessions with their project and
     /// recency, the presentation preferences, the collapsed-group set,
-    /// today's date, each session's elapsed days, and derived dormancy.
-    pub(super) fn sidebar_rows_cached(&self, today: NaiveDate) -> Rc<Vec<SidebarRow>> {
-        let mut fingerprint = mix(0x51de_ba5e_5eed_c0de, today.num_days_from_ce() as u64);
+    /// the local grouping day, each session's elapsed days, and derived dormancy.
+    pub(super) fn sidebar_rows_cached(&self) -> Rc<Vec<SidebarRow>> {
+        let dates = SidebarDateContext::new(Local::now(), self.state.sidebar_day_start_hour);
+        let now = dates.now;
+        let mut fingerprint = mix(0x51de_ba5e_5eed_c0de, dates.today.num_days_from_ce() as u64);
+        fingerprint = mix(fingerprint, u64::from(dates.day_start_hour));
+        fingerprint = mix(fingerprint, dates.calendar_year as u64);
         fingerprint = mix(fingerprint, self.boss_ui.revision);
         fingerprint = mix(
             fingerprint,
@@ -3996,7 +4045,6 @@ impl Waku {
             fingerprint,
             self.state.dormant_after_days.unwrap_or(0) as u64,
         );
-        let now = unix_time();
         for session in &self.state.sessions {
             if !session.has_started()
                 || session.archived_at.is_some()
@@ -4208,7 +4256,7 @@ impl Waku {
             fingerprint = mix_uuid(fingerprint, terminal_id);
         }
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
-            let (rows, collapsed_members, deliverables_unread) = self.sidebar_rows(now, today);
+            let (rows, collapsed_members, deliverables_unread) = self.sidebar_rows(dates);
             *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(rows);
             *self.sidebar_collapsed_group_members.borrow_mut() = Rc::new(collapsed_members);
             self.sidebar_deliverables_unread.set(deliverables_unread);
@@ -4223,8 +4271,7 @@ impl Waku {
     /// unread state of rows it hides.
     fn sidebar_rows(
         &self,
-        now: u64,
-        today: NaiveDate,
+        dates: SidebarDateContext,
     ) -> (Vec<SidebarRow>, HashMap<SidebarGroup, Vec<Uuid>>, bool) {
         let mut sorted_sessions = self
             .state
@@ -4265,6 +4312,7 @@ impl Waku {
         // Swept and stale sessions are dormant; where they land depends on
         // the grouping — a trailing Dormant section under Date, a
         // below-the-fold tail inside each project under Project.
+        let now = dates.now;
         let threshold = dormant_threshold_secs(self.state.dormant_after_days);
         let dormant_set = sorted_sessions
             .iter()
@@ -4511,7 +4559,7 @@ impl Waku {
                     .map(|session| session.id)
                     .collect::<Vec<_>>();
                 sorted_sessions.retain(|session| !dormant_set.contains(&session.id));
-                let grouped_sessions = date_sidebar_groups(&sorted_sessions, now, today);
+                let grouped_sessions = date_sidebar_groups(&sorted_sessions, dates);
                 for date_group in SessionDateGroup::ALL {
                     let group = SidebarGroup::Date(date_group);
                     let collapsed = self.sidebar_collapsed_groups.contains(&group);
@@ -4649,7 +4697,7 @@ impl Waku {
     /// there. Dormant sessions are skipped — an archive landing never parks
     /// selection on a shelved task.
     pub(super) fn next_sidebar_session_from_row(&self, position: usize) -> Option<Uuid> {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         next_sidebar_session_in_rows(&rows, position, |session_id| {
             self.state
                 .sessions
@@ -4698,7 +4746,7 @@ impl Waku {
         member: SidebarSelection,
         cx: &mut Context<Self>,
     ) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         let Some(target) = sidebar_selection_row_index(&rows, member) else {
             return;
         };
@@ -4736,7 +4784,7 @@ impl Waku {
         if self.sidebar_multi_selection.is_empty() {
             return Vec::new();
         }
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         let mut targets: Vec<Uuid> = rows
             .iter()
             .filter_map(|row| {
@@ -4768,7 +4816,7 @@ impl Waku {
         if self.sidebar_multi_selection.is_empty() {
             return Vec::new();
         }
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         let mut targets: Vec<(waku_client::DaemonKey, Uuid)> = rows
             .iter()
             .filter_map(|row| match sidebar_row_selection(row) {
@@ -5979,7 +6027,7 @@ impl Waku {
 
     pub(super) fn collapse_all_sidebar_groups(&mut self, cx: &mut Context<Self>) {
         let groups = self
-            .sidebar_rows_cached(Local::now().date_naive())
+            .sidebar_rows_cached()
             .iter()
             .filter_map(|row| match row {
                 SidebarRow::Header(group) => Some(*group),
@@ -6058,7 +6106,7 @@ impl Waku {
         if ordering == SidebarProjectOrdering::Manual && self.state.sidebar_project_order.is_empty()
         {
             self.state.sidebar_project_order = self
-                .sidebar_rows_cached(Local::now().date_naive())
+                .sidebar_rows_cached()
                 .iter()
                 .filter_map(|row| match row {
                     SidebarRow::Header(group) => sidebar_project_order_entry(*group),
@@ -6120,7 +6168,7 @@ impl Waku {
         direction: isize,
         cx: &mut Context<Self>,
     ) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         let entries = rows
             .iter()
             .filter_map(|row| match row {
@@ -8442,46 +8490,126 @@ mod tests {
     }
 
     #[test]
-    fn date_groups_follow_floored_elapsed_days() {
-        use chrono::TimeZone;
+    fn date_groups_use_the_selected_local_day_start() {
+        let local = |day, hour| {
+            Local
+                .with_ymd_and_hms(2026, 10, day, hour, 0, 0)
+                .earliest()
+                .unwrap()
+        };
+        let now = local(27, 12);
+        for hour in 0..=6 {
+            let dates = SidebarDateContext::new(now, hour);
+            let today = local(27, hour).timestamp() as u64;
+            let yesterday = local(26, hour).timestamp() as u64;
+            assert_eq!(session_date_group(today, dates), SessionDateGroup::Today);
+            assert_eq!(
+                session_date_group(today - 1, dates),
+                SessionDateGroup::Yesterday
+            );
+            assert_eq!(
+                session_date_group(yesterday, dates),
+                SessionDateGroup::Yesterday
+            );
+            assert_eq!(
+                session_date_group(yesterday - 1, dates),
+                SessionDateGroup::Last7Days
+            );
+            assert_eq!(
+                next_sidebar_day_start(dates.now, hour),
+                Some(local(28, hour).timestamp() as u64)
+            );
 
-        // Midnight, month/year changes, and DST must not split a displayed day.
+            // Until the selected hour, the preceding evening remains Today.
+            let before = DateTime::from_timestamp(today as i64 - 1, 0)
+                .unwrap()
+                .with_timezone(&Local);
+            let before = SidebarDateContext::new(before, hour);
+            assert_eq!(
+                session_date_group(yesterday, before),
+                SessionDateGroup::Today
+            );
+            assert_eq!(next_sidebar_day_start(before.now, hour), Some(today));
+        }
+    }
+
+    #[test]
+    fn date_groups_keep_rolling_older_ages_across_year_and_dst_boundaries() {
         for now in [
-            Local.with_ymd_and_hms(2026, 10, 26, 0, 30, 0),
             Local.with_ymd_and_hms(2026, 11, 2, 10, 0, 0),
-            Local.with_ymd_and_hms(2027, 1, 1, 0, 30, 0),
+            Local.with_ymd_and_hms(2027, 1, 1, 5, 0, 0),
             Local.with_ymd_and_hms(2026, 3, 9, 10, 0, 0),
         ] {
             let now = now.earliest().unwrap();
-            let today = now.date_naive();
-            let now = now.timestamp() as u64;
+            let dates = SidebarDateContext::new(now, 4);
             for (age, expected) in [
-                (0, SessionDateGroup::Today),
-                (86_399, SessionDateGroup::Today),
-                (86_400, SessionDateGroup::Yesterday),
-                (2 * 86_400 - 1, SessionDateGroup::Yesterday),
-                (2 * 86_400, SessionDateGroup::Last7Days),
+                (3 * 86_400, SessionDateGroup::Last7Days),
                 (7 * 86_400 - 1, SessionDateGroup::Last7Days),
                 (7 * 86_400, SessionDateGroup::Last30Days),
                 (30 * 86_400 - 1, SessionDateGroup::Last30Days),
             ] {
-                assert_eq!(session_date_group(now - age, now, today), expected);
+                assert_eq!(session_date_group(dates.now - age, dates), expected);
             }
             for age in [30, 365] {
-                let timestamp = now - age * 86_400;
-                let date = DateTime::from_timestamp(timestamp as i64, 0)
+                let timestamp = dates.now - age * 86_400;
+                let local = DateTime::from_timestamp(timestamp as i64, 0)
                     .unwrap()
                     .with_timezone(&Local);
-                let expected = if date.year() == today.year() {
+                let expected = if local.year() == dates.calendar_year {
                     SessionDateGroup::ThisYear
                 } else {
                     SessionDateGroup::More
                 };
-                assert_eq!(session_date_group(timestamp, now, today), expected);
+                assert_eq!(session_date_group(timestamp, dates), expected);
             }
             assert_eq!(
-                session_date_group(now + 86_400, now, today),
+                session_date_group(dates.now + 86_400, dates),
                 SessionDateGroup::Today
+            );
+        }
+    }
+
+    #[test]
+    fn sidebar_day_start_wakes_follow_local_calendar_through_dst() {
+        // A local day can be shorter or longer than 24 elapsed hours.
+        for (month, day) in [(3, 7), (11, 1), (12, 31)] {
+            let now = Local
+                .with_ymd_and_hms(2026, month, day, 4, 0, 0)
+                .earliest()
+                .unwrap();
+            let tomorrow = now
+                .date_naive()
+                .succ_opt()
+                .unwrap()
+                .and_hms_opt(4, 0, 0)
+                .unwrap();
+            let expected = Local
+                .from_local_datetime(&tomorrow)
+                .earliest()
+                .unwrap()
+                .timestamp() as u64;
+            assert_eq!(
+                next_sidebar_day_start(now.timestamp() as u64, 4),
+                Some(expected)
+            );
+        }
+        // In zones with a spring gap at 2 AM, that boundary starts at 3 AM.
+        let missing = NaiveDate::from_ymd_opt(2026, 3, 8)
+            .unwrap()
+            .and_hms_opt(2, 0, 0)
+            .unwrap();
+        if matches!(Local.from_local_datetime(&missing), chrono::LocalResult::None) {
+            let before = Local
+                .with_ymd_and_hms(2026, 3, 8, 1, 59, 59)
+                .earliest()
+                .unwrap();
+            let after = Local
+                .with_ymd_and_hms(2026, 3, 8, 3, 0, 0)
+                .earliest()
+                .unwrap();
+            assert_eq!(
+                next_sidebar_day_start(before.timestamp() as u64, 2),
+                Some(after.timestamp() as u64)
             );
         }
     }
@@ -9144,7 +9272,14 @@ mod tests {
         let mut sessions = vec![&replied_today, &newcomer, &quiet_yesterday];
         sort_sidebar_sessions(&mut sessions, SidebarOrdering::LastCreated);
 
-        let groups = date_sidebar_groups(&sessions, local_epoch(today, 16), today);
+        let dates = SidebarDateContext::new(
+            Local
+                .from_local_datetime(&today.and_hms_opt(16, 0, 0).unwrap())
+                .earliest()
+                .unwrap(),
+            4,
+        );
+        let groups = date_sidebar_groups(&sessions, dates);
         assert_eq!(
             groups[SessionDateGroup::Today.index()],
             vec![newcomer.id, replied_today.id]

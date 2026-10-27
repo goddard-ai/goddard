@@ -4478,6 +4478,8 @@ pub struct Waku {
     time_label_wake: Cell<Option<u64>>,
     /// Bumped per (re)arm so a superseded wake-up discards itself.
     time_label_wake_generation: Cell<u64>,
+    /// Local day-boundary calculation, cached across streaming frames.
+    sidebar_day_start_wake: Cell<Option<(u32, i32, chrono::NaiveDate, u64)>>,
     /// Live frames-per-second measurement for the header counter.
     fps_last_frame: Instant,
     fps_frame_count: u64,
@@ -5325,6 +5327,34 @@ impl Waku {
     fn schedule_time_label_wake(&self, cx: &mut Context<Self>) {
         let now = unix_time();
         let target = next_time_label_change(&self.state.sessions, now).map(|seconds| now + seconds);
+        // Date headers roll over at the viewer's local day boundary, including
+        // when the history has no recent replies to drive a label wake.
+        let target = if self.state.sidebar_grouping == SidebarGrouping::Date
+            && self
+                .state
+                .sessions
+                .iter()
+                .any(|session| session.has_started() && session.archived_at.is_none())
+        {
+            let local = Local::now();
+            let hour = self.state.sidebar_day_start_hour.min(6);
+            let offset = local.offset().local_minus_utc();
+            let date = local.date_naive();
+            let cached = self.sidebar_day_start_wake.get().filter(|entry| {
+                entry.0 == hour && entry.1 == offset && entry.2 == date && entry.3 > now
+            });
+            let at = cached.map(|entry| entry.3).or_else(|| {
+                let at = sidebar::next_sidebar_day_start(now, hour)?;
+                self.sidebar_day_start_wake
+                    .set(Some((hour, offset, date, at)));
+                Some(at)
+            });
+            at.map_or(target, |at| {
+                Some(target.map_or(at, |current| current.min(at)))
+            })
+        } else {
+            target
+        };
         // Terminal rows carry the same "…ago" labels; fold their next
         // boundary in so the shared wake covers them.
         let target = self
@@ -8129,6 +8159,7 @@ impl Waku {
                 git_panel_pane: git_panel_pane.clone(),
                 time_label_wake: Cell::new(None),
                 time_label_wake_generation: Cell::new(0),
+                sidebar_day_start_wake: Cell::new(None),
                 fps_last_frame: Instant::now(),
                 fps_frame_count: 0,
                 fps_value: 0,

@@ -18,6 +18,8 @@ import {
   useProviderProbes,
 } from '@/hooks/use-daemon-data'
 import { useCopyFeedback } from '@/hooks/use-copy-feedback'
+import { useSidebarDayStartHour } from '@/hooks/use-sidebar-day-start-hour'
+import { SIDEBAR_DAY_START_HOURS } from '@/lib/sidebar-preferences'
 import {
   daemonKeys,
   updateDaemonSettings,
@@ -169,6 +171,10 @@ export function SettingsView({
 function GeneralSettings() {
   const { t } = useI18n()
   const [analytics, setAnalytics] = useStoredBoolean('waku.analytics-enabled', true)
+  const [dayStartHour, setDayStartHour] = useSidebarDayStartHour()
+  const dayStartLabel = (hour: number) => hour === 0
+    ? t('settings.sidebar_day_start_midnight')
+    : t('settings.sidebar_day_start_am', { hour })
   return (
     <div>
       <SettingsCard>
@@ -176,6 +182,25 @@ function GeneralSettings() {
           icon="local"
           title={t('settings.local_by_default')}
           description={t('settings.local_by_default_web_description')}
+        />
+      </SettingsCard>
+      <SettingsCard row>
+        <SettingText
+          icon="hourglass"
+          title={t('settings.sidebar_day_start')}
+          description={t('settings.sidebar_day_start_description')}
+        />
+        <ControlMenu
+          align="right"
+          items={SIDEBAR_DAY_START_HOURS.map((hour) => ({
+            id: String(hour),
+            label: dayStartLabel(hour),
+            selected: hour === dayStartHour,
+            onSelect: () => setDayStartHour(hour),
+          }))}
+          label={dayStartLabel(dayStartHour)}
+          placement="below"
+          triggerClassName="h-8 w-[116px] max-w-none justify-between border bg-background px-3 text-[12px]"
         />
       </SettingsCard>
       <SettingsCard row>

@@ -575,7 +575,7 @@ settings.commands:
 settings.terminal:
   en: Terminal
 settings.general_keywords:
-  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull accent tint chip icon color theme agents agent tools permissions environment sandbox qa review train enter steer queue running turn chord key send submit scroll position transcript pin keep voice microphone mic input device airpods bluetooth dictation
+  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version sound audio notification alert chime bleep bubble gentle completed turn volume trackpad swipe gesture three finger navigation back forward sidebar day starts grouping midnight morning late night cutoff shortcut tags number command draft composer unsent preview dormant archive workspace default worktree branches branch merge sync conflicts land resolve rebase pull accent tint chip icon color theme agents agent tools permissions environment sandbox qa review train enter steer queue running turn chord key send submit scroll position transcript pin keep voice microphone mic input device airpods bluetooth dictation
 settings.appearance_keywords:
   en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid border outline separator hairline thick thin pixel preview math latex formula expression markdown file rendered source transcript content token speed tokens per second rate footer guided reading fixation saccade opacity
 settings.terminal_keywords:
@@ -1800,6 +1800,14 @@ settings.markdown_files_preview:
   en: Rendered preview
 settings.markdown_files_source:
   en: Source
+settings.sidebar_day_start:
+  en: Day starts at
+settings.sidebar_day_start_description:
+  en: Local time when Today and Yesterday roll over in the sidebar. A later start keeps late-night work together.
+settings.sidebar_day_start_midnight:
+  en: Midnight
+settings.sidebar_day_start_am:
+  en: "%{hour} AM"
 settings.dormant_after:
   en: Dormant after
 settings.dormant_after_description:

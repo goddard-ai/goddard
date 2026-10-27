@@ -2691,7 +2691,7 @@ impl Waku {
         self.state.selected_session = None;
         self.sync_voice_scratchpad_capture(cx);
         self.settings_page = None;
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         let pending = self
             .pending_session_activation
             .map(|pending| pending.session_id);
@@ -2780,10 +2780,8 @@ impl Waku {
         else {
             return;
         };
-        let landing_row = sidebar::sidebar_session_row_index(
-            &self.sidebar_rows_cached(Local::now().date_naive()),
-            session_id,
-        );
+        let landing_row =
+            sidebar::sidebar_session_row_index(&self.sidebar_rows_cached(), session_id);
         let busy = session.is_busy();
         // Only a worktree gets a preview: archiving snapshots its checkout
         // into the archive ref and removes the directory. A local checkout
@@ -3105,10 +3103,8 @@ impl Waku {
         if self.session_dormant_now(session) {
             return;
         }
-        let landing_row = sidebar::sidebar_session_row_index(
-            &self.sidebar_rows_cached(Local::now().date_naive()),
-            session_id,
-        );
+        let landing_row =
+            sidebar::sidebar_session_row_index(&self.sidebar_rows_cached(), session_id);
         let busy = session.is_busy();
         // Same split as archive: only a worktree gets a preview. A local
         // checkout is the user's own git state — sweeping never touches it.
@@ -4432,7 +4428,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         let selected = self.state.selected_session;
         let pending = self
             .pending_session_activation
@@ -4666,7 +4662,7 @@ impl Waku {
             }
         }
         self.show_unread_toast(stamped);
-        let rows = self.sidebar_rows_cached(Local::now().date_naive());
+        let rows = self.sidebar_rows_cached();
         let selected = self.state.selected_session;
         let pending = self
             .pending_session_activation

@@ -674,6 +674,10 @@ fn default_local_workspace_accent() -> bool {
     true
 }
 
+fn default_sidebar_day_start_hour() -> u32 {
+    DEFAULT_SIDEBAR_DAY_START_HOUR
+}
+
 fn default_dormant_after_days() -> Option<u32> {
     Some(DEFAULT_DORMANT_AFTER_DAYS)
 }
@@ -1484,6 +1488,9 @@ pub struct AppSettings {
     /// Days without a reply before a session groups as dormant; `None`
     /// disables auto-dormancy.
     pub dormant_after_days: Option<u32>,
+    /// Local hour at which Today and Yesterday roll over in the sidebar (0–6).
+    #[serde(default = "default_sidebar_day_start_hour")]
+    pub sidebar_day_start_hour: u32,
     /// ⌘-click (Ctrl-click on Linux and Windows) keeps opening links and
     /// file paths in the integrated terminal even while the running program
     /// reports mouse input. Off forwards those clicks to the program
@@ -1742,6 +1749,7 @@ impl Default for AppSettings {
             composer_dictation_experiment_enabled: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
+            sidebar_day_start_hour: DEFAULT_SIDEBAR_DAY_START_HOUR,
             terminal_open_links_in_mouse_mode: true,
             terminal_link_modifier: TerminalLinkModifier::default(),
             terminal_copy_on_select: true,
@@ -1814,6 +1822,9 @@ pub const DEFAULT_COMPLETION_SOUND_VOLUME: f32 = 1.0;
 /// Days without a reply before a session folds into the sidebar's Dormant
 /// group — the default for `dormant_after_days`.
 pub const DEFAULT_DORMANT_AFTER_DAYS: u32 = 7;
+
+/// Keep late-night work in the same sidebar day by default.
+pub const DEFAULT_SIDEBAR_DAY_START_HOUR: u32 = 4;
 
 /// The choices the dormancy-threshold picker offers, in days; `None` is its
 /// "Never" row, which disables auto-dormancy.
@@ -2299,6 +2310,9 @@ pub struct PersistedState {
     /// disables auto-dormancy.
     #[serde(default = "default_dormant_after_days")]
     pub dormant_after_days: Option<u32>,
+    /// Local hour at which Today and Yesterday roll over in the sidebar (0–6).
+    #[serde(default = "default_sidebar_day_start_hour")]
+    pub sidebar_day_start_hour: u32,
     /// ⌘-click (Ctrl-click on Linux and Windows) keeps opening links and
     /// file paths in the integrated terminal even while the running program
     /// reports mouse input.
@@ -2858,6 +2872,7 @@ impl PersistedState {
             composer_dictation_experiment_enabled: false,
             sidebar_draft_preview_color: SidebarDraftPreviewColor::default(),
             dormant_after_days: default_dormant_after_days(),
+            sidebar_day_start_hour: DEFAULT_SIDEBAR_DAY_START_HOUR,
             terminal_open_links_in_mouse_mode: true,
             terminal_link_modifier: TerminalLinkModifier::default(),
             terminal_copy_on_select: true,
@@ -3361,6 +3376,7 @@ impl PersistedState {
             composer_dictation_experiment_enabled: self.composer_dictation_experiment_enabled,
             sidebar_draft_preview_color: self.sidebar_draft_preview_color,
             dormant_after_days: self.dormant_after_days,
+            sidebar_day_start_hour: self.sidebar_day_start_hour.min(6),
             terminal_open_links_in_mouse_mode: self.terminal_open_links_in_mouse_mode,
             terminal_link_modifier: self.terminal_link_modifier,
             terminal_copy_on_select: self.terminal_copy_on_select,
@@ -3538,6 +3554,7 @@ impl PersistedState {
         self.composer_dictation_experiment_enabled = settings.composer_dictation_experiment_enabled;
         self.sidebar_draft_preview_color = settings.sidebar_draft_preview_color;
         self.dormant_after_days = settings.dormant_after_days;
+        self.sidebar_day_start_hour = settings.sidebar_day_start_hour.min(6);
         self.terminal_open_links_in_mouse_mode = settings.terminal_open_links_in_mouse_mode;
         self.terminal_link_modifier = settings.terminal_link_modifier;
         self.terminal_copy_on_select = settings.terminal_copy_on_select;
@@ -5513,6 +5530,30 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(!restored.local_workspace_accent);
+    }
+
+    #[test]
+    fn sidebar_day_start_defaults_to_four_and_round_trips_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.sidebar_day_start_hour, 4);
+        let mut state = PersistedState::empty();
+        assert_eq!(state.sidebar_day_start_hour, 4);
+        for hour in 0..=6 {
+            state.sidebar_day_start_hour = hour;
+            let settings = serde_json::to_value(state.app_settings()).unwrap();
+            assert_eq!(settings["sidebar_day_start_hour"], hour);
+            let mut restored = PersistedState::empty();
+            restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+            assert_eq!(restored.sidebar_day_start_hour, hour);
+        }
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("sidebar_day_start_hour")
+                .is_none()
+        );
+        state.apply_app_settings(serde_json::from_str(r#"{"sidebar_day_start_hour":99}"#).unwrap());
+        assert_eq!(state.sidebar_day_start_hour, 6);
     }
 
     #[test]

@@ -2113,6 +2113,30 @@ impl Waku {
                 )
             },
             self.sandbox_default_card(theme, search, cx),
+            setting_card(
+                "icons/hourglass.svg",
+                tr!("settings.sidebar_day_start"),
+                tr!("settings.sidebar_day_start_description"),
+                self.setting_selector(
+                    "sidebar-day-start-selector",
+                    (0..=6)
+                        .map(|hour| {
+                            let label = if hour == 0 {
+                                tr!("settings.sidebar_day_start_midnight")
+                            } else {
+                                tr!("settings.sidebar_day_start_am", hour = hour)
+                            };
+                            (hour, label)
+                        })
+                        .collect(),
+                    self.state.sidebar_day_start_hour.min(6),
+                    220.0,
+                    cx,
+                    |this, hour, _window, cx| this.set_sidebar_day_start_hour(hour, cx),
+                ),
+                theme,
+                search,
+            ),
             {
                 let dormant_after = self.state.dormant_after_days;
                 let weak = cx.entity().downgrade();
@@ -12659,6 +12683,16 @@ impl Waku {
             return;
         }
         self.state.auto_commit_reminder_on_land = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_sidebar_day_start_hour(&mut self, hour: u32, cx: &mut Context<Self>) {
+        let hour = hour.min(6);
+        if self.state.sidebar_day_start_hour == hour {
+            return;
+        }
+        self.state.sidebar_day_start_hour = hour;
         self.save();
         cx.notify();
     }

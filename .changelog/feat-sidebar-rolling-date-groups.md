@@ -1,1 +1,1 @@
-- Find recent tasks in sidebar date groups that match their rounded-down ages: under 24 hours stays in “Today”, even across midnight, with “Last 7 days” and “Last 30 days” for older tasks.
+- Keep late-night tasks together with sidebar days that start at 4 AM local time; change “Day starts at” in General settings from midnight through 6 AM. Older tasks use rolling “Last 7 days” and “Last 30 days” groups.

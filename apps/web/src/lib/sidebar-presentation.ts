@@ -1,5 +1,6 @@
 import type { AgentSession, Project } from '@waku/client'
 import { projectDisplayName } from './project-presentation'
+import { DEFAULT_SIDEBAR_DAY_START_HOUR } from './sidebar-preferences'
 
 export type DateGroup = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'more'
 
@@ -73,6 +74,7 @@ export function groupSessions(
   now = new Date(),
   unknownProject = 'Unknown project',
   projectlessName = 'No project',
+  dayStartHour = DEFAULT_SIDEBAR_DAY_START_HOUR,
 ): SessionGroup[] {
   const projectNames = new Map(projects.map((project) => [
     project.id,
@@ -86,7 +88,7 @@ export function groupSessions(
     .filter(sessionHasStarted)
     .sort((left, right) => sessionTimestamp(right) - sessionTimestamp(left))
   for (const session of started) {
-    const id = dateGroup(sessionTimestamp(session), now)
+    const id = dateGroup(sessionTimestamp(session), now, dayStartHour)
     const items = grouped.get(id) ?? []
     items.push({
       session,
@@ -134,8 +136,12 @@ export function sessionTimeLabel(
 export function nextSidebarUpdateDelay(
   sessions: AgentSession[],
   nowSeconds = Math.floor(Date.now() / 1_000),
+  dayStartHour = DEFAULT_SIDEBAR_DAY_START_HOUR,
 ): number {
-  let next = secondsUntilLocalMidnight(nowSeconds)
+  const now = new Date(nowSeconds * 1_000)
+  const today = sidebarDayStart(now, dayStartHour)
+  const nextStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, dayStartHour)
+  let next = Math.max(1, Math.ceil(nextStart.getTime() / 1_000 - nowSeconds))
   for (const session of sessions) {
     if (session.last_reply_at == null && !sessionHasStarted(session)) continue
     const elapsed = Math.max(0, nowSeconds - sessionTimestamp(session))
@@ -149,10 +155,12 @@ export function nextSidebarUpdateDelay(
   return next
 }
 
-export function dateGroup(timestamp: number, now = new Date()): DateGroup {
+export function dateGroup(timestamp: number, now = new Date(), dayStartHour = DEFAULT_SIDEBAR_DAY_START_HOUR): DateGroup {
+  const today = sidebarDayStart(now, dayStartHour)
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, dayStartHour)
+  if (timestamp * 1_000 >= today.getTime()) return 'today'
+  if (timestamp * 1_000 >= yesterday.getTime()) return 'yesterday'
   const ageDays = Math.floor(Math.max(0, Math.floor(now.getTime() / 1_000) - timestamp) / 86_400)
-  if (ageDays === 0) return 'today'
-  if (ageDays === 1) return 'yesterday'
   if (ageDays < 7) return 'week'
   if (ageDays < 30) return 'month'
   if (new Date(timestamp * 1_000).getFullYear() === now.getFullYear()) return 'year'
@@ -179,8 +187,8 @@ function sessionTimestamp(session: AgentSession): number {
   return session.last_reply_at ?? session.created_at
 }
 
-function secondsUntilLocalMidnight(nowSeconds: number): number {
-  const now = new Date(nowSeconds * 1_000)
-  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-  return Math.max(1, Math.ceil((tomorrow.getTime() - now.getTime()) / 1_000))
+function sidebarDayStart(now: Date, hour: number): Date {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour)
+  if (today.getTime() <= now.getTime()) return today
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, hour)
 }
