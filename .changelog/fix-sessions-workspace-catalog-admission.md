@@ -1,0 +1,1 @@
+- Catalog changes that unarchive, move, share, or remove a workspace now defer while that workspace is being retired, preserving the existing cleanup authority until the operation ends.

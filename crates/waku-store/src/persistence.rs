@@ -2345,6 +2345,8 @@ impl StateStore {
             .connection
             .unchecked_transaction()
             .map_err(to_io_error)?;
+        let previous = workspace_cleanup::catalog_workspace(&transaction, session.id)?;
+        let mut catalog_paths = Vec::new();
         let changed = transaction
             .execute(
                 "UPDATE sessions SET title = ?2, archived_at = ?3, pinned_at = ?4,
@@ -2371,7 +2373,17 @@ impl StateStore {
             ));
         }
         workspace_cleanup::sync(&transaction, session.id)?;
+        workspace_cleanup::changed_catalog_paths(
+            previous,
+            workspace_cleanup::catalog_workspace(&transaction, session.id)?,
+            &mut catalog_paths,
+        )?;
         for id in removed {
+            workspace_cleanup::changed_catalog_paths(
+                workspace_cleanup::catalog_workspace(&transaction, *id)?,
+                None,
+                &mut catalog_paths,
+            )?;
             let id = id.to_string();
             transaction
                 .execute(
@@ -2389,6 +2401,7 @@ impl StateStore {
                 .execute("DELETE FROM messages WHERE session_id = ?1", [&id])
                 .map_err(to_io_error)?;
         }
+        let _admission = workspace_cleanup::guard_catalog_paths(self.path(), &catalog_paths)?;
         transaction.commit().map_err(to_io_error)?;
         for id in removed {
             storage.removed_sessions.insert(*id);
@@ -2556,6 +2569,11 @@ impl StateStore {
 
         let projects = serde_json::to_string(&batch.projects).map_err(to_io_error)?;
         let projects_fingerprint = fingerprint(&projects);
+        let mut catalog_paths = if projects_fingerprint != storage.saved_projects {
+            workspace_cleanup::changed_project_paths(&transaction, &batch.projects)?
+        } else {
+            Vec::new()
+        };
         if projects_fingerprint != storage.saved_projects {
             transaction
                 .execute("DELETE FROM projects", [])
@@ -2594,6 +2612,7 @@ impl StateStore {
             if storage.removed_sessions.contains(&session.id) {
                 continue;
             }
+            let previous = workspace_cleanup::catalog_workspace(&transaction, session.id)?;
             // A skeleton's empty transcript means "not fetched", not "empty".
             // Its promoted list columns may still have changed (for example,
             // an inactive sidebar row was renamed), so update only those and
@@ -2606,6 +2625,11 @@ impl StateStore {
                     )
                     .map_err(to_io_error)?;
                 workspace_cleanup::sync(&transaction, session.id)?;
+                workspace_cleanup::changed_catalog_paths(
+                    previous,
+                    workspace_cleanup::catalog_workspace(&transaction, session.id)?,
+                    &mut catalog_paths,
+                )?;
                 continue;
             }
             let checkpoint_cache = terminal_checkpoints_for_session(
@@ -2620,6 +2644,11 @@ impl StateStore {
                 )
                 .map_err(to_io_error)?;
             workspace_cleanup::sync(&transaction, session.id)?;
+            workspace_cleanup::changed_catalog_paths(
+                previous,
+                workspace_cleanup::catalog_workspace(&transaction, session.id)?,
+                &mut catalog_paths,
+            )?;
             transaction
                 .execute(UPSERT_SESSION_DETAIL, params![session.id.to_string(), data])
                 .map_err(to_io_error)?;
@@ -2645,6 +2674,11 @@ impl StateStore {
             .filter(|id| !batch.live_ids.contains(id))
             .collect::<Vec<_>>();
         for id in &removed {
+            workspace_cleanup::changed_catalog_paths(
+                workspace_cleanup::catalog_workspace(&transaction, *id)?,
+                None,
+                &mut catalog_paths,
+            )?;
             let key = id.to_string();
             transaction
                 .execute(
@@ -2669,6 +2703,7 @@ impl StateStore {
         if let Some((applying, sequence)) = checkpoint {
             update_stable_link(&transaction, applying, "live", sequence)?;
         }
+        let _admission = workspace_cleanup::guard_catalog_paths(self.path(), &catalog_paths)?;
         transaction.commit().map_err(to_io_error)?;
         // Now that the rows are durable, and not before.
         storage.saved_projects = projects_fingerprint;

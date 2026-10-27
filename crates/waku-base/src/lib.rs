@@ -74,3 +74,5 @@ pub mod resource_broker;
 pub mod settings;
 pub mod subprocess;
 pub mod theme;
+
+pub mod workspace_admission;

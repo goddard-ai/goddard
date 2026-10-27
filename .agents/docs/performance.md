@@ -203,6 +203,17 @@
   unlink gate files while the store is in use: that would split inode ownership.
   Separate task stores, older nonparticipating daemons, unsupported platforms,
   archive generations and shared catalog owners require their own authority.
+- The shared `waku-base::workspace_admission` gate also fences catalog commits.
+  Compare actual narrow promoted rows before/after SQL metadata fencing; ordinary
+  saves and rename/pin commits acquire no workspace guard. Unarchive, workspace
+  changes, new owners and authority removal hold a guard through commit. Project
+  path changes include existing materialized worktrees even without dirty rows.
+  Coalesce changed paths under one common ancestor, bounding file descriptors
+  by path depth rather than batch size; a broad batch may conservatively defer
+  an unrelated retirement during its short transaction. Resolve missing future
+  paths through an existing ancestor; unresolved aliases fail closed. These
+  publication checks do not replace generation/owner checks between cleanup
+  stages, restore admission or prepared-history generation fencing.
 - Desktop ending-capture descriptors and in-flight slots use the local turn
   UUID, since rewind can reuse display counts. Recheck the settled turn and
   workspace before dispatch and acceptance, before preparing transcript rows.

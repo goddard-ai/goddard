@@ -67,6 +67,135 @@ pub(super) fn sync_project_paths(connection: &Connection) -> io::Result<()> {
     Ok(())
 }
 
+/// Narrow catalog state; never reads or deserializes a transcript.
+#[derive(PartialEq, Eq)]
+pub(super) struct CatalogWorkspace {
+    project_id: String,
+    project_path: Option<String>,
+    workspace: Option<String>,
+    archived_at: Option<i64>,
+}
+
+pub(super) fn catalog_workspace(
+    connection: &Connection,
+    session_id: Uuid,
+) -> io::Result<Option<CatalogWorkspace>> {
+    connection.query_row(
+        "SELECT sessions.project_id, projects.path, sessions.workspace, sessions.archived_at
+         FROM sessions LEFT JOIN projects ON projects.id = sessions.project_id WHERE sessions.id = ?1",
+        [session_id.to_string()],
+        |row| Ok(CatalogWorkspace { project_id: row.get(0)?, project_path: row.get(1)?, workspace: row.get(2)?, archived_at: row.get(3)? }),
+    ).optional().map_err(to_io_error)
+}
+
+impl CatalogWorkspace {
+    fn path(&self) -> io::Result<Option<PathBuf>> {
+        let workspace = self
+            .workspace
+            .as_deref()
+            .map(serde_json::from_str::<SessionWorkspace>)
+            .transpose()
+            .map_err(to_io_error)?
+            .unwrap_or_default();
+        Ok(workspace
+            .path()
+            .map(Path::to_owned)
+            .or_else(|| self.project_path.as_ref().map(PathBuf::from)))
+    }
+}
+
+/// Compare the actual promoted rows after SQL metadata fencing, so a stale
+/// incoming save cannot unnecessarily block persistence during retirement.
+pub(super) fn changed_catalog_paths(
+    previous: Option<CatalogWorkspace>,
+    next: Option<CatalogWorkspace>,
+    paths: &mut Vec<PathBuf>,
+) -> io::Result<()> {
+    let changed = match (&previous, &next) {
+        (Some(before), Some(after)) => {
+            before.project_id != after.project_id
+                || before.project_path != after.project_path
+                || before.workspace != after.workspace
+                || (before.archived_at.is_some() && before.archived_at != after.archived_at)
+        }
+        (None, None) => false,
+        _ => true,
+    };
+    if changed {
+        for row in previous.iter().chain(next.iter()) {
+            if let Some(path) = row.path()? {
+                paths.push(path);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Project moves can invalidate cleanup authority without dirtying a session.
+/// Compare only path columns when the project snapshot itself changed.
+pub(super) fn changed_project_paths(
+    connection: &Connection,
+    projects: &[Project],
+) -> io::Result<Vec<PathBuf>> {
+    let mut statement = connection
+        .prepare("SELECT id, path FROM projects")
+        .map_err(to_io_error)?;
+    let mut old = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(to_io_error)?
+        .collect::<Result<HashMap<_, _>, _>>()
+        .map_err(to_io_error)?;
+    let mut paths = Vec::new();
+    for project in projects {
+        let previous = old.remove(&project.id.to_string());
+        if previous.as_deref() != project.path.to_str() {
+            paths.extend(previous.map(PathBuf::from));
+            paths.push(project.path.clone());
+            project_workspaces(connection, &project.id.to_string(), &mut paths)?;
+        }
+    }
+    for (id, path) in old {
+        paths.push(PathBuf::from(path));
+        project_workspaces(connection, &id, &mut paths)?;
+    }
+    Ok(paths)
+}
+
+fn project_workspaces(
+    connection: &Connection,
+    project_id: &str,
+    paths: &mut Vec<PathBuf>,
+) -> io::Result<()> {
+    let mut statement = connection
+        .prepare("SELECT workspace FROM sessions WHERE project_id = ?1 AND workspace IS NOT NULL")
+        .map_err(to_io_error)?;
+    let rows = statement
+        .query_map([project_id], |row| row.get::<_, String>(0))
+        .map_err(to_io_error)?;
+    for row in rows {
+        let workspace: SessionWorkspace =
+            serde_json::from_str(&row.map_err(to_io_error)?).map_err(to_io_error)?;
+        if let Some(path) = workspace.path() {
+            paths.push(path.to_owned());
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn guard_catalog_paths(
+    store: &Path,
+    paths: &[PathBuf],
+) -> io::Result<Option<waku_base::workspace_admission::WorkspaceAdmission>> {
+    waku_base::workspace_admission::WorkspaceAdmission::catalog(store, paths).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::WouldBlock,
+            format!("workspace catalog commit deferred: {error:#}"),
+        )
+    })
+}
+
 impl StateStore {
     /// Committed archive identity for fencing delayed maintenance effects.
     /// This token alone is never permission to remove a workspace.
@@ -152,6 +281,154 @@ mod tests {
             )
             .optional()
             .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn catalog_changes_cannot_revoke_or_add_ownership_during_retirement() {
+        use waku_base::workspace_admission::WorkspaceAdmission;
+        let root = std::env::temp_dir().join(format!("catalog-retirement-{}", Uuid::new_v4()));
+        let workspace = root.join("task-worktree");
+        fs::create_dir_all(&workspace).unwrap();
+        let alias = root.join("alias");
+        std::os::unix::fs::symlink(&workspace, &alias).unwrap();
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = PersistedState::fresh(root.join("project"));
+        let id = state.sessions[0].id;
+        state.sessions[0].workspace = SessionWorkspace::Worktree {
+            path: workspace.clone(),
+            name: "task".into(),
+            branch: None,
+            base_branch: None,
+            adopted_by: None,
+            borrowed: false,
+        };
+        state.sessions[0].begin_turn("retained history");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        state.sessions[0].archived_at = Some(1234);
+        store.save(&mut state).unwrap();
+        state.mark_session_dirty(id);
+        let delayed = store.save_batch(&mut state);
+        let generation = store.workspace_cleanup_generation(id).unwrap();
+        let peer = StateStore::daemon(store.path().to_owned());
+        let mut peer_state = peer.load().unwrap();
+        let retirement = WorkspaceAdmission::retirement(store.path(), &workspace).unwrap();
+
+        let mut metadata = state.sessions[0].list_projection();
+        metadata.archived_at = None;
+        metadata.metadata_revision = 1;
+        metadata.metadata_mutation_id = Some(Uuid::new_v4());
+        let error = peer
+            .write_session_metadata(&metadata, 0, &HashSet::new())
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(
+            peer.load_session_detail(id).unwrap().unwrap().archived_at,
+            Some(1234)
+        );
+        assert_eq!(peer.workspace_cleanup_generation(id).unwrap(), generation);
+
+        // Renames and old saves which SQL metadata fencing keeps archived do
+        // not add an owner or revoke cleanup authority, and must remain prompt.
+        metadata.archived_at = Some(1234);
+        metadata.title = "renamed while retired".into();
+        peer.write_session_metadata(&metadata, 0, &HashSet::new())
+            .unwrap();
+        store.write_batch(&delayed).unwrap();
+        assert_eq!(
+            store
+                .load()
+                .unwrap()
+                .sessions
+                .iter()
+                .find(|row| row.id == id)
+                .unwrap()
+                .title,
+            metadata.title
+        );
+        assert_eq!(store.workspace_cleanup_generation(id).unwrap(), generation);
+
+        let mut sibling = AgentSession::new(peer_state.projects[0].id, ProviderKind::Codex);
+        sibling.workspace = SessionWorkspace::Worktree {
+            path: alias,
+            name: "shared".into(),
+            branch: None,
+            base_branch: None,
+            adopted_by: None,
+            borrowed: true,
+        };
+        sibling.begin_turn("shared workspace owner");
+        sibling.finish_active_turn(crate::model::TurnStatus::Completed);
+        let sibling_id = sibling.id;
+        peer_state.push_session(sibling);
+        let shared_batch = peer.save_batch(&mut peer_state);
+        assert_eq!(
+            peer.write_batch(&shared_batch).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        assert!(peer.load_session_detail(sibling_id).unwrap().is_none());
+
+        let mut moved_owner = peer.load().unwrap();
+        moved_owner.session_mut(id).unwrap().workspace = SessionWorkspace::Worktree {
+            path: root.join("replacement-worktree"),
+            name: "replacement".into(),
+            branch: None,
+            base_branch: None,
+            adopted_by: None,
+            borrowed: false,
+        };
+        moved_owner.mark_session_dirty(id);
+        let moved_owner_batch = peer.save_batch(&mut moved_owner);
+        assert_eq!(
+            peer.write_batch(&moved_owner_batch).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        assert_eq!(
+            peer.load()
+                .unwrap()
+                .sessions
+                .iter()
+                .find(|row| row.id == id)
+                .unwrap()
+                .workspace
+                .path(),
+            Some(workspace.as_path())
+        );
+
+        // Project moves must guard materialized worktrees outside the ordinary
+        // project directory, even without dirtying any session.
+        let mut moved_project = peer.load().unwrap();
+        moved_project.projects[0].path = root.join("new-project");
+        let moved_batch = peer.save_batch(&mut moved_project);
+        assert_eq!(
+            peer.write_batch(&moved_batch).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        assert_eq!(peer.load().unwrap().projects[0].path, root.join("project"));
+
+        // Explicit removal must not revoke a live cleanup's authority mid-unit.
+        let mut removed = peer.load().unwrap();
+        removed.sessions.clear();
+        let removed_batch = peer.save_batch(&mut removed);
+        assert_eq!(
+            peer.write_batch(&removed_batch).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        assert!(peer.load_session_detail(id).unwrap().is_some());
+        drop(retirement);
+
+        // A normal retry succeeds after the operation's final boundary and
+        // revokes the original archive generation atomically.
+        metadata.archived_at = None;
+        metadata.metadata_revision = 2;
+        peer.write_session_metadata(&metadata, 1, &HashSet::new())
+            .unwrap();
+        assert!(peer.workspace_cleanup_generation(id).unwrap().is_none());
+        peer.write_batch(&shared_batch).unwrap();
+        assert!(peer.load_session_detail(sibling_id).unwrap().is_some());
+        drop(peer);
+        drop(store);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -4,6 +4,7 @@ use std::{
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
+use uuid::Uuid;
 
 struct ChildGuard(Child);
 impl Drop for ChildGuard {
@@ -25,6 +26,31 @@ fn wait_until(child: &mut Child, ready: &Path) {
             "admission child did not become ready"
         );
         std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+// A concurrent process spawn can briefly inherit another test's descriptors
+// before CLOEXEC closes them. Production acquisition deliberately defers rather
+// than waits; release assertions allow that handoff, but still fail on a leak.
+fn retirement_after_release(store: &Path, path: &Path) -> WorkspaceAdmission {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match WorkspaceAdmission::retirement(store, path) {
+            Ok(guard) => return guard,
+            Err(error) => {
+                assert!(
+                    error
+                        .to_string()
+                        .starts_with("workspace admission deferred:"),
+                    "{error:#}"
+                );
+                assert!(
+                    Instant::now() < deadline,
+                    "released admission remained locked: {error:#}"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
     }
 }
 
@@ -62,7 +88,7 @@ fn admission_is_cross_process_and_releases_without_a_persistent_owner() {
     for mode in ["writer", "retirement"] {
         let ready = root.join("ready");
         let mut child = ChildGuard(Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "daemon::workspace_admission::tests::admission_is_cross_process_and_releases_without_a_persistent_owner", "--nocapture"])
+            .args(["--exact", "workspace_admission::tests::admission_is_cross_process_and_releases_without_a_persistent_owner", "--nocapture"])
             .env(CHILD_ROOT, &root)
             .env(CHILD_MODE, mode)
             .stdin(Stdio::piped())
@@ -112,7 +138,7 @@ fn untrusted_gate_files_fail_closed_and_failed_acquisition_releases_earlier_lock
     // guards must release so that a subsequent writer can still publish.
     assert!(WorkspaceAdmission::retirement(&store, &root).is_err());
     drop(guard);
-    drop(WorkspaceAdmission::retirement(&store, &root).unwrap());
+    drop(retirement_after_release(&store, &root));
 
     let gate = fs::read_dir(&root)
         .unwrap()
@@ -135,9 +161,37 @@ fn untrusted_gate_files_fail_closed_and_failed_acquisition_releases_earlier_lock
     assert!(WorkspaceAdmission::retirement(&store, &nested).is_err());
     assert_eq!(fs::read(&store).unwrap(), b"fixture");
     fs::remove_file(&lock).unwrap();
-    drop(WorkspaceAdmission::retirement(&store, &nested).unwrap());
+    drop(retirement_after_release(&store, &nested));
     fs::remove_dir_all(&gate).unwrap();
     std::os::unix::fs::symlink(&nested, &gate).unwrap();
     assert!(WorkspaceAdmission::writer(&store, &nested).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn catalog_guards_missing_paths_and_coalesces_large_batches() {
+    let root = std::env::temp_dir().join(format!("admission-catalog-{}", Uuid::new_v4()));
+    let workspace = root.join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let store = root.join("app.db");
+    fs::write(&store, b"fixture").unwrap();
+    let paths = (0..2_000)
+        .map(|number| workspace.join(format!("not-created-{number}/nested")))
+        .collect::<Vec<_>>();
+    let guard = WorkspaceAdmission::catalog(&store, &paths)
+        .unwrap()
+        .unwrap();
+    assert!(
+        guard._locks.len() <= 129,
+        "catalog batch retained per-row descriptors"
+    );
+    assert!(WorkspaceAdmission::retirement(&store, &workspace).is_err());
+    drop(guard);
+    let retirement = retirement_after_release(&store, &workspace);
+    assert!(WorkspaceAdmission::catalog(&store, &paths[..1]).is_err());
+    drop(retirement);
+    let alias = workspace.join("dangling");
+    std::os::unix::fs::symlink(root.join("missing"), &alias).unwrap();
+    assert!(WorkspaceAdmission::catalog(&store, &[alias.join("child")]).is_err());
     fs::remove_dir_all(root).unwrap();
 }
