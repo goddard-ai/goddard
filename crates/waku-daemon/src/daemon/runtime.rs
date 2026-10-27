@@ -384,7 +384,7 @@ impl WakuBackend {
         }
         // A launch that never came up keeps no credential.
         let sandboxed_launch = options.sandbox.is_some();
-        let _starting_writer = self
+        let mut starting_writer = self
             .runtime_lifecycles
             .observe_starting_writer(&cwd, event_sender.writer_completion());
         let (handle, stable) = self.start_runtime_driver(
@@ -395,6 +395,7 @@ impl WakuBackend {
             event_sender,
             cloud_launch,
         )?;
+        starting_writer.bind(handle.writer_completion());
         if prepared_plan.is_some()
             && handle.agent_surface_delivery() == driver::AgentSurfaceDelivery::Absent
         {

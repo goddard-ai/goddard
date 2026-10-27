@@ -88,6 +88,14 @@ product edits cannot rebuild it. Keep it that way.
   threads and wakes its waiting forwarder once. It preserves the host session
   and its provider; only explicit stop/drain requests terminate that owner.
   Retaining a driver clone must not keep detached threads polling the host.
+- **Physical writer observation.** Qualified absolute launch origins receive
+  one shared completion witness per root, host instance, session and generation.
+  Runtime attempts bind their provisional observations to that witness without
+  dropping writer accounting. Detach leaves it pending. Current-epoch inventory
+  with exact-generation Terminated/Exited status confirms it; stream-ending
+  events and cached stop receipts alone cannot. Unknown origin stays unknown.
+  These process-local observations complement durable link/stop reconciliation;
+  they do not exclude other workspace writers or authorize removal after restart.
 - **Held dispatch.** `CancelTurn` records a hold; queued submits become
   `DispatchPending` until `PermitDispatch` — the controller's explicit
   policy release, never implicit unwind. The link sends that release only

@@ -18,7 +18,7 @@ pub enum WriterCompletionState {
 pub struct WriterCompletion(Arc<AtomicU8>);
 
 impl WriterCompletion {
-    /// Launch identity, independent of task/runtime ids supplied by callers.
+    /// Physical writer identity, independent of task/runtime attempt ids.
     pub fn same_writer(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
@@ -31,7 +31,9 @@ impl WriterCompletion {
         }
     }
 
-    pub(super) fn register(&self) {
+    /// Register only when the adapter has identified the physical writer.
+    /// External transports may share this witness across reattachments.
+    pub fn register(&self) {
         let _ = self
             .0
             .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
@@ -39,7 +41,7 @@ impl WriterCompletion {
 
     /// Only the owning adapter may confirm: an exit event, dropped handle,
     /// requested shutdown, or failed process wait is insufficient evidence.
-    pub(super) fn confirm(&self) {
+    pub fn confirm(&self) {
         let _ = self
             .0
             .compare_exchange(1, 2, Ordering::AcqRel, Ordering::Acquire);

@@ -165,10 +165,47 @@ pub(crate) struct ControllerLease {
     routes: Mutex<HashMap<Uuid, Weak<LinkShared>>>,
     /// All service connections share dispatch serialization.
     service_gate: Mutex<()>,
+    /// Physical generation witnesses survive link detach without retaining a
+    /// driver. The enclosing lease fixes namespace root and host instance.
+    writers: Mutex<HashMap<(Uuid, u64), crate::driver::WriterCompletion>>,
+}
+
+impl ControllerLease {
+    fn writer(&self, session: SessionRef) -> crate::driver::WriterCompletion {
+        let mut writers = self.writers.lock().unwrap();
+        writers
+            .entry((session.session_id, session.generation))
+            .or_insert_with(|| {
+                let witness = crate::driver::WriterCompletion::default();
+                witness.register();
+                witness
+            })
+            .clone()
+    }
+
+    fn observe_writers(&self, inventory: &Inventory) {
+        if inventory.runtime_instance != self.instance || inventory.epoch != self.grant.epoch {
+            return;
+        }
+        let mut writers = self.writers.lock().unwrap();
+        for session in &inventory.sessions {
+            if matches!(
+                session.status,
+                SessionStatus::Terminated | SessionStatus::Exited
+            ) {
+                if let Some(witness) =
+                    writers.remove(&(session.session.session_id, session.session.generation))
+                {
+                    witness.confirm();
+                }
+            }
+        }
+    }
 }
 
 struct LinkShared {
     controller: Arc<ControllerLease>,
+    writer_completion: crate::driver::WriterCompletion,
     backend: Weak<WakuBackend>,
     provider: ProviderKind,
     mode: crate::model::RuntimeMode,
@@ -247,6 +284,7 @@ fn controller_lease(
         host_pid,
         routes: Mutex::new(HashMap::new()),
         service_gate: Mutex::new(()),
+        writers: Mutex::new(HashMap::new()),
     });
     leases.insert(root.to_path_buf(), lease.clone());
     Ok(lease)
@@ -447,8 +485,22 @@ pub(crate) fn start_link(
             runtime_id,
         })
     });
+    // Read the admitted generation's own origin, never the replacement
+    // request's cwd. Older hosts keep an unqualified witness conservatively.
+    let writer_inventory = client.reconcile(grant.epoch).map_err(link_error)?;
+    let writer_completion = if writer_inventory
+        .sessions
+        .iter()
+        .any(|session| session.session == sref && session.launch_cwd.is_some())
+    {
+        controller.writer(sref)
+    } else {
+        crate::driver::WriterCompletion::default()
+    };
+    controller.observe_writers(&writer_inventory);
     let shared = Arc::new(LinkShared {
         controller: controller.clone(),
+        writer_completion,
         backend: backend.weak_self(),
         provider,
         mode: options.mode,
@@ -1516,6 +1568,7 @@ fn pump_loop(shared: Arc<LinkShared>, mut requests: ReconciledRequests) {
     let mut cursor = shared.cursor();
     let mut native = crate::driver::NativeEventProjection::default();
     if let Ok(inventory) = shared.client.lock().unwrap().reconcile(shared.epoch) {
+        shared.controller.observe_writers(&inventory);
         if let Some(config) = inventory
             .sessions
             .iter()
@@ -1577,6 +1630,11 @@ fn pump_loop(shared: Arc<LinkShared>, mut requests: ReconciledRequests) {
                             shared.note_turn_settled(turn_id);
                         }
                         ProviderEvent::Terminated { .. } => {
+                            // Stream-ending interruption is not proof. Ask the
+                            // current host for exact-generation positive status.
+                            if let Ok(inventory) = client.reconcile(shared.epoch) {
+                                shared.controller.observe_writers(&inventory);
+                            }
                             // The generation is fenced — held commands
                             // were refused and no release is lawful.
                             let mut gate = shared.gate.lock().unwrap();
@@ -1912,6 +1970,10 @@ impl StableLink {
 }
 
 impl DriverControl for StableLink {
+    fn writer_completion(&self) -> crate::driver::WriterCompletion {
+        self.shared.writer_completion.clone()
+    }
+
     fn prompt(&self, prompt: String) {
         self.shared.submit(Value::String(prompt));
     }
@@ -2128,6 +2190,7 @@ impl DriverControl for StableLink {
         let result = backend.with_stable_stop_gate(intent.session_id, || {
             let mut client = self.shared.client.lock().unwrap();
             retire_stop(
+                &self.shared.controller,
                 &self.shared.store,
                 &intent,
                 &mut client,
@@ -2159,6 +2222,7 @@ impl DriverControl for StableLink {
 /// Explicit stop and restart recovery use the same immutable owner and cleanup
 /// boundary. This never authorizes workspace removal.
 fn retire_stop(
+    controller: &ControllerLease,
     store: &StateStore,
     intent: &StableStopIntent,
     client: &mut RuntimeClient,
@@ -2242,6 +2306,7 @@ fn retire_stop(
         anyhow::ensure!(quiet(&inventory), "provider termination is not confirmed");
     }
     store.stable_stop_confirm(intent)?;
+    controller.observe_writers(&inventory);
     anyhow::ensure!(
         intent.descriptor_qualified,
         "original ingress scope is unavailable; reconciliation required"
@@ -2322,7 +2387,13 @@ pub(crate) fn recover_stop(backend: &WakuBackend, intent: &StableStopIntent) -> 
         }),
         action: CanonicalAction::StopSession,
     };
-    retire_stop(backend.task_store(), intent, &mut client, envelope)
+    retire_stop(
+        &controller,
+        backend.task_store(),
+        intent,
+        &mut client,
+        envelope,
+    )
 }
 
 fn link_error(error: ClientError) -> anyhow::Error {
@@ -5264,5 +5335,11 @@ for line in sys.stdin:
             .find(|inv| inv.session == link.sref())
             .unwrap();
         assert!(inv.claims.is_empty());
+        assert!(inv.launch_cwd.is_none());
+        assert_eq!(
+            link.writer_completion().state(),
+            crate::driver::WriterCompletionState::Unknown,
+            "an unqualified original workspace must not gain cleanup evidence"
+        );
     }
 }

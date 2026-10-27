@@ -22,6 +22,36 @@ pub(super) struct StartingWriter {
     witness: WriterCompletion,
 }
 
+impl StartingWriter {
+    /// Stable attachments share the physical host generation's witness. Swap
+    /// the provisional launch observation without a gap in writer accounting.
+    pub(super) fn bind(&mut self, witness: WriterCompletion) {
+        if witness.state() == WriterCompletionState::Unknown {
+            return;
+        }
+        let mut writers = self.lifecycles.retired_writers.lock();
+        let mut paths = Vec::new();
+        writers.pending.retain(|(path, known)| {
+            if known.same_writer(&self.witness) {
+                paths.push(path.clone());
+                false
+            } else {
+                true
+            }
+        });
+        for path in paths {
+            if !writers
+                .pending
+                .iter()
+                .any(|(known_path, known)| *known_path == path && known.same_writer(&witness))
+            {
+                writers.pending.push((path, witness.clone()));
+            }
+        }
+        self.witness = witness;
+    }
+}
+
 impl Drop for StartingWriter {
     fn drop(&mut self) {
         if self.witness.state() == WriterCompletionState::Unknown {
@@ -343,6 +373,152 @@ while not pathlib.Path('release-' + name).exists():
         drop(first);
         drop(second);
         drop(backend);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stable_writer_survives_detach_shares_reattach_and_fences_replacement() {
+        use waku_runtime::{
+            AdapterFactory, AdapterRegistry, FakeFactory, HostOptions, RuntimeHost, RuntimeServer,
+            SystemClock,
+        };
+        let root = std::env::temp_dir().join(format!("stable-writer-{}", Uuid::new_v4()));
+        let host_root = root.join("host");
+        let (mut backend, session) = super::super::tests::surface_test_backend(&root);
+        let binary = root.join("controlled-provider");
+        std::fs::write(&binary, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut settings = backend.settings.get();
+        settings.agent_tools_enabled = false;
+        settings.agent_settings_enabled = false;
+        settings.subagents_enabled = false;
+        settings
+            .provider_binary_overrides
+            .insert(ProviderKind::Codex, binary.display().to_string());
+        backend.settings.replace(settings).unwrap();
+        backend.stable_test_root = Some(host_root.clone());
+        let factory = FakeFactory::new();
+        let mut registry = AdapterRegistry::new();
+        registry.register(
+            "codex",
+            Arc::new(factory.clone()) as Arc<dyn AdapterFactory>,
+        );
+        let host = RuntimeHost::open(
+            &host_root,
+            HostOptions::new("goddard"),
+            Arc::new(registry),
+            Box::new(SystemClock),
+        )
+        .unwrap();
+        let server = RuntimeServer::bind(host, &host_root, Duration::from_millis(5)).unwrap();
+        let backend = Arc::new(backend);
+        backend.install_weak_self();
+        let events = EventSink::detached();
+        let path = root.join("repo");
+        let (mut attempt, first) = backend.ensure_agent_runtime(session, &events).unwrap();
+        let physical_id = backend
+            .task_store
+            .stable_link(session)
+            .unwrap()
+            .unwrap()
+            .runtime_session_id;
+        let witness = first.writer_completion();
+        assert_eq!(witness.state(), WriterCompletionState::Pending);
+        {
+            drop(backend.remove_runtime(session, Some(attempt), false));
+            assert!(
+                backend
+                    .require_no_observed_workspace_writers(&path)
+                    .is_err()
+            );
+            let (next, attached) = backend.ensure_agent_runtime(session, &events).unwrap();
+            attempt = next;
+            assert!(witness.same_writer(&attached.writer_completion()));
+            assert_eq!(
+                backend
+                    .runtime_lifecycles
+                    .retired_writers
+                    .lock()
+                    .pending
+                    .len(),
+                1,
+                "reattachment accumulated duplicate writer observations"
+            );
+        }
+        drop(backend.remove_runtime(session, Some(attempt), false));
+        let adapter = factory.for_session(physical_id).unwrap();
+        adapter.script_terminate(waku_runtime::Termination::Unconfirmed {
+            detail: "still draining".into(),
+        });
+        first.delete_provider_session();
+        assert_eq!(witness.state(), WriterCompletionState::Pending);
+        assert!(
+            backend
+                .require_no_observed_workspace_writers(&path)
+                .is_err()
+        );
+        // A late positive owned exit is reconciled by the same explicit stop.
+        adapter.emit(waku_runtime::ProviderEvent::Terminated {
+            reason: waku_runtime::TerminateReason::Exited {
+                detail: "controlled exit".into(),
+            },
+        });
+        first.delete_provider_session();
+        assert_eq!(witness.state(), WriterCompletionState::Confirmed);
+        assert!(backend.require_no_observed_workspace_writers(&path).is_ok());
+        let (replacement_attempt, replacement) =
+            backend.ensure_agent_runtime(session, &events).unwrap();
+        let replacement_witness = replacement.writer_completion();
+        assert!(!witness.same_writer(&replacement_witness));
+        first.delete_provider_session();
+        assert_eq!(
+            replacement_witness.state(),
+            WriterCompletionState::Pending,
+            "old stop released a replacement provider"
+        );
+        assert!(
+            backend
+                .require_no_observed_workspace_writers(&path)
+                .is_err()
+        );
+        replacement.delete_provider_session();
+        drop(backend.remove_runtime(session, Some(replacement_attempt), false));
+        assert_eq!(
+            replacement_witness.state(),
+            WriterCompletionState::Confirmed
+        );
+        assert!(backend.require_no_observed_workspace_writers(&path).is_ok());
+        let (natural_attempt, natural) = backend.ensure_agent_runtime(session, &events).unwrap();
+        let natural_witness = natural.writer_completion();
+        let natural_id = backend
+            .task_store
+            .stable_link(session)
+            .unwrap()
+            .unwrap()
+            .runtime_session_id;
+        factory
+            .for_session(natural_id)
+            .unwrap()
+            .emit(waku_runtime::ProviderEvent::Terminated {
+                reason: waku_runtime::TerminateReason::Exited {
+                    detail: "natural exit".into(),
+                },
+            });
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while natural_witness.state() != WriterCompletionState::Confirmed {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "natural exit did not confirm its writer"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        drop(backend.remove_runtime(session, Some(natural_attempt), false));
+        assert!(backend.require_no_observed_workspace_writers(&path).is_ok());
+        drop(natural);
+        drop(first);
+        drop(replacement);
+        drop(backend);
+        drop(server);
         std::fs::remove_dir_all(root).unwrap();
     }
 

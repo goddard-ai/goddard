@@ -1,0 +1,1 @@
+- With the stable provider runtime enabled, workspace cleanup tracks the same provider across local detach and reconnect, waits for confirmed termination, and preserves a replacement provider's ownership when an older stop finishes.
