@@ -1,0 +1,1 @@
+- Finishing or stopping a response avoids copying completed activity output from earlier turns.

@@ -1438,19 +1438,22 @@ pub(super) fn should_refresh_branch_after_activity(
 }
 
 fn finish_streaming_messages(session: &mut AgentSession) {
-    for message in &mut session.messages {
-        if message.role == MessageRole::Assistant && message.streaming {
-            message.streaming = false;
-        }
-    }
+    session.messages.update_where(
+        |message| message.role == MessageRole::Assistant && message.streaming,
+        |message| message.streaming = false,
+    );
 }
 
 fn complete_transcript_activities(session: &mut AgentSession) {
-    for block in &mut session.transcript_blocks {
-        for activity in &mut block.activities {
-            activity.complete = true;
-        }
-    }
+    session.transcript_blocks.update_where(
+        |block| block.activities.iter().any(|activity| !activity.complete),
+        |block| {
+            block.activities.update_where(
+                |activity| !activity.complete,
+                |activity| activity.complete = true,
+            );
+        },
+    );
 }
 
 /// Close the stream segment a mid-turn message boundary cuts off: open text

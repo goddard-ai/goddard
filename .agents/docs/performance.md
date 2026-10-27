@@ -35,6 +35,14 @@
   This is cooperative slicing; an individual handler and final settlement
   still need auditing, and a drained UI queue does not prove physical writer
   retirement.
+- Shared transcript snapshots use copy-on-write payloads. Select changes with
+  shared reads before acquiring mutable history slots (`update_where`), rather
+  than rewriting flags that already have their target value. Stream settlement
+  changes only streaming assistant messages and incomplete activities/blocks;
+  completed history, including completed siblings inside a changed block,
+  keeps its shared payloads. A no-op settlement preserves history identities
+  too. This avoids copying historical output into the UI during a save, but
+  the metadata scan and copying a changed large payload still require auditing.
 - Resolve a whole session or collection in one background pass instead of
   probing per item, and guard it with a generation counter so a result from a
   superseded pass cannot overwrite newer state.

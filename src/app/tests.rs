@@ -3939,6 +3939,100 @@ fn only_the_turn_opening_prompt_is_a_rewind_boundary() {
     assert!(message_opens_turn(&session.messages, 4));
 }
 
+#[test]
+fn settling_shared_stream_history_preserves_completed_payloads_and_noop_identity() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    for index in 0..1_024 {
+        session.push_message(
+            MessageRole::Assistant,
+            format!("old message {index}: {}", "text ".repeat(64)),
+        );
+    }
+    for block_index in 0..128 {
+        session.transcript_blocks.push(TranscriptBlock {
+            after_message: block_index * 8,
+            turn_id: None,
+            activities: (0..8)
+                .map(|index| {
+                    let mut activity = ActivityItem::new(
+                        None,
+                        ActivityKind::Command,
+                        format!("completed {block_index}/{index}"),
+                        None,
+                        true,
+                    );
+                    activity.output = Some("old output ".repeat(400));
+                    activity
+                })
+                .collect(),
+        });
+    }
+    let turn_id = session.begin_turn("New turn");
+    session.status = SessionStatus::Working;
+    session.push_message(MessageRole::Assistant, "Live answer");
+    let answer_index = session.messages.len() - 1;
+    session.messages[answer_index].streaming = true;
+    // Legacy/unattributed leftovers still settle, even outside the latest turn.
+    session.messages[0].streaming = true;
+    session.transcript_blocks[0].activities[0].complete = false;
+    session.transcript_blocks.push(TranscriptBlock {
+        after_message: session.messages.len(),
+        turn_id: Some(turn_id),
+        activities: vec![
+            ActivityItem::new(None, ActivityKind::Command, "Done", None, true),
+            ActivityItem::new(None, ActivityKind::Command, "Running", None, false),
+        ]
+        .into(),
+    });
+    let tail_index = session.transcript_blocks.len() - 1;
+    // A persistence/preparation worker can retain these immutable snapshots.
+    let messages = session.messages.clone();
+    let blocks = session.transcript_blocks.clone();
+
+    settle_stream_segment(&mut session);
+
+    assert!(session.messages.iter().all(|message| !message.streaming));
+    assert!(
+        session
+            .transcript_blocks
+            .iter()
+            .all(|block| block.activities.iter().all(|activity| activity.complete))
+    );
+    assert!(messages[0].streaming && messages[answer_index].streaming);
+    assert!(!blocks[0].activities[0].complete);
+    assert!(!blocks[tail_index].activities[1].complete);
+    for index in 1..answer_index {
+        assert!(
+            std::ptr::eq(&session.messages[index], &messages[index]),
+            "completed message {index} was copied"
+        );
+    }
+    for index in 1..tail_index {
+        assert!(
+            std::ptr::eq(&session.transcript_blocks[index], &blocks[index]),
+            "completed block {index} was copied"
+        );
+    }
+    for index in 1..blocks[0].activities.len() {
+        assert!(
+            std::ptr::eq(
+                &session.transcript_blocks[0].activities[index],
+                &blocks[0].activities[index]
+            ),
+            "completed payload {index} inside a changed block was copied"
+        );
+    }
+    assert!(std::ptr::eq(
+        &session.transcript_blocks[tail_index].activities[0],
+        &blocks[tail_index].activities[0],
+    ));
+    let message_identity = session.messages.snapshot_identity();
+    let block_identity = session.transcript_blocks.snapshot_identity();
+    settle_stream_segment(&mut session);
+    assert!(message_identity == session.messages.snapshot_identity());
+    assert!(block_identity == session.transcript_blocks.snapshot_identity());
+}
+
 /// A steer lands mid-turn behind whatever was still streaming, which drops
 /// that block out of the live tail. Its header then comes from the
 /// summary, so the aborted command and thinking have to read "Ran" — an

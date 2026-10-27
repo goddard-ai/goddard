@@ -270,6 +270,24 @@ impl<T> SharedHistory<T> {
 }
 
 impl<T: Clone> SharedHistory<T> {
+    /// Select slots using shared reads, then mutate only those payloads.
+    /// A no-match pass keeps the container identity and every shared payload.
+    /// Predicates are evaluated before any updates run.
+    pub fn update_where(
+        &mut self,
+        mut matches: impl FnMut(&T) -> bool,
+        mut update: impl FnMut(&mut T),
+    ) {
+        let indices = self
+            .iter()
+            .enumerate()
+            .filter_map(|(index, value)| matches(value).then_some(index))
+            .collect::<Vec<_>>();
+        for index in indices {
+            update(&mut self[index]);
+        }
+    }
+
     pub fn get_mut(&mut self, index: usize) -> Option<&mut SharedValue<T>> {
         self.0
             .as_mut()
