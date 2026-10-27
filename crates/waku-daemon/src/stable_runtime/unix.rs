@@ -1975,7 +1975,14 @@ impl DriverControl for StableLink {
     /// Detach — never teardown. The runtime session is meant to outlive the
     /// daemon's entry; explicit termination belongs to
     /// `delete_provider_session` and the host's own drain.
-    fn begin_shutdown(&self) {}
+    fn begin_shutdown(&self) {
+        if !self.shared.stop.swap(true, Ordering::AcqRel) {
+            // The forwarder retains a driver while waiting on this channel.
+            // Wake it after removal so that cycle cannot pin local threads
+            // and host connections. This says nothing about provider exit.
+            let _ = self.shared.sender.send(DriverEvent::ProcessExited);
+        }
+    }
 
     fn respond(&self, request_id: String, option_id: String) {
         let _ = self.shared.command(
@@ -2636,6 +2643,46 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(row.runtime_session_id, first_attempt);
+    }
+
+    #[test]
+    fn stable_shutdown_detaches_local_threads_without_stopping_the_provider() {
+        let rig = rig(&["codex"]);
+        let (handle, original, receiver) = link(&rig, Uuid::new_v4(), None);
+        handle.begin_shutdown();
+        until("local attachment threads to retire", || {
+            original
+                .shared
+                .threads
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|thread| thread.is_finished())
+        });
+        let mut exits = 0;
+        while let Ok(event) = receiver.try_recv() {
+            exits += usize::from(matches!(event, DriverEvent::ProcessExited));
+        }
+        assert_eq!(exits, 1, "detachment must wake the waiting forwarder");
+        handle.begin_shutdown();
+        assert!(
+            !receiver
+                .try_iter()
+                .any(|event| matches!(event, DriverEvent::ProcessExited))
+        );
+        let adapter = rig.factory.for_session(original.sref().session_id).unwrap();
+        assert_eq!(adapter.terminate_count(), 0);
+        let (_handle, attached, _receiver) = link(&rig, Uuid::new_v4(), None);
+        assert_eq!(attached.sref(), original.sref());
+        let inventory = attached
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(attached.shared.epoch)
+            .unwrap();
+        assert_eq!(inventory.sessions.len(), 1);
+        assert_eq!(inventory.sessions[0].status, SessionStatus::Live);
     }
 
     #[test]

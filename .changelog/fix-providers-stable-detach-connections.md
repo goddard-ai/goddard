@@ -1,0 +1,1 @@
+- With the stable provider runtime enabled, detaching a task releases its local listener threads and host connections while the provider keeps running, preventing repeated reconnects from exhausting the host's connection limit.

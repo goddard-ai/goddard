@@ -84,6 +84,10 @@ product edits cannot rebuild it. Keep it that way.
   aliases to the same directory. An older pinned host or unqualified launch
   omits origin; absence remains unknown for cleanup. This metadata is not
   evidence of writer termination or permission to remove a workspace.
+- **Local detachment.** `begin_shutdown` stops this attachment's pump/service
+  threads and wakes its waiting forwarder once. It preserves the host session
+  and its provider; only explicit stop/drain requests terminate that owner.
+  Retaining a driver clone must not keep detached threads polling the host.
 - **Held dispatch.** `CancelTurn` records a hold; queued submits become
   `DispatchPending` until `PermitDispatch` — the controller's explicit
   policy release, never implicit unwind. The link sends that release only
