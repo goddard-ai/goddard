@@ -232,17 +232,17 @@ test("dev exits when the initial build fails outside serve mode", async () => {
   }
 });
 
-test("interactive builds use Cargo counters and retain live diagnostics and stderr failures", async () => {
+test("narrow interactive builds coordinate tunnel logs, Cargo progress and live diagnostics", async () => {
   const { root, bin, env } = await makeWorkspace("goddard-dev-progress-test-");
   await writeFile(join(bin, "mbx"), `#!${process.execPath}
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const root = process.env.TEST_ROOT;
-if (process.argv.includes("waku-daemon")) {
+if (!process.argv.includes("waku")) {
   console.log(JSON.stringify({ reason: "compiler-artifact", fresh: true }));
   process.exit(0);
 }
-process.stderr.write("\\x1b[1m    Building\\x1b[0m [===> ] 1176/1194: waku(build)\\r\\x1b[K");
+process.stderr.write("\\x1b[1m    Building\\x1b[0m [===> ] 737/744: waku-drivers, waku-server, goddard-agent(bin), waku-sessions\\r\\x1b[K");
 console.log(JSON.stringify({ reason: "compiler-message", message: {
   level: "warning", rendered: "warning: live diagnostic probe\\n",
 } }));
@@ -252,17 +252,31 @@ while (!existsSync(join(root, "release"))) await Bun.sleep(20);
 process.stderr.write("error: linker probe failed");
 process.exit(1);
 `, { mode: 0o755 });
+  await writeFile(join(bin, "cloudflared"), `#!${process.execPath}
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+if (process.argv.includes("list")) {
+  console.log(JSON.stringify([{ id: "test-tunnel", name: "goddard-dev", deleted_at: "0001" }]));
+} else if (process.argv.includes("run")) {
+  while (!existsSync(join(process.env.TEST_ROOT, "waiting"))) await Bun.sleep(20);
+  console.error("tunnel log probe " + "connection details ".repeat(12));
+  while (true) await Bun.sleep(1000);
+}
+`, { mode: 0o755 });
+  const serveProbe = Bun.serve({ port: 0, fetch: () => new Response() });
+  const servePort = serveProbe.port;
+  serveProbe.stop(true);
   let output = "";
   const decoder = new TextDecoder();
   const terminal = new Bun.Terminal({
-    cols: 240,
+    cols: 80,
     rows: 40,
     data(_terminal, bytes) {
       output += decoder.decode(bytes, { stream: true });
     },
   });
-  const child = Bun.spawn([process.execPath, devScript, "--wait"], {
-    env,
+  const child = Bun.spawn([process.execPath, devScript, "--wait", "--serve"], {
+    env: { ...env, GODDARD_DEV_SERVE_PORT: String(servePort), GODDARD_DEV_TUNNEL: "goddard-dev" },
     terminal,
   });
   try {
@@ -271,7 +285,17 @@ process.exit(1);
       10_000,
       "the app build and buffered warning",
     );
-    expect(output).toContain("1176/1194 units");
+    expect(output).toContain("737/744 units");
+    await waitFor(
+      () => output.includes("cloudflared: tunnel log probe"),
+      5_000,
+      "a tunnel log during the build",
+    );
+    expect(output).toContain("\r\x1b[2K[goddard-dev] cloudflared: tunnel log probe");
+    const frames = output.match(/\[goddard-dev\] Compiling [^\r\n\x1b]*/g) ?? [];
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) expect(Bun.stringWidth(frame)).toBeLessThan(80);
+    expect(output).not.toContain("████████ 737/744");
     expect(output).toContain("(all fresh)");
     expect(output).not.toContain("warning: live diagnostic probe");
     terminal.write("e\n");
@@ -281,12 +305,18 @@ process.exit(1);
       "live diagnostic expansion",
     );
     await writeFile(join(root, "release"), "");
-    expect(await child.exited).toBe(1);
     await waitFor(
       () => output.includes("error: linker probe failed"),
       5_000,
       "Cargo stderr failure output",
     );
+    await waitFor(
+      () => output.includes("initial build failed"),
+      5_000,
+      "the build to finish",
+    );
+    terminal.write("q\n");
+    expect(await child.exited).toBe(0);
     expect(output).not.toContain("Building [");
     expect(output.match(/warning: live diagnostic probe/g)).toHaveLength(1);
   } finally {

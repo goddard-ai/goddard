@@ -199,9 +199,10 @@ async function resignBundle(appBundle: string, root: string): Promise<void> {
 export async function startDevServe(options: {
   root: string;
   workDir: string;
+  log?: (line: string) => void;
 }): Promise<DevServe> {
   const { root, workDir } = options;
-  const log = (line: string) => console.log(`[goddard-dev] ${line}`);
+  const log = options.log ?? ((line: string) => console.log(`[goddard-dev] ${line}`));
   const hostname = process.env.GODDARD_DEV_HOSTNAME ?? "dev.goddardai.org";
   const tunnelName = process.env.GODDARD_DEV_TUNNEL ?? "goddard-dev";
   const port = Number(process.env.GODDARD_DEV_SERVE_PORT ?? 8976);

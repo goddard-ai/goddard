@@ -3,6 +3,7 @@
 import { $ } from "bun";
 import { stripVTControlCharacters } from "node:util";
 import { parseCargoProgress, readBuildLines } from "./dev-build-output";
+import { DevTerminal } from "./dev-terminal";
 import { bundleComputerUse } from "./cua-driver";
 import { wakuCacheDir } from "./cache-dir";
 import { startDevServe, type DevServe } from "./dev-serve";
@@ -24,6 +25,21 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import readline from "node:readline";
 import { WakuClient } from "../packages/waku-client/src/client";
+
+const terminal = new DevTerminal(
+  (text) => {
+    process.stdout.write(text);
+  },
+  () => process.stdout.columns ?? 80,
+);
+// Coordinate watcher logs with the progress row without changing the global
+// console used by other modules. The serve helper receives this logger too.
+const console = {
+  log: (...args: unknown[]) => terminal.log(() => globalThis.console.log(...args)),
+  warn: (...args: unknown[]) => terminal.log(() => globalThis.console.warn(...args)),
+  error: (...args: unknown[]) => terminal.log(() => globalThis.console.error(...args)),
+};
+process.stdout.on("resize", () => terminal.draw());
 
 const root = resolve(import.meta.dir, "..");
 const isMacOS = process.platform === "darwin";
@@ -534,8 +550,6 @@ async function releaseHyprlandRules(): Promise<void> {
   await $`hyprctl eval ${code}`.quiet().nothrow();
 }
 
-const progressBarWidth = 16;
-
 function elapsedLabel(since: number): string {
   const seconds = Math.floor((Date.now() - since) / 1000);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -550,11 +564,12 @@ function progressLine(
   warnings: number,
   errors: number,
 ): string {
+  const progressBarWidth = (process.stdout.columns ?? 80) < 100 ? 8 : 16;
   let bar: string;
   let count: string;
   if (expected !== undefined) {
     const fraction = Math.min(done / expected, 1);
-    const filled = Math.round(fraction * progressBarWidth);
+    const filled = Math.floor(fraction * progressBarWidth);
     bar =
       "█".repeat(filled) + "░".repeat(progressBarWidth - filled);
     count = ` ${done}/${expected} units`;
@@ -576,7 +591,7 @@ function progressLine(
     .filter(Boolean)
     .join(", ");
   const hint = issues ? " · press e + enter to expand" : "";
-  return `[goddard-dev] Compiling ${label} ${bar}${count}${detail}${issues ? ` · ${issues}${hint}` : ""} · ${elapsedLabel(startedAt)}`;
+  return `[goddard-dev] Compiling ${label} ${bar}${count} · ${elapsedLabel(startedAt)}${issues ? ` · ${issues}` : ""}${detail}${hint}`;
 }
 
 // Runs cargo through Mr Boxington with a live one-line progress bar on a TTY
@@ -619,30 +634,27 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
   let errors = 0;
   const log: string[] = [];
   let printed = 0;
-  const draw = () =>
-    process.stdout.write(
-      `\r\x1b[K${progressLine(label, done, expected, crate, startedAt, warnings, errors)}`,
-    );
+  const draw = () => terminal.draw();
   const emit = (text: string) => {
     const entry = text.endsWith("\n") ? text : `${text}\n`;
     log.push(entry);
     if (buildLogExpanded) {
-      process.stdout.write(`\r\x1b[K${entry}`);
+      terminal.log(() => process.stdout.write(entry));
       printed += 1;
-      draw();
     }
   };
   liveBuildLog = {
     expand() {
       while (printed < log.length) {
-        process.stdout.write(`\r\x1b[K${log[printed]}`);
+        terminal.log(() => process.stdout.write(log[printed]));
         printed += 1;
       }
-      draw();
     },
   };
   const ticker = setInterval(draw, 100);
-  draw();
+  terminal.start(() =>
+    progressLine(label, done, expected, crate, startedAt, warnings, errors),
+  );
   try {
     await Promise.all([
       readBuildLines(child.stdout, (line) => {
@@ -695,11 +707,11 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
     ]);
   } finally {
     clearInterval(ticker);
+    terminal.stop();
     liveBuildLog = undefined;
     buildLogExpanded = false;
   }
   const exitCode = await child.exited;
-  process.stdout.write("\r\x1b[K");
   lastBuildLog = { label, lines: log };
   if (exitCode !== 0) {
     while (printed < log.length) {
@@ -1053,12 +1065,12 @@ function pumpDaemonStderr(child: ReturnType<typeof Bun.spawn>): void {
         tail = lines.pop() ?? "";
         for (const line of lines) {
           if (mallocStackLoggingNoise?.test(line)) continue;
-          process.stderr.write(`${line}\n`);
+          terminal.log(() => process.stderr.write(`${line}\n`));
         }
       }
       tail += decoder.decode();
       if (tail && !mallocStackLoggingNoise?.test(tail)) {
-        process.stderr.write(tail);
+        terminal.log(() => process.stderr.write(tail), false);
       }
     } catch {
       // A dead daemon ends its stderr stream; the exit watcher reports it.
@@ -1941,6 +1953,7 @@ if (serveMode) {
     serve = await startDevServe({
       root,
       workDir: join(wakuCacheDir(), "dev-serve"),
+      log: (line) => console.log(`[goddard-dev] ${line}`),
     });
   } catch (error) {
     console.error("[goddard-dev] Could not start the update feed:", error);
