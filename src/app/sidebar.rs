@@ -235,37 +235,26 @@ fn sidebar_project_ordering_label(ordering: SidebarProjectOrdering) -> String {
     }
 }
 
-fn session_date_group(timestamp: u64, today: NaiveDate) -> SessionDateGroup {
+/// Match the row label's floored elapsed days, including across midnight and DST.
+fn session_date_group(timestamp: u64, now: u64, today: NaiveDate) -> SessionDateGroup {
+    match now.saturating_sub(timestamp) / 86_400 {
+        0 => return SessionDateGroup::Today,
+        1 => return SessionDateGroup::Yesterday,
+        2..=6 => return SessionDateGroup::Last7Days,
+        7..=29 => return SessionDateGroup::Last30Days,
+        _ => {}
+    }
+
     let session_date = i64::try_from(timestamp)
         .ok()
         .and_then(|timestamp| DateTime::<Utc>::from_timestamp(timestamp, 0))
         .map(|timestamp| timestamp.with_timezone(&Local).date_naive())
         .unwrap_or(today);
-    session_date_group_for_dates(session_date, today)
-}
-
-fn session_date_group_for_dates(session_date: NaiveDate, today: NaiveDate) -> SessionDateGroup {
-    if session_date >= today {
-        return SessionDateGroup::Today;
-    }
-
-    if today.pred_opt() == Some(session_date) {
-        return SessionDateGroup::Yesterday;
-    }
-
-    let age_days = today.signed_duration_since(session_date).num_days();
-    if age_days < 7 {
-        return SessionDateGroup::Last7Days;
-    }
-    if age_days < 30 {
-        return SessionDateGroup::Last30Days;
-    }
-
     if session_date.year() == today.year() {
-        return SessionDateGroup::ThisYear;
+        SessionDateGroup::ThisYear
+    } else {
+        SessionDateGroup::More
     }
-
-    SessionDateGroup::More
 }
 
 fn session_group_header(theme: &Theme, height: f32) -> Div {
@@ -825,11 +814,12 @@ fn sort_sidebar_sessions(sessions: &mut Vec<&AgentSession>, ordering: SidebarOrd
 /// Date buckets always follow last-updated recency, independent of the
 /// ordering preference: a task created last week but replied to today still
 /// lands under Today, sorted within the group by the ordering's key.
-fn date_sidebar_groups(sessions: &[&AgentSession], today: NaiveDate) -> [Vec<Uuid>; 6] {
+fn date_sidebar_groups(sessions: &[&AgentSession], now: u64, today: NaiveDate) -> [Vec<Uuid>; 6] {
     let mut grouped_sessions: [Vec<Uuid>; 6] = std::array::from_fn(|_| Vec::new());
     for &session in sessions {
-        grouped_sessions[session_date_group(sidebar_session_timestamp(session), today).index()]
-            .push(session.id);
+        grouped_sessions
+            [session_date_group(sidebar_session_timestamp(session), now, today).index()]
+        .push(session.id);
     }
     grouped_sessions
 }
@@ -3962,7 +3952,7 @@ impl Waku {
     /// fingerprint is an allocation-free scan of exactly what
     /// [`Self::sidebar_rows`] reads: started sessions with their project and
     /// recency, the presentation preferences, the collapsed-group set,
-    /// today's date, and each session's derived dormancy.
+    /// today's date, each session's elapsed days, and derived dormancy.
     pub(super) fn sidebar_rows_cached(&self, today: NaiveDate) -> Rc<Vec<SidebarRow>> {
         let mut fingerprint = mix(0x51de_ba5e_5eed_c0de, today.num_days_from_ce() as u64);
         fingerprint = mix(fingerprint, self.boss_ui.revision);
@@ -4019,6 +4009,14 @@ impl Waku {
             fingerprint = mix_uuid(fingerprint, session.id);
             fingerprint = mix_uuid(fingerprint, session.project_id);
             fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
+            if self.state.sidebar_grouping == SidebarGrouping::Date {
+                // Crossing an elapsed-day boundary must invalidate the rows
+                // even when neither the session nor the local date changes.
+                fingerprint = mix(
+                    fingerprint,
+                    (now.saturating_sub(sidebar_session_timestamp(session)) / 86_400).min(30),
+                );
+            }
             fingerprint = mix(fingerprint, u64::from(session.pinned_at.is_some()));
             fingerprint = mix(fingerprint, u64::from(session.incognito));
             fingerprint = mix(
@@ -4210,7 +4208,7 @@ impl Waku {
             fingerprint = mix_uuid(fingerprint, terminal_id);
         }
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
-            let (rows, collapsed_members, deliverables_unread) = self.sidebar_rows(today);
+            let (rows, collapsed_members, deliverables_unread) = self.sidebar_rows(now, today);
             *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(rows);
             *self.sidebar_collapsed_group_members.borrow_mut() = Rc::new(collapsed_members);
             self.sidebar_deliverables_unread.set(deliverables_unread);
@@ -4225,6 +4223,7 @@ impl Waku {
     /// unread state of rows it hides.
     fn sidebar_rows(
         &self,
+        now: u64,
         today: NaiveDate,
     ) -> (Vec<SidebarRow>, HashMap<SidebarGroup, Vec<Uuid>>, bool) {
         let mut sorted_sessions = self
@@ -4266,7 +4265,6 @@ impl Waku {
         // Swept and stale sessions are dormant; where they land depends on
         // the grouping — a trailing Dormant section under Date, a
         // below-the-fold tail inside each project under Project.
-        let now = unix_time();
         let threshold = dormant_threshold_secs(self.state.dormant_after_days);
         let dormant_set = sorted_sessions
             .iter()
@@ -4513,7 +4511,7 @@ impl Waku {
                     .map(|session| session.id)
                     .collect::<Vec<_>>();
                 sorted_sessions.retain(|session| !dormant_set.contains(&session.id));
-                let grouped_sessions = date_sidebar_groups(&sorted_sessions, today);
+                let grouped_sessions = date_sidebar_groups(&sorted_sessions, now, today);
                 for date_group in SessionDateGroup::ALL {
                     let group = SidebarGroup::Date(date_group);
                     let collapsed = self.sidebar_collapsed_groups.contains(&group);
@@ -8444,44 +8442,48 @@ mod tests {
     }
 
     #[test]
-    fn groups_sessions_by_recent_local_dates() {
-        // Monday and the starts of a month and year must not split recent tasks.
-        for today in [
-            NaiveDate::from_ymd_opt(2026, 10, 26).unwrap(),
-            NaiveDate::from_ymd_opt(2026, 11, 2).unwrap(),
-            NaiveDate::from_ymd_opt(2027, 1, 4).unwrap(),
+    fn date_groups_follow_floored_elapsed_days() {
+        use chrono::TimeZone;
+
+        // Midnight, month/year changes, and DST must not split a displayed day.
+        for now in [
+            Local.with_ymd_and_hms(2026, 10, 26, 0, 30, 0),
+            Local.with_ymd_and_hms(2026, 11, 2, 10, 0, 0),
+            Local.with_ymd_and_hms(2027, 1, 1, 0, 30, 0),
+            Local.with_ymd_and_hms(2026, 3, 9, 10, 0, 0),
         ] {
+            let now = now.earliest().unwrap();
+            let today = now.date_naive();
+            let now = now.timestamp() as u64;
             for (age, expected) in [
                 (0, SessionDateGroup::Today),
-                (1, SessionDateGroup::Yesterday),
-                (2, SessionDateGroup::Last7Days),
-                (6, SessionDateGroup::Last7Days),
-                (7, SessionDateGroup::Last30Days),
-                (29, SessionDateGroup::Last30Days),
+                (86_399, SessionDateGroup::Today),
+                (86_400, SessionDateGroup::Yesterday),
+                (2 * 86_400 - 1, SessionDateGroup::Yesterday),
+                (2 * 86_400, SessionDateGroup::Last7Days),
+                (7 * 86_400 - 1, SessionDateGroup::Last7Days),
+                (7 * 86_400, SessionDateGroup::Last30Days),
+                (30 * 86_400 - 1, SessionDateGroup::Last30Days),
             ] {
-                let date = today - chrono::Days::new(age);
-                assert_eq!(session_date_group_for_dates(date, today), expected);
+                assert_eq!(session_date_group(now - age, now, today), expected);
             }
             for age in [30, 365] {
-                let date = today - chrono::Days::new(age);
+                let timestamp = now - age * 86_400;
+                let date = DateTime::from_timestamp(timestamp as i64, 0)
+                    .unwrap()
+                    .with_timezone(&Local);
                 let expected = if date.year() == today.year() {
                     SessionDateGroup::ThisYear
                 } else {
                     SessionDateGroup::More
                 };
-                assert_eq!(session_date_group_for_dates(date, today), expected);
+                assert_eq!(session_date_group(timestamp, now, today), expected);
             }
+            assert_eq!(
+                session_date_group(now + 86_400, now, today),
+                SessionDateGroup::Today
+            );
         }
-    }
-
-    #[test]
-    fn future_sessions_stay_in_today() {
-        let today = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
-        let tomorrow = NaiveDate::from_ymd_opt(2026, 8, 13).unwrap();
-        assert_eq!(
-            session_date_group_for_dates(tomorrow, today),
-            SessionDateGroup::Today
-        );
     }
 
     #[test]
@@ -9142,7 +9144,7 @@ mod tests {
         let mut sessions = vec![&replied_today, &newcomer, &quiet_yesterday];
         sort_sidebar_sessions(&mut sessions, SidebarOrdering::LastCreated);
 
-        let groups = date_sidebar_groups(&sessions, today);
+        let groups = date_sidebar_groups(&sessions, local_epoch(today, 16), today);
         assert_eq!(
             groups[SessionDateGroup::Today.index()],
             vec![newcomer.id, replied_today.id]

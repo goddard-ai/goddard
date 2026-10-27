@@ -137,9 +137,12 @@ export function nextSidebarUpdateDelay(
 ): number {
   let next = secondsUntilLocalMidnight(nowSeconds)
   for (const session of sessions) {
-    if (session.last_reply_at == null) continue
-    const elapsed = Math.max(0, nowSeconds - session.last_reply_at)
-    const step = elapsed < 3_600 ? 60 : elapsed < 86_400 ? 3_600 : 86_400
+    if (session.last_reply_at == null && !sessionHasStarted(session)) continue
+    const elapsed = Math.max(0, nowSeconds - sessionTimestamp(session))
+    if (session.last_reply_at == null && elapsed >= 30 * 86_400) continue
+    const step = session.last_reply_at == null
+      ? 86_400
+      : elapsed < 3_600 ? 60 : elapsed < 86_400 ? 3_600 : 86_400
     const remaining = Math.max(1, step - elapsed % step)
     next = Math.min(next, remaining)
   }
@@ -147,21 +150,12 @@ export function nextSidebarUpdateDelay(
 }
 
 export function dateGroup(timestamp: number, now = new Date()): DateGroup {
-  const date = new Date(timestamp * 1_000)
-  const today = localDateStart(now)
-  const sessionDay = localDateStart(date)
-  if (sessionDay >= today) return 'today'
-
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (sessionDay.getTime() === yesterday.getTime()) return 'yesterday'
-
-  // Compare local calendar dates in UTC so DST does not change the day count.
-  const dayNumber = (day: Date) => Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()) / 86_400_000
-  const ageDays = dayNumber(today) - dayNumber(sessionDay)
+  const ageDays = Math.floor(Math.max(0, Math.floor(now.getTime() / 1_000) - timestamp) / 86_400)
+  if (ageDays === 0) return 'today'
+  if (ageDays === 1) return 'yesterday'
   if (ageDays < 7) return 'week'
   if (ageDays < 30) return 'month'
-  if (sessionDay.getFullYear() === today.getFullYear()) return 'year'
+  if (new Date(timestamp * 1_000).getFullYear() === now.getFullYear()) return 'year'
   return 'more'
 }
 
@@ -183,10 +177,6 @@ type Translator = (key: string, params?: Record<string, string | number>) => str
 
 function sessionTimestamp(session: AgentSession): number {
   return session.last_reply_at ?? session.created_at
-}
-
-function localDateStart(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
 function secondsUntilLocalMidnight(nowSeconds: number): number {

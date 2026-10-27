@@ -4672,10 +4672,11 @@ fn single_line_label(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Seconds until any session's time label next changes value, or `None` when
-/// no label is on the clock at all. A reply's "5m"/"3h"/"2d" moves only at
+/// Seconds until a session's time label or recent date group next changes,
+/// or `None` when neither is on the clock. A reply's "5m"/"3h"/"2d" moves only at
 /// its unit boundary, so the wake-up this feeds gets rarer as the history
-/// ages.
+/// ages. Started sessions without replies still wake at elapsed-day boundaries
+/// so their sidebar date group can move.
 pub(super) fn next_time_label_change(sessions: &[AgentSession], now: u64) -> Option<u64> {
     let mut next: Option<u64> = None;
     for session in sessions {
@@ -4688,6 +4689,12 @@ pub(super) fn next_time_label_change(sessions: &[AgentSession], now: u64) -> Opt
             };
             let remaining = (step - elapsed % step).max(1);
             next = Some(next.map_or(remaining, |next| next.min(remaining)));
+        } else if session.has_started() {
+            let elapsed = now.saturating_sub(session.created_at);
+            if elapsed < 30 * 86_400 {
+                let remaining = 86_400 - elapsed % 86_400;
+                next = Some(next.map_or(remaining, |next| next.min(remaining)));
+            }
         }
     }
     next

@@ -5992,7 +5992,7 @@ fn sidebar_time_labels_show_reply_age_during_a_live_turn() {
 fn time_label_wakes_land_exactly_on_label_boundaries() {
     use super::next_time_label_change;
 
-    // Nothing on the clock: no sessions, or none that ever replied.
+    // Nothing on the clock: no sessions, or only unstarted drafts.
     assert_eq!(next_time_label_change(&[], 1_000), None);
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     assert_eq!(
@@ -6037,6 +6037,23 @@ fn time_label_wakes_land_exactly_on_label_boundaries() {
     busy.last_reply_at = Some(1_000);
     let sessions = [busy];
     assert_eq!(next_time_label_change(&sessions, 1_030), Some(30));
+}
+
+#[test]
+fn unreplied_sidebar_tasks_wake_at_elapsed_day_boundaries() {
+    use super::next_time_label_change;
+
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("go");
+    session.last_reply_at = None;
+    session.created_at = 1_000;
+    let sessions = [session];
+    assert_eq!(next_time_label_change(&sessions, 1_000 + 86_399), Some(1));
+    assert_eq!(
+        next_time_label_change(&sessions, 1_000 + 86_400),
+        Some(86_400)
+    );
+    assert_eq!(next_time_label_change(&sessions, 1_000 + 30 * 86_400), None);
 }
 
 #[test]

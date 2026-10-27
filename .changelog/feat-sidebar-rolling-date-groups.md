@@ -1,1 +1,1 @@
-- Find recent tasks in “Last 7 days” and “Last 30 days” sidebar date groups, even across calendar week, month, and year boundaries.
+- Find recent tasks in sidebar date groups that match their rounded-down ages: under 24 hours stays in “Today”, even across midnight, with “Last 7 days” and “Last 30 days” for older tasks.

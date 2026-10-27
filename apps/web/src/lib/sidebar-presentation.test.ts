@@ -12,24 +12,28 @@ import {
 } from './sidebar-presentation'
 
 describe('desktop sidebar presentation', () => {
-  test('groups recent local dates across week, month, year, and DST boundaries', () => {
+  test('groups by floored elapsed days across midnight, year, and DST boundaries', () => {
     for (const now of [
-      new Date(2026, 9, 26, 10),
+      new Date(2026, 9, 26, 0, 30),
       new Date(2026, 10, 2, 10),
-      new Date(2027, 0, 4, 10),
-      new Date(2026, 2, 10, 10),
+      new Date(2027, 0, 1, 0, 30),
+      new Date(2026, 2, 9, 10),
     ]) {
       for (const [age, expected] of [
-        [0, 'today'], [1, 'yesterday'], [2, 'week'], [6, 'week'],
-        [7, 'month'], [29, 'month'],
+        [0, 'today'], [86_399, 'today'],
+        [86_400, 'yesterday'], [2 * 86_400 - 1, 'yesterday'],
+        [2 * 86_400, 'week'], [7 * 86_400 - 1, 'week'],
+        [7 * 86_400, 'month'], [30 * 86_400 - 1, 'month'],
       ] as const) {
-        const updated = new Date(now.getFullYear(), now.getMonth(), now.getDate() - age, 18)
-        expect(dateGroup(updated.getTime() / 1_000, now)).toBe(expected)
+        expect(dateGroup(now.getTime() / 1_000 - age, now)).toBe(expected)
       }
-      const older = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30, 18)
-      expect(dateGroup(older.getTime() / 1_000, now)).toBe(
-        older.getFullYear() === now.getFullYear() ? 'year' : 'more',
-      )
+      for (const age of [30, 365]) {
+        const older = new Date(now.getTime() - age * 86_400_000)
+        expect(dateGroup(older.getTime() / 1_000, now)).toBe(
+          older.getFullYear() === now.getFullYear() ? 'year' : 'more',
+        )
+      }
+      expect(dateGroup(now.getTime() / 1_000 + 86_400, now)).toBe('today')
     }
     const monday = new Date(2026, 9, 26, 10)
     const saturday = new Date(2026, 9, 24, 18)
@@ -38,8 +42,20 @@ describe('desktop sidebar presentation', () => {
       last_reply_at: saturday.getTime() / 1_000,
       messages: [{ id: 'message' } as never],
     })], monday)
-    expect(groups[0]?.id).toBe('week')
-    expect(groups[0]?.label).toBe('Last 7 days')
+    expect(groups[0]?.id).toBe('yesterday')
+    expect(groups[0]?.label).toBe('Yesterday')
+  })
+
+  test('updates unreplied task groups at elapsed-day boundaries', () => {
+    const now = new Date(2026, 9, 26, 10).getTime() / 1_000
+    const unreplied = session({
+      created_at: now - 86_399,
+      messages: [{ id: 'message' } as never],
+    })
+    expect(sessionTimeLabel(unreplied, now)).toBeNull()
+    expect(nextSidebarUpdateDelay([unreplied], now)).toBe(1)
+    expect(groupSessions([], [unreplied], new Date(now * 1_000))[0]?.id).toBe('today')
+    expect(groupSessions([], [unreplied], new Date((now + 1) * 1_000))[0]?.id).toBe('yesterday')
   })
 
   test('keeps Add Project in an empty history through the first group header', () => {
