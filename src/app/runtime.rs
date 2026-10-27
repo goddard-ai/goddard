@@ -2767,6 +2767,16 @@ impl Waku {
                 .sessions
                 .retain(|session| session.id == qa.record.session_id);
         }
+        // Dropping boss-managed rows here also retires rows merged while
+        // the flag was on and keeps them out of the cached catalog. The
+        // local daemon's rows stay: toggling the flag there must not strand
+        // in-flight employee work already tracked in this client.
+        if key.is_remote() {
+            let boss_experiment_enabled = self.state.boss_experiment_enabled;
+            snapshot
+                .sessions
+                .retain(|session| remote_session_visible(session, boss_experiment_enabled));
+        }
         let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
         let known_session_ids = self
             .state
@@ -2853,7 +2863,11 @@ impl Waku {
                     .iter()
                     .map(|project| project.id)
                     .collect::<Vec<_>>(),
-                &remote_catalog_session_ids(&snapshot, &self.state.sessions),
+                &remote_catalog_session_ids(
+                    &snapshot.projects,
+                    &snapshot.sessions,
+                    &self.state.sessions,
+                ),
             );
             for project in self.boss_ui.projects.values() {
                 if self

@@ -1190,15 +1190,26 @@ struct PreparedDriver {
 /// tagged with the daemon it came from so writes route back to the owner.
 type RemoteTaskStateSnapshot = waku_client::persistence::TaskCatalog;
 
+/// Whether a remote host's catalog row belongs in this client's merged
+/// view: boss-managed rows are experiment surfaces, and without the flag a
+/// remote host's employees, plans, and boss chat would read as ordinary
+/// tasks.
+fn remote_session_visible(session: &AgentSession, boss_experiment_enabled: bool) -> bool {
+    boss_experiment_enabled || !session.boss_managed
+}
+
 /// Client-only drafts and retained transcripts belong to their project's
 /// host even when the daemon's catalog does not report them.
 fn remote_catalog_session_ids(
-    catalog: &RemoteTaskStateSnapshot,
+    catalog_projects: &[Project],
+    catalog_sessions: &[AgentSession],
     sessions: &[AgentSession],
 ) -> Vec<Uuid> {
-    let projects: HashSet<Uuid> = catalog.projects.iter().map(|project| project.id).collect();
-    catalog
-        .sessions
+    let projects: HashSet<Uuid> = catalog_projects
+        .iter()
+        .map(|project| project.id)
+        .collect();
+    catalog_sessions
         .iter()
         .map(|session| session.id)
         .chain(
@@ -1222,6 +1233,13 @@ fn seed_remote_catalog(
     host: Uuid,
     catalog: &RemoteTaskStateSnapshot,
 ) {
+    // Live snapshots filter the same way in apply_remote_task_state.
+    let sessions: Vec<AgentSession> = catalog
+        .sessions
+        .iter()
+        .filter(|s| remote_session_visible(s, state.boss_experiment_enabled))
+        .cloned()
+        .collect();
     // A catalog polluted by a past claims gap can already carry these ids —
     // the claims below still route them to this host, so seed only the rows
     // the merged list does not already hold rather than double them.
@@ -1235,8 +1253,7 @@ fn seed_remote_catalog(
             .cloned(),
     );
     state.sessions.extend(
-        catalog
-            .sessions
+        sessions
             .iter()
             .filter(|s| !known_sessions.contains(&s.id))
             .cloned(),
@@ -1248,7 +1265,7 @@ fn seed_remote_catalog(
             .iter()
             .map(|project| project.id)
             .collect::<Vec<_>>(),
-        &remote_catalog_session_ids(catalog, &state.sessions),
+        &remote_catalog_session_ids(&catalog.projects, &sessions, &state.sessions),
     );
 }
 

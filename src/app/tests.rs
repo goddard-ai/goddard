@@ -138,17 +138,28 @@ fn remote_catalog_claims_include_client_drafts_only_for_its_projects() {
     // need to route the standing draft's picker and first prompt remotely.
     for _ in 0..2 {
         assert_eq!(
-            super::remote_catalog_session_ids(&catalog, &sessions),
+            super::remote_catalog_session_ids(&catalog.projects, &catalog.sessions, &sessions),
             vec![draft.id]
         );
         merge_remote_session_catalog(&mut sessions, Vec::new(), |_| true, |_| false, true);
     }
     let reported = AgentSession::new(catalog.projects[0].id, ProviderKind::Claude);
     catalog.sessions.push(reported.clone());
-    let claims = super::remote_catalog_session_ids(&catalog, &sessions);
+    let claims =
+        super::remote_catalog_session_ids(&catalog.projects, &catalog.sessions, &sessions);
     assert_eq!(claims.len(), 2);
     assert!(claims.contains(&draft.id));
     assert!(claims.contains(&reported.id));
+}
+
+#[test]
+fn remote_catalog_hides_boss_managed_sessions_without_the_experiment() {
+    let mut employee = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    employee.boss_managed = true;
+    let task = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    assert!(super::remote_session_visible(&task, false));
+    assert!(super::remote_session_visible(&employee, true));
+    assert!(!super::remote_session_visible(&employee, false));
 }
 
 #[test]

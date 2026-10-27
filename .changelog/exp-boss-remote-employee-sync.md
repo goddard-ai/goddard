@@ -1,0 +1,1 @@
+- A remote host's employees, plans, and boss chats no longer appear as ordinary tasks on clients without the Boss experiment enabled.
