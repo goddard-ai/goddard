@@ -733,6 +733,10 @@ impl From<&Project> for ProjectCatalogEntry {
     }
 }
 
+/// The save-time diff key for the task catalog: the fields another
+/// client's task list renders. Sidebar grouping stamps — archived, pinned,
+/// dormant — must stay here: a save that only flips one still has to bump
+/// the revision or the other client never reloads.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SessionCatalogEntry {
     title: String,
@@ -744,6 +748,10 @@ struct SessionCatalogEntry {
     status: SessionStatus,
     created_at: u64,
     last_reply_at: Option<u64>,
+    archived_at: Option<u64>,
+    pinned_at: Option<u64>,
+    dormant_at: Option<u64>,
+    dormant_exempt_until: Option<u64>,
 }
 
 impl From<&AgentSession> for SessionCatalogEntry {
@@ -758,6 +766,10 @@ impl From<&AgentSession> for SessionCatalogEntry {
             status: session.status,
             created_at: session.created_at,
             last_reply_at: session.last_reply_at,
+            archived_at: session.archived_at,
+            pinned_at: session.pinned_at,
+            dormant_at: session.dormant_at,
+            dormant_exempt_until: session.dormant_exempt_until,
         }
     }
 }
@@ -3910,7 +3922,7 @@ mod tests {
                 Command::SaveTaskState {
                     projects: Vec::new(),
                     live_session_ids: vec![session_id],
-                    sessions: vec![checkpoint],
+                    sessions: vec![checkpoint.clone()],
                     session_tails: Vec::new(),
                 },
             )
@@ -3919,6 +3931,47 @@ mod tests {
             observer_revisions
                 .recv_timeout(Duration::from_millis(100))
                 .is_err()
+        );
+
+        // Sidebar grouping stamps are catalog fields too: an archive-only
+        // save changes what another client's task list shows, so it bumps
+        // even though no chat-visible column moved.
+        checkpoint.archived_at = Some(checkpoint.updated_at);
+        source
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: Vec::new(),
+                    live_session_ids: vec![session_id],
+                    sessions: vec![checkpoint.clone()],
+                    session_tails: Vec::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            observer_revisions.recv_timeout(Duration::from_secs(1)),
+            Ok(2)
+        );
+
+        // Unarchiving bumps as well — the row reappears on other clients.
+        checkpoint.archived_at = None;
+        checkpoint.pinned_at = Some(checkpoint.updated_at);
+        source
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: Vec::new(),
+                    live_session_ids: vec![session_id],
+                    sessions: vec![checkpoint],
+                    session_tails: Vec::new(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            observer_revisions.recv_timeout(Duration::from_secs(1)),
+            Ok(3)
         );
 
         // Desktop persistence uses fire-and-forget notifications, while Web
@@ -3938,7 +3991,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(source_revisions.recv_timeout(Duration::from_secs(1)), Ok(2));
+        assert_eq!(source_revisions.recv_timeout(Duration::from_secs(1)), Ok(4));
         assert!(observer_revisions.try_recv().is_err());
         let ResponsePayload::TaskState { sessions, .. } = source
             .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)

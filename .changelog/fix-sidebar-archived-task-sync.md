@@ -1,0 +1,1 @@
+- Archiving, pinning, or letting a task go dormant on one client now updates the task list on your other connected clients — including mobile or web clients attached to a remote daemon — instead of leaving a stale row until they reloaded.
