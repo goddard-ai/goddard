@@ -62,10 +62,10 @@ fn admission_is_cross_process_and_releases_without_a_persistent_owner() {
         let root = PathBuf::from(root);
         let store = root.join("app.db");
         let nested = root.join("workspace/nested");
-        let _guard = if std::env::var(CHILD_MODE).unwrap() == "writer" {
-            WorkspaceAdmission::writer(&store, &nested)
-        } else {
-            WorkspaceAdmission::retirement(&store, &nested)
+        let _guard = match std::env::var(CHILD_MODE).unwrap().as_str() {
+            "writer" => WorkspaceAdmission::writer(&store, &nested),
+            "materialize" => WorkspaceAdmission::materialize(&store, &nested),
+            _ => WorkspaceAdmission::retirement(&store, &nested),
         }
         .unwrap();
         fs::write(root.join("ready"), b"ready").unwrap();
@@ -85,7 +85,7 @@ fn admission_is_cross_process_and_releases_without_a_persistent_owner() {
     let store = root.join("app.db");
     let alias = root.join("alias");
     std::os::unix::fs::symlink(&nested, &alias).unwrap();
-    for mode in ["writer", "retirement"] {
+    for mode in ["writer", "retirement", "materialize"] {
         let ready = root.join("ready");
         let mut child = ChildGuard(Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "workspace_admission::tests::admission_is_cross_process_and_releases_without_a_persistent_owner", "--nocapture"])
@@ -96,12 +96,26 @@ fn admission_is_cross_process_and_releases_without_a_persistent_owner() {
         wait_until(&mut child.0, &ready);
         for path in [&workspace, &alias, &descendant] {
             assert!(WorkspaceAdmission::retirement(&store, path).is_err());
-            if mode == "retirement" {
+            if mode == "retirement" || (mode == "materialize" && *path != workspace) {
                 assert!(WorkspaceAdmission::writer(&store, path).is_err());
+            }
+            if mode == "materialize" {
+                assert!(WorkspaceAdmission::materialize(&store, path).is_err());
             }
         }
         drop(WorkspaceAdmission::writer(&store, &unrelated).unwrap());
+        drop(WorkspaceAdmission::materialize(&store, &unrelated).unwrap());
+        if mode == "materialize" {
+            assert!(
+                WorkspaceAdmission::catalog(&store, &[nested.clone(), unrelated.clone()]).is_err(),
+                "coalescing catalog paths lost the materialization fence"
+            );
+        }
         if mode == "writer" {
+            drop(
+                WorkspaceAdmission::catalog(&store, &[nested.clone()])
+                    .expect("ordinary writer publication blocked a catalog commit"),
+            );
             drop(WorkspaceAdmission::writer(&store, &nested).unwrap());
             drop(child.0.stdin.take());
             let deadline = Instant::now() + Duration::from_secs(10);
@@ -182,7 +196,7 @@ fn catalog_guards_missing_paths_and_coalesces_large_batches() {
         .unwrap()
         .unwrap();
     assert!(
-        guard._locks.len() <= 129,
+        guard._locks.len() <= 257,
         "catalog batch retained per-row descriptors"
     );
     assert!(WorkspaceAdmission::retirement(&store, &workspace).is_err());

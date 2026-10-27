@@ -1926,6 +1926,9 @@ impl Backend for WakuBackend {
                 },
             }),
             Command::Workspace { operation } => {
+                if let Some(result) = self.execute_workspace_creation(&operation)? {
+                    return Ok(ResponsePayload::Workspace { result });
+                }
                 if let WorkspaceOperation::RemoveWorktree { path, force } = &operation {
                     crate::worktree::remove_guarded(path, *force, |root| {
                         self.begin_workspace_retirement(root)

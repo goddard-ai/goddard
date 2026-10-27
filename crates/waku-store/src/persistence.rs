@@ -2401,8 +2401,9 @@ impl StateStore {
                 .execute("DELETE FROM messages WHERE session_id = ?1", [&id])
                 .map_err(to_io_error)?;
         }
-        let _admission = workspace_cleanup::guard_catalog_paths(self.path(), &catalog_paths)?;
+        let admission = workspace_cleanup::guard_catalog_paths(self.path(), &catalog_paths)?;
         transaction.commit().map_err(to_io_error)?;
+        drop(admission);
         for id in removed {
             storage.removed_sessions.insert(*id);
             storage.persisted_sessions.remove(id);
@@ -2703,8 +2704,9 @@ impl StateStore {
         if let Some((applying, sequence)) = checkpoint {
             update_stable_link(&transaction, applying, "live", sequence)?;
         }
-        let _admission = workspace_cleanup::guard_catalog_paths(self.path(), &catalog_paths)?;
+        let admission = workspace_cleanup::guard_catalog_paths(self.path(), &catalog_paths)?;
         transaction.commit().map_err(to_io_error)?;
+        drop(admission);
         // Now that the rows are durable, and not before.
         storage.saved_projects = projects_fingerprint;
         for session in &batch.sessions {

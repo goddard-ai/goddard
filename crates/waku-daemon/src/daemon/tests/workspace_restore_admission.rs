@@ -247,3 +247,262 @@ fn restore_requests_exclude_retirement_before_and_through_filesystem_effects() {
         b"preserve projectless data"
     );
 }
+
+#[test]
+fn fresh_worktree_and_qa_requests_retain_source_and_allocation_admission() {
+    let root =
+        std::env::temp_dir().join(format!("worktree-allocation-admission-{}", Uuid::new_v4()));
+    let (backend, _) = super::super::tests::surface_test_backend(&root);
+    let repo = root.join("repo");
+    git(&repo, &["init", "-b", "main"]);
+    git(&repo, &["config", "user.name", "Fixture"]);
+    git(&repo, &["config", "user.email", "fixture@example.invalid"]);
+    git(&repo, &["config", "commit.gpgSign", "false"]);
+    let empty_hooks = root.join("empty-hooks");
+    fs::create_dir_all(&empty_hooks).unwrap();
+    git(
+        &repo,
+        &["config", "core.hooksPath", empty_hooks.to_str().unwrap()],
+    );
+    fs::write(repo.join("tracked.hold"), b"saved\n").unwrap();
+    fs::write(repo.join(".gitattributes"), b"tracked.hold filter=pause\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-m", "fixture"]);
+    let namespace = root.join("worktrees/repo");
+    fs::create_dir_all(&namespace).unwrap();
+    let peer = Arc::new(
+        WakuBackend::new(
+            crate::DaemonSettingsStore::open(root.join("peer-settings.json")).unwrap(),
+            StateStore::daemon(backend.task_store.path().to_owned()),
+        )
+        .unwrap(),
+    );
+    for (name, carry) in [("fresh", false), ("carried", true)] {
+        if carry {
+            fs::write(repo.join("tracked.hold"), b"carried\n").unwrap();
+        }
+        let operation = || {
+            if carry {
+                WorkspaceOperation::CreateWorktreeFromCheckout {
+                    project_path: repo.clone(),
+                    name: Some(name.into()),
+                }
+            } else {
+                WorkspaceOperation::CreateWorktree {
+                    project_path: repo.clone(),
+                    name: Some(name.into()),
+                    base_ref: Some("HEAD".into()),
+                    sync_default_branch: false,
+                    sync_branches: Vec::new(),
+                }
+            }
+        };
+        let held = backend.begin_workspace_retirement(&namespace).unwrap();
+        let error = request(&peer, operation()).unwrap_err();
+        assert!(
+            error.to_string().contains("workspace admission deferred"),
+            "{error:#}"
+        );
+        assert!(
+            !namespace.join(name).exists(),
+            "refused creation allocated its name"
+        );
+        if carry {
+            assert_eq!(fs::read(repo.join("tracked.hold")).unwrap(), b"carried\n");
+        }
+        drop(held);
+        let ResponsePayload::Workspace {
+            result: WorkspaceResult::WorktreeCreated { worktree },
+        } = request(&peer, operation()).unwrap()
+        else {
+            panic!("creation returned the wrong result");
+        };
+        let expected: &[u8] = if carry { b"carried\n" } else { b"saved\n" };
+        assert_eq!(
+            fs::read(worktree.path.join("tracked.hold")).unwrap(),
+            expected
+        );
+        if carry {
+            assert_eq!(fs::read(repo.join("tracked.hold")).unwrap(), b"carried\n");
+        }
+    }
+
+    let existing = namespace.join("fresh/repo");
+    let held = backend.begin_workspace_retirement(&existing).unwrap();
+    let unrelated = request(
+        &peer,
+        WorkspaceOperation::CreateWorktree {
+            project_path: repo.clone(),
+            name: Some("unrelated".into()),
+            base_ref: Some("HEAD".into()),
+            sync_default_branch: false,
+            sync_branches: Vec::new(),
+        },
+    )
+    .expect("retiring one checkout unnecessarily blocked an unrelated name");
+    assert!(matches!(
+        unrelated,
+        ResponsePayload::Workspace {
+            result: WorkspaceResult::WorktreeCreated { .. }
+        }
+    ));
+    drop(held);
+
+    // QA allocates another managed checkout through a separate RPC path.
+    git(
+        &repo,
+        &[
+            "restore",
+            "--source",
+            "HEAD",
+            "--worktree",
+            "--",
+            "tracked.hold",
+        ],
+    );
+    git(&root, &["init", "--bare", "-b", "main", "origin.git"]);
+    git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            root.join("origin.git").to_str().unwrap(),
+        ],
+    );
+    git(&repo, &["push", "-u", "origin", "main"]);
+    git(&repo, &["checkout", "-b", "dev"]);
+    fs::write(repo.join("qa.txt"), b"review this commit\n").unwrap();
+    git(&repo, &["add", "qa.txt"]);
+    git(&repo, &["commit", "-m", "QA candidate"]);
+    git(&repo, &["checkout", "main"]);
+    let held = backend.begin_workspace_retirement(&namespace).unwrap();
+    let error = request(
+        &peer,
+        WorkspaceOperation::QaStart {
+            cwd: repo.clone(),
+            branch: "dev".into(),
+        },
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("workspace admission deferred"),
+        "{error:#}"
+    );
+    drop(held);
+    assert!(matches!(
+        request(
+            &peer,
+            WorkspaceOperation::QaStart {
+                cwd: repo.clone(),
+                branch: "dev".into()
+            }
+        )
+        .unwrap(),
+        ResponsePayload::Workspace {
+            result: WorkspaceResult::QaStarted { .. }
+        }
+    ));
+
+    // Hold a real checkout inside its smudge filter. Both its source and name
+    // namespace must stay fenced until materialization has fully returned.
+    let ready = root.join("allocation-ready");
+    let release = ReleaseFilter(root.join("allocation-release"));
+    let script = root.join("allocation-filter.sh");
+    fs::write(&script, b"printf ready > \"$1\"\ni=0\nwhile [ ! -e \"$2\" ] && [ \"$i\" -lt 1000 ]; do sleep .01; i=$((i+1)); done\ncat\n").unwrap();
+    let quote = |path: &Path| format!("'{}'", path.to_str().unwrap().replace('\'', "'\\''"));
+    git(
+        &repo,
+        &[
+            "config",
+            "filter.pause.smudge",
+            &format!(
+                "/bin/sh {} {} {}",
+                quote(&script),
+                quote(&ready),
+                quote(&release.0)
+            ),
+        ],
+    );
+    let worker_peer = Arc::clone(&peer);
+    let worker_repo = repo.clone();
+    let worker = std::thread::spawn(move || {
+        request(
+            &worker_peer,
+            WorkspaceOperation::CreateWorktree {
+                project_path: worker_repo,
+                name: Some("paused".into()),
+                base_ref: Some("HEAD".into()),
+                sync_default_branch: false,
+                sync_branches: Vec::new(),
+            },
+        )
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready.exists() {
+        assert!(
+            !worker.is_finished(),
+            "allocation finished before reaching the controlled filter"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "allocation did not reach the controlled filter"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    for path in [&repo, &namespace] {
+        let error = backend
+            .begin_workspace_retirement(path)
+            .err()
+            .expect("creation released its admission guard early");
+        assert!(
+            error.to_string().contains("workspace admission deferred"),
+            "{error:#}"
+        );
+    }
+    let paused_path = namespace.join("paused/repo");
+    let error = request(
+        &peer,
+        WorkspaceOperation::EnsureWorktree {
+            project_path: repo.clone(),
+            path: paused_path.clone(),
+            branch: None,
+            base_ref: Some("HEAD".into()),
+        },
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("workspace admission deferred"),
+        "{error:#}"
+    );
+    assert!(
+        peer.record_native_writer_before_start(Uuid::new_v4(), Uuid::new_v4(), &paused_path)
+            .is_err()
+    );
+    assert!(peer.task_store.native_writer_origins().unwrap().is_empty());
+    assert!(
+        peer.open_terminal(&paused_path, 80, 24, EventSink::detached(), None)
+            .is_err()
+    );
+    assert!(
+        peer.task_store
+            .terminal_writer_origins()
+            .unwrap()
+            .is_empty()
+    );
+    drop(release);
+    let ResponsePayload::Workspace {
+        result: WorkspaceResult::WorktreeCreated { worktree },
+    } = worker.join().unwrap().unwrap()
+    else {
+        panic!("creation returned the wrong result");
+    };
+    assert_eq!(
+        fs::read(worktree.path.join("tracked.hold")).unwrap(),
+        b"saved\n"
+    );
+    drop(backend.begin_workspace_retirement(&namespace).unwrap());
+    drop(peer);
+    drop(backend);
+    fs::remove_dir_all(root).unwrap();
+}

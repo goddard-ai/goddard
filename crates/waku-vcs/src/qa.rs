@@ -114,8 +114,19 @@ fn sole_parent(cwd: &Path, sha: &str, expected: &str) -> anyhow::Result<()> {
 }
 
 pub fn start(cwd: &Path, branch: &str) -> anyhow::Result<QaCheckout> {
+    start_guarded(cwd, branch, |_| Ok(()))
+}
+
+/// Retain source admission during preflight and allocation admission through
+/// creation of the tested checkout.
+pub fn start_guarded<G>(
+    cwd: &Path,
+    branch: &str,
+    mut before_create: impl FnMut(waku_git::worktree::CreationScope<'_>) -> anyhow::Result<G>,
+) -> anyhow::Result<QaCheckout> {
     ensure!(!branch.trim().is_empty(), "choose a QA branch");
     let branch = crate::review::qa_branch_checked(branch)?;
+    let _source = before_create(waku_git::worktree::CreationScope::Source(cwd))?;
     let (base_branch, base_sha) = fetched_base(cwd)?;
     ensure!(
         branch != base_branch,
@@ -147,7 +158,8 @@ pub fn start(cwd: &Path, branch: &str) -> anyhow::Result<QaCheckout> {
         .context("there are no commits waiting for QA")?;
     sole_parent(cwd, sha, &base_sha)?;
     let commit = crate::git_panel::commit(cwd, sha)?;
-    let worktree = waku_git::worktree::create(cwd, None, Some(sha), false, &[])?;
+    let worktree =
+        waku_git::worktree::create_guarded(cwd, None, Some(sha), false, &[], before_create)?;
     Ok(QaCheckout {
         base_branch,
         base_sha,

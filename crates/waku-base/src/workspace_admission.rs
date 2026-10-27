@@ -15,6 +15,15 @@ pub struct WorkspaceAdmission {
     _locks: Vec<fs::File>,
 }
 
+#[cfg(unix)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AdmissionKind {
+    Writer,
+    Retirement,
+    Materialization,
+    Catalog,
+}
+
 impl WorkspaceAdmission {
     pub fn writer(store: &Path, path: &Path) -> anyhow::Result<Self> {
         Self::acquire(store, path, false)
@@ -22,6 +31,20 @@ impl WorkspaceAdmission {
 
     pub fn retirement(store: &Path, path: &Path) -> anyhow::Result<Self> {
         Self::acquire(store, path, true)
+    }
+
+    /// Serialize creation/restoration of one destination, and keep descendant
+    /// writer/catalog admission out until the directory is fully materialized.
+    pub fn materialize(store: &Path, path: &Path) -> anyhow::Result<Self> {
+        #[cfg(unix)]
+        {
+            Self::acquire_canonical(store, &catalog_path(path)?, AdmissionKind::Materialization)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (store, path);
+            Ok(Self {})
+        }
     }
 
     /// Guard catalog ownership transitions, including paths not materialized
@@ -47,7 +70,11 @@ impl WorkspaceAdmission {
                     );
                 }
             }
-            Ok(Some(Self::acquire_canonical(store, &common, false)?))
+            Ok(Some(Self::acquire_canonical(
+                store,
+                &common,
+                AdmissionKind::Catalog,
+            )?))
         }
     }
 
@@ -64,11 +91,19 @@ impl WorkspaceAdmission {
 
     #[cfg(unix)]
     fn acquire(store: &Path, path: &Path, retiring: bool) -> anyhow::Result<Self> {
-        Self::acquire_canonical(store, &dunce::canonicalize(path)?, retiring)
+        Self::acquire_canonical(
+            store,
+            &dunce::canonicalize(path)?,
+            if retiring {
+                AdmissionKind::Retirement
+            } else {
+                AdmissionKind::Writer
+            },
+        )
     }
 
     #[cfg(unix)]
-    fn acquire_canonical(store: &Path, path: &Path, retiring: bool) -> anyhow::Result<Self> {
+    fn acquire_canonical(store: &Path, path: &Path, kind: AdmissionKind) -> anyhow::Result<Self> {
         use sha2::{Digest, Sha256};
         use std::os::unix::{ffi::OsStrExt, fs::DirBuilderExt, fs::MetadataExt};
 
@@ -103,8 +138,8 @@ impl WorkspaceAdmission {
                 Sha256::digest(path.as_os_str().as_bytes())
             ))
         };
-        let mut locks = Vec::with_capacity(ancestors.len() + 1);
-        if retiring {
+        let mut locks = Vec::with_capacity(2 * ancestors.len() + 1);
+        if kind == AdmissionKind::Retirement {
             // Exclusive own-path locks on ancestors conflict with a writer
             // rooted above us. The subtree lock conflicts with writers below.
             // Retirements serialize with each other, including sibling paths;
@@ -117,6 +152,26 @@ impl WorkspaceAdmission {
             locks.push(lock_file(&lock_path(&path, "own"), false)?);
             for ancestor in ancestors.iter().skip(1) {
                 locks.push(lock_file(&lock_path(ancestor, "subtree"), false)?);
+            }
+            // An exclusive destination lease also excludes descendant writers
+            // and overlapping allocators. Ancestor leases stay shared, so
+            // different destinations can materialize concurrently.
+            for (depth, ancestor) in ancestors.iter().enumerate() {
+                locks.push(lock_file(
+                    &lock_path(ancestor, "materialization"),
+                    depth == 0 && kind == AdmissionKind::Materialization,
+                )?);
+            }
+            match kind {
+                // A coalesced catalog scope must exclude materialization below
+                // it without excluding ordinary writer publication there.
+                AdmissionKind::Catalog => locks.push(lock_file(&lock_path(path, "catalog"), true)?),
+                AdmissionKind::Materialization => {
+                    for ancestor in &ancestors {
+                        locks.push(lock_file(&lock_path(ancestor, "catalog"), false)?);
+                    }
+                }
+                _ => {}
             }
         }
         Ok(Self { _locks: locks })

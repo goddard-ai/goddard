@@ -151,7 +151,7 @@ impl WakuBackend {
         session.workspace = match workspace {
             AgentWorkspace::Local => SessionWorkspace::Local,
             AgentWorkspace::Worktree => {
-                let created = crate::worktree::create(
+                let created = self.create_managed_worktree(
                     &project_path,
                     None,
                     base_branch.as_deref(),

@@ -1,0 +1,1 @@
+- Worktree creation and restore requests now coordinate with retirement, provider startup, and terminal startup so conflicting operations defer instead of racing.

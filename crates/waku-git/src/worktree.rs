@@ -111,6 +111,12 @@ const SLUG_NOUNS: &[&str] = &[
 
 pub use waku_protocol::git::CreatedWorktree;
 
+/// Source preparation and destination materialization require distinct leases.
+pub enum CreationScope<'a> {
+    Source(&'a Path),
+    Destination(&'a Path),
+}
+
 /// Whether `path` sits inside a linked Git worktree rather than a primary
 /// checkout. A linked worktree's own `.git` lives under the main
 /// repository's `worktrees/` directory, which is what separates the two
@@ -177,22 +183,45 @@ pub fn create(
     sync_default_branch: bool,
     sync_branches: &[String],
 ) -> anyhow::Result<CreatedWorktree> {
-    let (_, repository, project_relative) = resolve_repository(project_path)?;
-    let base_ref = base_ref
-        .map(str::trim)
-        .filter(|reference| !reference.is_empty())
-        .map(str::to_owned)
-        .map(Ok)
-        .unwrap_or_else(|| default_base_ref(&repository))?;
-    if sync_default_branch || !sync_branches.is_empty() {
-        sync_base_branch(&repository, &base_ref, sync_default_branch, sync_branches);
-    }
-    git_stdout(
-        &repository,
-        &["rev-parse", "--verify", &format!("{base_ref}^{{commit}}")],
+    create_guarded(
+        project_path,
+        name,
+        base_ref,
+        sync_default_branch,
+        sync_branches,
+        |_| Ok(()),
     )
-    .with_context(|| format!("base ref `{base_ref}` is unavailable"))?;
-    add_named(&repository, &project_relative, name, &base_ref, None)
+}
+
+/// Keep caller-owned source and allocation guards alive through branch sync,
+/// name allocation, checkout, materialization and failure cleanup.
+pub fn create_guarded<G>(
+    project_path: &Path,
+    name: Option<&str>,
+    base_ref: Option<&str>,
+    sync_default_branch: bool,
+    sync_branches: &[String],
+    mut before_create: impl FnMut(CreationScope<'_>) -> anyhow::Result<G>,
+) -> anyhow::Result<CreatedWorktree> {
+    let (_, repository, project_relative) = resolve_repository(project_path)?;
+    let _source = before_create(CreationScope::Source(&repository))?;
+    add_named(&repository, &project_relative, name, before_create, || {
+        let base_ref = base_ref
+            .map(str::trim)
+            .filter(|reference| !reference.is_empty())
+            .map(str::to_owned)
+            .map(Ok)
+            .unwrap_or_else(|| default_base_ref(&repository))?;
+        if sync_default_branch || !sync_branches.is_empty() {
+            sync_base_branch(&repository, &base_ref, sync_default_branch, sync_branches);
+        }
+        git_stdout(
+            &repository,
+            &["rev-parse", "--verify", &format!("{base_ref}^{{commit}}")],
+        )
+        .with_context(|| format!("base ref `{base_ref}` is unavailable"))?;
+        Ok((base_ref, None))
+    })
 }
 
 /// Create a detached linked worktree that adopts the checkout's current
@@ -205,31 +234,38 @@ pub fn create_from_checkout(
     project_path: &Path,
     name: Option<&str>,
 ) -> anyhow::Result<CreatedWorktree> {
+    create_from_checkout_guarded(project_path, name, |_| Ok(()))
+}
+
+/// Apply the creation fence before taking the source snapshot as well as
+/// before allocating the new checkout.
+pub fn create_from_checkout_guarded<G>(
+    project_path: &Path,
+    name: Option<&str>,
+    mut before_create: impl FnMut(CreationScope<'_>) -> anyhow::Result<G>,
+) -> anyhow::Result<CreatedWorktree> {
     let (_, repository, project_relative) = resolve_repository(project_path)?;
-    let head = git_optional_stdout(&repository, &["rev-parse", "--verify", "HEAD^{commit}"])?;
-    // A dangling commit of the whole working state — ignored files stay out,
-    // same as a turn checkpoint.
-    let snapshot = crate::checkpoint::capture_worktree_commit(&repository)?;
-    let (base, carried) = match head {
-        Some(head) => {
-            // `git diff --quiet` exits 1 on differences; a snapshot that
-            // reproduces HEAD exactly needs no application.
-            let dirty =
-                git_optional_stdout(&repository, &["diff", "--quiet", &head, &snapshot, "--"])?
-                    .is_none();
-            (head, dirty.then_some(snapshot))
-        }
-        // An unborn branch has no commit to detach at; the snapshot, a root
-        // commit of the full working state, is the base.
-        None => (snapshot, None),
-    };
-    add_named(
-        &repository,
-        &project_relative,
-        name,
-        &base,
-        carried.as_deref(),
-    )
+    let _source = before_create(CreationScope::Source(&repository))?;
+    add_named(&repository, &project_relative, name, before_create, || {
+        let head = git_optional_stdout(&repository, &["rev-parse", "--verify", "HEAD^{commit}"])?;
+        // A dangling commit of the whole working state — ignored files stay out,
+        // same as a turn checkpoint.
+        let snapshot = crate::checkpoint::capture_worktree_commit(&repository)?;
+        let (base, carried) = match head {
+            Some(head) => {
+                // `git diff --quiet` exits 1 on differences; a snapshot that
+                // reproduces HEAD exactly needs no application.
+                let dirty =
+                    git_optional_stdout(&repository, &["diff", "--quiet", &head, &snapshot, "--"])?
+                        .is_none();
+                (head, dirty.then_some(snapshot))
+            }
+            // An unborn branch has no commit to detach at; the snapshot, a root
+            // commit of the full working state, is the base.
+            None => (snapshot, None),
+        };
+        Ok((base, carried))
+    })
 }
 
 /// Resolve `project_path` to its canonical form, its repository root, and the
@@ -249,22 +285,16 @@ fn resolve_repository(project_path: &Path) -> anyhow::Result<(PathBuf, PathBuf, 
 }
 
 /// The name-allocation and checkout loop both creation entry points share.
-/// `carried_state`, when set, is a commit whose difference from `base_ref` is
-/// replayed into the new checkout as unstaged work.
-fn add_named(
+/// Prepare the base/snapshot only after the selected destination is admitted.
+/// A prepared snapshot is carried into the new checkout as unstaged work.
+fn add_named<G>(
     repository: &Path,
     project_relative: &Path,
     name: Option<&str>,
-    base_ref: &str,
-    carried_state: Option<&str>,
+    mut before_create: impl FnMut(CreationScope<'_>) -> anyhow::Result<G>,
+    mut prepare: impl FnMut() -> anyhow::Result<(String, Option<String>)>,
 ) -> anyhow::Result<CreatedWorktree> {
     let (worktree_root, repository_name) = worktree_root(repository)?;
-    fs::create_dir_all(&worktree_root).with_context(|| {
-        format!(
-            "could not create the worktree directory {}",
-            worktree_root.display()
-        )
-    })?;
     let registered = registered_worktree_paths(&repository)?;
 
     // The name directory itself is the claim: a leftover entry must block
@@ -277,17 +307,25 @@ fn add_named(
             || registered.contains(&dir.join(&repository_name))
     };
     let checkout = |name: &str| worktree_root.join(name).join(&repository_name);
-    let add = |name: &str| -> anyhow::Result<(PathBuf, bool)> {
+    let mut add = |name: &str| -> anyhow::Result<CreatedWorktree> {
         let path = checkout(name);
+        let _destination = before_create(CreationScope::Destination(&path))?;
+        let (base_ref, carried_state) = prepare()?;
+        fs::create_dir_all(&worktree_root).with_context(|| {
+            format!(
+                "could not create the worktree directory {}",
+                worktree_root.display()
+            )
+        })?;
         let result = (|| -> anyhow::Result<bool> {
-            let mut lfs_skipped = add_detached(repository, &path, base_ref)?;
-            if let Some(state) = carried_state {
+            let mut lfs_skipped = add_detached(repository, &path, &base_ref)?;
+            if let Some(state) = carried_state.as_deref() {
                 lfs_skipped |= carry_state(&path, state)?;
             }
             Ok(lfs_skipped)
         })();
         match result {
-            Ok(lfs_skipped) => Ok((path, lfs_skipped)),
+            Ok(lfs_skipped) => materialized(path, project_relative, name.to_owned(), lfs_skipped),
             Err(error) => {
                 cleanup_failed_add(repository, &path);
                 Err(error)
@@ -300,8 +338,7 @@ fn add_named(
             if taken(&name) {
                 bail!("a worktree named `{name}` already exists");
             }
-            let (path, lfs_skipped) = add(&name)?;
-            materialized(path, project_relative, name, lfs_skipped)
+            add(&name)
         }
         None => {
             // Each attempt draws a fresh random pair rather than suffixing
@@ -311,8 +348,7 @@ fn add_named(
                 if taken(&name) {
                     continue;
                 }
-                let (path, lfs_skipped) = add(&name)?;
-                return materialized(path, project_relative, name, lfs_skipped);
+                return add(&name);
             }
             // A UUID fallback keeps the last resort independent of
             // human-readable name collisions.
@@ -324,8 +360,7 @@ fn add_named(
             if taken(&name) {
                 bail!("could not allocate a unique Git worktree name");
             }
-            let (path, lfs_skipped) = add(&name)?;
-            materialized(path, project_relative, name, lfs_skipped)
+            add(&name)
         }
     }
 }
@@ -446,20 +481,25 @@ pub fn ensure(
     if path.try_exists().unwrap_or(true) {
         return Ok(None);
     }
-    let project_path = dunce::canonicalize(project_path)
-        .with_context(|| format!("could not open project {}", project_path.display()))?;
-    let repository = git_stdout(&project_path, &["rev-parse", "--show-toplevel"])
-        .context("worktrees require a Git repository")?;
-    let repository = dunce::canonicalize(PathBuf::from(repository.trim()))
-        .context("could not resolve the Git repository root")?;
-    let project_relative = project_path
-        .strip_prefix(&repository)
-        .context("the project is outside its Git repository root")?;
+    ensure_guarded(project_path, path, branch, base_ref, |_| Ok(()))
+}
+
+/// Admit both the source and the actual destination checkout root before any
+/// prune/checkout work, including readiness checks for an existing directory.
+pub fn ensure_guarded<G>(
+    project_path: &Path,
+    path: &Path,
+    branch: Option<&str>,
+    base_ref: Option<&str>,
+    mut before_create: impl FnMut(CreationScope<'_>) -> anyhow::Result<G>,
+) -> anyhow::Result<Option<Option<String>>> {
+    let (_, repository, project_relative) = resolve_repository(project_path)?;
+    let _source = before_create(CreationScope::Source(&repository))?;
     // `path` ends with the project-relative suffix; dropping those
     // components recovers the worktree root `git worktree add` targets.
     let mut worktree_path = path.to_path_buf();
     if !project_relative.as_os_str().is_empty() {
-        if !worktree_path.ends_with(project_relative) {
+        if !worktree_path.ends_with(&project_relative) {
             bail!(
                 "{} is not inside a worktree of {}",
                 path.display(),
@@ -469,6 +509,19 @@ pub fn ensure(
         for _ in 0..project_relative.components().count() {
             worktree_path.pop();
         }
+    }
+    let source_is_destination =
+        dunce::canonicalize(&worktree_path).is_ok_and(|root| root == repository);
+    let _destination = if source_is_destination {
+        None
+    } else {
+        Some(before_create(CreationScope::Destination(&worktree_path))?)
+    };
+    if path.try_exists().unwrap_or(true) {
+        return Ok(None);
+    }
+    if source_is_destination {
+        bail!("cannot recreate a worktree over its source checkout");
     }
     // A directory deleted by hand leaves a registration that would make
     // `git worktree add` refuse the path.
@@ -1091,8 +1144,8 @@ mod tests {
             &repository,
             project_relative,
             Some("retryable"),
-            "feature",
-            Some("not-a-commit"),
+            |_| Ok(()),
+            || Ok(("feature".into(), Some("not-a-commit".into()))),
         );
         assert!(failed.is_err());
 
@@ -1100,8 +1153,8 @@ mod tests {
             &repository,
             project_relative,
             Some("retryable"),
-            "feature",
-            None,
+            |_| Ok(()),
+            || Ok(("feature".into(), None)),
         )
         .unwrap();
         assert_eq!(created.name, "retryable");

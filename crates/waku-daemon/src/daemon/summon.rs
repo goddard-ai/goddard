@@ -968,7 +968,7 @@ impl WakuBackend {
         let (workspace, adopted_from) = match ticket.workspace.unwrap_or_default() {
             AgentWorkspace::Local => (SessionWorkspace::Local, None),
             AgentWorkspace::Worktree => {
-                let created = crate::worktree::create(
+                let created = self.create_managed_worktree(
                     &project_path,
                     None,
                     ticket.base_branch.as_deref(),

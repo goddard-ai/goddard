@@ -2237,7 +2237,7 @@ impl WakuBackend {
         // the employee running in its old workspace.
         let created = match workspace {
             AgentWorkspace::Local => None,
-            AgentWorkspace::Worktree => Some(crate::worktree::create(
+            AgentWorkspace::Worktree => Some(self.create_managed_worktree(
                 &project_path,
                 None,
                 base_branch.as_deref(),

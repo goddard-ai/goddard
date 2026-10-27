@@ -7,6 +7,97 @@ impl WakuBackend {
         WorkspaceAdmission::writer(self.task_store.path(), path)
     }
 
+    fn admit_workspace_creation_path(
+        &self,
+        scope: crate::worktree::CreationScope<'_>,
+    ) -> anyhow::Result<WorkspaceAdmission> {
+        match scope {
+            crate::worktree::CreationScope::Source(path) => self.admit_workspace_writer(path),
+            crate::worktree::CreationScope::Destination(path) => {
+                WorkspaceAdmission::materialize(self.task_store.path(), path)
+            }
+        }
+    }
+
+    pub(super) fn create_managed_worktree(
+        &self,
+        project_path: &Path,
+        name: Option<&str>,
+        base_ref: Option<&str>,
+        sync_default_branch: bool,
+        sync_branches: &[String],
+    ) -> anyhow::Result<crate::worktree::CreatedWorktree> {
+        crate::worktree::create_guarded(
+            project_path,
+            name,
+            base_ref,
+            sync_default_branch,
+            sync_branches,
+            |scope| self.admit_workspace_creation_path(scope),
+        )
+    }
+
+    pub(super) fn execute_workspace_creation(
+        &self,
+        operation: &WorkspaceOperation,
+    ) -> anyhow::Result<Option<WorkspaceResult>> {
+        Ok(Some(match operation {
+            WorkspaceOperation::CreateWorktree {
+                project_path,
+                name,
+                base_ref,
+                sync_default_branch,
+                sync_branches,
+            } => WorkspaceResult::WorktreeCreated {
+                worktree: self.create_managed_worktree(
+                    project_path,
+                    name.as_deref(),
+                    base_ref.as_deref(),
+                    *sync_default_branch,
+                    sync_branches,
+                )?,
+            },
+            WorkspaceOperation::CreateWorktreeFromCheckout { project_path, name } => {
+                WorkspaceResult::WorktreeCreated {
+                    worktree: crate::worktree::create_from_checkout_guarded(
+                        project_path,
+                        name.as_deref(),
+                        |scope| self.admit_workspace_creation_path(scope),
+                    )?,
+                }
+            }
+            WorkspaceOperation::EnsureWorktree {
+                project_path,
+                path,
+                branch,
+                base_ref,
+            } => {
+                match crate::worktree::ensure_guarded(
+                    project_path,
+                    path,
+                    branch.as_deref(),
+                    base_ref.as_deref(),
+                    |scope| self.admit_workspace_creation_path(scope),
+                )? {
+                    Some(branch) => WorkspaceResult::WorktreeEnsured {
+                        created: true,
+                        branch,
+                    },
+                    None => WorkspaceResult::WorktreeEnsured {
+                        created: false,
+                        branch: None,
+                    },
+                }
+            }
+            WorkspaceOperation::QaStart { cwd, branch } => WorkspaceResult::QaStarted {
+                checkout: waku_vcs::qa::start_guarded(cwd, branch, |scope| {
+                    self.admit_workspace_creation_path(scope)
+                })?,
+            },
+            _ => return Ok(None),
+        }))
+    }
+
     /// Keep restore/materialization requests excluded from retirement through
     /// their complete filesystem operation, including a not-yet-created target.
     pub(super) fn admit_workspace_restore(
@@ -15,17 +106,11 @@ impl WakuBackend {
     ) -> anyhow::Result<Option<WorkspaceAdmission>> {
         match operation {
             WorkspaceOperation::RestoreRef { cwd, .. } => {
-                WorkspaceAdmission::catalog(self.task_store.path(), std::slice::from_ref(cwd))
+                WorkspaceAdmission::materialize(self.task_store.path(), cwd).map(Some)
             }
             WorkspaceOperation::RestoreProjectlessWorkspace { path } => {
-                WorkspaceAdmission::catalog(self.task_store.path(), std::slice::from_ref(path))
+                WorkspaceAdmission::materialize(self.task_store.path(), path).map(Some)
             }
-            WorkspaceOperation::EnsureWorktree {
-                project_path, path, ..
-            } => WorkspaceAdmission::catalog(
-                self.task_store.path(),
-                &[project_path.clone(), path.clone()],
-            ),
             _ => Ok(None),
         }
     }

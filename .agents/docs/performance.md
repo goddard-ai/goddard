@@ -214,13 +214,26 @@
   paths through an existing ancestor; unresolved aliases fail closed. These
   publication checks do not replace generation/owner checks between cleanup
   stages, restore admission or prepared-history generation fencing.
-- Daemon `RestoreRef`, `RestoreProjectlessWorkspace` and `EnsureWorktree`
-  requests hold the shared workspace gate through the full operation, after
-  retirement-specific RPC routing and before filesystem effects. Missing
-  targets use existing-ancestor normalization; ensure guards both its source
-  project and destination. A conflict returns promptly for retry. This live
+- Daemon `RestoreRef` and `RestoreProjectlessWorkspace` requests hold a
+  destination materialization lease through the full filesystem operation.
+  `EnsureWorktree` uses typed source/destination admission at the real checkout
+  root. Missing targets use existing-ancestor normalization. A conflict returns
+  promptly for retry. This live
   request fence does not qualify orphan subprocesses after daemon loss, fence
   fresh name allocation or replace cleanup generation/owner revalidation.
+- Managed worktree creation uses typed source/destination admission callbacks
+  from daemon task, summon, workspace-control, creation and QA RPC paths. Select
+  the destination before branch sync/source capture; retain its exclusive
+  materialization lease through directory allocation, checkout, carrying state,
+  materialization and failed-add cleanup. Ensure/recreation uses the same lease
+  at the actual checkout root. Ordinary publication takes shared readiness keys
+  on its ancestors, keeping new providers/terminals and ending captures out of
+  a directory still being materialized. Catalog commits exclude materialization
+  through separate catalog keys, preserving ordinary publication compatibility;
+  coalesced catalog scopes retain descriptor bounds proportional to depth.
+  Release catalog admission immediately after SQLite commit. Unrelated target
+  names can materialize concurrently with retirement of another checkout.
+  These live leases still do not qualify subprocesses after daemon loss.
 - Desktop ending-capture descriptors and in-flight slots use the local turn
   UUID, since rewind can reuse display counts. Recheck the settled turn and
   workspace before dispatch and acceptance, before preparing transcript rows.
