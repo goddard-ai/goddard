@@ -1,0 +1,1 @@
+- File-finder searches run in the background and discard results from earlier queries or workspaces.

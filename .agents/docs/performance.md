@@ -128,9 +128,14 @@
   strings. Cache hits replace shared handles; they must not clone the complete
   listing or rebuild its projection on the UI thread. Keep the background owner
   through rejected query completions, abandoned weak updates, cache eviction
-  and the last UI consumer's release. Fuzzy result filtering still runs per
-  input change; moving index ownership does not establish a latency bound for
-  that matching or transcript-link preparation.
+  and the last UI consumer's release. File-finder matching runs on a worker,
+  with one physical job and one replaceable latest request per window. Closing
+  the dialog revokes authority without releasing a running job's slot. Recheck
+  the current input/scope before accepting completion or opening a result;
+  clear old-query rows during preparation and retain background reclamation
+  through failed weak updates. Matcher scratch allocation/reclamation also
+  stays off the UI thread. Composer matching and transcript-link preparation
+  still require auditing; this does not establish measured desktop latency.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for
   their capture lock, and retain it through Git capture and durable checkpoint
   persistence. Cleanup must check that evidence even after the provider exits.

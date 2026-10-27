@@ -4,8 +4,9 @@
 //! The modal is a view over the composer's shared workspace file index —
 //! `mention_files` mirrored into `mention_file_index` by
 //! `refresh_composer_sources`, discovered on the background executor —
-//! filtered into `results` per keystroke and per index arrival, so a frame
-//! never walks the filesystem or re-runs the fuzzy match. The search field
+//! filtered into `results` on a worker per keystroke and per index arrival.
+//! Only one matching job runs; newer inputs replace its pending successor.
+//! A frame never walks the filesystem or re-runs the fuzzy match. The search field
 //! keeps real focus while the row highlight is drawn, matching the command
 //! palette. A `path:line[:column]` suffix jumps straight to that position.
 //! Confirming opens the file in the right panel through the same
@@ -19,7 +20,7 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 use std::path::Component;
 
-use crate::composer_complete::{self, Scored, highlight_byte_ranges};
+use crate::composer_complete::{Scored, highlight_byte_ranges};
 
 use super::autocomplete::matched_text;
 use super::command_palette::{
@@ -27,6 +28,9 @@ use super::command_palette::{
     SelectPrevious, next_selection_index,
 };
 use super::*;
+
+#[path = "file_finder_matching.rs"]
+mod matching;
 
 /// List navigation lives beneath the focused one-line input; Escape bubbles
 /// from the field to the card's dismiss action without clearing the query.
@@ -85,7 +89,8 @@ pub(super) struct FileFinderUi {
     results: Vec<Scored<FileEntry>>,
     selected: usize,
     scroll: ScrollHandle,
-    matcher: Matcher,
+    matcher: Option<BackgroundOwned<Matcher>>,
+    matching: matching::Matching,
 }
 
 impl FileFinderUi {
@@ -103,7 +108,8 @@ impl FileFinderUi {
             results: Vec::new(),
             selected: 0,
             scroll: ScrollHandle::new(),
-            matcher: composer_complete::matcher(),
+            matcher: None,
+            matching: matching::Matching::default(),
         }
     }
 
@@ -416,6 +422,10 @@ impl Waku {
             return;
         }
         self.file_finder.open = false;
+        self.file_finder.matching.invalidate();
+        self.file_finder.results.clear();
+        self.file_finder.files = file_index::empty();
+        self.file_finder.matcher = None;
         self.file_finder.focus_generation = self.file_finder.focus_generation.wrapping_add(1);
         if let Some(previous_focus) = self.file_finder.previous_focus.take() {
             window.focus(&previous_focus, cx);
@@ -522,6 +532,7 @@ impl Waku {
             }
         };
         if root != self.file_finder.root {
+            self.file_finder.matching.invalidate();
             self.file_finder.root = root;
             self.file_finder.files = file_index::empty();
             self.file_finder.results.clear();
@@ -545,17 +556,55 @@ impl Waku {
         }
         let query = self.file_finder.search.read(cx).content().to_owned();
         let (path_query, _, _) = split_position_suffix(&query);
-        self.file_finder.results = composer_complete::filter_files_at_indices(
-            &self.file_finder.files.get().entries,
-            &self.file_finder.files.get().files_only,
-            path_query,
-            &mut self.file_finder.matcher,
-        );
-        self.file_finder.selected = self
+        if self.file_finder.files.get().files_only.is_empty() {
+            self.file_finder.matching.invalidate();
+            self.file_finder.results.clear();
+        } else if self
             .file_finder
-            .selected
-            .min(self.file_finder.results.len().saturating_sub(1));
+            .matching
+            .request(Arc::clone(&self.file_finder.files), path_query)
+        {
+            // Old-query rows must not remain clickable during preparation.
+            self.file_finder.results.clear();
+            self.file_finder.selected = 0;
+        }
+        self.start_file_finder_matching(cx);
         cx.notify();
+    }
+
+    fn start_file_finder_matching(&mut self, cx: &mut Context<Self>) {
+        if !self.file_finder.open {
+            return;
+        }
+        let Some(request) = self.file_finder.matching.take() else {
+            return;
+        };
+        let matcher = self.file_finder.matcher.take();
+        cx.spawn(async move |this, cx| {
+            let output = cx
+                .background_executor()
+                .spawn(async move { matching::run(request, matcher) })
+                .await;
+            let _ = this.update(cx, move |this, cx| {
+                // Revalidate the actual query and files scope before accepting
+                // a result; a context change need not have refreshed the modal.
+                // Keep the physical slot held while refreshing so this cannot
+                // admit a second job ahead of the completing one.
+                this.refresh_file_finder_results(cx);
+                if this.file_finder.matching.finish(output.get().generation) {
+                    let output = output.into_inner();
+                    this.file_finder.results = output.results;
+                    this.file_finder.matcher = Some(output.matcher);
+                    this.file_finder.selected = this
+                        .file_finder
+                        .selected
+                        .min(this.file_finder.results.len().saturating_sub(1));
+                }
+                this.start_file_finder_matching(cx);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn move_file_finder_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -585,6 +634,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A queued click/Enter must not apply rows from an earlier scope or
+        // input if its own change notification has not refreshed the modal.
+        self.refresh_file_finder_results(cx);
         let index = index.unwrap_or_else(|| {
             self.file_finder
                 .selected
@@ -596,6 +648,7 @@ impl Waku {
         let relative_path = row.item.path.clone();
         let query = self.file_finder.search.read(cx).content().to_owned();
         let (_, line, column) = split_position_suffix(&query);
+        self.sync_right_panel_files_root(cx);
         self.right_panel_pending_file_focus = Some(PendingFileFocus {
             path: relative_path.clone(),
             position: line.map(|line| (line, column.unwrap_or(1))),
@@ -632,7 +685,7 @@ impl Waku {
             .file_finder
             .selected
             .min(self.file_finder.results.len().saturating_sub(1));
-        let loading = self.file_finder.loading;
+        let loading = self.file_finder.loading || self.file_finder.matching.is_pending();
         let show_placeholder = self.file_finder.results.is_empty();
         let results_height =
             file_finder_results_height(self.file_finder.results.len(), show_placeholder)
