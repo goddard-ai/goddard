@@ -1,0 +1,1 @@
+- Archiving queued employees preserves a replacement assignment resumed before the delayed archive stop runs.

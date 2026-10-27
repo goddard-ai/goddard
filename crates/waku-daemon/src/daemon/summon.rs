@@ -1826,9 +1826,25 @@ impl WakuBackend {
     /// recovery consults before reconstructing anything.
     pub(super) fn stop_queued_employees(&self, session_ids: &[Uuid]) {
         for session_id in session_ids {
+            let lifecycle = self.runtime_lifecycles.session(*session_id);
+            let _owner = lifecycle.lock();
             if self.boss.employee_lifecycle(*session_id)
                 != Some(waku_protocol::boss::EmployeeLifecycle::Queued)
             {
+                continue;
+            }
+            // Archive/removal batches are snapshots. A resume may have cleared
+            // the archive and installed a new ticket before this gate opened.
+            // Claim only current retirement intent; dispatch and requeue use
+            // this same owner through their roster transitions.
+            let removed = self.removed_session_ids.lock().contains(session_id);
+            let archived = self
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .any(|session| session.id == *session_id && session.archived_at.is_some());
+            if !removed && !archived {
                 continue;
             }
             if let Err(error) = self.stop_queued_employee(*session_id) {
