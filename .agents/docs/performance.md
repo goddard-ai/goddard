@@ -148,9 +148,15 @@
   or corrupt cache, or an existing Git index lock, selects a fresh UUID index
   namespace. Never unlink an uncertain index lock. Clear the pending marker only
   after successful capture and cache metadata publication; healthy captures keep
-  incremental index reuse. Retired cache lanes need bounded idle maintenance;
-  do not scan them from UI paths or confuse derived-cache retirement with proof
-  that a provider/workspace writer stopped. A capture parent can die while its
+  incremental index reuse. Successful captures enqueue derived-index retirement
+  through host maintenance: each admitted unit examines at most 64 directory
+  entries and removes at most eight obsolete UUID indexes under the cache gate.
+  Re-read the current generation each unit; retain pending/unknown metadata,
+  the fixed baseline, legacy files, symlinks, directories and any locked index.
+  Read only the bounded generation header, never the full untracked-path list.
+  Saturation/failure retains caches for later captures to retry. Do not scan
+  them from UI paths or confuse derived-cache retirement with proof that a
+  provider/workspace writer stopped. A capture parent can die while its
   Git clean-filter child survives and publishes an old index late. The cache
   gate excludes live producers; it is not orphan completion, queued-checkpoint
   ownership, archive-generation authority or full workspace admission.

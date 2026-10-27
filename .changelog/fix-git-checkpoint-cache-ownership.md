@@ -1,1 +1,1 @@
-- Interrupted checkpoints recover without taking over another capture’s Git index lock.
+- Interrupted checkpoints recover without taking over another capture’s Git index lock. Obsolete checkpoint caches are reclaimed in small batches when host load permits.

@@ -17,6 +17,9 @@ use uuid::Uuid;
 
 use waku_protocol::model::{Checkpoint, CheckpointFile, CheckpointStatus, unix_time};
 
+#[path = "checkpoint_cache_retirement.rs"]
+mod cache_retirement;
+
 const TURN_START_METADATA_PREFIX: &str = "Waku-Turn-Start: ";
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 /// The side index every snapshot on a worktree shares, kept in the worktree's
@@ -471,7 +474,7 @@ fn capture_worktree_commit_with_base_inner(
         bail!("worktree snapshots require a Git repository");
     }
 
-    let git_dir = worktree_git_dir(cwd)?;
+    let git_dir = dunce::canonicalize(worktree_git_dir(cwd)?)?;
     // `status -z` and `diff-files` report repository-relative paths while
     // `git add` resolves pathspecs against its working directory, so the
     // capture plumbing runs at the worktree root — the one place both
@@ -566,6 +569,12 @@ fn capture_worktree_commit_with_base_inner(
             // into a capture failure because the cache could not be saved.
             eprintln!("checkpoint index cache save failed: {error:#}");
             let _ = fs::remove_file(&state_path);
+        } else if let Err(error) =
+            cache_retirement::schedule(&git_dir, index_state.index_generation)
+        {
+            // Derived caches are expendable. Queue saturation must not reject
+            // an already-created checkpoint; another capture can retry.
+            eprintln!("checkpoint cache retirement scheduling failed: {error}");
         }
     }
     eprintln!(
@@ -1067,7 +1076,11 @@ fn lock_capture_file(git_dir: &Path) -> anyhow::Result<fs::File> {
             Err(fs::TryLockError::Error(error)) => return Err(error.into()),
             Err(fs::TryLockError::WouldBlock) => {
                 let Some(remaining) = remaining_capture_time()? else {
-                    bail!("checkpoint capture deferred: another process owns the worktree cache");
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WouldBlock,
+                        "checkpoint capture deferred: another process owns the worktree cache",
+                    )
+                    .into());
                 };
                 std::thread::sleep(remaining.min(Duration::from_millis(20)));
             }
