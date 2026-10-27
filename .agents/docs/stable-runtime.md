@@ -374,6 +374,14 @@ overwrites the same claim rather than accumulating. Confirmed session stop
 releases the claim and removes the descriptor; an unconfirmed stop keeps
 both for honest reconciliation.
 
+Descriptor publication and retirement share an OS-held file lock with bounded
+worker-only waits. Retirement matches the original root, task, session,
+generation and grant ID recorded in `stable_runtime_stops.descriptor_owner`;
+this field contains no grant secret. Directory-relative operations remain bound
+to the opened parent even if its pathname is replaced. Failed filesystem or
+claim retirement retains local ownership for retry; confirmed provider exit
+alone does not mean local credential retirement finished.
+
 The resource broker's `ResourceOperation::Reanchor { id, owner_pid }` moves
 a reservation's liveness owner to a verified live pid — daemon-internal
 only, fenced to the owning task, refused on dead rows and dead pids, and it

@@ -235,6 +235,8 @@ export const stableRuntimeStops = sqliteTable(
     runtimeSessionId: text("runtime_session_id").notNull(),
     generation: integer("generation").notNull(),
     requestedAt: integer("requested_at").notNull(),
+    /** Private path and original grant id, without the grant secret. */
+    descriptorOwner: text("descriptor_owner"),
     /** Set only after the exact host generation confirms termination. */
     confirmedAt: integer("confirmed_at"),
   },

@@ -1,1 +1,1 @@
-- With the stable provider runtime enabled, stop retries reuse their original request and preserve attachment credentials when termination is unconfirmed or controller authority has changed.
+- With the stable provider runtime enabled, stop retries keep their original request and preserve credentials belonging to replacement sessions. Failed credential cleanup remains recorded for retry.

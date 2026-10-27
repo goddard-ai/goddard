@@ -1,8 +1,10 @@
 //! Unix socket transport and controller implementation.
 
 use super::STABLE_NAMESPACE;
+mod ingress_descriptor;
 #[cfg(test)]
 use super::enabled;
+use ingress_descriptor::LockedDescriptor;
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -31,7 +33,7 @@ use crate::daemon::WakuBackend;
 use crate::driver::{DriverControl, DriverEventSender, DriverHandle, DriverStartOptions};
 use crate::model::{DriverEvent, PermissionOption, ProviderKind, UserInputQuestion};
 use crate::persistence::{
-    PersistedState, StableLinkRow, StableReceipt, StableStopIntent, StateStore,
+    PersistedState, StableIngressOwner, StableLinkRow, StableReceipt, StableStopIntent, StateStore,
 };
 
 /// Env override locating the `waku-runtime-host` executable to spawn when
@@ -214,7 +216,7 @@ struct LinkShared {
     agent_delivery: crate::driver::AgentSurfaceDelivery,
     /// The provisioned ingress descriptor — removed when the session is
     /// confirmed stopped so a stale CLI cannot linger on a dead grant.
-    agent_descriptor: Option<PathBuf>,
+    agent_descriptor_owner: Option<StableIngressOwner>,
     /// Set on drop — pump and service threads retire between polls.
     stop: Arc<AtomicBool>,
     threads: Mutex<Vec<JoinHandle<()>>>,
@@ -386,20 +388,23 @@ pub(crate) fn start_link(
     // detachment cannot silently release provider-held work — this covers
     // summon tickets even for sessions without an agent surface.
     let anchored = reanchor_task_claims(backend, session_id, host_pid);
-    #[cfg(unix)]
-    if let (Some(env), Some(prepared)) = (&options.agent, &prepared) {
-        provision_agent(
-            &mut client,
-            grant.epoch,
-            root,
-            sref,
-            env,
-            prepared,
-            &anchored,
-            reattaching,
+    let agent_grant_id = if let (Some(env), Some(prepared)) = (&options.agent, &prepared) {
+        Some(
+            provision_agent(
+                &mut client,
+                grant.epoch,
+                root,
+                sref,
+                env,
+                prepared,
+                &anchored,
+                reattaching,
+            )
+            .context("could not provision the session's agent ingress")?,
         )
-        .context("could not provision the session's agent ingress")?;
-    }
+    } else {
+        None
+    };
 
     let service: Arc<dyn IngressService> = service_override.unwrap_or_else(|| {
         Arc::new(BackendIngress {
@@ -454,9 +459,12 @@ pub(crate) fn start_link(
             (true, _) => crate::driver::AgentSurfaceDelivery::Silent,
             (false, _) => crate::driver::AgentSurfaceDelivery::Absent,
         },
-        agent_descriptor: prepared
-            .as_ref()
-            .map(|prepared| prepared.descriptor.clone()),
+        agent_descriptor_owner: prepared.as_ref().zip(agent_grant_id).map(
+            |(prepared, grant_id)| StableIngressOwner {
+                path: prepared.descriptor.clone(),
+                grant_id,
+            },
+        ),
         stop: Arc::new(AtomicBool::new(false)),
         threads: Mutex::new(Vec::new()),
     });
@@ -801,33 +809,13 @@ fn provision_agent(
     prepared: &AgentProvisioning,
     anchored: &[Uuid],
     reattaching: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Uuid> {
+    let mut locked = LockedDescriptor::acquire(&prepared.descriptor)?;
     let grant = if reattaching {
-        use std::io::Read;
-        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-        let mut file = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(&prepared.descriptor)
-            .context("original ingress grant is unavailable; attachment blocked")?;
-        let metadata = file.metadata()?;
-        // SAFETY: geteuid has no preconditions and reads this process's identity.
-        let current_uid = unsafe { libc::geteuid() };
-        anyhow::ensure!(
-            metadata.is_file()
-                && metadata.uid() == current_uid
-                && metadata.mode() & 0o077 == 0
-                && metadata.len() <= 64 * 1024,
-            "original ingress evidence is not a bounded private file"
-        );
-        let mut bytes = Vec::new();
-        (&mut file).take(64 * 1024 + 1).read_to_end(&mut bytes)?;
-        anyhow::ensure!(
-            bytes.len() <= 64 * 1024,
-            "original ingress evidence is oversized"
-        );
-        let descriptor: IngressDescriptor = serde_json::from_slice(&bytes)
-            .context("original ingress grant is invalid; attachment blocked")?;
+        let descriptor = locked
+            .read()
+            .context("original ingress grant is unavailable; attachment blocked")?
+            .ok_or_else(|| anyhow!("original ingress grant is unavailable; attachment blocked"))?;
         anyhow::ensure!(
             descriptor.version == INGRESS_DESCRIPTOR_VERSION
                 && descriptor.root == root
@@ -862,15 +850,12 @@ fn provision_agent(
             .map_err(link_error)
             .context("the runtime host refused a session grant")?
     };
-    write_descriptor(
-        &prepared.descriptor,
-        &IngressDescriptor {
-            version: INGRESS_DESCRIPTOR_VERSION,
-            root: root.to_path_buf(),
-            task_id: env.task_id,
-            grant: grant.clone(),
-        },
-    )?;
+    locked.publish(&IngressDescriptor {
+        version: INGRESS_DESCRIPTOR_VERSION,
+        root: root.to_path_buf(),
+        task_id: env.task_id,
+        grant: grant.clone(),
+    })?;
     client
         .register_claim(
             epoch,
@@ -888,7 +873,7 @@ fn provision_agent(
         )
         .map_err(link_error)
         .context("the runtime host refused the ingress lease claim")?;
-    Ok(())
+    Ok(grant.grant_id)
 }
 
 /// The durable claim identity for one generation's agent-ingress lease —
@@ -964,41 +949,6 @@ fn file_sha256(path: &Path) -> anyhow::Result<String> {
         hash.update(&chunk[..count]);
     }
     Ok(format!("{:x}", hash.finalize()))
-}
-
-/// Publish the private descriptor atomically — a replacement daemon's
-/// rewrite never leaves a torn grant behind for the CLI to read.
-#[cfg(unix)]
-fn write_descriptor(path: &Path, descriptor: &IngressDescriptor) -> anyhow::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    if let Some(parent) = path.parent() {
-        crate::fs_ext::create_private_dir_all(parent)
-            .context("could not create the agent ingress directory")?;
-    }
-    let bytes = serde_json::to_vec(descriptor)?;
-    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-    let staged = (|| -> anyhow::Result<()> {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        Ok(())
-    })();
-    if staged.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    staged.context("could not stage the agent ingress descriptor")?;
-    std::fs::rename(&temporary, path).context("could not publish the agent ingress descriptor")?;
-    if let Some(parent) = path.parent()
-        && let Ok(dir) = std::fs::File::open(parent)
-    {
-        let _ = dir.sync_all();
-    }
-    Ok(())
 }
 
 /// The surviving host pid anchoring a recorded runtime session, when its
@@ -1278,6 +1228,7 @@ impl LinkShared {
             runtime_instance: self.instance,
             runtime_session_id: self.sref.session_id,
             generation: self.sref.generation,
+            descriptor_owner: self.agent_descriptor_owner.clone(),
         }
     }
 
@@ -2196,15 +2147,31 @@ impl DriverControl for StableLink {
                     return;
                 }
             }
-            if let Some(descriptor) = &self.shared.agent_descriptor {
-                let _ = std::fs::remove_file(descriptor);
+            if let Some(owner) = &intent.descriptor_owner {
+                match LockedDescriptor::acquire(&owner.path)
+                    .and_then(|mut locked| locked.retire(&intent))
+                {
+                    Ok(true) => {}
+                    Ok(false) => return, // A successor owns this pathname.
+                    Err(error) => {
+                        let _ = self.shared.sender.send(DriverEvent::Error(format!(
+                            "provider stopped; ingress retirement pending: {error}"
+                        )));
+                        return;
+                    }
+                }
             }
-            let _ = self.shared.store.stable_link_clear(
+            let retired = self.shared.store.stable_link_clear(
                 self.shared.task_id,
                 self.shared.instance,
                 self.shared.sref.session_id,
                 self.shared.sref.generation,
             );
+            if let Err(error) = retired {
+                let _ = self.shared.sender.send(DriverEvent::Error(format!(
+                    "provider stopped; attachment retirement pending: {error}"
+                )));
+            }
         } else {
             let _ = self.shared.sender.send(DriverEvent::Error(
                 "stop pending — provider termination is not confirmed".into(),
@@ -4409,7 +4376,10 @@ for line in sys.stdin:
             .unwrap();
         let mut substituted = second.clone();
         substituted.grant = replacement_grant;
-        write_descriptor(&descriptor_path, &substituted).unwrap();
+        LockedDescriptor::acquire(&descriptor_path)
+            .unwrap()
+            .publish(&substituted)
+            .unwrap();
         let mut opts = options();
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
         let (sender, _) = link_test_event_channel();
@@ -4425,7 +4395,10 @@ for line in sys.stdin:
             None,
         );
         assert!(format!("{:#}", rejected.err().unwrap()).contains("lease evidence"));
-        write_descriptor(&descriptor_path, &second).unwrap();
+        LockedDescriptor::acquire(&descriptor_path)
+            .unwrap()
+            .publish(&second)
+            .unwrap();
         drop(daemon);
         // Controller transfer cannot revive the expired original authority.
         clock.advance(GRANT_TTL_MS);
@@ -4573,46 +4546,183 @@ for line in sys.stdin:
     }
 
     #[test]
-    fn stable_link_confirmed_stop_cannot_retire_credentials_after_control_replacement() {
-        let rig = rig(&["codex"]);
-        let agent_dir = temp_root("stop-agent");
-        let mut opts = options();
-        opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
-        let (old, original, _rx) = link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
-        old.delete_provider_session();
-        assert!(
-            rig.backend
+    fn stable_link_confirmed_stop_cannot_retire_successor_credentials() {
+        for replace_controller in [false, true] {
+            let rig = rig(&["codex"]);
+            let agent_dir = temp_root("stop-agent");
+            let mut opts = options();
+            opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
+            let (old, original, _rx) =
+                link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+            old.delete_provider_session();
+            assert!(
+                rig.backend
+                    .task_store()
+                    .stable_stop_begin(&original.shared.stop_intent())
+                    .unwrap()
+            );
+            let mut opts = options();
+            opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
+            let (_replacement, _link, _replacement_rx) =
+                link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+            let descriptor = agent_dir.join(DESCRIPTOR_NAME);
+            let expected = std::fs::read(&descriptor).unwrap();
+            let owner = rig
+                .backend
                 .task_store()
-                .stable_stop_begin(&original.shared.stop_intent())
+                .stable_link(rig.session_id)
                 .unwrap()
+                .unwrap();
+            if replace_controller {
+                controller(&rig)
+                    .acquire_control(&ClientHello::current())
+                    .unwrap();
+            }
+            old.delete_provider_session();
+            assert!(
+                std::fs::read(&descriptor).is_ok_and(|actual| actual == expected),
+                "a delayed stop removed a successor's descriptor"
+            );
+            assert_eq!(
+                rig.backend
+                    .task_store()
+                    .stable_link(rig.session_id)
+                    .unwrap(),
+                Some(owner)
+            );
+        }
+    }
+
+    #[test]
+    fn ingress_descriptor_lock_is_shared_across_processes_and_released_on_owner_death() {
+        const CHILD_ROOT: &str = "GODDARD_INGRESS_LOCK_TEST_CHILD_ROOT";
+        if let Some(root) = std::env::var_os(CHILD_ROOT) {
+            let root = PathBuf::from(root);
+            let path = root.join(DESCRIPTOR_NAME);
+            let error = LockedDescriptor::acquire(&path)
+                .err()
+                .expect("parent's lock was bypassed");
+            assert_eq!(
+                error.downcast_ref::<std::io::Error>().unwrap().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+            std::fs::write(root.join("blocked"), "").unwrap();
+            wait_until(|| root.join("release").exists());
+            let _owned = LockedDescriptor::acquire(&path).unwrap();
+            std::fs::write(root.join("owned"), "").unwrap();
+            // The parent kills this isolated test child to prove OS cleanup.
+            loop {
+                std::thread::park();
+            }
+        }
+        let root = temp_root("descriptor-lock");
+        let path = root.join(DESCRIPTOR_NAME);
+        let parent = LockedDescriptor::acquire(&path).unwrap();
+        struct ChildGuard(Option<std::process::Child>);
+        impl Drop for ChildGuard {
+            fn drop(&mut self) {
+                if let Some(mut child) = self.0.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        }
+        let mut child = ChildGuard(Some(std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "stable_runtime::unix::tests::ingress_descriptor_lock_is_shared_across_processes_and_released_on_owner_death"])
+            .env(CHILD_ROOT, &root).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+            .spawn().unwrap()));
+        wait_until(|| root.join("blocked").exists());
+        assert!(child.0.as_mut().unwrap().try_wait().unwrap().is_none());
+        drop(parent);
+        std::fs::write(root.join("release"), "").unwrap();
+        wait_until(|| root.join("owned").exists());
+        assert!(
+            LockedDescriptor::acquire(&path).is_err(),
+            "child's lock was bypassed"
         );
+        drop(child);
+        drop(LockedDescriptor::acquire(&path).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ingress_retirement_failure_keeps_the_original_owner_for_retry() {
+        let rig = rig(&["codex"]);
+        let agent_dir = temp_root("descriptor-retry");
         let mut opts = options();
         opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
-        let (_replacement, _link, _replacement_rx) =
-            link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
-        let descriptor = agent_dir.join(DESCRIPTOR_NAME);
-        let expected = std::fs::read(&descriptor).unwrap();
-        let owner = rig
-            .backend
-            .task_store()
-            .stable_link(rig.session_id)
-            .unwrap()
-            .unwrap();
-        controller(&rig)
-            .acquire_control(&ClientHello::current())
-            .unwrap();
-        old.delete_provider_session();
+        let (handle, link, _rx) = link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        let intent = link.shared.stop_intent();
+        let path = agent_dir.join(DESCRIPTOR_NAME);
+        let original = std::fs::read(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap(); // An uncertain filesystem object must be preserved.
+        handle.delete_provider_session();
+        assert!(rig.backend.task_store().stable_stop_begin(&intent).unwrap());
         assert!(
-            std::fs::read(&descriptor).is_ok_and(|actual| actual == expected),
-            "a stale controller removed a successor's descriptor"
-        );
-        assert_eq!(
             rig.backend
                 .task_store()
                 .stable_link(rig.session_id)
-                .unwrap(),
-            Some(owner)
+                .unwrap()
+                .is_some()
         );
+        assert!(path.is_dir());
+        std::fs::remove_dir(&path).unwrap();
+        let descriptor: IngressDescriptor = serde_json::from_slice(&original).unwrap();
+        LockedDescriptor::acquire(&path)
+            .unwrap()
+            .publish(&descriptor)
+            .unwrap();
+        handle.delete_provider_session();
+        assert!(!path.exists());
+        assert!(
+            rig.backend
+                .task_store()
+                .stable_link(rig.session_id)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn ingress_mutations_stay_in_the_locked_directory_after_path_replacement() {
+        let rig = rig(&["codex"]);
+        let agent_dir = temp_root("descriptor-directory");
+        let mut opts = options();
+        opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
+        let (handle, link, _rx) = link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        let path = agent_dir.join(DESCRIPTOR_NAME);
+        let intent = link.shared.stop_intent();
+        let mut original = LockedDescriptor::acquire(&path).unwrap();
+        let descriptor = original.read().unwrap().unwrap();
+        handle.delete_provider_session(); // Confirmation succeeds; this lock defers local retirement.
+        assert!(
+            rig.backend
+                .task_store()
+                .stable_link(rig.session_id)
+                .unwrap()
+                .is_some(),
+            "a second lock in the same process bypassed the holder"
+        );
+        assert!(rig.backend.task_store().stable_stop_begin(&intent).unwrap());
+        let moved = agent_dir.with_extension("moved");
+        std::fs::rename(&agent_dir, &moved).unwrap();
+        let mut successor = LockedDescriptor::acquire(&path).unwrap();
+        let mut replacement = descriptor.clone();
+        replacement.grant.grant_id = Uuid::new_v4();
+        successor.publish(&replacement).unwrap();
+        original.publish(&descriptor).unwrap();
+        assert!(original.retire(&intent).unwrap());
+        assert!(!moved.join(DESCRIPTOR_NAME).exists());
+        assert!(
+            successor
+                .read()
+                .unwrap()
+                .is_some_and(|current| current.grant.grant_id == replacement.grant.grant_id)
+        );
+        drop((original, successor));
+        std::fs::remove_dir_all(&moved).unwrap();
+        std::fs::remove_dir_all(&agent_dir).unwrap();
     }
 
     /// Confirmed termination retires the generation's lease claim and its

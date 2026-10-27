@@ -1,0 +1,1 @@
+ALTER TABLE `stable_runtime_stops` ADD `descriptor_owner` text;
