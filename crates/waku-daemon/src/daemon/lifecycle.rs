@@ -48,7 +48,15 @@ impl WakuBackend {
                 .context("could not load Goddard automations")?,
         );
         let boss = Arc::new(if settings.get().boss_experiment_enabled {
-            crate::boss::BossService::open(data_dir.join("boss"))?
+            match crate::boss::BossService::open(data_dir.join("boss")) {
+                Ok(boss) => boss,
+                Err(error) => {
+                    // Keep the store intact and let Boss operations retry activation.
+                    // An unavailable experiment must not take down ordinary tasks.
+                    eprintln!("could not load Boss; continuing with Boss inactive: {error:#}");
+                    crate::boss::BossService::disabled(data_dir.join("boss"))
+                }
+            }
         } else {
             crate::boss::BossService::disabled(data_dir.join("boss"))
         });

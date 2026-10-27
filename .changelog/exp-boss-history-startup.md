@@ -1,0 +1,1 @@
+- A missing or corrupt Boss employee history no longer prevents the daemon from starting; Boss remains inactive and reports the storage error when used.

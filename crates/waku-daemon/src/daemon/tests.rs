@@ -14,6 +14,69 @@ fn detailed_session() -> AgentSession {
 }
 
 #[test]
+fn corrupt_boss_history_does_not_prevent_daemon_startup_or_overwrite_the_store() {
+    for missing in [false, true] {
+        let root = std::env::temp_dir().join(format!("boss-startup-{}", Uuid::new_v4()));
+        let boss_root = root.join("boss");
+        drop(crate::boss::BossService::open(boss_root.clone()).unwrap());
+        let manifest = boss_root.join("boss.json");
+        let original = std::fs::read(&manifest).unwrap();
+        let mut corrupt: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        corrupt["retiredHistory"] = serde_json::json!({"slot": 0, "digest": "mismatch"});
+        let corrupt = serde_json::to_vec(&corrupt).unwrap();
+        std::fs::write(&manifest, &corrupt).unwrap();
+        let history = boss_root.join("retired-employees-0.json");
+        if !missing {
+            std::fs::write(&history, "[]").unwrap();
+        }
+        let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+        let mut document = settings.get();
+        document.boss_experiment_enabled = true;
+        settings.replace(document).unwrap();
+
+        let (backend, session_id) = surface_test_backend(&root);
+        assert!(
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .any(|session| session.id == session_id)
+        );
+        assert!(backend.settings.get().boss_experiment_enabled);
+        assert!(!backend.boss.is_active());
+        let error = backend
+            .handle_boss_operation(
+                None,
+                BossOperation::Open {
+                    provider: ProviderKind::Codex,
+                    model: None,
+                    mode: Default::default(),
+                },
+                &EventSink::detached(),
+            )
+            .unwrap_err();
+        assert!(format!("{error:#}").contains(if missing {
+            "reading Boss employee history"
+        } else {
+            "Boss employee history digest mismatch"
+        }));
+        assert!(!backend.boss.is_active());
+        assert_eq!(std::fs::read(&manifest).unwrap(), corrupt);
+        if !missing {
+            assert_eq!(std::fs::read(&history).unwrap(), b"[]");
+        }
+
+        // Repairing the store allows activation without restarting the daemon.
+        std::fs::write(&manifest, original).unwrap();
+        backend.boss.activate().unwrap();
+        assert!(backend.boss.is_active());
+        drop(backend);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
 fn employee_archive_guard_preserves_dirty_and_unlanded_work() {
     let root = std::env::temp_dir().join(format!("archive-guard-{}", Uuid::new_v4()));
     let repository = root.join("repository");
