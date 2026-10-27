@@ -614,6 +614,7 @@ impl DriverControl for ClaudeDriver {
         if let Some(runtime) = &self.computer_use {
             runtime.begin_shutdown();
         }
+        let _ = self.commands.send(CommandMessage::Shutdown);
     }
 
     fn prompt(&self, prompt: String) {
@@ -701,7 +702,6 @@ impl DriverControl for ClaudeDriver {
 impl Drop for ClaudeDriver {
     fn drop(&mut self) {
         self.begin_shutdown();
-        let _ = self.commands.send(CommandMessage::Shutdown);
     }
 }
 

@@ -929,6 +929,7 @@ impl DriverControl for OpenCodeDriver {
         if let Some(runtime) = &self.computer_use {
             runtime.begin_shutdown();
         }
+        let _ = self.commands.send(DriverCommand::Shutdown);
     }
 
     fn prompt(&self, prompt: String) {
@@ -1031,8 +1032,8 @@ impl Drop for OpenCodeDriver {
     fn drop(&mut self) {
         self.begin_shutdown();
         // No socket surgery, no process signal, no exit budget: the clean
-        // consequence of owning no server. Unsubscribe first so the hub stops
-        // fanning out, then wake the worker so it winds down.
+        // consequence of owning no server. begin_shutdown already wakes the
+        // worker; release this handle's subscription and scoped resources.
         drop(self.subscription.take());
         // The worker retains the final lease and cleans up the MCP runtime
         // when it handles Shutdown; the user's service is never terminated.
@@ -1041,7 +1042,6 @@ impl Drop for OpenCodeDriver {
         // launcher while the service is still expected to answer.
         drop(self.agent_surface.take());
         drop(self.subagent_instruction.take());
-        let _ = self.commands.send(DriverCommand::Shutdown);
     }
 }
 

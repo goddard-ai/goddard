@@ -396,6 +396,7 @@ impl DriverControl for AmpDriver {
         if let Some(runtime) = &self.computer_use {
             runtime.begin_shutdown();
         }
+        let _ = self.commands.send(CommandMessage::Shutdown);
     }
 
     fn cancel_computer_use(&self) {
@@ -445,7 +446,6 @@ impl DriverControl for AmpDriver {
 impl Drop for AmpDriver {
     fn drop(&mut self) {
         self.begin_shutdown();
-        let _ = self.commands.send(CommandMessage::Shutdown);
     }
 }
 

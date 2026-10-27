@@ -1,0 +1,1 @@
+- Closed or archived tasks now release their task runtime even while background listeners are attached, preventing abandoned provider processes and subscriptions from lingering.

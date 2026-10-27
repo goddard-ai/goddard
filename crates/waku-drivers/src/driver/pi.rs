@@ -813,6 +813,7 @@ impl DriverControl for PiDriver {
         if let Some(runtime) = &self.computer_use {
             runtime.begin_shutdown();
         }
+        let _ = self.commands.send(CommandMessage::Shutdown);
     }
 
     fn prompt(&self, prompt: String) {
@@ -927,7 +928,6 @@ impl Drop for PiDriver {
     fn drop(&mut self) {
         self.begin_shutdown();
         self.cancel_computer_use();
-        let _ = self.commands.send(CommandMessage::Shutdown);
     }
 }
 

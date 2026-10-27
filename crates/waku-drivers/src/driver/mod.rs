@@ -546,4 +546,86 @@ mod tests {
         assert!(matches!(received.try_recv(), Ok(DriverEvent::TextDelta(text)) if text == "one"));
         assert!(matches!(received.try_recv(), Ok(DriverEvent::TextDelta(text)) if text == "two"));
     }
+
+    /// Keep the production launch/transport/process-wait pipeline. Only the
+    /// external provider CLI is replaced with a controlled JSON-line peer.
+    #[cfg(unix)]
+    #[test]
+    fn native_shutdown_exits_with_the_forwarders_driver_handle_still_alive() {
+        use std::os::unix::fs::PermissionsExt as _;
+        use std::time::{Duration, Instant};
+
+        for provider in [
+            ProviderKind::Claude,
+            ProviderKind::Amp,
+            ProviderKind::Pi,
+            ProviderKind::OhMyPi,
+        ] {
+            let root = std::env::temp_dir().join(format!("provider-stop-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&root).unwrap();
+            let binary = root.join("controlled-provider");
+            std::fs::write(&binary, r#"#!/usr/bin/env python3
+import json, pathlib, sys
+print(json.dumps({"type": "system", "subtype": "init", "session_id": "controlled-session"}), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    print(json.dumps({"type": "response", "command": request.get("type"), "id": request.get("id"), "success": True,
+                      "data": {"sessionId": "controlled-session", "sessionFile": str(pathlib.Path.cwd() / "session.jsonl")}}), flush=True)
+pathlib.Path("provider-stopped").write_text("stdin closed")
+"#).unwrap();
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let (events, received) = test_event_channel();
+            let driver = start_local(
+                provider,
+                DriverStartOptions {
+                    binary,
+                    cwd: root.clone(),
+                    mode: RuntimeMode::FullAccess,
+                    model: None,
+                    reasoning_effort: None,
+                    service_tier: None,
+                    context_window: None,
+                    agent_preset: None,
+                    computer_use_enabled: false,
+                    computer_use_runtime: None,
+                    agent: None,
+                    read_own_transcript: false,
+                    subagents: None,
+                    mcp_servers: Vec::new(),
+                    http_mcp_capability_recorder: None,
+                    provider_cursor: None,
+                    eval: None,
+                    sandbox: None,
+                    allow_model_fallback: false,
+                    ephemeral: false,
+                },
+                events,
+            )
+            .unwrap();
+            let forwarder = driver.clone();
+            // The real forwarder retains its handle until ProcessExited. A
+            // shutdown deferred to final Drop creates a circular wait here.
+            driver.begin_shutdown();
+            drop(driver);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                match received.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                    Ok(DriverEvent::ProcessExited) => break,
+                    Ok(DriverEvent::Error(error)) => {
+                        panic!("{provider:?} failed to retire: {error}")
+                    }
+                    Ok(_) => {}
+                    Err(error) => panic!(
+                        "{provider:?} kept its provider while the forwarder held a handle: {error}"
+                    ),
+                }
+            }
+            assert!(
+                root.join("provider-stopped").is_file(),
+                "{provider:?} did not close provider stdin"
+            );
+            drop(forwarder);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
 }

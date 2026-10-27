@@ -318,6 +318,7 @@ impl DriverControl for DeepSeekDriver {
         if let Some(runtime) = &self.computer_use {
             runtime.begin_shutdown();
         }
+        let _ = self.commands.send(CommandMessage::Shutdown);
     }
 
     fn prompt(&self, prompt: String) {
@@ -418,7 +419,6 @@ impl Drop for DeepSeekDriver {
     fn drop(&mut self) {
         self.begin_shutdown();
         drop(self.server.take());
-        let _ = self.commands.send(CommandMessage::Shutdown);
     }
 }
 

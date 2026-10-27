@@ -1715,6 +1715,9 @@ impl DriverControl for MuseDriver {
         if let Some(runtime) = &self.computer_use {
             runtime.begin_shutdown();
         }
+        // Wake the worker before its event forwarder releases the final
+        // driver handle. Only this subscription ends; the pooled host survives.
+        let _ = self.commands.send(DriverCommand::Shutdown);
     }
 
     fn cancel_computer_use(&self) {
@@ -1828,9 +1831,6 @@ impl DriverControl for MuseDriver {
 impl Drop for MuseDriver {
     fn drop(&mut self) {
         self.begin_shutdown();
-        // Shutdown wakes the worker, whose exit drops the subscription; the
-        // host itself belongs to the pool and outlives any one session.
-        let _ = self.commands.send(DriverCommand::Shutdown);
     }
 }
 
