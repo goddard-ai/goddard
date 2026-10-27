@@ -357,14 +357,34 @@ fn extract_workspace_zip(archive: fs::File, destination: &Path) -> io::Result<()
     Ok(())
 }
 
+/// Parent creation is idempotent; a chosen task directory requires an
+/// exclusive materialization lease until its creation returns.
+pub enum CreationScope<'a> {
+    Namespace(&'a Path),
+    Destination(&'a Path),
+}
+
 pub fn create_workspace(prompt: Option<&str>) -> io::Result<Workspace> {
+    create_workspace_guarded(prompt, |_| Ok(()))
+}
+
+pub fn create_workspace_guarded<G>(
+    prompt: Option<&str>,
+    before_create: impl FnMut(CreationScope<'_>) -> io::Result<G>,
+) -> io::Result<Workspace> {
     let root = workspace_root().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
             "could not locate the home directory for ~/.goddard/projects",
         )
     })?;
-    create_workspace_in(&root, Local::now().date_naive(), None, prompt)
+    create_workspace_in_guarded(
+        &root,
+        Local::now().date_naive(),
+        None,
+        prompt,
+        before_create,
+    )
 }
 
 /// Move one old dated workspace from `~/.goddard/<date>/<slug>` into
@@ -492,10 +512,21 @@ fn create_workspace_in(
     directory_name: Option<&str>,
     prompt: Option<&str>,
 ) -> io::Result<Workspace> {
-    ensure_real_directory(root)?;
+    create_workspace_in_guarded(root, date, directory_name, prompt, |_| Ok(()))
+}
+
+fn create_workspace_in_guarded<G>(
+    root: &Path,
+    date: NaiveDate,
+    directory_name: Option<&str>,
+    prompt: Option<&str>,
+    mut before_create: impl FnMut(CreationScope<'_>) -> io::Result<G>,
+) -> io::Result<Workspace> {
+    ensure_creation_directory(root, &mut before_create)?;
     let date_directory = root.join(date.format("%Y-%m-%d").to_string());
-    ensure_real_directory(&date_directory)?;
+    ensure_creation_directory(&date_directory, &mut before_create)?;
     let slug = workspace_slug(directory_name, prompt);
+    let mut deferred = false;
 
     for index in 0..MAX_NUMBERED_CANDIDATES {
         let name = if index == 0 {
@@ -503,30 +534,54 @@ fn create_workspace_in(
         } else {
             format!("{slug}-{}", index + 1)
         };
-        if let Some(workspace) = try_create_workspace(root, &date_directory, &name)? {
-            return Ok(workspace);
+        match try_create_workspace(root, &date_directory, &name, &mut before_create) {
+            Ok(Some(workspace)) => return Ok(workspace),
+            Ok(None) => {}
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => deferred = true,
+            Err(error) => return Err(error),
         }
     }
 
     for _ in 0..MAX_RANDOM_CANDIDATES {
         let name = format!("{slug}-{}", Uuid::new_v4());
-        if let Some(workspace) = try_create_workspace(root, &date_directory, &name)? {
-            return Ok(workspace);
+        match try_create_workspace(root, &date_directory, &name, &mut before_create) {
+            Ok(Some(workspace)) => return Ok(workspace),
+            Ok(None) => {}
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => deferred = true,
+            Err(error) => return Err(error),
         }
     }
 
     Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        "unable to create a unique projectless task directory",
+        if deferred {
+            io::ErrorKind::WouldBlock
+        } else {
+            io::ErrorKind::AlreadyExists
+        },
+        if deferred {
+            "projectless workspace allocation deferred: candidate destinations are busy"
+        } else {
+            "unable to create a unique projectless task directory"
+        },
     ))
 }
 
-fn try_create_workspace(
+fn try_create_workspace<G>(
     root: &Path,
     date_directory: &Path,
     name: &str,
+    before_create: &mut impl FnMut(CreationScope<'_>) -> io::Result<G>,
 ) -> io::Result<Option<Workspace>> {
     let cwd = date_directory.join(name);
+    match fs::symlink_metadata(&cwd) {
+        Ok(_) => {
+            validate_real_directory(&cwd)?;
+            return Ok(None);
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let _destination = before_create(CreationScope::Destination(&cwd))?;
     match fs::create_dir(&cwd) {
         Ok(()) => Ok(Some(Workspace {
             cwd,
@@ -535,6 +590,20 @@ fn try_create_workspace(
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
             validate_real_directory(&cwd)?;
             Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn ensure_creation_directory<G>(
+    path: &Path,
+    before_create: &mut impl FnMut(CreationScope<'_>) -> io::Result<G>,
+) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => validate_real_directory(path),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let _namespace = before_create(CreationScope::Namespace(path))?;
+            ensure_real_directory(path)
         }
         Err(error) => Err(error),
     }
@@ -614,6 +683,38 @@ mod tests {
         assert_eq!(fs::read_dir(&first.cwd).unwrap().count(), 0);
 
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn guarded_allocation_bounds_busy_retries_and_preserves_fatal_errors() {
+        let root = test_root();
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let date_directory = root.join("2026-08-08");
+        fs::create_dir_all(&date_directory).unwrap();
+        let mut attempts = 0;
+        let error = create_workspace_in_guarded(&root, date, None, None, |_| {
+            attempts += 1;
+            Err::<(), _>(io::ErrorKind::WouldBlock.into())
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(attempts, MAX_NUMBERED_CANDIDATES + MAX_RANDOM_CANDIDATES);
+        assert_eq!(fs::read_dir(&date_directory).unwrap().count(), 0);
+
+        attempts = 0;
+        let error = create_workspace_in_guarded(&root, date, None, None, |_| {
+            attempts += 1;
+            Err::<(), _>(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "untrusted gate",
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(error.to_string(), "untrusted gate");
+        assert_eq!(attempts, 1);
+        assert_eq!(fs::read_dir(&date_directory).unwrap().count(), 0);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]

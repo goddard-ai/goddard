@@ -1,0 +1,1 @@
+- Projectless task creation now avoids directories involved in overlapping workspace cleanup or restoration.

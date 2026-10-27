@@ -234,6 +234,13 @@
   Release catalog admission immediately after SQLite commit. Unrelated target
   names can materialize concurrently with retirement of another checkout.
   These live leases still do not qualify subprocesses after daemon loss.
+- Fresh projectless allocation uses shared admission before creating missing
+  root/date directories and an exclusive materialization lease for each chosen
+  task directory. Skip occupied names before leasing them, and try another name
+  on a typed busy-destination error. Keep the existing bounded candidate budget;
+  permission and validation failures return immediately. A retiring ancestor
+  defers allocation without creating directories. Legacy migration still needs
+  its own source-move and catalog handoff; fresh allocation does not supply it.
 - Desktop ending-capture descriptors and in-flight slots use the local turn
   UUID, since rewind can reuse display counts. Recheck the settled turn and
   workspace before dispatch and acceptance, before preparing transcript rows.

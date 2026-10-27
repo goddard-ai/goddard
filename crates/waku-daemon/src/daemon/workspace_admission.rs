@@ -37,11 +37,38 @@ impl WakuBackend {
         )
     }
 
+    fn admit_projectless_creation(
+        &self,
+        scope: crate::projectless::CreationScope<'_>,
+    ) -> std::io::Result<WorkspaceAdmission> {
+        let result = match scope {
+            crate::projectless::CreationScope::Namespace(path) => {
+                WorkspaceAdmission::namespace(self.task_store.path(), path)
+            }
+            crate::projectless::CreationScope::Destination(path) => {
+                WorkspaceAdmission::materialize(self.task_store.path(), path)
+            }
+        };
+        result.map_err(|error| match error.downcast::<std::io::Error>() {
+            Ok(error) => error,
+            Err(error) => std::io::Error::other(error.to_string()),
+        })
+    }
+
     pub(super) fn execute_workspace_creation(
         &self,
         operation: &WorkspaceOperation,
     ) -> anyhow::Result<Option<WorkspaceResult>> {
         Ok(Some(match operation {
+            WorkspaceOperation::CreateProjectlessWorkspace { prompt } => {
+                WorkspaceResult::ProjectlessWorkspace {
+                    cwd: crate::projectless::create_workspace_guarded(
+                        prompt.as_deref(),
+                        |scope| self.admit_projectless_creation(scope),
+                    )?
+                    .cwd,
+                }
+            }
             WorkspaceOperation::CreateWorktree {
                 project_path,
                 name,

@@ -249,6 +249,101 @@ fn restore_requests_exclude_retirement_before_and_through_filesystem_effects() {
 }
 
 #[test]
+fn projectless_creation_defers_busy_namespaces_and_skips_busy_task_names() {
+    const FIXTURE_ROOT: &str = "GODDARD_PROJECTLESS_ADMISSION_FIXTURE_ROOT";
+    let Some(root) = std::env::var_os(FIXTURE_ROOT) else {
+        // Do not change the projectless root in the parent native test process.
+        let root = std::env::temp_dir().join(format!(
+            "projectless-allocation-admission-{}",
+            Uuid::new_v4()
+        ));
+        let mut child = OwnedFixture(ProcessCommand::new(std::env::current_exe().unwrap())
+            .args(["--exact", "daemon::workspace_admission::tests::projectless_creation_defers_busy_namespaces_and_skips_busy_task_names", "--nocapture"])
+            .env(FIXTURE_ROOT, &root).spawn().unwrap());
+        let deadline = Instant::now() + Duration::from_secs(45);
+        loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                assert!(status.success());
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "projectless fixture did not finish"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(child);
+        fs::remove_dir_all(root).unwrap();
+        return;
+    };
+    let root = PathBuf::from(root);
+    let (backend, _) = super::super::tests::surface_test_backend(&root);
+    let profile = root.join("fresh-profile");
+    fs::create_dir_all(&profile).unwrap();
+    let projects = profile.join("projects");
+    crate::projectless::set_workspace_root(Some(projects.clone()));
+    let create = |prompt: &str| {
+        request(
+            &backend,
+            WorkspaceOperation::CreateProjectlessWorkspace {
+                prompt: Some(prompt.to_owned()),
+            },
+        )
+        .map(|response| match response {
+            ResponsePayload::Workspace {
+                result: WorkspaceResult::ProjectlessWorkspace { cwd },
+            } => cwd,
+            response => panic!("unexpected creation response: {response:?}"),
+        })
+    };
+    let assert_deferred = |error: anyhow::Error| {
+        assert_eq!(
+            error
+                .downcast_ref::<std::io::Error>()
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::WouldBlock),
+            "{error:#}",
+        );
+    };
+
+    // The missing root must not be created below a retiring ancestor.
+    let retirement = backend.begin_workspace_retirement(&profile).unwrap();
+    assert_deferred(create("allocation fixture").unwrap_err());
+    assert!(!projects.exists());
+    drop(retirement);
+    let first = create("allocation fixture").unwrap();
+    fs::write(first.join("notes"), b"keep existing task").unwrap();
+    let date = first.parent().unwrap();
+
+    // With parents already present, every candidate is blocked by retirement.
+    let retirement = backend.begin_workspace_retirement(&projects).unwrap();
+    let entries = fs::read_dir(date).unwrap().count();
+    assert_deferred(create("other allocation").unwrap_err());
+    assert_eq!(fs::read_dir(date).unwrap().count(), entries);
+    drop(retirement);
+
+    // A live existing name and a reserved absent name must not block siblings.
+    let retirement = backend.begin_workspace_retirement(&first).unwrap();
+    let second = create("allocation fixture").unwrap();
+    assert_eq!(second, date.join("allocation-fixture-2"));
+    assert_eq!(
+        fs::read(first.join("notes")).unwrap(),
+        b"keep existing task"
+    );
+    drop(retirement);
+    let reserved = date.join("reserved-allocation");
+    let materializing =
+        WorkspaceAdmission::materialize(backend.task_store.path(), &reserved).unwrap();
+    assert_eq!(
+        create("reserved allocation").unwrap(),
+        date.join("reserved-allocation-2")
+    );
+    assert!(!reserved.exists());
+    drop(materializing);
+    assert_eq!(create("reserved allocation").unwrap(), reserved);
+}
+
+#[test]
 fn fresh_worktree_and_qa_requests_retain_source_and_allocation_admission() {
     let root =
         std::env::temp_dir().join(format!("worktree-allocation-admission-{}", Uuid::new_v4()));

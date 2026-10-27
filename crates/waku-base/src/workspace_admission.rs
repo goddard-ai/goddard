@@ -33,6 +33,20 @@ impl WorkspaceAdmission {
         Self::acquire(store, path, true)
     }
 
+    /// Protect idempotent namespace creation, including an absent path, while
+    /// allowing other creators to ensure the same parent directory.
+    pub fn namespace(store: &Path, path: &Path) -> anyhow::Result<Self> {
+        #[cfg(unix)]
+        {
+            Self::acquire_canonical(store, &catalog_path(path)?, AdmissionKind::Writer)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (store, path);
+            Ok(Self {})
+        }
+    }
+
     /// Serialize creation/restoration of one destination, and keep descendant
     /// writer/catalog admission out until the directory is fully materialized.
     pub fn materialize(store: &Path, path: &Path) -> anyhow::Result<Self> {
@@ -245,9 +259,8 @@ fn lock_file(path: &Path, exclusive: bool) -> anyhow::Result<fs::File> {
     if unsafe { libc::flock(file.as_raw_fd(), mode | libc::LOCK_NB) } != 0 {
         let error = io::Error::last_os_error();
         if error.kind() == io::ErrorKind::WouldBlock {
-            anyhow::bail!(
-                "workspace admission deferred: an intersecting workspace operation is publishing or retiring"
-            );
+            return Err(io::Error::new(io::ErrorKind::WouldBlock,
+                "workspace admission deferred: an intersecting workspace operation is publishing or retiring").into());
         }
         return Err(error.into());
     }
