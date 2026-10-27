@@ -10779,6 +10779,7 @@ impl Waku {
         let notes = self.render_memory_record_notes(&record_ref, cx);
         let long_text = record.text.len() > MEMORY_EXPAND_CHARS
             || record.text.lines().nth(MEMORY_EXPAND_LINES).is_some();
+        let clamped = long_text && !expanded;
         let mut row = div()
             .id(SharedString::from(format!("boss-memory-{record_key}")))
             .tab_index(0)
@@ -10814,6 +10815,7 @@ impl Waku {
             )
             .child(
                 div()
+                    .relative()
                     .pt(px(4.0))
                     .text_size(sp(13.0))
                     .line_height(sp(19.0))
@@ -10822,7 +10824,22 @@ impl Waku {
                             .max_h(px(MEMORY_EXPAND_LINES as f32 * 19.0))
                             .overflow_hidden()
                     })
-                    .children(document),
+                    .children(document)
+                    .when(clamped, |element| {
+                        element.child(
+                            div()
+                                .absolute()
+                                .bottom_0()
+                                .left_0()
+                                .w_full()
+                                .h(px(28.0))
+                                .bg(linear_gradient(
+                                    180.0,
+                                    linear_color_stop(theme.surface.opacity(0.0), 0.0),
+                                    linear_color_stop(theme.surface, 1.0),
+                                )),
+                        )
+                    }),
             )
             .children(notes);
         if long_text {
