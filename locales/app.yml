@@ -3802,8 +3802,48 @@ suggestions.automatic_actions_title:
   en: Automatic suggested actions
 suggestions.automatic_action_description:
   en: Opt in to run this suggestion automatically when Jev reaches the required probability (80% minimum).
-suggestions.action_description:
-  en: Jev may offer this as the next step after a turn settles.
+suggestions.actions_description:
+  en: "Choose which next steps Jev may suggest. It weighs the latest turn and your recent actions, offering a suggestion only when one stands out. Suggestions wait for you to click unless you opt in under Automation."
+suggestions.actions_enabled_count:
+  en: "%{enabled} of %{total} actions enabled"
+suggestions.action_on:
+  en: "On"
+suggestions.action_off:
+  en: "Off"
+suggestions.action_disabled:
+  en: "Off — not suggested. When enabled: %{description}"
+suggestions.action_run_tests:
+  en: "After files change, Jev considers whether running tests is the likely next step."
+suggestions.action_fix_errors:
+  en: "After a command or tool fails, Jev considers whether to ask the agent to fix the errors."
+suggestions.action_commit_changes:
+  en: "After files change, Jev considers whether to ask the agent to commit the work."
+suggestions.action_add_tests:
+  en: "After files change, Jev considers whether the next step is to ask the agent for tests."
+suggestions.action_review_changes:
+  en: "After files change, Jev considers whether to ask the agent to review the work."
+suggestions.action_open_pr:
+  en: "After files change and a PR can be opened, Jev considers whether to ask the agent to push and open one."
+suggestions.action_you_decide:
+  en: "Asks the agent to choose how to proceed. Jev does not currently select this suggestion."
+suggestions.action_implement_plan:
+  en: "In a planning phase, Jev considers whether the plan is ready for the agent to implement."
+suggestions.action_diagnose:
+  en: "Asks the agent to investigate the cause. Jev does not currently select this suggestion."
+suggestions.action_whats_next:
+  en: "After a turn ends, Jev considers whether to ask the agent what to do next."
+suggestions.action_address_review:
+  en: "When a PR notification arrives, Jev weighs the review state and your recent actions before suggesting a follow-up."
+suggestions.action_fix_ci:
+  en: "When a PR check notification arrives, Jev weighs the check status and your recent actions before suggesting a fix."
+suggestions.action_commit:
+  en: "After files change, Jev considers whether opening the Git commit dialog is the likely next step."
+suggestions.action_push:
+  en: "After files change, Jev considers whether pushing the work to its remote is the likely next step."
+suggestions.action_sync:
+  en: "Syncs the workspace with its remote. Jev does not currently select this suggestion."
+suggestions.action_land:
+  en: "In a worktree task, Jev considers whether landing its commits onto the base branch is the likely next step."
 suggestions.edit_prompt:
   en: Edit
 suggestions.reset_prompt:

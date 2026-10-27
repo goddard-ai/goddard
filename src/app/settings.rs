@@ -7391,38 +7391,100 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let search = &search.for_group(&tr!("jev.group_actions"));
+        let enabled_count = action_predictions::ACTIONABLE_SUGGESTIONS
+            .iter()
+            .filter(|id| !self.state.disabled_suggested_actions.contains(**id))
+            .count();
         let rows = action_predictions::ACTIONABLE_SUGGESTIONS
             .iter()
             .map(|&id| {
                 let enabled = !self.state.disabled_suggested_actions.contains(id);
-                let controls = settings_button(
-                    format!("suggested-action-toggle-{id}"),
-                    if enabled {
-                        tr!("auto_prompts.disable")
-                    } else {
-                        tr!("auto_prompts.enable")
-                    },
-                    true,
-                    false,
-                    true,
-                    theme,
-                    cx,
-                    move |this, _, cx| this.set_suggested_action_enabled(id, !enabled, cx),
-                );
+                let description_key = match id {
+                    "run-tests" => "suggestions.action_run_tests",
+                    "fix-errors" => "suggestions.action_fix_errors",
+                    "commit-changes" => "suggestions.action_commit_changes",
+                    "add-tests" => "suggestions.action_add_tests",
+                    "review-changes" => "suggestions.action_review_changes",
+                    "open-pr" => "suggestions.action_open_pr",
+                    "you-decide" => "suggestions.action_you_decide",
+                    "implement-plan" => "suggestions.action_implement_plan",
+                    "diagnose" => "suggestions.action_diagnose",
+                    "whats-next" => "suggestions.action_whats_next",
+                    "address-review" => "suggestions.action_address_review",
+                    "fix-ci" => "suggestions.action_fix_ci",
+                    "commit" => "suggestions.action_commit",
+                    "push" => "suggestions.action_push",
+                    "sync" => "suggestions.action_sync",
+                    "land" => "suggestions.action_land",
+                    _ => return None,
+                };
+                let description = tr!(description_key);
+                let description = if enabled {
+                    description
+                } else {
+                    tr!("suggestions.action_disabled", description = description)
+                };
+                let title = action_predictions::suggested_action_title(id)?;
+                let controls = div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_secondary)
+                            .child(if enabled {
+                                tr!("suggestions.action_on")
+                            } else {
+                                tr!("suggestions.action_off")
+                            }),
+                    )
+                    .child(toggle_switch(
+                        format!("suggested-action-toggle-{id}"),
+                        enabled,
+                        false,
+                        theme,
+                        cx,
+                        move |this, _, cx| this.set_suggested_action_enabled(id, !enabled, cx),
+                    ));
+                // Keep the theme's contrast guarantees; mute the title rather
+                // than reducing opacity on the text or interactive control.
+                let mut row_theme = theme;
+                if !enabled {
+                    row_theme.text = theme.text_secondary;
+                }
                 settings_row(
                     "icons/zap.svg",
-                    action_predictions::suggested_action_title(id)?,
-                    tr!("suggestions.action_description"),
+                    title,
+                    description,
                     controls,
-                    theme,
+                    row_theme,
                     search,
                 )
             })
             .collect();
         let card = settings_row_card(rows, theme)?;
+        let introduction = div()
+            .px(px(4.0))
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(div().text_size(sp(12.5)).text_color(theme.text).child(tr!(
+                "suggestions.actions_enabled_count",
+                enabled = enabled_count,
+                total = action_predictions::ACTIONABLE_SUGGESTIONS.len()
+            )))
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .line_height(sp(18.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("suggestions.actions_description")),
+            );
         settings_group(
             tr!("jev.group_actions"),
-            vec![card.into_any_element()],
+            vec![introduction.into_any_element(), card.into_any_element()],
             theme,
         )
         .map(|group| div().mt(px(15.0)).child(group).into_any_element())

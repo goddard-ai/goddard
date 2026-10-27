@@ -1,0 +1,1 @@
+- See which Jev actions are on at a glance, with an enabled count, clear switches, muted disabled rows, and descriptions explaining when each suggestion is considered.
