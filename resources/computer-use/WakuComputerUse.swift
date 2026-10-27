@@ -155,7 +155,7 @@ struct WakuComputerUse {
                     switch method {
                     case "initialize":
                         result = ["protocolVersion": "2025-06-18", "capabilities": ["tools": [:]],
-                                  "serverInfo": ["name": "Goddard Cua Driver", "version": "0.28.0"]]
+                                  "serverInfo": ["name": "Goddard Cua Driver", "version": "0.38.0"]]
                     case "tools/list": result = try driver.listTools()
                     case "tools/call":
                         guard let params = request["params"] as? [String: Any], let name = params["name"] as? String else {

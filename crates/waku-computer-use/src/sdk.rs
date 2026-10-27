@@ -1,4 +1,4 @@
-//! Native SDK ABI 1.1 from Cua Driver 0.28.0 (cua_driver_abi.h).
+//! Native SDK ABI 1.1 from Cua Driver 0.38.0 (cua_driver_abi.h).
 //! Only the host/protocol boundary lives here; Cua implements every tool.
 
 use std::ffi::c_void;

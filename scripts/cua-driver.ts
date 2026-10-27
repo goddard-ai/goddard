@@ -9,31 +9,31 @@ import { wakuCacheDir } from "./cache-dir";
 import { writeCuaSkill } from "./cua-api";
 import { prepareCuaHost } from "./cua-host";
 
-export const cuaVersion = "0.28.0";
+export const cuaVersion = "0.38.0";
 const root = resolve(import.meta.dir, "..");
 const artifacts = {
   "darwin-arm64": [
-    "82ea1801a5a800b2e46199e8b88694e8bba5670fd533c63a32766c753300d4d6",
+    "5f71191c082ca07c9dfc13b7c9a6eec60a82818c245a93534cc0eb7911471d72",
     "libcua_driver_sdk.dylib",
   ],
   "darwin-x86_64": [
-    "d758a7d45df89dbf849f01011d6e88591449face9277707d9dc749345343442d",
+    "68721a916f2d9b20233a14623e0f663caf6130ba9018465a57a178120d96bc4e",
     "libcua_driver_sdk.dylib",
   ],
   "linux-arm64": [
-    "984b0932b18f1fe1fdf738d3b7e07c1581da3ffc45b62080507beeeeb5e1b5a2",
+    "ed8a51125ade8807c7717c3dde13d62bd31e6275e6b5e2446cf018d0b01d93b3",
     "libcua_driver_sdk.so",
   ],
   "linux-x86_64": [
-    "b3029d0e1d462bc832dd689a0bdee92852a50865dafb987318f2e334ec4eed4e",
+    "a305cbd531f94d6413c5db300c33df68e3adbe8b92b9604cf8e645c5f6cb1fa3",
     "libcua_driver_sdk.so",
   ],
   "windows-arm64": [
-    "86f9af260d64693f61736193891cdf65bfdfc010df0f91491f3ba8fbd38de498",
+    "c442872360cbb819e288b9f30daa7e3d2693d5945495d1400bcd90af5bd16402",
     "cua_driver_sdk.dll",
   ],
   "windows-x86_64": [
-    "dbae495361a3d5862f7ed57cb82dc7a83f46e7a9ab111a6a23a8acaa79ec6265",
+    "997f20114ad3db227a854e1e5a886234f76405b155f4af70605d4b7ca4a436a1",
     "cua_driver_sdk.dll",
   ],
 } as const;

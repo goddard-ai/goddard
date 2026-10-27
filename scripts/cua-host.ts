@@ -16,8 +16,8 @@ import { join, resolve } from "node:path";
 import { wakuCacheDir } from "./cache-dir";
 
 const root = resolve(import.meta.dir, "..");
-const revision = "1b50c02e2d34734f64d2d22f54eb76cc97b4a663";
-const version = "0.28.0";
+const revision = "85e2b1318bd77ccf3cfa88ccdf875a4bb7eaed19";
+const version = "0.38.0";
 
 // The cargo target triple when cross-building; the default compiles for the
 // host, which is what the dev watcher wants.
@@ -63,7 +63,8 @@ export async function prepareCuaHost(targetTriple?: string): Promise<string> {
         revision
       )
         throw new Error("Cua source revision mismatch");
-      await $`git -C ${staging} sparse-checkout set libs/cua-driver/rust libs/cua-driver/contract`.quiet();
+      // Cargo resolves every workspace member, including the CLI's shared telemetry dependency.
+      await $`git -C ${staging} sparse-checkout set libs/cua-driver/rust libs/cua-driver/contract libs/cua/crates/cua-telemetry`.quiet();
       try {
         await rename(staging, source);
       } catch (error) {

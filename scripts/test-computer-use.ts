@@ -2,6 +2,7 @@
 // Usage: bun scripts/test-computer-use.ts <goddard_js_repl> <computer-use-helper>
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
@@ -38,6 +39,30 @@ const pending = new Map<
   number,
   { resolve(value: any): void; reject(error: Error): void }
 >();
+// Answer the diagnostic calls' task approvals only in this test's private
+// channel. These calls read config, reject missing IDs, and inspect our cursor;
+// the smoke never approves an app or an existing browser profile.
+const answeredApprovals = new Set<string>();
+const approvalTimer = setInterval(() => {
+  try {
+    for (const name of readdirSync(directory)) {
+      if (
+        !/^approval-request-[a-f0-9]+\.json$/.test(name) ||
+        answeredApprovals.has(name)
+      ) continue;
+      const approval = JSON.parse(readFileSync(join(directory, name), "utf8"));
+      assert.equal(approval.scope, "desktop");
+      assert.equal(approval.bundle_id, null);
+      const response = name
+        .replace("approval-request-", "approval-response-")
+        .replace(/\.json$/, ".txt");
+      writeFileSync(join(directory, response), "task");
+      answeredApprovals.add(name);
+    }
+  } catch (error) {
+    for (const request of pending.values()) request.reject(error as Error);
+  }
+}, 10);
 createInterface({ input: child.stdout }).on("line", (line) => {
   const message = JSON.parse(line);
   const request = pending.get(message.id);
@@ -156,6 +181,7 @@ try {
     `Cua SDK smoke passed (${output.platform}, ${output.tools.length} direct native methods; refusal, images, reset and reconnect${expectCursor ? ", native cursor enabled" : ""}).`,
   );
 } finally {
+  clearInterval(approvalTimer);
   child.stdin.end();
   await Promise.race([
     new Promise((resolve) => child.once("exit", resolve)),
