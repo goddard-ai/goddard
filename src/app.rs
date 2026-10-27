@@ -6740,7 +6740,7 @@ impl Waku {
             // is what lands the final position and size on disk.
             cx.on_app_quit(|this, cx| {
                 this.save();
-                let ticket = this.store.app_save_ticket();
+                let store = Arc::clone(&this.store);
                 let metadata = std::mem::take(&mut this.session_metadata_saves);
                 // Ordered metadata tasks finish their UI acknowledgment too.
                 let keep_alive = cx.entity();
@@ -6748,8 +6748,14 @@ impl Waku {
                     for (_, (_, task)) in metadata {
                         let _ = task.await;
                     }
+                    // Metadata acknowledgments can enqueue a final save.
+                    let ticket = store.app_save_ticket();
+                    let tasks = store.task_save_tickets();
                     drop(keep_alive);
                     if let Some(ticket) = ticket {
+                        let _ = ticket.wait().await;
+                    }
+                    for ticket in tasks {
                         let _ = ticket.wait().await;
                     }
                 }

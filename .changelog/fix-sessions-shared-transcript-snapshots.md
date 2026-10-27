@@ -1,1 +1,1 @@
-- Long transcript snapshots now share unchanged history instead of copying it, reducing work during saves, imports, and background actions; grouped activity rendering also avoids copying tool output.
+- Long transcript saves share unchanged history and prepare acknowledged, coalesced writes off the UI thread; quitting waits for pending saves, and grouped activity rendering avoids copying tool output.

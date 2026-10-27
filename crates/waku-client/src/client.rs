@@ -629,6 +629,28 @@ impl DaemonClient {
         command: Command,
         timeout: Option<Duration>,
     ) -> anyhow::Result<ResponsePayload> {
+        self.request_on_lane(session_id, runtime_id, command, timeout, false)
+    }
+
+    /// Acknowledged background writes retain the bulk lane's lower priority.
+    pub(crate) fn request_bulk(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        command: Command,
+    ) -> anyhow::Result<ResponsePayload> {
+        let timeout = request_timeout(&command);
+        self.request_on_lane(session_id, runtime_id, command, Some(timeout), true)
+    }
+
+    fn request_on_lane(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        command: Command,
+        timeout: Option<Duration>,
+        bulk: bool,
+    ) -> anyhow::Result<ResponsePayload> {
         if self.inner.disconnected.load(Ordering::Acquire) {
             bail!("Goddard daemon is disconnected");
         }
@@ -641,12 +663,12 @@ impl DaemonClient {
             runtime_id,
             command,
         });
-        if self
-            .inner
-            .outgoing
-            .send(Outgoing::Message(message))
-            .is_err()
-        {
+        let queued = if bulk {
+            self.inner.bulk.send(message).is_ok()
+        } else {
+            self.inner.outgoing.send(Outgoing::Message(message)).is_ok()
+        };
+        if !queued {
             self.inner.pending.lock().remove(&request_id);
             bail!("Goddard daemon connection is closed");
         }

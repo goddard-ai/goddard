@@ -8764,7 +8764,7 @@ impl Waku {
             self.flush_daemon_recovery_report(cx);
         }
 
-        let (app_write_pending, app_write_error) = self.store.app_write_status();
+        let (app_write_pending, app_write_error) = self.store.write_status(&mut self.state);
         if let Some(error) = app_write_error {
             self.show_toast(tr!("errors.save_local_state", error = error));
             cx.notify();

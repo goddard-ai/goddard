@@ -4,6 +4,8 @@ mod app_writer;
 pub use app_writer::AppSaveTicket;
 mod catalog_writer;
 pub use catalog_writer::{CatalogCacheUpdate, CatalogCacheWriter};
+mod task_writer;
+pub use task_writer::TaskSaveTicket;
 
 #[cfg(test)]
 #[path = "persistence/startup_tests.rs"]
@@ -2700,6 +2702,9 @@ pub struct PersistedState {
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
     dirty_sessions: HashSet<Uuid>,
+    /// In-flight data cannot be evicted before its matching acknowledgment.
+    #[serde(skip)]
+    pending_session_saves: HashMap<Uuid, (Uuid, u64)>,
 }
 
 /// A transcript [`PersistedState::trim_idle_transcripts`] released: which
@@ -2774,6 +2779,7 @@ impl PersistedState {
                 if session.detail_loaded
                     && has_transcript
                     && !self.dirty_sessions.contains(&session.id)
+                    && !self.pending_session_saves.contains_key(&session.id)
                     && !pinned.contains(&session.id)
                 {
                     Some((index, session.updated_at))
@@ -3007,6 +3013,7 @@ impl PersistedState {
             agent_memory_limit_mb: None,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
+            pending_session_saves: HashMap::new(),
         }
     }
 
@@ -4030,7 +4037,7 @@ struct SaveCursor {
 /// The session as it goes on the wire: whole, or stripped to the tail
 /// appended since the last acknowledged send when the cursor's prefix
 /// still matches. The second return is the baseline the send advances to
-/// once the daemon acknowledges it — applied only on `notify` success.
+/// once the daemon confirms the exact prefix was committed.
 fn wire_session(
     session: &AgentSession,
     cursor: Option<SaveCursor>,
@@ -4164,9 +4171,11 @@ pub struct StateStore {
     /// into a destructive replacement of the daemon database. Per remote
     /// host, `DaemonMap::catalog_loaded` gates the same way.
     task_state_loaded: AtomicBool,
-    /// Per-session send baselines for incremental saves. Cursors live only
-    /// for this client boot, so a restart always begins with a full save.
+    /// Authoritative hydration baselines. Each connection's save worker
+    /// adopts a seed once, then advances only on acknowledged writes.
     save_cursors: Mutex<HashMap<Uuid, SaveCursor>>,
+    task_writers: Mutex<Vec<task_writer::Writer>>,
+    task_write_error: Mutex<Option<String>>,
     /// Content hashes of the app files as last written — a save runs every
     /// stream tick and skips the atomic rewrite while they are unchanged.
     written_app_settings: Mutex<u64>,
@@ -4222,6 +4231,8 @@ impl StateStore {
             remote_default_cwd: Mutex::new(None),
             task_state_loaded: AtomicBool::new(false),
             save_cursors: Mutex::new(HashMap::new()),
+            task_writers: Mutex::new(Vec::new()),
+            task_write_error: Mutex::new(None),
             written_app_settings: Mutex::new(0),
             written_app_state: Mutex::new(0),
             app_writer: Mutex::new(None),
@@ -4624,12 +4635,24 @@ impl StateStore {
     /// or is unreachable keeps its dirty ids queued for the next save while
     /// the rest still commit.
     pub fn save(&self, state: &mut PersistedState) -> io::Result<()> {
-        smol::block_on(self.queue_save(state)?.wait())
+        let app = self.queue_save(state)?;
+        let tasks = self.task_save_tickets();
+        let result = smol::block_on(async move {
+            app.wait().await?;
+            for ticket in tasks {
+                ticket.wait().await?;
+            }
+            Ok(())
+        });
+        self.collect_task_saves(state);
+        result
     }
 
-    /// Enqueue desktop files without waiting for serialization or disk. The
-    /// returned ticket is required before discarding user-owned draft contents.
+    /// Enqueue desktop files and shared task snapshots without waiting for
+    /// serialization, disk, or RPC. The returned local-file ticket is required
+    /// before discarding drafts; task durability has its own barriers.
     pub fn queue_save(&self, state: &mut PersistedState) -> io::Result<AppSaveTicket> {
+        self.collect_task_saves(state);
         let writer = {
             let mut writer = self.app_writer.lock();
             if writer.is_none() {
@@ -4643,7 +4666,7 @@ impl StateStore {
             settings_path: self.app_settings_path.clone(),
             state_path: self.app_state_path.clone(),
         })?;
-        self.save_task_state(state)?;
+        self.queue_task_state(state)?;
         Ok(ticket)
     }
 
@@ -4656,23 +4679,96 @@ impl StateStore {
 
     /// Pending status and errors are read together so a completion racing the
     /// event pump cannot leave an unreported error without a scheduled wake.
-    pub fn app_write_status(&self) -> (bool, Option<String>) {
-        self.app_writer
+    pub fn write_status(&self, state: &mut PersistedState) -> (bool, Option<String>) {
+        let task_pending = self.collect_task_saves(state);
+        let (app_pending, app_error) = self
+            .app_writer
             .lock()
             .as_ref()
-            .map_or((false, None), app_writer::Writer::status)
+            .map_or((false, None), app_writer::Writer::status);
+        let task_error = self.task_write_error.lock().take();
+        (app_pending || task_pending, app_error.or(task_error))
     }
 
-    fn save_task_state(&self, state: &mut PersistedState) -> io::Result<()> {
+    pub fn task_save_tickets(&self) -> Vec<TaskSaveTicket> {
+        self.task_writers
+            .lock()
+            .iter()
+            .map(task_writer::Writer::ticket)
+            .collect()
+    }
+
+    fn collect_task_saves(&self, state: &mut PersistedState) -> bool {
+        let writers = self.task_writers.lock().clone();
+        let mut pending = false;
+        let mut report = None;
+        for writer in writers {
+            let (active, results, error) = writer.status();
+            pending |= active;
+            let had_results = !results.is_empty();
+            for result in results {
+                if state.pending_session_saves.get(&result.session_id)
+                    != Some(&(writer.id, result.version))
+                {
+                    continue;
+                }
+                if let Some(error) = result.error {
+                    if state
+                        .sessions
+                        .iter()
+                        .any(|session| session.id == result.session_id)
+                    {
+                        state.dirty_sessions.insert(result.session_id);
+                        report.get_or_insert(error);
+                    } else {
+                        state.pending_session_saves.remove(&result.session_id);
+                    }
+                } else {
+                    state.pending_session_saves.remove(&result.session_id);
+                }
+            }
+            if !had_results && let Some(error) = error {
+                report.get_or_insert(error);
+            }
+        }
+        if let Some(error) = report {
+            *self.task_write_error.lock() = Some(error);
+        }
+        // A replaced connection must finish on its original daemon, but once
+        // drained it must not retain a worker thread and cursor map forever.
+        let clients = self
+            .daemons
+            .connected()
+            .into_iter()
+            .map(|(_, daemon)| daemon.client())
+            .collect::<Vec<_>>();
+        self.task_writers.lock().retain(|writer| {
+            clients.iter().any(|client| writer.matches(client))
+                || state
+                    .pending_session_saves
+                    .values()
+                    .any(|(owner, _)| *owner == writer.id)
+                || writer.is_pending()
+        });
+        pending
+    }
+
+    fn queue_task_state(&self, state: &mut PersistedState) -> io::Result<()> {
         if !self.task_state_loaded.load(Ordering::Acquire) {
             return Err(io::Error::new(
                 io::ErrorKind::NotConnected,
                 "task state was not loaded; refusing to overwrite daemon data",
             ));
         }
-        let dirty_ids = state.dirty_sessions.clone();
-        let mut saved_ids = HashSet::new();
-        let mut first_error = None;
+        let retained = state
+            .sessions
+            .iter()
+            .map(|session| session.id)
+            .collect::<HashSet<_>>();
+        state.dirty_sessions.retain(|id| retained.contains(id));
+        state
+            .pending_session_saves
+            .retain(|id, _| retained.contains(id));
         for (key, daemon) in self.daemons.connected() {
             if !self.daemons.catalog_loaded(key) {
                 continue;
@@ -4684,7 +4780,7 @@ impl StateStore {
                         DaemonKey::Remote(_) => self.daemons.session_owner(*id) == key,
                     }
             };
-            let projects: Vec<Project> = state
+            let projects = state
                 .projects
                 .iter()
                 .filter(|_| !self.is_auxiliary())
@@ -4694,93 +4790,67 @@ impl StateStore {
                 })
                 .cloned()
                 .collect();
-            let live_session_ids: Vec<Uuid> = state
+            let live_session_ids = state
                 .sessions
                 .iter()
                 .filter(|session| owned(&session.id))
                 .map(|session| session.id)
                 .collect();
-            // Drafts stay local until their first prompt: a session that has
-            // not started owns no daemon row, and shipping one would
-            // catalogue it as a phantom "New task" skeleton in every client's
-            // next load. Archived employee shells are daemon-owned even before
-            // their first turn, so their archive flag must still be sent.
-            let mut prepared = Vec::new();
-            for session in state.sessions.iter().filter(|session| {
-                dirty_ids.contains(&session.id)
-                    && (session.has_started()
-                        || (session.boss_managed && session.archived_at.is_some()))
-                    && owned(&session.id)
-            }) {
-                let cursor = self.save_cursors.lock().get(&session.id).copied();
-                let mut tails = Vec::new();
-                let (wire, sent) = wire_session(session, cursor, &mut tails);
-                prepared.push(SizedSaveSession {
-                    bytes: serialized_len(&wire).unwrap_or(usize::MAX),
-                    wire,
-                    tail: tails.into_iter().next(),
-                    cursor: sent,
-                });
-            }
-            for frame in pack_save_frames(prepared) {
-                let frame_ids: Vec<Uuid> = frame.iter().map(|item| item.wire.id).collect();
-                let mut session_tails = Vec::new();
-                let mut frame_cursors = Vec::new();
-                let sessions = frame
-                    .into_iter()
-                    .map(|item| {
-                        if let Some(tail) = item.tail {
-                            session_tails.push(tail);
-                        }
-                        if let Some(cursor) = item.cursor {
-                            frame_cursors.push((item.wire.id, cursor));
-                        }
-                        item.wire
-                    })
-                    .collect();
-                match daemon.client().notify(
-                    Uuid::nil(),
-                    Uuid::nil(),
-                    Command::SaveTaskState {
-                        projects: projects.clone(),
-                        live_session_ids: live_session_ids.clone(),
-                        sessions,
-                        session_tails,
-                        compact_response: None,
-                    },
-                ) {
-                    Ok(()) => {
-                        saved_ids.extend(frame_ids);
-                        let mut cursors = self.save_cursors.lock();
-                        for (session_id, cursor) in frame_cursors {
-                            cursors.insert(session_id, cursor);
-                        }
-                    }
-                    Err(error) => {
-                        if first_error.is_none() {
-                            first_error = Some(to_io_error(error));
-                        }
-                        // A closed connection cannot take the remaining
-                        // frames; their sessions stay dirty for the next save.
-                        break;
-                    }
+            let client = daemon.client();
+            let writer = {
+                let mut writers = self.task_writers.lock();
+                if let Some(writer) = writers.iter().find(|writer| writer.matches(&client)) {
+                    writer.clone()
+                } else {
+                    let writer = task_writer::Writer::start(client)?;
+                    writers.push(writer.clone());
+                    writer
                 }
+            };
+            let seeds = self.save_cursors.lock();
+            let sessions = state
+                .sessions
+                .iter()
+                .filter(|session| {
+                    (state.dirty_sessions.contains(&session.id)
+                        || state.pending_session_saves.contains_key(&session.id))
+                        && (session.has_started()
+                            || (session.boss_managed && session.archived_at.is_some()))
+                        && owned(&session.id)
+                })
+                .map(|session| {
+                    let version = if state.dirty_sessions.contains(&session.id) {
+                        None
+                    } else {
+                        state
+                            .pending_session_saves
+                            .get(&session.id)
+                            .filter(|(owner, _)| *owner == writer.id)
+                            .map(|(_, version)| *version)
+                    };
+                    task_writer::SessionSnapshot {
+                        session: session.clone(),
+                        version,
+                        baseline: seeds.get(&session.id).copied(),
+                    }
+                })
+                .collect();
+            drop(seeds);
+            let versions = writer.queue(task_writer::Snapshot {
+                projects,
+                live_session_ids,
+                sessions,
+            })?;
+            // Clearing occurs at enqueue, not at completion: a new mutation
+            // gets a fresh dirty mark, which an older ack cannot erase.
+            // Pending markers protect unacknowledged data from eviction and
+            // carry it into every replacement snapshot, including quit.
+            for (id, version) in versions {
+                state.dirty_sessions.remove(&id);
+                state.pending_session_saves.insert(id, (writer.id, version));
             }
         }
-        // Skipped drafts remain dirty so the save after their first prompt
-        // still publishes them even if that path forgets to re-mark them.
-        let remaining_ids = state
-            .sessions
-            .iter()
-            .map(|session| session.id)
-            .collect::<HashSet<_>>();
-        state
-            .dirty_sessions
-            .retain(|id| remaining_ids.contains(id) && !saved_ids.contains(id));
-        match first_error {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
+        Ok(())
     }
 
     pub fn remove_session(&self, session_id: Uuid) -> io::Result<()> {

@@ -45,7 +45,27 @@ impl DaemonFixture {
                             Command::GetSettings => ResponsePayload::Settings {
                                 settings: DaemonSettings::default(),
                             },
-                            _ => handler(&request.command).unwrap_or(ResponsePayload::Ack),
+                            _ => handler(&request.command).unwrap_or_else(|| {
+                                match &request.command {
+                                    Command::SaveTaskState { sessions, .. } => {
+                                        ResponsePayload::TaskStateSaved {
+                                            sessions: sessions.clone(),
+                                            receipts: Some(
+                                                sessions
+                                                    .iter()
+                                                    .map(|session| {
+                                                        waku_protocol::SessionSaveReceipt {
+                                        session_id: session.id,
+                                        detail: waku_protocol::SessionDetailSaveOutcome::Applied,
+                                    }
+                                                    })
+                                                    .collect(),
+                                            ),
+                                        }
+                                    }
+                                    _ => ResponsePayload::Ack,
+                                }
+                            }),
                         };
                         let request_id = request.request_id;
                         requests.send(request).unwrap();
@@ -354,4 +374,178 @@ fn transcript_search_reports_partial_total_and_disconnected_host_failures() {
     );
     let settled = rx.iter().last().unwrap();
     assert_eq!((settled.pending, settled.failed, settled.total), (0, 1, 1));
+}
+
+#[test]
+fn task_saves_coalesce_without_blocking_edits_and_wait_for_acknowledgements() {
+    let (entered, observed) = unbounded();
+    let (release, gate) = unbounded();
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let local = DaemonFixture::with_handler(move |command| {
+        if let Command::SaveTaskState { sessions, .. } = command {
+            let index = calls.fetch_add(1, Ordering::SeqCst);
+            entered.send(index).unwrap();
+            if index < 2 {
+                gate.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            return Some(ResponsePayload::TaskStateSaved {
+                sessions: sessions.clone(),
+                receipts: Some(
+                    sessions
+                        .iter()
+                        .map(|session| waku_protocol::SessionSaveReceipt {
+                            session_id: session.id,
+                            detail: waku_protocol::SessionDetailSaveOutcome::Applied,
+                        })
+                        .collect(),
+                ),
+            });
+        }
+        None
+    });
+    let fixture = StoreFixture::new(&local);
+    let store = &fixture.store;
+    let mut state = PersistedState::empty();
+    let project = Project::from_path(fixture.root.join("project"));
+    let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+    session.begin_turn("initial prompt");
+    session.detail_loaded = true;
+    let id = session.id;
+    state.projects.push(project);
+    state.push_session(session);
+
+    store.queue_save(&mut state).unwrap();
+    assert_eq!(observed.recv_timeout(Duration::from_secs(2)).unwrap(), 0);
+    assert!(state.trim_idle_transcripts(&HashSet::new(), 0).is_empty());
+    for title in ["intermediate", "latest"] {
+        state.session_mut(id).unwrap().title = title.into();
+        store.queue_save(&mut state).unwrap();
+    }
+    let newest = state.pending_session_saves[&id];
+    release.send(()).unwrap();
+    assert_eq!(observed.recv_timeout(Duration::from_secs(2)).unwrap(), 1);
+    store.collect_task_saves(&mut state);
+    assert_eq!(
+        state.pending_session_saves[&id], newest,
+        "old ack cleared a newer save"
+    );
+    assert!(state.trim_idle_transcripts(&HashSet::new(), 0).is_empty());
+    // A further edit made while the second save is in flight must stay dirty
+    // even when that save completes successfully.
+    state.session_mut(id).unwrap().title = "unsaved edit".into();
+    let tickets = store.task_save_tickets();
+    release.send(()).unwrap();
+    smol::block_on(async {
+        for ticket in tickets {
+            ticket.wait().await.unwrap();
+        }
+    });
+    store.collect_task_saves(&mut state);
+    assert!(state.dirty_sessions.contains(&id));
+    assert!(!state.pending_session_saves.contains_key(&id));
+    let saves = [local.next_request(), local.next_request()];
+    let Command::SaveTaskState { sessions, .. } = &saves[1].command else {
+        panic!("expected save")
+    };
+    assert_eq!(sessions[0].title, "latest");
+    assert!(
+        local.requests.is_empty(),
+        "obsolete intermediate snapshot was sent"
+    );
+}
+
+#[test]
+fn unconfirmed_task_save_keeps_data_dirty_until_a_confirmed_retry() {
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let local = DaemonFixture::with_handler(move |command| {
+        if matches!(command, Command::SaveTaskState { .. })
+            && calls.fetch_add(1, Ordering::SeqCst) == 0
+        {
+            return Some(ResponsePayload::Ack);
+        }
+        None
+    });
+    let fixture = StoreFixture::new(&local);
+    let store = &fixture.store;
+    let mut state = PersistedState::empty();
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("must survive an unconfirmed save");
+    let id = session.id;
+    state.push_session(session);
+    assert!(store.save(&mut state).is_err());
+    assert!(state.dirty_sessions.contains(&id));
+    assert!(state.pending_session_saves.contains_key(&id));
+    store.save(&mut state).unwrap();
+    assert!(!state.dirty_sessions.contains(&id));
+    assert!(!state.pending_session_saves.contains_key(&id));
+}
+
+#[test]
+fn rejected_task_tail_retries_full_before_advancing_the_save_cursor() {
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let local = DaemonFixture::with_handler(move |command| {
+        if let Command::SaveTaskState {
+            sessions,
+            session_tails,
+            ..
+        } = command
+        {
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            if call == 1 {
+                assert_eq!(session_tails.len(), 1);
+            } else {
+                assert!(session_tails.is_empty());
+            }
+            return Some(ResponsePayload::TaskStateSaved {
+                sessions: sessions.clone(),
+                receipts: Some(
+                    sessions
+                        .iter()
+                        .map(|session| waku_protocol::SessionSaveReceipt {
+                            session_id: session.id,
+                            detail: if call == 1 {
+                                waku_protocol::SessionDetailSaveOutcome::FullRequired
+                            } else {
+                                waku_protocol::SessionDetailSaveOutcome::Applied
+                            },
+                        })
+                        .collect(),
+                ),
+            });
+        }
+        None
+    });
+    let fixture = StoreFixture::new(&local);
+    let store = &fixture.store;
+    let mut state = PersistedState::empty();
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("original prompt");
+    session.push_message(
+        waku_protocol::model::MessageRole::Assistant,
+        "original answer",
+    );
+    session.detail_loaded = true;
+    let id = session.id;
+    state.push_session(session);
+    store.save(&mut state).unwrap();
+    state
+        .session_mut(id)
+        .unwrap()
+        .push_message(waku_protocol::model::MessageRole::User, "new question");
+    store.save(&mut state).unwrap();
+    assert!(!state.pending_session_saves.contains_key(&id));
+    for _ in 0..2 {
+        local.next_request();
+    }
+    let Command::SaveTaskState {
+        sessions,
+        session_tails,
+        ..
+    } = local.next_request().command
+    else {
+        panic!("expected save")
+    };
+    assert!(session_tails.is_empty());
+    assert_eq!(sessions[0].messages.len(), state.sessions[0].messages.len());
+    assert_eq!(sessions[0].messages.last().unwrap().content, "new question");
 }
