@@ -4,6 +4,7 @@ mod app_writer;
 mod catalog_batch;
 mod catalog_inbox;
 mod catalog_merge;
+mod catalog_projects;
 pub use catalog_batch::{
     CatalogSelectionFallback, CatalogSelectionStep, CatalogSessionBatch, CatalogSessionEffect,
     CatalogSessionOrder, CatalogSessionProgress,
@@ -13,6 +14,7 @@ pub use catalog_inbox::{
     catalog_inbox,
 };
 pub use catalog_merge::{merge_remote_session_catalog, merge_session_catalog_row};
+pub use catalog_projects::{CatalogProjectBatch, CatalogProjectProgress};
 
 pub use app_writer::AppSaveTicket;
 mod catalog_writer;
@@ -2726,6 +2728,14 @@ pub struct PersistedState {
     locally_removed_sessions: HashMap<DaemonKey, BTreeMap<Uuid, std::time::Instant>>,
     #[serde(skip)]
     session_catalog_index: catalog_merge::SessionCatalogIndex,
+    #[serde(skip)]
+    project_topology_revision: u64,
+    #[serde(skip)]
+    project_catalog_index: catalog_projects::ProjectCatalogIndex,
+    #[serde(skip)]
+    unreported_projects: HashSet<Uuid>,
+    #[serde(skip)]
+    locally_removed_projects: HashMap<DaemonKey, BTreeMap<Uuid, std::time::Instant>>,
 }
 
 /// A transcript [`PersistedState::trim_idle_transcripts`] released: which
@@ -3044,6 +3054,10 @@ impl PersistedState {
             unreported_sessions: HashSet::new(),
             locally_removed_sessions: HashMap::new(),
             session_catalog_index: Default::default(),
+            project_topology_revision: 0,
+            project_catalog_index: Default::default(),
+            unreported_projects: HashSet::new(),
+            locally_removed_projects: HashMap::new(),
         }
     }
 
@@ -4561,7 +4575,7 @@ impl StateStore {
             let session = state.new_session(project.id, state.last_provider);
             state.selected_project = Some(project.id);
             state.selected_session = Some(session.id);
-            state.projects.push(project);
+            state.push_project(project);
             state.push_session(session);
         }
         state.ensure_runtime_session();

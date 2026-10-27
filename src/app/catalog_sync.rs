@@ -3,8 +3,8 @@
 use super::*;
 use waku_client::DaemonKey;
 use waku_client::persistence::{
-    CatalogSessionEffect, CatalogSessionOrder, CatalogSessionProgress, CatalogUpdate,
-    CatalogVersion,
+    CatalogProjectProgress, CatalogSessionEffect, CatalogSessionOrder, CatalogSessionProgress,
+    CatalogUpdate, CatalogVersion,
 };
 
 const INDEX_ROWS_PER_TICK: usize = 2048;
@@ -19,7 +19,8 @@ pub(super) struct CatalogApplication {
     progress: CatalogSessionProgress,
     fresh: bool,
     reregistered: HashSet<Uuid>,
-    project_removals: Vec<Uuid>,
+    projects: CatalogProjectProgress,
+    sessions_complete: bool,
 }
 
 impl Drop for CatalogApplication {
@@ -28,7 +29,6 @@ impl Drop for CatalogApplication {
             std::mem::take(&mut self.snapshot),
             std::mem::take(&mut self.order),
             std::mem::take(&mut self.reregistered),
-            std::mem::take(&mut self.project_removals),
         );
         self.executor
             .spawn(async move {
@@ -75,42 +75,17 @@ impl Waku {
                 .detach();
             return;
         }
-        let mut snapshot = update.catalog.take().expect("catalog checked above");
+        let snapshot = update.catalog.take().expect("catalog checked above");
         let order = update
             .session_order
             .take()
             .expect("catalog ordering checked above");
-        // Project batching is separate from the bounded session path. Applying
-        // projects first ensures every arriving task can resolve its owner.
-        let project_removals = self
-            .state
-            .projects
-            .iter()
-            .filter(|project| {
-                self.daemons.project_owner(project.id) == key && !order.contains_project(project.id)
-            })
-            .map(|project| project.id)
-            .collect();
-        runtime::merge_remote_project_catalog(
-            &mut self.state.projects,
-            std::mem::take(&mut snapshot.projects),
-            |_| false,
-        );
-        Project::resolve_display_names(&mut self.state.projects);
         if let DaemonKey::Remote(host) = key {
             self.daemons.note_remote_catalog_loaded(host);
-            for id in order.project_ids() {
-                self.daemons.claim_project(id, key);
-            }
-            for project in self.boss_ui.projects.values() {
-                if self
-                    .boss_ui
-                    .states
-                    .get(&key)
-                    .is_some_and(|state| state.identity.id == project.id)
-                {
-                    self.daemons.claim_project(project.id, key);
-                }
+            if let Some(state) = self.boss_ui.states.get(&key)
+                && self.boss_ui.projects.contains_key(&state.identity.id)
+            {
+                self.daemons.claim_project(state.identity.id, key);
             }
             if let Some(cache) = update.cache_catalog.take() {
                 self.update_remote_catalog_cache(
@@ -129,6 +104,13 @@ impl Waku {
                 .as_ref()
                 .filter(|_| same_source)
                 .map(|old| &old.progress),
+        );
+        let projects = CatalogProjectProgress::start(
+            &order,
+            previous
+                .as_ref()
+                .filter(|_| same_source)
+                .map(|old| &old.projects),
         );
         let reregistered = if same_source {
             std::mem::take(&mut previous.as_mut().expect("same source exists").reregistered)
@@ -152,7 +134,8 @@ impl Waku {
                 progress,
                 fresh,
                 reregistered,
-                project_removals,
+                projects,
+                sessions_complete: false,
             },
         );
         if !self.catalog_apply_queue.contains(&key) {
@@ -164,9 +147,10 @@ impl Waku {
         self.catalog_apply_queue.retain(|queued| *queued != key);
         let retired = self.catalog_applications.remove(&key);
         let removals = self.state.revoke_catalog_removals(key);
+        let project_removals = self.state.revoke_project_removals(key);
         self.background_executor
             .spawn(async move {
-                drop((retired, removals));
+                drop((retired, removals, project_removals));
             })
             .detach();
     }
@@ -195,6 +179,39 @@ impl Waku {
                             .detach();
                     }
                 } else {
+                    let allow_project_removals =
+                        application.sessions_complete && self.state.catalog_index_ready();
+                    let mut project_batch = application.projects.step(
+                        &mut self.state,
+                        &application.snapshot,
+                        &application.order,
+                        key,
+                        application.started_at,
+                        INDEX_ROWS_PER_TICK,
+                        SESSION_ROWS_PER_TICK,
+                        allow_project_removals,
+                        |id| self.daemons.project_owner(id) == key,
+                    );
+                    changed |=
+                        !project_batch.applied.is_empty() || !project_batch.removed.is_empty();
+                    if matches!(key, DaemonKey::Remote(_)) {
+                        for id in &project_batch.applied {
+                            self.daemons.claim_project(*id, key);
+                        }
+                    }
+                    for id in &project_batch.removed {
+                        self.daemons.drop_project(*id);
+                    }
+                    if !self.state.project_catalog_index_ready() {
+                        self.background_executor
+                            .spawn(async move {
+                                drop(project_batch);
+                            })
+                            .detach();
+                        self.catalog_applications.insert(key, application);
+                        self.catalog_apply_queue.push_back(key);
+                        return self.advance_catalog_selection_fallback(cx) || changed;
+                    }
                     let mut batch = application.progress.step(
                         &mut self.state,
                         &application.snapshot,
@@ -211,12 +228,27 @@ impl Waku {
                         |id| self.runtimes.contains_key(&id),
                         |id| self.pending_session_metadata.contains_key(&id),
                     );
-                    changed = !batch.effects.is_empty();
+                    changed |= !batch.effects.is_empty();
+                    application.sessions_complete = batch.complete;
                     let mut retired = Vec::new();
                     let mut save = false;
                     for effect in batch.effects {
                         match effect {
                             CatalogSessionEffect::Applied { id, added } => {
+                                if let Some(project_id) =
+                                    self.state.catalog_session(id).map(|row| row.project_id)
+                                {
+                                    if self.state.apply_catalog_project(
+                                        &application.snapshot,
+                                        &application.order,
+                                        key,
+                                        project_id,
+                                        &mut project_batch.retired,
+                                    ) && matches!(key, DaemonKey::Remote(_))
+                                    {
+                                        self.daemons.claim_project(project_id, key);
+                                    }
+                                }
                                 if matches!(key, DaemonKey::Remote(_)) {
                                     self.daemons.claim_session(id, key);
                                 }
@@ -251,16 +283,19 @@ impl Waku {
                         self.stream_state_dirty = true;
                     }
                     let old_index = batch.retired_index.take();
+                    let projects_complete = project_batch.complete;
                     self.background_executor
                         .spawn(async move {
-                            drop((retired, old_index));
+                            drop((retired, old_index, project_batch));
                         })
                         .detach();
                     if batch.complete
+                        && projects_complete
+                        && self.state.project_catalog_index_ready()
                         && self.state.catalog_index_ready()
                         && self.task_state_sync_events.is_current(application.version)
                     {
-                        self.finish_catalog_project_removals(key, &application, cx);
+                        Project::resolve_display_names(&mut self.state.projects);
                         self.task_state_sync_events.acknowledge(application.version);
                         self.background_executor
                             .spawn(async move {
@@ -275,41 +310,6 @@ impl Waku {
             }
         }
         self.advance_catalog_selection_fallback(cx) || changed
-    }
-
-    fn finish_catalog_project_removals(
-        &mut self,
-        key: DaemonKey,
-        application: &CatalogApplication,
-        _cx: &mut Context<Self>,
-    ) {
-        let removed_ids = application
-            .project_removals
-            .iter()
-            .copied()
-            .filter(|id| {
-                self.daemons.project_owner(*id) == key
-                    && !application.order.contains_project(*id)
-                    && !self.state.catalog_project_has_sessions(*id)
-            })
-            .collect::<HashSet<_>>();
-        if removed_ids.is_empty() {
-            return;
-        }
-        let retired = self
-            .state
-            .projects
-            .extract_if(.., |project| removed_ids.contains(&project.id))
-            .collect::<Vec<_>>();
-        for id in &removed_ids {
-            self.daemons.drop_project(*id);
-        }
-        Project::resolve_display_names(&mut self.state.projects);
-        self.background_executor
-            .spawn(async move {
-                drop((retired, removed_ids));
-            })
-            .detach();
     }
 
     fn retire_catalog_session_surface(&mut self, id: Uuid, cx: &mut Context<Self>) {

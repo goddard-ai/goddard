@@ -521,32 +521,6 @@ pub(super) fn merge_remote_session_catalog(
 /// scopes deletions to the merging daemon's rows for the same reason as
 /// sessions. Any surviving same-id rows collapse to one: claims can be lost
 /// to older bugs and both copies describe one project.
-pub(super) fn merge_remote_project_catalog(
-    local: &mut Vec<Project>,
-    remote: Vec<Project>,
-    owns: impl Fn(Uuid) -> bool,
-) {
-    let remote_ids = remote
-        .iter()
-        .map(|project| project.id)
-        .collect::<HashSet<_>>();
-    local.retain(|project| !owns(project.id) || remote_ids.contains(&project.id));
-    let mut positions = HashMap::with_capacity(local.len());
-    for (index, project) in local.iter().enumerate() {
-        positions.entry(project.id).or_insert(index);
-    }
-    for remote in remote {
-        if let Some(&index) = positions.get(&remote.id) {
-            local[index] = remote;
-        } else {
-            positions.insert(remote.id, local.len());
-            local.push(remote);
-        }
-    }
-    let mut seen = HashSet::with_capacity(local.len());
-    local.retain(|project| seen.insert(project.id));
-}
-
 /// Preserve newer resident detail and list edits while installing a stored baseline.
 pub(super) fn merge_hydrated_session(
     existing: &mut AgentSession,
@@ -3516,6 +3490,7 @@ impl Waku {
         self.state
             .projects
             .retain(|project| self.daemons.project_owner(project.id) != remote);
+        self.state.note_project_topology_change();
         self.revoke_catalog_application(remote, cx);
         let retired = self.task_state_sync_events.revoke(remote);
         if retired.is_some() {

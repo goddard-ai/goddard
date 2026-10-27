@@ -5,7 +5,7 @@ use super::*;
 #[derive(Default)]
 pub struct CatalogSessionOrder {
     rows: Vec<(Uuid, usize)>,
-    project_ids: HashSet<Uuid>,
+    pub(super) project_rows: Vec<(Uuid, usize)>,
 }
 
 impl CatalogSessionOrder {
@@ -17,14 +17,23 @@ impl CatalogSessionOrder {
         }
         Self {
             rows: rows.into_iter().collect(),
-            project_ids: catalog.projects.iter().map(|project| project.id).collect(),
+            project_rows: catalog
+                .projects
+                .iter()
+                .enumerate()
+                .map(|(index, project)| (project.id, index))
+                .collect::<BTreeMap<_, _>>()
+                .into_iter()
+                .collect(),
         }
     }
     pub fn project_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
-        self.project_ids.iter().copied()
+        self.project_rows.iter().map(|row| row.0)
     }
     pub fn contains_project(&self, id: Uuid) -> bool {
-        self.project_ids.contains(&id)
+        self.project_rows
+            .binary_search_by_key(&id, |row| row.0)
+            .is_ok()
     }
     fn contains(&self, id: Uuid) -> bool {
         self.rows.binary_search_by_key(&id, |row| row.0).is_ok()

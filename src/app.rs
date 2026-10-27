@@ -1205,6 +1205,7 @@ fn seed_remote_catalog(
     // the merged list does not already hold rather than double them.
     let known_projects: HashSet<Uuid> = state.projects.iter().map(|p| p.id).collect();
     let known_sessions: HashSet<Uuid> = state.sessions.iter().map(|s| s.id).collect();
+    state.note_project_topology_change();
     state.projects.extend(
         catalog
             .projects
