@@ -24,18 +24,8 @@ impl Waku {
     }
 
     fn complete_reasoning_activity(&mut self, session_id: Uuid) {
-        let Some(session) = self.state.session_mut(session_id) else {
-            return;
-        };
-        let reasoning = session
-            .transcript_blocks
-            .iter_mut()
-            .rev()
-            .flat_map(|block| block.activities.iter_mut().rev())
-            .find(|activity| activity.reasoning.is_some() && !activity.complete);
-        if let Some(reasoning) = reasoning {
-            reasoning.complete = true;
-            session.updated_at = unix_time();
+        if let Some(session) = self.state.session_mut(session_id) {
+            complete_latest_reasoning_activity(session);
         }
     }
 
@@ -1456,6 +1446,36 @@ fn complete_transcript_activities(session: &mut AgentSession) {
     );
 }
 
+/// Search through shared reads so skipped blocks and no-match histories keep
+/// their payloads and cache identities. Only the selected slot may detach.
+fn latest_transcript_activity_mut(
+    session: &mut AgentSession,
+    mut matches: impl FnMut(&ActivityItem) -> bool,
+) -> Option<&mut ActivityItem> {
+    let (block, activity) = session
+        .transcript_blocks
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, block)| {
+            block
+                .activities
+                .iter()
+                .rposition(&mut matches)
+                .map(|activity| (index, activity))
+        })?;
+    Some(&mut session.transcript_blocks[block].activities[activity])
+}
+
+fn complete_latest_reasoning_activity(session: &mut AgentSession) {
+    if let Some(reasoning) = latest_transcript_activity_mut(session, |activity| {
+        activity.reasoning.is_some() && !activity.complete
+    }) {
+        reasoning.complete = true;
+        session.updated_at = unix_time();
+    }
+}
+
 /// Close the stream segment a mid-turn message boundary cuts off: open text
 /// stops streaming and in-flight thinking or tool work counts as finished.
 /// A provider that kept a call alive reconciles it — the next update for its
@@ -1473,63 +1493,59 @@ pub(super) fn update_transcript_activity(
     session: &mut AgentSession,
     item: ActivityItem,
 ) -> Result<(Uuid, bool), ActivityItem> {
-    for block in session.transcript_blocks.iter_mut().rev() {
-        let matching = block.activities.iter_mut().rev().find(|activity| {
-            item.source_id
-                .as_ref()
-                .is_some_and(|id| activity.source_id.as_ref() == Some(id))
-                || (item.source_id.is_none() && activity.title == item.title && !activity.complete)
-        });
-        if let Some(activity) = matching {
-            let has_arguments = item.arguments.is_some();
-            let replaces_changes = !item.file_changes.is_empty();
-            let activity_id = activity.id;
-            activity.kind = item.kind;
-            activity.title = item.title;
-            // The label's keyed form travels with `title` — a stale key
-            // would keep rendering the earlier lifecycle state (e.g. a
-            // completed compaction forever reading "Compacting context").
-            activity.title_i18n = item.title_i18n;
-            if item.tool_name.is_some() {
-                activity.tool_name = item.tool_name;
-            }
-            if item.mcp_server.is_some() {
-                activity.mcp_server = item.mcp_server;
-            }
-            activity.complete = item.complete;
-            activity.failed = item.failed;
-            if item.detail.is_some() {
-                activity.detail = item.detail;
-            }
-            if item.arguments.is_some() {
-                activity.arguments = item.arguments;
-            }
-            if item.output.is_some() {
-                activity.output = item.output;
-            }
-            if !item.image_urls.is_empty() {
-                activity.image_urls = item.image_urls;
-            }
-            if !item.file_changes.is_empty() {
-                activity.file_changes = item.file_changes;
-            }
-            if item.display_target.is_some() && (activity.display_target.is_none() || has_arguments)
-            {
-                activity.display_target = item.display_target;
-            }
-            if item.display_description.is_some()
-                && (activity.display_description.is_none() || has_arguments)
-            {
-                activity.display_description = item.display_description;
-            }
-            if item.reasoning.is_some() {
-                activity.reasoning = item.reasoning;
-            }
-            session.updated_at = unix_time();
-            return Ok((activity_id, replaces_changes));
-        }
+    let Some(activity) = latest_transcript_activity_mut(session, |activity| {
+        item.source_id
+            .as_ref()
+            .is_some_and(|id| activity.source_id.as_ref() == Some(id))
+            || (item.source_id.is_none() && activity.title == item.title && !activity.complete)
+    }) else {
+        return Err(item);
+    };
+    let has_arguments = item.arguments.is_some();
+    let replaces_changes = !item.file_changes.is_empty();
+    let activity_id = activity.id;
+    activity.kind = item.kind;
+    activity.title = item.title;
+    // The label's keyed form travels with `title` — a stale key
+    // would keep rendering the earlier lifecycle state (e.g. a
+    // completed compaction forever reading "Compacting context").
+    activity.title_i18n = item.title_i18n;
+    if item.tool_name.is_some() {
+        activity.tool_name = item.tool_name;
     }
-    Err(item)
+    if item.mcp_server.is_some() {
+        activity.mcp_server = item.mcp_server;
+    }
+    activity.complete = item.complete;
+    activity.failed = item.failed;
+    if item.detail.is_some() {
+        activity.detail = item.detail;
+    }
+    if item.arguments.is_some() {
+        activity.arguments = item.arguments;
+    }
+    if item.output.is_some() {
+        activity.output = item.output;
+    }
+    if !item.image_urls.is_empty() {
+        activity.image_urls = item.image_urls;
+    }
+    if !item.file_changes.is_empty() {
+        activity.file_changes = item.file_changes;
+    }
+    if item.display_target.is_some() && (activity.display_target.is_none() || has_arguments) {
+        activity.display_target = item.display_target;
+    }
+    if item.display_description.is_some()
+        && (activity.display_description.is_none() || has_arguments)
+    {
+        activity.display_description = item.display_description;
+    }
+    if item.reasoning.is_some() {
+        activity.reasoning = item.reasoning;
+    }
+    session.updated_at = unix_time();
+    Ok((activity_id, replaces_changes))
 }
 
 pub(super) fn push_transcript_activity(
@@ -1775,6 +1791,10 @@ fn text_delta_rejoins(previous: &str, delta: &str) -> bool {
     let opens_fresh = delta.chars().next().is_some_and(char::is_uppercase);
     ends_mid_thought && !opens_fresh
 }
+
+#[cfg(test)]
+#[path = "streaming_activity_tests.rs"]
+mod activity_history_tests;
 
 #[cfg(test)]
 mod config_activation_tests {

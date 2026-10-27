@@ -1,1 +1,1 @@
-- Long transcript saves share unchanged history and prepare acknowledged, coalesced writes off the UI thread; quitting waits for pending saves, and grouped activity rendering avoids copying tool output.
+- Long transcript saves and activity updates keep unchanged history shared. Acknowledged writes run off the UI thread, quitting waits for pending saves, and grouped activity rendering avoids copying tool output.

@@ -41,8 +41,11 @@
   changes only streaming assistant messages and incomplete activities/blocks;
   completed history, including completed siblings inside a changed block,
   keeps its shared payloads. A no-op settlement preserves history identities
-  too. This avoids copying historical output into the UI during a save, but
-  the metadata scan and copying a changed large payload still require auditing.
+  too. For single-activity updates, locate the newest matching position through
+  shared reads before borrowing that slot mutably. Searching blocks through
+  mutable iteration detaches skipped blocks and their activity containers,
+  including a search with no match. Metadata scans and copying a changed large
+  payload still require auditing.
 - Resolve a whole session or collection in one background pass instead of
   probing per item, and guard it with a generation counter so a result from a
   superseded pass cannot overwrite newer state.
