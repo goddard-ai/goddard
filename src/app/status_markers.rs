@@ -14,7 +14,7 @@
 //! stay daemon-side behind `Command::Evaluate`; this file is the app-side
 //! seam, the same shape `routing.rs` takes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -274,6 +274,17 @@ impl StatusSuggestedAction {
             Self::Done => "done",
         }
     }
+}
+
+/// Apply current action switches to cached status suggestions. Keep the
+/// original verdict so toggling a chip cannot release its reserved input slot.
+pub(super) fn enabled_status_suggestions<'a>(
+    actions: &'a [StatusSuggestedAction],
+    disabled: &'a BTreeSet<String>,
+) -> impl Iterator<Item = &'a StatusSuggestedAction> {
+    actions
+        .iter()
+        .filter(|action| !disabled.contains(action.canned_id()))
 }
 
 /// A scored turn's verdict waiting on the user's next journaled action —
@@ -1009,10 +1020,12 @@ impl Waku {
             return None;
         }
         let turn_id = turn.id;
-        let actions = self.turn_status_suggestions.get(&turn_id)?;
-        if actions.is_empty() {
-            return None;
-        }
+        let mut actions = enabled_status_suggestions(
+            self.turn_status_suggestions.get(&turn_id)?,
+            &self.state.disabled_suggested_actions,
+        )
+        .peekable();
+        actions.peek()?;
         // ⌘⏎ fires the leftmost chip while the composer is empty — the
         // chord is advertised there exactly when it is bound, resolved as
         // if the field were focused (the binding lives on the TextInput
@@ -1038,7 +1051,7 @@ impl Waku {
                 .items_center()
                 .gap(px(6.0))
                 .children(marker_pill)
-                .children(actions.iter().enumerate().map(|(index, action)| {
+                .children(actions.enumerate().map(|(index, action)| {
                     let (icon_path, label) = match action {
                         StatusSuggestedAction::Proceed => (
                             "icons/chat.svg",
@@ -1198,7 +1211,10 @@ impl Waku {
             || !self
                 .turn_status_suggestions
                 .get(&turn_id)
-                .is_some_and(|actions| actions.contains(action))
+                .is_some_and(|actions| {
+                    enabled_status_suggestions(actions, &self.state.disabled_suggested_actions)
+                        .any(|enabled| enabled == action)
+                })
         {
             return;
         }
@@ -1367,7 +1383,13 @@ impl Waku {
                         }
                         let session_id = session.id;
                         let actions = suggested_actions(&evaluation);
-                        self.note_marker_verdict(session_id, turn_id, &evaluation, &actions);
+                        let offered = enabled_status_suggestions(
+                            &actions,
+                            &self.state.disabled_suggested_actions,
+                        )
+                        .cloned()
+                        .collect::<Vec<_>>();
+                        self.note_marker_verdict(session_id, turn_id, &evaluation, &offered);
                         // A request for the user's own details or a choice
                         // still reserves the row so predictions cannot
                         // suggest continuing past that request.
@@ -1892,6 +1914,53 @@ mod tests {
             [StatusSuggestedAction::YouDecide]
         );
         assert!(waiting_for_user_input(&verdict("other")));
+    }
+
+    #[test]
+    fn cached_status_suggestions_follow_action_switches() {
+        let verdict = evaluation(BTreeMap::from([
+            (
+                ENDING_QUESTION.to_owned(),
+                ending_choice("awaiting-input", &[("awaiting-input", 0.90)]),
+            ),
+            (
+                INPUT_QUESTION.to_owned(),
+                ending_choice("decision", &[("decision", 0.90)]),
+            ),
+        ]));
+        let cached = suggested_actions(&verdict);
+        let mut disabled = BTreeSet::new();
+        assert_eq!(
+            enabled_status_suggestions(&cached, &disabled).next(),
+            Some(&StatusSuggestedAction::YouDecide)
+        );
+        disabled.insert("you-decide".to_owned());
+        assert!(
+            enabled_status_suggestions(&cached, &disabled)
+                .next()
+                .is_none()
+        );
+        // Hiding the chip must not erase the input verdict or its cached
+        // action; re-enabling takes effect without another evaluation.
+        assert!(waiting_for_user_input(&verdict));
+        disabled.clear();
+        assert_eq!(
+            enabled_status_suggestions(&cached, &disabled).next(),
+            Some(&StatusSuggestedAction::YouDecide)
+        );
+
+        let cached = [
+            StatusSuggestedAction::Diagnose,
+            StatusSuggestedAction::RunTests,
+            StatusSuggestedAction::FixErrors,
+            StatusSuggestedAction::Proceed,
+        ];
+        disabled.extend(["diagnose", "run-tests", "fix-errors"].map(str::to_owned));
+        // The renderer and shortcut both select from this same iterator.
+        assert_eq!(
+            enabled_status_suggestions(&cached, &disabled).collect::<Vec<_>>(),
+            [&StatusSuggestedAction::Proceed]
+        );
     }
 
     #[test]

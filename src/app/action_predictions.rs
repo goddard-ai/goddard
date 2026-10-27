@@ -1509,7 +1509,12 @@ impl Waku {
         {
             return self.state.status_markers_enabled
                 && turn.status == TurnStatus::Completed
-                && !actions.is_empty();
+                && status_markers::enabled_status_suggestions(
+                    actions,
+                    &self.state.disabled_suggested_actions,
+                )
+                .next()
+                .is_some();
         }
         self.action_suggestion.as_ref().is_some_and(|suggestion| {
             suggestion.session_id == session.id
@@ -1773,7 +1778,13 @@ impl Waku {
                 .and_then(|turn| {
                     self.turn_status_suggestions
                         .get(&turn.id)
-                        .and_then(|actions| actions.first())
+                        .and_then(|actions| {
+                            status_markers::enabled_status_suggestions(
+                                actions,
+                                &self.state.disabled_suggested_actions,
+                            )
+                            .next()
+                        })
                         .map(|action| Displayed::Status(turn.id, action.clone()))
                 });
             match displayed {
