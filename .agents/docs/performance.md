@@ -24,6 +24,10 @@
 - Resolve a whole session or collection in one background pass instead of
   probing per item, and guard it with a generation counter so a result from a
   superseded pass cannot overwrite newer state.
+- Catalog inbox results carry a source/generation token. Check it before UI
+  application and acknowledge only after the current snapshot is fully applied.
+  Reconnect freshness survives superseded work and errors until that completion;
+  it must not be consumed just by taking a snapshot from the inbox.
 - One-shot user actions such as a click or menu command may work synchronously
   when freshness matters more than latency; frames may not.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for

@@ -1933,7 +1933,19 @@ impl Waku {
             eprintln!("could not refresh daemon task state: {error}");
         }
         if let Some(snapshot) = update.catalog {
+            let Some(version) = update
+                .version
+                .filter(|version| self.task_state_sync_events.is_current(*version))
+            else {
+                cx.background_executor()
+                    .spawn(async move {
+                        drop((snapshot, update.cache_catalog));
+                    })
+                    .detach();
+                return true;
+            };
             self.apply_remote_task_state(key, snapshot, update.cache_catalog, update.fresh, cx);
+            self.task_state_sync_events.acknowledge(version);
         }
         true
     }

@@ -2,7 +2,9 @@
 
 mod app_writer;
 mod catalog_inbox;
-pub use catalog_inbox::{CatalogInboxReceiver, CatalogInboxSender, CatalogSource, catalog_inbox};
+pub use catalog_inbox::{
+    CatalogInboxReceiver, CatalogInboxSender, CatalogSource, CatalogVersion, catalog_inbox,
+};
 
 pub use app_writer::AppSaveTicket;
 mod catalog_writer;

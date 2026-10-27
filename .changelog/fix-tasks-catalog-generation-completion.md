@@ -1,0 +1,1 @@
+- Remote catalog refreshes preserve reconnect recovery when a newer snapshot supersedes an update, and discard superseded results before UI application.

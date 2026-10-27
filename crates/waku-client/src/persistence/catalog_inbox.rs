@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 #[derive(Default)]
 pub struct CatalogUpdate {
+    pub version: Option<CatalogVersion>,
     pub catalog: Option<TaskCatalog>,
     /// Unmodified remote-host cache input, copied by the polling worker so
     /// optimistic UI overlays never enter the offline cache.
@@ -21,11 +22,24 @@ pub struct CatalogUpdate {
     pub fresh: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CatalogVersion {
+    key: DaemonKey,
+    source: Uuid,
+    generation: Uuid,
+}
+
+struct SourceState {
+    source: Uuid,
+    generation: Option<Uuid>,
+    fresh: bool,
+}
+
 #[derive(Default)]
 struct Slots {
     latest: HashMap<DaemonKey, CatalogUpdate>,
     ready: VecDeque<DaemonKey>,
-    sources: HashMap<DaemonKey, Uuid>,
+    sources: HashMap<DaemonKey, SourceState>,
 }
 
 type Pending = Arc<Mutex<Slots>>;
@@ -73,7 +87,14 @@ impl CatalogInboxSender {
         let source = Uuid::new_v4();
         let retired = {
             let mut pending = self.pending.lock();
-            pending.sources.insert(key, source);
+            pending.sources.insert(
+                key,
+                SourceState {
+                    source,
+                    generation: None,
+                    fresh: false,
+                },
+            );
             pending.ready.retain(|queued| *queued != key);
             pending.latest.remove(&key)
         };
@@ -104,9 +125,23 @@ impl CatalogSource {
         };
         let retired = {
             let mut pending = self.pending.lock();
-            if pending.sources.get(&self.key) != Some(&self.source) {
+            let Some(state) = pending
+                .sources
+                .get_mut(&self.key)
+                .filter(|state| state.source == self.source)
+            else {
                 return Err(crossbeam_channel::SendError(()));
+            };
+            state.fresh |= fresh;
+            if result.is_ok() {
+                state.generation = Some(Uuid::new_v4());
             }
+            let fresh = state.fresh;
+            let version = state.generation.map(|generation| CatalogVersion {
+                key: self.key,
+                source: self.source,
+                generation,
+            });
             if !pending.latest.contains_key(&self.key) {
                 pending.ready.push_back(self.key);
             }
@@ -114,6 +149,7 @@ impl CatalogSource {
             slot.fresh |= fresh;
             match result {
                 Ok(catalog) => {
+                    slot.version = version;
                     slot.error = None;
                     (
                         slot.catalog.replace(catalog),
@@ -135,6 +171,29 @@ impl CatalogSource {
 }
 
 impl CatalogInboxReceiver {
+    /// Check before applying each batch, including after background preparation.
+    pub fn is_current(&self, version: CatalogVersion) -> bool {
+        self.pending
+            .lock()
+            .sources
+            .get(&version.key)
+            .is_some_and(|state| {
+                state.source == version.source && state.generation == Some(version.generation)
+            })
+    }
+
+    /// Only completion of the current catalog consumes reconnection evidence.
+    /// Superseded or revoked work cannot acknowledge its successor's source.
+    pub fn acknowledge(&self, version: CatalogVersion) -> bool {
+        let mut pending = self.pending.lock();
+        let Some(state) = pending.sources.get_mut(&version.key).filter(|state| {
+            state.source == version.source && state.generation == Some(version.generation)
+        }) else {
+            return false;
+        };
+        state.fresh = false;
+        true
+    }
     /// Revoke before removing a host's visible rows. The caller reclaims
     /// returned plain data on a background executor.
     pub fn revoke(&self, key: DaemonKey) -> Option<CatalogUpdate> {
@@ -150,7 +209,10 @@ impl CatalogInboxReceiver {
         let _ = self.wake.try_recv();
         let mut pending = self.pending.lock();
         let key = pending.ready.pop_front()?;
-        pending.latest.remove(&key).map(|update| (key, update))
+        pending.latest.remove(&key).map(|mut update| {
+            update.fresh = pending.sources.get(&key).is_some_and(|state| state.fresh);
+            (key, update)
+        })
     }
 
     pub fn has_pending(&self) -> bool {
@@ -174,7 +236,14 @@ mod tests {
     }
 
     fn drain(receiver: &CatalogInboxReceiver) -> HashMap<DaemonKey, CatalogUpdate> {
-        std::iter::from_fn(|| receiver.take_next()).collect()
+        std::iter::from_fn(|| receiver.take_next())
+            .map(|(key, update)| {
+                if let Some(version) = update.version {
+                    assert!(receiver.acknowledge(version));
+                }
+                (key, update)
+            })
+            .collect()
     }
 
     #[test]
@@ -237,6 +306,46 @@ mod tests {
         let (readded, _) = sender.bind(host);
         readded.send((Ok(catalog("readded")), true)).unwrap();
         assert!(drain(&receiver).remove(&host).unwrap().fresh);
+    }
+
+    #[test]
+    fn taken_catalogs_are_revoked_and_freshness_survives_until_current_completion() {
+        let (sender, receiver) = catalog_inbox();
+        let host = DaemonKey::Remote(Uuid::new_v4());
+        let (source, _) = sender.bind(host);
+        source.send((Ok(catalog("first")), true)).unwrap();
+        let first = receiver.take_next().unwrap().1;
+        let old = first.version.unwrap();
+        assert!(receiver.is_current(old));
+        source
+            .send((Err("temporarily unavailable".into()), false))
+            .unwrap();
+        assert!(
+            receiver.is_current(old),
+            "an error must not invalidate accepted catalog data"
+        );
+        source.send((Ok(catalog("successor")), false)).unwrap();
+        assert!(!receiver.is_current(old));
+        assert!(!receiver.acknowledge(old));
+        let next = receiver.take_next().unwrap().1;
+        assert!(next.fresh, "supersession lost incognito recovery authority");
+        let current = next.version.unwrap();
+        assert!(receiver.acknowledge(current));
+        source
+            .send((Ok(catalog("ordinary update")), false))
+            .unwrap();
+        let ordinary = receiver.take_next().unwrap().1;
+        assert!(!ordinary.fresh);
+        let token = ordinary.version.unwrap();
+        receiver.revoke(host);
+        assert!(!receiver.is_current(token));
+        assert!(!receiver.acknowledge(token));
+        let (replacement, _) = sender.bind(host);
+        replacement
+            .send((Ok(catalog("replacement")), true))
+            .unwrap();
+        assert!(!receiver.acknowledge(token));
+        assert!(receiver.take_next().unwrap().1.fresh);
     }
 
     #[test]
