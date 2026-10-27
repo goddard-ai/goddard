@@ -33,30 +33,14 @@ use waku_protocol::boss::{
     shipped_persona_revisions,
 };
 
-/// What an employee's settle did to its task — the daemon's finish tail
-/// reads it to decide the report. `Quiet` leaves the ordinary work-kind
-/// rules in charge.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum AssignmentFinish {
-    /// Nothing task-shaped applied — a standalone job, a settle the
-    /// success semantics do not claim, a late result on a closed task,
-    /// or a superseded finisher.
-    Quiet,
-    /// An ordinary assignment's accepted success left a durable handoff —
-    /// the report carries its id and captured intent.
-    Handoff { id: Uuid, intent: String },
-    /// The designated finisher satisfied the completion conditions — the task
-    /// is completed and the finish owes nobody a report.
-    Completed,
-    /// The designated closer succeeded but could not close — the report
-    /// carries the recorded conflict's reason.
-    Conflict { reason: String },
-}
+pub use waku_protocol::boss::AssignmentFinish;
+
 /// The effects the daemon applies after expiry and outcome bookkeeping commit.
 #[derive(Debug)]
 pub struct EmployeeCompletion {
     pub reservations: Vec<Uuid>,
     pub assignment: AssignmentFinish,
+    pub report_id: Option<Uuid>,
 }
 
 use waku_protocol::model::ProviderKind;
@@ -787,6 +771,7 @@ impl BossService {
             {
                 ticket.prompt.clear();
                 ticket.pending_prompts.clear();
+                ticket.transferred_prompt_ids.clear();
             }
             Ok(())
         })
@@ -3262,10 +3247,47 @@ impl BossService {
         session: Uuid,
         expiry: Option<EmployeeExpiry>,
     ) -> anyhow::Result<EmployeeCompletion> {
+        self.complete_expiry_inner(session, expiry, None)
+    }
+
+    pub fn complete_expiry_with_report(
+        &self,
+        session: Uuid,
+        expiry: EmployeeExpiry,
+        body: String,
+        failed: bool,
+        final_message: String,
+        settle: EmployeeSettle,
+    ) -> anyhow::Result<EmployeeCompletion> {
+        self.complete_expiry_inner(
+            session,
+            Some(expiry),
+            Some((body, failed, final_message, settle)),
+        )
+    }
+
+    pub fn pending_completion_reports(&self) -> Vec<waku_protocol::boss::EmployeeCompletionReport> {
+        self.state.lock().completion_reports.clone()
+    }
+
+    pub fn completion_report_delivered(&self, id: Uuid) -> anyhow::Result<()> {
+        self.update(|state| {
+            state.completion_reports.retain(|report| report.id != id);
+            Ok(())
+        })
+    }
+
+    fn complete_expiry_inner(
+        &self,
+        session: Uuid,
+        expiry: Option<EmployeeExpiry>,
+        report: Option<(String, bool, String, EmployeeSettle)>,
+    ) -> anyhow::Result<EmployeeCompletion> {
         let now = waku_protocol::model::unix_time();
         let mut completion = EmployeeCompletion {
             reservations: Vec::new(),
             assignment: AssignmentFinish::Quiet,
+            report_id: None,
         };
         self.update(|state| {
             let Some(entry) = state
@@ -3275,6 +3297,36 @@ impl BossService {
             else {
                 return Ok(());
             };
+            let generation = entry.ticket.as_ref().map(|ticket| ticket.generation);
+            if report.is_some()
+                && let Some(pending) = state.completion_reports.iter().find(|pending| {
+                    pending.employee.session_id == session
+                        && pending
+                            .employee
+                            .ticket
+                            .as_ref()
+                            .map(|ticket| ticket.generation)
+                            == generation
+                })
+            {
+                completion.report_id = Some(pending.id);
+                completion.assignment = pending.assignment.clone();
+                completion.reservations = pending.reservations.clone();
+                return Ok(());
+            }
+            if report.is_some()
+                && entry
+                    .expiry
+                    .as_ref()
+                    .is_some_and(|expiry| expiry.completion_report_id.is_some())
+            {
+                return Ok(());
+            }
+            let entry = state
+                .employees
+                .iter_mut()
+                .find(|entry| entry.session_id == session)
+                .expect("employee checked");
             entry.set_lifecycle(EmployeeLifecycle::Expired, now);
             if let Some(expiry) = expiry {
                 entry.expiry = Some(expiry);
@@ -3286,9 +3338,30 @@ impl BossService {
                     .extend(ticket.pending_reservation.take());
                 ticket.pending_resources = None;
             }
+            let report_id = report.as_ref().map(|_| Uuid::new_v4());
+            if let Some(expiry) = entry.expiry.as_mut() {
+                expiry.completion_report_id = report_id;
+            }
             let employee = entry.clone();
             record_assignment_settle(state, &employee, now);
             completion.assignment = Self::finish_assignment(state, &employee, now);
+            if let Some((body, failed, final_message, settle)) = &report {
+                let id = report_id.expect("report identity created with payload");
+                completion.report_id = Some(id);
+                state
+                    .completion_reports
+                    .push(waku_protocol::boss::EmployeeCompletionReport {
+                        id,
+                        settle: *settle,
+                        employee: Box::new(employee),
+                        assignment: completion.assignment.clone(),
+                        body: body.clone(),
+                        failed: *failed,
+                        final_message: final_message.clone(),
+                        reservations: completion.reservations.clone(),
+                    });
+            }
+
             Ok(())
         })?;
         Ok(completion)
@@ -3358,25 +3431,7 @@ impl BossService {
             .iter()
             .filter(|entry| entry.lifecycle() == EmployeeLifecycle::Queued)
             .collect();
-        queued.sort_by(|left, right| {
-            let left_ticket = left.ticket.as_ref();
-            let right_ticket = right.ticket.as_ref();
-            right_ticket
-                .is_some_and(|ticket| ticket.force_start)
-                .cmp(&left_ticket.is_some_and(|ticket| ticket.force_start))
-                .then_with(|| {
-                    right_ticket
-                        .and_then(|ticket| ticket.priority)
-                        .unwrap_or(0)
-                        .cmp(&left_ticket.and_then(|ticket| ticket.priority).unwrap_or(0))
-                })
-                .then_with(|| {
-                    left_ticket
-                        .map(|ticket| ticket.sequence)
-                        .unwrap_or(0)
-                        .cmp(&right_ticket.map(|ticket| ticket.sequence).unwrap_or(0))
-                })
-        });
+        queued.sort_by(|left, right| left.admission_order(right));
         queued.into_iter().cloned().collect()
     }
 
@@ -3400,7 +3455,7 @@ impl BossService {
             .find(|entry| entry.session_id == session)?;
         let position = if employee.lifecycle() == EmployeeLifecycle::Queued {
             let root = Self::queue_root(&state, employee);
-            let sequence = employee.ticket.as_ref()?.sequence;
+            employee.ticket.as_ref()?;
             Some(
                 state
                     .employees
@@ -3408,10 +3463,7 @@ impl BossService {
                     .filter(|entry| {
                         entry.lifecycle() == EmployeeLifecycle::Queued
                             && Self::queue_root(&state, entry) == root
-                            && entry
-                                .ticket
-                                .as_ref()
-                                .is_some_and(|ticket| ticket.sequence <= sequence)
+                            && entry.admission_order(employee) != std::cmp::Ordering::Greater
                     })
                     .count() as u64,
             )
@@ -3474,7 +3526,7 @@ impl BossService {
         Ok(employee)
     }
 
-    fn enqueue_employee(
+    pub(crate) fn enqueue_employee(
         state: &mut BossState,
         employee: &mut BossEmployee,
         mut ticket: SummonTicket,
@@ -4519,6 +4571,31 @@ impl BossService {
                     state.employees.retain(|entry| {
                         entry.session_id == caller || entry.supervisor_id == caller
                     });
+                    state.retired_employees = std::sync::Arc::new(
+                        state
+                            .retired_employees
+                            .iter()
+                            .filter(|entry| {
+                                entry.session_id == caller || entry.supervisor_id == caller
+                            })
+                            .cloned()
+                            .collect(),
+                    );
+                    let visible: HashSet<_> = state
+                        .employees
+                        .iter()
+                        .chain(state.retired_employees.iter())
+                        .map(|entry| entry.session_id)
+                        .collect();
+                    state
+                        .outbox
+                        .retain(|entry| visible.contains(&entry.session_id));
+                    state
+                        .wave_outbox
+                        .retain(|entry| entry.supervisor_id == caller);
+                    state
+                        .completion_reports
+                        .retain(|report| visible.contains(&report.employee.session_id));
                     // Waves stay scoped to what the caller can already see:
                     // its own memberships and the groups it summoned.
                     state.waves.retain(|wave| {
@@ -4831,6 +4908,7 @@ impl BossService {
                 name,
                 reference,
             } => {
+                let _operation = self.operation_lock.lock();
                 let target = PathBuf::from(&path);
                 if !target.is_absolute() {
                     bail!("deliverable paths must be absolute");
@@ -4873,14 +4951,14 @@ impl BossService {
                 // was published from — an employee's worktree is cleaned up
                 // with its chat. A `reference` publish keeps the live path,
                 // and switching modes drops the snapshot a copy left behind.
+                self.recover_deliverable_snapshot(id)?;
                 let stored = if reference {
-                    let _ = fs::remove_dir_all(self.deliverable_dir(id));
                     None
                 } else {
                     Some(self.store_deliverable(id, &target)?)
                 };
                 let now = waku_protocol::model::unix_time();
-                self.update(|state| {
+                let saved = self.update(|state| {
                     let plan_id = self.plan_document_owner(state, &target);
                     if let Some(deliverable) = state
                         .deliverables
@@ -4910,10 +4988,24 @@ impl BossService {
                         });
                     }
                     Ok(())
-                })?;
+                });
+                if let Err(error) = saved {
+                    let _ =
+                        fs::remove_dir_all(self.deliverables_root().join(format!(".stage-{id}")));
+                    return Err(error);
+                }
+                if reference {
+                    let _ = fs::remove_dir_all(self.deliverable_dir(id));
+                } else {
+                    let stage = self.deliverables_root().join(format!(".stage-{id}"));
+                    let publish = self.deliverables_root().join(format!(".publish-{id}"));
+                    fs::rename(stage, publish)?;
+                    self.recover_deliverable_snapshot(id)?;
+                }
                 Ok(BossResult::Saved)
             }
             BossOperation::DismissDeliverable { id } => {
+                let _operation = self.operation_lock.lock();
                 self.require_owner(caller)?;
                 self.update(|state| {
                     let count = state.deliverables.len();
@@ -5651,43 +5743,103 @@ impl BossService {
         self.deliverables_root().join(id.to_string())
     }
 
-    /// Snapshot `source` under `deliverables/<id>/`, returning the stored
-    /// absolute path. The copy lands by renaming a staging sibling so a
-    /// reader never sees a half-written tree; a failed copy removes the
-    /// staging directory and leaves any previous snapshot in place.
+    /// Prepare a complete replacement without touching the committed snapshot.
+    /// The public path remains stable across republishing. Only a successful
+    /// manifest save promotes the stage into a recoverable publication intent.
     fn store_deliverable(&self, id: Uuid, source: &Path) -> anyhow::Result<String> {
         let base = source
             .file_name()
             .ok_or_else(|| anyhow!("deliverable path must name a file or folder"))?;
         let stage = self.deliverables_root().join(format!(".stage-{id}"));
-        let target = self.deliverable_dir(id);
         let _ = fs::remove_dir_all(&stage);
         fs::create_dir_all(&stage)?;
-        let mut budget = DeliverableBudget::default();
-        if let Err(error) = copy_deliverable(source, &stage.join(base), &mut budget) {
+        if let Err(error) =
+            copy_deliverable(source, &stage.join(base), &mut DeliverableBudget::default())
+        {
             let _ = fs::remove_dir_all(&stage);
             return Err(error);
         }
-        let _ = fs::remove_dir_all(&target);
-        fs::rename(&stage, &target)?;
-        Ok(target.join(base).to_string_lossy().into_owned())
+        Ok(self
+            .deliverable_dir(id)
+            .join(base)
+            .to_string_lossy()
+            .into_owned())
+    }
+
+    fn recover_deliverable_snapshot(&self, id: Uuid) -> anyhow::Result<()> {
+        let target = self.deliverable_dir(id);
+        let publish = self.deliverables_root().join(format!(".publish-{id}"));
+        let backup = self.deliverables_root().join(format!(".backup-{id}"));
+        if publish.is_dir() {
+            if target.exists() {
+                if backup.exists() {
+                    fs::remove_dir_all(&backup)?;
+                }
+                fs::rename(&target, &backup)?;
+            }
+            if let Err(error) = fs::rename(&publish, &target) {
+                if !target.exists() && backup.exists() {
+                    fs::rename(&backup, &target)?;
+                }
+                return Err(error.into());
+            }
+        } else if !target.exists() && backup.exists() {
+            fs::rename(&backup, &target)?;
+        }
+        if target.exists() && backup.exists() {
+            fs::remove_dir_all(backup)?;
+        }
+        Ok(())
     }
 
     /// Drop copied snapshots no live record points at — a crash between the
     /// copy landing and the state save leaves the store dir behind.
     fn sweep_deliverable_store(&self, state: &BossState) {
-        let live: std::collections::HashSet<String> = state
+        let live: HashSet<_> = state
             .deliverables
             .iter()
-            .filter(|deliverable| deliverable.source_path.is_some())
-            .map(|deliverable| deliverable.id.to_string())
+            .filter(|entry| entry.source_path.is_some())
+            .map(|entry| entry.id.to_string())
             .collect();
+        for deliverable in state
+            .deliverables
+            .iter()
+            .filter(|entry| entry.source_path.is_some())
+        {
+            let id = deliverable.id;
+            let stage = self.deliverables_root().join(format!(".stage-{id}"));
+            // A first publish may have committed its manifest just before
+            // promoting the stage. Existing snapshots keep their old bytes
+            // when the process stopped before recording a publication intent.
+            if stage.is_dir()
+                && !self.deliverable_dir(id).exists()
+                && !self
+                    .deliverables_root()
+                    .join(format!(".publish-{id}"))
+                    .exists()
+            {
+                let _ = fs::rename(
+                    &stage,
+                    self.deliverables_root().join(format!(".publish-{id}")),
+                );
+            } else if stage.exists() {
+                let _ = fs::remove_dir_all(stage);
+            }
+            if let Err(error) = self.recover_deliverable_snapshot(id) {
+                eprintln!("could not recover deliverable snapshot {id}: {error:#}");
+            }
+        }
         let Ok(entries) = fs::read_dir(self.deliverables_root()) else {
             return;
         };
         for entry in entries.flatten() {
             let name = entry.file_name();
-            if !name.to_str().is_some_and(|name| live.contains(name)) {
+            let name = name.to_string_lossy();
+            let id = [".stage-", ".publish-", ".backup-"]
+                .iter()
+                .find_map(|prefix| name.strip_prefix(prefix))
+                .unwrap_or(&name);
+            if !live.contains(id) {
                 let _ = fs::remove_dir_all(entry.path());
             }
         }
@@ -7638,6 +7790,7 @@ fn fresh_state() -> BossState {
         planning: Vec::new(),
         outcomes: Vec::new(),
         instruction_pins: Vec::new(),
+        completion_reports: Vec::new(),
         goals_viewed_at: None,
         resource_policy: BossResourcePolicy::default(),
         next_sequence: 0,
@@ -7673,6 +7826,7 @@ fn disabled_state() -> BossState {
         planning: Vec::new(),
         outcomes: Vec::new(),
         instruction_pins: Vec::new(),
+        completion_reports: Vec::new(),
         goals_viewed_at: None,
         resource_policy: BossResourcePolicy::default(),
         next_sequence: 0,
@@ -11648,6 +11802,7 @@ mod memory_op_tests {
             force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
+            transferred_prompt_ids: Vec::new(),
             group_id: Some("wave".into()),
             priority: None,
             outcome_id: None,
@@ -11764,6 +11919,7 @@ mod memory_op_tests {
             force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
+            transferred_prompt_ids: Vec::new(),
             group_id: None,
             priority: None,
             outcome_id: None,
@@ -12030,6 +12186,7 @@ mod memory_op_tests {
             force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
+            transferred_prompt_ids: Vec::new(),
             group_id: None,
             priority: None,
             outcome_id: None,
@@ -13539,6 +13696,7 @@ mod memory_op_tests {
             force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
+            transferred_prompt_ids: Vec::new(),
             group_id: None,
             priority: None,
             outcome_id,
@@ -14681,6 +14839,7 @@ mod memory_op_tests {
             force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
+            transferred_prompt_ids: Vec::new(),
             group_id: None,
             priority: None,
             outcome_id: None,

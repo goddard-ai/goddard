@@ -1,0 +1,1 @@
+- Boss queue positions now reflect priority and the Start now control, matching the order in which employees are considered for admission.

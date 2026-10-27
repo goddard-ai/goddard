@@ -2625,7 +2625,7 @@
             "sourceRevision": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/definitions/ChainBaseSource"
                 },
                 {
                   "type": "null"
@@ -2743,6 +2743,28 @@
         }
       ]
     },
+    "ChainBaseSource": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/ChainBaseKind"
+        }
+      ]
+    },
+    "ChainBaseKind": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "previousStepLanded"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
     "ChainControl": {
       "anyOf": [
         {
@@ -2756,6 +2778,9 @@
         },
         {
           "const": "cancel"
+        },
+        {
+          "const": "accept"
         }
       ]
     },
@@ -3009,7 +3034,7 @@
         "baseRevision": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/definitions/ChainBaseSource"
             },
             {
               "type": "null"

@@ -11266,13 +11266,7 @@ fn boss_queue_ranks(state: &BossState) -> HashMap<Uuid, usize> {
         .iter()
         .filter(|employee| employee.lifecycle() == waku_protocol::boss::EmployeeLifecycle::Queued)
         .collect();
-    queued.sort_by_key(|employee| {
-        employee
-            .ticket
-            .as_ref()
-            .map(|ticket| ticket.sequence)
-            .unwrap_or(u64::MAX)
-    });
+    queued.sort_by(|left, right| left.admission_order(right));
     queued
         .iter()
         .enumerate()
@@ -11301,7 +11295,7 @@ fn boss_queue_root(state: &BossState, employee: &BossEmployee) -> Uuid {
 
 /// The employee's 1-based position inside its own queue root and the root's
 /// queued count — the card's "Position N of M". Mirrors the daemon's
-/// `queue_position`: sequence order within the group, `None` when the
+/// `queue_position`: admission order within the group, `None` when the
 /// employee is not waiting.
 fn boss_queue_position(state: &BossState, session_id: Uuid) -> Option<(usize, usize)> {
     let employee = state
@@ -11312,7 +11306,7 @@ fn boss_queue_position(state: &BossState, session_id: Uuid) -> Option<(usize, us
         return None;
     }
     let root = boss_queue_root(state, employee);
-    let sequence = employee.ticket.as_ref()?.sequence;
+    employee.ticket.as_ref()?;
     let mut position = 0;
     let mut total = 0;
     for entry in &state.employees {
@@ -11320,11 +11314,7 @@ fn boss_queue_position(state: &BossState, session_id: Uuid) -> Option<(usize, us
             && boss_queue_root(state, entry) == root
         {
             total += 1;
-            if entry
-                .ticket
-                .as_ref()
-                .is_some_and(|ticket| ticket.sequence <= sequence)
-            {
+            if entry.admission_order(employee) != std::cmp::Ordering::Greater {
                 position += 1;
             }
         }
@@ -12279,6 +12269,7 @@ mod tests {
             planning: Vec::new(),
             outcomes: Vec::new(),
             instruction_pins: Vec::new(),
+            completion_reports: Vec::new(),
             resource_policy: BossResourcePolicy::default(),
             next_sequence: 0,
             next_event_id: 0,
@@ -12934,6 +12925,7 @@ mod tests {
             force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
+            transferred_prompt_ids: Vec::new(),
             group_id: None,
             priority: None,
             outcome_id: None,
@@ -13079,6 +13071,7 @@ mod tests {
         // The same member's unresolved record flags the outcome itself.
         let mut failed_member = member;
         failed_member.employee.expiry = Some(waku_protocol::boss::EmployeeExpiry {
+            completion_report_id: None,
             cause: waku_protocol::boss::ExpiryCause::Failed,
             resumable: true,
             parked_prompts: 0,
@@ -13986,6 +13979,7 @@ mod tests {
             planning: Vec::new(),
             outcomes: Vec::new(),
             instruction_pins: Vec::new(),
+            completion_reports: Vec::new(),
             resource_policy: waku_protocol::boss::BossResourcePolicy::default(),
             next_sequence: 0,
             next_event_id: 0,

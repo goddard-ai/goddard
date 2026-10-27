@@ -22379,3 +22379,6 @@ fn task_wireframes_require_opt_in_valid_documents_and_workspace_containment() {
     drop(backend);
     remove_tree(root);
 }
+
+#[path = "tests/audit_regressions.rs"]
+mod audit_regressions;

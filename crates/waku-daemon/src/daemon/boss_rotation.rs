@@ -245,6 +245,37 @@ impl WakuBackend {
         })
     }
 
+    /// Durable completion acknowledgements require a readable receipt store;
+    /// uncertainty leaves the report pending rather than consuming it.
+    pub(super) fn try_boss_lineage_message_landed(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        if self.boss.is_boss(session_id) {
+            let ledger = ContinuityLedger::load(&self.boss_continuity_path())?;
+            if ledger.cleared_notification_ids.contains(&message_id) {
+                return Ok(true);
+            }
+        }
+        let mut state = self.task_state.lock();
+        for id in self.boss_lineage_sessions(session_id) {
+            if let Some(session) = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == id)
+            {
+                self.task_store.hydrate(session)?;
+                if session.queued_messages.iter().any(|m| m.id == message_id)
+                    || session.messages.iter().any(|m| m.id == message_id)
+                {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     /// The installed provider's prevention-contract evidence for the active
     /// Boss configuration. Only a qualified route can start a new preventive
     /// refresh; interrupted rotations and compaction incidents still recover.
@@ -1303,9 +1334,20 @@ impl WakuBackend {
         // Clearing consumes both delivered reports and parked notifications.
         // Preserve their identities before deleting the only transcript copy,
         // including reports from versions that did not attach trigger metadata.
+        let pending_completion_ids = self
+            .boss
+            .pending_completion_reports()
+            .into_iter()
+            .filter(|report| {
+                self.boss
+                    .report_target(&report.employee)
+                    .is_some_and(|target| self.boss.is_boss(target))
+            })
+            .map(|report| report.id)
+            .collect::<Vec<_>>();
         let notification_ids: std::collections::BTreeSet<_> = {
             let mut state = self.task_state.lock();
-            let mut ids = std::collections::BTreeSet::new();
+            let mut ids = std::collections::BTreeSet::from_iter(pending_completion_ids);
             for session in state.sessions.iter_mut().filter(|session| {
                 session.boss_managed
                     && session.project_id == identity.id

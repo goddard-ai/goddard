@@ -882,7 +882,12 @@ pub enum EmployeeLifecycle {
 /// reports to the Boss service so the finish can classify the expiry
 /// legibly. The durable record is `ExpiryCause`; this is only how the
 /// settle was observed.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum EmployeeSettle {
     /// The provider's turn ended — success or failure is the session's
     /// terminal verdict, read at finish time.
@@ -1028,6 +1033,11 @@ impl ExpiryCause {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct EmployeeExpiry {
+    /// Durable completion identity, retained after outbox acknowledgement so
+    /// a repeated finish cannot recreate an already delivered report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub completion_report_id: Option<Uuid>,
     pub cause: ExpiryCause,
     /// Whether reviving the job makes sense — `cause.resumable()`
     /// copied onto the wire so clients never re-derive it.
@@ -1052,6 +1062,7 @@ impl EmployeeExpiry {
             resumable: cause.resumable(),
             parked_prompts: 0,
             pending_question: None,
+            completion_report_id: None,
         }
     }
 
@@ -1154,6 +1165,10 @@ pub struct SummonTicket {
     /// envelope in submission order and survive restart.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_prompts: Vec<String>,
+    /// Source queue entries already transferred into pending_prompts. Dispatch
+    /// removes their old mirror before delivery, including after a crash.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transferred_prompt_ids: Vec<Uuid>,
     /// Optional wave/group id — every ticket admitted under the same id
     /// is a wave member; the daemon notifies the supervisor once when
     /// the membership goes all-terminal.
@@ -1294,6 +1309,45 @@ pub struct BossResourcePolicy {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub host: Option<crate::resources::ResourcePolicy>,
+}
+
+/// What an employee's settle did to its task — the daemon's finish tail
+/// reads it to decide the report. `Quiet` leaves the ordinary work-kind
+/// rules in charge.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum AssignmentFinish {
+    /// Nothing task-shaped applied — a standalone job, a settle the
+    /// success semantics do not claim, a late result on a closed task,
+    /// or a superseded finisher.
+    Quiet,
+    /// An ordinary assignment's accepted success left a durable handoff —
+    /// the report carries its id and captured intent.
+    Handoff { id: Uuid, intent: String },
+    /// The designated finisher satisfied the completion conditions — the task
+    /// is completed and the finish owes nobody a report.
+    Completed,
+    /// The designated closer succeeded but could not close — the report
+    /// carries the recorded conflict's reason.
+    Conflict { reason: String },
+}
+/// A completed attempt's effects awaiting durable delivery. Kept independently
+/// of the live roster so retirement and readmission cannot erase a report.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EmployeeCompletionReport {
+    pub id: Uuid,
+    pub settle: EmployeeSettle,
+    pub employee: Box<BossEmployee>,
+    pub assignment: AssignmentFinish,
+    pub body: String,
+    pub failed: bool,
+    pub final_message: String,
+    pub reservations: Vec<Uuid>,
 }
 
 /// A dispatch notification the daemon owes a supervisor — durable so a
@@ -1622,6 +1676,27 @@ impl From<EmployeeStatus> for EmployeeLifecycleWire {
 }
 
 impl BossEmployee {
+    /// Authoritative queue order: forced admissions, descending priority,
+    /// then the durable FIFO sequence.
+    pub fn admission_order(&self, other: &Self) -> std::cmp::Ordering {
+        let left = self.ticket.as_ref();
+        let right = other.ticket.as_ref();
+        right
+            .is_some_and(|ticket| ticket.force_start)
+            .cmp(&left.is_some_and(|ticket| ticket.force_start))
+            .then_with(|| {
+                right
+                    .and_then(|ticket| ticket.priority)
+                    .unwrap_or(0)
+                    .cmp(&left.and_then(|ticket| ticket.priority).unwrap_or(0))
+            })
+            .then_with(|| {
+                left.map(|ticket| ticket.sequence)
+                    .unwrap_or(0)
+                    .cmp(&right.map(|ticket| ticket.sequence).unwrap_or(0))
+            })
+    }
+
     /// Move the employee to `lifecycle`, keeping the `expired` wire
     /// projection and its timestamp in step.
     pub fn set_lifecycle(&mut self, lifecycle: EmployeeLifecycle, now: u64) {
@@ -2127,6 +2202,8 @@ pub struct BossRotationStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub completion_reports: Vec<EmployeeCompletionReport>,
     /// Temporary user obligations and their retirement evidence, independent
     /// of provider sessions, personas, and append-only memory buckets.
     #[serde(default)]

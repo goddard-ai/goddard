@@ -10,13 +10,14 @@ import type { BossRotationStatus } from "./BossRotationStatus";
 import type { BossWave } from "./BossWave";
 import type { DispatchNotification } from "./DispatchNotification";
 import type { EmployeeChain } from "./EmployeeChain";
+import type { EmployeeCompletionReport } from "./EmployeeCompletionReport";
 import type { InstructionPin } from "./InstructionPin";
 import type { PersonaDefaultNotice } from "./PersonaDefaultNotice";
 import type { PersonaDefaultRole } from "./PersonaDefaultRole";
 import type { PersonaDefaultsState } from "./PersonaDefaultsState";
 import type { WaveNotification } from "./WaveNotification";
 
-export type BossState = {
+export type BossState = { completionReports?: Array<EmployeeCompletionReport>,
 /**
  * Temporary user obligations and their retirement evidence, independent
  * of provider sessions, personas, and append-only memory buckets.

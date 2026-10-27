@@ -1,0 +1,1 @@
+- Boss completion reports survive restarts, failed employee resumption preserves parked prompts, and failed deliverable updates preserve the last published copy.

@@ -6,7 +6,12 @@ import type { ExpiryCause } from "./ExpiryCause";
  * reviving makes sense, and the leftovers (parked prompts, an
  * unanswered ask) the finish surfaces so they are never silently lost.
  */
-export type EmployeeExpiry = { cause: ExpiryCause,
+export type EmployeeExpiry = {
+/**
+ * Durable completion identity, retained after outbox acknowledgement so
+ * a repeated finish cannot recreate an already delivered report.
+ */
+completionReportId?: string, cause: ExpiryCause,
 /**
  * Whether reviving the job makes sense — `cause.resumable()`
  * copied onto the wire so clients never re-derive it.

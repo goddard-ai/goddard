@@ -1,0 +1,1 @@
+- Boss employees can no longer read unrelated retired assignments, and permission changes revoke stale integration access.

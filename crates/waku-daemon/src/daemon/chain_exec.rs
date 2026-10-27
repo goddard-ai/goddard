@@ -468,6 +468,7 @@ impl WakuBackend {
                 force_start: false,
                 composer_receipts: Vec::new(),
                 pending_prompts: Vec::new(),
+                transferred_prompt_ids: Vec::new(),
                 group_id: None,
                 priority: None,
                 outcome_id: None,
@@ -482,44 +483,34 @@ impl WakuBackend {
             };
             self.create_employee_shell(&employee, &resolved, &ticket)?;
             let session_id = employee.session_id;
-            if let Err(error) = self.boss.enqueue_ticket(employee.clone(), ticket) {
+            let admitted = match self.boss.enqueue_chain_employee(
+                chain.id,
+                attempt.id,
+                attempt.definition_version,
+                employee.clone(),
+                ticket,
+            ) {
+                Ok(admitted) => admitted,
+                Err(error) => {
+                    self.remove_session_shell(session_id);
+                    return Err(error);
+                }
+            };
+            if admitted != session_id {
                 self.remove_session_shell(session_id);
-                return Err(error);
+                return Ok(admitted);
             }
             if let Err(error) = self.post_summon_marker(supervisor, &employee, events) {
                 eprintln!("could not record chain summon marker: {error:#}");
             }
             Ok::<_, anyhow::Error>(session_id)
         })();
-        let session_id = match result {
-            Ok(session_id) => session_id,
+        match result {
+            Ok(_) => {}
             Err(error) => {
                 return self.chain_admission_failed(chain, attempt, format!("{error:#}"));
             }
         };
-        // Admission binding commits after the ticket exists — a launch that
-        // raced the queue between enqueue and this write gets stopped, never
-        // detached from its attempt.
-        if let Err(error) = observe_quiet(
-            &self.boss,
-            chain.id,
-            attempt.id,
-            attempt.definition_version,
-            attempt.dispatch_id,
-            OBSERVE_ADMITTED,
-            ChainObservation::Admitted {
-                employee_id: session_id,
-            },
-        ) {
-            let _ = error;
-            let _ = self.boss.mark_cancelled(session_id);
-            let _ = self.finish_boss_employee(
-                session_id,
-                false,
-                waku_protocol::boss::EmployeeSettle::Stopped,
-            );
-            return;
-        }
         self.wake_summon_queue();
     }
 
@@ -660,14 +651,12 @@ impl WakuBackend {
         );
     }
 
-    /// A `Resume` on a gate-paused chain: re-verify the sealed handoff
-    /// against live host facts before the control reaches the reducer.
-    /// Repaired access, files, or landings accept the handoff and the
-    /// `Resume` then advances; a gate that still fails leaves the chain
-    /// paused with its updated reason — `true` reports that outcome and
-    /// the caller skips the control, which demands a retry for sealed
-    /// attempts.
-    pub(super) fn chain_resume_recheck(&self, chain_id: Uuid) -> anyhow::Result<bool> {
+    /// Collect host facts without mutating a gate-paused chain. The reducer
+    /// applies them with Resume after validating authority and revision.
+    pub(super) fn chain_resume_verification(
+        &self,
+        chain_id: Uuid,
+    ) -> anyhow::Result<Option<(Uuid, u64, waku_boss::chains::HandoffVerification)>> {
         let gate_paused =
             self.boss
                 .document()
@@ -685,19 +674,10 @@ impl WakuBackend {
                 })
                 .map(|attempt| (attempt.id, attempt.definition_version));
         let Some((attempt_id, version)) = gate_paused else {
-            return Ok(false);
+            return Ok(None);
         };
         let verification = self.verify_chain_handoff(chain_id, attempt_id, version)?;
-        self.boss
-            .recheck_chain_handoff(chain_id, attempt_id, version, &verification)?;
-        Ok(!self
-            .boss
-            .document()
-            .chains
-            .iter()
-            .find(|chain| chain.id == chain_id)
-            .and_then(|chain| chain.steps[chain.current_step].attempts.last())
-            .is_some_and(|attempt| attempt.handoff_accepted))
+        Ok(Some((attempt_id, version, verification)))
     }
 
     /// A Pause or Cancel racing a live attempt: the reducer already marked

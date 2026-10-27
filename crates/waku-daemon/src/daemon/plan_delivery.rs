@@ -630,6 +630,16 @@ impl WakuBackend {
         session_id: Uuid,
         events: &EventSink,
     ) -> anyhow::Result<()> {
+        self.retire_employee_runtime(session_id,
+            "Required-plan authority changed; existing work is retained. The next attempt redelivers the complete approved revision.", events)
+    }
+
+    pub(super) fn retire_employee_runtime(
+        &self,
+        session_id: Uuid,
+        reason: &str,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let _owner = lifecycle.lock();
         let gate = self
@@ -642,12 +652,7 @@ impl WakuBackend {
             // An already-blocked receipt keeps its original failure — the
             // recorded cause, not the retirement, is the actionable blocker.
             if review.receipt.phase != Phase::Blocked {
-                gate.block(
-                    &mut review,
-                    anyhow!(
-                        "plan authority changed: restart with fresh verified delivery of the bound revision"
-                    ),
-                );
+                gate.block(&mut review, anyhow!(reason.to_owned()));
             }
         }
         if let Some(entry) = self.remove_runtime(session_id, None, false) {
@@ -659,14 +664,7 @@ impl WakuBackend {
                 .for_session(session_id, entry.runtime_id)
                 .end_session_runtime();
             drop_detached(Some(entry));
-            record_daemon_interrupt(
-                &self.task_state,
-                &self.task_store,
-                session_id,
-                Some(
-                    "Required-plan authority changed; existing work is retained. The next attempt redelivers the complete approved revision.",
-                ),
-            )?;
+            record_daemon_interrupt(&self.task_state, &self.task_store, session_id, Some(reason))?;
         }
         Ok(())
     }

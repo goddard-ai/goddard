@@ -8237,6 +8237,7 @@ mod tests {
             planning: Vec::new(),
             outcomes: Vec::new(),
             instruction_pins: Vec::new(),
+            completion_reports: Vec::new(),
             resource_policy: BossResourcePolicy::default(),
             next_sequence: 0,
             next_event_id: 0,

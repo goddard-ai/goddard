@@ -327,6 +327,82 @@ fn validate_workspace_run<'a>(steps: impl Iterator<Item = &'a ChainStepDefinitio
 }
 
 impl BossService {
+    /// Publish the queued employee and its attempt binding in one durable write.
+    /// Concurrent/restarted drives return the employee already admitted under
+    /// this dispatch identity; a stopped or superseded attempt cannot publish.
+    pub fn enqueue_chain_employee(
+        &self,
+        chain_id: Uuid,
+        attempt_id: Uuid,
+        version: u64,
+        employee: waku_protocol::boss::BossEmployee,
+        ticket: waku_protocol::boss::SummonTicket,
+    ) -> Result<Uuid> {
+        let mut admitted = None;
+        self.update(|state| {
+            let chain = chain_mut(state, chain_id)?;
+            let attempt = current_attempt(chain, attempt_id, version)?;
+            let dispatch_id = attempt.dispatch_id;
+            ensure!(
+                employee.request_id == Some(dispatch_id) && employee.request_fingerprint.is_some(),
+                "chain dispatch identity missing"
+            );
+            let existing = state
+                .employees
+                .iter()
+                .chain(state.retired_employees.iter())
+                .find(|entry| entry.request_id == Some(dispatch_id))
+                .cloned();
+            if let Some(existing) = &existing {
+                ensure!(
+                    existing.request_fingerprint == employee.request_fingerprint,
+                    "dispatch id collides with a different admission"
+                );
+                let chain = chain_mut(state, chain_id)?;
+                if current_attempt(chain, attempt_id, version)?.employee_id
+                    == Some(existing.session_id)
+                {
+                    admitted = Some(existing.session_id);
+                    return Ok(());
+                }
+            }
+            let chain = chain_mut(state, chain_id)?;
+            ensure!(
+                chain.status == ChainStatus::Waiting,
+                "chain dispatch is stopped or already admitted"
+            );
+            let attempt = current_attempt(chain, attempt_id, version)?;
+            ensure!(
+                attempt.employee_id.is_none() && attempt.sealed.is_none(),
+                "attempt already admitted or sealed"
+            );
+            let id = if let Some(existing) = existing {
+                existing.session_id
+            } else {
+                let mut employee = employee;
+                let id = employee.session_id;
+                Self::enqueue_employee(state, &mut employee, ticket.clone())?;
+                id
+            };
+            let chain = chain_mut(state, chain_id)?;
+            let attempt = current_attempt(chain, attempt_id, version)?;
+            attempt.employee_id = Some(id);
+            attempt.status = StepStatus::Queued;
+            chain.steps[chain.current_step].status = StepStatus::Queued;
+            chain.status = ChainStatus::Queued;
+            chain.reason = None;
+            audit(
+                chain,
+                ChainActor::Daemon,
+                Uuid::from_u128(dispatch_id.as_u128() ^ 1),
+                "admitted",
+            )?;
+            admitted = Some(id);
+            Ok(())
+        })?;
+        admitted.ok_or_else(|| anyhow!("chain admission missing"))
+    }
+
     /// Shared client/scripting contract. Only a bound attempt can write its
     /// provisional result; chain controls never inherit employee permissions.
     pub fn chain_operation(
@@ -345,6 +421,18 @@ impl BossService {
         caller: Option<Uuid>,
         action: ChainOperation,
         bindings: Option<&[Uuid]>,
+    ) -> Result<EmployeeChain> {
+        self.chain_operation_with_preflight(caller, action, bindings, None)
+    }
+
+    /// Host facts are collected without holding the operation lock, then applied
+    /// with the caller's revision in the same transaction as Resume.
+    pub fn chain_operation_with_preflight(
+        &self,
+        caller: Option<Uuid>,
+        action: ChainOperation,
+        bindings: Option<&[Uuid]>,
+        resume: Option<(Uuid, u64, HandoffVerification)>,
     ) -> Result<EmployeeChain> {
         let owner = caller.is_none_or(|caller| self.has_boss_authority(caller));
         if !owner {
@@ -501,6 +589,27 @@ impl BossService {
                         control != ChainControl::Accept || chain.status == ChainStatus::Paused,
                         "accept requires a paused chain"
                     );
+                    if control == ChainControl::Resume
+                        && let Some((attempt_id, version, verification)) = &resume
+                    {
+                        ensure!(chain.status == ChainStatus::Paused, "resume requires a paused chain");
+                        let attempt = current_attempt(chain, *attempt_id, *version)?;
+                        ensure!(!attempt.handoff_accepted, "handoff changed during verification");
+                        let handoff = attempt.sealed.as_ref().ok_or_else(|| anyhow!("terminal evidence is not sealed"))?;
+                        ensure!(attempt.terminal.as_ref().is_some_and(|terminal| terminal.disposition == ResultDisposition::Success)
+                            && handoff.result.disposition == ResultDisposition::Success, "failed execution requires retry");
+                        let packet = handoff.result.clone();
+                        if let Some(reason) = gate_reason(&chain.steps[chain.current_step], &packet, verification, *version) {
+                            pause(chain, reason);
+                            audit(chain, ChainActor::Daemon, Uuid::new_v4(), "sealed handoff gates rechecked")?;
+                            result = Some(chain.clone());
+                            return Ok(());
+                        }
+                        let attempt = current_attempt(chain, *attempt_id, *version)?;
+                        attempt.handoff_accepted = true;
+                        attempt.status = StepStatus::Succeeded;
+                        chain.steps[chain.current_step].status = StepStatus::Succeeded;
+                    }
                     let step = &mut chain.steps[chain.current_step];
                     let released = step.attempts.last().is_none_or(|attempt| {
                         attempt.employee_id.is_none()

@@ -44,7 +44,8 @@ impl WakuBackend {
                     } else {
                         backend.deliver_pending_agent_prompts();
                     }
-                    let queued = backend.boss.identity_and_session().1.is_some()
+                    let queued = !backend.boss.pending_completion_reports().is_empty()
+                        || backend.boss.identity_and_session().1.is_some()
                         || !backend.boss.queued_heads().is_empty()
                         || !backend.boss.pending_resource_updates().is_empty()
                         || !backend.agent_queue_targets().is_empty();
@@ -341,7 +342,7 @@ impl WakuBackend {
             let heads = self.boss.queued_heads();
             let updates = self.boss.pending_resource_updates();
             if heads.is_empty() && updates.is_empty() {
-                return;
+                break;
             }
             let mut progressed = false;
             for employee in heads {
@@ -372,7 +373,15 @@ impl WakuBackend {
                 }
             }
             if !progressed {
-                return;
+                break;
+            }
+        }
+        // Admission and wave notifications retain their existing order.
+        // In particular, an inline wake during finish must release capacity
+        // and resolve the wave before replaying that finish's report.
+        for report in self.boss.pending_completion_reports() {
+            if let Err(error) = self.deliver_completion_report(report) {
+                eprintln!("could not deliver employee completion: {error:#}");
             }
         }
     }
@@ -804,6 +813,7 @@ impl WakuBackend {
         ticket: &waku_protocol::boss::SummonTicket,
     ) -> anyhow::Result<bool> {
         let session_id = employee.session_id;
+        self.consume_transferred_prompts(session_id)?;
         let current = self
             .boss
             .employee(session_id)
@@ -1524,6 +1534,7 @@ impl WakuBackend {
             force_start: false,
             composer_receipts: Vec::new(),
             pending_prompts: Vec::new(),
+            transferred_prompt_ids: Vec::new(),
             group_id,
             priority,
             outcome_id,
@@ -2351,8 +2362,13 @@ impl WakuBackend {
             bail!("chain attempts requeue through chain controls");
         }
         let (base, started) = self.ticket_base_for(session_id)?;
-        let mut parked = Vec::new();
-        {
+        let already_transferred = self
+            .boss
+            .employee_including_retired(session_id)
+            .and_then(|employee| employee.ticket)
+            .map(|ticket| ticket.transferred_prompt_ids)
+            .unwrap_or_default();
+        let parked = {
             let mut state = self.task_state.lock();
             if let Some(session) = state
                 .sessions
@@ -2360,51 +2376,75 @@ impl WakuBackend {
                 .find(|session| session.id == session_id)
             {
                 self.task_store.hydrate(session)?;
-                // A requeue revives the employee, so its archive flag
-                // clears ahead of admission — clients relist the sidebar
-                // row on the next task-state push instead of leaving live
-                // work filed under the archive.
-                let mut dirty = session.archived_at.take().is_some();
-                if session
+                session
                     .queued_messages
                     .iter()
-                    .any(|queued| queued.is_agent_owned())
-                {
-                    parked = session
-                        .queued_messages
-                        .iter()
-                        .filter(|queued| queued.is_agent_owned())
-                        .map(|queued| queued.content.clone())
-                        .collect();
-                    session
-                        .queued_messages
-                        .retain(|queued| !queued.is_agent_owned());
-                    dirty = true;
-                }
-                if dirty {
-                    session.updated_at = crate::model::unix_time();
-                    state.mark_session_dirty(session_id);
-                    self.task_store.save(&mut state)?;
-                }
+                    .filter(|queued| {
+                        queued.is_agent_owned() && !already_transferred.contains(&queued.id)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
             }
-        }
-        _owner.set(None);
-        self.agent.clear_session(session_id);
+        };
+        let ids = parked.iter().map(|queued| queued.id).collect::<Vec<_>>();
         let (_employee, stale_reservations) =
             self.boss.requeue_employee(session_id, base, |ticket| {
                 if !parked.is_empty() {
-                    let mut combined = parked;
+                    let mut combined = parked
+                        .iter()
+                        .map(|queued| queued.content.clone())
+                        .collect::<Vec<_>>();
                     combined.extend(std::mem::take(&mut ticket.pending_prompts));
                     ticket.pending_prompts = combined;
+                    ticket.transferred_prompt_ids.extend(ids.iter().copied());
                 }
                 adjust(ticket, started);
             })?;
+        _owner.set(None);
+        self.agent.clear_session(session_id);
+        // The accepted ticket is authoritative. Failed cleanup is retried by
+        // dispatch, which still holds the lifecycle lock before any launch.
+        if let Err(error) = self.consume_transferred_prompts(session_id) {
+            eprintln!("could not clean transferred employee prompts: {error:#}");
+        }
         for reservation in stale_reservations {
             if let Ok(broker) = self.resource_broker() {
                 broker.release_admission(session_id, reservation);
             }
         }
         self.wake_summon_queue();
+        Ok(())
+    }
+
+    /// Remove source queue entries only after the ticket owns their content.
+    fn consume_transferred_prompts(&self, session_id: Uuid) -> anyhow::Result<()> {
+        let ids = self
+            .boss
+            .employee(session_id)
+            .and_then(|employee| employee.ticket)
+            .map(|ticket| ticket.transferred_prompt_ids)
+            .unwrap_or_default();
+        let mut state = self.task_state.lock();
+        if let Some(session) = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        {
+            self.task_store.hydrate(session)?;
+            let archived = session.archived_at.take().is_some();
+            let previous_count = session.queued_messages.len();
+            session
+                .queued_messages
+                .retain(|queued| !ids.contains(&queued.id));
+            // A failed save may already have removed the entries in memory.
+            // Persist again while the ticket still records the transfer.
+            if archived || previous_count != session.queued_messages.len() || !ids.is_empty() {
+                state.mark_session_dirty(session_id);
+                self.task_store.save(&mut state)?;
+            }
+        }
         Ok(())
     }
 
@@ -2539,6 +2579,7 @@ impl WakuBackend {
                 force_start: false,
                 composer_receipts: Vec::new(),
                 pending_prompts: Vec::new(),
+                transferred_prompt_ids: Vec::new(),
                 group_id: None,
                 priority: None,
                 outcome_id: None,
@@ -2621,6 +2662,24 @@ impl WakuBackend {
         report_trigger: Option<crate::model::ReportTrigger>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
+        self.deliver_employee_report_with_id(target, prompt, sender, report_trigger, None, events)
+    }
+
+    pub(super) fn deliver_employee_report_with_id(
+        &self,
+        target: Uuid,
+        prompt: String,
+        sender: Uuid,
+        report_trigger: Option<crate::model::ReportTrigger>,
+        queued_id: Option<Uuid>,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
+        let report_trigger = report_trigger.map(|mut trigger| {
+            if let Some(id) = queued_id {
+                trigger.event_id = id;
+            }
+            trigger
+        });
         let report_trigger = report_trigger.map(|mut trigger| {
             let state = self.task_state.lock();
             trigger.reference_context = state
@@ -2647,7 +2706,7 @@ impl WakuBackend {
                 prompt,
                 Some(sender),
                 true,
-                None,
+                queued_id,
                 report_trigger,
                 events,
             );
@@ -2661,6 +2720,18 @@ impl WakuBackend {
             && self.agent.has_open_turn(target)
             && driver.supports_steer()
         {
+            if let Some(id) = queued_id {
+                mirror_agent_queued_prompt(
+                    &self.task_state,
+                    &self.task_store,
+                    target,
+                    id,
+                    &prompt,
+                    Some(sender),
+                    true,
+                    report_trigger.clone(),
+                )?;
+            }
             let transport = agent_prompt_envelope(&self.task_state, target, Some(sender), &prompt);
             self.agent.record_pending_steer(
                 target,
@@ -2668,8 +2739,9 @@ impl WakuBackend {
                     prompt: prompt.clone(),
                     transport: transport.clone(),
                     sender: Some(sender),
-                    // A direct steer never parks — no chip to mirror.
-                    queued_id: None,
+                    // Durable completion reports retain their mirrored id
+                    // until the provider accepts this steer.
+                    queued_id,
                     submission_id: None,
                     context: None,
                     hidden: true,
@@ -2687,7 +2759,7 @@ impl WakuBackend {
             prompt,
             Some(sender),
             true,
-            None,
+            queued_id,
             report_trigger,
             events,
         )

@@ -118,7 +118,7 @@ pub(super) fn enrich_leaf(path: &str, mut leaf: Value) -> Value {
             "--group-id".into(),
             json!({"type":"string","optional":true,"notes":"Wave reports once all members finish"}),
         );
-        object.insert("--priority".into(), json!({"type":"integer","minimum":i64::MIN,"maximum":i64::MAX,"optional":true,"notes":"Stored scheduling hint; FIFO ordering unchanged"}));
+        object.insert("--priority".into(), json!({"type":"integer","minimum":i64::MIN,"maximum":i64::MAX,"optional":true,"notes":"Higher priority attempts admission first; sequence breaks ties; human start-now takes precedence"}));
         object.insert(
             "--outcome-id".into(),
             json!({"type":"UUID","optional":true,"conflictsWith":"--new-outcome-json[-file]"}),

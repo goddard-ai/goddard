@@ -239,22 +239,20 @@ impl WakuBackend {
             BossOperation::InstructionPin { action } => self.handle_instruction_pin(caller, action),
             BossOperation::Chain { action } => {
                 use waku_protocol::chains::{ChainControl, ChainOperation};
-                // Resume on a gate-paused chain re-verifies the sealed
-                // handoff against live host facts before the control runs —
-                // outside the operation lock so its git checks never
-                // serialize boss writes. A gate that still fails reports
-                // the re-paused state; a repaired gate lets Resume advance.
-                if let ChainOperation::Control {
-                    chain_id,
-                    control: ChainControl::Resume,
-                    ..
-                } = &action
-                    && self.chain_resume_recheck(*chain_id)?
-                {
-                    return Ok(BossResult::State {
-                        state: self.boss.document(),
-                    });
+                anyhow::ensure!(
+                    matches!(action, ChainOperation::RecordResult { .. })
+                        || caller.is_none_or(|id| self.boss.has_boss_authority(id)),
+                    "only the boss or a human can inspect or control chains"
+                );
+                if let ChainOperation::Control { chain_id, expected_revision, .. } = &action {
+                    let document = self.boss.document();
+                    let chain = document.chains.iter().find(|chain| chain.id == *chain_id)
+                        .ok_or_else(|| anyhow!("unknown chain"))?;
+                    anyhow::ensure!(chain.revision == *expected_revision, "stale chain revision");
                 }
+                let resume = if let ChainOperation::Control { chain_id, control: ChainControl::Resume, .. } = &action {
+                    self.chain_resume_verification(*chain_id)?
+                } else { None };
                 // A symbolic retry source resolves against live Git state
                 // now — outside the operation lock like the other Git
                 // checks — so the durable attempt base stays a commit id.
@@ -368,21 +366,7 @@ impl WakuBackend {
                         project_bindings = steps.iter().map(|step| step.project_id).collect();
                     }
                     let is_result = matches!(action, ChainOperation::RecordResult { .. });
-                    // Resume on a gate-paused chain re-verifies the sealed
-                    // handoff first — a gate that still fails reports the
-                    // re-paused state instead of the control's retry bail.
-                    if let ChainOperation::Control {
-                        chain_id,
-                        control: ChainControl::Resume,
-                        ..
-                    } = &action
-                        && self.chain_resume_recheck(*chain_id)?
-                    {
-                        return Ok(BossResult::State {
-                            state: self.boss.document(),
-                        });
-                    }
-                    self.boss.chain_operation_with_project_bindings(caller, action, Some(&project_bindings))?;
+                    self.boss.chain_operation_with_preflight(caller, action, Some(&project_bindings), resume)?;
                     if is_result {
                         Ok(BossResult::Saved)
                     } else {
@@ -795,7 +779,9 @@ impl WakuBackend {
                     }
                     use waku_protocol::boss::EmployeeLifecycle;
                     match self.boss.employee_lifecycle(session_id) {
-                        Some(EmployeeLifecycle::Queued) => {
+                        Some(EmployeeLifecycle::Queued)
+                            if self.boss.employee(session_id).is_some_and(|employee| employee.ticket.is_some()) =>
+                        {
                             return self.control_queued_employee(caller, session_id, action);
                         }
                         Some(EmployeeLifecycle::Dispatching) => {
@@ -866,6 +852,11 @@ impl WakuBackend {
                             session_id,
                             permissions.clone(),
                         )?;
+                        let current = self.boss.employee(session_id).ok_or_else(|| anyhow!("employee disappeared after grant update"))?;
+                        let capabilities_changed = previous.as_ref().is_some_and(|previous|
+                            previous.permissions.integration_ids != current.permissions.integration_ids
+                                || previous.permissions.computer_use != current.permissions.computer_use);
+                        if capabilities_changed { self.integrations.revoke_task(session_id); }
                         if let Some(previous) = previous
                             && previous.assignment_kind
                                 == waku_protocol::boss::PlanAssignmentKind::Implementation
@@ -875,6 +866,12 @@ impl WakuBackend {
                                     .ok_or_else(|| anyhow!("employee disappeared after grant update"))?.permissions)?
                         {
                             self.retire_plan_runtime(session_id, events)?;
+                        } else if capabilities_changed && !current.expired() {
+                            let interrupted = self.agent.has_open_turn(session_id);
+                            self.retire_employee_runtime(session_id, "Employee permissions changed; existing work is retained.", events)?;
+                            if interrupted {
+                                self.queue_agent_prompt(session_id, "Your supervisor updated your permissions. Verify the state of your partial work and continue under the current grants.".into(), caller, events)?;
+                            }
                         }
                         // The employee's next prompt re-injects its persona
                         // block so the revised grants reach it — and its
@@ -1733,9 +1730,8 @@ impl WakuBackend {
     /// The teardown after `begin_finishing` — also driven directly by
     /// restart recovery for records already parked at `finishing`. The
     /// steps tolerate a resumed run: teardown no-ops on a missing
-    /// runtime, `complete_expiry` takes the reservation exactly once,
-    /// and the report goes out only while the record can still be read
-    /// as finishing.
+    /// runtime, and expiry commits the report and released reservations
+    /// together. Delivery retries from that snapshot with a stable message id.
     pub(super) fn finish_boss_employee_tail(
         &self,
         session_id: Uuid,
@@ -1881,6 +1877,7 @@ impl WakuBackend {
             }
         }
         let expiry = waku_protocol::boss::EmployeeExpiry {
+            completion_report_id: None,
             cause,
             resumable: cause.resumable(),
             parked_prompts,
@@ -1891,42 +1888,74 @@ impl WakuBackend {
         // the winning expiry, and the broker's release keeps resident
         // devices under their own retention rules. Waking the scheduler
         // is what pulls the next queued ticket forward.
-        let completion = self
-            .boss
-            .complete_expiry(session_id, Some(expiry.clone()))?;
-        for reservation in completion.reservations {
+        let completion = self.boss.complete_expiry_with_report(
+            session_id,
+            expiry,
+            body,
+            failed,
+            final_message,
+            settle,
+        )?;
+        for reservation in &completion.reservations {
             if let Ok(broker) = self.resource_broker() {
-                broker.release_admission(session_id, reservation);
+                broker.release_admission(session_id, *reservation);
             }
         }
         self.wake_summon_queue();
-        eprintln!(
-            "employee {session_id} expired — cause {}, resumable {}, parked {}, pending question {}",
-            expiry.cause.label(),
-            expiry.resumable,
-            expiry.parked_prompts,
-            expiry.pending_question.is_some()
-        );
-        // Re-read the expired record — it now carries the refined settle
-        // detail (cause, leftovers, resumability) the report keys on.
-        let employee = self
+        if let Some(id) = completion.report_id
+            && let Some(report) = self
+                .boss
+                .pending_completion_reports()
+                .into_iter()
+                .find(|report| report.id == id)
+        {
+            self.deliver_completion_report(report)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn deliver_completion_report(
+        &self,
+        report: waku_protocol::boss::EmployeeCompletionReport,
+    ) -> anyhow::Result<()> {
+        let lifecycle = self.runtime_lifecycles.session(report.employee.session_id);
+        let _owner = lifecycle.lock();
+        if !self
             .boss
-            .employee(session_id)
-            .unwrap_or_else(|| employee.clone());
+            .pending_completion_reports()
+            .iter()
+            .any(|pending| pending.id == report.id)
+        {
+            return Ok(());
+        }
+        let waku_protocol::boss::EmployeeCompletionReport {
+            id,
+            settle,
+            employee,
+            assignment: assignment_finish,
+            body,
+            failed,
+            final_message,
+            reservations,
+        } = report;
+        let session_id = employee.session_id;
+        for reservation in reservations {
+            self.resource_broker()?
+                .release_admission(session_id, reservation);
+        }
         // A chain-bound expiry takes the sealed-handoff path — the chain
         // owns the silence, the successor's admission, and any exception
         // the seal owes. An adapter error still suppresses the ordinary
         // report: duplicated evidence is better than a wrong wake.
         match self.finish_chain_attempt(&employee, settle, failed, &final_message) {
             Ok(true) => {
+                self.boss.completion_report_delivered(id)?;
                 self.deliver_wave_notifications();
                 return Ok(());
             }
             Ok(false) => {}
             Err(error) => {
-                eprintln!("chain finish path failed for {session_id}: {error:#}");
-                self.deliver_wave_notifications();
-                return Ok(());
+                return Err(error);
             }
         }
         let expiry = employee.expiry.as_ref();
@@ -1942,7 +1971,6 @@ impl WakuBackend {
         // A cancelled record expired on a supervisor's stop — intentional,
         // already visible on the record, and not a failure. It never wakes
         // the supervisor: whoever stopped it already knows.
-        let assignment_finish = completion.assignment;
         let continuation = self.boss.plan_continuation_context(&employee);
         // A linked assignment's success semantics sit above the work-kind
         // switch: an ordinary success always hands off with its intent, a
@@ -1959,7 +1987,10 @@ impl WakuBackend {
                 || employee.blocker.is_some()
                 || failed
                 || interrupted);
-        if reports && let Some(supervisor) = self.boss.report_target(&employee) {
+        if reports {
+            let Some(supervisor) = self.boss.report_target(&employee) else {
+                return Ok(());
+            };
             use waku_protocol::boss::ExpiryCause;
             let cause = expiry.map(|expiry| expiry.cause);
             // A repeat interruption names its ordinal — a crash loop
@@ -2088,15 +2119,20 @@ impl WakuBackend {
             };
             let trigger = crate::model::ReportTrigger::new(&employee, kind);
             let events = self.event_source.lock().clone();
+            if self.try_boss_lineage_message_landed(supervisor, id)? {
+                self.boss.completion_report_delivered(id)?;
+                return Ok(());
+            }
             if interrupted {
                 // Interruption reports take the blocker path — they reach
                 // a busy supervisor mid-turn rather than queueing behind
                 // its work.
-                self.deliver_employee_report(
+                self.deliver_employee_report_with_id(
                     supervisor,
                     prompt,
                     session_id,
                     Some(trigger),
+                    Some(id),
                     &events,
                 )?;
             } else {
@@ -2105,12 +2141,13 @@ impl WakuBackend {
                     prompt,
                     Some(session_id),
                     true,
-                    None,
+                    Some(id),
                     Some(trigger),
                     &events,
                 )?;
             }
         }
+        self.boss.completion_report_delivered(id)?;
         // This finish may have resolved a wave — drain its notice.
         self.deliver_wave_notifications();
         Ok(())

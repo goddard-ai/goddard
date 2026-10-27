@@ -75,6 +75,11 @@ composerReceipts?: Array<EmployeeComposerReceipt>,
  */
 pendingPrompts?: Array<string>,
 /**
+ * Source queue entries already transferred into pending_prompts. Dispatch
+ * removes their old mirror before delivery, including after a crash.
+ */
+transferredPromptIds?: Array<string>,
+/**
  * Optional wave/group id — every ticket admitted under the same id
  * is a wave member; the daemon notifies the supervisor once when
  * the membership goes all-terminal.
