@@ -21,6 +21,8 @@ mod terminal_writer;
 pub use terminal_writer::TerminalWriterOrigin;
 mod native_writer;
 pub use native_writer::NativeWriterOrigin;
+mod checkpoint_writer;
+pub use checkpoint_writer::CheckpointWriterOrigin;
 pub use stable_stop::{StableIngressOwner, StableStopIntent, StableStopRecord};
 
 use std::collections::{BTreeMap, HashMap, HashSet};

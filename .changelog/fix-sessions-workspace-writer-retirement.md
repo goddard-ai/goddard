@@ -1,1 +1,1 @@
-- Archive snapshots and workspace removal now defer while an observed provider writer is running or its stop remains unconfirmed, including after its task runtime has been detached.
+- Archive snapshots and workspace removal defer while an observed provider or checkpoint capture is active or unconfirmed. New checkpoints captured after a turn finishes retain that protection across backend replacement.

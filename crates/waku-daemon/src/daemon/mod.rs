@@ -484,6 +484,8 @@ struct RuntimeLifecycles {
     retired_writers: Mutex<workspace_writers::RetiredWriters>,
     /// Qualified native completion receipts whose durable write needs retry.
     native_confirmations: Mutex<HashSet<Uuid>>,
+    /// Physically completed checkpoint attempts whose durable receipt needs retry.
+    checkpoint_confirmations: Mutex<HashSet<Uuid>>,
     locks: Mutex<HashMap<Uuid, Arc<ReentrantMutex<std::cell::Cell<Option<Uuid>>>>>>,
     shutting_down: std::sync::atomic::AtomicBool,
     #[cfg(test)]
@@ -716,6 +718,7 @@ mod catalog_ops;
 mod chain_exec;
 mod chain_handoff;
 mod checkout_history;
+mod checkpoint_writers;
 mod driver_commands;
 mod events;
 mod idle;

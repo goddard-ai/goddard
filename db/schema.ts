@@ -314,3 +314,19 @@ export const nativeWorkspaceWriters = sqliteTable(
   (table) => [index("native_unconfirmed_writers").on(table.originId)
     .where(sql`${table.confirmed} is not 1`)],
 );
+
+/** A Git checkpoint attempt stays a writer until its own physical capture is known quiet. */
+export const checkpointWorkspaceWriters = sqliteTable(
+  "checkpoint_workspace_writers",
+  {
+    originId: text("origin_id").primaryKey(),
+    sessionId: text("session_id").notNull(),
+    turnCount: integer("turn_count").notNull(),
+    workspace: text("workspace").notNull(),
+    identity: text("identity"),
+    confirmed: integer("confirmed").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [index("checkpoint_unconfirmed_writers").on(table.originId)
+    .where(sql`${table.confirmed} is not 1`)],
+);

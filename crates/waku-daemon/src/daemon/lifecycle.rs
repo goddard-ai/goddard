@@ -614,6 +614,7 @@ impl WakuBackend {
         );
 
         let capture_started = std::time::Instant::now();
+        let origin = self.record_checkpoint_writer_before_capture(&cwd, session_id, turn_count)?;
         *physical_writer_quiet = false;
         let checkpoint = if untouched {
             crate::checkpoint::capture_untouched_turn(&cwd, session_id, turn_count)?
@@ -627,6 +628,7 @@ impl WakuBackend {
         // Capture returned successfully after its command/readers completed.
         // Durable checkpoint persistence is a separate obligation below.
         *physical_writer_quiet = true;
+        self.confirm_checkpoint_writer_after_capture(origin);
         // The transcript holds a "checking for changes" card open for this
         // round trip — the elapsed line is the only record of how long the
         // worktree snapshot actually took.

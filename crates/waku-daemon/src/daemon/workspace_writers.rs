@@ -14,7 +14,7 @@ pub(super) struct TerminalWriterEvents {
     pub lifecycles: Arc<RuntimeLifecycles>,
 }
 
-fn terminal_directory_identity(path: &Path) -> anyhow::Result<String> {
+pub(super) fn terminal_directory_identity(path: &Path) -> anyhow::Result<String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -412,6 +412,7 @@ impl WakuBackend {
                 "workspace cleanup deferred: a durable native writer has no confirmed completion"
             );
         }
+        self.require_no_observed_checkpoint_writers(&target)?;
         let terminal_origins = self.task_store.terminal_writer_origins()?;
         anyhow::ensure!(
             terminal_origins.len() < 65,

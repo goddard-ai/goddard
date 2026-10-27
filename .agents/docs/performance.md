@@ -175,6 +175,20 @@
 - Daemon turn checkpoints register workspace-writer evidence before waiting for
   their capture lock, and retain it through Git capture and durable checkpoint
   persistence. Cleanup must check that evidence even after the provider exits.
+  Publish owed work by canonical workspace/session/turn before waiting; only a
+  matching successful retry clears that debt. Failures before Git or after Git
+  successfully finishes keep persistence debt without inventing physical work.
+  New ending captures also commit an immutable physical-attempt origin before
+  their first Git operation. Deduped reads create no origin. Successful capture
+  confirms only its own attempt, independently of checkpoint persistence; a new
+  capture for the same turn cannot clear an older unconfirmed attempt. Failed
+  completion writes retry from at most 64 local receipts before new captures
+  and positive quiet checks. The indexed durable inventory reads at most 65
+  rows and defers incomplete, corrupt or unlocatable evidence after reopen.
+  This uses the existing capture-quiet evidence; legacy/orphan reconciliation,
+  durable recovery of owed metadata, queued desktop captures and final workspace
+  admission remain required. Checkpoint success never erases unrelated unknown
+  providers.
 - Native driver factories record an immutable attempt origin before contact,
   including factories that fail after starting work. Task/runtime removal and
   runtime-id reuse do not retire that origin. Only the selected attempt's
@@ -187,15 +201,6 @@
   existing adapter witness semantics, not stronger descendant evidence.
   This supplies restart accounting, not cross-daemon admission, legacy-origin
   reconstruction or a complete physical-writer/removal proof.
-  Successful capture confirms completion. Publish owed checkpoint work, keyed
-  by canonical workspace/session/turn, before waiting for its lock. Errors before
-  spawning Git or after successful Git completion retain that debt without
-  inventing an unknown physical writer; only a matching successful retry clears
-  it. An error during Git capture still retains unqualified writer evidence per
-  workspace. Checkpoint success must never erase unrelated unknown providers.
-  These process-local preconditions do not replace destructive workspace
-  admission, durable failure recovery, or queued desktop work that has not yet
-  reached the daemon.
 - Checkpoint caches use a versioned namespace: older binaries must not read
   generation metadata while continuing to mutate their old fixed index. Keep
   legacy cache files untouched. Each worktree has an OS file gate in addition
