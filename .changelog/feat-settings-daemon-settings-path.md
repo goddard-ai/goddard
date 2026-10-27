@@ -1,0 +1,1 @@
+- Standalone daemons accept `--settings-path PATH` to select a separate settings file.

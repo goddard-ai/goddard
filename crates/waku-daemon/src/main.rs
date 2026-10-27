@@ -1,5 +1,6 @@
 use std::io::Write as _;
 use std::net::{SocketAddr, TcpListener};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -14,6 +15,7 @@ fn main() -> anyhow::Result<()> {
     // Register the embedded locale catalog with waku-protocol before any wire
     // type renders text in this process.
     waku_daemon::i18n::install();
+    let arguments = Arguments::parse(std::env::args().skip(1))?;
     waku_daemon::command_env::raise_open_file_limit();
     let mut migration = waku_protocol::migration::migrate_home_directory();
     migration.extend(waku_daemon::migration::migrate_data_directory());
@@ -28,7 +30,6 @@ fn main() -> anyhow::Result<()> {
     for skipped in &migration.skipped {
         eprintln!("Goddard: left legacy item {} unmigrated", skipped.display());
     }
-    let arguments = Arguments::parse(std::env::args().skip(1))?;
     let token = std::env::var(DAEMON_TOKEN_ENV)
         .context("Goddard daemon authentication token is missing")?;
     // The bearer capability belongs only to this server process. Remove it
@@ -75,7 +76,9 @@ fn main() -> anyhow::Result<()> {
     // the only trace a wedged handler leaves.
     waku_daemon::stats::install_panic_log(task_path.parent().unwrap_or(&task_path));
     let settings = waku_daemon::DaemonSettingsStore::open_with_legacy(
-        waku_daemon::DaemonSettings::default_path(),
+        arguments
+            .settings_path
+            .unwrap_or_else(waku_daemon::DaemonSettings::default_path),
         [task_path.with_file_name("settings.json")],
     )
     .context("could not load daemon settings")?;
@@ -119,6 +122,7 @@ fn ensure_bind_allowed(address: SocketAddr, allow_non_loopback: bool) -> anyhow:
 struct Arguments {
     bind: String,
     parent_pid: Option<u32>,
+    settings_path: Option<PathBuf>,
     allowed_origins: Vec<String>,
     allow_non_loopback: bool,
 }
@@ -127,6 +131,7 @@ impl Arguments {
     fn parse(arguments: impl IntoIterator<Item = String>) -> anyhow::Result<Self> {
         let mut bind = "127.0.0.1:0".to_owned();
         let mut parent_pid = None;
+        let mut settings_path = None;
         let mut allowed_origins = Vec::new();
         let mut allow_non_loopback = false;
         let mut arguments = arguments.into_iter();
@@ -136,6 +141,14 @@ impl Arguments {
                     bind = arguments
                         .next()
                         .ok_or_else(|| anyhow!("--bind requires an address"))?;
+                }
+                "--settings-path" => {
+                    settings_path = Some(PathBuf::from(
+                        arguments
+                            .next()
+                            .filter(|path| !path.is_empty())
+                            .ok_or_else(|| anyhow!("--settings-path requires a file path"))?,
+                    ));
                 }
                 "--parent-pid" => {
                     parent_pid = Some(
@@ -158,7 +171,7 @@ impl Arguments {
                 }
                 "--help" | "-h" => {
                     println!(
-                        "usage: {} [--bind ADDRESS] [--allow-non-loopback] [--parent-pid PID] [--allow-origin ORIGIN]...",
+                        "usage: {} [--bind ADDRESS] [--allow-non-loopback] [--parent-pid PID] [--settings-path PATH] [--allow-origin ORIGIN]...",
                         env!("CARGO_BIN_NAME")
                     );
                     std::process::exit(0);
@@ -169,6 +182,7 @@ impl Arguments {
         Ok(Self {
             bind,
             parent_pid,
+            settings_path,
             allowed_origins,
             allow_non_loopback,
         })
@@ -203,6 +217,25 @@ mod tests {
             ["https://app.waku.test", "http://localhost:3000"]
         );
         assert!(!arguments.allow_non_loopback);
+    }
+
+    #[test]
+    fn settings_path_is_explicit_and_preserves_the_default_when_omitted() {
+        assert!(
+            Arguments::parse(Vec::<String>::new())
+                .unwrap()
+                .settings_path
+                .is_none()
+        );
+        let path = PathBuf::from("/fixture/settings with spaces.json");
+        let arguments = Arguments::parse([
+            "--settings-path".into(),
+            path.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert_eq!(arguments.settings_path, Some(path));
+        assert!(Arguments::parse(["--settings-path".into()]).is_err());
+        assert!(Arguments::parse(["--settings-path".into(), String::new()]).is_err());
     }
 
     #[test]

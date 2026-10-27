@@ -133,3 +133,21 @@
   pump, the pulse clock (`crates/waku-ui/src/ui/motion.rs`), veils, overlay scrollbars, pane
   caching, or anything else a streaming frame reaches; it also records the
   counter-based measurement playbook that actually finds regressions.
+
+## Isolated desktop measurements
+
+A separate task database is insufficient isolation: daemon settings default to
+`~/.goddard/settings.json` even with `GODDARD_DATA_DIR`. Fixture daemons must pass
+`--settings-path` explicitly. The flag selects that file; home migration and
+provider configuration synchronization still use their normal locations.
+
+On macOS, prepare an owned bundle copy with freshly built binaries and verified
+signatures. Keep existing watchers and their bundles untouched. Restrict the
+fixture process and descendants from home-directory reads, writes outside the
+fixture, and external networking; verify the policy with owned probes before
+launching. Sandbox path filters must use canonical paths (`/private/var/...`,
+not the `/var/...` symlink). Reserve desktop input for the launch/measurement
+phase and stop owned fixture processes afterward. Use window metadata, native
+stack samples and counters without screenshots. Record source/binary identity,
+workload sizes, contention and coverage limits. An event-loop wait in one sample
+cannot establish frame latency or provider behavior under pressure.

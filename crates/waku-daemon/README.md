@@ -9,8 +9,12 @@ prints one JSON readiness record to stdout containing its address, protocol
 version, and process ID.
 
 ```text
-GODDARD_DAEMON_TOKEN=<secret> goddard-daemon --bind 127.0.0.1:0 [--parent-pid PID] [--allow-origin ORIGIN]...
+GODDARD_DAEMON_TOKEN=<secret> goddard-daemon --bind 127.0.0.1:0 [--parent-pid PID] [--settings-path PATH] [--allow-origin ORIGIN]...
 ```
+
+Pass `--settings-path PATH` to choose a daemon settings file. The default remains
+`~/.goddard/settings.json`. Set task-database location overrides separately;
+provider configuration keeps its usual home-directory locations.
 
 Goddard Desktop supervises this process. Debug builds use the feature-gated
 `goddard-debug-daemon` target at `target/debug/goddard-debug-daemon`, so rebuilding
