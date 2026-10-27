@@ -11,6 +11,7 @@ use driver::{WriterCompletion, WriterCompletionState};
 pub(super) struct TerminalWriterEvents {
     pub events: EventSink,
     pub store: Arc<StateStore>,
+    pub lifecycles: Arc<RuntimeLifecycles>,
 }
 
 fn terminal_directory_identity(path: &Path) -> anyhow::Result<String> {
@@ -32,11 +33,16 @@ impl crate::terminal::TerminalEventSink for TerminalWriterEvents {
     fn before_spawn(&self, cwd: &Path) -> anyhow::Result<()> {
         let workspace = dunce::canonicalize(cwd)?;
         let identity = terminal_directory_identity(&workspace)?;
+        // Commit the durable origin while publication is excluded by the
+        // same short gate that admits destructive workspace operations.
+        let writers = self.lifecycles.retired_writers.lock();
+        writers.require_admission(&workspace)?;
         self.store
             .record_terminal_writer(&crate::persistence::TerminalWriterOrigin {
                 workspace,
                 identity,
             })?;
+        drop(writers);
         Ok(())
     }
 
@@ -54,6 +60,7 @@ pub(super) struct CheckpointCaptureKey {
 
 #[derive(Default)]
 pub(super) struct RetiredWriters {
+    retiring: HashMap<Uuid, PathBuf>,
     pending: Vec<(PathBuf, WriterCompletion)>,
     // An unqualified transport leaves one conservative marker per workspace,
     // rather than retaining a driver or accumulating one marker per restart.
@@ -62,6 +69,37 @@ pub(super) struct RetiredWriters {
     // Git work is known quiet. Matching successful retries can fulfill it;
     // they must never erase the unrelated unknown-provider set above.
     checkpoints: HashSet<CheckpointCaptureKey>,
+}
+
+impl RetiredWriters {
+    fn require_admission(&self, path: &Path) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.retiring.values().any(|root| paths_overlap(path, root)),
+            "workspace admission deferred: an intersecting workspace operation is in progress"
+        );
+        Ok(())
+    }
+}
+
+fn paths_overlap(left: &Path, right: &Path) -> bool {
+    left.starts_with(right) || right.starts_with(left)
+}
+
+/// A process-local admission fence, not durable archive authority or proof
+/// about writers belonging to another daemon. No registry lock spans Git I/O.
+pub(super) struct WorkspaceRetirement {
+    lifecycles: Arc<RuntimeLifecycles>,
+    id: Uuid,
+}
+
+impl Drop for WorkspaceRetirement {
+    fn drop(&mut self) {
+        self.lifecycles
+            .retired_writers
+            .lock()
+            .retiring
+            .remove(&self.id);
+    }
 }
 
 /// Keep attempted launches visible before a RuntimeEntry exists. A failed
@@ -169,16 +207,18 @@ impl RuntimeLifecycles {
         self: &Arc<Self>,
         cwd: &Path,
         witness: WriterCompletion,
-    ) -> StartingWriter {
+    ) -> anyhow::Result<StartingWriter> {
+        let cwd = dunce::canonicalize(cwd).unwrap_or_else(|_| cwd.to_owned());
         let mut writers = self.retired_writers.lock();
+        writers.require_admission(&cwd)?;
         writers
             .pending
             .retain(|(_, witness)| witness.state() != WriterCompletionState::Confirmed);
-        writers.pending.push((cwd.to_owned(), witness.clone()));
-        StartingWriter {
+        writers.pending.push((cwd, witness.clone()));
+        Ok(StartingWriter {
             lifecycles: Arc::clone(self),
             witness,
-        }
+        })
     }
 
     /// Call while holding the runtime map lock, before removal becomes visible.
@@ -223,6 +263,28 @@ impl RuntimeLifecycles {
 }
 
 impl WakuBackend {
+    /// Exclude intersecting local writer admissions before checking quiet, and
+    /// retain the reservation through the caller's complete filesystem effect.
+    /// Cross-daemon admission and archive-generation checks remain separate.
+    pub(super) fn begin_workspace_retirement(
+        &self,
+        path: &Path,
+    ) -> anyhow::Result<WorkspaceRetirement> {
+        let target = dunce::canonicalize(path)?;
+        let id = Uuid::new_v4();
+        {
+            let mut writers = self.runtime_lifecycles.retired_writers.lock();
+            writers.require_admission(&target)?;
+            writers.retiring.insert(id, target.clone());
+        }
+        let retirement = WorkspaceRetirement {
+            lifecycles: Arc::clone(&self.runtime_lifecycles),
+            id,
+        };
+        self.require_no_observed_workspace_writers(&target)?;
+        Ok(retirement)
+    }
+
     /// Worker-only: normalize aliases outside the runtime locks, then reject
     /// removal while an observed provider is live or its stop is unconfirmed.
     /// Successful return does not authorize deletion or exclude a new launch;
@@ -353,7 +415,8 @@ while not pathlib.Path('release-' + name).exists():
             let (events, receiver) = driver::test_event_channel();
             let starting = backend
                 .runtime_lifecycles
-                .observe_starting_writer(&worktree, events.writer_completion());
+                .observe_starting_writer(&worktree, events.writer_completion())
+                .unwrap();
             assert!(
                 backend
                     .require_no_observed_workspace_writers(&alias)
@@ -788,6 +851,23 @@ while not pathlib.Path('release-' + name).exists():
             .last()
             .unwrap()
             .turn_count;
+        // A queued capture cannot start Git while retirement owns admission.
+        // Its obligation survives denial and a subsequent retry fulfills it.
+        let retirement = backend.begin_workspace_retirement(&path).unwrap();
+        let error = backend
+            .capture_turn_checkpoint(path.clone(), session, count, false)
+            .unwrap_err();
+        assert!(error.to_string().contains("workspace admission deferred"));
+        assert_eq!(
+            backend
+                .runtime_lifecycles
+                .retired_writers
+                .lock()
+                .checkpoints
+                .len(),
+            1
+        );
+        drop(retirement);
         rusqlite::Connection::open(backend.task_store.path()).unwrap().execute_batch(
             "CREATE TRIGGER fail_checkpoint BEFORE UPDATE ON session_details BEGIN SELECT RAISE(ABORT, 'fixture checkpoint persistence failure'); END;"
         ).unwrap();
@@ -821,7 +901,8 @@ while not pathlib.Path('release-' + name).exists():
         // a checkpoint retry, even in the same workspace.
         let unknown = backend
             .runtime_lifecycles
-            .observe_starting_writer(&path, WriterCompletion::default());
+            .observe_starting_writer(&path, WriterCompletion::default())
+            .unwrap();
         drop(unknown);
         rusqlite::Connection::open(backend.task_store.path())
             .unwrap()
@@ -906,7 +987,8 @@ while not pathlib.Path('release-' + name).exists():
         let (events, received) = driver::test_event_channel();
         let starting = backend
             .runtime_lifecycles
-            .observe_starting_writer(&path, events.writer_completion());
+            .observe_starting_writer(&path, events.writer_completion())
+            .unwrap();
         events.send(DriverEvent::ProcessExited).unwrap();
         assert!(matches!(
             received.recv().unwrap(),

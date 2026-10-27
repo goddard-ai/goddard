@@ -329,3 +329,81 @@ fn nested_worktree_removal_checks_writers_across_the_entire_git_root() {
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn retirement_excludes_local_writer_admissions_and_releases_after_failure() {
+    let root = std::env::temp_dir().join(format!("workspace-admission-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let workspace = root.join("repo");
+    let nested = workspace.join("nested");
+    let unrelated = root.join("unrelated");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::create_dir_all(&unrelated).unwrap();
+    let alias = root.join("alias");
+    std::os::unix::fs::symlink(&nested, &alias).unwrap();
+    let marker = root.join("spawned");
+    let backend = backend.with_terminal_shell(alacritty_terminal::tty::Shell::new(
+        "/bin/sh".into(),
+        vec![
+            "-c".into(),
+            "printf child > \"$1\"".into(),
+            "fixture".into(),
+            marker.to_string_lossy().into_owned(),
+        ],
+    ));
+    let retirement = backend.begin_workspace_retirement(&workspace).unwrap();
+    // An alias and an ancestor both intersect the reservation; siblings do not.
+    for path in [&alias, &root] {
+        let error = backend
+            .runtime_lifecycles
+            .observe_starting_writer(path, driver::WriterCompletion::default())
+            .err()
+            .expect("intersecting provider admission was allowed");
+        assert!(error.to_string().contains("workspace admission deferred"));
+        assert!(backend.begin_workspace_retirement(path).is_err());
+    }
+    let other = backend.begin_workspace_retirement(&unrelated).unwrap();
+    drop(other);
+    let error = backend
+        .open_terminal(&alias, 80, 24, EventSink::detached(), None)
+        .err()
+        .expect("terminal admission was allowed during retirement");
+    assert!(error.to_string().contains("workspace admission deferred"));
+    assert!(!marker.exists());
+    assert!(
+        backend
+            .task_store
+            .terminal_writer_origins()
+            .unwrap()
+            .is_empty()
+    );
+    drop(retirement);
+    let retry = backend.begin_workspace_retirement(&workspace).unwrap();
+    drop(retry);
+    let terminal = backend
+        .open_terminal(&alias, 80, 24, EventSink::detached(), None)
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !marker.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "admitted terminal did not run"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    drop(terminal);
+    // Quiet-check failure must release its reservation, without clearing the
+    // durable unqualified terminal origin or blocking unrelated operations.
+    assert!(backend.begin_workspace_retirement(&workspace).is_err());
+    let witness = driver::WriterCompletion::default();
+    witness.register();
+    let admitted = backend
+        .runtime_lifecycles
+        .observe_starting_writer(&workspace, witness.clone())
+        .expect("failed quiet check retained its admission reservation");
+    witness.confirm();
+    drop(admitted);
+    drop(backend.begin_workspace_retirement(&unrelated).unwrap());
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}

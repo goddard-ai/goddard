@@ -1889,28 +1889,28 @@ impl Backend for WakuBackend {
             Command::Workspace { operation } => {
                 if let WorkspaceOperation::RemoveWorktree { path, force } = &operation {
                     crate::worktree::remove_guarded(path, *force, |root| {
-                        self.require_no_observed_workspace_writers(root)
+                        self.begin_workspace_retirement(root)
                     })?;
                     return Ok(ResponsePayload::Workspace {
                         result: WorkspaceResult::Ack,
                     });
                 }
-                match &operation {
+                let _retirement = match &operation {
                     WorkspaceOperation::ArchiveProjectlessWorkspace { path } => {
-                        self.require_no_observed_workspace_writers(path)?;
+                        Some(self.begin_workspace_retirement(path)?)
                     }
                     WorkspaceOperation::CaptureRef { cwd, git_ref }
                         if crate::checkpoint::is_archive_ref(git_ref) =>
                     {
                         crate::checkpoint::capture_ref_guarded(cwd, git_ref, |root| {
-                            self.require_no_observed_workspace_writers(root)
+                            self.begin_workspace_retirement(root)
                         })?;
                         return Ok(ResponsePayload::Workspace {
                             result: WorkspaceResult::Ack,
                         });
                     }
-                    _ => {}
-                }
+                    _ => None,
+                };
                 // Commit/push/land move local refs — prompt the share
                 // poll so synced branches push and notify promptly
                 // rather than waiting out the interval.

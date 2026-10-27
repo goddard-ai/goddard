@@ -1,0 +1,1 @@
+- Archiving a workspace defers conflicting provider and terminal starts within the same daemon until capture or removal finishes.

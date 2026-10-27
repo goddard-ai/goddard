@@ -471,6 +471,7 @@ impl WakuBackend {
         let events = workspace_writers::TerminalWriterEvents {
             events,
             store: self.task_store.clone(),
+            lifecycles: Arc::clone(&self.runtime_lifecycles),
         };
         #[cfg(all(test, unix))]
         if command.is_none()
@@ -514,12 +515,12 @@ impl WakuBackend {
         // finished. Register before waiting on the per-workspace capture lock.
         let witness = driver::WriterCompletion::default();
         witness.register();
-        let capture_writer = self
-            .runtime_lifecycles
-            .observe_starting_writer(&cwd, witness.clone());
         let key = self
             .runtime_lifecycles
             .checkpoint_owed(&cwd, session_id, turn_count);
+        let capture_writer = self
+            .runtime_lifecycles
+            .observe_starting_writer(&cwd, witness.clone())?;
         // Before a Git operation starts, this attempt owns no process. A
         // successful Git result restores that proof even if persistence fails.
         let mut physical_writer_quiet = true;

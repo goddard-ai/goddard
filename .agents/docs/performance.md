@@ -139,6 +139,15 @@
   removal. Checking only the requested nested cwd can miss sibling writers and
   discard sibling changes. These hooks do not themselves provide admission or
   archive-generation authority.
+- Daemon archive capture/removal holds a process-local path reservation through
+  the filesystem operation. Provider factory admission, checkpoint captures and
+  terminal origin publication reject intersecting reservations, including aliases
+  and ancestor/descendant paths. Registry locks cover only reservation/evidence
+  publication; Git and ZIP work run after releasing them. Failed quiet checks
+  release their reservation. Denied checkpoint capture retains its owed work.
+  This closes local admission races at those boundaries, not cross-daemon
+  coordination, preparation/restore ownership, shared catalog owners or stale
+  archive-generation authority; those still need the complete executor contract.
 - Keep per-frame work proportional to what is on screen. Long collections are
   virtualized with `list()`, and a row builder must not rebuild whole-session
   state; hoist that to a cache refreshed once per frame.

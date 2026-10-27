@@ -395,7 +395,7 @@ impl WakuBackend {
         let sandboxed_launch = options.sandbox.is_some();
         let mut starting_writer = self
             .runtime_lifecycles
-            .observe_starting_writer(&cwd, event_sender.writer_completion());
+            .observe_starting_writer(&cwd, event_sender.writer_completion())?;
         let (handle, stable) = self.start_runtime_driver(
             session_id,
             runtime_id,
