@@ -278,6 +278,12 @@ impl Session {
     fn inventory(&self) -> SessionInventory {
         let g = self.current();
         SessionInventory {
+            launch_cwd: self
+                .launch
+                .get("cwd")
+                .and_then(Value::as_str)
+                .filter(|cwd| cwd.len() <= 8192 && Path::new(cwd).is_absolute())
+                .map(str::to_owned),
             adapter: self.adapter_name.clone(),
             requested: self.requested.clone(),
             requested_revision: self.requested_revision,

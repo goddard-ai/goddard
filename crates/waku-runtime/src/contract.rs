@@ -523,6 +523,11 @@ pub struct PendingRequestSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct SessionInventory {
     pub session: SessionRef,
+    /// Original absolute launch directory, bounded to 8192 bytes. This is
+    /// launch metadata, not a quiet-writer or workspace-removal permit.
+    /// Older hosts and launches without a qualified absolute cwd omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_cwd: Option<String>,
     /// The registered owner and accepted configuration are reconciliation
     /// truth even before the provider confirms an activation boundary.
     #[serde(default)]

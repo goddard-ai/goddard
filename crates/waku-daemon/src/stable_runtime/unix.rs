@@ -308,6 +308,28 @@ pub(crate) fn start_link(
         }
     }
 
+    let prior = task_store
+        .stable_link(session_id)
+        .context("could not read the task's runtime link state")?;
+    let attach = resolve_attachment(prior.as_ref(), &inventory, provider)?;
+    if let Attachment::Reattach { sref, .. } = &attach {
+        if let Some(original) = inventory
+            .sessions
+            .iter()
+            .find(|session| session.session == *sref)
+            .and_then(|session| session.launch_cwd.as_deref())
+        {
+            let original = Path::new(original);
+            let original = dunce::canonicalize(original)
+                .context("could not verify the surviving provider's original workspace")?;
+            let requested = dunce::canonicalize(&options.cwd)
+                .context("could not verify the reattachment workspace")?;
+            anyhow::ensure!(
+                original == requested,
+                "stable provider reattachment cannot change the original workspace"
+            );
+        }
+    }
     // The agent surface is provisioned before admission when the launch
     // carries one: the pinned helper and descriptor paths ride the admit
     // payload while the grant is issued only once the session exists.
@@ -328,10 +350,6 @@ pub(crate) fn start_link(
         None
     };
 
-    let prior = task_store
-        .stable_link(session_id)
-        .context("could not read the task's runtime link state")?;
-    let attach = resolve_attachment(prior.as_ref(), &inventory, provider)?;
     let reattaching = matches!(&attach, Attachment::Reattach { .. });
     let (sref, mut row) = match attach {
         Attachment::Reattach { sref, row } => {
@@ -2618,6 +2636,93 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(row.runtime_session_id, first_attempt);
+    }
+
+    #[test]
+    fn stable_reattachment_keeps_the_original_workspace() {
+        let rig = rig(&["codex"]);
+        let original = rig.runtime_root.join("original-workspace");
+        let replacement = rig.runtime_root.join("replacement-workspace");
+        std::fs::create_dir_all(&original).unwrap();
+        std::fs::create_dir_all(&replacement).unwrap();
+        let mut opts = options();
+        opts.cwd = original.clone();
+        let (sender, _rx) = link_test_event_channel();
+        let (_handle, first) = start_link(
+            &rig.backend,
+            rig.backend.task_store(),
+            rig.session_id,
+            Uuid::new_v4(),
+            ProviderKind::Codex,
+            &opts,
+            sender,
+            &rig.runtime_root,
+            None,
+        )
+        .unwrap();
+        let recorded = rig
+            .backend
+            .task_store()
+            .stable_link(rig.session_id)
+            .unwrap();
+        opts.cwd = replacement;
+        let (sender, _rx) = link_test_event_channel();
+        let failure = start_link(
+            &rig.backend,
+            rig.backend.task_store(),
+            rig.session_id,
+            Uuid::new_v4(),
+            ProviderKind::Codex,
+            &opts,
+            sender,
+            &rig.runtime_root,
+            None,
+        )
+        .err()
+        .expect("workspace replacement must fail");
+        assert!(
+            failure
+                .to_string()
+                .contains("cannot change the original workspace")
+        );
+        assert_eq!(
+            rig.backend
+                .task_store()
+                .stable_link(rig.session_id)
+                .unwrap(),
+            recorded
+        );
+        let inventory = first
+            .shared
+            .client
+            .lock()
+            .unwrap()
+            .reconcile(first.shared.epoch)
+            .unwrap();
+        assert_eq!(inventory.sessions.len(), 1);
+        assert_eq!(
+            inventory.sessions[0].launch_cwd.as_deref(),
+            original.to_str()
+        );
+        assert_eq!(inventory.sessions[0].status, SessionStatus::Live);
+        // Filesystem aliases still identify the same original workspace.
+        let alias = rig.runtime_root.join("workspace-alias");
+        std::os::unix::fs::symlink(&original, &alias).unwrap();
+        opts.cwd = alias;
+        let (sender, _rx) = link_test_event_channel();
+        let (_handle, attached) = start_link(
+            &rig.backend,
+            rig.backend.task_store(),
+            rig.session_id,
+            Uuid::new_v4(),
+            ProviderKind::Codex,
+            &opts,
+            sender,
+            &rig.runtime_root,
+            None,
+        )
+        .unwrap();
+        assert_eq!(attached.sref(), first.sref());
     }
 
     /// A second attachment replays only what the first never applied —

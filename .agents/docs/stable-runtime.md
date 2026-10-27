@@ -77,6 +77,13 @@ product edits cannot rebuild it. Keep it that way.
   without adding a second terminal event. Consumers still check generation
   status because older pinned hosts and historical journals may contain the
   earlier ambiguous completed receipts.
+- **Original workspace.** Inventory's optional `launchCwd` projects only the
+  original absolute launch directory (at most 8192 bytes), including after
+  journal reopen. Requested configuration is not launch evidence. Reattachment
+  rejects a different directory when origin is known and accepts filesystem
+  aliases to the same directory. An older pinned host or unqualified launch
+  omits origin; absence remains unknown for cleanup. This metadata is not
+  evidence of writer termination or permission to remove a workspace.
 - **Held dispatch.** `CancelTurn` records a hold; queued submits become
   `DispatchPending` until `PermitDispatch` — the controller's explicit
   policy release, never implicit unwind. The link sends that release only

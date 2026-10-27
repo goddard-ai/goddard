@@ -134,6 +134,88 @@ fn disposition(receipt: &CommandReceipt) -> &CommandDisposition {
     &receipt.disposition
 }
 
+#[test]
+fn launch_workspace_inventory_survives_controller_and_journal_replacement() {
+    let root = TestRoot::new();
+    let workspace = TestRoot::new();
+    std::fs::create_dir_all(workspace.path()).unwrap();
+    let cwd = workspace.path().to_str().unwrap();
+    let mut rig = open(&root, Budgets::default());
+    let grant = rig.control();
+    for (launch, expected) in [
+        (
+            json!({"cwd": cwd, "secret": "must-not-be-projected"}),
+            Some(cwd),
+        ),
+        (json!({"cwd": "."}), None),
+        (json!({"cwd": format!("/{}", "x".repeat(8192))}), None),
+        (json!({"cwd": 42}), None),
+        (Value::Null, None),
+    ] {
+        let id = Uuid::new_v4();
+        rig.host
+            .execute(
+                &rig.creds().0,
+                rig.env(
+                    &grant,
+                    Uuid::new_v4(),
+                    CanonicalAction::AdmitSession {
+                        session_id: id,
+                        adapter: "fake".into(),
+                        launch,
+                        requested: RequestedConfig {
+                            options: json!({"cwd": "/misleading"}),
+                            ..Default::default()
+                        },
+                    },
+                ),
+            )
+            .unwrap();
+        let inventory = rig.host.reconcile(&rig.creds().0, grant.epoch).unwrap();
+        let session = inventory
+            .sessions
+            .iter()
+            .find(|s| s.session.session_id == id)
+            .unwrap();
+        assert_eq!(session.launch_cwd.as_deref(), expected);
+    }
+    let replacement = rig.control();
+    let before = rig
+        .host
+        .reconcile(&rig.creds().0, replacement.epoch)
+        .unwrap();
+    assert_eq!(
+        before
+            .sessions
+            .iter()
+            .filter(|s| s.launch_cwd.is_some())
+            .count(),
+        1
+    );
+    let serialized = serde_json::to_string(&before).unwrap();
+    assert!(!serialized.contains("must-not-be-projected"));
+    // Compatibility with an older pinned host: missing origin stays unknown.
+    let mut legacy = serde_json::to_value(&before.sessions[0]).unwrap();
+    legacy.as_object_mut().unwrap().remove("launchCwd");
+    let legacy: SessionInventory = serde_json::from_value(legacy).unwrap();
+    assert!(legacy.launch_cwd.is_none());
+    drop(rig);
+    let mut reopened = open(&root, Budgets::default());
+    let grant = reopened.control();
+    let after = reopened
+        .host
+        .reconcile(&reopened.creds().0, grant.epoch)
+        .unwrap();
+    for old in before.sessions {
+        let new = after
+            .sessions
+            .iter()
+            .find(|s| s.session == old.session)
+            .unwrap();
+        assert_eq!(new.launch_cwd, old.launch_cwd);
+    }
+}
+
 // -- attach / detach -----------------------------------------------------
 
 #[test]

@@ -1,0 +1,1 @@
+- With the stable provider runtime enabled, reconnecting to a surviving provider preserves its original workspace and rejects a request for a different directory when the host reports its launch directory.
