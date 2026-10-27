@@ -1,0 +1,1 @@
+- Large task-list refreshes apply task rows in smaller batches so other desktop work can run between updates.

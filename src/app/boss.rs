@@ -3863,7 +3863,11 @@ impl Waku {
                 {
                     // Keep newer live events if an attach beat this snapshot.
                     if !existing.detail_loaded {
+                        let project_changed = existing.project_id != session.project_id;
                         *existing = session;
+                        if project_changed {
+                            this.state.note_session_topology_change();
+                        }
                     }
                 } else {
                     this.state.note_session_topology_change();

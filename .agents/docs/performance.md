@@ -29,10 +29,32 @@
   Reconnect freshness survives superseded work and errors until that completion;
   it must not be consumed just by taking a snapshot from the inbox.
 - `PersistedState::merge_session_catalog` retains a UUID lookup index across
-  metadata-only refreshes. Session membership, identity or order changes must
+  metadata-only refreshes. Session membership, identity, project assignment or order changes must
   call `note_session_topology_change`; `push_session` does that automatically.
   Changing status/text does not invalidate topology. Keep temporary friend-view
   save filtering from invalidating the cache when the final order is unchanged.
+- Desktop catalog session reconciliation prepares UUID ordering on the polling
+  worker, then applies one host per pump in round-robin order. Each slice prepares
+  at most 2,048 local index entries and performs at most 128 session operations;
+  these are operation limits, not guarantees about elapsed time. Ordered indexes
+  avoid whole-table resizing during a slice. Carry the UUID cursor and valid local
+  index preparation across superseding snapshots so busy hosts still converge.
+  Work may advance at the 16 ms background cadence; catalog repaint requests use
+  the existing 120 ms streaming cadence, including a final pending repaint.
+- Catalog session removals update positional and project-reference indexes with
+  `swap_remove`; callers must not depend on storage order. Preserve live history,
+  pending metadata and local rows not yet reported by the daemon. A recovered
+  incognito row stays protected until an authoritative catalog reports adoption;
+  re-registration uses the existing coalesced mandatory-save cadence. Local
+  deletion fences clear only after a matching host reports absence in a request
+  started after the deletion. Record request start before issuing the RPC.
+- Selection fallback scans at most 2,048 sessions per pump and yields to explicit
+  selection/project changes. Replaced snapshots, prepared indexes, retired rows
+  and buffered inbox contents are reclaimed off the UI thread, including when
+  the receiver closes. Keep raw offline-cache snapshots separate from UI overlays.
+  Project merging/name reconciliation and legacy bulk callers still require
+  separate bounding; session batching alone does not bound the entire catalog
+  update or establish measured desktop responsiveness.
 - One-shot user actions such as a click or menu command may work synchronously
   when freshness matters more than latency; frames may not.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for

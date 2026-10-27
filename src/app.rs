@@ -3186,6 +3186,11 @@ pub struct Waku {
     /// Latest background catalog per host, preserving reconnect information.
     task_state_sync_tx: waku_client::persistence::CatalogInboxSender,
     task_state_sync_events: waku_client::persistence::CatalogInboxReceiver,
+    catalog_applications: HashMap<waku_client::DaemonKey, catalog_sync::CatalogApplication>,
+    catalog_apply_queue: VecDeque<waku_client::DaemonKey>,
+    catalog_selection_fallback: Option<catalog_sync::CatalogSelectionFallback>,
+    catalog_visual_dirty: bool,
+    catalog_last_notify: Instant,
     /// `settingsChanged` broadcasts forwarded by the task-state sync worker:
     /// the authoritative daemon document each time another client — or an
     /// agent — rewrites it.
@@ -4519,6 +4524,7 @@ mod boss;
 mod boss_history;
 mod boss_moods;
 mod branches;
+mod catalog_sync;
 mod checkout_status;
 mod close_dialog;
 mod command_palette;
@@ -7615,6 +7621,11 @@ impl Waku {
                 event_wake_tx,
                 task_state_sync_tx,
                 task_state_sync_events,
+                catalog_applications: HashMap::new(),
+                catalog_apply_queue: VecDeque::new(),
+                catalog_selection_fallback: None,
+                catalog_visual_dirty: false,
+                catalog_last_notify: Instant::now(),
                 daemon_settings_tx,
                 daemon_settings_events,
                 daemon_recovery_tx,

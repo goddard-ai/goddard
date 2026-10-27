@@ -1,7 +1,7 @@
 //! Coalesce catalog results before they reach the UI. Producers own disposal
 //! of replaced snapshots; the UI consumes one host per apply in arrival order.
 
-use super::TaskCatalog;
+use super::{CatalogSessionOrder, TaskCatalog};
 use crate::DaemonKey;
 use crossbeam_channel::{Receiver, Sender, TrySendError};
 use parking_lot::Mutex;
@@ -12,7 +12,9 @@ use uuid::Uuid;
 #[derive(Default)]
 pub struct CatalogUpdate {
     pub version: Option<CatalogVersion>,
+    pub started_at: Option<std::time::Instant>,
     pub catalog: Option<TaskCatalog>,
+    pub session_order: Option<CatalogSessionOrder>,
     /// Unmodified remote-host cache input, copied by the polling worker so
     /// optimistic UI overlays never enter the offline cache.
     pub cache_catalog: Option<TaskCatalog>,
@@ -29,6 +31,12 @@ pub struct CatalogVersion {
     generation: Uuid,
 }
 
+impl CatalogVersion {
+    pub fn same_source(self, other: Self) -> bool {
+        self.key == other.key && self.source == other.source
+    }
+}
+
 struct SourceState {
     source: Uuid,
     generation: Option<Uuid>,
@@ -40,6 +48,7 @@ struct Slots {
     latest: HashMap<DaemonKey, CatalogUpdate>,
     ready: VecDeque<DaemonKey>,
     sources: HashMap<DaemonKey, SourceState>,
+    closed: bool,
 }
 
 type Pending = Arc<Mutex<Slots>>;
@@ -58,11 +67,27 @@ pub struct CatalogSource {
     wake: Sender<()>,
     key: DaemonKey,
     source: Uuid,
+    session_filter: Option<Uuid>,
 }
 
 pub struct CatalogInboxReceiver {
     pending: Pending,
     wake: Receiver<()>,
+}
+
+impl Drop for CatalogInboxReceiver {
+    fn drop(&mut self) {
+        let retired = {
+            let mut pending = self.pending.lock();
+            pending.closed = true;
+            pending.sources.clear();
+            pending.ready.clear();
+            std::mem::take(&mut pending.latest)
+        };
+        if !retired.is_empty() {
+            super::task_writer::retire(retired);
+        }
+    }
 }
 
 pub fn catalog_inbox() -> (CatalogInboxSender, CatalogInboxReceiver) {
@@ -87,16 +112,20 @@ impl CatalogInboxSender {
         let source = Uuid::new_v4();
         let retired = {
             let mut pending = self.pending.lock();
-            pending.sources.insert(
-                key,
-                SourceState {
-                    source,
-                    generation: None,
-                    fresh: false,
-                },
-            );
-            pending.ready.retain(|queued| *queued != key);
-            pending.latest.remove(&key)
+            if pending.closed {
+                None
+            } else {
+                pending.sources.insert(
+                    key,
+                    SourceState {
+                        source,
+                        generation: None,
+                        fresh: false,
+                    },
+                );
+                pending.ready.retain(|queued| *queued != key);
+                pending.latest.remove(&key)
+            }
         };
         (
             CatalogSource {
@@ -104,6 +133,7 @@ impl CatalogInboxSender {
                 wake: self.wake.clone(),
                 key,
                 source,
+                session_filter: None,
             },
             retired,
         )
@@ -111,14 +141,32 @@ impl CatalogInboxSender {
 }
 
 impl CatalogSource {
+    pub fn only_session(mut self, session: Option<Uuid>) -> Self {
+        self.session_filter = session;
+        self
+    }
     /// Call on the catalog worker: replaced plain-data snapshots are dropped
     /// here, outside the lock, rather than by the UI's channel drain.
+    /// Publish locally constructed data. Network loaders must use send_started
+    /// with a timestamp captured before their request, for removal fencing.
     pub fn send(
         &self,
-        (result, fresh): (Result<TaskCatalog, String>, bool),
+        update: (Result<TaskCatalog, String>, bool),
+    ) -> Result<(), crossbeam_channel::SendError<()>> {
+        self.send_started(update, std::time::Instant::now())
+    }
+
+    pub fn send_started(
+        &self,
+        (mut result, fresh): (Result<TaskCatalog, String>, bool),
+        started_at: std::time::Instant,
     ) -> Result<(), crossbeam_channel::SendError<()>> {
         // Copy outside the shared lock and on the producer, never in the
         // UI's apply path. Local catalogs do not need an offline host copy.
+        if let (Some(id), Ok(catalog)) = (self.session_filter, &mut result) {
+            catalog.sessions.retain(|session| session.id == id);
+        }
+        let session_order = result.as_ref().ok().map(CatalogSessionOrder::prepare);
         let cache_catalog = match (&self.key, &result) {
             (DaemonKey::Remote(_), Ok(catalog)) => Some(catalog.clone()),
             _ => None,
@@ -150,15 +198,17 @@ impl CatalogSource {
             match result {
                 Ok(catalog) => {
                     slot.version = version;
+                    slot.started_at = Some(started_at);
                     slot.error = None;
                     (
                         slot.catalog.replace(catalog),
                         std::mem::replace(&mut slot.cache_catalog, cache_catalog),
+                        std::mem::replace(&mut slot.session_order, session_order),
                     )
                 }
                 Err(error) => {
                     slot.error = Some(error);
-                    (None, None)
+                    (None, None, None)
                 }
             }
         };
@@ -171,6 +221,13 @@ impl CatalogSource {
 }
 
 impl CatalogInboxReceiver {
+    pub fn source_is_current(&self, version: CatalogVersion) -> bool {
+        self.pending
+            .lock()
+            .sources
+            .get(&version.key)
+            .is_some_and(|state| state.source == version.source)
+    }
     /// Check before applying each batch, including after background preparation.
     pub fn is_current(&self, version: CatalogVersion) -> bool {
         self.pending
@@ -282,6 +339,12 @@ mod tests {
         assert_eq!(recovered.catalog.unwrap().sessions[0].title, "recovered");
         drop(receiver);
         assert!(remote_source.send((Ok(catalog("closed")), false)).is_err());
+        assert!(sender.pending.lock().latest.is_empty());
+        let (late, _) = sender.bind(DaemonKey::Local);
+        assert!(
+            late.send((Ok(catalog("bound after receiver close")), false))
+                .is_err()
+        );
     }
 
     #[test]
@@ -346,6 +409,52 @@ mod tests {
             .unwrap();
         assert!(!receiver.acknowledge(token));
         assert!(receiver.take_next().unwrap().1.fresh);
+    }
+
+    #[test]
+    fn worker_preparation_filters_qa_before_ordering_and_raw_cache_copy() {
+        let (sender, receiver) = catalog_inbox();
+        let key = DaemonKey::Remote(Uuid::new_v4());
+        let target = Uuid::new_v4();
+        let (source, _) = sender.bind(key);
+        let source = source.only_session(Some(target));
+        let mut input = catalog("raw");
+        input.sessions[0].id = target;
+        input
+            .sessions
+            .push(AgentSession::new(Uuid::new_v4(), ProviderKind::Codex));
+        let started = std::time::Instant::now();
+        source.send_started((Ok(input), true), started).unwrap();
+        let update = receiver.take_next().unwrap().1;
+        assert_eq!(update.started_at, Some(started));
+        let snapshot = update.catalog.unwrap();
+        assert_eq!(snapshot.sessions.len(), 1);
+        assert_eq!(update.cache_catalog.unwrap().sessions[0].id, target);
+        let order = update.session_order.unwrap();
+        let mut progress = super::super::CatalogSessionProgress::start(&order, None);
+        let mut state = super::super::PersistedState::empty();
+        for _ in 0..10 {
+            if progress
+                .step(
+                    &mut state,
+                    &snapshot,
+                    &order,
+                    true,
+                    key,
+                    started,
+                    4,
+                    4,
+                    |_| false,
+                    |_| false,
+                    |_| false,
+                )
+                .complete
+            {
+                break;
+            }
+        }
+        assert_eq!(state.sessions.len(), 1);
+        assert_eq!(state.sessions[0].id, target);
     }
 
     #[test]

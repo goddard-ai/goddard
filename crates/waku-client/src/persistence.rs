@@ -1,10 +1,16 @@
 //! Desktop-owned preferences and RPC proxies for daemon-owned task state.
 
 mod app_writer;
+mod catalog_batch;
 mod catalog_inbox;
 mod catalog_merge;
+pub use catalog_batch::{
+    CatalogSelectionFallback, CatalogSelectionStep, CatalogSessionBatch, CatalogSessionEffect,
+    CatalogSessionOrder, CatalogSessionProgress,
+};
 pub use catalog_inbox::{
-    CatalogInboxReceiver, CatalogInboxSender, CatalogSource, CatalogVersion, catalog_inbox,
+    CatalogInboxReceiver, CatalogInboxSender, CatalogSource, CatalogUpdate, CatalogVersion,
+    catalog_inbox,
 };
 pub use catalog_merge::{merge_remote_session_catalog, merge_session_catalog_row};
 
@@ -2715,6 +2721,10 @@ pub struct PersistedState {
     #[serde(skip)]
     session_topology_revision: u64,
     #[serde(skip)]
+    unreported_sessions: HashSet<Uuid>,
+    #[serde(skip)]
+    locally_removed_sessions: HashMap<DaemonKey, BTreeMap<Uuid, std::time::Instant>>,
+    #[serde(skip)]
     session_catalog_index: catalog_merge::SessionCatalogIndex,
 }
 
@@ -2759,6 +2769,10 @@ impl PersistedState {
 
     pub fn push_session(&mut self, session: AgentSession) {
         self.note_session_topology_change();
+        self.unreported_sessions.insert(session.id);
+        for removed in self.locally_removed_sessions.values_mut() {
+            removed.remove(&session.id);
+        }
         self.dirty_sessions.insert(session.id);
         self.sessions.push(session);
     }
@@ -3027,6 +3041,8 @@ impl PersistedState {
             dirty_sessions: HashSet::new(),
             pending_session_saves: HashMap::new(),
             session_topology_revision: 0,
+            unreported_sessions: HashSet::new(),
+            locally_removed_sessions: HashMap::new(),
             session_catalog_index: Default::default(),
         }
     }
@@ -3786,6 +3802,7 @@ impl PersistedState {
         let session = self.new_session(project_id, self.last_provider);
         self.selected_session = Some(session.id);
         self.note_session_topology_change();
+        self.unreported_sessions.insert(session.id);
         self.sessions.push(session);
     }
 

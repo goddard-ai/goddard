@@ -159,26 +159,34 @@ impl DaemonMap {
     /// Re-key a host's ownership after its catalog snapshot — live or cached —
     /// was applied: every id it reports is claimed to it, and claims for ids
     /// it no longer reports are dropped so other daemons' rows are untouched.
-    pub fn replace_remote_catalog(&self, host: Uuid, projects: &[Uuid], sessions: &[Uuid]) {
-        let reported_projects: HashSet<Uuid> = projects.iter().copied().collect();
-        let reported_sessions: HashSet<Uuid> = sessions.iter().copied().collect();
-        self.inner
-            .project_origins
-            .write()
-            .retain(|id, owner| *owner != host || reported_projects.contains(id));
-        self.inner
-            .session_origins
-            .write()
-            .retain(|id, owner| *owner != host || reported_sessions.contains(id));
-        self.inner
-            .project_origins
-            .write()
-            .extend(reported_projects.iter().map(|id| (*id, host)));
-        self.inner
-            .session_origins
-            .write()
-            .extend(reported_sessions.iter().map(|id| (*id, host)));
+    pub fn note_remote_catalog_loaded(&self, host: Uuid) {
         self.inner.loaded_remotes.write().insert(host);
+    }
+
+    pub fn replace_remote_projects(&self, host: Uuid, projects: &[Uuid]) {
+        let reported: HashSet<Uuid> = projects.iter().copied().collect();
+        self.inner
+            .project_origins
+            .write()
+            .retain(|id, owner| *owner != host || reported.contains(id));
+        self.inner
+            .project_origins
+            .write()
+            .extend(reported.iter().map(|id| (*id, host)));
+        self.inner.loaded_remotes.write().insert(host);
+    }
+
+    pub fn replace_remote_catalog(&self, host: Uuid, projects: &[Uuid], sessions: &[Uuid]) {
+        self.replace_remote_projects(host, projects);
+        let reported: HashSet<Uuid> = sessions.iter().copied().collect();
+        self.inner
+            .session_origins
+            .write()
+            .retain(|id, owner| *owner != host || reported.contains(id));
+        self.inner
+            .session_origins
+            .write()
+            .extend(reported.iter().map(|id| (*id, host)));
     }
 
     /// Forget one row's ownership — the row itself is being deleted, so any

@@ -1605,6 +1605,7 @@ impl Waku {
     ) {
         let clients = supervisor.subscribe_clients();
         let (results, retired) = self.task_state_sync_tx.bind(key);
+        let results = results.only_session(self.qa_window.as_ref().map(|qa| qa.record.session_id));
         if retired.is_some() {
             self.background_executor
                 .spawn(async move { drop(retired) })
@@ -1705,10 +1706,11 @@ impl Waku {
                             return;
                         }
                     }
+                    let started_at = std::time::Instant::now();
                     let result = load_remote_task_state(&client).map_err(|error| error.to_string());
                     // Fresh connection: the daemon may have restarted and
                     // lost its in-memory incognito sessions.
-                    if results.send((result, true)).is_err() {
+                    if results.send_started((result, true), started_at).is_err() {
                         return;
                     }
                     signal_event_pump(&event_wake);
@@ -1738,9 +1740,10 @@ impl Waku {
                                 if let Some(state) = load_remote_boss_state(&client) {
                                     if boss_updates.send((key, state)).is_err() { return; }
                                 }
+                                let started_at = std::time::Instant::now();
                                 let result = load_remote_task_state(&client)
                                     .map_err(|error| error.to_string());
-                                if results.send((result, false)).is_err() {
+                                if results.send_started((result, false), started_at).is_err() {
                                     return;
                                 }
                                 signal_event_pump(&event_wake);
@@ -1863,28 +1866,21 @@ impl Waku {
     }
 
     fn drain_task_state_sync_events(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some((key, update)) = self.task_state_sync_events.take_next() else {
-            return false;
-        };
-        if let Some(error) = update.error {
-            eprintln!("could not refresh daemon task state: {error}");
+        let mut changed = false;
+        if let Some((key, update)) = self.task_state_sync_events.take_next() {
+            self.queue_catalog_application(key, update, cx);
+            changed = true;
         }
-        if let Some(snapshot) = update.catalog {
-            let Some(version) = update
-                .version
-                .filter(|version| self.task_state_sync_events.is_current(*version))
-            else {
-                cx.background_executor()
-                    .spawn(async move {
-                        drop((snapshot, update.cache_catalog));
-                    })
-                    .detach();
-                return true;
-            };
-            self.apply_remote_task_state(key, snapshot, update.cache_catalog, update.fresh, cx);
-            self.task_state_sync_events.acknowledge(version);
+        let applied = self.apply_catalog_session_batch(cx);
+        self.catalog_visual_dirty |= applied || changed;
+        if self.catalog_visual_dirty && self.catalog_last_notify.elapsed() >= STREAM_FRAME_INTERVAL
+        {
+            self.catalog_visual_dirty = false;
+            self.catalog_last_notify = Instant::now();
+            true
+        } else {
+            false
         }
-        true
     }
 
     fn drain_daemon_settings_events(&mut self, cx: &mut Context<Self>) -> bool {
@@ -2045,6 +2041,10 @@ impl Waku {
     /// or an employee sidebar row reaching the end of its avatar wait.
     fn next_timed_pump_delay(&self) -> Option<Duration> {
         [
+            self.catalog_visual_dirty
+                .then(|| STREAM_FRAME_INTERVAL.saturating_sub(self.catalog_last_notify.elapsed())),
+            self.stream_state_dirty
+                .then(|| STREAM_SAVE_INTERVAL.saturating_sub(self.last_stream_save.elapsed())),
             self.background_output_refresh_delay(),
             self.sidebar_employee_avatar_wake_delay(),
             self.daemon_recovery_episode
@@ -2517,7 +2517,11 @@ impl Waku {
             .iter_mut()
             .find(|existing| existing.id == session_id)
         {
+            let project_changed = existing.project_id != session.project_id;
             *existing = session;
+            if project_changed {
+                self.state.note_session_topology_change();
+            }
         } else {
             self.state.note_session_topology_change();
             self.state.sessions.push(session);
@@ -2582,7 +2586,7 @@ impl Waku {
             .extract_if(.., |session| session.id == session_id)
             .collect::<Vec<_>>();
         if !retired.is_empty() {
-            self.state.note_session_topology_change();
+            self.state.note_session_removed(session_id);
             cx.background_executor()
                 .spawn(async move { drop(retired) })
                 .detach();
@@ -2699,232 +2703,8 @@ impl Waku {
         cx.notify();
     }
 
-    fn apply_remote_task_state(
-        &mut self,
-        key: waku_client::DaemonKey,
-        mut snapshot: RemoteTaskStateSnapshot,
-        mut cache_catalog: Option<RemoteTaskStateSnapshot>,
-        fresh: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let _timing = waku_client::diagnostics::measure(waku_client::diagnostics::Work::Catalog);
-        if let Some(qa) = &self.qa_window {
-            snapshot
-                .sessions
-                .retain(|session| session.id == qa.record.session_id);
-            if let Some(cache) = &mut cache_catalog {
-                cache
-                    .sessions
-                    .retain(|session| session.id == qa.record.session_id);
-            }
-        }
-        let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
-        let known_session_ids = self
-            .state
-            .sessions
-            .iter()
-            .map(|session| session.id)
-            .collect::<HashSet<_>>();
-        let remote_ids = snapshot
-            .sessions
-            .iter()
-            .map(|session| session.id)
-            .collect::<HashSet<_>>();
-        // Only this daemon's rows may be removed or replaced — the merged
-        // list also carries every other host's sessions and projects.
-        // Keep pending optimistic fields and their original CAS version
-        // together until acknowledgment. A broadcast arriving first must
-        // neither flip the toggle nor let a transcript save claim its version.
-        let mut catalog_sessions = std::mem::take(&mut snapshot.sessions);
-        if !self.pending_session_metadata.is_empty() {
-            let pending = self
-                .state
-                .sessions
-                .iter()
-                .filter(|session| self.pending_session_metadata.contains_key(&session.id))
-                .map(|session| (session.id, session.list_projection()))
-                .collect::<HashMap<_, _>>();
-            for remote in &mut catalog_sessions {
-                if let Some(local) = pending.get(&remote.id) {
-                    remote.title.clone_from(&local.title);
-                    remote.archived_at = local.archived_at;
-                    remote.pinned_at = local.pinned_at;
-                    remote.agent_rename_allowed = local.agent_rename_allowed;
-                    remote.metadata_revision = local.metadata_revision;
-                    remote.metadata_mutation_id = local.metadata_mutation_id;
-                }
-            }
-        }
-        let retired = self.state.merge_session_catalog(
-            catalog_sessions,
-            // Watched friend sessions are borrowed from a peer — no
-            // daemon's catalog owns or retires them.
-            |session_id| {
-                self.daemons.session_owner(session_id) == key
-                    && !self.friend_sessions.contains_key(&session_id)
-            },
-            |session_id| runtime_ids.contains(&session_id),
-            fresh,
-        );
-        let removed = retired.iter().map(|session| session.id).collect::<Vec<_>>();
-        if !retired.is_empty() {
-            cx.background_executor()
-                .spawn(async move { drop(retired) })
-                .detach();
-        }
-        // Incognito rows the restarted daemon forgot ride the next save back:
-        // SaveTaskState adopts a detail-loaded started session it does not
-        // know, `provider_cursor` included, so an idle one simply reappears
-        // and a busy one's attach misses fall into `resume_lost_runtime`.
-        if fresh {
-            let reregister: Vec<Uuid> = self
-                .state
-                .sessions
-                .iter()
-                .filter(|session| {
-                    session.incognito
-                        && session.detail_loaded
-                        && session.has_started()
-                        && !remote_ids.contains(&session.id)
-                        && self.daemons.session_owner(session.id) == key
-                })
-                .map(|session| session.id)
-                .collect();
-            for session_id in &reregister {
-                self.state.mark_session_dirty(*session_id);
-            }
-            if !reregister.is_empty() {
-                self.save();
-            }
-        }
-        for session_id in &removed {
-            self.session_metadata_saves.remove(session_id);
-            self.pending_session_metadata.remove(session_id);
-            self.runtime_attach_pending.remove(session_id);
-            self.pending_session_cancels.remove(session_id);
-            self.runtime_attach_misses.remove(session_id);
-            if let Some(runtime) = self.runtimes.remove(session_id) {
-                runtime.retire_payloads(&self.background_executor);
-            }
-            self.background_work.remove(session_id);
-            self.remove_right_panel_session_state(*session_id, cx);
-            self.remove_side_chat_surface(*session_id, cx);
-            self.side_chat_views.remove(session_id);
-            self.side_chat_composers.remove(session_id);
-            self.task_switcher.remove(*session_id);
-            self.project_switcher.session_removed(*session_id);
-            self.transcript_scroll_positions.remove(session_id);
-        }
-        let project_ids = snapshot
-            .projects
-            .iter()
-            .map(|project| project.id)
-            .collect::<Vec<_>>();
-        merge_remote_project_catalog(
-            &mut self.state.projects,
-            std::mem::take(&mut snapshot.projects),
-            |project_id| self.daemons.project_owner(project_id) == key,
-        );
-        Project::resolve_display_names(&mut self.state.projects);
-        // Sessions the merge just learned about were made outside this UI —
-        // an automation run, the CLI, or another client on this daemon.
-        for session in &self.state.sessions {
-            if !known_session_ids.contains(&session.id) {
-                self.track_task_created(session, "external");
-            }
-        }
-        if let waku_client::DaemonKey::Remote(host) = key {
-            self.daemons.replace_remote_catalog(
-                host,
-                &project_ids,
-                &remote_ids.iter().copied().collect::<Vec<_>>(),
-            );
-            for project in self.boss_ui.projects.values() {
-                if self
-                    .boss_ui
-                    .states
-                    .get(&key)
-                    .is_some_and(|state| state.identity.id == project.id)
-                {
-                    self.daemons.claim_project(project.id, key);
-                }
-            }
-            if let Some(cache) = cache_catalog {
-                self.update_remote_catalog_cache(
-                    host,
-                    waku_client::persistence::CatalogCacheUpdate::Replace(cache),
-                );
-            }
-        }
-
-        let attach = self
-            .state
-            .sessions
-            .iter()
-            .filter(|session| {
-                session.status.is_busy()
-                    || (self.state.selected_session == Some(session.id) && session.has_started())
-            })
-            .map(|session| session.id)
-            .collect::<Vec<_>>();
-        for session_id in attach {
-            self.start_runtime_attachment(session_id, cx);
-        }
-
-        if self.state.selected_session.is_some_and(|selected| {
-            !self
-                .state
-                .sessions
-                .iter()
-                .any(|session| session.id == selected)
-        }) {
-            let previous_project = self.state.selected_project;
-            self.state.selected_session = None;
-            self.sync_voice_scratchpad_capture(cx);
-            let next = self
-                .state
-                .sessions
-                .iter()
-                .filter(|session| {
-                    previous_project.is_none_or(|project| session.project_id == project)
-                })
-                .max_by_key(|session| session.updated_at)
-                .map(|session| session.id)
-                .or_else(|| {
-                    self.state
-                        .sessions
-                        .iter()
-                        .max_by_key(|session| session.updated_at)
-                        .map(|session| session.id)
-                });
-            if let Some(next) = next {
-                self.select_session(next, cx);
-            } else if let Some(project_id) = self
-                .state
-                .selected_project
-                .filter(|project_id| {
-                    self.state
-                        .projects
-                        .iter()
-                        .any(|project| project.id == *project_id)
-                })
-                .or_else(|| self.state.projects.first().map(|project| project.id))
-            {
-                self.state.selected_project = Some(project_id);
-                self.create_session_for(project_id, self.state.last_provider, cx);
-            }
-            // Covers the no-selection landing too — select/create swap
-            // through their own activation, this is a no-op then.
-            self.sync_right_panel_owner(cx);
-        }
-    }
-
     pub(super) fn start_runtime_attachment(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if let Some(session) = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
+        if let Some(session) = self.state.catalog_session(session_id)
             && session.provider == ProviderKind::Antigravity
         {
             // Antigravity owns an app-local TUI, not a daemon runtime. Its
@@ -2944,9 +2724,8 @@ impl Waku {
         }
         if self
             .state
-            .sessions
-            .iter()
-            .any(|session| session.id == session_id && !session.detail_loaded && !session.incognito)
+            .catalog_session(session_id)
+            .is_some_and(|session| !session.detail_loaded && !session.incognito)
         {
             self.ensure_session_loaded(session_id, cx);
             return;
@@ -2974,9 +2753,7 @@ impl Waku {
         let event_wake = self.event_wake_tx.clone();
         let (replay_cursor, hydrate) = self
             .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
+            .catalog_session(session_id)
             .map(|session| {
                 (
                     session.runtime_event_cursor,
@@ -3691,8 +3468,8 @@ impl Waku {
                 self.daemons.session_owner(session.id) == remote
             })
             .collect::<Vec<_>>();
-        if !retired.is_empty() {
-            self.state.note_session_topology_change();
+        for row in &retired {
+            self.state.note_session_removed(row.id);
         }
         let removed_sessions = retired.iter().map(|session| session.id).collect::<Vec<_>>();
         self.background_executor
@@ -3701,6 +3478,7 @@ impl Waku {
         self.state
             .projects
             .retain(|project| self.daemons.project_owner(project.id) != remote);
+        self.revoke_catalog_application(remote, cx);
         let retired = self.task_state_sync_events.revoke(remote);
         if retired.is_some() {
             self.background_executor
@@ -6651,7 +6429,11 @@ impl Waku {
             && let Some(existing) = self.state.session_mut(session_id)
             && !existing.detail_loaded
         {
+            let project_changed = existing.project_id != hydrated.project_id;
             *existing = hydrated;
+            if project_changed {
+                self.state.note_session_topology_change();
+            }
         }
         let handle = prepared.handle.clone();
         self.runtimes.insert(
@@ -8731,6 +8513,9 @@ impl Waku {
                 || runtime.stream_remeasure_pending
         }) {
             EventPumpSchedule::StreamFrame
+        } else if !self.catalog_apply_queue.is_empty() || self.catalog_selection_fallback.is_some()
+        {
+            EventPumpSchedule::BackgroundOutput(Duration::from_millis(16))
         } else if app_write_pending || self.task_state_sync_events.has_pending() {
             EventPumpSchedule::BackgroundOutput(Duration::from_millis(50))
         } else if let Some(delay) = self.next_timed_pump_delay() {

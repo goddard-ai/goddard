@@ -4,8 +4,10 @@ use super::*;
 
 #[derive(Debug, Default)]
 pub(super) struct SessionCatalogIndex {
-    revision: Option<u64>,
-    positions: HashMap<Uuid, usize>,
+    pub(super) revision: Option<u64>,
+    pub(super) indexed_rows: usize,
+    pub(super) positions: BTreeMap<Uuid, usize>,
+    pub(super) project_counts: BTreeMap<Uuid, usize>,
 }
 // A state snapshot must not copy a potentially large disposable lookup cache.
 impl Clone for SessionCatalogIndex {
@@ -14,8 +16,21 @@ impl Clone for SessionCatalogIndex {
     }
 }
 
+impl Drop for SessionCatalogIndex {
+    fn drop(&mut self) {
+        if self.positions.is_empty() && self.project_counts.is_empty() {
+            return;
+        }
+        let retired = (
+            std::mem::take(&mut self.positions),
+            std::mem::take(&mut self.project_counts),
+        );
+        super::task_writer::retire(retired);
+    }
+}
+
 impl PersistedState {
-    /// Call after changing session identity, membership or order directly.
+    /// Call after changing session identity, membership, order or project directly.
     /// Prefer push_session for ordinary new sessions. Metadata edits do not
     /// change topology and must not continuously invalidate catalog lookup.
     pub fn note_session_topology_change(&mut self) {
@@ -23,29 +38,60 @@ impl PersistedState {
         self.session_catalog_index.revision = None;
     }
 
+    pub fn note_local_session_removed(&mut self, id: Uuid, key: DaemonKey) {
+        self.locally_removed_sessions
+            .entry(key)
+            .or_default()
+            .insert(id, std::time::Instant::now());
+    }
+
+    pub fn revoke_catalog_removals(
+        &mut self,
+        key: DaemonKey,
+    ) -> Option<BTreeMap<Uuid, std::time::Instant>> {
+        self.locally_removed_sessions.remove(&key)
+    }
+
+    pub fn note_session_removed(&mut self, id: Uuid) {
+        self.unreported_sessions.remove(&id);
+        self.note_session_topology_change();
+    }
+
     pub fn merge_session_catalog(
         &mut self,
-        remote: Vec<AgentSession>,
+        mut remote: Vec<AgentSession>,
         owns: impl Fn(Uuid) -> bool,
         has_local_runtime: impl Fn(Uuid) -> bool,
         fresh: bool,
     ) -> Vec<AgentSession> {
         let valid = self.session_catalog_index.revision == Some(self.session_topology_revision)
-            && self.session_catalog_index.positions.len() == self.sessions.len();
+            && self.session_catalog_index.indexed_rows == self.sessions.len();
+        remote.retain(|row| {
+            !self
+                .locally_removed_sessions
+                .values()
+                .any(|removed| removed.contains_key(&row.id))
+        });
+        for row in &remote {
+            self.unreported_sessions.remove(&row.id);
+        }
+        let unreported = &self.unreported_sessions;
         let previous_len = self.sessions.len();
         let removed = merge_indexed(
             &mut self.sessions,
             remote,
-            owns,
+            |id| owns(id) && !unreported.contains(&id),
             has_local_runtime,
             fresh,
             &mut self.session_catalog_index.positions,
+            &mut self.session_catalog_index.project_counts,
             valid,
         );
         if !removed.is_empty() || self.sessions.len() != previous_len {
             self.session_topology_revision = self.session_topology_revision.wrapping_add(1);
         }
         self.session_catalog_index.revision = Some(self.session_topology_revision);
+        self.session_catalog_index.indexed_rows = self.sessions.len();
         removed
     }
 }
@@ -63,7 +109,8 @@ pub fn merge_remote_session_catalog(
         owns,
         has_local_runtime,
         fresh,
-        &mut HashMap::new(),
+        &mut BTreeMap::new(),
+        &mut BTreeMap::new(),
         false,
     )
 }
@@ -74,7 +121,8 @@ fn merge_indexed(
     owns: impl Fn(Uuid) -> bool,
     has_local_runtime: impl Fn(Uuid) -> bool,
     fresh: bool,
-    positions: &mut HashMap<Uuid, usize>,
+    positions: &mut BTreeMap<Uuid, usize>,
+    project_counts: &mut BTreeMap<Uuid, usize>,
     valid: bool,
 ) -> Vec<AgentSession> {
     let remote_ids = remote
@@ -101,22 +149,38 @@ fn merge_indexed(
     // made each catalog refresh quadratic in the number of tasks.
     if !valid || !removed.is_empty() {
         positions.clear();
-        positions.reserve(local.len());
+        project_counts.clear();
         for (index, session) in local.iter().enumerate() {
             positions.entry(session.id).or_insert(index);
+            *project_counts.entry(session.project_id).or_default() += 1;
         }
     }
     for remote in remote {
         if let Some(&index) = positions.get(&remote.id) {
             let local = &mut local[index];
+            let previous_project = local.project_id;
             merge_session_catalog_row(local, remote, has_local_runtime(local.id));
+            if local.project_id != previous_project {
+                decrement_project_reference(project_counts, previous_project);
+                *project_counts.entry(local.project_id).or_default() += 1;
+            }
         } else {
             positions.insert(remote.id, local.len());
+            *project_counts.entry(remote.project_id).or_default() += 1;
             local.push(remote);
         }
     }
 
     removed
+}
+
+pub(super) fn decrement_project_reference(counts: &mut BTreeMap<Uuid, usize>, id: Uuid) {
+    if let Some(count) = counts.get_mut(&id) {
+        *count -= 1;
+        if *count == 0 {
+            counts.remove(&id);
+        }
+    }
 }
 
 pub fn merge_session_catalog_row(

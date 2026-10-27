@@ -848,9 +848,8 @@ impl Waku {
     pub(super) fn ensure_session_loaded(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self
             .state
-            .sessions
-            .iter()
-            .any(|session| session.id == session_id && !session.detail_loaded)
+            .catalog_session(session_id)
+            .is_some_and(|session| !session.detail_loaded)
         {
             self.session_hydrations
                 .enqueue(session_id, self.state.selected_session == Some(session_id));
@@ -862,9 +861,8 @@ impl Waku {
         while let Some(session_id) = self.session_hydrations.next() {
             if !self
                 .state
-                .sessions
-                .iter()
-                .any(|session| session.id == session_id && !session.detail_loaded)
+                .catalog_session(session_id)
+                .is_some_and(|session| !session.detail_loaded)
             {
                 self.session_hydrations.running.remove(&session_id);
                 continue;
@@ -2045,6 +2043,7 @@ impl Waku {
                 session.workspace = workspace;
             }
         }
+        self.state.note_session_topology_change();
         self.daemons
             .claim_session(session_id, self.daemons.project_owner(project_id));
     }
@@ -2563,7 +2562,7 @@ impl Waku {
         self.remove_right_panel_session_state(session_id, cx);
         self.remove_composer_draft(composer_draft_key, cx);
         let retired = self.state.sessions.remove(index);
-        self.state.note_session_topology_change();
+        self.state.note_session_removed(retired.id);
         cx.background_executor()
             .spawn(async move { drop(retired) })
             .detach();
@@ -2589,9 +2588,12 @@ impl Waku {
         self.remove_side_chat_surface(session_id, cx);
         self.side_chat_views.remove(&session_id);
         self.side_chat_composers.remove(&session_id);
+        let catalog_owner = self.daemons.session_owner(session_id);
         if let Err(error) = self.store.remove_session(session_id) {
             self.show_toast(tr!("errors.save_local_state", error = error));
         }
+        self.state
+            .note_local_session_removed(session_id, catalog_owner);
         if self
             .pending_session_activation
             .is_some_and(|pending| pending.session_id == session_id)
@@ -7873,6 +7875,7 @@ impl Waku {
                             }
                             session.project_id = project_id;
                             session.workspace = SessionWorkspace::Local;
+                            waku.state.note_session_topology_change();
                             waku.daemons
                                 .claim_session(draft_id, waku.daemons.project_owner(project_id));
                             if retires_temporary_chat {

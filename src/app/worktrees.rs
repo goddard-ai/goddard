@@ -683,6 +683,7 @@ impl Waku {
                 .runtimes
                 .get(&session_id)
                 .is_some_and(|runtime| runtime.driver.supports_steer());
+        self.state.note_session_topology_change();
         let Some(session) = self.state.session_mut(session_id) else {
             return;
         };

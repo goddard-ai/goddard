@@ -262,12 +262,7 @@ impl Waku {
         if self.agy_terminals.contains_key(&session_id) || self.daemon.is_remote() {
             return;
         }
-        let Some(session) = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-        else {
+        let Some(session) = self.state.catalog_session(session_id) else {
             return;
         };
         if session.provider != ProviderKind::Antigravity || !session.has_started() {

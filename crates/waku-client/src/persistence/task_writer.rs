@@ -97,7 +97,7 @@ impl Drop for WorkerLife {
 
 /// Reclamation must not wait for a slow RPC or for idle CPU. Use the existing
 /// async/blocking pool rather than spawning a new native thread per snapshot.
-fn retire(value: impl Send + 'static) {
+pub(super) fn retire(value: impl Send + 'static) {
     smol::spawn(async move { smol::unblock(move || drop(value)).await }).detach();
 }
 
