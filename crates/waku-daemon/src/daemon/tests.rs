@@ -973,7 +973,7 @@ fn a_stale_client_save_cannot_unarchive_a_managed_session() {
 }
 
 #[test]
-fn expired_archives_are_purged_when_state_loads() {
+fn expired_archives_wait_for_admitted_maintenance_after_state_load() {
     let root = std::env::temp_dir().join(format!("waku-archive-{}", Uuid::new_v4()));
     let store = StateStore::daemon(root.join("app.db"));
     let mut state = PersistedState::fresh(root.join("repo"));
@@ -1003,10 +1003,21 @@ fn expired_archives_are_purged_when_state_loads() {
         store,
     )
     .unwrap();
+    assert!(
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .any(|session| session.id == expired_id),
+        "loading must preserve expired archives until maintenance is admitted"
+    );
+    // Drive one admitted maintenance unit without relying on host CPU load.
+    assert!(backend.purge_expired_archived_sessions().unwrap());
     let remaining = backend.task_state.lock().sessions.clone();
     assert!(
         !remaining.iter().any(|session| session.id == expired_id),
-        "an archive past the retention window is removed on load"
+        "an admitted retention unit removes an archive past its retention window"
     );
     assert!(
         remaining
@@ -11654,6 +11665,10 @@ fn setmodel_selection_survives_stale_saves_broadcast_hydration_and_reload() {
             stale.clone()
         };
         incoming.updated_at += (index as u64 + 1) * 10_000;
+        // Keep the provider selection stale, but authorize each new title
+        // edit against the current metadata revision. A truly stale title
+        // is rejected and correctly produces no catalog-change broadcast.
+        incoming.metadata_revision = detail(&reader).metadata_revision;
         incoming.title = format!("Stale client metadata edit {index}");
         let mut tails = Vec::new();
         if incremental {
@@ -11674,6 +11689,10 @@ fn setmodel_selection_survives_stale_saves_broadcast_hydration_and_reload() {
             panic!("expected save acknowledgement")
         };
         assert_selection(&sessions[0]);
+        assert_eq!(
+            sessions[0].title,
+            format!("Stale client metadata edit {index}")
+        );
         broadcasts.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_selection(&catalog(&reader));
         assert_selection(&detail(&reader));
@@ -11706,6 +11725,7 @@ fn setmodel_selection_survives_stale_saves_broadcast_hydration_and_reload() {
     // selection or erase the daemon's prompt while it is working.
     let mut incoming = stale.clone();
     incoming.updated_at += 40_000;
+    incoming.metadata_revision = detail(&reader).metadata_revision;
     incoming.title = "Stale working client metadata edit".into();
     incoming.reasoning_effort = None;
     request(Command::SaveTaskState {
