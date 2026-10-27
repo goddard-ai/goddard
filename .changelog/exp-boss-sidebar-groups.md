@@ -1,0 +1,1 @@
+- Find avatar style, employee chat search, and sidebar grouping in Settings → Boss. Turn off “Group employees in sidebar” for one list without group headers, with planning sessions first.

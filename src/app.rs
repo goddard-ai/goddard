@@ -311,6 +311,7 @@ enum SettingsPage {
     Usage,
     Daemon,
     ComputerUse,
+    Boss,
     Commands,
     Terminal,
     Appearance,
@@ -2203,6 +2204,7 @@ fn diff_source_from_persisted(source: PersistedDiffSource) -> ReviewDiffSource {
 fn persisted_settings_page(page: SettingsPage) -> PersistedSettingsPage {
     match page {
         SettingsPage::General => PersistedSettingsPage::General,
+        SettingsPage::Boss => PersistedSettingsPage::Boss,
         SettingsPage::Providers => PersistedSettingsPage::Providers,
         SettingsPage::Skills => PersistedSettingsPage::Skills,
         SettingsPage::Friends => PersistedSettingsPage::Friends,
@@ -2225,6 +2227,7 @@ fn persisted_settings_page(page: SettingsPage) -> PersistedSettingsPage {
 fn settings_page_from_persisted(page: PersistedSettingsPage) -> SettingsPage {
     match page {
         PersistedSettingsPage::General => SettingsPage::General,
+        PersistedSettingsPage::Boss => SettingsPage::Boss,
         PersistedSettingsPage::Providers => SettingsPage::Providers,
         PersistedSettingsPage::Skills => SettingsPage::Skills,
         PersistedSettingsPage::Friends => SettingsPage::Friends,

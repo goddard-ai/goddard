@@ -6684,6 +6684,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     // the full navigation even before anything is typed.
     let mut all_pages = vec![
         SettingsPage::General,
+        SettingsPage::Boss,
         SettingsPage::Appearance,
         SettingsPage::Keybindings,
     ];

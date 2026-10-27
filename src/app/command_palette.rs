@@ -3578,6 +3578,12 @@ impl Waku {
                 "settings preferences general local privacy updates",
             ),
             (
+                SettingsPage::Boss,
+                "settings.boss",
+                "icons/brain.svg",
+                "settings preferences boss employees planning sidebar groups avatar search",
+            ),
+            (
                 SettingsPage::Appearance,
                 "settings.appearance",
                 "icons/appearance.svg",
@@ -3715,7 +3721,11 @@ impl Waku {
                         "settings.sidebar_draft_preview_color" => {
                             self.state.sidebar_composer_drafts
                         }
-                        "boss.avatar_style" => self.state.boss_experiment_enabled,
+                        "boss.avatar_style"
+                        | "boss.employee_groups"
+                        | "experiments.employee_search_window" => {
+                            self.state.boss_experiment_enabled
+                        }
                         "daemon.new_task_environment" => self.state.sandbox_experiment_enabled,
                         "daemon.external_title" => self.daemon.is_externally_managed(),
                         "daemon.expose_title"
@@ -5975,7 +5985,8 @@ impl Waku {
                 self.open_settings_action(&OpenSettings, window, cx);
                 self.open_settings_page(page, window, cx);
                 // Keep the experiments acknowledgement gate intact.
-                if page != SettingsPage::Experiments || self.state.experiments_warning_acknowledged
+                if !matches!(page, SettingsPage::Experiments | SettingsPage::Boss)
+                    || self.state.experiments_warning_acknowledged
                 {
                     self.settings_search
                         .update(cx, |input, cx| input.set_content(title, cx));

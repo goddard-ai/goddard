@@ -397,6 +397,17 @@ fn append_sidebar_planning_group(rows: &mut Vec<SidebarRow>, sessions: &[Uuid], 
     rows.push(SidebarRow::CollapsibleGroupSpacer { collapsed });
 }
 
+/// Flat Boss lists keep planning first and expose every listed employee,
+/// independent of any remembered group folds or per-group reveal counts.
+fn append_sidebar_ungrouped_roster(
+    rows: &mut Vec<SidebarRow>,
+    planning: &[Uuid],
+    employees: impl Iterator<Item = Uuid>,
+) {
+    rows.extend(planning.iter().copied().map(SidebarRow::Planning));
+    rows.extend(employees.map(SidebarRow::Employee));
+}
+
 /// The member faces a collapsed employee group's header previews — up to
 /// `SIDEBAR_COLLAPSED_GROUP_AVATARS` non-expired members with a resolvable identity —
 /// and the member count its "+N more" tail omits. A member without an
@@ -4005,6 +4016,7 @@ impl Waku {
         fingerprint = mix(fingerprint, u64::from(dates.day_start_hour));
         fingerprint = mix(fingerprint, dates.calendar_year as u64);
         fingerprint = mix(fingerprint, self.boss_ui.revision);
+        fingerprint = mix(fingerprint, u64::from(self.state.sidebar_employee_groups));
         fingerprint = mix(
             fingerprint,
             match self.state.sidebar_grouping {
@@ -4444,6 +4456,34 @@ impl Waku {
                 // delegated tasks. The fold flag is shared across hosts like
                 // the employee groups', so the member lists merge too.
                 let planning_ids = self.sidebar_planning_session_ids(*key);
+                if !self.state.sidebar_employee_groups {
+                    let employees = self
+                        .boss_ui
+                        .active
+                        .get(key)
+                        .into_iter()
+                        .flatten()
+                        .chain(
+                            self.boss_ui
+                                .recent
+                                .get(key)
+                                .into_iter()
+                                .flatten()
+                                .filter(|id| !self.boss_ui.working.contains(id)),
+                        )
+                        .copied()
+                        .filter(|id| {
+                            sidebar_employee_shown(
+                                id,
+                                &self.state.sessions,
+                                &self.state.sidebar_archived_employees,
+                                self.boss_ui.working.contains(id),
+                            ) && self.sidebar_employee_avatar_ready(*id)
+                        });
+                    append_sidebar_ungrouped_roster(&mut rows, &planning_ids, employees);
+                    continue;
+                }
+
                 if !planning_ids.is_empty() {
                     collapsed_members
                         .entry(SidebarGroup::Planning)
@@ -8849,6 +8889,24 @@ mod tests {
             vec![
                 SidebarRow::Header(SidebarGroup::Employees),
                 SidebarRow::CollapsibleGroupSpacer { collapsed: true },
+            ]
+        );
+    }
+
+    #[test]
+    fn ungrouped_roster_keeps_planning_first_and_all_employees_without_headers() {
+        let planning = [Uuid::from_u128(1), Uuid::from_u128(2)];
+        let employees = [Uuid::from_u128(3), Uuid::from_u128(4), Uuid::from_u128(5)];
+        let mut rows = Vec::new();
+        append_sidebar_ungrouped_roster(&mut rows, &planning, employees.into_iter());
+        assert_eq!(
+            rows,
+            vec![
+                SidebarRow::Planning(planning[0]),
+                SidebarRow::Planning(planning[1]),
+                SidebarRow::Employee(employees[0]),
+                SidebarRow::Employee(employees[1]),
+                SidebarRow::Employee(employees[2]),
             ]
         );
     }

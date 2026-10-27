@@ -1035,7 +1035,7 @@ experiments.computer_use_title:
 experiments.boss_title:
   en: Boss and employees
 experiments.boss_description:
-  en: Enable the Boss assistant, employee tasks, personas, and plans.
+  en: Enable the Boss assistant, employee tasks, personas, and plans. Configure sidebar grouping, avatars, and employee chat search in Settings → Boss.
 experiments.employee_search_window:
   en: Employee chat search
 experiments.employee_search_off:
@@ -7383,3 +7383,14 @@ command_palette.transcript_search_failed:
   en: Transcript search failed. Edit the query to retry.
 command_palette.transcript_search_incomplete:
   en: Some hosts could not be searched. Edit the query to retry.
+
+settings.boss:
+  en: Boss
+settings.boss_keywords:
+  en: boss employees personas planning sessions avatar style sidebar groups grouping outcomes errands waiting search history
+boss.employee_groups:
+  en: Group employees in sidebar
+boss.employee_groups_description:
+  en: Group employees by purpose and queue status. Turn off for one list without group headers, with planning sessions first.
+boss.employee_search_description:
+  en: How far back Search employee chats looks, including archived chats. Off hides the command.

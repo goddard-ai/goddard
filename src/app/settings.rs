@@ -88,12 +88,18 @@ pub(super) struct DaemonQrCode {
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 17] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 18] = [
     (
         SettingsPage::General,
         "settings.general",
         "icons/settings.svg",
         "settings.general_keywords",
+    ),
+    (
+        SettingsPage::Boss,
+        "settings.boss",
+        "icons/brain.svg",
+        "settings.boss_keywords",
     ),
     (
         SettingsPage::Appearance,
@@ -370,9 +376,17 @@ pub(super) const SETTINGS_SEARCH_TITLES: &[(SettingsPage, &[&str])] = &[
         ],
     ),
     (
+        SettingsPage::Boss,
+        &[
+            "experiments.boss_title",
+            "boss.avatar_style",
+            "boss.employee_groups",
+            "experiments.employee_search_window",
+        ],
+    ),
+    (
         SettingsPage::Appearance,
         &[
-            "boss.avatar_style",
             "settings.sidebar_transparency",
             "settings.appearance",
             "settings.light_theme",
@@ -484,8 +498,9 @@ pub(super) const SETTINGS_SEARCH_TITLES: &[(SettingsPage, &[&str])] = &[
 /// sidebar order. The other pages are self-contained surfaces (tables,
 /// master/detail panes) with their own filters — they never appear in
 /// search results rather than rendering degenerate inside a section.
-const SEARCHABLE_SETTINGS_PAGES: [SettingsPage; 10] = [
+const SEARCHABLE_SETTINGS_PAGES: [SettingsPage; 11] = [
     SettingsPage::General,
+    SettingsPage::Boss,
     SettingsPage::Appearance,
     SettingsPage::Providers,
     SettingsPage::Commands,
@@ -1625,6 +1640,7 @@ impl Waku {
                     .text_color(theme.text)
                     .child(match page {
                         SettingsPage::General => tr!("settings.general"),
+                        SettingsPage::Boss => tr!("settings.boss"),
                         SettingsPage::Providers => tr!("settings.providers"),
                         SettingsPage::Skills => tr!("settings.skills"),
                         SettingsPage::Friends => tr!("settings.friends"),
@@ -1645,6 +1661,7 @@ impl Waku {
             )
             .child(match page {
                 SettingsPage::General => self.render_general_settings(&search, cx),
+                SettingsPage::Boss => self.render_boss_settings(&search, cx),
                 SettingsPage::Providers => self.render_providers_settings(&search, cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
                 SettingsPage::Friends => self.render_friends_settings(&search, cx),
@@ -1779,6 +1796,7 @@ impl Waku {
                 search.source_filter = Some(source);
                 let content = match page {
                     SettingsPage::General => self.render_general_settings(&search, cx),
+                    SettingsPage::Boss => self.render_boss_settings(&search, cx),
                     SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
                     SettingsPage::Providers => self.render_providers_settings(&search, cx),
                     SettingsPage::Friends => self.render_friends_settings(&search, cx),
@@ -5728,7 +5746,7 @@ impl Waku {
                 enabled: self.state.boss_experiment_enabled,
                 set: Self::set_boss_experiment_enabled,
                 eval_backed: false,
-                tuning: Some(Self::boss_tuning),
+                tuning: None,
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
@@ -7620,52 +7638,132 @@ impl Waku {
         )
     }
 
-    /// The Boss card's tuning block: how far back the command palette's
-    /// "Search employee chats" view reaches — archived records included —
-    /// or Off to hide the command.
-    fn boss_tuning(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        let days = self.state.employee_chat_search_days;
-        let handle = self.menu_handle("employee-chat-search-days".to_owned(), cx);
-        let weak = cx.entity().downgrade();
-        let selector = dropdown_menu(
-            MenuChip::new("employee-chat-search-days")
-                .label(employee_chat_search_days_label(days))
-                .outlined()
-                .selected(handle.is_open())
-                .w(px(140.0))
-                .justify_between(),
-            "employee-chat-search-days-menu",
-            &handle,
-            MenuAlign::BelowRight,
-            move |_| {
-                crate::persistence::EMPLOYEE_CHAT_SEARCH_DAYS_OPTIONS
-                    .into_iter()
-                    .map(|option| {
-                        let weak = weak.clone();
-                        MenuItem::new(employee_chat_search_days_label(option), move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_employee_chat_search_days(option, cx)
-                            });
+    fn render_boss_settings(&self, search: &SettingSearch, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        if !self.state.experiments_warning_acknowledged {
+            return if search.active() {
+                div().into_any_element()
+            } else {
+                self.render_experiments_gate(theme, cx)
+            };
+        }
+        let enabled = self.state.boss_experiment_enabled;
+        let mut cards: Vec<AnyElement> = setting_card(
+            "icons/brain.svg",
+            tr!("experiments.boss_title"),
+            tr!("experiments.boss_description"),
+            toggle_switch(
+                "boss-settings-toggle",
+                enabled,
+                false,
+                theme,
+                cx,
+                move |this, _, cx| this.set_boss_experiment_enabled(!enabled, cx),
+            ),
+            theme,
+            search,
+        )
+        .into_iter()
+        .collect();
+        if enabled {
+            let key = self
+                .selected_surface_boss_key()
+                .unwrap_or(waku_client::DaemonKey::Local);
+            let selected_style = self
+                .boss_ui
+                .states
+                .get(&key)
+                .map(|state| state.identity.avatar_style)
+                .unwrap_or_default();
+            let avatar_style_row = settings_row(
+                "icons/user-round.svg",
+                tr!("boss.avatar_style"),
+                tr!("boss.avatar_style_description"),
+                self.setting_selector(
+                    "boss-avatar-style-selector",
+                    vec![
+                        (AvatarStyle::Gaze, tr!("boss.avatar_style_gaze")),
+                        (AvatarStyle::DiceBear, tr!("boss.avatar_style_dicebear")),
+                        (AvatarStyle::LineFace, tr!("boss.avatar_style_line_face")),
+                        (AvatarStyle::AgentAvatars, tr!("boss.avatar_style_agent")),
+                        (AvatarStyle::Avvvatars, tr!("boss.avatar_style_avvvatars")),
+                        (AvatarStyle::Mascots, tr!("boss.avatar_style_mascots")),
+                    ],
+                    selected_style,
+                    160.0,
+                    cx,
+                    move |this, style, _, cx| this.set_boss_avatar_style(key, style, cx),
+                ),
+                theme,
+                search,
+            );
+
+            let days = self.state.employee_chat_search_days;
+            let handle = self.menu_handle("employee-chat-search-days".to_owned(), cx);
+            let weak = cx.entity().downgrade();
+            let selector = dropdown_menu(
+                MenuChip::new("employee-chat-search-days")
+                    .label(employee_chat_search_days_label(days))
+                    .outlined()
+                    .selected(handle.is_open())
+                    .w(px(140.0))
+                    .justify_between(),
+                "employee-chat-search-days-menu",
+                &handle,
+                MenuAlign::BelowRight,
+                move |_| {
+                    crate::persistence::EMPLOYEE_CHAT_SEARCH_DAYS_OPTIONS
+                        .into_iter()
+                        .map(|option| {
+                            let weak = weak.clone();
+                            MenuItem::new(employee_chat_search_days_label(option), move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_employee_chat_search_days(option, cx)
+                                });
+                            })
+                            .selected(option == days)
                         })
-                        .selected(option == days)
-                    })
-                    .collect()
-            },
-        );
+                        .collect()
+                },
+            );
+            let grouped = self.state.sidebar_employee_groups;
+            cards.extend(setting_card(
+                "icons/panel-left.svg",
+                tr!("boss.employee_groups"),
+                tr!("boss.employee_groups_description"),
+                toggle_switch(
+                    "sidebar-employee-groups-toggle",
+                    grouped,
+                    false,
+                    theme,
+                    cx,
+                    move |this, _, cx| {
+                        this.state.sidebar_employee_groups = !grouped;
+                        this.save();
+                        cx.notify();
+                    },
+                ),
+                theme,
+                search,
+            ));
+            if let Some(card) = settings_row_card(vec![avatar_style_row], theme) {
+                cards.push(card.into_any_element());
+            }
+            cards.extend(setting_card(
+                "icons/search.svg",
+                tr!("experiments.employee_search_window"),
+                tr!("boss.employee_search_description"),
+                selector,
+                theme,
+                search,
+            ));
+        }
         div()
-            .mt(px(10.0))
+            .mt(px(15.0))
             .flex()
-            .items_center()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .w(px(110.0))
-                    .flex_none()
-                    .text_size(sp(12.5))
-                    .text_color(theme.text_secondary)
-                    .child(tr!("experiments.employee_search_window")),
-            )
-            .child(selector)
+            .flex_col()
+            .gap(px(10.0))
+            .children(cards)
             .into_any_element()
     }
 
@@ -11582,44 +11680,6 @@ impl Waku {
                 .map(|matched| self.render_theme_preview(preview_open, matched, cx))
         };
 
-        let avatar_style_row = self
-            .state
-            .boss_experiment_enabled
-            .then(|| {
-                let key = self
-                    .selected_surface_boss_key()
-                    .unwrap_or(waku_client::DaemonKey::Local);
-                let selected_style = self
-                    .boss_ui
-                    .states
-                    .get(&key)
-                    .map(|state| state.identity.avatar_style)
-                    .unwrap_or_default();
-                settings_row(
-                    "icons/user-round.svg",
-                    tr!("boss.avatar_style"),
-                    tr!("boss.avatar_style_description"),
-                    self.setting_selector(
-                        "boss-avatar-style-selector",
-                        vec![
-                            (AvatarStyle::Gaze, tr!("boss.avatar_style_gaze")),
-                            (AvatarStyle::DiceBear, tr!("boss.avatar_style_dicebear")),
-                            (AvatarStyle::LineFace, tr!("boss.avatar_style_line_face")),
-                            (AvatarStyle::AgentAvatars, tr!("boss.avatar_style_agent")),
-                            (AvatarStyle::Avvvatars, tr!("boss.avatar_style_avvvatars")),
-                            (AvatarStyle::Mascots, tr!("boss.avatar_style_mascots")),
-                        ],
-                        selected_style,
-                        160.0,
-                        cx,
-                        move |this, style, _, cx| this.set_boss_avatar_style(key, style, cx),
-                    ),
-                    theme,
-                    search,
-                )
-            })
-            .flatten();
-
         // Vibrancy is a macOS-only effect; on other platforms the sidebar is
         // already a solid fill and there is nothing to switch.
         let transparency_rows = if cfg!(target_os = "macos") {
@@ -11713,7 +11773,6 @@ impl Waku {
                 theme,
                 search,
             ),
-            avatar_style_row,
             settings_row(
                 "icons/sun.svg",
                 tr!("settings.light_theme"),

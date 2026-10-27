@@ -1222,6 +1222,7 @@ pub struct PersistedFullscreenSurface {
 #[serde(rename_all = "snake_case")]
 pub enum PersistedSettingsPage {
     General,
+    Boss,
     Providers,
     Skills,
     Friends,
@@ -1468,6 +1469,9 @@ pub struct AppSettings {
     /// Show a task's unsent composer draft on its own line under the sidebar
     /// row's title.
     pub sidebar_composer_drafts: bool,
+    /// Show purpose and queue headers for Boss employees in the sidebar.
+    #[serde(default = "default_enabled")]
+    pub sidebar_employee_groups: bool,
     /// Swap the composer's Enter chords: Enter steers into the running turn
     /// and ⌘⏎ submits the draft instead of the other way around.
     pub composer_enter_steers: bool,
@@ -1742,6 +1746,7 @@ impl Default for AppSettings {
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             sidebar_composer_drafts: false,
+            sidebar_employee_groups: true,
             composer_enter_steers: false,
             transcript_keep_scroll_on_send: false,
             transcript_compact_on_send: false,
@@ -2286,6 +2291,9 @@ pub struct PersistedState {
     /// the sidebar row's title.
     #[serde(default)]
     pub sidebar_composer_drafts: bool,
+    /// Show purpose and queue headers for Boss employees in the sidebar.
+    #[serde(default = "default_enabled")]
+    pub sidebar_employee_groups: bool,
     /// Whether the composer's Enter chords are swapped: Enter steers into
     /// the running turn and ⌘⏎ submits the draft.
     #[serde(default)]
@@ -2865,6 +2873,7 @@ impl PersistedState {
             three_finger_swipe_navigation: false,
             sidebar_shortcut_tags: true,
             sidebar_composer_drafts: false,
+            sidebar_employee_groups: true,
             composer_enter_steers: false,
             transcript_keep_scroll_on_send: false,
             transcript_compact_on_send: false,
@@ -3369,6 +3378,7 @@ impl PersistedState {
             three_finger_swipe_navigation: self.three_finger_swipe_navigation,
             sidebar_shortcut_tags: self.sidebar_shortcut_tags,
             sidebar_composer_drafts: self.sidebar_composer_drafts,
+            sidebar_employee_groups: self.sidebar_employee_groups,
             composer_enter_steers: self.composer_enter_steers,
             transcript_keep_scroll_on_send: self.transcript_keep_scroll_on_send,
             transcript_compact_on_send: self.transcript_compact_on_send,
@@ -3547,6 +3557,7 @@ impl PersistedState {
         self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
         self.sidebar_shortcut_tags = settings.sidebar_shortcut_tags;
         self.sidebar_composer_drafts = settings.sidebar_composer_drafts;
+        self.sidebar_employee_groups = settings.sidebar_employee_groups;
         self.composer_enter_steers = settings.composer_enter_steers;
         self.transcript_keep_scroll_on_send = settings.transcript_keep_scroll_on_send;
         self.transcript_compact_on_send = settings.transcript_compact_on_send;
@@ -5490,6 +5501,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.three_finger_swipe_navigation);
+    }
+
+    #[test]
+    fn sidebar_employee_groups_default_on_and_persist_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(defaults.sidebar_employee_groups);
+        let mut state = PersistedState::empty();
+        assert!(state.sidebar_employee_groups);
+        state.sidebar_employee_groups = false;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["sidebar_employee_groups"], false);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("sidebar_employee_groups")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(!restored.sidebar_employee_groups);
     }
 
     #[test]
