@@ -986,6 +986,17 @@ function writeDaemonInfo(): void {
   }
 }
 
+function clearDaemonConnection(): void {
+  daemonAddress = undefined;
+  controlClient?.disconnect();
+  controlClient = undefined;
+  try {
+    rmSync(daemonInfoPath, { force: true });
+  } catch (error) {
+    console.error("[goddard-dev] Could not remove stale daemon info:", error);
+  }
+}
+
 async function spawnDaemon(
   bind: string,
   preserveProtocolDirty = false,
@@ -1086,6 +1097,7 @@ function watchDaemonExit(child: ReturnType<typeof Bun.spawn>): void {
     if (daemon !== child || stopping) return;
     daemon = undefined;
     runningDaemonLane = undefined;
+    clearDaemonConnection();
     console.error(`[goddard-dev] Daemon exited unexpectedly (${code}).`);
     if (Date.now() - lastDaemonSpawnAt > 30_000) {
       await restartDaemon("unexpected exit");
@@ -1186,6 +1198,7 @@ async function stopDaemon(): Promise<void> {
   daemon = undefined;
   if (child === undefined || child.exitCode !== null) {
     runningDaemonLane = undefined;
+    if (child !== undefined) clearDaemonConnection();
     return;
   }
   try {
@@ -1202,8 +1215,7 @@ async function stopDaemon(): Promise<void> {
   // Clear the lane only once the process is gone: until then it still holds
   // the lane's binary open and a build must not pick it as the copy target.
   runningDaemonLane = undefined;
-  controlClient?.disconnect();
-  controlClient = undefined;
+  clearDaemonConnection();
 }
 
 // A live session is one with a provider runtime a daemon restart would kill.
@@ -1620,7 +1632,9 @@ async function stopApp(): Promise<void> {
 
 function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
   if (daemonAddress === undefined) {
-    console.error("[goddard-dev] The daemon is not running; cannot launch the app.");
+    console.error(
+      "[goddard-dev] The daemon is not running; press b + enter to restart it and launch the app.",
+    );
     return undefined;
   }
   const lane = laned ? latestLane : undefined;
@@ -1660,9 +1674,13 @@ function launchApp(): ReturnType<typeof Bun.spawn> | undefined {
     appBundlePath = undefined;
     // The daemon owns session state, so it and the watcher stay up when the
     // app exits; 'a' relaunches, 'q' shuts everything down.
-    console.log(
-      `[goddard-dev] App exited (${exitCode}); the daemon is still running — press a + enter to relaunch.`,
-    );
+    const processStatus = isMacOS
+      ? `App launcher finished (${exitCode}); the app's exit status is unavailable`
+      : `App exited (${exitCode})`;
+    const recovery = daemonAddress === undefined
+      ? "the daemon is not running — press b + enter to restart it and relaunch"
+      : "the daemon is still running — press a + enter to relaunch";
+    console.log(`[goddard-dev] ${processStatus}; ${recovery}.`);
   });
   return launchedApp;
 }

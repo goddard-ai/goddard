@@ -120,6 +120,98 @@ async function waitFor(
   throw new Error(`timed out waiting for ${detail}`);
 }
 
+for (const announcesReady of [false, true]) {
+  test(`dev recovers after the previous daemon exits ${announcesReady ? "after" : "before"} readiness`, async () => {
+    const { root, bin, dataDir, env } = await makeWorkspace("goddard-dev-recovery-test-");
+    const oldBundle = join(dataDir, "debug", "lanes", "b", "Goddard Debug.app");
+    const seed = Bun.spawn([join(bin, "bundle-stub")], {
+      env: { ...env, GODDARD_BUNDLE_DIR: oldBundle },
+    });
+    expect(await seed.exited).toBe(0);
+    await writeFile(join(dataDir, "debug", "lanes", "b", ".complete"), "seed\n");
+    await writeFile(join(oldBundle, "Contents", "MacOS", "goddard-debug-daemon"), `#!${process.execPath}
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+${announcesReady ? 'console.log(JSON.stringify({address: "127.0.0.1:34198"}));' : ''}
+${announcesReady ? 'while (!existsSync(join(process.env.TEST_ROOT, "exit-old-daemon"))) await Bun.sleep(10);' : ''}
+process.exit(1);
+`, { mode: 0o755 });
+    await writeFile(join(bin, "mbx"), `#!${process.execPath}
+import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+writeFileSync(join(process.env.TEST_ROOT, "building"), "");
+while (!existsSync(join(process.env.TEST_ROOT, "release-build"))) await Bun.sleep(10);
+`, { mode: 0o755 });
+    let output = "";
+    const decoder = new TextDecoder();
+    const terminal = new Bun.Terminal({
+      cols: 240,
+      rows: 40,
+      data(_terminal, bytes) {
+        output += decoder.decode(bytes, { stream: true });
+      },
+    });
+    const child = Bun.spawn([process.execPath, devScript, "--wait"], { env, terminal });
+    try {
+      await waitFor(() => existsSync(join(root, "building")), 10_000, "initial build");
+      if (announcesReady) {
+        expect(output).toContain("Daemon listening on 127.0.0.1:34198");
+        await writeFile(join(root, "exit-old-daemon"), "");
+        await waitFor(() => output.includes("Daemon exited unexpectedly"), 5_000, "old daemon exit");
+        expect(existsSync(join(dataDir, "debug", "goddard-daemon.json"))).toBe(false);
+        // A failed daemon stays stopped until a fresh build or explicit restart.
+        terminal.write("a\n");
+        await waitFor(() => output.includes("press b + enter to restart it and launch"), 5_000, "blocked app launch");
+        expect(output).not.toContain("[goddard-dev] Launching ");
+      }
+      await writeFile(join(root, "release-build"), "");
+      await waitFor(() => output.includes("Daemon listening on 127.0.0.1:34199"), 20_000, "fresh daemon startup");
+      await waitFor(() => output.includes("App launcher finished"), 5_000, "app launcher completion");
+      expect(output.indexOf("Daemon listening on 127.0.0.1:34199")).toBeLessThan(output.indexOf("[goddard-dev] Launching "));
+      expect(output).toContain("the app's exit status is unavailable");
+      expect(child.exitCode).toBeNull();
+      const infoPath = join(dataDir, "debug", "goddard-daemon.json");
+      expect(existsSync(infoPath)).toBe(true);
+      if (announcesReady) {
+        // Even the freshly built binary must not enter a restart loop if it dies fast.
+        const ps = Bun.spawn(["ps", "-axo", "pid=,ppid=,comm="], { stdout: "pipe" });
+        const processes = await new Response(ps.stdout).text();
+        expect(await ps.exited).toBe(0);
+        const daemonProcess = processes
+          .split("\n")
+          .map((line) => line.trim().split(/\s+/))
+          .find((parts) => Number(parts[1]) === child.pid && parts[2]?.endsWith("sleep"));
+        expect(daemonProcess).toBeDefined();
+        const previousOutput = output.length;
+        process.kill(Number(daemonProcess![0]), "SIGTERM");
+        await waitFor(() => output.slice(previousOutput).includes("Press d + enter to restart"), 5_000, "fresh daemon failure");
+        expect(existsSync(infoPath)).toBe(false);
+        const launches = output.match(/\[goddard-dev\] Launching /g)?.length;
+        terminal.write("a\n");
+        await waitFor(() => output.slice(previousOutput).includes("press b + enter to restart it and launch"), 5_000, "blocked relaunch after repeated failure");
+        expect(output.match(/\[goddard-dev\] Launching /g)?.length).toBe(launches);
+        expect(output.slice(previousOutput)).not.toContain("Daemon listening");
+      }
+      // Shutdown must also remove the endpoint discovery file.
+      terminal.write("q\n");
+      await child.exited;
+      expect(existsSync(infoPath)).toBe(false);
+    } finally {
+      if (child.exitCode === null) {
+        child.kill();
+        const exited = await Promise.race([
+          child.exited.then(() => true),
+          Bun.sleep(2_000).then(() => false),
+        ]);
+        if (!exited) child.kill("SIGKILL");
+        await child.exited;
+      }
+      terminal.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 40_000);
+}
+
 test("dev --serve stays alive after a failed initial build and recovers on the next change", async () => {
   const { root, bin, dataDir, env } = await makeWorkspace("goddard-dev-test-");
   const serveProbe = Bun.serve({ port: 0, fetch: () => new Response() });

@@ -46,14 +46,6 @@ fn main() -> anyhow::Result<()> {
         .with_context(|| format!("could not bind Goddard daemon to {}", arguments.bind))?;
     let address = listener.local_addr()?;
     ensure_bind_allowed(address, arguments.allow_non_loopback)?;
-    let ready = DaemonReady {
-        address: address.to_string(),
-        protocol_version: PROTOCOL_VERSION,
-        pid: std::process::id(),
-    };
-    println!("{}", serde_json::to_string(&ready)?);
-    std::io::stdout().flush()?;
-
     let shutdown = Arc::new(AtomicBool::new(false));
     if let Some(parent_pid) = arguments.parent_pid {
         let monitor_shutdown = shutdown.clone();
@@ -89,6 +81,15 @@ fn main() -> anyhow::Result<()> {
     // Scheduled automations tick whether or not a client ever connects;
     // starting here is what makes them daemon-owned.
     backend.start_automations();
+    // Binding the socket alone is not readiness: loading persisted state can
+    // still fail. Owners may launch clients as soon as they receive this line.
+    let ready = DaemonReady {
+        address: address.to_string(),
+        protocol_version: PROTOCOL_VERSION,
+        pid: std::process::id(),
+    };
+    println!("{}", serde_json::to_string(&ready)?);
+    std::io::stdout().flush()?;
     waku_daemon::serve(
         listener,
         token,
