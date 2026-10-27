@@ -417,14 +417,17 @@ pub(crate) fn start_link(
             };
             // The process may outlive this daemon or a lost admission reply.
             // Persist its physical workspace before any provider contact.
-            task_store.stable_writer_begin(&crate::persistence::StableWriterOrigin {
-                session_id,
-                root: root.to_path_buf(),
-                runtime_instance: instance,
-                runtime_session_id: runtime_id,
-                generation: 1,
-                workspace,
-            })?;
+            {
+                let _admission = backend.admit_workspace_writer(&workspace)?;
+                task_store.stable_writer_begin(&crate::persistence::StableWriterOrigin {
+                    session_id,
+                    root: root.to_path_buf(),
+                    runtime_instance: instance,
+                    runtime_session_id: runtime_id,
+                    generation: 1,
+                    workspace,
+                })?;
+            }
             let receipt = execute_safe(
                 &mut client,
                 &ActionEnvelope {
@@ -512,14 +515,16 @@ pub(crate) fn start_link(
         .find(|session| session.session == sref)
         .and_then(|session| session.launch_cwd.as_deref())
     {
+        let workspace = dunce::canonicalize(origin)
+            .context("could not resolve the original provider workspace")?;
+        let _admission = backend.admit_workspace_writer(&workspace)?;
         task_store.stable_writer_begin(&crate::persistence::StableWriterOrigin {
             session_id,
             root: root.to_path_buf(),
             runtime_instance: instance,
             runtime_session_id: sref.session_id,
             generation: sref.generation,
-            workspace: dunce::canonicalize(origin)
-                .context("could not resolve the original provider workspace")?,
+            workspace,
         })?;
     }
     let writer_completion = if writer_inventory

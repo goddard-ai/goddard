@@ -16,6 +16,7 @@ impl WakuBackend {
         #[cfg(not(unix))]
         let identity = None;
         let origin_id = Uuid::new_v4();
+        let _admission = self.admit_workspace_writer(&workspace)?;
         self.task_store
             .record_checkpoint_writer(&crate::persistence::CheckpointWriterOrigin {
                 origin_id,

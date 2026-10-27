@@ -393,6 +393,10 @@ impl WakuBackend {
         }
         // A launch that never came up keeps no credential.
         let sandboxed_launch = options.sandbox.is_some();
+        // Refuse overlapping retirement before publishing a provisional local
+        // writer. Keep the shared guard through durable origin publication and
+        // the driver handoff, so a refused launch leaves no unknown marker.
+        let publication = self.admit_workspace_writer(&cwd)?;
         let mut starting_writer = self
             .runtime_lifecycles
             .observe_starting_writer(&cwd, event_sender.writer_completion())?;
@@ -405,6 +409,7 @@ impl WakuBackend {
             cloud_launch,
         )?;
         starting_writer.bind(handle.writer_completion());
+        drop(publication);
         if prepared_plan.is_some()
             && handle.agent_surface_delivery() == driver::AgentSurfaceDelivery::Absent
         {

@@ -33,6 +33,8 @@ impl crate::terminal::TerminalEventSink for TerminalWriterEvents {
     fn before_spawn(&self, cwd: &Path) -> anyhow::Result<()> {
         let workspace = dunce::canonicalize(cwd)?;
         let identity = terminal_directory_identity(&workspace)?;
+        let _admission =
+            workspace_admission::WorkspaceAdmission::writer(self.store.path(), &workspace)?;
         // Commit the durable origin while publication is excluded by the
         // same short gate that admits destructive workspace operations.
         let writers = self.lifecycles.retired_writers.lock();
@@ -85,11 +87,13 @@ fn paths_overlap(left: &Path, right: &Path) -> bool {
     left.starts_with(right) || right.starts_with(left)
 }
 
-/// A process-local admission fence, not durable archive authority or proof
-/// about writers belonging to another daemon. No registry lock spans Git I/O.
+/// Excludes new writer publication in this process and other participating
+/// backends sharing the task store. No registry lock spans Git I/O; durable
+/// origins and the quiet check account for previously published writers.
 pub(super) struct WorkspaceRetirement {
     lifecycles: Arc<RuntimeLifecycles>,
     id: Uuid,
+    _admission: workspace_admission::WorkspaceAdmission,
 }
 
 impl Drop for WorkspaceRetirement {
@@ -278,6 +282,7 @@ impl WakuBackend {
         #[cfg(not(unix))]
         let identity = None;
         let origin_id = Uuid::new_v4();
+        let _admission = self.admit_workspace_writer(&workspace)?;
         self.task_store
             .record_native_writer(&crate::persistence::NativeWriterOrigin {
                 origin_id,
@@ -351,6 +356,8 @@ impl WakuBackend {
         path: &Path,
     ) -> anyhow::Result<WorkspaceRetirement> {
         let target = dunce::canonicalize(path)?;
+        let admission =
+            workspace_admission::WorkspaceAdmission::retirement(self.task_store.path(), &target)?;
         let id = Uuid::new_v4();
         {
             let mut writers = self.runtime_lifecycles.retired_writers.lock();
@@ -360,6 +367,7 @@ impl WakuBackend {
         let retirement = WorkspaceRetirement {
             lifecycles: Arc::clone(&self.runtime_lifecycles),
             id,
+            _admission: admission,
         };
         self.require_no_observed_workspace_writers(&target)?;
         Ok(retirement)

@@ -216,3 +216,40 @@ fn native_writer_origins_precede_factory_contact_survive_reopen_and_fence_reused
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn refused_peer_retirement_admission_never_contacts_factory_or_leaves_unknown_writer() {
+    let root = std::env::temp_dir().join(format!("native-refused-admission-{}", Uuid::new_v4()));
+    let (backend, session_id) = super::super::tests::surface_test_backend(&root);
+    let workspace = root.join("repo");
+    let mut peer = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("peer-settings.json")).unwrap(),
+        StateStore::daemon(backend.task_store.path().to_owned()),
+    )
+    .unwrap();
+    peer.runtime_test_start = Some(Arc::new(|_, _, _| {
+        panic!("refused workspace admission contacted the provider factory")
+    }));
+    let retirement = backend.begin_workspace_retirement(&workspace).unwrap();
+    let error = peer
+        .spawn_runtime(
+            session_id,
+            Uuid::new_v4(),
+            ProviderKind::Claude,
+            options(&workspace),
+            EventSink::detached(),
+        )
+        .err()
+        .expect("peer launch bypassed workspace retirement");
+    assert!(
+        error.to_string().contains("workspace admission deferred"),
+        "{error:#}"
+    );
+    assert!(peer.task_store.native_writer_origins().unwrap().is_empty());
+    drop(retirement);
+    peer.require_no_observed_workspace_writers(&workspace)
+        .expect("refused launch left an unqualified local writer");
+    drop(peer);
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -1,0 +1,1 @@
+- Workspace retirement now excludes overlapping provider, terminal, and ending-checkpoint writer admission across daemons sharing the same task store.

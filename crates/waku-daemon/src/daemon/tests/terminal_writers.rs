@@ -362,7 +362,49 @@ fn retirement_excludes_local_writer_admissions_and_releases_after_failure() {
         assert!(error.to_string().contains("workspace admission deferred"));
         assert!(backend.begin_workspace_retirement(path).is_err());
     }
-    let other = backend.begin_workspace_retirement(&unrelated).unwrap();
+    // Retirement work serializes, but an unrelated writer can still publish.
+    assert!(backend.begin_workspace_retirement(&unrelated).is_err());
+    drop(backend.admit_workspace_writer(&unrelated).unwrap());
+    let other = WakuBackend::new(
+        crate::DaemonSettingsStore::open(root.join("other-settings.json")).unwrap(),
+        StateStore::daemon(backend.task_store.path().to_owned()),
+    )
+    .unwrap();
+    // Its independent in-memory registry cannot see our local retirement.
+    // Each physical-contact boundary must consult the shared store's gate.
+    for path in [&alias, &root] {
+        assert!(
+            other
+                .record_native_writer_before_start(Uuid::new_v4(), Uuid::new_v4(), path)
+                .is_err()
+        );
+        assert!(
+            other
+                .record_checkpoint_writer_before_capture(path, Uuid::new_v4(), 1)
+                .is_err()
+        );
+        assert!(other.admit_workspace_writer(path).is_err());
+        assert!(
+            other
+                .open_terminal(path, 80, 24, EventSink::detached(), None)
+                .is_err()
+        );
+    }
+    assert!(other.task_store.native_writer_origins().unwrap().is_empty());
+    assert!(
+        other
+            .task_store
+            .checkpoint_writer_origins()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        other
+            .task_store
+            .terminal_writer_origins()
+            .unwrap()
+            .is_empty()
+    );
     drop(other);
     let error = backend
         .open_terminal(&alias, 80, 24, EventSink::detached(), None)

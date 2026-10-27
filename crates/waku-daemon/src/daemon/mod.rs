@@ -738,6 +738,7 @@ mod stable_stop_recovery;
 mod summon;
 mod task_creation;
 mod transfer;
+mod workspace_admission;
 mod workspace_writers;
 
 use driver_commands::*;

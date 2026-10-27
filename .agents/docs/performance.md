@@ -192,6 +192,17 @@
   durable recovery of owed metadata, queued desktop captures and final workspace
   admission remain required. Checkpoint success never erases unrelated unknown
   providers.
+- On Unix, workspace retirement holds a nonblocking cross-process file guard
+  for the same authoritative task store. New native/stable origins, terminal
+  origins and ending-checkpoint origins publish under shared admission guards;
+  runtime startup takes the guard before provisional local writer observation.
+  Ancestor/descendant and canonical symlink aliases intersect. Unrelated writer
+  admission remains available; retirement operations serialize. Guards span
+  filesystem effects without holding a catalog/registry mutex. Durable origins
+  still supply previously published writer evidence after daemon loss. Never
+  unlink gate files while the store is in use: that would split inode ownership.
+  Separate task stores, older nonparticipating daemons, unsupported platforms,
+  archive generations and shared catalog owners require their own authority.
 - Desktop ending-capture descriptors and in-flight slots use the local turn
   UUID, since rewind can reuse display counts. Recheck the settled turn and
   workspace before dispatch and acceptance, before preparing transcript rows.
