@@ -263,6 +263,86 @@ impl RuntimeLifecycles {
 }
 
 impl WakuBackend {
+    pub(super) fn record_native_writer_before_start(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        cwd: &Path,
+    ) -> anyhow::Result<Uuid> {
+        // Do not keep admitting attempts while known completion receipts
+        // cannot be persisted. Retry without waiting for idle maintenance.
+        self.retry_native_writer_confirmations()?;
+        let workspace = dunce::canonicalize(cwd)?;
+        #[cfg(unix)]
+        let identity = Some(terminal_directory_identity(&workspace)?);
+        #[cfg(not(unix))]
+        let identity = None;
+        let origin_id = Uuid::new_v4();
+        self.task_store
+            .record_native_writer(&crate::persistence::NativeWriterOrigin {
+                origin_id,
+                session_id,
+                runtime_id,
+                workspace,
+                identity,
+            })?;
+        Ok(origin_id)
+    }
+
+    pub(super) fn observe_native_writer_completion(
+        &self,
+        origin_id: Uuid,
+        witness: WriterCompletion,
+    ) {
+        let store = Arc::clone(&self.task_store);
+        let lifecycles = Arc::downgrade(&self.runtime_lifecycles);
+        witness.on_confirm(move || {
+            let lifecycles = lifecycles.upgrade();
+            if let Some(lifecycles) = &lifecycles {
+                lifecycles.native_confirmations.lock().insert(origin_id);
+            }
+            match store.confirm_native_writer(origin_id) {
+                Ok(()) => {
+                    if let Some(lifecycles) = lifecycles {
+                        lifecycles.native_confirmations.lock().remove(&origin_id);
+                    }
+                }
+                Err(error) => {
+                    eprintln!("could not persist native writer completion {origin_id}: {error}")
+                }
+            }
+        });
+    }
+
+    fn retry_native_writer_confirmations(&self) -> anyhow::Result<()> {
+        let pending: Vec<_> = self
+            .runtime_lifecycles
+            .native_confirmations
+            .lock()
+            .iter()
+            .take(64)
+            .copied()
+            .collect();
+        let mut failure = None;
+        for origin_id in pending {
+            match self.task_store.confirm_native_writer(origin_id) {
+                Ok(()) => {
+                    self.runtime_lifecycles
+                        .native_confirmations
+                        .lock()
+                        .remove(&origin_id);
+                }
+                Err(error) => {
+                    failure.get_or_insert(error);
+                }
+            }
+        }
+        if let Some(error) = failure {
+            return Err(error.into());
+        }
+        Ok(())
+    }
+
     /// Exclude intersecting local writer admissions before checking quiet, and
     /// retain the reservation through the caller's complete filesystem effect.
     /// Cross-daemon admission and archive-generation checks remain separate.
@@ -290,6 +370,7 @@ impl WakuBackend {
     /// Successful return does not authorize deletion or exclude a new launch;
     /// the retirement executor must also hold its workspace admission fence.
     pub(super) fn require_no_observed_workspace_writers(&self, path: &Path) -> anyhow::Result<()> {
+        self.retry_native_writer_confirmations()?;
         // Removal registers retired evidence before releasing this same map
         // lock. Looking at active first and retired second cannot miss the
         // transition between those two registries.
@@ -306,6 +387,29 @@ impl WakuBackend {
             anyhow::ensure!(
                 !(cwd.starts_with(&target) || target.starts_with(&cwd)),
                 "workspace cleanup deferred: a workspace writer is still active or its stop is unconfirmed"
+            );
+        }
+        let native_origins = self.task_store.native_writer_origins()?;
+        anyhow::ensure!(
+            native_origins.len() < 65,
+            "workspace cleanup deferred: native writer inventory exceeds the bounded safety scan"
+        );
+        for origin in native_origins {
+            let canonical = dunce::canonicalize(&origin.workspace)
+                .context("workspace cleanup deferred: native writer origin is unavailable")?;
+            #[cfg(unix)]
+            let current_identity = Some(terminal_directory_identity(&canonical)?);
+            #[cfg(not(unix))]
+            let current_identity: Option<String> = None;
+            anyhow::ensure!(
+                canonical == origin.workspace
+                    && origin.identity.is_some()
+                    && origin.identity == current_identity,
+                "workspace cleanup deferred: native writer origin moved, was reused or is unqualified"
+            );
+            anyhow::ensure!(
+                !(canonical.starts_with(&target) || target.starts_with(&canonical)),
+                "workspace cleanup deferred: a durable native writer has no confirmed completion"
             );
         }
         let terminal_origins = self.task_store.terminal_writer_origins()?;

@@ -491,8 +491,12 @@ impl WakuBackend {
         cloud: bool,
     ) -> anyhow::Result<(DriverHandle, Option<crate::stable_runtime::StableLink>)> {
         #[cfg(test)]
-        if let Some(start) = &self.runtime_test_start {
-            return start(provider, options, sender).map(|handle| (handle, None));
+        if self.runtime_test_start.is_some() {
+            return self
+                .start_native_runtime_driver(
+                    session_id, runtime_id, provider, options, sender, cloud,
+                )
+                .map(|handle| (handle, None));
         }
         if let Some(root) = self.stable_runtime_root(provider) {
             // The opt-in seam: this launch attaches through the surviving
@@ -536,12 +540,44 @@ impl WakuBackend {
                 return Ok((handle, Some(stable)));
             }
         }
-        let handle = if cloud {
-            driver::start_cloud(provider, options, sender)?
+        self.start_native_runtime_driver(session_id, runtime_id, provider, options, sender, cloud)
+            .map(|handle| (handle, None))
+    }
+
+    fn start_native_runtime_driver(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        provider: ProviderKind,
+        options: DriverStartOptions,
+        sender: driver::DriverEventSender,
+        cloud: bool,
+    ) -> anyhow::Result<DriverHandle> {
+        let origin_id =
+            self.record_native_writer_before_start(session_id, runtime_id, &options.cwd)?;
+        let provisional = sender.writer_completion();
+        #[cfg(test)]
+        let result = if let Some(start) = &self.runtime_test_start {
+            start(provider, options, sender)
+        } else if cloud {
+            driver::start_cloud(provider, options, sender)
         } else {
-            driver::start_local(provider, options, sender)?
+            driver::start_local(provider, options, sender)
         };
-        Ok((handle, None))
+        #[cfg(not(test))]
+        let result = if cloud {
+            driver::start_cloud(provider, options, sender)
+        } else {
+            driver::start_local(provider, options, sender)
+        };
+        let witness = result
+            .as_ref()
+            .ok()
+            .map(|handle| handle.writer_completion())
+            .filter(|witness| witness.state() != driver::WriterCompletionState::Unknown)
+            .unwrap_or(provisional);
+        self.observe_native_writer_completion(origin_id, witness);
+        result
     }
 
     /// Revoke only the owner being removed. A launch attempt can own credentials
@@ -787,3 +823,7 @@ impl WakuBackend {
         Ok((runtime_id, handle))
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "tests/native_writers.rs"]
+mod native_writer_tests;

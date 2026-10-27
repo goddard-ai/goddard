@@ -172,6 +172,18 @@
 - Daemon turn checkpoints register workspace-writer evidence before waiting for
   their capture lock, and retain it through Git capture and durable checkpoint
   persistence. Cleanup must check that evidence even after the provider exits.
+- Native driver factories record an immutable attempt origin before contact,
+  including factories that fail after starting work. Task/runtime removal and
+  runtime-id reuse do not retire that origin. Only the selected attempt's
+  qualified `WriterCompletion` witness records completion; exit events and
+  dropped handles do not. Retry failed completion writes from at most 64 local
+  receipts before new native admissions and quiet checks; persistent receipt
+  errors block new native contact. A partial index bounds the unconfirmed-origin
+  inventory to 65 metadata rows; saturation, corruption, moved/unavailable
+  origins and unknown directory identities defer cleanup. Confirmation uses
+  existing adapter witness semantics, not stronger descendant evidence.
+  This supplies restart accounting, not cross-daemon admission, legacy-origin
+  reconstruction or a complete physical-writer/removal proof.
   Successful capture confirms completion. Publish owed checkpoint work, keyed
   by canonical workspace/session/turn, before waiting for its lock. Errors before
   spawning Git or after successful Git completion retain that debt without

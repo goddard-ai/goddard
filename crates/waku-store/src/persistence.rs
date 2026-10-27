@@ -19,6 +19,8 @@ pub use stable_writer::StableWriterOrigin;
 mod workspace_cleanup;
 mod terminal_writer;
 pub use terminal_writer::TerminalWriterOrigin;
+mod native_writer;
+pub use native_writer::NativeWriterOrigin;
 pub use stable_stop::{StableIngressOwner, StableStopIntent, StableStopRecord};
 
 use std::collections::{BTreeMap, HashMap, HashSet};

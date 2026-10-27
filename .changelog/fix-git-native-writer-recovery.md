@@ -1,0 +1,1 @@
+- Workspace cleanup preserves directories when a native provider attempt remains unconfirmed after a daemon restart or failed launch.

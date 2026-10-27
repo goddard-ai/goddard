@@ -482,6 +482,8 @@ type RotationObserver = Arc<dyn Fn(waku_boss::rotation_oracle::RotationObservati
 #[derive(Default)]
 struct RuntimeLifecycles {
     retired_writers: Mutex<workspace_writers::RetiredWriters>,
+    /// Qualified native completion receipts whose durable write needs retry.
+    native_confirmations: Mutex<HashSet<Uuid>>,
     locks: Mutex<HashMap<Uuid, Arc<ReentrantMutex<std::cell::Cell<Option<Uuid>>>>>>,
     shutting_down: std::sync::atomic::AtomicBool,
     #[cfg(test)]

@@ -13,6 +13,7 @@
  */
 
 import { blob, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
@@ -295,4 +296,21 @@ export const terminalWorkspaceWriters = sqliteTable(
     createdAt: integer("created_at").notNull(),
   },
   (table) => [uniqueIndex("terminal_workspace_writer_origin").on(table.workspace, table.identity)],
+);
+
+/** Native attempt identity survives runtime/task removal; only its qualified witness confirms it. */
+export const nativeWorkspaceWriters = sqliteTable(
+  "native_workspace_writers",
+  {
+    originId: text("origin_id").primaryKey(),
+    sessionId: text("session_id").notNull(),
+    runtimeId: text("runtime_id").notNull(),
+    workspace: text("workspace").notNull(),
+    /** Null means this platform could not qualify the directory identity. */
+    identity: text("identity"),
+    confirmed: integer("confirmed").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [index("native_unconfirmed_writers").on(table.originId)
+    .where(sql`${table.confirmed} is not 1`)],
 );
