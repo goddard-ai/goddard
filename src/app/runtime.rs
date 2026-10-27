@@ -3421,6 +3421,7 @@ impl Waku {
             .cancel_owner(waku_client::DaemonKey::Remote(host_id));
         self.session_hydrations
             .cancel_owner(waku_client::DaemonKey::Remote(host_id));
+        self.invalidate_file_finder_owner(waku_client::DaemonKey::Remote(host_id));
         self.save();
         #[cfg(unix)]
         if let Some(link) = self.ssh_transports.remove(&host_id) {
@@ -3466,6 +3467,7 @@ impl Waku {
 
         let remote = waku_client::DaemonKey::Remote(host);
         self.runtime_attach_pending.cancel_owner(remote);
+        self.invalidate_file_finder_owner(remote);
         self.session_hydrations.cancel_owner(remote);
         let retired = self
             .state

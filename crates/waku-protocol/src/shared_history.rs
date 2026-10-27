@@ -4,7 +4,7 @@
 
 use std::fmt;
 use std::ops::{Deref, DerefMut, Index, IndexMut, RangeBounds};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use imbl::Vector;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -37,6 +37,29 @@ impl<T: Clone> DerefMut for SharedValue<T> {
 }
 
 pub struct SharedHistory<T>(Option<Arc<Vector<SharedValue<T>>>>);
+
+/// Constant-time cache identity that does not retain transcript contents.
+/// A weak handle prevents address reuse while the identity is held. Mutation
+/// through `Arc::make_mut` changes identity, including with one strong owner.
+pub struct HistoryIdentity<T>(Option<Weak<Vector<SharedValue<T>>>>);
+
+impl<T> Clone for HistoryIdentity<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T> PartialEq for HistoryIdentity<T> {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (None, None) => true,
+            (Some(left), Some(right)) => Weak::ptr_eq(left, right),
+            _ => false,
+        }
+    }
+}
+
+impl<T> Eq for HistoryIdentity<T> {}
 
 impl<T> Default for SharedHistory<T> {
     fn default() -> Self {
@@ -109,6 +132,12 @@ impl<T> ExactSizeIterator for IterMut<'_, T> {}
 impl<T> std::iter::FusedIterator for IterMut<'_, T> {}
 
 impl<T> SharedHistory<T> {
+    /// Identity of this container snapshot; does not hash contents or observe
+    /// interior mutation of a payload.
+    pub fn snapshot_identity(&self) -> HistoryIdentity<T> {
+        HistoryIdentity(self.0.as_ref().map(Arc::downgrade))
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -359,6 +388,41 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for SharedHistory<T> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn cache_identity_observes_sole_owner_edits_without_retaining_payloads() {
+        #[derive(Clone)]
+        struct Observed {
+            value: u32,
+            drops: Arc<AtomicUsize>,
+        }
+        impl Drop for Observed {
+            fn drop(&mut self) {
+                self.drops.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut history: SharedHistory<_> = vec![Observed {
+            value: 1,
+            drops: Arc::clone(&drops),
+        }]
+        .into();
+        let before = history.snapshot_identity();
+        assert!(before == history.snapshot_identity());
+        let copied = before.clone();
+        history[0].value = 2;
+        let after = history.snapshot_identity();
+        assert!(copied == before);
+        assert!(before != after);
+        assert_eq!(history[0].value, 2);
+        drop(history);
+        assert_eq!(
+            drops.load(Ordering::Relaxed),
+            1,
+            "cache identities retained history payloads"
+        );
+        assert!(before != after);
+    }
 
     #[derive(Serialize, Deserialize)]
     struct Payload {

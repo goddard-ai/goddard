@@ -134,8 +134,19 @@
   the current input/scope before accepting completion or opening a result;
   clear old-query rows during preparation and retain background reclamation
   through failed weak updates. Matcher scratch allocation/reclamation also
-  stays off the UI thread. Composer matching and transcript-link preparation
-  still require auditing; this does not establish measured desktop latency.
+  stays off the UI thread. Planned-workspace transcript links and file listings
+  also prepare on a worker, with one physical preparation job and one pending
+  immutable snapshot. UI keys contain workspace/host identity plus weak history
+  identities; they never clone or hash the collected path list. These weak
+  identities detect container edits without retaining transcript contents.
+  Release the strong transcript snapshot before waiting on Git/remote listing.
+  Reuse one ready listing across unchanged openings; invalidate it through
+  workspace refreshes and host edits/removal. Keep collected paths and their
+  transport payload entirely on the worker. Unlinked transcripts reuse the
+  ordinary shared base-ref query; only linked-path overlays use a separate
+  prepared listing. Host edits/removal also revoke shared file-query tokens,
+  since another host can reuse the same path. Composer matching still requires
+  auditing; this does not establish measured desktop latency.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for
   their capture lock, and retain it through Git capture and durable checkpoint
   persistence. Cleanup must check that evidence even after the provider exits.

@@ -31,6 +31,8 @@ use super::*;
 
 #[path = "file_finder_matching.rs"]
 mod matching;
+#[path = "file_finder_preparation.rs"]
+mod preparation;
 
 /// List navigation lives beneath the focused one-line input; Escape bubbles
 /// from the field to the card's dismiss action without clearing the query.
@@ -79,10 +81,7 @@ pub(super) struct FileFinderUi {
     /// base ref's tree rather than the checkout's. A drift clears the
     /// projection; the next refresh relists under the new key.
     root: Option<(PathBuf, waku_protocol::workspace::ProjectFilesListing)>,
-    /// Paths linked by the selected task's transcript, prepared once per
-    /// finder open rather than rescanned as the query changes.
-    transcript_link_key: Option<(Uuid, PathBuf)>,
-    transcript_link_paths: Vec<String>,
+    preparation: preparation::Preparation,
     /// A listing for `root` is in flight — the placeholder draws its spinner.
     loading: bool,
     files: file_index::SharedFileIndex,
@@ -101,8 +100,7 @@ impl FileFinderUi {
             focus_generation: 0,
             previous_focus: None,
             root: None,
-            transcript_link_key: None,
-            transcript_link_paths: Vec::new(),
+            preparation: preparation::Preparation::default(),
             loading: false,
             files: file_index::empty(),
             results: Vec::new(),
@@ -116,10 +114,6 @@ impl FileFinderUi {
     pub(super) fn is_open(&self) -> bool {
         self.open
     }
-}
-
-fn transcript_file_link_paths(session: &AgentSession, root: &Path) -> Vec<String> {
-    transcript_mention_paths(&session.messages, &session.transcript_blocks, root, false)
 }
 
 /// Extract mentions without touching the filesystem. Autocomplete runs this on
@@ -375,8 +369,6 @@ impl Waku {
 
         self.file_finder.open = true;
         self.file_finder.focus_generation = self.file_finder.focus_generation.wrapping_add(1);
-        self.file_finder.transcript_link_key = None;
-        self.file_finder.transcript_link_paths.clear();
         self.file_finder.selected = 0;
         self.file_finder.scroll.scroll_to_item(0);
         self.file_finder
@@ -422,6 +414,7 @@ impl Waku {
             return;
         }
         self.file_finder.open = false;
+        self.file_finder.preparation.suspend();
         self.file_finder.matching.invalidate();
         self.file_finder.results.clear();
         self.file_finder.files = file_index::empty();
@@ -459,79 +452,35 @@ impl Waku {
         if !self.file_finder.open {
             return;
         }
-        let root = match self.resolve_right_panel_files_root(cx) {
-            Some(path) => {
-                let listing = if matches!(
-                    self.active_right_panel_owner(),
-                    RightPanelOwner::Session(_)
-                ) {
-                    let session_listing = self.selected_session().map(|session| {
+        let mut planned = false;
+        let mut preparation = None;
+        let root = self.resolve_right_panel_files_root(cx).map(|path| {
+            let listing = if matches!(self.active_right_panel_owner(), RightPanelOwner::Session(_))
+            {
+                self.selected_session()
+                    .map(|session| {
                         let listing = Self::workspace_files_listing(&session.workspace);
-                        let cache_key = (session.id, path.clone());
-                        let linked_paths = if matches!(
-                            &listing,
-                            waku_protocol::workspace::ProjectFilesListing::BaseRef { .. }
-                        ) && self.file_finder.transcript_link_key.as_ref()
-                            != Some(&cache_key)
+                        if let waku_protocol::workspace::ProjectFilesListing::BaseRef { base_ref } =
+                            &listing
                         {
-                            Some(transcript_file_link_paths(session, &path))
-                        } else {
-                            None
-                        };
-                        (listing, cache_key, linked_paths)
-                    });
-                    match session_listing {
-                        Some((listing, cache_key, linked_paths)) => {
-                            if let Some(linked_paths) = linked_paths {
-                                self.file_finder.transcript_link_key = Some(cache_key.clone());
-                                self.file_finder.transcript_link_paths = linked_paths;
-                            }
-                            match listing {
-                                waku_protocol::workspace::ProjectFilesListing::BaseRef {
-                                    base_ref,
-                                } if self.file_finder.transcript_link_key.as_ref()
-                                    == Some(&cache_key)
-                                    && !self.file_finder.transcript_link_paths.is_empty() =>
-                                {
-                                    waku_protocol::workspace::ProjectFilesListing::BaseRefWithUntracked {
-                                        base_ref,
-                                        paths: self.file_finder.transcript_link_paths.clone(),
-                                    }
-                                }
-                                waku_protocol::workspace::ProjectFilesListing::BaseRef {
-                                    base_ref,
-                                } => {
-                                    waku_protocol::workspace::ProjectFilesListing::BaseRef {
-                                        base_ref,
-                                    }
-                                }
-                                listing => {
-                                    self.file_finder.transcript_link_key = None;
-                                    self.file_finder.transcript_link_paths.clear();
-                                    listing
-                                }
-                            }
+                            planned = true;
+                            preparation = self.file_finder.preparation.capture(
+                                session,
+                                &path,
+                                base_ref.clone(),
+                                self.daemons.session_owner(session.id),
+                            );
                         }
-                        None => {
-                            self.file_finder.transcript_link_key = None;
-                            self.file_finder.transcript_link_paths.clear();
-                            waku_protocol::workspace::ProjectFilesListing::default()
-                        }
-                    }
-                } else {
-                    self.file_finder.transcript_link_key = None;
-                    self.file_finder.transcript_link_paths.clear();
-                    waku_protocol::workspace::ProjectFilesListing::WorkingTree
-                };
-                Some((path, listing))
-            }
-            None => {
-                self.file_finder.transcript_link_key = None;
-                self.file_finder.transcript_link_paths.clear();
-                None
-            }
-        };
+                        listing
+                    })
+                    .unwrap_or_default()
+            } else {
+                waku_protocol::workspace::ProjectFilesListing::WorkingTree
+            };
+            (path, listing)
+        });
         if root != self.file_finder.root {
+            self.file_finder.preparation.suspend();
             self.file_finder.matching.invalidate();
             self.file_finder.root = root;
             self.file_finder.files = file_index::empty();
@@ -539,20 +488,39 @@ impl Waku {
             self.file_finder.selected = 0;
             self.file_finder.scroll.scroll_to_item(0);
         }
-        if let Some(root) = self.file_finder.root.clone() {
-            match self.mention_files.read(&root) {
-                Query::Ready(entries) => {
+        if let Some(input) = preparation {
+            self.file_finder.preparation.request(input);
+        }
+        let prepared = planned
+            .then(|| self.file_finder.preparation.ready())
+            .flatten();
+        match prepared {
+            Some(preparation::Listing::Overlay(files)) => {
+                self.file_finder.files = files;
+                self.file_finder.loading = false;
+            }
+            None if planned => {
+                self.file_finder.files = file_index::empty();
+                self.file_finder.loading = true;
+                self.start_file_finder_preparation(cx);
+            }
+            _ => {
+                if let Some(root) = self.file_finder.root.clone() {
+                    match self.mention_files.read(&root) {
+                        Query::Ready(entries) => {
+                            self.file_finder.loading = false;
+                            self.file_finder.files = entries;
+                        }
+                        Query::Pending => self.file_finder.loading = true,
+                        Query::Missing(token) => {
+                            self.file_finder.loading = true;
+                            self.fetch_mention_files(token, root, cx);
+                        }
+                    }
+                } else {
                     self.file_finder.loading = false;
-                    self.file_finder.files = entries;
-                }
-                Query::Pending => self.file_finder.loading = true,
-                Query::Missing(token) => {
-                    self.file_finder.loading = true;
-                    self.fetch_mention_files(token, root, cx);
                 }
             }
-        } else {
-            self.file_finder.loading = false;
         }
         let query = self.file_finder.search.read(cx).content().to_owned();
         let (path_query, _, _) = split_position_suffix(&query);
@@ -570,6 +538,60 @@ impl Waku {
         }
         self.start_file_finder_matching(cx);
         cx.notify();
+    }
+
+    pub(super) fn invalidate_file_finder_workspace(&mut self, path: &Path) {
+        self.file_finder.preparation.invalidate_workspace(path);
+    }
+
+    pub(super) fn invalidate_file_finder_owner(&mut self, owner: waku_client::DaemonKey) {
+        self.file_finder.preparation.invalidate_owner(owner);
+        // Paths can be reused by a replacement host even when the last planned
+        // cache belonged elsewhere. Revoke in-flight shared query tokens too.
+        self.mention_files.clear();
+    }
+
+    fn start_file_finder_preparation(&mut self, cx: &mut Context<Self>) {
+        let Some(request) = self.file_finder.preparation.take() else {
+            return;
+        };
+        // Use the captured owner rather than guessing a host from a path:
+        // two hosts can expose the same checkout path.
+        let Some(workspace) = self
+            .daemons
+            .supervisor(request.owner())
+            .map(|daemon| waku_client::WorkspaceClient::new(daemon.client()))
+        else {
+            self.file_finder.preparation.abandon(request.generation());
+            self.file_finder.loading = false;
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let output = cx
+                .background_executor()
+                .spawn(async move {
+                    preparation::run(request, |root, listing| {
+                        match workspace.request(waku_client::WorkspaceOperation::ListProjectFiles {
+                            root,
+                            cap: crate::composer_complete::FILE_INDEX_CAP,
+                            listing,
+                        }) {
+                            Ok(waku_client::WorkspaceResult::ProjectFiles { entries }) => entries,
+                            Ok(_) | Err(_) => Vec::new(),
+                        }
+                    })
+                })
+                .await;
+            let _ = this.update(cx, move |this, cx| {
+                // Cache publication has no UI side effects. Refresh the actual
+                // scope before exposing it to matching or selectable rows.
+                this.file_finder
+                    .preparation
+                    .finish(output.generation, output.listing);
+                this.refresh_file_finder_results(cx);
+            });
+        })
+        .detach();
     }
 
     fn start_file_finder_matching(&mut self, cx: &mut Context<Self>) {

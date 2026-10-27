@@ -867,6 +867,7 @@ impl Waku {
             self.slash_commands
                 .invalidate(&(provider, path.clone(), binary_override));
             self.mention_files.invalidate_where(|key| key.0 == path);
+            self.invalidate_file_finder_workspace(&path);
         }
         self.refresh_composer_sources(cx);
     }

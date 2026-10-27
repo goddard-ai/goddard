@@ -1745,6 +1745,7 @@ impl Waku {
         self.invalidate_base_push_state(&workspace_path);
         self.mention_files
             .invalidate_where(|key| key.0 == workspace_path);
+        self.invalidate_file_finder_workspace(&workspace_path);
         self.invalidate_sidebar_git_scans(
             self.daemon_key_for_path(&workspace_path),
             &workspace_path,
@@ -1783,6 +1784,7 @@ impl Waku {
         self.invalidate_workspace_remote_files(&path);
         self.invalidate_base_push_state(&path);
         self.mention_files.invalidate_where(|key| key.0 == path);
+        self.invalidate_file_finder_workspace(&path);
     }
 
     pub(super) fn create_session_for(
