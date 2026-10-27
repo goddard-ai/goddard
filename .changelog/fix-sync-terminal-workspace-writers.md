@@ -1,0 +1,1 @@
+- Workspace removal preserves directories with unconfirmed terminal writers, even after closing the terminal or restarting the daemon.

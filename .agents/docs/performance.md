@@ -123,6 +123,14 @@
   These process-local preconditions do not replace destructive workspace
   admission, durable failure recovery, or queued desktop work that has not yet
   reached the daemon.
+- Daemon terminals commit a narrow unqualified writer origin immediately before
+  the PTY factory can create a child. A storage failure aborts before spawn;
+  invalid-directory validation creates no origin. Neither terminal close, EOF,
+  shell-leader wait nor catalog deletion clears this observation. Unix directory
+  identity distinguishes a reused path. Cleanup checks at most 64 origins and
+  defers on overflow, corrupt metadata or an unlocatable/replaced origin. This
+  conservative inventory is not positive descendant completion, scalable paged
+  admission, legacy-origin recovery or final destructive workspace authority.
 - Keep per-frame work proportional to what is on screen. Long collections are
   virtualized with `list()`, and a row builder must not rebuild whole-session
   state; hoist that to a cache refreshed once per frame.

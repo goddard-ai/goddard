@@ -468,6 +468,10 @@ impl WakuBackend {
         events: EventSink,
         command: Option<&waku_protocol::custom_commands::CustomCommand>,
     ) -> anyhow::Result<crate::terminal::DaemonTerminal> {
+        let events = workspace_writers::TerminalWriterEvents {
+            events,
+            store: self.task_store.clone(),
+        };
         #[cfg(all(test, unix))]
         if command.is_none()
             && let Some(shell) = &self.terminal_shell

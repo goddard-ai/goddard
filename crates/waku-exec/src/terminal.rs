@@ -6,6 +6,12 @@
 
 /// Receives live terminal events without retaining them in a replay journal.
 pub trait TerminalEventSink: Send + 'static {
+    /// Called after validation and before a PTY child can exist. Owners can
+    /// establish durable writer evidence here; failure aborts the launch.
+    fn before_spawn(&self, _cwd: &std::path::Path) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     fn send_ephemeral(&self, event: waku_protocol::WireDriverEvent) -> anyhow::Result<()>;
 }
 
@@ -113,9 +119,14 @@ mod platform {
                 );
             }
 
+            // Use the observed physical path for the factory as well; an
+            // alias retargeted by another operation must not redirect spawn
+            // away from the directory whose ownership was recorded.
+            let cwd = std::fs::canonicalize(cwd)
+                .with_context(|| format!("resolve terminal working directory {}", cwd.display()))?;
             let mut options = tty::Options {
                 shell: Some(shell),
-                working_directory: Some(cwd.to_owned()),
+                working_directory: Some(cwd.clone()),
                 drain_on_exit: false,
                 ..Default::default()
             };
@@ -129,6 +140,7 @@ mod platform {
             options.env.insert("COLORTERM".into(), "truecolor".into());
 
             let size = window_size(cols, rows);
+            events.before_spawn(&cwd)?;
             let pty = tty::new(&options, size, 0)
                 .with_context(|| format!("spawn terminal in {}", cwd.display()))?;
             let mut output = pty.file().try_clone().context("clone terminal output")?;
@@ -343,5 +355,86 @@ impl DaemonTerminal {
 
     pub fn child_pid(&self) -> u32 {
         0
+    }
+}
+
+#[cfg(all(test, unix))]
+mod writer_tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    struct RetargetAlias {
+        alias: PathBuf,
+        replacement: PathBuf,
+        observed: Arc<Mutex<Option<PathBuf>>>,
+    }
+
+    impl TerminalEventSink for RetargetAlias {
+        fn before_spawn(&self, cwd: &std::path::Path) -> anyhow::Result<()> {
+            *self.observed.lock().unwrap() = Some(cwd.to_owned());
+            std::fs::remove_file(&self.alias)?;
+            std::os::unix::fs::symlink(&self.replacement, &self.alias)?;
+            Ok(())
+        }
+        fn send_ephemeral(&self, _: waku_protocol::WireDriverEvent) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn terminal_spawn_uses_observed_directory_after_alias_retargeting() {
+        let root =
+            std::env::temp_dir().join(format!("terminal-observed-cwd-{}", uuid::Uuid::new_v4()));
+        let original = root.join("original");
+        let replacement = root.join("replacement");
+        let alias = root.join("alias");
+        let output = root.join("actual-cwd");
+        std::fs::create_dir_all(&original).unwrap();
+        std::fs::create_dir_all(&replacement).unwrap();
+        std::os::unix::fs::symlink(&original, &alias).unwrap();
+        let expected = original.canonicalize().unwrap();
+        let observed = Arc::new(Mutex::new(None));
+        let terminal = DaemonTerminal::open_with_shell(
+            &alias,
+            80,
+            24,
+            RetargetAlias {
+                alias: alias.clone(),
+                replacement: replacement.clone(),
+                observed: observed.clone(),
+            },
+            alacritty_terminal::tty::Shell::new(
+                "/bin/sh".into(),
+                vec![
+                    "-c".into(),
+                    "pwd -P > \"$1\"".into(),
+                    "terminal-cwd-fixture".into(),
+                    output.to_string_lossy().into_owned(),
+                ],
+            ),
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let actual = loop {
+            if let Ok(value) = std::fs::read_to_string(&output)
+                && !value.trim().is_empty()
+            {
+                break value;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "terminal did not report its working directory"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert_eq!(
+            alias.canonicalize().unwrap(),
+            replacement.canonicalize().unwrap()
+        );
+        assert_eq!(observed.lock().unwrap().as_ref(), Some(&expected));
+        assert_eq!(PathBuf::from(actual.trim()), expected);
+        drop(terminal);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

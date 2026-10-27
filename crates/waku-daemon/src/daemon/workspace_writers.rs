@@ -6,6 +6,45 @@
 use super::*;
 use driver::{WriterCompletion, WriterCompletionState};
 
+/// Preserve an unqualified terminal origin before its PTY can spawn. Neither
+/// close, EOF nor a shell-leader wait can qualify arbitrary descendants.
+pub(super) struct TerminalWriterEvents {
+    pub events: EventSink,
+    pub store: Arc<StateStore>,
+}
+
+fn terminal_directory_identity(path: &Path) -> anyhow::Result<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = std::fs::metadata(path)?;
+        anyhow::ensure!(metadata.is_dir(), "terminal origin is not a directory");
+        Ok(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        anyhow::bail!("terminal writer identity is unavailable on this platform")
+    }
+}
+
+impl crate::terminal::TerminalEventSink for TerminalWriterEvents {
+    fn before_spawn(&self, cwd: &Path) -> anyhow::Result<()> {
+        let workspace = dunce::canonicalize(cwd)?;
+        let identity = terminal_directory_identity(&workspace)?;
+        self.store
+            .record_terminal_writer(&crate::persistence::TerminalWriterOrigin {
+                workspace,
+                identity,
+            })?;
+        Ok(())
+    }
+
+    fn send_ephemeral(&self, event: WireDriverEvent) -> anyhow::Result<()> {
+        self.events.send_ephemeral(event)
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(super) struct CheckpointCaptureKey {
     cwd: PathBuf,
@@ -205,6 +244,26 @@ impl WakuBackend {
             anyhow::ensure!(
                 !(cwd.starts_with(&target) || target.starts_with(&cwd)),
                 "workspace cleanup deferred: a workspace writer is still active or its stop is unconfirmed"
+            );
+        }
+        let terminal_origins = self.task_store.terminal_writer_origins()?;
+        anyhow::ensure!(
+            terminal_origins.len() < 65,
+            "workspace cleanup deferred: terminal writer inventory exceeds the bounded safety scan"
+        );
+        for origin in terminal_origins {
+            // A moved, reused or unreadable origin cannot be located safely
+            // from its old pathname; preserve data rather than skip it.
+            let canonical = dunce::canonicalize(&origin.workspace)
+                .context("workspace cleanup deferred: terminal writer origin is unavailable")?;
+            anyhow::ensure!(
+                canonical == origin.workspace
+                    && terminal_directory_identity(&canonical)? == origin.identity,
+                "workspace cleanup deferred: terminal writer origin moved or its path was reused"
+            );
+            anyhow::ensure!(
+                !(canonical.starts_with(&target) || target.starts_with(&canonical)),
+                "workspace cleanup deferred: terminal descendants have no confirmed completion"
             );
         }
         crate::stable_runtime::require_quiet_workspace_writers(self, &target)

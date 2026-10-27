@@ -284,3 +284,15 @@ export const workspaceCleanupIntents = sqliteTable(
   },
   (table) => [index("workspace_cleanup_ready").on(table.phase, table.retryAt)],
 );
+
+/** Unqualified terminal origins survive closure and restart; no task FK or exit inference. */
+export const terminalWorkspaceWriters = sqliteTable(
+  "terminal_workspace_writers",
+  {
+    workspace: text("workspace").notNull(),
+    /** Directory identity at spawn; reopening a reused path must retain the older origin. */
+    identity: text("identity").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("terminal_workspace_writer_origin").on(table.workspace, table.identity)],
+);
