@@ -886,7 +886,7 @@ impl WakuBackend {
     /// through its bound backend handle.
     pub(crate) fn archive_sessions(&self, session_ids: &[Uuid]) -> anyhow::Result<()> {
         let mut archived_ids = Vec::new();
-        let mut removed_ids;
+        let removed_ids;
         let workspace_roots: Vec<PathBuf>;
         {
             let mut state = self.task_state.lock();
@@ -928,38 +928,29 @@ impl WakuBackend {
             // archived row, not just this call's, so a side chat whose
             // parent was already archived is swept too. The roots stay;
             // only the descendants found walking them are removed.
-            let mut queue: Vec<Uuid> = state
-                .sessions
-                .iter()
-                .filter(|session| session.archived_at.is_some())
-                .map(|session| session.id)
-                .collect();
-            removed_ids = Vec::new();
-            while let Some(parent) = queue.pop() {
-                for session in state
+            let removed = catalog_ops::side_chat_descendants(
+                &state.sessions,
+                state
                     .sessions
                     .iter()
-                    .filter(|session| session.side_chat_of == Some(parent))
-                {
-                    removed_ids.push(session.id);
-                    queue.push(session.id);
-                }
-            }
+                    .filter(|session| session.archived_at.is_some())
+                    .map(|session| session.id),
+            );
             workspace_roots = state
                 .sessions
                 .iter()
-                .filter(|session| removed_ids.contains(&session.id))
+                .filter(|session| removed.contains(&session.id))
                 .filter_map(|session| session.workspace.path().map(Path::to_path_buf))
                 .collect();
-            if !removed_ids.is_empty() {
+            if !removed.is_empty() {
                 state
                     .sessions
-                    .retain(|session| !removed_ids.contains(&session.id));
-                let mut removed = self.removed_session_ids.lock();
-                for id in &removed_ids {
-                    removed.insert(*id);
-                }
+                    .retain(|session| !removed.contains(&session.id));
+                self.removed_session_ids
+                    .lock()
+                    .extend(removed.iter().copied());
             }
+            removed_ids = removed.into_iter().collect::<Vec<_>>();
             self.task_store.save(&mut state)?;
         }
         // A queued employee's shell is memory-only — the archived flag a

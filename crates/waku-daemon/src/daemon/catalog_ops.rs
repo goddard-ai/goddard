@@ -1,5 +1,35 @@
 use super::*;
 
+/// Index parent edges once: saves with many archived roots must not scan the
+/// entire catalog for every root or descendant. Visit each parent once even
+/// when malformed legacy rows contain a cycle.
+pub(super) fn side_chat_descendants(
+    sessions: &[AgentSession],
+    roots: impl IntoIterator<Item = Uuid>,
+) -> HashSet<Uuid> {
+    let mut children: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for session in sessions {
+        if let Some(parent) = session.side_chat_of {
+            children.entry(parent).or_default().push(session.id);
+        }
+    }
+    let mut queue = roots.into_iter().collect::<Vec<_>>();
+    let mut visited = HashSet::new();
+    let mut removed = HashSet::new();
+    while let Some(parent) = queue.pop() {
+        if !visited.insert(parent) {
+            continue;
+        }
+        if let Some(children) = children.get(&parent) {
+            for &child in children {
+                removed.insert(child);
+                queue.push(child);
+            }
+        }
+    }
+    removed
+}
+
 impl WakuBackend {
     pub(super) fn update_session_metadata(
         &self,
@@ -56,22 +86,8 @@ impl WakuBackend {
         next.metadata_mutation_id = Some(mutation_id);
         let mut removed = HashSet::new();
         if next.archived_at.is_some() {
-            let mut children: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
-            for session in &state.sessions {
-                if let Some(parent) = session.side_chat_of {
-                    children.entry(parent).or_default().push(session.id);
-                }
-            }
-            let mut queue = vec![session_id];
-            while let Some(parent) = queue.pop() {
-                if let Some(children) = children.get(&parent) {
-                    for &child in children {
-                        if child != session_id && removed.insert(child) {
-                            queue.push(child);
-                        }
-                    }
-                }
-            }
+            removed = side_chat_descendants(&state.sessions, [session_id]);
+            removed.remove(&session_id);
         }
         self.task_store
             .write_session_metadata(&next, expected_revision, &removed)?;
@@ -275,6 +291,28 @@ impl WakuBackend {
 mod metadata_tests {
     use super::*;
     use waku_protocol::SessionMetadataChange;
+
+    #[test]
+    fn archive_descendants_handle_many_roots_and_cyclic_legacy_links() {
+        let project = Uuid::new_v4();
+        let mut sessions = (0..4096)
+            .map(|_| AgentSession::new(project, ProviderKind::Codex))
+            .collect::<Vec<_>>();
+        let roots = sessions
+            .iter()
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        let mut child = AgentSession::new(project, ProviderKind::Codex);
+        child.side_chat_of = Some(roots[0]);
+        let mut grandchild = AgentSession::new(project, ProviderKind::Codex);
+        grandchild.side_chat_of = Some(child.id);
+        let expected = HashSet::from([child.id, grandchild.id, roots[0]]);
+        // A corrupt legacy cycle must finish deterministically instead of
+        // keeping an archive request and the task-state lock forever.
+        sessions[0].side_chat_of = Some(grandchild.id);
+        sessions.extend([grandchild, child]);
+        assert_eq!(side_chat_descendants(&sessions, roots), expected);
+    }
 
     #[test]
     fn metadata_retries_conflicts_and_stale_full_saves_preserve_durable_archive() {

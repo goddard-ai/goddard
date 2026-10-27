@@ -1102,14 +1102,16 @@ impl Backend for WakuBackend {
                 if !tails.is_empty() {
                     let cold = {
                         let state = self.task_state.lock();
+                        let loaded = state
+                            .sessions
+                            .iter()
+                            .filter(|session| session.detail_loaded)
+                            .map(|session| session.id)
+                            .collect::<HashSet<_>>();
                         sessions
                             .iter()
                             .filter(|session| tails.contains_key(&session.id))
-                            .filter(|session| {
-                                !state.sessions.iter().any(|resident| {
-                                    resident.id == session.id && resident.detail_loaded
-                                })
-                            })
+                            .filter(|session| !loaded.contains(&session.id))
                             .map(|session| session.id)
                             .collect::<Vec<_>>()
                     };
@@ -1123,18 +1125,20 @@ impl Backend for WakuBackend {
                 let mut state = self.task_state.lock();
                 let stable_sessions = self.task_store.stable_link_session_ids()?;
                 let removed_project_ids = self.removed_project_ids.lock();
+                let mut project_positions = HashMap::new();
+                for (index, project) in state.projects.iter().enumerate() {
+                    project_positions.entry(project.id).or_insert(index);
+                }
                 for mut project in projects {
                     if removed_project_ids.contains(&project.id) {
                         continue;
                     }
-                    if let Some(existing) = state
-                        .projects
-                        .iter_mut()
-                        .find(|existing| existing.id == project.id)
-                    {
+                    if let Some(&index) = project_positions.get(&project.id) {
+                        let existing = &mut state.projects[index];
                         preserve_daemon_project_fields(existing, &mut project);
                         *existing = project;
                     } else {
+                        project_positions.insert(project.id, state.projects.len());
                         state.projects.push(project);
                     }
                 }
@@ -1157,11 +1161,19 @@ impl Backend for WakuBackend {
                 drop(removed_session_ids);
                 let mut saved_ids = Vec::with_capacity(sessions.len());
                 let mut submitted_bodies = HashMap::new();
+                let mut session_positions = HashMap::new();
+                for (index, session) in state.sessions.iter().enumerate() {
+                    session_positions.entry(session.id).or_insert(index);
+                }
                 for mut session in sessions {
                     let session_id = session.id;
                     let had_detail = session.detail_loaded;
                     if let Some(tail) = tails.remove(&session_id) {
-                        splice_session_tail(&state.sessions, &mut bases, &mut session, tail);
+                        let resident = session_positions
+                            .get(&session_id)
+                            .map(|&index| std::slice::from_ref(&state.sessions[index]))
+                            .unwrap_or(&[]);
+                        splice_session_tail(resident, &mut bases, &mut session, tail);
                     }
                     let submitted_body = (compact_response && session.detail_loaded)
                         .then(|| (session.messages.clone(), session.transcript_blocks.clone()));
@@ -1170,11 +1182,8 @@ impl Backend for WakuBackend {
                     } else {
                         SessionDetailSaveOutcome::MetadataOnly
                     };
-                    let applied = if let Some(existing) = state
-                        .sessions
-                        .iter_mut()
-                        .find(|existing| existing.id == session_id)
-                    {
+                    let applied = if let Some(&index) = session_positions.get(&session_id) {
+                        let existing = &mut state.sessions[index];
                         let employee = self.boss.employee_including_retired(session_id);
                         // Full transcript saves are also metadata writers.
                         // Fence stale versions before any projection merge;
@@ -1293,6 +1302,7 @@ impl Backend for WakuBackend {
                         detail = SessionDetailSaveOutcome::Applied;
                         session.metadata_revision = 0;
                         session.metadata_mutation_id = None;
+                        session_positions.insert(session_id, state.sessions.len());
                         state.sessions.push(session);
                         true
                     } else {
@@ -1332,23 +1342,14 @@ impl Backend for WakuBackend {
                 // Archiving a task deletes its side chats — the same rule the
                 // native app applies. A client that only flips `archived_at`
                 // must not leave them in the catalog.
-                let mut cascaded = Vec::new();
-                let mut queue: Vec<Uuid> = state
-                    .sessions
-                    .iter()
-                    .filter(|session| session.archived_at.is_some())
-                    .map(|session| session.id)
-                    .collect();
-                while let Some(parent) = queue.pop() {
-                    for session in state
+                let cascaded = catalog_ops::side_chat_descendants(
+                    &state.sessions,
+                    state
                         .sessions
                         .iter()
-                        .filter(|session| session.side_chat_of == Some(parent))
-                    {
-                        cascaded.push(session.id);
-                        queue.push(session.id);
-                    }
-                }
+                        .filter(|session| session.archived_at.is_some())
+                        .map(|session| session.id),
+                );
                 let cascaded_roots = state
                     .sessions
                     .iter()
@@ -1396,6 +1397,7 @@ impl Backend for WakuBackend {
                     return Err(error.into());
                 }
                 self.stop_queued_employees(&newly_archived);
+                let cascaded = cascaded.into_iter().collect::<Vec<_>>();
                 let removed_terminals = self.sweep_orphaned_terminals(&cascaded, &cascaded_roots);
                 drop_detached(removed_terminals);
                 let removed_runtimes = cascaded
@@ -1404,6 +1406,10 @@ impl Backend for WakuBackend {
                     .collect::<Vec<_>>();
                 drop_detached(removed_runtimes);
                 let mut state = self.task_state.lock();
+                let mut saved_rows = HashMap::new();
+                for session in &state.sessions {
+                    saved_rows.entry(session.id).or_insert(session);
+                }
                 // Compare the actual committed batch, not a newer live row.
                 // Storage rewrites invalidate the input cursor; physical
                 // identity avoids another full text hash.
@@ -1414,9 +1420,10 @@ impl Backend for WakuBackend {
                                 batch
                                     .session(receipt.session_id)
                                     .or_else(|| {
-                                        state.sessions.iter().find(|entry| {
-                                            entry.id == receipt.session_id && entry.incognito
-                                        })
+                                        saved_rows
+                                            .get(&receipt.session_id)
+                                            .copied()
+                                            .filter(|entry| entry.incognito)
                                     })
                                     .is_some_and(|entry| {
                                         entry.messages.shares_items_with(messages)
@@ -1432,11 +1439,9 @@ impl Backend for WakuBackend {
                 let sessions = saved_ids
                     .into_iter()
                     .filter_map(|session_id| {
-                        state
-                            .sessions
-                            .iter()
-                            .find(|session| session.id == session_id)
-                            .cloned()
+                        saved_rows
+                            .get(&session_id)
+                            .map(|session| (*session).clone())
                     })
                     .collect::<Vec<_>>();
                 self.auto_prompts.consider(

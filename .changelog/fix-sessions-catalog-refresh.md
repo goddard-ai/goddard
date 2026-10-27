@@ -1,1 +1,1 @@
-- Reduced work when synchronizing large task lists across connected clients.
+- Reduced work when saving and synchronizing large task lists, including lists with many archived tasks and side chats.
