@@ -27,7 +27,7 @@ fn corrupt_boss_history_does_not_prevent_daemon_startup_or_overwrite_the_store()
         std::fs::write(&manifest, &corrupt).unwrap();
         let history = boss_root.join("retired-employees-0.json");
         if !missing {
-            std::fs::write(&history, "[]").unwrap();
+            std::fs::write(&history, "invalid json").unwrap();
         }
         let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
         let mut document = settings.get();
@@ -59,12 +59,12 @@ fn corrupt_boss_history_does_not_prevent_daemon_startup_or_overwrite_the_store()
         assert!(format!("{error:#}").contains(if missing {
             "reading Boss employee history"
         } else {
-            "Boss employee history digest mismatch"
+            "invalid Boss employee history"
         }));
         assert!(!backend.boss.is_active());
         assert_eq!(std::fs::read(&manifest).unwrap(), corrupt);
         if !missing {
-            assert_eq!(std::fs::read(&history).unwrap(), b"[]");
+            assert_eq!(std::fs::read(&history).unwrap(), b"invalid json");
         }
 
         // Repairing the store allows activation without restarting the daemon.

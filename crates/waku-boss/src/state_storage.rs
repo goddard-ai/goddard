@@ -57,18 +57,42 @@ impl StateStorage {
         };
         let mut stored: StoredState =
             serde_json::from_slice(&bytes).context("invalid Boss document")?;
-        if let Some(history) = &stored.retired_history {
+        if let Some(history) = &mut stored.retired_history {
             ensure!(
                 stored.state.retired_employees.is_empty(),
                 "Boss employee history has two sources"
             );
-            let bytes = fs::read(history.path(root)?).context("reading Boss employee history")?;
-            ensure!(
-                format!("{:x}", Sha256::digest(&bytes)) == history.digest,
-                "Boss employee history digest mismatch"
-            );
+            let history_bytes =
+                fs::read(history.path(root)?).context("reading Boss employee history")?;
             stored.state.retired_employees =
-                serde_json::from_slice(&bytes).context("invalid Boss employee history")?;
+                serde_json::from_slice(&history_bytes).context("invalid Boss employee history")?;
+            let digest = format!("{:x}", Sha256::digest(&history_bytes));
+            if digest != history.digest {
+                // A byte mismatch alone need not make valid history unavailable.
+                // Refuse empty or inconsistent rosters rather than blessing data loss.
+                let mut identities = std::collections::HashSet::new();
+                ensure!(
+                    !stored.state.retired_employees.is_empty()
+                        && stored
+                            .state
+                            .retired_employees
+                            .iter()
+                            .all(|employee| employee.expired()
+                                && identities.insert(employee.session_id)),
+                    "Boss employee history digest mismatch with an invalid retired roster"
+                );
+                let backup = root.join(format!("history-recovery-{}", uuid::Uuid::new_v4()));
+                fs::create_dir(&backup).context("preserving mismatched Boss history")?;
+                super::atomic_write(&backup.join("boss.json"), &bytes)?;
+                super::atomic_write(&backup.join("history.json"), &history_bytes)?;
+                sync_directory(&backup)?;
+                sync_directory(root)?;
+                eprintln!(
+                    "Boss employee history digest mismatch; recovering valid history; original files preserved in {}",
+                    backup.display()
+                );
+                history.digest = digest;
+            }
         }
         // A legacy inline history is migrated by the next successful save.
         if stored.retired_history.is_some() || stored.state.retired_employees.is_empty() {
@@ -307,6 +331,61 @@ mod tests {
             history_files, 2,
             "history updates must not accumulate full snapshots"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mismatched_valid_history_recovers_once_and_preserves_original_files() {
+        let root = std::env::temp_dir().join(format!("boss-history-recovery-{}", Uuid::new_v4()));
+        let id = legacy_history(&root);
+        drop(BossService::open(root.clone()).unwrap());
+        let manifest = root.join("boss.json");
+        let original = fs::read(&manifest).unwrap();
+        let stored: StoredState = serde_json::from_slice(&original).unwrap();
+        let history = stored.retired_history.unwrap().path(&root).unwrap();
+        let mut employees: Vec<BossEmployee> =
+            serde_json::from_slice(&fs::read(&history).unwrap()).unwrap();
+        employees[0].job_title = "Recovered assignment".into();
+        let changed = serde_json::to_vec_pretty(&employees).unwrap();
+        fs::write(&history, &changed).unwrap();
+
+        let service = BossService::open(root.clone()).unwrap();
+        assert_eq!(service.document().retired_employees[0].session_id, id);
+        assert_eq!(
+            service.document().retired_employees[0].job_title,
+            "Recovered assignment"
+        );
+        assert_eq!(fs::read(&history).unwrap(), changed);
+        let repaired: StoredState = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        assert_eq!(
+            repaired.retired_history.unwrap().digest,
+            format!("{:x}", Sha256::digest(&changed))
+        );
+        let backups = || {
+            fs::read_dir(&root)
+                .unwrap()
+                .map(Result::unwrap)
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("history-recovery-")
+                })
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>()
+        };
+        let preserved = backups();
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(fs::read(preserved[0].join("boss.json")).unwrap(), original);
+        assert_eq!(
+            fs::read(preserved[0].join("history.json")).unwrap(),
+            changed
+        );
+        drop(service);
+        let reopened = BossService::open(root.clone()).unwrap();
+        assert_eq!(reopened.document().retired_employees[0].session_id, id);
+        assert_eq!(backups(), preserved);
+        drop(reopened);
         fs::remove_dir_all(root).unwrap();
     }
 

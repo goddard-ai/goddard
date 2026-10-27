@@ -1,1 +1,1 @@
-- A missing or corrupt Boss employee history no longer prevents the daemon from starting; Boss remains inactive and reports the storage error when used.
+- Boss automatically recovers valid employee history after a checksum mismatch without an app warning; missing or unreadable history no longer prevents the daemon from starting.
