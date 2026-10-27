@@ -742,6 +742,29 @@ pub struct DaemonRecovery {
     pub replaced: bool,
 }
 
+/// One pending settings document, regardless of RPC latency. Preserve explicit
+/// credential writes while ordinary snapshots replace the rest of the document.
+struct SettingsUpdates {
+    pending: Mutex<Option<DaemonSettings>>,
+    wake: Sender<()>,
+}
+
+impl SettingsUpdates {
+    fn send(&self, newer: DaemonSettings) -> anyhow::Result<()> {
+        let mut pending = self.pending.lock();
+        *pending = Some(match pending.take() {
+            Some(previous) => coalesce_settings(previous, newer),
+            None => newer,
+        });
+        match self.wake.try_send(()) {
+            Ok(()) | Err(crossbeam_channel::TrySendError::Full(())) => Ok(()),
+            Err(crossbeam_channel::TrySendError::Disconnected(())) => {
+                bail!("Goddard daemon settings writer is closed")
+            }
+        }
+    }
+}
+
 struct SupervisorInner {
     executable: Option<PathBuf>,
     /// The daemon's host is not this machine. An externally managed
@@ -753,7 +776,7 @@ struct SupervisorInner {
     restart: Mutex<()>,
     settings: Mutex<DaemonSettings>,
     persisted_settings: Mutex<Option<DaemonSettings>>,
-    settings_updates: Sender<DaemonSettings>,
+    settings_updates: SettingsUpdates,
     client_updates: Mutex<Vec<Sender<DaemonClient>>>,
     recovery_reports: Mutex<Vec<Sender<DaemonRecovery>>>,
     /// Every status transition — subscribers get the current status at
@@ -883,7 +906,11 @@ impl DaemonSupervisor {
         exposure: Option<DaemonExposureSettings>,
         settings: DaemonSettings,
     ) -> anyhow::Result<Self> {
-        let (settings_updates, settings_update_rx) = unbounded();
+        let (wake, settings_update_rx) = crossbeam_channel::bounded(1);
+        let settings_updates = SettingsUpdates {
+            pending: Mutex::new(None),
+            wake,
+        };
         let inner = Arc::new(SupervisorInner {
             executable,
             remote,
@@ -1643,18 +1670,22 @@ fn coalesce_settings(mut pending: DaemonSettings, mut newer: DaemonSettings) -> 
     newer
 }
 
-fn persist_settings(
-    weak_inner: std::sync::Weak<SupervisorInner>,
-    updates: Receiver<DaemonSettings>,
-) {
-    while let Ok(mut settings) = updates.recv() {
+fn persist_settings(weak_inner: std::sync::Weak<SupervisorInner>, updates: Receiver<()>) {
+    while updates.recv().is_ok() {
+        let Some(inner) = weak_inner.upgrade() else {
+            return;
+        };
+        let Some(mut settings) = inner.settings_updates.pending.lock().take() else {
+            continue;
+        };
+        drop(inner);
         loop {
-            while let Ok(newer) = updates.try_recv() {
-                settings = coalesce_settings(settings, newer);
-            }
             let Some(inner) = weak_inner.upgrade() else {
                 return;
             };
+            if let Some(newer) = inner.settings_updates.pending.lock().take() {
+                settings = coalesce_settings(settings, newer);
+            }
             if !inner.running.load(Ordering::Acquire) {
                 return;
             }

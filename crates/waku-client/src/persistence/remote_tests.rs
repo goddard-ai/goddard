@@ -549,3 +549,55 @@ fn rejected_task_tail_retries_full_before_advancing_the_save_cursor() {
     assert_eq!(sessions[0].messages.len(), state.sessions[0].messages.len());
     assert_eq!(sessions[0].messages.last().unwrap().content, "new question");
 }
+
+#[test]
+fn slow_settings_rpc_coalesces_edits_and_preserves_pending_credentials() {
+    use waku_protocol::inference::InferenceProvider;
+    let (entered, observed) = unbounded();
+    let (release, gate) = unbounded();
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let local = DaemonFixture::with_handler(move |command| {
+        if matches!(command, Command::UpdateSettings { .. }) {
+            let index = calls.fetch_add(1, Ordering::SeqCst);
+            entered.send(index).unwrap();
+            if index == 0 {
+                gate.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+        }
+        None
+    });
+    let provider = InferenceProvider::OpenRouter;
+    let mut settings = DaemonSettings::default();
+    settings
+        .inference
+        .entry(provider)
+        .or_default()
+        .config
+        .insert("route".into(), "initial".into());
+    local.supervisor.update_settings(settings.clone()).unwrap();
+    assert_eq!(observed.recv_timeout(Duration::from_secs(2)).unwrap(), 0);
+    settings.inference.get_mut(&provider).unwrap().api_key = Some("fixture-credential".into());
+    local.supervisor.update_settings(settings.clone()).unwrap();
+    settings.inference.get_mut(&provider).unwrap().api_key = None;
+    for index in 0..1000 {
+        settings
+            .inference
+            .get_mut(&provider)
+            .unwrap()
+            .config
+            .insert("route".into(), index.to_string());
+        local.supervisor.update_settings(settings.clone()).unwrap();
+    }
+    release.send(()).unwrap();
+    assert_eq!(observed.recv_timeout(Duration::from_secs(2)).unwrap(), 1);
+    local.next_request();
+    let Command::UpdateSettings { settings } = local.next_request().command else {
+        panic!("expected settings")
+    };
+    assert_eq!(settings.inference[&provider].config["route"], "999");
+    assert_eq!(
+        settings.inference[&provider].api_key.as_deref(),
+        Some("fixture-credential")
+    );
+    assert!(local.requests.is_empty(), "superseded settings were sent");
+}
