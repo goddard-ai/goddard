@@ -235,15 +235,20 @@ export const stableRuntimeStops = sqliteTable(
     runtimeSessionId: text("runtime_session_id").notNull(),
     generation: integer("generation").notNull(),
     requestedAt: integer("requested_at").notNull(),
-    /** Private path and original grant id, without the grant secret. */
+    /** Owner JSON without a secret; JSON null is known absent, SQL NULL is legacy unknown. */
     descriptorOwner: text("descriptor_owner"),
     /** Set only after the exact host generation confirms termination. */
     confirmedAt: integer("confirmed_at"),
+    retiredAt: integer("retired_at"),
+    retryAt: integer("retry_at").notNull().default(0),
+    failures: integer("failures").notNull().default(0),
+    lastError: text("last_error"),
   },
   (table) => [
     uniqueIndex("stable_runtime_stop_owner").on(
       table.runtimeInstance, table.runtimeSessionId, table.generation,
     ),
+    index("stable_runtime_stop_ready").on(table.retiredAt, table.retryAt, table.commandId),
   ],
 );
 

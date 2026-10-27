@@ -30,6 +30,14 @@ mod unix;
 #[cfg(unix)]
 pub(crate) use unix::*;
 
+#[cfg(not(unix))]
+pub(crate) fn recover_stop(
+    _backend: &crate::daemon::WakuBackend,
+    _intent: &crate::persistence::StableStopIntent,
+) -> anyhow::Result<()> {
+    anyhow::bail!("stable runtime recovery is unavailable on this platform")
+}
+
 // No stable transport exists on non-Unix hosts. This uninhabited type keeps
 // the shared runtime bookkeeping explicit without admitting a fake link.
 #[cfg(not(unix))]

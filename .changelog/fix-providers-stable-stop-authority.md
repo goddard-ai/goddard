@@ -1,1 +1,1 @@
-- With the stable provider runtime enabled, stop retries keep their original request and preserve replacement credentials. Lost provider ownership and failed credential cleanup remain pending for reconciliation.
+- With the stable provider runtime enabled, stop and credential cleanup requests survive daemon restarts, reuse their original identities, and preserve replacement credentials. Unconfirmed ownership remains pending for reconciliation.

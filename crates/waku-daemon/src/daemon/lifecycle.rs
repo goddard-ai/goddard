@@ -60,6 +60,7 @@ impl WakuBackend {
         let task_store = Arc::new(task_store);
         let backend = Self {
             workspace_cleanup_recovery_scheduled: std::sync::atomic::AtomicBool::new(false),
+            stable_stop_recovery_started: std::sync::atomic::AtomicBool::new(false),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_goal_claims: Mutex::new(HashMap::new()),
             repo_maps: Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),

@@ -387,6 +387,25 @@ to the opened parent even if its pathname is replaced. Failed filesystem or
 claim retirement retains local ownership for retry; confirmed provider exit
 alone does not mean local credential retirement finished.
 
+The daemon recovers explicitly recorded stops without a desktop connection.
+One weakly owned control worker polls every five seconds, reads at most eight
+due metadata records, and shares the ordinary attachment controller lease.
+It contacts only the recorded root, instance and generation; it never starts a
+host or admits a provider to satisfy old intent. Pending stop records fence
+reattachment to that same target. Stop recovery is mandatory control work and
+does not wait for optional idle maintenance admission.
+
+`stable_runtime_stops` records local retirement separately from confirmed exit.
+Failures retain ownership and use persisted exponential retry delays from 30 to
+900 seconds, with bounded diagnostics. Invalid records are deferred individually
+without reading transcripts or blocking valid peers. SQL NULL descriptor evidence
+means legacy unknown scope; JSON `null` means a qualified absent agent surface.
+An original host claim can qualify legacy evidence. Missing evidence or a live
+owner contradicting recorded confirmation requires reconciliation, never deletion.
+Recovery stops during daemon shutdown. This worker does not remove workspaces;
+archive generation, shared owners, other writers and checkpoint fences still
+belong to the workspace cleanup executor.
+
 The resource broker's `ResourceOperation::Reanchor { id, owner_pid }` moves
 a reservation's liveness owner to a verified live pid — daemon-internal
 only, fenced to the owning task, refused on dead rows and dead pids, and it

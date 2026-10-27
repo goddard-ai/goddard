@@ -169,6 +169,7 @@ pub(crate) struct ControllerLease {
 
 struct LinkShared {
     controller: Arc<ControllerLease>,
+    backend: Weak<WakuBackend>,
     provider: ProviderKind,
     mode: crate::model::RuntimeMode,
     /// The daemon task this session serves.
@@ -222,6 +223,35 @@ struct LinkShared {
     threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
+fn controller_lease(
+    backend: &WakuBackend,
+    root: &Path,
+    client: &mut RuntimeClient,
+    instance: Uuid,
+    host_pid: u32,
+) -> anyhow::Result<Arc<ControllerLease>> {
+    let mut leases = backend.stable_controllers.lock().unwrap();
+    if let Some(lease) = leases.get(root) {
+        anyhow::ensure!(
+            lease.instance == instance,
+            "the runtime instance changed; reconciliation is required"
+        );
+        return Ok(lease.clone());
+    }
+    let grant = client
+        .acquire_control(&ClientHello::current())
+        .map_err(link_error)?;
+    let lease = Arc::new(ControllerLease {
+        instance,
+        grant,
+        host_pid,
+        routes: Mutex::new(HashMap::new()),
+        service_gate: Mutex::new(()),
+    });
+    leases.insert(root.to_path_buf(), lease.clone());
+    Ok(lease)
+}
+
 /// Attach a daemon runtime attempt to the host and return its driver handle.
 /// The whole reconcile-then-attach sequence lives here so `start_runtime_driver`
 /// stays a provider-agnostic dispatch.
@@ -257,30 +287,7 @@ pub(crate) fn start_link(
     let host_pid = waku_runtime::ipc::Endpoint::load(root)
         .map(|endpoint| endpoint.pid)
         .context("the runtime host's endpoint is unreadable")?;
-    let controller = {
-        let mut leases = backend.stable_controllers.lock().unwrap();
-        if let Some(lease) = leases.get(root) {
-            anyhow::ensure!(
-                lease.instance == instance,
-                "the runtime instance changed; reconciliation is required before admission"
-            );
-            lease.clone()
-        } else {
-            let grant = client
-                .acquire_control(&ClientHello::current())
-                .map_err(link_error)
-                .context("the runtime host refused control")?;
-            let lease = Arc::new(ControllerLease {
-                instance,
-                grant,
-                host_pid,
-                routes: Mutex::new(HashMap::new()),
-                service_gate: Mutex::new(()),
-            });
-            leases.insert(root.to_path_buf(), lease.clone());
-            lease
-        }
-    };
+    let controller = controller_lease(backend, root, &mut client, instance, host_pid)?;
     let host_pid = controller.host_pid;
     let grant = &controller.grant;
     // Reconciliation precedes admission: the inventory names live sessions,
@@ -377,6 +384,15 @@ pub(crate) fn start_link(
             )
         }
     };
+    anyhow::ensure!(
+        !task_store.stable_stop_blocks_attachment(
+            session_id,
+            instance,
+            sref.session_id,
+            sref.generation,
+        )?,
+        "stable provider stop or credential retirement is pending; attachment deferred"
+    );
     row.session_id = session_id;
     let requests = reconcile_requests(&mut client, grant.epoch, &inventory, sref, row.applied_seq)?;
     row.updated_at = crate::model::unix_time();
@@ -415,6 +431,7 @@ pub(crate) fn start_link(
     });
     let shared = Arc::new(LinkShared {
         controller: controller.clone(),
+        backend: backend.weak_self(),
         provider,
         mode: options.mode,
         task_id: session_id,
@@ -763,7 +780,12 @@ fn preflight_agent(
     env: &crate::agent::AgentLaunchEnv,
 ) -> anyhow::Result<AgentProvisioning> {
     let helper_dir = pin_helper(root, &env.cli_path)?;
-    let descriptor = env.shim_directory.join(DESCRIPTOR_NAME);
+    let directory = if env.shim_directory.is_absolute() {
+        env.shim_directory.clone()
+    } else {
+        std::env::current_dir()?.join(&env.shim_directory)
+    };
+    let descriptor = directory.join(DESCRIPTOR_NAME);
     let mut pairs = std::collections::BTreeMap::new();
     pairs.insert(
         waku_protocol::RUNTIME_INGRESS_ENV.to_string(),
@@ -1229,6 +1251,7 @@ impl LinkShared {
             runtime_session_id: self.sref.session_id,
             generation: self.sref.generation,
             descriptor_owner: self.agent_descriptor_owner.clone(),
+            descriptor_qualified: true,
         }
     }
 
@@ -2073,109 +2096,30 @@ impl DriverControl for StableLink {
     /// attachment. Resource claims require separate workload reconciliation.
     fn delete_provider_session(&self) {
         let intent = self.shared.stop_intent();
-        // Local intent commits before host contact. Reuse both its command
-        // identity and any confirmed historical result after replacement.
-        let already_confirmed = match self.shared.store.stable_stop_begin(&intent) {
-            Ok(confirmed) => confirmed,
-            Err(error) => {
-                let _ = self.shared.sender.send(DriverEvent::Error(format!(
-                    "could not record stable provider stop: {error}"
-                )));
-                return;
-            }
+        let Some(backend) = self.shared.backend.upgrade() else {
+            let _ = self.shared.store.stable_stop_begin(&intent);
+            return;
         };
-        let mut client = self.shared.client.lock().unwrap();
-        let receipt_completed = already_confirmed
-            || matches!(
-                execute_safe(
-                    &mut client,
-                    &self
-                        .shared
-                        .envelope(intent.command_id, CanonicalAction::StopSession),
-                ),
-                Ok(waku_runtime::contract::CommandReceipt {
-                    disposition: waku_runtime::contract::CommandDisposition::Terminal {
-                        outcome: waku_runtime::contract::TerminalOutcome::Completed,
-                        ..
-                    },
-                    ..
-                })
+        let result = backend.with_stable_stop_gate(intent.session_id, || {
+            let mut client = self.shared.client.lock().unwrap();
+            retire_stop(
+                &self.shared.store,
+                &intent,
+                &mut client,
+                self.shared
+                    .envelope(intent.command_id, CanonicalAction::StopSession),
+            )
+        });
+        if let Err(error) = result {
+            let _ = self.shared.store.stable_stop_retry(
+                &intent,
+                crate::model::unix_time(),
+                &error.to_string(),
             );
-        // Older pinned hosts can resolve a stop command on an interruption
-        // event too. Its receipt alone does not establish writer quiescence.
-        let inventory = if receipt_completed {
-            client.reconcile(self.shared.epoch).ok()
-        } else {
-            None
-        };
-        let confirmed = already_confirmed
-            || inventory.as_ref().is_some_and(|inventory| {
-                inventory.sessions.iter().any(|session| {
-                    session.session == self.shared.sref
-                        && matches!(
-                            session.status,
-                            SessionStatus::Terminated | SessionStatus::Exited
-                        )
-                })
-            });
-        if confirmed {
-            if let Err(error) = self.shared.store.stable_stop_confirm(&intent) {
-                let _ = self.shared.sender.send(DriverEvent::Error(format!(
-                    "provider stopped; could not record confirmation: {error}"
-                )));
-                return;
-            }
-            // Historical confirmation does not grant a stale controller
-            // permission to retire another attachment's local credentials.
-            let Some(inventory) = inventory else {
-                let _ = self.shared.sender.send(DriverEvent::Error(
-                    "provider stopped; lease retirement awaits current controller authority".into(),
-                ));
-                return;
-            };
-            let claim_id = agent_claim_id(self.shared.sref);
-            if inventory.sessions.iter().any(|session| {
-                session
-                    .claims
-                    .iter()
-                    .any(|claim| claim.claim_id == claim_id)
-            }) {
-                if let Err(error) = client.release_claim(self.shared.epoch, claim_id) {
-                    let _ = self.shared.sender.send(DriverEvent::Error(format!(
-                        "provider stopped; lease retirement pending: {error}"
-                    )));
-                    return;
-                }
-            }
-            if let Some(owner) = &intent.descriptor_owner {
-                match LockedDescriptor::acquire(&owner.path)
-                    .and_then(|mut locked| locked.retire(&intent))
-                {
-                    Ok(true) => {}
-                    Ok(false) => return, // A successor owns this pathname.
-                    Err(error) => {
-                        let _ = self.shared.sender.send(DriverEvent::Error(format!(
-                            "provider stopped; ingress retirement pending: {error}"
-                        )));
-                        return;
-                    }
-                }
-            }
-            let retired = self.shared.store.stable_link_clear(
-                self.shared.task_id,
-                self.shared.instance,
-                self.shared.sref.session_id,
-                self.shared.sref.generation,
-            );
-            if let Err(error) = retired {
-                let _ = self.shared.sender.send(DriverEvent::Error(format!(
-                    "provider stopped; attachment retirement pending: {error}"
-                )));
-            }
-        } else {
-            let _ = self.shared.sender.send(DriverEvent::Error(
-                "stop pending — provider termination is not confirmed".into(),
-            ));
+            backend.start_stable_stop_recovery();
+            let _ = self.shared.sender.send(DriverEvent::Error(format!(
+                "stable provider retirement pending: {error}"
+            )));
         }
     }
 
@@ -2185,6 +2129,175 @@ impl DriverControl for StableLink {
     ) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
         bail!("rollback is not supported by the stable provider runtime")
     }
+}
+
+/// Explicit stop and restart recovery use the same immutable owner and cleanup
+/// boundary. This never authorizes workspace removal.
+fn retire_stop(
+    store: &StateStore,
+    intent: &StableStopIntent,
+    client: &mut RuntimeClient,
+    envelope: ActionEnvelope,
+) -> anyhow::Result<()> {
+    let already_confirmed = store.stable_stop_begin(intent)?;
+    let target = SessionRef {
+        session_id: intent.runtime_session_id,
+        generation: intent.generation,
+    };
+    let epoch = envelope.epoch;
+    let mut inventory = client.reconcile(epoch).map_err(link_error)?;
+    anyhow::ensure!(
+        !already_confirmed
+            || !inventory
+                .sessions
+                .iter()
+                .any(|session| session.session == target
+                    && matches!(
+                        session.status,
+                        SessionStatus::Live | SessionStatus::Stopping
+                    )),
+        "recorded stop confirmation disagrees with the live owner; reconciliation required"
+    );
+    let mut qualified = intent.clone();
+    if !qualified.descriptor_qualified {
+        if let Some(claim) = inventory
+            .sessions
+            .iter()
+            .find(|session| session.session == target)
+            .and_then(|session| {
+                session
+                    .claims
+                    .iter()
+                    .find(|claim| claim.claim_id == agent_claim_id(target))
+            })
+        {
+            qualified.descriptor_owner =
+                Some(StableIngressOwner {
+                    path: serde_json::from_value(
+                        claim
+                            .detail
+                            .get("descriptor")
+                            .cloned()
+                            .ok_or_else(|| anyhow!("original ingress path is unavailable"))?,
+                    )
+                    .context("original ingress path is invalid")?,
+                    grant_id: serde_json::from_value(
+                        claim.detail.get("grantId").cloned().ok_or_else(|| {
+                            anyhow!("original ingress grant identity is unavailable")
+                        })?,
+                    )
+                    .context("original ingress grant identity is invalid")?,
+                });
+            qualified.descriptor_qualified = true;
+            store.stable_stop_begin(&qualified)?;
+        }
+    }
+    let intent = &qualified;
+    let quiet = |inventory: &Inventory| {
+        inventory.sessions.iter().any(|session| {
+            session.session == target
+                && matches!(
+                    session.status,
+                    SessionStatus::Terminated | SessionStatus::Exited
+                )
+        })
+    };
+    if !already_confirmed && !quiet(&inventory) {
+        anyhow::ensure!(
+            inventory
+                .sessions
+                .iter()
+                .any(|session| session.session == target),
+            "recorded provider generation is unavailable; ownership is unconfirmed"
+        );
+        // A lost answer is reconciled under the original command id. A
+        // completed receipt alone is insufficient on older pinned hosts.
+        let _ = execute_safe(client, &envelope);
+        inventory = client.reconcile(epoch).map_err(link_error)?;
+        anyhow::ensure!(quiet(&inventory), "provider termination is not confirmed");
+    }
+    store.stable_stop_confirm(intent)?;
+    anyhow::ensure!(
+        intent.descriptor_qualified,
+        "original ingress scope is unavailable; reconciliation required"
+    );
+    let claim_id = agent_claim_id(target);
+    if inventory.sessions.iter().any(|session| {
+        session
+            .claims
+            .iter()
+            .any(|claim| claim.claim_id == claim_id)
+    }) {
+        client.release_claim(epoch, claim_id).map_err(link_error)?;
+    }
+    if let Some(owner) = &intent.descriptor_owner {
+        if !LockedDescriptor::acquire(&owner.path)?.retire(intent)? {
+            let current = store.stable_link(intent.session_id)?;
+            anyhow::ensure!(
+                !current
+                    .as_ref()
+                    .is_some_and(|row| row.runtime_instance == intent.runtime_instance
+                        && row.runtime_session_id == intent.runtime_session_id
+                        && row.generation == intent.generation),
+                "ingress descriptor ownership changed; reconciliation is required"
+            );
+            store.stable_stop_retired(intent)?;
+            return Ok(());
+        }
+    }
+    store.stable_link_clear(
+        intent.session_id,
+        intent.runtime_instance,
+        intent.runtime_session_id,
+        intent.generation,
+    )?;
+    store.stable_stop_retired(intent)?;
+    Ok(())
+}
+
+pub(crate) fn recover_stop(backend: &WakuBackend, intent: &StableStopIntent) -> anyhow::Result<()> {
+    backend.task_store().stable_stop_begin(intent)?;
+    anyhow::ensure!(
+        intent.namespace == STABLE_NAMESPACE,
+        "unrecognized stop namespace"
+    );
+    anyhow::ensure!(
+        intent.root.canonicalize()? == intent.root,
+        "recorded runtime root changed"
+    );
+    // Never ensure_host/admit here: recovery contacts only the recorded owner.
+    let credentials = load_credentials(&intent.root)?;
+    let (mut client, hello) = RuntimeClient::controller(
+        &intent.root,
+        &credentials.controller,
+        &ClientHello::current(),
+    )
+    .map_err(link_error)?;
+    anyhow::ensure!(
+        hello.runtime_instance == intent.runtime_instance,
+        "recorded host instance changed"
+    );
+    let pid = waku_runtime::ipc::Endpoint::load(&intent.root)?.pid;
+    let controller = controller_lease(
+        backend,
+        &intent.root,
+        &mut client,
+        hello.runtime_instance,
+        pid,
+    )?;
+    let envelope = ActionEnvelope {
+        namespace: intent.namespace.clone(),
+        runtime_instance: intent.runtime_instance,
+        epoch: controller.grant.epoch,
+        retry_window_id: controller.grant.retry_window_id,
+        command_id: intent.command_id,
+        session: Some(SessionRef {
+            session_id: intent.runtime_session_id,
+            generation: intent.generation,
+        }),
+        action: CanonicalAction::StopSession,
+    };
+    retire_stop(backend.task_store(), intent, &mut client, envelope)
 }
 
 fn link_error(error: ClientError) -> anyhow::Error {
@@ -4437,6 +4550,231 @@ for line in sys.stdin:
             .is_err()
         );
         assert!(!descriptor_path.exists());
+    }
+
+    #[test]
+    fn recorded_stop_recovers_on_backend_startup_without_provider_reattachment() {
+        for legacy in [false, true] {
+            let rig = rig(&["codex"]);
+            let agent_dir = temp_root("recovered-agent");
+            let mut opts = options();
+            opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
+            let (handle, original, _rx) =
+                link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+            let mut intent = original.shared.stop_intent();
+            if legacy {
+                intent.descriptor_owner = None;
+                intent.descriptor_qualified = false;
+            }
+            rig.backend.with_stable_stop_gate(rig.session_id, || {
+                if !legacy {
+                    rig.backend.task_store().stable_stop_begin(&intent).unwrap();
+                }
+                let successor = Arc::new(
+                    WakuBackend::new(
+                        crate::settings::DaemonSettingsStore::open(
+                            temp_root("recovery-settings").join("settings.json"),
+                        )
+                        .unwrap(),
+                        StateStore::daemon(rig.backend.task_store().path().to_owned()),
+                    )
+                    .unwrap(),
+                );
+                successor.install_weak_self();
+                if legacy {
+                    rig.backend.task_store().stable_stop_begin(&intent).unwrap();
+                }
+                wait_until(|| !successor.task_store().stable_stops_pending().unwrap());
+                assert_eq!(
+                    rig.factory.adapters().len(),
+                    1,
+                    "recovery admitted a new provider"
+                );
+                assert_eq!(
+                    rig.factory
+                        .for_session(intent.runtime_session_id)
+                        .unwrap()
+                        .terminate_count(),
+                    1
+                );
+                assert!(!agent_dir.join(DESCRIPTOR_NAME).exists());
+                assert!(
+                    successor
+                        .task_store()
+                        .stable_link(rig.session_id)
+                        .unwrap()
+                        .is_none()
+                );
+                let epoch = successor
+                    .stable_controllers
+                    .lock()
+                    .unwrap()
+                    .get(&intent.root)
+                    .unwrap()
+                    .grant
+                    .epoch;
+                let (events, _received) = link_test_event_channel();
+                let (_next, _link) = start_link(
+                    &successor,
+                    successor.task_store(),
+                    rig.session_id,
+                    Uuid::new_v4(),
+                    ProviderKind::Codex,
+                    &options(),
+                    events,
+                    &rig.runtime_root,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(
+                    successor
+                        .stable_controllers
+                        .lock()
+                        .unwrap()
+                        .get(&intent.root)
+                        .unwrap()
+                        .grant
+                        .epoch,
+                    epoch,
+                    "ordinary attachment fenced the recovery controller"
+                );
+            });
+            drop((handle, original));
+        }
+    }
+
+    #[test]
+    fn pending_stop_fences_reattachment_and_recovery_preserves_foreign_host() {
+        let rig = rig(&["codex"]);
+        let (_handle, original, _rx) = link(&rig, Uuid::new_v4(), None);
+        let intent = original.shared.stop_intent();
+        rig.backend.with_stable_stop_gate(rig.session_id, || {
+            rig.backend.task_store().stable_stop_begin(&intent).unwrap();
+            let (events, _received) = link_test_event_channel();
+            let error = start_link(
+                &rig.backend,
+                rig.backend.task_store(),
+                rig.session_id,
+                Uuid::new_v4(),
+                ProviderKind::Codex,
+                &options(),
+                events,
+                &rig.runtime_root,
+                None,
+            )
+            .err()
+            .unwrap();
+            assert!(error.to_string().contains("retirement is pending"));
+            let mut foreign = intent.clone();
+            foreign.runtime_instance = Uuid::new_v4();
+            foreign.command_id = Uuid::new_v4();
+            assert!(recover_stop(&rig.backend, &foreign).is_err());
+            assert_eq!(rig.factory.adapters().len(), 1);
+            assert_eq!(
+                rig.factory
+                    .for_session(intent.runtime_session_id)
+                    .unwrap()
+                    .terminate_count(),
+                0
+            );
+            assert!(
+                original
+                    .shared
+                    .client
+                    .lock()
+                    .unwrap()
+                    .reconcile(original.shared.epoch)
+                    .is_ok(),
+                "a mismatched recovery request fenced the real controller"
+            );
+        });
+    }
+
+    #[test]
+    fn recovered_confirmation_cannot_override_a_contradictory_live_owner() {
+        let rig = rig(&["codex"]);
+        let (_handle, original, _rx) = link(&rig, Uuid::new_v4(), None);
+        let intent = original.shared.stop_intent();
+        rig.backend.with_stable_stop_gate(rig.session_id, || {
+            rig.backend.task_store().stable_stop_begin(&intent).unwrap();
+            rig.backend
+                .task_store()
+                .stable_stop_confirm(&intent)
+                .unwrap();
+            assert!(recover_stop(&rig.backend, &intent).is_err());
+            assert_eq!(
+                rig.factory
+                    .for_session(intent.runtime_session_id)
+                    .unwrap()
+                    .terminate_count(),
+                0
+            );
+            assert!(
+                rig.backend
+                    .task_store()
+                    .stable_link(rig.session_id)
+                    .unwrap()
+                    .is_some()
+            );
+        });
+    }
+
+    #[test]
+    fn stop_recovery_backs_off_uncertainty_and_finishes_the_original_command() {
+        let rig = rig(&["codex"]);
+        let (_handle, original, _rx) = link(&rig, Uuid::new_v4(), None);
+        let intent = original.shared.stop_intent();
+        let adapter = rig.factory.for_session(intent.runtime_session_id).unwrap();
+        adapter.script_terminate(waku_runtime::adapter::Termination::Unconfirmed {
+            detail: "late exit".into(),
+        });
+        rig.backend.with_stable_stop_gate(rig.session_id, || {
+            rig.backend.task_store().stable_stop_begin(&intent).unwrap();
+            rig.backend.recover_stable_stops_once().unwrap();
+            rig.backend.recover_stable_stops_once().unwrap();
+            assert_eq!(adapter.terminate_count(), 1);
+            assert!(
+                rig.backend
+                    .task_store()
+                    .stable_stops_due(crate::model::unix_time())
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(
+                rig.backend
+                    .task_store()
+                    .stable_link(rig.session_id)
+                    .unwrap()
+                    .is_some()
+            );
+            adapter.emit(ProviderEvent::Terminated {
+                reason: waku_runtime::contract::TerminateReason::Requested,
+            });
+            wait_until(|| {
+                original
+                    .shared
+                    .client
+                    .lock()
+                    .unwrap()
+                    .reconcile(original.shared.epoch)
+                    .is_ok_and(|inventory| {
+                        inventory.sessions.iter().any(|session| {
+                            session.session == original.sref()
+                                && session.status == SessionStatus::Terminated
+                        })
+                    })
+            });
+            rusqlite::Connection::open(rig.backend.task_store().path())
+                .unwrap()
+                .execute(
+                    "UPDATE stable_runtime_stops SET retry_at = 0 WHERE command_id = ?1",
+                    [intent.command_id.to_string()],
+                )
+                .unwrap();
+            rig.backend.recover_stable_stops_once().unwrap();
+            assert_eq!(adapter.terminate_count(), 1);
+            assert!(!rig.backend.task_store().stable_stops_pending().unwrap());
+        });
     }
 
     #[test]

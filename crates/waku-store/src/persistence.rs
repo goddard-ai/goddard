@@ -15,7 +15,7 @@
 
 mod stable_stop;
 mod workspace_cleanup;
-pub use stable_stop::{StableIngressOwner, StableStopIntent};
+pub use stable_stop::{StableIngressOwner, StableStopIntent, StableStopRecord};
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;

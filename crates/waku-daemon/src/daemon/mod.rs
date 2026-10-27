@@ -500,6 +500,7 @@ impl RuntimeLifecycles {
 
 pub struct WakuBackend {
     workspace_cleanup_recovery_scheduled: std::sync::atomic::AtomicBool,
+    stable_stop_recovery_started: std::sync::atomic::AtomicBool,
     sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
     managed_goal_claims: Mutex<HashMap<(Uuid, Uuid), HashSet<Uuid>>>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
@@ -625,10 +626,17 @@ impl WakuBackend {
         *self.weak_self.lock() = Arc::downgrade(self);
         self.start_archive_retention();
         self.start_workspace_cleanup_recovery();
+        self.start_stable_stop_recovery();
     }
 
     pub(crate) fn weak_self(&self) -> Weak<WakuBackend> {
         self.weak_self.lock().clone()
+    }
+
+    pub(crate) fn with_stable_stop_gate<T>(&self, task: Uuid, run: impl FnOnce() -> T) -> T {
+        let lifecycle = self.runtime_lifecycles.session(task);
+        let _owner = lifecycle.lock();
+        run()
     }
 
     /// The hub's event source, for the stable-runtime ingress service's
@@ -639,7 +647,6 @@ impl WakuBackend {
 
     /// The durable state store — the stable-runtime link records its
     /// session attachment and effect receipts here.
-    #[cfg(test)]
     pub(crate) fn task_store(&self) -> &Arc<StateStore> {
         &self.task_store
     }
@@ -721,6 +728,7 @@ mod response;
 mod response_ops;
 mod rpc;
 mod runtime;
+mod stable_stop_recovery;
 mod summon;
 mod task_creation;
 mod transfer;
