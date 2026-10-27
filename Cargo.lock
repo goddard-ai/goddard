@@ -11676,6 +11676,7 @@ dependencies = [
  "dunce",
  "libc",
  "parking_lot",
+ "same-file",
  "serde",
  "serde_json",
  "uuid",

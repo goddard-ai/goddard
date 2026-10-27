@@ -402,6 +402,9 @@ pub fn remove_guarded<G>(
         .map(Path::to_owned)
         .context("could not resolve the Git repository root")?;
     let _guard = before_remove(&worktree_root)?;
+    // Exclude live snapshot parents in other daemons. This gate does not
+    // qualify orphan children or replace the caller's broader writer proof.
+    let _capture = crate::checkpoint::lock_worktree_cache_for_removal(&worktree_root)?;
     let worktree_root_arg = worktree_root.to_string_lossy().into_owned();
     let mut arguments = vec!["worktree", "remove"];
     if force {

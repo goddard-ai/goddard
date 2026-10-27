@@ -1,0 +1,1 @@
+- Interrupted checkpoints recover without taking over another capture’s Git index lock.

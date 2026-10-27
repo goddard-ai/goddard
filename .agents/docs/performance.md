@@ -134,6 +134,26 @@
   These process-local preconditions do not replace destructive workspace
   admission, durable failure recovery, or queued desktop work that has not yet
   reached the daemon.
+- Checkpoint caches use a versioned namespace: older binaries must not read
+  generation metadata while continuing to mutate their old fixed index. Keep
+  legacy cache files untouched. Each worktree has an OS file gate in addition
+  to its process-local mutex. Snapshot contention respects the existing capture
+  deadline; removal without that deadline defers immediately. Removal holds the
+  same gate through Git/directory retirement. Compare the held file identity
+  with the current path after locking, so a waiter on deleted/recreated Git
+  metadata cannot use a stale lock handle. `same-file` is already locked in the
+  workspace and supplies this comparison without reading locked bytes through
+  a second handle on platforms where locks are mandatory.
+- Mark cache capture pending before any mutable-index command. An interrupted
+  or corrupt cache, or an existing Git index lock, selects a fresh UUID index
+  namespace. Never unlink an uncertain index lock. Clear the pending marker only
+  after successful capture and cache metadata publication; healthy captures keep
+  incremental index reuse. Retired cache lanes need bounded idle maintenance;
+  do not scan them from UI paths or confuse derived-cache retirement with proof
+  that a provider/workspace writer stopped. A capture parent can die while its
+  Git clean-filter child survives and publishes an old index late. The cache
+  gate excludes live producers; it is not orphan completion, queued-checkpoint
+  ownership, archive-generation authority or full workspace admission.
 - Queued employee archive/removal records roster cancellation before publishing
   catalog retirement: an unstarted shell may have no durable task row. Batch
   cancellation emits no callback under the catalog lock. A rejected cancellation

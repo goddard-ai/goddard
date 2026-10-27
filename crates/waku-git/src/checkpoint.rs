@@ -23,8 +23,13 @@ const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 /// own git dir so its stat cache stays valid for that checkout. Reuse is what
 /// makes `git add` incremental: entries whose stat is unchanged skip hashing,
 /// so the per-capture cost tracks changed files instead of worktree size.
-const CHECKPOINT_INDEX_NAME: &str = "waku-checkpoint-index";
-const CHECKPOINT_INDEX_STATE_NAME: &str = "waku-checkpoint-index.json";
+// Older binaries ignore `index_generation`, so they must never read this
+// namespace's metadata while continuing to mutate their old fixed index.
+const CHECKPOINT_INDEX_NAME: &str = "waku-checkpoint-v2-index";
+const CHECKPOINT_INDEX_STATE_NAME: &str = "waku-checkpoint-v2-index.json";
+// Never unlink the gate during capture; reject handles to replaced directories.
+const CHECKPOINT_CAPTURE_LOCK: &str = "waku-checkpoint-v2.lock";
+const CHECKPOINT_CAPTURE_PENDING: &str = "waku-checkpoint-v2.pending";
 const TURN_CAPTURE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Ref tips pinned as parents of a turn-start snapshot. Past this bound the
 /// commit object would grow with the repository's ref count on every turn.
@@ -41,6 +46,10 @@ struct TurnStartMetadata {
 /// worktree base. Its tree keeps captured uncommitted files warm between turns.
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct CheckpointIndexState {
+    /// Interrupted attempts can leave Git children alive. Rotate the mutable
+    /// index namespace instead of deleting their locks or reusing their file.
+    #[serde(default)]
+    index_generation: Option<Uuid>,
     head: Option<String>,
     tree: String,
     #[serde(default)]
@@ -463,7 +472,6 @@ fn capture_worktree_commit_with_base_inner(
     }
 
     let git_dir = worktree_git_dir(cwd)?;
-    let index = git_dir.join(CHECKPOINT_INDEX_NAME);
     // `status -z` and `diff-files` report repository-relative paths while
     // `git add` resolves pathspecs against its working directory, so the
     // capture plumbing runs at the worktree root — the one place both
@@ -476,18 +484,31 @@ fn capture_worktree_commit_with_base_inner(
     let capture_lock = capture_lock(&git_dir);
     let lock_started = std::time::Instant::now();
     let _capture = lock_capture_mutex(&capture_lock)?;
+    let _process_capture = lock_capture_file(&git_dir)?;
     let lock_wait = lock_started.elapsed();
-    // A capture killed mid-write leaves its index lock behind; the mutex
-    // above makes any leftover dead.
-    let _ = fs::remove_file(index.with_extension("lock"));
 
     let snapshot_started = std::time::Instant::now();
     let mut index_retry = false;
     let state_path = git_dir.join(CHECKPOINT_INDEX_STATE_NAME);
-    let mut index_state = fs::read(&state_path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<CheckpointIndexState>(&bytes).ok())
-        .unwrap_or_default();
+    let pending_path = git_dir.join(CHECKPOINT_CAPTURE_PENDING);
+    // Publish before any mutable index command. A replacement process cannot
+    // infer that an old Git child exited just because its parent lock closed.
+    let interrupted = mark_capture_pending(&pending_path)?;
+    let mut index_state = if interrupted {
+        fresh_index_state()
+    } else {
+        fs::read(&state_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<CheckpointIndexState>(&bytes).ok())
+            .unwrap_or_default()
+    };
+    let mut index = checkpoint_index_path(&git_dir, &index_state);
+    if index.with_extension("lock").try_exists()? {
+        // Legacy or external owners need not participate in our file gate.
+        // An existing Git lock is uncertainty, never permission to unlink it.
+        index_state = fresh_index_state();
+        index = checkpoint_index_path(&git_dir, &index_state);
+    }
     let result = match capture_with_index(
         &root,
         &scope,
@@ -503,10 +524,10 @@ fn capture_worktree_commit_with_base_inner(
             // fix. Ignore-rule changes can also make a formerly included
             // untracked path invalid; rebuilding from HEAD re-applies Git's
             // current excludes without forcing ignored content in.
-            let _ = fs::remove_file(&index);
-            let _ = fs::remove_file(index.with_extension("lock"));
-            let _ = fs::remove_file(&state_path);
-            index_state = CheckpointIndexState::default();
+            // Do not erase files a failed command may still own. The new
+            // namespace also makes recovery independent of stale Git locks.
+            index_state = fresh_index_state();
+            index = checkpoint_index_path(&git_dir, &index_state);
             index_retry = true;
             capture_with_index(
                 &root,
@@ -521,16 +542,6 @@ fn capture_worktree_commit_with_base_inner(
         }
         ok => ok,
     };
-    if result.as_ref().is_err_and(|error| {
-        error
-            .downcast_ref::<TurnCaptureDeadlineExceeded>()
-            .is_some()
-    }) {
-        // Git killed by the deadline can leave only this private index's lock
-        // behind. We hold the per-worktree capture mutex, so it is safe to
-        // remove without touching Git's shared repository locks.
-        let _ = fs::remove_file(index.with_extension("lock"));
-    }
     if result.is_ok() {
         index_state.head = head.map(str::to_owned);
         let save_state = (|| -> anyhow::Result<()> {
@@ -544,6 +555,9 @@ fn capture_worktree_commit_with_base_inner(
             let temporary = state_path.with_extension("json.tmp");
             fs::write(&temporary, bytes)?;
             fs::rename(temporary, &state_path)?;
+            // Only a complete capture plus cache publication enables reuse.
+            // Errors leave the marker and isolate the next attempt's writes.
+            fs::remove_file(&pending_path)?;
             Ok(())
         })();
         if let Err(error) = save_state {
@@ -1021,6 +1035,96 @@ fn capture_lock(git_dir: &Path) -> Arc<Mutex<()>> {
         .entry(key)
         .or_insert_with(|| Arc::new(Mutex::new(())))
         .clone()
+}
+
+fn checkpoint_cache_options() -> fs::OpenOptions {
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    options
+}
+
+/// Worker-only cross-process exclusion for one worktree's mutable cache.
+/// This is not provider retirement evidence or workspace deletion authority.
+fn lock_capture_file(git_dir: &Path) -> anyhow::Result<fs::File> {
+    let path = git_dir.join(CHECKPOINT_CAPTURE_LOCK);
+    let file = checkpoint_cache_options()
+        .create(true)
+        .truncate(false)
+        .open(&path)?;
+    loop {
+        match file.try_lock() {
+            Ok(()) => {
+                validate_capture_gate(&file, &path)?;
+                return Ok(file);
+            }
+            Err(fs::TryLockError::Error(error)) => return Err(error.into()),
+            Err(fs::TryLockError::WouldBlock) => {
+                let Some(remaining) = remaining_capture_time()? else {
+                    bail!("checkpoint capture deferred: another process owns the worktree cache");
+                };
+                std::thread::sleep(remaining.min(Duration::from_millis(20)));
+            }
+        }
+    }
+}
+
+/// Worktree removal must exclude snapshot producers in other daemons too.
+/// The caller retains this gate through Git removal and directory cleanup.
+pub(crate) fn lock_worktree_cache_for_removal(cwd: &Path) -> anyhow::Result<fs::File> {
+    lock_capture_file(&worktree_git_dir(cwd)?)
+}
+
+fn validate_capture_gate(file: &fs::File, path: &Path) -> anyhow::Result<()> {
+    // A waiter can retain a handle after Git removes/recreates its admin
+    // directory. Compare open file identities, not pathname spelling or bytes
+    // read through a second handle (file locks can be mandatory on Windows).
+    let current = checkpoint_cache_options().open(path)?;
+    anyhow::ensure!(
+        file.metadata()?.is_file() && current.metadata()?.is_file(),
+        "checkpoint cache gate is not a regular file"
+    );
+    let held = same_file::Handle::from_file(file.try_clone()?)?;
+    let current = same_file::Handle::from_file(current)?;
+    anyhow::ensure!(
+        held == current,
+        "checkpoint cache gate was replaced while waiting"
+    );
+    Ok(())
+}
+
+fn mark_capture_pending(path: &Path) -> anyhow::Result<bool> {
+    match checkpoint_cache_options().create_new(true).open(path) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            anyhow::ensure!(
+                fs::symlink_metadata(path)?.file_type().is_file(),
+                "checkpoint capture marker is not a regular file"
+            );
+            Ok(true)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn fresh_index_state() -> CheckpointIndexState {
+    CheckpointIndexState {
+        index_generation: Some(Uuid::new_v4()),
+        ..Default::default()
+    }
+}
+
+fn checkpoint_index_path(git_dir: &Path, state: &CheckpointIndexState) -> PathBuf {
+    git_dir.join(match state.index_generation {
+        Some(generation) => format!("{CHECKPOINT_INDEX_NAME}-{generation}"),
+        None => CHECKPOINT_INDEX_NAME.to_owned(),
+    })
 }
 
 fn prepare_turn_diff_base(
@@ -1755,6 +1859,299 @@ fn command_error(output: &Output) -> String {
 mod tests {
     use super::*;
 
+    // A separate libtest process exercises the actual capture path. This helper
+    // is invoked only by the owner test with its private fixture environment.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "owned subprocess helper for the checkpoint cache crash regression"]
+    fn capture_cache_child() {
+        let root = std::env::var_os("GODDARD_TEST_CHECKPOINT_ROOT").expect("fixture root");
+        capture_ref(Path::new(&root), "refs/waku/cache-child").unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_capture_excludes_other_processes_and_isolates_an_orphan_after_parent_death() {
+        let directory = std::env::temp_dir().join(format!("waku-cache-process-{}", Uuid::new_v4()));
+        let primary = directory.join("primary");
+        let repo = directory.join("held");
+        let linked = directory.join("linked");
+        fs::create_dir_all(&primary).unwrap();
+        git_ok(&primary, &["init", "--quiet"]);
+        git_ok(&primary, &["config", "core.hooksPath", "/dev/null"]);
+        git_ok(&primary, &["config", "commit.gpgsign", "false"]);
+        git_ok(&primary, &["config", "filter.controlled.clean", "cat"]);
+        git_ok(&primary, &["config", "filter.controlled.smudge", "cat"]);
+        git_ok(&primary, &["config", "filter.controlled.required", "true"]);
+        fs::write(
+            primary.join(".gitattributes"),
+            "*.filtered filter=controlled\n",
+        )
+        .unwrap();
+        fs::write(primary.join("payload.filtered"), "baseline\n").unwrap();
+        git_ok(&primary, &["add", "."]);
+        git_ok(
+            &primary,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        );
+        git_ok(
+            &primary,
+            &["worktree", "add", "--detach", repo.to_str().unwrap()],
+        );
+        git_ok(
+            &primary,
+            &["worktree", "add", "--detach", linked.to_str().unwrap()],
+        );
+        let head = git_text(&repo, &["rev-parse", "HEAD"]);
+        let real_index = fs::read(worktree_git_dir(&repo).unwrap().join("index")).unwrap();
+        capture_ref(&repo, "refs/waku/cache-baseline").unwrap();
+        let git_dir = worktree_git_dir(&repo).unwrap();
+        let original_index = git_dir.join(CHECKPOINT_INDEX_NAME);
+        let original_bytes = fs::read(&original_index).unwrap();
+        let ready = directory.join("filter-ready");
+        let release = directory.join("filter-release");
+        let input = directory.join("filter-input");
+        fs::write(
+            directory.join("slow-filter.sh"),
+            r#"#!/bin/sh
+cat > "$GODDARD_TEST_FILTER_INPUT" || exit 1
+printf ready > "$GODDARD_TEST_FILTER_READY"
+count=0
+while [ ! -f "$GODDARD_TEST_FILTER_RELEASE" ]; do
+    count=$((count + 1))
+    [ "$count" -lt 3000 ] || exit 1
+    sleep 0.01
+done
+cat "$GODDARD_TEST_FILTER_INPUT"
+"#,
+        )
+        .unwrap();
+        git_ok(
+            &repo,
+            &["config", "filter.controlled.clean", "sh ../slow-filter.sh"],
+        );
+        fs::write(repo.join("payload.filtered"), "orphan version\n").unwrap();
+        struct CaptureChild {
+            child: std::process::Child,
+            release: PathBuf,
+        }
+        impl Drop for CaptureChild {
+            fn drop(&mut self) {
+                let _ = fs::write(&self.release, "release");
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while self.child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                if self.child.try_wait().ok().flatten().is_none() {
+                    let _ = self.child.kill();
+                    let _ = self.child.wait();
+                }
+            }
+        }
+        let mut child = CaptureChild {
+            child: std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "checkpoint::tests::capture_cache_child",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env("GODDARD_TEST_CHECKPOINT_ROOT", &repo)
+                .env("GODDARD_TEST_FILTER_READY", &ready)
+                .env("GODDARD_TEST_FILTER_RELEASE", &release)
+                .env("GODDARD_TEST_FILTER_INPUT", &input)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+            release: release.clone(),
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(
+                child.child.try_wait().unwrap().is_none(),
+                "capture child exited before filter readiness"
+            );
+            assert!(
+                Instant::now() < deadline,
+                "capture child did not start its controlled Git filter"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(fs::read_to_string(&input).unwrap(), "orphan version\n");
+        let index_lock = original_index.with_extension("lock");
+        let owned_lock = fs::read(&index_lock).unwrap();
+        // The child already owns its Git command/filter. Changing the fixture
+        // configuration now lets other captures proceed without blocking there.
+        git_ok(&repo, &["config", "filter.controlled.clean", "cat"]);
+        let error = with_capture_deadline(Duration::from_millis(120), || {
+            capture_ref(&repo, "refs/waku/cache-contender")
+        })
+        .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<TurnCaptureDeadlineExceeded>()
+                .is_some(),
+            "{error:#}"
+        );
+        assert_eq!(
+            fs::read(&index_lock).unwrap(),
+            owned_lock,
+            "a contender stole another process's Git lock"
+        );
+        assert!(!has_ref(&repo, "refs/waku/cache-contender"));
+        let removal = crate::worktree::remove(&repo, true).unwrap_err();
+        assert!(format!("{removal:#}").contains("another process owns the worktree cache"));
+        assert!(repo.join("payload.filtered").exists());
+        assert_eq!(fs::read(&index_lock).unwrap(), owned_lock);
+        // An independent linked worktree has a separate mutable cache/gate.
+        with_capture_deadline(Duration::from_secs(2), || {
+            capture_ref(&linked, "refs/waku/cache-linked")
+        })
+        .unwrap();
+        assert!(child.child.try_wait().unwrap().is_none());
+        child.child.kill().unwrap();
+        child.child.wait().unwrap();
+        assert!(git_dir.join(CHECKPOINT_CAPTURE_PENDING).exists());
+        // The old filter remains alive after the Rust capture owner is gone.
+        // A replacement must use a new index before releasing that old writer.
+        fs::write(repo.join("payload.filtered"), "replacement version\n").unwrap();
+        capture_ref(&repo, "refs/waku/cache-replacement").unwrap();
+        assert_eq!(fs::read(&index_lock).unwrap(), owned_lock);
+        let state: CheckpointIndexState =
+            serde_json::from_slice(&fs::read(git_dir.join(CHECKPOINT_INDEX_STATE_NAME)).unwrap())
+                .unwrap();
+        assert!(state.index_generation.is_some());
+        let replacement_index = checkpoint_index_path(&git_dir, &state);
+        assert_ne!(replacement_index, original_index);
+        assert_eq!(
+            git_text(
+                &repo,
+                &["show", "refs/waku/cache-replacement:payload.filtered"]
+            ),
+            "replacement version"
+        );
+        fs::write(&release, "release").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fs::read(&original_index).unwrap() == original_bytes || index_lock.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "the orphaned Git command did not finish its delayed index write"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let stage = git_with_index(
+            &repo,
+            &original_index,
+            ["ls-files", "--stage", "--", "payload.filtered"],
+        )
+        .unwrap();
+        let blob = stage.split_whitespace().nth(1).unwrap();
+        assert_eq!(git_text(&repo, &["cat-file", "-p", blob]), "orphan version");
+        // Late old-index publication cannot poison warm reuse of the new lane.
+        fs::write(repo.join("payload.filtered"), "after orphan\n").unwrap();
+        capture_ref(&repo, "refs/waku/cache-after-orphan").unwrap();
+        assert_eq!(
+            git_text(
+                &repo,
+                &["show", "refs/waku/cache-after-orphan:payload.filtered"]
+            ),
+            "after orphan"
+        );
+        let reused: CheckpointIndexState =
+            serde_json::from_slice(&fs::read(git_dir.join(CHECKPOINT_INDEX_STATE_NAME)).unwrap())
+                .unwrap();
+        assert_eq!(reused.index_generation, state.index_generation);
+        assert_eq!(git_text(&repo, &["rev-parse", "HEAD"]), head);
+        assert_eq!(
+            fs::read(worktree_git_dir(&repo).unwrap().join("index")).unwrap(),
+            real_index
+        );
+        drop(child);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn legacy_checkpoint_cache_and_locks_remain_untouched() {
+        let directory = std::env::temp_dir().join(format!("waku-cache-legacy-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        git_ok(&directory, &["init", "--quiet"]);
+        fs::write(directory.join("preserve.txt"), "fresh workspace data\n").unwrap();
+        let git_dir = worktree_git_dir(&directory).unwrap();
+        let legacy = [
+            "waku-checkpoint-index",
+            "waku-checkpoint-index.lock",
+            "waku-checkpoint-index.json",
+        ];
+        for name in legacy {
+            fs::write(git_dir.join(name), b"owned by an older capture").unwrap();
+        }
+        capture_ref(&directory, "refs/waku/cache-versioned").unwrap();
+        assert_eq!(
+            git_text(
+                &directory,
+                &["show", "refs/waku/cache-versioned:preserve.txt"]
+            ),
+            "fresh workspace data"
+        );
+        for name in legacy {
+            assert_eq!(
+                fs::read(git_dir.join(name)).unwrap(),
+                b"owned by an older capture"
+            );
+        }
+        assert!(git_dir.join(CHECKPOINT_INDEX_NAME).exists());
+        assert!(git_dir.join(CHECKPOINT_INDEX_STATE_NAME).exists());
+        assert!(
+            !git_dir.join("index").exists(),
+            "an unborn checkout's real index must remain absent"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn replaced_capture_gate_rejects_a_stale_open_handle() {
+        let directory = std::env::temp_dir().join(format!("waku-cache-gate-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(CHECKPOINT_CAPTURE_LOCK);
+        drop(lock_capture_file(&directory).unwrap());
+        let stale = checkpoint_cache_options().open(&path).unwrap();
+        let retired = directory.with_extension("retired");
+        fs::rename(&directory, &retired).unwrap();
+        fs::create_dir_all(&directory).unwrap();
+        let replacement = lock_capture_file(&directory).unwrap();
+        let replacement_identity =
+            same_file::Handle::from_file(replacement.try_clone().unwrap()).unwrap();
+        stale.try_lock().unwrap();
+        assert!(
+            validate_capture_gate(&stale, &path)
+                .unwrap_err()
+                .to_string()
+                .contains("replaced")
+        );
+        assert_eq!(
+            same_file::Handle::from_path(&path).unwrap(),
+            replacement_identity
+        );
+        drop(stale);
+        drop(replacement_identity);
+        drop(replacement);
+        fs::remove_dir_all(directory).unwrap();
+        fs::remove_dir_all(retired).unwrap();
+    }
+
     fn git_ok(cwd: &Path, args: &[&str]) {
         let status = crate::command_env::search_path_command("git")
             .args(args)
@@ -2292,7 +2689,13 @@ mod tests {
         let index = worktree_git_dir(&directory)
             .unwrap()
             .join(CHECKPOINT_INDEX_NAME);
-        assert!(!index.with_extension("lock").exists());
+        let interrupted_lock = fs::read(index.with_extension("lock")).ok();
+        assert!(
+            worktree_git_dir(&directory)
+                .unwrap()
+                .join(CHECKPOINT_CAPTURE_PENDING)
+                .exists()
+        );
 
         let child_pid = fs::read_to_string(&child_pid_file).unwrap();
         let mut child_stopped = false;
@@ -2312,6 +2715,11 @@ mod tests {
 
         write_filter("#!/bin/sh\ncat\n");
         let retried = capture_turn(&directory, session, 1).unwrap();
+        assert_eq!(
+            fs::read(index.with_extension("lock")).ok(),
+            interrupted_lock,
+            "retry must not unlink the interrupted capture's lock"
+        );
         assert_eq!(retried.status, CheckpointStatus::Ready);
         assert!(
             retried
