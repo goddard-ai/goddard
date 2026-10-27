@@ -1,0 +1,1 @@
+- Large task catalogs decode without building intermediate trees for every response, reducing allocation churn during remote metadata refreshes.

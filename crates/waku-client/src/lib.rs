@@ -6,6 +6,7 @@
 //! implementations.
 
 mod client;
+mod server_message;
 pub mod diagnostics;
 pub mod command_env;
 pub mod composer_complete;

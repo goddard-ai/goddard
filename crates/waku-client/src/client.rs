@@ -865,7 +865,7 @@ fn run_client(
 
         match socket.read() {
             Ok(Message::Text(text)) => {
-                let Ok(message) = serde_json::from_str::<ServerMessage>(text.as_ref()) else {
+                let Ok(message) = crate::server_message::decode(text.as_ref()) else {
                     continue;
                 };
                 match message {
