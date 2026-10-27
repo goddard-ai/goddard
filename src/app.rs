@@ -20,7 +20,7 @@ use gpui::{
     linear_gradient, list, point, prelude::*, pulsating_between, px, rgb, size,
 };
 use uuid::Uuid;
-use waku_client::persistence::BackgroundOwned;
+use waku_client::persistence::{BackgroundOwned, PendingSessionRequests, SessionRequest};
 
 use crate::checkpoint;
 use crate::composer_complete::{ComposerWorkItem, FileEntry, SlashCommand};
@@ -3354,7 +3354,7 @@ pub struct Waku {
         Result<waku_protocol::eval::Evaluation, String>,
     )>,
     runtimes: HashMap<Uuid, SessionRuntime>,
-    runtime_attach_pending: HashSet<Uuid>,
+    runtime_attach_pending: PendingSessionRequests,
     runtime_attach_misses: HashMap<Uuid, u8>,
     /// Automatic turn resumptions after a daemon restart, per session.
     /// Cleared when a turn completes successfully; capped so a daemon that
@@ -7680,7 +7680,7 @@ impl Waku {
                 inbox_suggestion_tx,
                 inbox_suggestion_events,
                 runtimes: HashMap::new(),
-                runtime_attach_pending: HashSet::new(),
+                runtime_attach_pending: Default::default(),
                 runtime_attach_misses: HashMap::new(),
                 runtime_auto_resumes: HashMap::new(),
                 daemon_recovery_episode: None,

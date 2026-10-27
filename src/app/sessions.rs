@@ -779,8 +779,11 @@ impl Waku {
             .catalog_session(session_id)
             .is_some_and(|session| !session.detail_loaded)
         {
-            self.session_hydrations
-                .enqueue(session_id, self.state.selected_session == Some(session_id));
+            self.session_hydrations.enqueue(
+                session_id,
+                self.daemons.session_owner(session_id),
+                self.state.selected_session == Some(session_id),
+            );
             self.start_pending_session_hydrations(cx);
             if self.session_hydrations.has_ready() {
                 signal_event_pump(&self.event_wake_tx);
@@ -792,19 +795,22 @@ impl Waku {
         // Removed/already-loaded rows can leave stale queue entries. Bound
         // their disposal too; the pump resumes ready work on another tick.
         for _ in 0..8 {
-            let Some(session_id) = self.session_hydrations.next() else {
+            let Some(request) = self.session_hydrations.next() else {
                 break;
             };
-            if !self
-                .state
-                .catalog_session(session_id)
-                .is_some_and(|session| !session.detail_loaded)
+            let session_id = request.session_id();
+            if !self.session_hydrations.is_current(request)
+                || self.daemons.session_owner(session_id) != request.owner()
+                || !self
+                    .state
+                    .catalog_session(session_id)
+                    .is_some_and(|session| !session.detail_loaded)
             {
-                self.session_hydrations.finished(session_id);
+                self.session_hydrations.finished(request);
                 continue;
             }
             if self.daemon_for_session(session_id).is_none() {
-                self.session_hydrations.finished(session_id);
+                self.session_hydrations.finished(request);
                 if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id)
                 {
                     self.use_remote_host(host, cx);
@@ -832,7 +838,15 @@ impl Waku {
                     })
                     .await;
                 let _ = waku.update(cx, |waku, cx| {
-                    waku.session_hydrations.finished(session_id);
+                    let accepted = waku.session_hydrations.finished(request)
+                        && waku.daemons.session_owner(session_id) == request.owner();
+                    if !accepted {
+                        waku.start_pending_session_hydrations(cx);
+                        if waku.session_hydrations.has_ready() {
+                            signal_event_pump(&waku.event_wake_tx);
+                        }
+                        return;
+                    }
                     match result.into_inner() {
                         Ok((session, interrupted_turn)) => {
                             let session = BackgroundOwned::new(session);
@@ -2507,6 +2521,8 @@ impl Waku {
         self.remove_composer_draft(composer_draft_key, cx);
         let retired = self.state.sessions.remove(index);
         self.state.note_session_removed(retired.id);
+        self.runtime_attach_pending.cancel(retired.id);
+        self.session_hydrations.cancel(retired.id);
         cx.background_executor()
             .spawn(async move { drop(retired) })
             .detach();
@@ -7110,7 +7126,7 @@ impl Waku {
             && self.state.sessions.iter().any(|session| {
                 session.id == session_id
                     && session.status.is_busy()
-                    && (!session.detail_loaded || self.runtime_attach_pending.contains(&session_id))
+                    && (!session.detail_loaded || self.runtime_attach_pending.contains(session_id))
             })
         {
             self.pending_session_cancels.insert(session_id);

@@ -341,7 +341,8 @@ impl Waku {
     fn retire_catalog_session_surface(&mut self, id: Uuid, cx: &mut Context<Self>) {
         self.session_metadata_saves.remove(&id);
         self.pending_session_metadata.remove(&id);
-        self.runtime_attach_pending.remove(&id);
+        self.runtime_attach_pending.cancel(id);
+        self.session_hydrations.cancel(id);
         self.pending_session_cancels.remove(&id);
         self.runtime_attach_misses.remove(&id);
         if let Some(runtime) = self.runtimes.remove(&id) {

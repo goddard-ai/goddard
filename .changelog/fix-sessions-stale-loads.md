@@ -1,0 +1,1 @@
+- Late transcript loads and runtime attachments no longer replace newer requests after a task is removed and reopened or a remote host is edited.

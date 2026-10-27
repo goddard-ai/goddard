@@ -2496,6 +2496,8 @@ impl Waku {
                 return;
             }
         };
+        self.runtime_attach_pending.cancel(session_id);
+        self.session_hydrations.cancel(session_id);
         // The snapshot is the whole session — no hydration pass needed.
         session.detail_loaded = true;
         if let Some(existing) = self
@@ -2574,6 +2576,8 @@ impl Waku {
             .collect::<Vec<_>>();
         if !retired.is_empty() {
             self.state.note_session_removed(session_id);
+            self.runtime_attach_pending.cancel(session_id);
+            self.session_hydrations.cancel(session_id);
             cx.background_executor()
                 .spawn(async move { drop(retired) })
                 .detach();
@@ -2722,7 +2726,7 @@ impl Waku {
             // runtime; an attach racing it would subscribe a second handle
             // to the same daemon runtime.
             || self.submission_preparations.contains(&session_id)
-            || self.runtime_attach_pending.contains(&session_id)
+            || self.runtime_attach_pending.contains(session_id)
         {
             return;
         }
@@ -2736,7 +2740,10 @@ impl Waku {
             }
             return;
         };
-        self.runtime_attach_pending.insert(session_id);
+        let owner = self.daemons.session_owner(session_id);
+        let Some(request) = self.runtime_attach_pending.begin(session_id, owner) else {
+            return;
+        };
         let event_wake = self.event_wake_tx.clone();
         let (replay_cursor, hydrate) = self
             .state
@@ -2764,7 +2771,7 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_runtime_attachment(session_id, result, cx);
+                waku.finish_runtime_attachment(request, result, cx);
             });
         })
         .detach();
@@ -3410,6 +3417,10 @@ impl Waku {
         record.token = token;
         record.ssh_destination = ssh_destination;
         let record = record.clone();
+        self.runtime_attach_pending
+            .cancel_owner(waku_client::DaemonKey::Remote(host_id));
+        self.session_hydrations
+            .cancel_owner(waku_client::DaemonKey::Remote(host_id));
         self.save();
         #[cfg(unix)]
         if let Some(link) = self.ssh_transports.remove(&host_id) {
@@ -3454,6 +3465,8 @@ impl Waku {
         self.save();
 
         let remote = waku_client::DaemonKey::Remote(host);
+        self.runtime_attach_pending.cancel_owner(remote);
+        self.session_hydrations.cancel_owner(remote);
         let retired = self
             .state
             .sessions
@@ -3518,7 +3531,8 @@ impl Waku {
         for session_id in &removed_sessions {
             self.session_metadata_saves.remove(session_id);
             self.pending_session_metadata.remove(session_id);
-            self.runtime_attach_pending.remove(session_id);
+            self.runtime_attach_pending.cancel(*session_id);
+            self.session_hydrations.cancel(*session_id);
             self.runtime_attach_misses.remove(session_id);
             if let Some(runtime) = self.runtimes.remove(session_id) {
                 runtime.retire_payloads(&self.background_executor);
@@ -3804,11 +3818,14 @@ impl Waku {
 
     fn finish_runtime_attachment(
         &mut self,
-        session_id: Uuid,
+        request: SessionRequest,
         result: BackgroundOwned<anyhow::Result<Option<PreparedDriver>>>,
         cx: &mut Context<Self>,
     ) {
-        if !self.runtime_attach_pending.remove(&session_id) {
+        let session_id = request.session_id();
+        if !self.runtime_attach_pending.complete(request)
+            || self.daemons.session_owner(session_id) != request.owner()
+        {
             return;
         }
         match result.into_inner() {
@@ -4075,7 +4092,7 @@ impl Waku {
             .find(|session| session.id == session_id)
             .is_some_and(session_resume_eligible);
         if !eligible
-            || self.runtime_attach_pending.contains(&session_id)
+            || self.runtime_attach_pending.contains(session_id)
             || self.submission_preparations.contains(&session_id)
             || self.goal_runtime_starts.contains(&session_id)
             || self.worktree_move_pending.contains(&session_id)
@@ -6408,6 +6425,7 @@ impl Waku {
         session_id: Uuid,
         mut prepared: PreparedDriver,
     ) -> DriverHandle {
+        self.runtime_attach_pending.cancel(session_id);
         // A fresh driver is not mid-drain of a cancelled turn; clear any
         // entry the replaced runtime left behind.
         self.cancel_drains.remove(&session_id);
@@ -6421,6 +6439,15 @@ impl Waku {
             if let Some(existing) = self.state.session_mut(session_id) {
                 merge_hydrated_session(existing, hydrated);
             }
+        }
+        // A supplied/previously loaded baseline supersedes pending detail.
+        // Keep a needed read if this installation still owns only a skeleton.
+        if self
+            .state
+            .catalog_session(session_id)
+            .is_some_and(|session| session.detail_loaded)
+        {
+            self.session_hydrations.cancel(session_id);
         }
         let handle = prepared.handle.clone();
         let replaced = self.runtimes.insert(

@@ -27,6 +27,8 @@ pub use project_names::{
 pub use app_writer::AppSaveTicket;
 mod catalog_writer;
 pub use catalog_writer::{CatalogCacheUpdate, CatalogCacheWriter};
+mod session_requests;
+pub use session_requests::{PendingSessionRequests, SessionRequest};
 mod session_hydration;
 pub use session_hydration::SessionHydrations;
 mod task_writer;

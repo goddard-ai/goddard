@@ -99,6 +99,16 @@
   `merge_hydrated_session` overlay so newer list edits survive; replaced skeletons
   and old runtime payloads also reclaim in the background. GPUI-affine state
   keeps its owning-thread cleanup. Reclamation does not wait for idle admission.
+- Detail and runtime-attachment results carry opaque per-attempt authority from
+  `PendingSessionRequests`, plus their owning daemon and its request epoch.
+  Completion removes only the matching attempt. Task retirement, friend-view
+  replacement/removal and host edits/removal revoke stale authority; host
+  revocation changes an epoch without scanning all pending requests. Hydration
+  keeps revoked reads in its physical two-read accounting until their callbacks
+  finish. Requeued tasks get new authority and stale queued work is skipped by
+  the bounded drain. Installing a loaded baseline cancels obsolete detail; keep
+  a still-needed read if installation leaves only a skeleton. Discard rejected
+  payloads through `BackgroundOwned` before any state or error UI is applied.
 - One-shot user actions such as a click or menu command may work synchronously
   when freshness matters more than latency; frames may not.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for
