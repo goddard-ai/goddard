@@ -13,7 +13,9 @@
 //! deserialize a transcript. The schema is defined in `db/schema.ts` and
 //! applied by [`apply_migrations`].
 
+mod stable_stop;
 mod workspace_cleanup;
+pub use stable_stop::StableStopIntent;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;

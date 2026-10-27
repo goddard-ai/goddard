@@ -12,7 +12,7 @@
  * fetched only when a session is opened.
  */
 
-import { blob, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { blob, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
@@ -222,6 +222,28 @@ export const stableRuntimeReceipts = sqliteTable("stable_runtime_receipts", {
   outcome: text("outcome").notNull(),
   recordedAt: integer("recorded_at").notNull(),
 });
+
+/** Explicit provider-stop authority survives daemon and attachment replacement. */
+export const stableRuntimeStops = sqliteTable(
+  "stable_runtime_stops",
+  {
+    commandId: text("command_id").primaryKey(),
+    sessionId: text("session_id").notNull(),
+    namespace: text("namespace").notNull(),
+    root: text("root").notNull(),
+    runtimeInstance: text("runtime_instance").notNull(),
+    runtimeSessionId: text("runtime_session_id").notNull(),
+    generation: integer("generation").notNull(),
+    requestedAt: integer("requested_at").notNull(),
+    /** Set only after the exact host generation confirms termination. */
+    confirmedAt: integer("confirmed_at"),
+  },
+  (table) => [
+    uniqueIndex("stable_runtime_stop_owner").on(
+      table.runtimeInstance, table.runtimeSessionId, table.generation,
+    ),
+  ],
+);
 
 /** Durable archive-workspace intent. A row records work owed, never permission to delete. */
 export const workspaceCleanupIntents = sqliteTable(

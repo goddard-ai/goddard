@@ -1,0 +1,1 @@
+- With the stable provider runtime enabled, stop retries reuse their original request and preserve attachment credentials when termination is unconfirmed or controller authority has changed.

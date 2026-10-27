@@ -30,7 +30,9 @@ use crate::Backend;
 use crate::daemon::WakuBackend;
 use crate::driver::{DriverControl, DriverEventSender, DriverHandle, DriverStartOptions};
 use crate::model::{DriverEvent, PermissionOption, ProviderKind, UserInputQuestion};
-use crate::persistence::{PersistedState, StableLinkRow, StableReceipt, StateStore};
+use crate::persistence::{
+    PersistedState, StableLinkRow, StableReceipt, StableStopIntent, StateStore,
+};
 
 /// Env override locating the `waku-runtime-host` executable to spawn when
 /// no live endpoint answers. Absent it, the sibling of the daemon binary is
@@ -1260,6 +1262,25 @@ impl LinkShared {
         }
     }
 
+    fn stop_intent(&self) -> StableStopIntent {
+        StableStopIntent {
+            command_id: Uuid::new_v5(
+                &Uuid::NAMESPACE_URL,
+                format!(
+                    "goddard:stable-stop:v1:{}:{}:{}:{}",
+                    self.task_id, self.instance, self.sref.session_id, self.sref.generation,
+                )
+                .as_bytes(),
+            ),
+            session_id: self.task_id,
+            namespace: self.namespace.clone(),
+            root: self.root.clone(),
+            runtime_instance: self.instance,
+            runtime_session_id: self.sref.session_id,
+            generation: self.sref.generation,
+        }
+    }
+
     fn envelope(&self, command_id: Uuid, action: CanonicalAction) -> ActionEnvelope {
         ActionEnvelope {
             namespace: self.namespace.clone(),
@@ -2100,26 +2121,81 @@ impl DriverControl for StableLink {
     /// Fence the host generation and forget only its confirmed stopped
     /// attachment. Resource claims require separate workload reconciliation.
     fn delete_provider_session(&self) {
+        let intent = self.shared.stop_intent();
+        // Local intent commits before host contact. Reuse both its command
+        // identity and any confirmed historical result after replacement.
+        let already_confirmed = match self.shared.store.stable_stop_begin(&intent) {
+            Ok(confirmed) => confirmed,
+            Err(error) => {
+                let _ = self.shared.sender.send(DriverEvent::Error(format!(
+                    "could not record stable provider stop: {error}"
+                )));
+                return;
+            }
+        };
         let mut client = self.shared.client.lock().unwrap();
-        let receipt = execute_safe(
-            &mut client,
-            &self
-                .shared
-                .envelope(Uuid::new_v4(), CanonicalAction::StopSession),
-        );
-        if matches!(
-            receipt,
-            Ok(waku_runtime::contract::CommandReceipt {
-                disposition: waku_runtime::contract::CommandDisposition::Terminal {
-                    outcome: waku_runtime::contract::TerminalOutcome::Completed,
+        let receipt_completed = already_confirmed
+            || matches!(
+                execute_safe(
+                    &mut client,
+                    &self
+                        .shared
+                        .envelope(intent.command_id, CanonicalAction::StopSession),
+                ),
+                Ok(waku_runtime::contract::CommandReceipt {
+                    disposition: waku_runtime::contract::CommandDisposition::Terminal {
+                        outcome: waku_runtime::contract::TerminalOutcome::Completed,
+                        ..
+                    },
                     ..
-                },
-                ..
-            })
-        ) {
-            // Termination is proven — the generation's lease claim and its
-            // published credential retire with it.
-            let _ = client.release_claim(self.shared.epoch, agent_claim_id(self.shared.sref));
+                })
+            );
+        // Older pinned hosts can resolve a stop command on an interruption
+        // event too. Its receipt alone does not establish writer quiescence.
+        let inventory = if receipt_completed {
+            client.reconcile(self.shared.epoch).ok()
+        } else {
+            None
+        };
+        let confirmed = already_confirmed
+            || inventory.as_ref().is_some_and(|inventory| {
+                inventory.sessions.iter().any(|session| {
+                    session.session == self.shared.sref
+                        && matches!(
+                            session.status,
+                            SessionStatus::Terminated | SessionStatus::Exited
+                        )
+                })
+            });
+        if confirmed {
+            if let Err(error) = self.shared.store.stable_stop_confirm(&intent) {
+                let _ = self.shared.sender.send(DriverEvent::Error(format!(
+                    "provider stopped; could not record confirmation: {error}"
+                )));
+                return;
+            }
+            // Historical confirmation does not grant a stale controller
+            // permission to retire another attachment's local credentials.
+            let Some(inventory) = inventory else {
+                let _ = self.shared.sender.send(DriverEvent::Error(
+                    "provider stopped; lease retirement awaits current controller authority".into(),
+                ));
+                return;
+            };
+            let claim_id = agent_claim_id(self.shared.sref);
+            if inventory.sessions.iter().any(|session| {
+                session
+                    .claims
+                    .iter()
+                    .any(|claim| claim.claim_id == claim_id)
+            }) {
+                if let Err(error) = client.release_claim(self.shared.epoch, claim_id) {
+                    let _ = self.shared.sender.send(DriverEvent::Error(format!(
+                        "provider stopped; lease retirement pending: {error}"
+                    )));
+                    return;
+                }
+            }
             if let Some(descriptor) = &self.shared.agent_descriptor {
                 let _ = std::fs::remove_file(descriptor);
             }
@@ -4388,6 +4464,155 @@ for line in sys.stdin:
             .is_err()
         );
         assert!(!descriptor_path.exists());
+    }
+
+    #[test]
+    fn stable_link_stop_intent_must_commit_before_provider_contact() {
+        let rig = rig(&["codex"]);
+        let (handle, link, _rx) = link(&rig, Uuid::new_v4(), None);
+        let intent = link.shared.stop_intent();
+        let adapter = rig.factory.for_session(link.sref().session_id).unwrap();
+        let connection = rusqlite::Connection::open(rig.backend.task_store().path()).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER refuse_stop BEFORE INSERT ON stable_runtime_stops
+             BEGIN SELECT RAISE(FAIL, 'controlled stop persistence failure'); END;",
+            )
+            .unwrap();
+        handle.delete_provider_session();
+        assert_eq!(adapter.terminate_count(), 0);
+        assert!(
+            link.shared
+                .client
+                .lock()
+                .unwrap()
+                .command(intent.command_id)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            rig.backend
+                .task_store()
+                .stable_link(rig.session_id)
+                .unwrap()
+                .is_some()
+        );
+        connection
+            .execute_batch("DROP TRIGGER refuse_stop")
+            .unwrap();
+        handle.delete_provider_session();
+        assert_eq!(adapter.terminate_count(), 1);
+        assert!(rig.backend.task_store().stable_stop_begin(&intent).unwrap());
+    }
+
+    #[test]
+    fn stable_link_stop_retries_keep_identity_and_require_positive_generation_status() {
+        use waku_runtime::adapter::Termination;
+        use waku_runtime::contract::TerminateReason;
+        for interrupted in [false, true] {
+            let rig = rig(&["codex"]);
+            let (handle, link, _rx) = link(&rig, Uuid::new_v4(), None);
+            let intent = link.shared.stop_intent();
+            let adapter = rig.factory.for_session(link.sref().session_id).unwrap();
+            adapter.script_terminate(Termination::Unconfirmed {
+                detail: "controlled late stop".into(),
+            });
+            handle.delete_provider_session();
+            handle.delete_provider_session();
+            assert_eq!(
+                adapter.terminate_count(),
+                1,
+                "an uncertain stop was resent under a new command id"
+            );
+            assert!(!rig.backend.task_store().stable_stop_begin(&intent).unwrap());
+            assert!(
+                rig.backend
+                    .task_store()
+                    .stable_link(rig.session_id)
+                    .unwrap()
+                    .is_some()
+            );
+            let reason = if interrupted {
+                TerminateReason::Interrupted {
+                    detail: "writer ownership lost".into(),
+                }
+            } else {
+                TerminateReason::Requested
+            };
+            adapter.emit(ProviderEvent::Terminated { reason });
+            wait_until(|| {
+                link.shared
+                    .client
+                    .lock()
+                    .unwrap()
+                    .reconcile(link.shared.epoch)
+                    .is_ok_and(|inventory| {
+                        inventory.sessions.iter().any(|session| {
+                            session.session == link.sref()
+                                && matches!(
+                                    session.status,
+                                    SessionStatus::Terminated | SessionStatus::Interrupted
+                                )
+                        })
+                    })
+            });
+            handle.delete_provider_session();
+            assert_eq!(
+                rig.backend.task_store().stable_stop_begin(&intent).unwrap(),
+                !interrupted
+            );
+            assert_eq!(
+                rig.backend
+                    .task_store()
+                    .stable_link(rig.session_id)
+                    .unwrap()
+                    .is_some(),
+                interrupted
+            );
+        }
+    }
+
+    #[test]
+    fn stable_link_confirmed_stop_cannot_retire_credentials_after_control_replacement() {
+        let rig = rig(&["codex"]);
+        let agent_dir = temp_root("stop-agent");
+        let mut opts = options();
+        opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
+        let (old, original, _rx) = link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        old.delete_provider_session();
+        assert!(
+            rig.backend
+                .task_store()
+                .stable_stop_begin(&original.shared.stop_intent())
+                .unwrap()
+        );
+        let mut opts = options();
+        opts.agent = Some(agent_env(rig.session_id, &agent_dir, None));
+        let (_replacement, _link, _replacement_rx) =
+            link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, opts);
+        let descriptor = agent_dir.join(DESCRIPTOR_NAME);
+        let expected = std::fs::read(&descriptor).unwrap();
+        let owner = rig
+            .backend
+            .task_store()
+            .stable_link(rig.session_id)
+            .unwrap()
+            .unwrap();
+        controller(&rig)
+            .acquire_control(&ClientHello::current())
+            .unwrap();
+        old.delete_provider_session();
+        assert!(
+            std::fs::read(&descriptor).is_ok_and(|actual| actual == expected),
+            "a stale controller removed a successor's descriptor"
+        );
+        assert_eq!(
+            rig.backend
+                .task_store()
+                .stable_link(rig.session_id)
+                .unwrap(),
+            Some(owner)
+        );
     }
 
     /// Confirmed termination retires the generation's lease claim and its
