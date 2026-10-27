@@ -1884,6 +1884,7 @@ impl Waku {
             changed = true;
         }
         let applied = self.apply_catalog_session_batch(cx);
+        self.start_pending_session_hydrations(cx);
         let names_changed = self.advance_project_names(cx);
         self.catalog_visual_dirty |= applied || changed || names_changed;
         if self.catalog_visual_dirty && self.catalog_last_notify.elapsed() >= STREAM_FRAME_INTERVAL
@@ -8531,6 +8532,7 @@ impl Waku {
         } else if !self.catalog_apply_queue.is_empty()
             || self.catalog_selection_fallback.is_some()
             || self.project_name_refresh.needs_tick(&self.state)
+            || self.session_hydrations.has_ready()
         {
             EventPumpSchedule::BackgroundOutput(Duration::from_millis(16))
         } else if app_write_pending || self.task_state_sync_events.has_pending() {

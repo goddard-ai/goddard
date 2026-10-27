@@ -1,43 +1,6 @@
 use super::*;
 
-/// One shared queue for navigation, runtime attachment and panel hydration.
-/// A visible task can overtake queued warmup, without duplicating an active read.
-#[derive(Default)]
-pub(super) struct SessionHydrations {
-    queued: VecDeque<Uuid>,
-    running: HashSet<Uuid>,
-}
-
-impl SessionHydrations {
-    pub(super) fn contains(&self, session_id: Uuid) -> bool {
-        self.running.contains(&session_id) || self.queued.contains(&session_id)
-    }
-
-    fn enqueue(&mut self, session_id: Uuid, visible: bool) {
-        if self.running.contains(&session_id) {
-            return;
-        }
-        if visible {
-            self.queued.retain(|id| *id != session_id);
-            self.queued.push_front(session_id);
-        } else if !self.queued.contains(&session_id) {
-            self.queued.push_back(session_id);
-        }
-    }
-
-    fn next(&mut self) -> Option<Uuid> {
-        if self.running.len() >= 2 {
-            return None;
-        }
-        let id = self.queued.pop_front()?;
-        self.running.insert(id);
-        Some(id)
-    }
-
-    fn iter(&self) -> impl Iterator<Item = &Uuid> {
-        self.running.iter().chain(self.queued.iter())
-    }
-}
+pub(super) use waku_client::persistence::SessionHydrations;
 
 pub(super) fn settle_idle_session_detail(session: &mut AgentSession) -> Option<usize> {
     if session.status.is_busy() {
@@ -105,41 +68,6 @@ mod startup_hydration_tests {
         assert_eq!(settle_idle_session_detail(&mut live), None);
         assert_eq!(live.turns[0].status, TurnStatus::Running);
         assert!(live.messages.last().unwrap().streaming);
-    }
-
-    #[test]
-    fn startup_hydration_prioritizes_selection_without_duplicate_or_unbounded_reads() {
-        let ids = [
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-        ];
-        let mut queue = SessionHydrations::default();
-        for id in ids {
-            queue.enqueue(id, false);
-        }
-        assert_eq!(queue.next(), Some(ids[0]));
-        assert_eq!(queue.next(), Some(ids[1]));
-        assert_eq!(queue.next(), None);
-
-        // A click overtakes queued warmup. Repeated clicks on active and
-        // queued tasks still produce exactly one read per task.
-        queue.enqueue(ids[3], true);
-        queue.enqueue(ids[3], true);
-        queue.enqueue(ids[0], true);
-        queue.running.remove(&ids[0]);
-        assert_eq!(queue.next(), Some(ids[3]));
-        assert_eq!(queue.next(), None);
-        queue.running.remove(&ids[1]);
-        assert_eq!(queue.next(), Some(ids[2]));
-        queue.running.clear();
-        assert_eq!(queue.next(), None);
-        assert!(!queue.contains(ids[0]));
-
-        // A completed or failed request can be explicitly retried.
-        queue.enqueue(ids[0], true);
-        assert_eq!(queue.next(), Some(ids[0]));
     }
 }
 
@@ -854,21 +782,29 @@ impl Waku {
             self.session_hydrations
                 .enqueue(session_id, self.state.selected_session == Some(session_id));
             self.start_pending_session_hydrations(cx);
+            if self.session_hydrations.has_ready() {
+                signal_event_pump(&self.event_wake_tx);
+            }
         }
     }
 
-    fn start_pending_session_hydrations(&mut self, cx: &mut Context<Self>) {
-        while let Some(session_id) = self.session_hydrations.next() {
+    pub(super) fn start_pending_session_hydrations(&mut self, cx: &mut Context<Self>) {
+        // Removed/already-loaded rows can leave stale queue entries. Bound
+        // their disposal too; the pump resumes ready work on another tick.
+        for _ in 0..8 {
+            let Some(session_id) = self.session_hydrations.next() else {
+                break;
+            };
             if !self
                 .state
                 .catalog_session(session_id)
                 .is_some_and(|session| !session.detail_loaded)
             {
-                self.session_hydrations.running.remove(&session_id);
+                self.session_hydrations.finished(session_id);
                 continue;
             }
             if self.daemon_for_session(session_id).is_none() {
-                self.session_hydrations.running.remove(&session_id);
+                self.session_hydrations.finished(session_id);
                 if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id)
                 {
                     self.use_remote_host(host, cx);
@@ -893,7 +829,7 @@ impl Waku {
                     })
                     .await;
                 let _ = waku.update(cx, |waku, cx| {
-                    waku.session_hydrations.running.remove(&session_id);
+                    waku.session_hydrations.finished(session_id);
                     match result {
                         Ok((session, interrupted_turn)) => {
                             waku.trim_resident_transcripts();
@@ -955,6 +891,9 @@ impl Waku {
                         }
                     }
                     waku.start_pending_session_hydrations(cx);
+                    if waku.session_hydrations.has_ready() {
+                        signal_event_pump(&waku.event_wake_tx);
+                    }
                     cx.notify();
                 });
             })

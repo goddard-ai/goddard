@@ -83,6 +83,14 @@
   off the UI thread even when a weak update fails after window closure. Labels
   may briefly show their canonical names while disambiguation catches up; label
   changes use the coalesced catalog repaint cadence.
+- Transcript hydration deduplication and selected-task promotion use indexed
+  ordering, not scans of all waiting tasks. There are at most two reads in flight.
+  Each start attempt invocation examines at most eight candidates, including
+  stale/already-loaded rows; remaining ready work resumes through the pump's
+  background cadence. Navigation and completion callbacks wake the pump when a
+  bounded attempt leaves ready work. Queue indexes reclaim off the UI thread
+  on window closure. This bounds queue administration, not detail merge,
+  transcript trimming, or the other hydration-completion helpers.
 - One-shot user actions such as a click or menu command may work synchronously
   when freshness matters more than latency; frames may not.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for
