@@ -1,0 +1,1 @@
+- Large archive and dormant-task previews release memory in the background when dismissed or replaced.

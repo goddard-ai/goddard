@@ -2768,7 +2768,7 @@ impl Waku {
                 let focus_new_dialog = self.archive_dialog.is_none();
                 let focus = self.open_archive_dialog(
                     session_id,
-                    crate::git_commit::ArchivePreview::default(),
+                    BackgroundOwned::new(crate::git_commit::ArchivePreview::default()),
                     true,
                     landing_row,
                     cx,
@@ -2801,7 +2801,7 @@ impl Waku {
             let preview = cx
                 .background_executor()
                 .spawn(async move {
-                    match workspace_client.request(
+                    let preview = match workspace_client.request(
                         waku_client::WorkspaceOperation::InspectArchivePreview {
                             cwd: workspace,
                             base,
@@ -2809,7 +2809,8 @@ impl Waku {
                     ) {
                         Ok(waku_client::WorkspaceResult::ArchivePreview { preview }) => preview,
                         _ => None,
-                    }
+                    };
+                    BackgroundOwned::new(preview.unwrap_or_default())
                 })
                 .await;
             let finish = waku
@@ -2831,8 +2832,10 @@ impl Waku {
                         .iter()
                         .find(|session| session.id == session_id)
                         .is_some_and(|session| session.is_busy());
-                    let preview = preview.unwrap_or_default();
-                    if busy || !preview.files.is_empty() || !preview.unpushed_commits.is_empty() {
+                    if busy
+                        || !preview.get().files.is_empty()
+                        || !preview.get().unpushed_commits.is_empty()
+                    {
                         // Queued warnings must not reset the current modal's
                         // keyboard choice when another preview finishes.
                         let focus_new_dialog = waku.archive_dialog.is_none();
@@ -3098,7 +3101,7 @@ impl Waku {
             if busy && self.archive_dialog.is_none() {
                 let focus = self.open_dormant_dialog(
                     session_id,
-                    crate::git_commit::ArchivePreview::default(),
+                    BackgroundOwned::new(crate::git_commit::ArchivePreview::default()),
                     true,
                     landing_row,
                     cx,
@@ -3126,7 +3129,7 @@ impl Waku {
             let preview = cx
                 .background_executor()
                 .spawn(async move {
-                    match workspace_client.request(
+                    let preview = match workspace_client.request(
                         waku_client::WorkspaceOperation::InspectArchivePreview {
                             cwd: workspace,
                             base,
@@ -3134,7 +3137,8 @@ impl Waku {
                     ) {
                         Ok(waku_client::WorkspaceResult::ArchivePreview { preview }) => preview,
                         _ => None,
-                    }
+                    };
+                    BackgroundOwned::new(preview.unwrap_or_default())
                 })
                 .await;
             let finish = waku
@@ -3148,8 +3152,10 @@ impl Waku {
                         .iter()
                         .find(|session| session.id == session_id)
                         .is_some_and(|session| session.is_busy());
-                    let preview = preview.unwrap_or_default();
-                    if busy || !preview.files.is_empty() || !preview.unpushed_commits.is_empty() {
+                    if busy
+                        || !preview.get().files.is_empty()
+                        || !preview.get().unpushed_commits.is_empty()
+                    {
                         let focus_new_dialog = waku.archive_dialog.is_none();
                         let focus =
                             waku.open_dormant_dialog(session_id, preview, busy, landing_row, cx);

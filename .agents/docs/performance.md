@@ -109,6 +109,11 @@
   the bounded drain. Installing a loaded baseline cancels obsolete detail; keep
   a still-needed read if installation leaves only a skeleton. Discard rejected
   payloads through `BackgroundOwned` before any state or error UI is applied.
+- Archive and dormant-confirmation previews keep `BackgroundOwned` from the
+  worker result through queued/dialog ownership. Abandoned weak updates,
+  duplicate confirmations, no-warning results, confirm/dismiss and window close
+  retire the plain preview payload off the UI thread; focus/scroll state stays
+  affine. Rendering those previews still needs bounded row preparation.
 - One-shot user actions such as a click or menu command may work synchronously
   when freshness matters more than latency; frames may not.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for

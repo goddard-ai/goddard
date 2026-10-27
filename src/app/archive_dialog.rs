@@ -42,7 +42,9 @@ pub(super) struct ArchiveDialogState {
     /// Whether the session still had a live turn when the dialog opened —
     /// confirming stops it.
     active_turn: bool,
-    preview: crate::git_commit::ArchivePreview,
+    // Every abandoned/closed/duplicate dialog retires its plain payload on
+    // the worker pool; focus and scroll state stay on the UI thread.
+    preview: BackgroundOwned<crate::git_commit::ArchivePreview>,
     scroll: ScrollHandle,
     archive_focus: FocusHandle,
     cancel_focus: FocusHandle,
@@ -77,7 +79,7 @@ impl Waku {
     pub(super) fn open_archive_dialog(
         &mut self,
         session_id: Uuid,
-        preview: crate::git_commit::ArchivePreview,
+        preview: BackgroundOwned<crate::git_commit::ArchivePreview>,
         active_turn: bool,
         landing_row: Option<usize>,
         cx: &mut Context<Self>,
@@ -97,7 +99,7 @@ impl Waku {
     pub(super) fn open_dormant_dialog(
         &mut self,
         session_id: Uuid,
-        preview: crate::git_commit::ArchivePreview,
+        preview: BackgroundOwned<crate::git_commit::ArchivePreview>,
         active_turn: bool,
         landing_row: Option<usize>,
         cx: &mut Context<Self>,
@@ -116,7 +118,7 @@ impl Waku {
         &mut self,
         session_id: Uuid,
         kind: ArchiveDialogKind,
-        preview: crate::git_commit::ArchivePreview,
+        preview: BackgroundOwned<crate::git_commit::ArchivePreview>,
         active_turn: bool,
         landing_row: Option<usize>,
         cx: &mut Context<Self>,
@@ -194,8 +196,8 @@ impl Waku {
         let dialog = self.archive_dialog.as_ref()?;
         let theme = Theme::current(cx);
         let weak = cx.entity().downgrade();
-        let files = dialog.preview.files.clone();
-        let commits = dialog.preview.unpushed_commits.clone();
+        let files = dialog.preview.get().files.clone();
+        let commits = dialog.preview.get().unpushed_commits.clone();
         // The listed paths are relative to the session's checkout.
         let session_workspace = self
             .state
@@ -506,10 +508,10 @@ mod tests {
             landing_row: Some(session_id as usize),
             title: format!("Task {session_id}"),
             active_turn: true,
-            preview: crate::git_commit::ArchivePreview {
+            preview: BackgroundOwned::new(crate::git_commit::ArchivePreview {
                 files: Vec::new(),
                 unpushed_commits: vec![format!("Commit {session_id}")],
-            },
+            }),
             scroll: ScrollHandle::new(),
             archive_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
@@ -530,11 +532,11 @@ mod tests {
         let mut second = first.take_next().unwrap();
         assert_eq!(second.session_id, Uuid::from_u128(3));
         assert_eq!(second.landing_row, Some(3));
-        assert_eq!(second.preview.unpushed_commits, ["Commit 3"]);
+        assert_eq!(second.preview.get().unpushed_commits, ["Commit 3"]);
         let mut third = second.take_next().unwrap();
         assert_eq!(third.session_id, Uuid::from_u128(2));
         assert_eq!(third.landing_row, Some(2));
-        assert_eq!(third.preview.unpushed_commits, ["Commit 2"]);
+        assert_eq!(third.preview.get().unpushed_commits, ["Commit 2"]);
         assert!(third.take_next().is_none());
     }
 
