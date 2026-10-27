@@ -122,6 +122,15 @@
   preview row construction, not every enclosing dialog/catalog helper.
 - One-shot user actions such as a click or menu command may work synchronously
   when freshness matters more than latency; frames may not.
+- Composer and file-finder listings share an `Arc<BackgroundOwned<FileIndex>>`
+  from the query cache through main/side-chat indexes and the finder. Prepare
+  the file-only positions on the listing worker, without duplicating path
+  strings. Cache hits replace shared handles; they must not clone the complete
+  listing or rebuild its projection on the UI thread. Keep the background owner
+  through rejected query completions, abandoned weak updates, cache eviction
+  and the last UI consumer's release. Fuzzy result filtering still runs per
+  input change; moving index ownership does not establish a latency bound for
+  that matching or transcript-link preparation.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for
   their capture lock, and retain it through Git capture and durable checkpoint
   persistence. Cleanup must check that evidence even after the provider exits.

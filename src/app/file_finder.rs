@@ -75,17 +75,13 @@ pub(super) struct FileFinderUi {
     /// base ref's tree rather than the checkout's. A drift clears the
     /// projection; the next refresh relists under the new key.
     root: Option<(PathBuf, waku_protocol::workspace::ProjectFilesListing)>,
-    /// `Arc::as_ptr` identity of the index `files` was filtered out of, so the
-    /// files-only projection is rebuilt once per index swap rather than per
-    /// keystroke.
-    index: usize,
     /// Paths linked by the selected task's transcript, prepared once per
     /// finder open rather than rescanned as the query changes.
     transcript_link_key: Option<(Uuid, PathBuf)>,
     transcript_link_paths: Vec<String>,
     /// A listing for `root` is in flight — the placeholder draws its spinner.
     loading: bool,
-    files: Rc<Vec<FileEntry>>,
+    files: file_index::SharedFileIndex,
     results: Vec<Scored<FileEntry>>,
     selected: usize,
     scroll: ScrollHandle,
@@ -100,11 +96,10 @@ impl FileFinderUi {
             focus_generation: 0,
             previous_focus: None,
             root: None,
-            index: 0,
             transcript_link_key: None,
             transcript_link_paths: Vec::new(),
             loading: false,
-            files: Rc::new(Vec::new()),
+            files: file_index::empty(),
             results: Vec::new(),
             selected: 0,
             scroll: ScrollHandle::new(),
@@ -528,8 +523,7 @@ impl Waku {
         };
         if root != self.file_finder.root {
             self.file_finder.root = root;
-            self.file_finder.index = 0;
-            self.file_finder.files = Rc::new(Vec::new());
+            self.file_finder.files = file_index::empty();
             self.file_finder.results.clear();
             self.file_finder.selected = 0;
             self.file_finder.scroll.scroll_to_item(0);
@@ -538,17 +532,7 @@ impl Waku {
             match self.mention_files.read(&root) {
                 Query::Ready(entries) => {
                     self.file_finder.loading = false;
-                    let index_ptr = Arc::as_ptr(&entries) as usize;
-                    if self.file_finder.index != index_ptr {
-                        self.file_finder.index = index_ptr;
-                        self.file_finder.files = Rc::new(
-                            entries
-                                .iter()
-                                .filter(|entry| !entry.is_dir)
-                                .cloned()
-                                .collect(),
-                        );
-                    }
+                    self.file_finder.files = entries;
                 }
                 Query::Pending => self.file_finder.loading = true,
                 Query::Missing(token) => {
@@ -561,8 +545,9 @@ impl Waku {
         }
         let query = self.file_finder.search.read(cx).content().to_owned();
         let (path_query, _, _) = split_position_suffix(&query);
-        self.file_finder.results = composer_complete::filter_files(
-            &self.file_finder.files,
+        self.file_finder.results = composer_complete::filter_files_at_indices(
+            &self.file_finder.files.get().entries,
+            &self.file_finder.files.get().files_only,
             path_query,
             &mut self.file_finder.matcher,
         );

@@ -475,6 +475,27 @@ pub fn filter_files(
         .collect()
 }
 
+/// Filter a worker-prepared subset without copying its file entries or paths.
+/// Every index must address `files`; subset order remains the tie breaker.
+pub fn filter_files_at_indices(
+    files: &[FileEntry],
+    indices: &[usize],
+    query: &str,
+    matcher: &mut Matcher,
+) -> Vec<Scored<FileEntry>> {
+    let paths = indices
+        .iter()
+        .map(|index| files[*index].path.as_str())
+        .collect::<Vec<_>>();
+    filter_scored(&paths, query, matcher, FILTER_CAP)
+        .into_iter()
+        .map(|(index, positions)| Scored {
+            item: files[indices[index]].clone(),
+            positions,
+        })
+        .collect()
+}
+
 // ── Work-item mentions (`#`) ───────────────────────────────────────────────
 
 /// One issue or pull request as a `#` completion row, flattened from the
@@ -701,6 +722,47 @@ pub fn highlight_byte_ranges(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_subset_preserves_order_and_maps_scores_to_original_entries() {
+        let files = vec![
+            FileEntry {
+                path: "src/".into(),
+                is_dir: true,
+            },
+            FileEntry {
+                path: "src/app.rs".into(),
+                is_dir: false,
+            },
+            FileEntry {
+                path: "docs/appendix.md".into(),
+                is_dir: false,
+            },
+            FileEntry {
+                path: "README.md".into(),
+                is_dir: false,
+            },
+        ];
+        let mut matcher = matcher();
+        let subset = filter_files_at_indices(&files, &[3, 1], "", &mut matcher);
+        assert_eq!(
+            subset
+                .iter()
+                .map(|hit| hit.item.path.as_str())
+                .collect::<Vec<_>>(),
+            ["README.md", "src/app.rs"]
+        );
+        assert!(
+            subset
+                .iter()
+                .all(|hit| !hit.item.is_dir && hit.positions.is_empty())
+        );
+        let subset = filter_files_at_indices(&files, &[3, 1], "app", &mut matcher);
+        assert_eq!(subset.len(), 1);
+        assert_eq!(subset[0].item.path, "src/app.rs");
+        assert_eq!(subset[0].positions, [4, 5, 6]);
+        assert!(filter_files_at_indices(&files, &[], "", &mut matcher).is_empty());
+    }
 
     #[test]
     fn mention_filter_rejects_scattered_matches_before_capping() {

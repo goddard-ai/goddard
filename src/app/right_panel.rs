@@ -7175,7 +7175,7 @@ impl Waku {
                 commands: Rc::new(Vec::new()),
                 command_key: None,
                 commands_loading: false,
-                files: Rc::new(Vec::new()),
+                files: file_index::empty(),
                 file_key: None,
                 files_loading: false,
             },

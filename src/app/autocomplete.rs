@@ -458,14 +458,17 @@ impl Waku {
         }
     }
 
-    pub(super) fn surface_files(&self, surface: &composer::ComposerCard) -> Rc<Vec<FileEntry>> {
+    pub(super) fn surface_files(
+        &self,
+        surface: &composer::ComposerCard,
+    ) -> file_index::SharedFileIndex {
         match surface {
             composer::ComposerCard::Main => self.mention_file_index.clone(),
             composer::ComposerCard::SideChat { session_id, .. } => self
                 .side_chat_composers
                 .get(session_id)
                 .map(|chat| chat.files.clone())
-                .unwrap_or_default(),
+                .unwrap_or_else(file_index::empty),
         }
     }
 
@@ -542,7 +545,7 @@ impl Waku {
             self.slash_command_index = Rc::new(Vec::new());
             self.slash_command_index_key = None;
             self.slash_command_index_loading = false;
-            self.mention_file_index = Rc::new(Vec::new());
+            self.mention_file_index = file_index::empty();
             self.mention_file_index_key = None;
             self.mention_file_index_loading = false;
             return;
@@ -616,21 +619,21 @@ impl Waku {
 
         match self.mention_files.read(&files_key) {
             Query::Ready(files) => {
-                self.mention_file_index = files.as_ref().clone().into();
+                self.mention_file_index = files;
                 self.mention_file_index_key = Some(files_key);
                 self.mention_file_index_loading = false;
             }
             Query::Pending => {
                 self.mention_file_index_loading = true;
                 if self.mention_file_index_key.as_ref() != Some(&files_key) {
-                    self.mention_file_index = Rc::new(Vec::new());
+                    self.mention_file_index = file_index::empty();
                     self.mention_file_index_key = None;
                 }
             }
             Query::Missing(token) => {
                 self.mention_file_index_loading = true;
                 if self.mention_file_index_key.as_ref() != Some(&files_key) {
-                    self.mention_file_index = Rc::new(Vec::new());
+                    self.mention_file_index = file_index::empty();
                     self.mention_file_index_key = None;
                 }
                 if self.workspace_client_for_path(&project_path).is_none() {
@@ -714,7 +717,7 @@ impl Waku {
                 chat.commands = Rc::new(Vec::new());
                 chat.command_key = None;
                 chat.commands_loading = false;
-                chat.files = Rc::new(Vec::new());
+                chat.files = file_index::empty();
                 chat.file_key = None;
                 chat.files_loading = false;
             }
@@ -773,7 +776,7 @@ impl Waku {
         match self.mention_files.read(&files_key) {
             Query::Ready(files) => {
                 if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
-                    chat.files = files.as_ref().clone().into();
+                    chat.files = files;
                     chat.file_key = Some(files_key);
                     chat.files_loading = false;
                 }
@@ -782,7 +785,7 @@ impl Waku {
                 if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
                     chat.files_loading = true;
                     if chat.file_key.as_ref() != Some(&files_key) {
-                        chat.files = Rc::new(Vec::new());
+                        chat.files = file_index::empty();
                         chat.file_key = None;
                     }
                 }
@@ -791,7 +794,7 @@ impl Waku {
                 if let Some(chat) = self.side_chat_composers.get_mut(&session_id) {
                     chat.files_loading = true;
                     if chat.file_key.as_ref() != Some(&files_key) {
-                        chat.files = Rc::new(Vec::new());
+                        chat.files = file_index::empty();
                         chat.file_key = None;
                     }
                 }
@@ -826,14 +829,16 @@ impl Waku {
             let files = cx
                 .background_executor()
                 .spawn(async move {
-                    match workspace.request(waku_client::WorkspaceOperation::ListProjectFiles {
-                        root: key.0,
-                        cap: FILE_INDEX_CAP,
-                        listing: key.1,
-                    }) {
-                        Ok(waku_client::WorkspaceResult::ProjectFiles { entries }) => entries,
-                        Ok(_) | Err(_) => Vec::new(),
-                    }
+                    let entries =
+                        match workspace.request(waku_client::WorkspaceOperation::ListProjectFiles {
+                            root: key.0,
+                            cap: FILE_INDEX_CAP,
+                            listing: key.1,
+                        }) {
+                            Ok(waku_client::WorkspaceResult::ProjectFiles { entries }) => entries,
+                            Ok(_) | Err(_) => Vec::new(),
+                        };
+                    BackgroundOwned::new(file_index::FileIndex::new(entries))
                 })
                 .await;
             waku.update(cx, |waku, cx| {
@@ -1237,7 +1242,7 @@ impl Waku {
         let source = match trigger.kind {
             TriggerKind::Command => Rc::as_ptr(&commands) as usize,
             TriggerKind::File => {
-                Rc::as_ptr(&files) as usize ^ self.session_mention_fingerprint_for(surface)
+                Arc::as_ptr(&files) as usize ^ self.session_mention_fingerprint_for(surface)
             }
             // `0` while no fetch has landed — a fresh `Rc` per call would
             // defeat the memo.
@@ -1303,7 +1308,7 @@ impl Waku {
                     &mut matcher,
                 );
                 rank_file_mentions(
-                    &files,
+                    &files.get().entries,
                     &ui.transcript_mentions.borrow(),
                     &trigger.query,
                     &mut matcher,

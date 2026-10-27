@@ -1,0 +1,1 @@
+- Large workspaces avoid repeated file-list copies when refreshing autocomplete or opening the file finder.
