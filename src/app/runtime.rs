@@ -497,6 +497,7 @@ pub(super) fn take_ready_deferred_steers(
 /// drops its in-memory incognito sessions from the catalog, and the client
 /// holds the only copy, so they survive the merge to be re-registered. On a
 /// same-daemon revision their absence means deletion, which applies as usual.
+#[cfg(test)]
 pub(super) fn merge_remote_session_catalog(
     local: &mut Vec<AgentSession>,
     remote: Vec<AgentSession>,
@@ -504,43 +505,13 @@ pub(super) fn merge_remote_session_catalog(
     has_local_runtime: impl Fn(Uuid) -> bool,
     fresh: bool,
 ) -> Vec<AgentSession> {
-    let remote_ids = remote
-        .iter()
-        .map(|session| session.id)
-        .collect::<HashSet<_>>();
-    // Re-registration needs the transcript, so only detail-loaded copies
-    // survive; an incognito skeleton learned from another client comes back
-    // through the catalog when its owner re-pushes it.
-    let survives_restart =
-        |session: &AgentSession| fresh && session.incognito && session.detail_loaded;
-    // Return removed records without dropping their potentially large
-    // transcripts. UI callers transfer them to a reclamation worker.
-    let removed = local
-        .extract_if(.., |session| {
-            session.has_started()
-                && owns(session.id)
-                && !remote_ids.contains(&session.id)
-                && !survives_restart(session)
-        })
-        .collect::<Vec<_>>();
-
-    // Build once after retention: finding every remote row by a fresh scan
-    // made each catalog refresh quadratic in the number of tasks.
-    let mut positions = HashMap::with_capacity(local.len());
-    for (index, session) in local.iter().enumerate() {
-        positions.entry(session.id).or_insert(index);
-    }
-    for remote in remote {
-        if let Some(&index) = positions.get(&remote.id) {
-            let local = &mut local[index];
-            merge_session_catalog_row(local, remote, has_local_runtime(local.id));
-        } else {
-            positions.insert(remote.id, local.len());
-            local.push(remote);
-        }
-    }
-
-    removed
+    waku_client::persistence::merge_remote_session_catalog(
+        local,
+        remote,
+        owns,
+        has_local_runtime,
+        fresh,
+    )
 }
 
 /// `merge_remote_session_catalog` for projects. Reported rows reconcile by
@@ -595,41 +566,7 @@ fn merge_session_catalog_row(
     remote: AgentSession,
     has_local_runtime: bool,
 ) {
-    if remote.metadata_revision >= local.metadata_revision {
-        local.title = remote.title;
-        local.archived_at = remote.archived_at;
-        local.pinned_at = remote.pinned_at;
-        local.metadata_revision = remote.metadata_revision;
-        local.metadata_mutation_id = remote.metadata_mutation_id;
-    }
-    local.auto_title = remote.auto_title;
-    local.project_id = remote.project_id;
-    // A snapshot that predates the confirmed activation cannot own
-    // the effective fields — its provider/model/effort are
-    // pre-activation requested state. The mark itself merges
-    // forward only, so the snapshot cannot lower the local
-    // high-water and reopen stale redeliveries either.
-    if remote.config_activation >= local.config_activation {
-        local.provider = remote.provider;
-        local.model = remote.model;
-        local.reasoning_effort = remote.reasoning_effort;
-    }
-    local.config_activation = local.config_activation.max(remote.config_activation);
-    local.created_at = remote.created_at;
-    local.last_reply_at = remote.last_reply_at;
-    local.dormant_at = remote.dormant_at;
-    local.dormant_exempt_until = remote.dormant_exempt_until;
-    local.side_chat_of = remote.side_chat_of;
-    // A hydrated session's workspace is at least as fresh as the
-    // stored column the projection carries — and may hold an unsaved
-    // move — so only skeletons adopt it.
-    if !local.detail_loaded {
-        local.workspace = remote.workspace;
-    }
-    if !has_local_runtime {
-        local.status = remote.status;
-        local.updated_at = remote.updated_at;
-    }
+    waku_client::persistence::merge_session_catalog_row(local, remote, has_local_runtime);
 }
 
 /// Perform every blocking operation between accepting a submission and
@@ -2582,6 +2519,7 @@ impl Waku {
         {
             *existing = session;
         } else {
+            self.state.note_session_topology_change();
             self.state.sessions.push(session);
         }
         self.friend_sessions.insert(
@@ -2644,6 +2582,7 @@ impl Waku {
             .extract_if(.., |session| session.id == session_id)
             .collect::<Vec<_>>();
         if !retired.is_empty() {
+            self.state.note_session_topology_change();
             cx.background_executor()
                 .spawn(async move { drop(retired) })
                 .detach();
@@ -2816,8 +2755,7 @@ impl Waku {
                 }
             }
         }
-        let retired = merge_remote_session_catalog(
-            &mut self.state.sessions,
+        let retired = self.state.merge_session_catalog(
             catalog_sessions,
             // Watched friend sessions are borrowed from a peer — no
             // daemon's catalog owns or retires them.
@@ -3753,6 +3691,9 @@ impl Waku {
                 self.daemons.session_owner(session.id) == remote
             })
             .collect::<Vec<_>>();
+        if !retired.is_empty() {
+            self.state.note_session_topology_change();
+        }
         let removed_sessions = retired.iter().map(|session| session.id).collect::<Vec<_>>();
         self.background_executor
             .spawn(async move { drop(retired) })
@@ -5180,11 +5121,15 @@ impl Waku {
         } else {
             // Friend sessions are borrowed views of another daemon's
             // task state — persisting them would resurrect them locally.
-            let (kept, watched): (Vec<_>, Vec<_>) = self
-                .state
-                .sessions
-                .drain(..)
-                .partition(|session| !self.friend_sessions.contains_key(&session.id));
+            let mut seen_friend = false;
+            let mut order_changed = false;
+            let (kept, watched): (Vec<_>, Vec<_>) =
+                self.state.sessions.drain(..).partition(|session| {
+                    let friend = self.friend_sessions.contains_key(&session.id);
+                    order_changed |= seen_friend && !friend;
+                    seen_friend |= friend;
+                    !friend
+                });
             self.state.sessions = kept;
             let result = self
                 .store
@@ -5192,6 +5137,9 @@ impl Waku {
                 .err()
                 .map(|error| error.to_string());
             self.state.sessions.extend(watched);
+            if order_changed {
+                self.state.note_session_topology_change();
+            }
             result
         };
         let app_saved = app_error.is_none();

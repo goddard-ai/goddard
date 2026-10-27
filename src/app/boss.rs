@@ -2840,6 +2840,7 @@ impl Waku {
                                             .spawn(async move { drop(retired) })
                                             .detach();
                                     } else {
+                                        this.state.note_session_topology_change();
                                         this.state.sessions.push(*session);
                                     }
                                 } else {
@@ -2848,8 +2849,7 @@ impl Waku {
                                     // and rotation links, just as catalog sync does.
                                     let runtime_ids: HashSet<_> =
                                         this.runtimes.keys().copied().collect();
-                                    let retired = super::runtime::merge_remote_session_catalog(
-                                        &mut this.state.sessions,
+                                    let retired = this.state.merge_session_catalog(
                                         vec![*session],
                                         |_| false,
                                         |id| runtime_ids.contains(&id),
@@ -3866,6 +3866,7 @@ impl Waku {
                         *existing = session;
                     }
                 } else {
+                    this.state.note_session_topology_change();
                     this.state.sessions.push(session);
                 }
                 if old != id {

@@ -28,6 +28,11 @@
   application and acknowledge only after the current snapshot is fully applied.
   Reconnect freshness survives superseded work and errors until that completion;
   it must not be consumed just by taking a snapshot from the inbox.
+- `PersistedState::merge_session_catalog` retains a UUID lookup index across
+  metadata-only refreshes. Session membership, identity or order changes must
+  call `note_session_topology_change`; `push_session` does that automatically.
+  Changing status/text does not invalidate topology. Keep temporary friend-view
+  save filtering from invalidating the cache when the final order is unchanged.
 - One-shot user actions such as a click or menu command may work synchronously
   when freshness matters more than latency; frames may not.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for

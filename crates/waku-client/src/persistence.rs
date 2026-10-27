@@ -2,9 +2,11 @@
 
 mod app_writer;
 mod catalog_inbox;
+mod catalog_merge;
 pub use catalog_inbox::{
     CatalogInboxReceiver, CatalogInboxSender, CatalogSource, CatalogVersion, catalog_inbox,
 };
+pub use catalog_merge::{merge_remote_session_catalog, merge_session_catalog_row};
 
 pub use app_writer::AppSaveTicket;
 mod catalog_writer;
@@ -2710,6 +2712,10 @@ pub struct PersistedState {
     /// In-flight data cannot be evicted before its matching acknowledgment.
     #[serde(skip)]
     pending_session_saves: HashMap<Uuid, (Uuid, u64)>,
+    #[serde(skip)]
+    session_topology_revision: u64,
+    #[serde(skip)]
+    session_catalog_index: catalog_merge::SessionCatalogIndex,
 }
 
 /// A transcript [`PersistedState::trim_idle_transcripts`] released: which
@@ -2752,6 +2758,7 @@ impl PersistedState {
     }
 
     pub fn push_session(&mut self, session: AgentSession) {
+        self.note_session_topology_change();
         self.dirty_sessions.insert(session.id);
         self.sessions.push(session);
     }
@@ -3019,6 +3026,8 @@ impl PersistedState {
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
             pending_session_saves: HashMap::new(),
+            session_topology_revision: 0,
+            session_catalog_index: Default::default(),
         }
     }
 
@@ -3776,6 +3785,7 @@ impl PersistedState {
         };
         let session = self.new_session(project_id, self.last_provider);
         self.selected_session = Some(session.id);
+        self.note_session_topology_change();
         self.sessions.push(session);
     }
 
@@ -4572,6 +4582,7 @@ impl StateStore {
         let mut state = PersistedState::empty();
         state.projects = projects;
         state.sessions = sessions;
+        state.note_session_topology_change();
         let app_settings_missing = !self.app_settings_path.is_file();
         if let Some(settings) = self.read_app_settings()? {
             state.apply_app_settings(settings);

@@ -1,0 +1,1 @@
+- Catalog refreshes reuse task lookup indexes across metadata updates, reducing repeated UI-thread work while preserving resident histories and active runtime state.

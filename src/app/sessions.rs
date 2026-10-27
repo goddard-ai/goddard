@@ -2563,6 +2563,7 @@ impl Waku {
         self.remove_right_panel_session_state(session_id, cx);
         self.remove_composer_draft(composer_draft_key, cx);
         let retired = self.state.sessions.remove(index);
+        self.state.note_session_topology_change();
         cx.background_executor()
             .spawn(async move { drop(retired) })
             .detach();

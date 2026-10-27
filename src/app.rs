@@ -1212,6 +1212,7 @@ fn seed_remote_catalog(
             .filter(|p| !known_projects.contains(&p.id))
             .cloned(),
     );
+    state.note_session_topology_change();
     state.sessions.extend(
         catalog
             .sessions
@@ -5476,6 +5477,7 @@ impl Waku {
             state
                 .sessions
                 .retain(|session| session.id == qa.record.session_id);
+            state.note_session_topology_change();
             state.selected_project = Some(qa.record.project_id);
             state.selected_session = Some(qa.record.session_id);
             state.remote_hosts.clear();
