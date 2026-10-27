@@ -506,9 +506,24 @@ impl WakuBackend {
         turn_count: usize,
         untouched: bool,
     ) -> anyhow::Result<Checkpoint> {
-        crate::checkpoint::with_turn_capture_deadline(|| {
+        // A settled provider does not imply that its final Git capture has
+        // finished. Register before waiting on the per-workspace capture lock.
+        let witness = driver::WriterCompletion::default();
+        witness.register();
+        let capture_writer = self
+            .runtime_lifecycles
+            .observe_starting_writer(&cwd, witness.clone());
+        let result = crate::checkpoint::with_turn_capture_deadline(|| {
             self.capture_turn_checkpoint_inner(cwd, session_id, turn_count, untouched)
-        })
+        });
+        if result.is_ok() {
+            // Successful capture includes joined process readers and a
+            // positively waited child. A failed capture may lack that proof.
+            witness.confirm();
+        } else {
+            capture_writer.unqualified();
+        }
+        result
     }
 
     pub(super) fn capture_turn_checkpoint_inner(

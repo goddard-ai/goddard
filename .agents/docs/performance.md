@@ -26,6 +26,13 @@
   superseded pass cannot overwrite newer state.
 - One-shot user actions such as a click or menu command may work synchronously
   when freshness matters more than latency; frames may not.
+- Daemon turn checkpoints register workspace-writer evidence before waiting for
+  their capture lock, and retain it through Git capture and durable checkpoint
+  persistence. Cleanup must check that evidence even after the provider exits.
+  Successful capture confirms completion; errors retain one unqualified marker
+  per workspace. This process-local precondition does not replace destructive
+  workspace admission, durable failure recovery, or queued desktop work that has
+  not yet reached the daemon.
 - Keep per-frame work proportional to what is on screen. Long collections are
   virtualized with `list()`, and a row builder must not rebuild whole-session
   state; hoist that to a cache refreshed once per frame.

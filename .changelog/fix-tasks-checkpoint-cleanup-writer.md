@@ -1,0 +1,1 @@
+- Workspace cleanup waits for daemon checkpoint captures that are already queued or running, including their durable checkpoint writes.

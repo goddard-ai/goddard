@@ -1,4 +1,4 @@
-//! Observe retired provider writers without retaining their driver handles.
+//! Observe provider and checkpoint writers without retaining driver handles.
 //! This is a necessary cleanup precondition, not a filesystem-removal permit.
 //! Archive authority, shared owners, other writers, and admission still need
 //! their own checks at the final destructive boundary.
@@ -17,12 +17,33 @@ pub(super) struct RetiredWriters {
 /// Keep attempted launches visible before a RuntimeEntry exists. A failed
 /// factory call can already have contacted a provider; absence of an entry
 /// therefore cannot release its unconfirmed writer observation.
+/// Checkpoint workers use the same observation before waiting for capture.
 pub(super) struct StartingWriter {
     lifecycles: Arc<RuntimeLifecycles>,
     witness: WriterCompletion,
 }
 
 impl StartingWriter {
+    /// Collapse an unsuccessful worker's unqualified evidence to one marker
+    /// per workspace instead of accumulating a witness on every retry.
+    pub(super) fn unqualified(self) {
+        self.retain_unknown();
+    }
+
+    fn retain_unknown(&self) {
+        let mut writers = self.lifecycles.retired_writers.lock();
+        let mut unknown = Vec::new();
+        writers.pending.retain(|(path, witness)| {
+            if witness.same_writer(&self.witness) {
+                unknown.push(path.clone());
+                false
+            } else {
+                true
+            }
+        });
+        writers.unknown.extend(unknown);
+    }
+
     /// Stable attachments share the physical host generation's witness. Swap
     /// the provisional launch observation without a gap in writer accounting.
     pub(super) fn bind(&mut self, witness: WriterCompletion) {
@@ -55,17 +76,7 @@ impl StartingWriter {
 impl Drop for StartingWriter {
     fn drop(&mut self) {
         if self.witness.state() == WriterCompletionState::Unknown {
-            let mut writers = self.lifecycles.retired_writers.lock();
-            let mut unknown = Vec::new();
-            writers.pending.retain(|(path, witness)| {
-                if witness.same_writer(&self.witness) {
-                    unknown.push(path.clone());
-                    false
-                } else {
-                    true
-                }
-            });
-            writers.unknown.extend(unknown);
+            self.retain_unknown();
         }
     }
 }
@@ -148,7 +159,7 @@ impl WakuBackend {
             let cwd = dunce::canonicalize(&cwd).unwrap_or(cwd);
             anyhow::ensure!(
                 !(cwd.starts_with(&target) || target.starts_with(&cwd)),
-                "workspace cleanup deferred: a provider writer is still active or its stop is unconfirmed"
+                "workspace cleanup deferred: a workspace writer is still active or its stop is unconfirmed"
             );
         }
         crate::stable_runtime::require_quiet_workspace_writers(self, &target)
@@ -525,6 +536,177 @@ while not pathlib.Path('release-' + name).exists():
         drop(replacement);
         drop(backend);
         drop(server);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ending_checkpoint_remains_a_writer_until_capture_and_persistence_finish() {
+        let root = std::env::temp_dir().join(format!("checkpoint-writer-{}", Uuid::new_v4()));
+        let (backend, session) = super::super::tests::surface_test_backend(&root);
+        let path = root.join("repo");
+        for args in [
+            vec!["init", "-q"],
+            vec![
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "seed",
+            ],
+        ] {
+            assert!(
+                std::process::Command::new("git")
+                    .current_dir(&path)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        std::fs::write(path.join("ending.txt"), "final changes").unwrap();
+        let alias = root.join("alias");
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        let count = backend
+            .task_store
+            .load_session_detail(session)
+            .unwrap()
+            .unwrap()
+            .turns
+            .last()
+            .unwrap()
+            .turn_count;
+        let capture_lock = Arc::new(Mutex::new(()));
+        backend
+            .checkpoint_capture_locks
+            .lock()
+            .insert(path.clone(), capture_lock.clone());
+        let held = capture_lock.lock();
+        let backend = Arc::new(backend);
+        let capturing = {
+            let backend = backend.clone();
+            let path = path.clone();
+            std::thread::spawn(move || {
+                backend.handle(
+                    Request {
+                        request_id: Uuid::new_v4(),
+                        session_id: session,
+                        runtime_id: Uuid::nil(),
+                        command: Command::Workspace {
+                            operation: waku_protocol::WorkspaceOperation::CaptureTurn {
+                                cwd: path,
+                                session_id: session,
+                                turn_count: count,
+                                untouched: false,
+                            },
+                        },
+                    },
+                    EventSink::detached(),
+                    None,
+                )
+            })
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while backend
+            .require_no_observed_workspace_writers(&alias)
+            .is_ok()
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "queued checkpoint was invisible to cleanup"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let removal = backend.handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command: Command::Workspace {
+                    operation: waku_protocol::WorkspaceOperation::RemoveWorktree {
+                        path: alias.clone(),
+                        force: true,
+                    },
+                },
+            },
+            EventSink::detached(),
+            None,
+        );
+        assert!(
+            removal
+                .unwrap_err()
+                .to_string()
+                .contains("writer is still active")
+        );
+        assert!(path.join("ending.txt").is_file());
+        drop(held);
+        let result = capturing.join().unwrap().unwrap();
+        assert!(
+            matches!(result, ResponsePayload::Workspace { result: waku_protocol::WorkspaceResult::Checkpoint { checkpoint } } if checkpoint.status == crate::model::CheckpointStatus::Ready)
+        );
+        backend
+            .require_no_observed_workspace_writers(&alias)
+            .unwrap();
+        let stored = backend
+            .task_store
+            .load_session_detail(session)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stored
+                .turns
+                .last()
+                .unwrap()
+                .checkpoint
+                .as_ref()
+                .unwrap()
+                .status,
+            crate::model::CheckpointStatus::Ready
+        );
+        drop(backend);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_ending_checkpoint_keeps_bounded_unqualified_workspace_evidence() {
+        let root =
+            std::env::temp_dir().join(format!("checkpoint-failure-writer-{}", Uuid::new_v4()));
+        let (backend, session) = super::super::tests::surface_test_backend(&root);
+        let path = root.join("repo");
+        let count = backend
+            .task_store
+            .load_session_detail(session)
+            .unwrap()
+            .unwrap()
+            .turns
+            .last()
+            .unwrap()
+            .turn_count;
+        rusqlite::Connection::open(backend.task_store.path()).unwrap().execute_batch(
+            "CREATE TRIGGER fail_checkpoint BEFORE UPDATE ON session_details BEGIN SELECT RAISE(ABORT, 'fixture checkpoint persistence failure'); END;"
+        ).unwrap();
+        for _ in 0..3 {
+            assert!(
+                backend
+                    .capture_turn_checkpoint(path.clone(), session, count, false)
+                    .is_err()
+            );
+            assert!(
+                backend
+                    .require_no_observed_workspace_writers(&path)
+                    .is_err()
+            );
+        }
+        let observations = backend.runtime_lifecycles.retired_writers.lock();
+        assert_eq!(observations.unknown.len(), 1);
+        assert!(
+            observations.pending.is_empty(),
+            "failed retries accumulated per-attempt witnesses"
+        );
+        drop(observations);
+        drop(backend);
         std::fs::remove_dir_all(root).unwrap();
     }
 
