@@ -1884,7 +1884,8 @@ impl Waku {
             changed = true;
         }
         let applied = self.apply_catalog_session_batch(cx);
-        self.catalog_visual_dirty |= applied || changed;
+        let names_changed = self.advance_project_names(cx);
+        self.catalog_visual_dirty |= applied || changed || names_changed;
         if self.catalog_visual_dirty && self.catalog_last_notify.elapsed() >= STREAM_FRAME_INTERVAL
         {
             self.catalog_visual_dirty = false;
@@ -3491,6 +3492,7 @@ impl Waku {
             .projects
             .retain(|project| self.daemons.project_owner(project.id) != remote);
         self.state.note_project_topology_change();
+        self.refresh_project_names();
         self.revoke_catalog_application(remote, cx);
         let retired = self.task_state_sync_events.revoke(remote);
         if retired.is_some() {
@@ -8526,7 +8528,9 @@ impl Waku {
                 || runtime.stream_remeasure_pending
         }) {
             EventPumpSchedule::StreamFrame
-        } else if !self.catalog_apply_queue.is_empty() || self.catalog_selection_fallback.is_some()
+        } else if !self.catalog_apply_queue.is_empty()
+            || self.catalog_selection_fallback.is_some()
+            || self.project_name_refresh.needs_tick(&self.state)
         {
             EventPumpSchedule::BackgroundOutput(Duration::from_millis(16))
         } else if app_write_pending || self.task_state_sync_events.has_pending() {

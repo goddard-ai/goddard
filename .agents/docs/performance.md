@@ -57,9 +57,8 @@
   selection/project changes. Replaced snapshots, prepared indexes, retired rows
   and buffered inbox contents are reclaimed off the UI thread, including when
   the receiver closes. Keep raw offline-cache snapshots separate from UI overlays.
-  Project name reconciliation and legacy bulk callers still require separate
-  bounding; row batching alone does not bound the entire catalog update or
-  establish measured desktop responsiveness.
+  Legacy bulk callers and other catalog-triggered UI helpers still require
+  auditing; row batching alone does not establish measured desktop responsiveness.
 - Project catalogs also prepare at most 2,048 local index entries and perform
   at most 128 project operations per host slice. Task contributions can install
   one referenced project each before their UI effects run, adding at most 128
@@ -70,8 +69,20 @@
   request-start absence fence as task removals. Keep replaced projects and old
   indexes on the background reclamation path. Direct project membership, identity
   or order changes must call `note_project_topology_change`; use `push_project`
-  for local creation. Name resolution still runs as a whole-list completion pass
-  and must be moved off the UI thread separately.
+  for local creation.
+- Project-name disambiguation collects only UUID/name/path inputs in chunks of
+  at most 128 rows per pump, resolves collisions with the shared resolver on a
+  worker, then applies at most 128 labels per pump. Membership/order/name/path
+  changes revoke old labels through a separate revision. Metadata-only refreshes
+  preserve both active name work and derived labels. Direct name/path changes
+  must call `note_project_names_change`; desktop callers use
+  `refresh_project_names` to invalidate and wake the pump. Only one resolver
+  runs at a time, and it wakes the owner on completion rather than requiring UI
+  polling. Startup, catalog completion, creation/removal, relocation and host
+  removal use this path. Snapshot chunks and abandoned/result storage reclaim
+  off the UI thread even when a weak update fails after window closure. Labels
+  may briefly show their canonical names while disambiguation catches up; label
+  changes use the coalesced catalog repaint cadence.
 - One-shot user actions such as a click or menu command may work synchronously
   when freshness matters more than latency; frames may not.
 - Daemon turn checkpoints register workspace-writer evidence before waiting for

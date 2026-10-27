@@ -42,6 +42,33 @@ pub(super) use waku_client::persistence::CatalogSelectionFallback;
 use waku_client::persistence::CatalogSelectionStep;
 
 impl Waku {
+    pub(super) fn refresh_project_names(&mut self) {
+        self.state.note_project_names_change();
+        signal_event_pump(&self.event_wake_tx);
+    }
+
+    pub(super) fn advance_project_names(&mut self, cx: &mut Context<Self>) -> bool {
+        let step = self
+            .project_name_refresh
+            .step(&mut self.state, SESSION_ROWS_PER_TICK);
+        if let Some(snapshot) = step.snapshot {
+            cx.spawn(async move |this, cx| {
+                let labels = cx
+                    .background_executor()
+                    .spawn(async move { snapshot.resolve() })
+                    .await;
+                // Labels own background reclamation even if this weak update
+                // fails after the window closes.
+                let _ = this.update(cx, |this, _| {
+                    this.project_name_refresh.accept(labels);
+                    signal_event_pump(&this.event_wake_tx);
+                });
+            })
+            .detach();
+        }
+        step.changed
+    }
+
     pub(super) fn queue_catalog_application(
         &mut self,
         key: DaemonKey,
@@ -295,7 +322,6 @@ impl Waku {
                         && self.state.catalog_index_ready()
                         && self.task_state_sync_events.is_current(application.version)
                     {
-                        Project::resolve_display_names(&mut self.state.projects);
                         self.task_state_sync_events.acknowledge(application.version);
                         self.background_executor
                             .spawn(async move {

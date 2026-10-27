@@ -2437,7 +2437,7 @@ impl Waku {
             .projects
             .retain(|project| project.id != project_id);
         self.state.note_local_project_removed(project_id, owner);
-        Project::resolve_display_names(&mut self.state.projects);
+        self.refresh_project_names();
         self.project_switcher.project_removed(project_id);
         for session_id in session_ids {
             self.remove_session_inner(session_id, None, false, cx);
@@ -2634,6 +2634,7 @@ impl Waku {
                 .retain(|project| project.id != project_id);
             self.state
                 .note_local_project_removed(project_id, catalog_owner);
+            self.refresh_project_names();
             if self.state.selected_project == Some(project_id) {
                 self.state.selected_project = None;
             }
@@ -3895,7 +3896,7 @@ impl Waku {
                 project.bookmark = crate::bookmarks::create(&project.path);
                 let project_id = project.id;
                 self.state.push_project(project);
-                Project::resolve_display_names(&mut self.state.projects);
+                self.refresh_project_names();
                 project_id
             }
         };
@@ -7749,7 +7750,7 @@ impl Waku {
                     project.bookmark = crate::bookmarks::create(&project.path);
                     let project_id = project.id;
                     this.state.push_project(project);
-                    Project::resolve_display_names(&mut this.state.projects);
+                    this.refresh_project_names();
                     this.analytics.track(crate::analytics::Event::ProjectAdded);
                     this.create_session_for(project_id, this.state.last_provider, cx);
                 });
@@ -7859,7 +7860,7 @@ impl Waku {
                     project.name = Project::PROJECTLESS_NAME.to_owned();
                     let project_id = project.id;
                     waku.state.push_project(project);
-                    Project::resolve_display_names(&mut waku.state.projects);
+                    waku.refresh_project_names();
                     // The draft the pick was typed into moves onto the new
                     // project — unless it started or materialized a
                     // worktree while provisioning was in flight, in which

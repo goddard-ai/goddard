@@ -1,1 +1,1 @@
-- Large task-list refreshes apply task and project rows in smaller batches so other desktop work can run between updates.
+- Large task-list refreshes apply task and project rows in smaller batches so other desktop work can run between updates; project-name disambiguation runs in the background.

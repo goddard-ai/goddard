@@ -5,6 +5,7 @@ mod catalog_batch;
 mod catalog_inbox;
 mod catalog_merge;
 mod catalog_projects;
+mod project_names;
 pub use catalog_batch::{
     CatalogSelectionFallback, CatalogSelectionStep, CatalogSessionBatch, CatalogSessionEffect,
     CatalogSessionOrder, CatalogSessionProgress,
@@ -15,6 +16,9 @@ pub use catalog_inbox::{
 };
 pub use catalog_merge::{merge_remote_session_catalog, merge_session_catalog_row};
 pub use catalog_projects::{CatalogProjectBatch, CatalogProjectProgress};
+pub use project_names::{
+    ProjectNameLabels, ProjectNameRefresh, ProjectNameSnapshot, ProjectNameStep,
+};
 
 pub use app_writer::AppSaveTicket;
 mod catalog_writer;
@@ -2731,6 +2735,8 @@ pub struct PersistedState {
     #[serde(skip)]
     project_topology_revision: u64,
     #[serde(skip)]
+    project_names_revision: u64,
+    #[serde(skip)]
     project_catalog_index: catalog_projects::ProjectCatalogIndex,
     #[serde(skip)]
     unreported_projects: HashSet<Uuid>,
@@ -3055,6 +3061,7 @@ impl PersistedState {
             locally_removed_sessions: HashMap::new(),
             session_catalog_index: Default::default(),
             project_topology_revision: 0,
+            project_names_revision: 0,
             project_catalog_index: Default::default(),
             unreported_projects: HashSet::new(),
             locally_removed_projects: HashMap::new(),

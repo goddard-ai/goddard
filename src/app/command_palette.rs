@@ -5585,7 +5585,7 @@ impl Waku {
             let project_id = project.id;
             self.daemons.claim_project(project_id, key);
             self.state.push_project(project);
-            Project::resolve_display_names(&mut self.state.projects);
+            self.refresh_project_names();
             self.analytics.track(crate::analytics::Event::ProjectAdded);
             project_id
         };

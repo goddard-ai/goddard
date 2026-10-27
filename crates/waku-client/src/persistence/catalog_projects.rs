@@ -185,6 +185,7 @@ impl PersistedState {
     pub fn note_project_topology_change(&mut self) {
         self.project_topology_revision = self.project_topology_revision.wrapping_add(1);
         self.project_catalog_index.revision = None;
+        self.note_project_names_change();
     }
 
     pub fn push_project(&mut self, project: Project) {
@@ -213,6 +214,7 @@ impl PersistedState {
     }
 
     fn finish_indexed_project_mutation(&mut self) {
+        self.note_project_names_change();
         self.project_topology_revision = self.project_topology_revision.wrapping_add(1);
         self.project_catalog_index.revision = Some(self.project_topology_revision);
         self.project_catalog_index.indexed_rows = self.projects.len();
@@ -250,6 +252,9 @@ impl PersistedState {
             let existing = &self.projects[position];
             if existing.name == project.name && existing.path == project.path {
                 project.resolved_name.clone_from(&existing.resolved_name);
+            } else {
+                project.resolved_name = None;
+                self.note_project_names_change();
             }
             retired.push(std::mem::replace(&mut self.projects[position], project));
         } else {

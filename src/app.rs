@@ -3190,6 +3190,7 @@ pub struct Waku {
     catalog_applications: HashMap<waku_client::DaemonKey, catalog_sync::CatalogApplication>,
     catalog_apply_queue: VecDeque<waku_client::DaemonKey>,
     catalog_selection_fallback: Option<catalog_sync::CatalogSelectionFallback>,
+    project_name_refresh: waku_client::persistence::ProjectNameRefresh,
     catalog_visual_dirty: bool,
     catalog_last_notify: Instant,
     /// `settingsChanged` broadcasts forwarded by the task-state sync worker:
@@ -6003,9 +6004,8 @@ impl Waku {
         } else {
             (false, None)
         };
-        // Resolve colliding project names across the merged catalog — the
-        // persisted list plus every seeded remote one.
-        Project::resolve_display_names(&mut state.projects);
+        // The event pump collects and resolves names after mounting the merged
+        // catalog; window construction must not disambiguate the whole list.
         let projectless_save_error = projectless_migrated
             .then(|| store.save(&mut state).err())
             .flatten();
@@ -7625,6 +7625,7 @@ impl Waku {
                 catalog_applications: HashMap::new(),
                 catalog_apply_queue: VecDeque::new(),
                 catalog_selection_fallback: None,
+                project_name_refresh: Default::default(),
                 catalog_visual_dirty: false,
                 catalog_last_notify: Instant::now(),
                 daemon_settings_tx,
