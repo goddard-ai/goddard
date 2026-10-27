@@ -214,6 +214,13 @@
   paths through an existing ancestor; unresolved aliases fail closed. These
   publication checks do not replace generation/owner checks between cleanup
   stages, restore admission or prepared-history generation fencing.
+- Daemon `RestoreRef`, `RestoreProjectlessWorkspace` and `EnsureWorktree`
+  requests hold the shared workspace gate through the full operation, after
+  retirement-specific RPC routing and before filesystem effects. Missing
+  targets use existing-ancestor normalization; ensure guards both its source
+  project and destination. A conflict returns promptly for retry. This live
+  request fence does not qualify orphan subprocesses after daemon loss, fence
+  fresh name allocation or replace cleanup generation/owner revalidation.
 - Desktop ending-capture descriptors and in-flight slots use the local turn
   UUID, since rewind can reuse display counts. Recheck the settled turn and
   workspace before dispatch and acceptance, before preparing transcript rows.

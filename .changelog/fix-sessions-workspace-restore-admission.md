@@ -1,0 +1,1 @@
+- Checkpoint and archived-workspace restores now defer while an overlapping retirement operation is active, including recreation of a missing worktree.

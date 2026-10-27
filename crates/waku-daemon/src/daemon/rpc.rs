@@ -1950,6 +1950,7 @@ impl Backend for WakuBackend {
                     }
                     _ => None,
                 };
+                let _restore = self.admit_workspace_restore(&operation)?;
                 // Commit/push/land move local refs — prompt the share
                 // poll so synced branches push and notify promptly
                 // rather than waiting out the interval.
