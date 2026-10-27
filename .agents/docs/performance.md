@@ -192,6 +192,14 @@
   durable recovery of owed metadata, queued desktop captures and final workspace
   admission remain required. Checkpoint success never erases unrelated unknown
   providers.
+- Desktop ending-capture descriptors and in-flight slots use the local turn
+  UUID, since rewind can reuse display counts. Recheck the settled turn and
+  workspace before dispatch and acceptance, before preparing transcript rows.
+  Carry the complete worker result in `BackgroundOwned` through weak updates
+  and rejection; reclaim replaced checkpoints in the background too. A rejected
+  completion wakes the pump to re-evaluate current queue gates. These checks
+  fence the UI handoff; daemon-side ref publication and persistence still need
+  their own generation authority.
 - Native driver factories record an immutable attempt origin before contact,
   including factories that fail after starting work. Task/runtime removal and
   runtime-id reuse do not retire that origin. Only the selected attempt's

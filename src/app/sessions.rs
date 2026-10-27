@@ -831,7 +831,10 @@ impl Waku {
                                     )
                                 })?;
                             session.migrate_legacy_state();
-                            let interrupted_turn = settle_idle_session_detail(&mut session);
+                            let interrupted_turn = settle_idle_session_detail(&mut session)
+                                .and_then(|count| {
+                                    session.turns.last().map(|turn| (turn.id, count))
+                                });
                             Ok::<_, std::io::Error>((session, interrupted_turn))
                         })();
                         BackgroundOwned::new(result)
@@ -862,7 +865,7 @@ impl Waku {
                                 false
                             };
                             if applied
-                                && let Some(turn_count) = interrupted_turn
+                                && let Some((turn_id, turn_count)) = interrupted_turn
                                 && let Some(project_path) = waku
                                     .state
                                     .sessions
@@ -874,6 +877,7 @@ impl Waku {
                                 waku.pending_checkpoint_captures
                                     .push(PendingCheckpointCapture {
                                         session_id,
+                                        turn_id,
                                         turn_count,
                                         project_path,
                                         untouched: false,

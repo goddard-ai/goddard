@@ -1087,6 +1087,7 @@ enum SidebarDockMotion {
 /// A turn whose checkpoint still has to be captured.
 struct PendingCheckpointCapture {
     session_id: Uuid,
+    turn_id: Uuid,
     turn_count: usize,
     project_path: PathBuf,
     untouched: bool,
@@ -4299,7 +4300,7 @@ pub struct Waku {
     /// The (session, turn) captures currently running, so a repeated request —
     /// a turn that finishes while its own capture is still going — does not
     /// fork a second `git add -A` over the same worktree.
-    checkpoint_captures_in_flight: HashSet<(Uuid, usize)>,
+    checkpoint_captures_in_flight: HashSet<(Uuid, Uuid)>,
     /// Clock for the idle-session sweep, so the check costs one comparison per
     /// frame instead of a scan.
     last_idle_session_sweep: Instant,
@@ -6124,12 +6125,13 @@ impl Waku {
             if session.status != SessionStatus::Idle {
                 session.status = SessionStatus::Idle;
             }
-            let interrupted_turn = sessions::settle_idle_session_detail(session);
+            let interrupted_turn = sessions::settle_idle_session_detail(session)
+                .and_then(|count| session.turns.last().map(|turn| (turn.id, count)));
             // A crash mid-turn leaves work in the tree worth checkpointing, but
             // one `capture_turn` per interrupted session is upwards of ten
             // `git` invocations each — paid here, before the window has drawn
             // once. Queue them and let the first frames go out first.
-            if let Some(turn_count) = interrupted_turn
+            if let Some((turn_id, turn_count)) = interrupted_turn
                 && let Some(project_path) = session
                     .workspace
                     .path()
@@ -6138,6 +6140,7 @@ impl Waku {
             {
                 interrupted_turn_checkpoints.push(PendingCheckpointCapture {
                     session_id: session.id,
+                    turn_id,
                     turn_count,
                     project_path,
                     untouched: false,

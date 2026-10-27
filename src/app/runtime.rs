@@ -1,5 +1,24 @@
 use super::*;
 
+fn checkpoint_capture_target_exists(
+    session: &AgentSession,
+    session_id: Uuid,
+    turn_id: Uuid,
+    turn_count: usize,
+) -> bool {
+    session.id == session_id
+        && !session.incognito
+        && session.turns.iter().rev().any(|turn| {
+            turn.id == turn_id
+                && turn.turn_count == turn_count
+                && turn.status != TurnStatus::Running
+        })
+}
+
+#[cfg(test)]
+#[path = "runtime_checkpoint_tests.rs"]
+mod checkpoint_capture_tests;
+
 /// Consecutive automatic resumptions one session gets across daemon
 /// restarts. The count clears when a turn completes, so a daemon that keeps
 /// dying on the resumed prompt is what stops the loop — not steady work.
@@ -3933,7 +3952,7 @@ impl Waku {
                 return;
             }
             session.status = SessionStatus::Idle;
-            let interrupted_turn_count = session
+            let interrupted_turn = session
                 .turns
                 .last_mut()
                 .filter(|turn| turn.status == TurnStatus::Running)
@@ -3941,9 +3960,9 @@ impl Waku {
                     turn.status = TurnStatus::Interrupted;
                     turn.interruption = Some(waku_protocol::model::TurnInterruption::Daemon);
                     turn.completed_at = Some(unix_time());
-                    turn.turn_count
+                    (turn.id, turn.turn_count)
                 });
-            if let Some(turn_count) = interrupted_turn_count {
+            if let Some((turn_id, turn_count)) = interrupted_turn {
                 let skip_checkpoint = session.turns.last().is_some_and(|turn| {
                     interrupted_planning_turn_has_no_file_changes(session, turn.id)
                 });
@@ -3955,6 +3974,7 @@ impl Waku {
                         .or_else(|| project_paths.get(&session.project_id).cloned());
                     checkpoint = project_path.map(|project_path| PendingCheckpointCapture {
                         session_id,
+                        turn_id,
                         turn_count,
                         project_path,
                         untouched: false,
@@ -4941,13 +4961,13 @@ impl Waku {
         app_saved
     }
 
-    fn checkpoint_capture_pending(&self, session_id: Uuid, turn_count: usize) -> bool {
+    fn checkpoint_capture_pending(&self, session_id: Uuid, turn_id: Uuid) -> bool {
         self.checkpoint_captures_in_flight
-            .contains(&(session_id, turn_count))
+            .contains(&(session_id, turn_id))
             || self
                 .pending_checkpoint_captures
                 .iter()
-                .any(|capture| capture.session_id == session_id && capture.turn_count == turn_count)
+                .any(|capture| capture.session_id == session_id && capture.turn_id == turn_id)
     }
 
     /// The settled last turn whose checkpoint capture is still queued or in
@@ -4959,7 +4979,7 @@ impl Waku {
             .find(|session| session.id == session_id)
             .and_then(|session| session.turns.last())
             .filter(|turn| turn.status != TurnStatus::Running)
-            .filter(|turn| self.checkpoint_capture_pending(session_id, turn.turn_count))
+            .filter(|turn| self.checkpoint_capture_pending(session_id, turn.id))
             .map(|turn| turn.id)
     }
 
@@ -5046,7 +5066,7 @@ impl Waku {
         if session.incognito {
             return;
         }
-        if self.checkpoint_capture_pending(session_id, turn_count) {
+        if self.checkpoint_capture_pending(session_id, turn.id) {
             return;
         }
         let Some(project_path) = self
@@ -5058,6 +5078,7 @@ impl Waku {
         self.pending_checkpoint_captures
             .push(PendingCheckpointCapture {
                 session_id,
+                turn_id: turn.id,
                 turn_count,
                 project_path,
                 untouched: turn.status == TurnStatus::Interrupted
@@ -5079,24 +5100,32 @@ impl Waku {
     /// Runs queued turn checkpoints on the background executor.
     ///
     /// A capture lands a frame or many later, and the turn it belongs to may be
-    /// gone by then, so the result is matched back by turn count rather than
-    /// position. Only a queued send waits on it: the transcript's rewind
-    /// affordance appears when `invalidate_checkpoint_refs` prompts the next
+    /// gone by then, so the result is matched back by immutable turn identity.
+    /// Turn counts can be reused after rewind. Only a queued send waits on it:
+    /// the transcript's rewind affordance appears when
+    /// `invalidate_checkpoint_refs` prompts the next
     /// prefetch to notice the new ref.
     pub(super) fn start_pending_checkpoint_captures(&mut self, cx: &mut Context<Self>) {
         for request in std::mem::take(&mut self.pending_checkpoint_captures) {
             let PendingCheckpointCapture {
                 session_id,
+                turn_id,
                 turn_count,
                 project_path,
                 untouched,
             } = request;
+            if !self.state.sessions.iter().any(|session| {
+                checkpoint_capture_target_exists(session, session_id, turn_id, turn_count)
+                    && self.workspace_path_for_session(session) == Some(project_path.as_path())
+            }) {
+                continue;
+            }
             let Some(workspace) = self.workspace_client_for_session(session_id) else {
                 continue;
             };
             if !self
                 .checkpoint_captures_in_flight
-                .insert((session_id, turn_count))
+                .insert((session_id, turn_id))
             {
                 continue;
             }
@@ -5106,7 +5135,7 @@ impl Waku {
                     .spawn({
                         let project_path = project_path.clone();
                         async move {
-                            match workspace.request(
+                            let captured = (|| match workspace.request(
                                 waku_client::WorkspaceOperation::CaptureTurn {
                                     cwd: project_path,
                                     session_id,
@@ -5114,19 +5143,32 @@ impl Waku {
                                     untouched,
                                 },
                             )? {
-                                waku_client::WorkspaceResult::Checkpoint { checkpoint } => {
+                                waku_client::WorkspaceResult::Checkpoint { checkpoint }
+                                    if checkpoint.turn_count == turn_count =>
+                                {
                                     Ok(checkpoint)
                                 }
                                 _ => anyhow::bail!(
                                     "the daemon returned an invalid checkpoint response"
                                 ),
-                            }
+                            })();
+                            waku_client::persistence::BackgroundOwned::new(captured)
                         }
                     })
                     .await;
                 waku.update(cx, |waku, cx| {
                     waku.checkpoint_captures_in_flight
-                        .remove(&(session_id, turn_count));
+                        .remove(&(session_id, turn_id));
+                    if !waku.state.sessions.iter().any(|session| {
+                        checkpoint_capture_target_exists(session, session_id, turn_id, turn_count)
+                            && waku.workspace_path_for_session(session)
+                                == Some(project_path.as_path())
+                    }) {
+                        // Re-evaluate current queue/cleanup gates through the
+                        // pump; this result no longer owns a transcript target.
+                        signal_event_pump(&waku.event_wake_tx);
+                        return;
+                    }
                     let selected = waku.state.selected_session == Some(session_id);
                     if selected {
                         waku.sync_transcript_rows();
@@ -5136,7 +5178,7 @@ impl Waku {
                     } else {
                         Vec::new()
                     };
-                    let checkpoint = match captured {
+                    let checkpoint = match captured.into_inner() {
                         Ok(checkpoint) => checkpoint,
                         Err(error) => {
                             waku.show_toast(tr!("errors.capture_turn_checkpoint", error = error));
@@ -5157,9 +5199,11 @@ impl Waku {
                         && let Some(turn) = session
                             .turns
                             .iter_mut()
-                            .find(|turn| turn.turn_count == turn_count)
+                            .find(|turn| turn.id == turn_id && turn.turn_count == turn_count)
                     {
-                        turn.checkpoint = Some(checkpoint);
+                        drop(waku_client::persistence::BackgroundOwned::new(
+                            turn.checkpoint.replace(checkpoint),
+                        ));
                         attached_turn_id = Some(turn.id);
                     }
                     if let Some(turn_id) = attached_turn_id

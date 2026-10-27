@@ -1,0 +1,1 @@
+- Desktop checkpoint completions validate the original turn before updating its card. Abandoned or stale checkpoint payloads are reclaimed in the background.
