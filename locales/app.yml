@@ -3803,7 +3803,7 @@ suggestions.automatic_actions_title:
 suggestions.automatic_action_description:
   en: Opt in to run this suggestion automatically when Jev reaches the required probability (80% minimum).
 suggestions.actions_description:
-  en: "Choose which next steps Jev may suggest. It weighs the latest turn and your recent actions, offering a suggestion only when one stands out. Suggestions wait for you to click unless you opt in under Automation."
+  en: "Choose which next steps Jev may suggest. It weighs the latest turn and your recent actions, offering a suggestion only when one stands out. Suggestions wait for you to click unless you opt in under Automation. Status-based prompts are controlled separately by status markers."
 suggestions.actions_enabled_count:
   en: "%{enabled} of %{total} actions enabled"
 suggestions.action_on:
@@ -3811,7 +3811,7 @@ suggestions.action_on:
 suggestions.action_off:
   en: "Off"
 suggestions.action_disabled:
-  en: "Off — not suggested. When enabled: %{description}"
+  en: "Off for next-step predictions. %{description}"
 suggestions.action_run_tests:
   en: "After files change, Jev considers whether running tests is the likely next step."
 suggestions.action_fix_errors:
@@ -3825,11 +3825,11 @@ suggestions.action_review_changes:
 suggestions.action_open_pr:
   en: "After files change and a PR can be opened, Jev considers whether to ask the agent to push and open one."
 suggestions.action_you_decide:
-  en: "Asks the agent to choose how to proceed. Jev does not currently select this suggestion."
+  en: "Shown when Jev’s status verdict indicates a decision or input is needed. Asks the agent to choose how to proceed; controlled by status markers, independently of this switch."
 suggestions.action_implement_plan:
   en: "In a planning phase, Jev considers whether the plan is ready for the agent to implement."
 suggestions.action_diagnose:
-  en: "Asks the agent to investigate the cause. Jev does not currently select this suggestion."
+  en: "Shown when Jev’s status verdict indicates failure or a blocker. Asks the agent to investigate the cause; controlled by status markers, independently of this switch."
 suggestions.action_whats_next:
   en: "After a turn ends, Jev considers whether to ask the agent what to do next."
 suggestions.action_address_review:
