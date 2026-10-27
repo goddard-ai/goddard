@@ -258,6 +258,7 @@ chmod 755 "$agent_executable"
 # Finder info and resource forks on copied resources make codesign reject the
 # bundle as "detritus"; strip extended attributes before signing.
 xattr -cr "$bundle"
+echo "Signing app bundle..." >&2
 # Sparkle's nested executables sign first, then the framework, then the app.
 # The app's hardened runtime enforces library validation, so the framework must
 # carry the same identity as the app or dlopen rejects it at launch. The audio

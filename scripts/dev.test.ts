@@ -231,3 +231,70 @@ test("dev exits when the initial build fails outside serve mode", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("interactive builds use Cargo counters and retain live diagnostics and stderr failures", async () => {
+  const { root, bin, env } = await makeWorkspace("goddard-dev-progress-test-");
+  await writeFile(join(bin, "mbx"), `#!${process.execPath}
+import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const root = process.env.TEST_ROOT;
+if (process.argv.includes("waku-daemon")) {
+  console.log(JSON.stringify({ reason: "compiler-artifact", fresh: true }));
+  process.exit(0);
+}
+process.stderr.write("\\x1b[1m    Building\\x1b[0m [===> ] 1176/1194: waku(build)\\r\\x1b[K");
+console.log(JSON.stringify({ reason: "compiler-message", message: {
+  level: "warning", rendered: "warning: live diagnostic probe\\n",
+} }));
+writeFileSync(join(root, "waiting"), "");
+while (!existsSync(join(root, "release"))) await Bun.sleep(20);
+// No trailing newline: stream closure must flush this Cargo-level failure.
+process.stderr.write("error: linker probe failed");
+process.exit(1);
+`, { mode: 0o755 });
+  let output = "";
+  const decoder = new TextDecoder();
+  const terminal = new Bun.Terminal({
+    cols: 240,
+    rows: 40,
+    data(_terminal, bytes) {
+      output += decoder.decode(bytes, { stream: true });
+    },
+  });
+  const child = Bun.spawn([process.execPath, devScript, "--wait"], {
+    env,
+    terminal,
+  });
+  try {
+    await waitFor(
+      () => existsSync(join(root, "waiting")) && output.includes("1 warning"),
+      10_000,
+      "the app build and buffered warning",
+    );
+    expect(output).toContain("1176/1194 units");
+    expect(output).toContain("(all fresh)");
+    expect(output).not.toContain("warning: live diagnostic probe");
+    terminal.write("e\n");
+    await waitFor(
+      () => output.includes("warning: live diagnostic probe"),
+      5_000,
+      "live diagnostic expansion",
+    );
+    await writeFile(join(root, "release"), "");
+    expect(await child.exited).toBe(1);
+    await waitFor(
+      () => output.includes("error: linker probe failed"),
+      5_000,
+      "Cargo stderr failure output",
+    );
+    expect(output).not.toContain("Building [");
+    expect(output.match(/warning: live diagnostic probe/g)).toHaveLength(1);
+  } finally {
+    if (child.exitCode === null) {
+      child.kill();
+      await child.exited;
+    }
+    terminal.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 20_000);

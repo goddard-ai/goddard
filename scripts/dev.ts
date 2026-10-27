@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
 import { $ } from "bun";
+import { stripVTControlCharacters } from "node:util";
+import { parseCargoProgress, readBuildLines } from "./dev-build-output";
 import { bundleComputerUse } from "./cua-driver";
 import { wakuCacheDir } from "./cache-dir";
 import { startDevServe, type DevServe } from "./dev-serve";
@@ -92,8 +94,6 @@ const daemonTokenPath = join(stableDir, "goddard-daemon-token");
 // Written next to the token so scripts (and humans) can read the current
 // daemon address + token after the watcher log has scrolled away.
 const daemonInfoPath = join(stableDir, "goddard-daemon.json");
-// Progress-bar denominators persist across runs here.
-const buildStatsPath = join(stableDir, "goddard-build-stats.json");
 // Adopting an external daemon needs its GODDARD_DAEMON_TOKEN as well — a
 // lone address (usually a stray inherited variable) leaves every client
 // rejected, so the pair counts as unset and the watcher spawns locally.
@@ -154,7 +154,6 @@ function migrateLegacyTargetState(): void {
     [join(legacyDir, basename(devStatePath)), devStatePath],
     [join(legacyDir, basename(daemonTokenPath)), daemonTokenPath],
     [join(legacyDir, basename(daemonInfoPath)), daemonInfoPath],
-    [join(legacyDir, basename(buildStatsPath)), buildStatsPath],
   ];
   if (laned && !serveMode) {
     moves.push([join(legacyDir, "lanes"), laneRoot]);
@@ -535,33 +534,7 @@ async function releaseHyprlandRules(): Promise<void> {
   await $`hyprctl eval ${code}`.quiet().nothrow();
 }
 
-// Cargo reports units only as they finish — never a total — so the bar's
-// denominator is the previous build's dirty-unit count for the same label,
-// persisted across runs. Tiny or unknown counts render an animated
-// indeterminate bar instead of a fake percentage.
 const progressBarWidth = 16;
-
-function readBuildStats(): Record<string, number> {
-  try {
-    return JSON.parse(readFileSync(buildStatsPath, "utf8")) as Record<
-      string,
-      number
-    >;
-  } catch {
-    return {};
-  }
-}
-
-function recordBuildStats(label: string, dirtyUnits: number): void {
-  try {
-    const stats = readBuildStats();
-    stats[label] = dirtyUnits;
-    mkdirSync(dirname(buildStatsPath), { recursive: true });
-    writeFileSync(buildStatsPath, `${JSON.stringify(stats)}\n`);
-  } catch {
-    // The stats file only refines the bar; a failed write changes nothing.
-  }
-}
 
 function elapsedLabel(since: number): string {
   const seconds = Math.floor((Date.now() - since) / 1000);
@@ -579,12 +552,12 @@ function progressLine(
 ): string {
   let bar: string;
   let count: string;
-  if (expected !== undefined && expected > 2) {
-    const fraction = Math.min(done / expected, 0.99);
+  if (expected !== undefined) {
+    const fraction = Math.min(done / expected, 1);
     const filled = Math.round(fraction * progressBarWidth);
     bar =
       "█".repeat(filled) + "░".repeat(progressBarWidth - filled);
-    count = `${done}/${expected}`;
+    count = ` ${done}/${expected} units`;
   } else {
     const block = 5;
     const head =
@@ -593,7 +566,7 @@ function progressLine(
     bar = Array.from({ length: progressBarWidth }, (_, index) =>
       index <= head && index > head - block ? "█" : "░",
     ).join("");
-    count = `${done}`;
+    count = "";
   }
   const detail = crate ? ` · ${crate}` : "";
   const issues = [
@@ -603,12 +576,12 @@ function progressLine(
     .filter(Boolean)
     .join(", ");
   const hint = issues ? " · press e + enter to expand" : "";
-  return `[goddard-dev] Compiling ${label} ${bar} ${count} crate${done === 1 ? "" : "s"}${detail}${issues ? ` · ${issues}${hint}` : ""} · ${elapsedLabel(startedAt)}`;
+  return `[goddard-dev] Compiling ${label} ${bar}${count}${detail}${issues ? ` · ${issues}${hint}` : ""} · ${elapsedLabel(startedAt)}`;
 }
 
 // Runs cargo through Mr Boxington with a live one-line progress bar on a TTY
-// by parsing the compiler's JSON stream. Diagnostics stay buffered behind the bar — the
-// line reports warning/error counts — and 'e' expands them live or replays
+// using Cargo's own stderr counters; JSON stdout supplies diagnostics. The
+// line reports warning/error counts, and 'e' expands them live or replays
 // them afterward. A failed build always dumps its full output. Off a TTY
 // cargo's own output passes straight through.
 async function cargoBuild(label: string, args: string[]): Promise<boolean> {
@@ -618,7 +591,6 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
     return result.exitCode === 0;
   }
 
-  const expected = readBuildStats()[label];
   const child = Bun.spawn(
     [
       "mbx",
@@ -628,13 +600,20 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
     ],
     {
       cwd: root,
-      env: { ...process.env, CARGO_TERM_COLOR: "always" },
+      env: {
+        ...process.env,
+        CARGO_TERM_COLOR: "always",
+        CARGO_TERM_PROGRESS_WHEN: "always",
+        CARGO_TERM_PROGRESS_WIDTH: "120",
+      },
       stdout: "pipe",
-      stderr: "inherit",
+      stderr: "pipe",
     },
   );
   const startedAt = Date.now();
   let done = 0;
+  let expected: number | undefined;
+  let rebuilt = false;
   let crate = "";
   let warnings = 0;
   let errors = 0;
@@ -665,62 +644,55 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
   const ticker = setInterval(draw, 100);
   draw();
   try {
-    const stdout = child.stdout;
-    if (stdout !== null && typeof stdout !== "number") {
-      const reader = stdout.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, { stream: true });
-        let newline = buffer.indexOf("\n");
-        while (newline !== -1) {
-          const line = buffer.slice(0, newline);
-          buffer = buffer.slice(newline + 1);
-          newline = buffer.indexOf("\n");
-          let parsed: {
-            reason?: string;
-            fresh?: boolean;
-            target?: { name?: string };
-            message?: {
-              rendered?: string | null;
-              message?: string;
-              level?: string;
-            };
-            text?: string;
+    await Promise.all([
+      readBuildLines(child.stdout, (line) => {
+        let parsed: {
+          reason?: string;
+          fresh?: boolean;
+          message?: {
+            rendered?: string | null;
+            message?: string;
+            level?: string;
           };
-          try {
-            parsed = JSON.parse(line);
-          } catch {
-            emit(line);
-            continue;
-          }
-          if (parsed.reason === "compiler-artifact") {
-            if (parsed.fresh === false) {
-              done += 1;
-              crate = parsed.target?.name ?? crate;
-              draw();
-            }
-          } else if (parsed.reason === "build-script-executed") {
-            done += 1;
-          } else if (parsed.reason === "compiler-message") {
-            const rendered =
-              parsed.message?.rendered ?? parsed.message?.message;
-            if (parsed.message?.level === "warning") warnings += 1;
-            if (
-              parsed.message?.level === "error" ||
-              parsed.message?.level === "error: internal compiler error"
-            ) {
-              errors += 1;
-            }
-            if (rendered) emit(rendered);
-          } else if (parsed.reason === "text" && parsed.text) {
-            emit(parsed.text);
-          }
+          text?: string;
+        };
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          emit(line);
+          return;
         }
-      }
-    }
+        if (parsed.reason === "compiler-artifact") {
+          if (parsed.fresh === false) rebuilt = true;
+        } else if (parsed.reason === "compiler-message") {
+          const rendered = parsed.message?.rendered ?? parsed.message?.message;
+          if (parsed.message?.level === "warning") warnings += 1;
+          if (
+            parsed.message?.level === "error" ||
+            parsed.message?.level === "error: internal compiler error"
+          ) {
+            errors += 1;
+          }
+          if (rendered) emit(rendered);
+          draw();
+        } else if (parsed.reason === "text" && parsed.text) {
+          emit(parsed.text);
+        }
+      }),
+      readBuildLines(child.stderr, (line) => {
+        const progress = parseCargoProgress(line);
+        if (progress !== undefined) {
+          done = progress.done;
+          expected = progress.total;
+          crate = progress.detail;
+          draw();
+          return;
+        }
+        // Cargo's erase/cursor sequences must never escape into our display.
+        const text = stripVTControlCharacters(line).trimEnd();
+        if (text) emit(text);
+      }),
+    ]);
   } finally {
     clearInterval(ticker);
     liveBuildLog = undefined;
@@ -736,7 +708,6 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
     }
     return false;
   }
-  recordBuildStats(label, done);
   const issues = [
     errors > 0 ? `${errors} error${errors === 1 ? "" : "s"}` : "",
     warnings > 0 ? `${warnings} warning${warnings === 1 ? "" : "s"}` : "",
@@ -744,7 +715,7 @@ async function cargoBuild(label: string, args: string[]): Promise<boolean> {
     .filter(Boolean)
     .join(", ");
   console.log(
-    `[goddard-dev] ${label === "app" ? "App" : "Daemon"} compiled in ${elapsedLabel(startedAt)}${done === 0 ? " (all fresh)" : ""}${issues ? ` with ${issues} — press e + enter to show them` : ""}.`,
+    `[goddard-dev] ${label === "app" ? "App" : "Daemon"} compiled in ${elapsedLabel(startedAt)}${!rebuilt ? " (all fresh)" : ""}${issues ? ` with ${issues} — press e + enter to show them` : ""}.`,
   );
   return true;
 }
@@ -902,6 +873,7 @@ async function build(target: BuildTarget): Promise<boolean> {
   if (isMacOS) {
     const lane = laned ? appBuildLane() : undefined;
     if (lane !== undefined) retireLane(lane);
+    console.log("[goddard-dev] Packaging app bundle...");
     // The watcher already ran cargo itself so it could draw progress;
     // bundle.sh only packages and signs the binaries it just produced.
     const laneEnv = [
@@ -925,6 +897,7 @@ async function build(target: BuildTarget): Promise<boolean> {
     if (lane !== undefined) publishLane(lane);
   } else {
     try {
+      console.log("[goddard-dev] Packaging Computer Use SDK...");
       await bundleComputerUse(
         join(targetDir, "debug"),
         join(targetDir, "debug", "resources"),
@@ -967,6 +940,7 @@ async function buildDaemon(publishRuntime = true): Promise<boolean> {
     retireLane(lane);
     // Reuse the unchanged app and helpers, then replace daemon + CLI and
     // re-sign the new bundle. Neither live lane is modified.
+    console.log("[goddard-dev] Packaging rebuilt daemon...");
     const result = await $`env GODDARD_SKIP_CARGO_BUILD=1 GODDARD_BUNDLE_SOURCE=${source} GODDARD_BUNDLE_DIR=${laneAppPath(lane)} ${bundleScript} debug`.nothrow();
     if (result.exitCode !== 0) {
       console.error(
