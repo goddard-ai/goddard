@@ -87,6 +87,10 @@ pub struct BranchSnapshot {
     pub branches: Vec<BranchEntry>,
     pub additions: u64,
     pub deletions: u64,
+    /// A clean, attached checkout strictly behind its known upstream, with
+    /// no integration or Git lock in progress, as of this inspection.
+    #[serde(default)]
+    pub can_pull: bool,
 }
 
 impl BranchSnapshot {

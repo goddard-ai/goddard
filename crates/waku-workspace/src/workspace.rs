@@ -412,8 +412,16 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
             crate::git_panel::ignore(&cwd, &path)?;
             WorkspaceResult::Ack
         }
-        WorkspaceOperation::PullUpstream { cwd, strategy } => WorkspaceResult::Pull {
-            outcome: crate::git_panel::pull(&cwd, strategy)?,
+        WorkspaceOperation::PullUpstream {
+            cwd,
+            strategy,
+            fast_forward_only,
+        } => WorkspaceResult::Pull {
+            outcome: if fast_forward_only == Some(true) {
+                crate::git_panel::pull_clean_behind(&cwd)?
+            } else {
+                crate::git_panel::pull(&cwd, strategy)?
+            },
         },
         WorkspaceOperation::AbortSync { cwd } => {
             crate::git_panel::abort_sync(&cwd)?;

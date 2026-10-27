@@ -219,7 +219,7 @@ pub(super) fn suggested_action_title(action: &str) -> Option<String> {
     }
 }
 
-/// Commit remains review-gated because its dispatcher opens the commit dialog.
+/// Commit remains review-gated; Pull changes always requires a manual click.
 pub(super) const AUTOMATIC_ACTIONS: &[&str] = &[
     "run-tests",
     "fix-errors",
@@ -234,7 +234,6 @@ pub(super) const AUTOMATIC_ACTIONS: &[&str] = &[
     "address-review",
     "fix-ci",
     "push",
-    "sync",
     "land",
 ];
 
@@ -303,7 +302,7 @@ pub(super) struct PendingActionPrediction {
 
 /// The floating suggestion above the composer — either a pending
 /// prediction's gated pick or a deterministic follow-up to a Git action.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) struct ActionSuggestion {
     /// `None` for deterministic follow-ups that are not part of Jev.
     pub prediction_id: Option<Uuid>,
@@ -1477,6 +1476,48 @@ impl Waku {
         })
     }
 
+    /// Resolve the same action for visibility, rendering, and activation.
+    /// Pull eligibility comes only from a current daemon snapshot; no render
+    /// path performs Git I/O or launches another query.
+    fn current_action_suggestion(&self) -> Option<ActionSuggestion> {
+        let session = self.composer_session()?;
+        let stored = self
+            .action_suggestion
+            .as_ref()
+            .filter(|suggestion| suggestion.session_id == session.id);
+        if stored.is_some_and(|suggestion| {
+            suggestion.prediction_id.is_none() || suggestion.preempts_status
+        }) {
+            return stored.cloned();
+        }
+        if !self.state.action_predictions_enabled
+            || self.state.disabled_suggested_actions.contains("sync")
+            || !action_predictions_apply(session)
+            || session.is_busy()
+            || session.active_turn_id().is_some()
+            || self.git_panel_operation.is_some()
+            || self.branch_operation_pending
+        {
+            return stored.cloned();
+        }
+        let can_pull = self
+            .workspace_path_for_session(session)
+            .and_then(|workspace| self.branch_snapshots.peek(workspace))
+            .is_some_and(
+                |snapshot| matches!(snapshot.as_ref(), Ok(Some(snapshot)) if snapshot.can_pull),
+            );
+        if !can_pull {
+            return stored.cloned();
+        }
+        Some(ActionSuggestion {
+            prediction_id: None,
+            session_id: session.id,
+            action: "sync",
+            base: None,
+            preempts_status: false,
+        })
+    }
+
     /// Whether the suggestion row renders this frame, mirroring
     /// `render_action_suggestion`'s layering: a deterministic Git follow-up
     /// or an inbox-event pick claims the slot first. Otherwise, a settled
@@ -1516,10 +1557,8 @@ impl Waku {
                 .next()
                 .is_some();
         }
-        self.action_suggestion.as_ref().is_some_and(|suggestion| {
-            suggestion.session_id == session.id
-                && self.suggestion_parts(&suggestion.action).is_some()
-        })
+        self.current_action_suggestion()
+            .is_some_and(|suggestion| self.suggestion_parts(suggestion.action).is_some())
     }
 
     /// Suggested actions sit in the composer's accessory row and wrap before
@@ -1554,7 +1593,7 @@ impl Waku {
         {
             return self.render_status_suggestion(window, cx);
         }
-        let suggestion = self.action_suggestion.as_ref()?;
+        let suggestion = self.current_action_suggestion()?;
         if session.id != suggestion.session_id {
             return None;
         }
@@ -1576,6 +1615,8 @@ impl Waku {
         // yields to this row, so the two never occupy the same slot.
         let marker_pill =
             self.floating_status_marker_pill(self.active_transcript_rows(), &theme, cx);
+        let click_suggestion = suggestion.clone();
+        let keyboard_suggestion = suggestion.clone();
         Some(
             div()
                 .min_w_0()
@@ -1626,11 +1667,11 @@ impl Waku {
                         )
                         .tooltip(Tooltip::text(tooltip))
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.accept_action_suggestion(window, cx);
+                            this.accept_action_suggestion(&click_suggestion, window, cx);
                         }))
                         .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                             if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                this.accept_action_suggestion(window, cx);
+                                this.accept_action_suggestion(&keyboard_suggestion, window, cx);
                                 cx.stop_propagation();
                             }
                         })),
@@ -1645,13 +1686,23 @@ impl Waku {
     /// log, then dispatch the same way the action's own affordance does —
     /// a canned prompt submits through the composer path, a Git action
     /// through the panel's op machinery.
-    fn accept_action_suggestion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn accept_action_suggestion(
+        &mut self,
+        expected: &ActionSuggestion,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.composer_is_empty(cx) {
             return;
         }
-        let Some(suggestion) = self.action_suggestion.clone() else {
+        let Some(suggestion) = self.current_action_suggestion() else {
             return;
         };
+        // A refresh or selection change must never turn a queued click or
+        // shortcut into a different action than the one the user saw.
+        if &suggestion != expected {
+            return;
+        }
         if let Some(prediction) = self
             .pending_action_predictions
             .iter_mut()
@@ -1701,7 +1752,7 @@ impl Waku {
                     match dispatch {
                         SuggestionDispatch::Push => self.start_workspace_push(workspace, cx),
                         SuggestionDispatch::Sync => {
-                            self.start_workspace_sync(workspace, PullStrategy::Rebase, cx)
+                            self.start_workspace_pull_changes(workspace, cx)
                         }
                         _ => {}
                     }
@@ -1747,7 +1798,7 @@ impl Waku {
         enum Displayed {
             PlanApproval(Uuid),
             Status(Uuid, StatusSuggestedAction),
-            Action,
+            Action(ActionSuggestion),
         }
         let approval_session = self
             .composer_session()
@@ -1762,7 +1813,7 @@ impl Waku {
         let displayed = if let Some(session_id) = approval_session {
             Some(Displayed::PlanApproval(session_id))
         } else if has_follow_up {
-            Some(Displayed::Action)
+            self.current_action_suggestion().map(Displayed::Action)
         } else if active_turn {
             // The regular next-step chip is hidden while a turn runs, so its
             // shortcut must propagate as well. Preemptive actions and plan
@@ -1799,14 +1850,13 @@ impl Waku {
                     None
                 }
                 None => self
-                    .action_suggestion
-                    .as_ref()
+                    .current_action_suggestion()
                     .filter(|suggestion| {
                         self.composer_session().map(|session| session.id)
                             == Some(suggestion.session_id)
                             && self.suggestion_parts(&suggestion.action).is_some()
                     })
-                    .map(|_| Displayed::Action),
+                    .map(Displayed::Action),
             }
         };
         let Some(displayed) = displayed else {
@@ -1823,7 +1873,9 @@ impl Waku {
                     Displayed::Status(turn_id, action) => {
                         this.accept_status_suggestion(*turn_id, action, cx);
                     }
-                    Displayed::Action => this.accept_action_suggestion(window, cx),
+                    Displayed::Action(suggestion) => {
+                        this.accept_action_suggestion(suggestion, window, cx)
+                    }
                 });
             });
         });
@@ -2033,6 +2085,7 @@ mod tests {
             branches: Vec::new(),
             additions: 0,
             deletions: 0,
+            can_pull: false,
         };
         assert!(checkout_on_default_branch(&snapshot(
             Some("main"),
@@ -2156,6 +2209,9 @@ mod tests {
         thresholds.insert("run-tests".to_owned(), 99);
         assert!(!automatic_action_allowed("run-tests", 0.98, &thresholds));
         assert!(automatic_action_allowed("run-tests", 0.99, &thresholds));
+        // A legacy persisted threshold must never auto-run Pull changes.
+        thresholds.insert("sync".to_owned(), 80);
+        assert!(!automatic_action_allowed("sync", 1.0, &thresholds));
         thresholds.insert("commit".to_owned(), 95);
         assert!(!automatic_action_allowed("commit", 1.0, &thresholds));
     }

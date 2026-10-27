@@ -52,6 +52,7 @@ fn inspect_inner(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
         branches: metadata.branches,
         additions,
         deletions,
+        can_pull: crate::git_panel::can_pull_clean_behind(cwd).unwrap_or(false),
     }))
 }
 

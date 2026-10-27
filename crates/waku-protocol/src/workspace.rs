@@ -1084,6 +1084,10 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         cwd: PathBuf,
         strategy: PullStrategy,
+        /// Manual suggestion: recheck a clean, strictly-behind checkout and
+        /// refuse any integration requiring a merge or rebase.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fast_forward_only: Option<bool>,
     },
     /// Abort whichever integration is mid-flight (`rebase --abort` or
     /// `merge --abort`). No-op when none is.

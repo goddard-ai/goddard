@@ -3803,7 +3803,7 @@ suggestions.automatic_actions_title:
 suggestions.automatic_action_description:
   en: Opt in to run this suggestion automatically when Jev reaches the required probability (80% minimum).
 suggestions.actions_description:
-  en: "Choose which next steps Jev may suggest. It weighs the latest turn and your recent actions, offering a suggestion only when one stands out. Suggestions wait for you to click unless you opt in under Automation. These switches also apply to prompts offered by status markers."
+  en: "Choose which next steps appear above the composer. Jev uses turn results and recent actions; Pull changes uses Git state. Suggestions wait for your click unless enabled under Automation. These switches also control status-based prompts."
 suggestions.actions_enabled_count:
   en: "%{enabled} of %{total} actions enabled"
 suggestions.action_on:
@@ -3841,7 +3841,7 @@ suggestions.action_commit:
 suggestions.action_push:
   en: "After files change, Jev considers whether pushing the work to its remote is the likely next step."
 suggestions.action_sync:
-  en: "Syncs the workspace with its remote. Jev does not currently select this suggestion."
+  en: "Offered for a clean branch strictly behind its last fetched upstream, with no Git operation running. Pulls with fast-forward only after you click; never runs automatically."
 suggestions.action_land:
   en: "In a worktree task, Jev considers whether landing its commits onto the base branch is the likely next step."
 suggestions.edit_prompt:
@@ -3901,7 +3901,7 @@ suggestions.push_changes:
 suggestions.archive:
   en: Archive
 suggestions.sync:
-  en: Sync
+  en: Pull changes
 suggestions.land:
   en: Land
 suggestions.you_decide:
@@ -4710,6 +4710,10 @@ git_panel.title:
   en: Git
 git_panel.sync_changes:
   en: Sync changes
+git_panel.pulling:
+  en: Pulling changes…
+git_panel.pulled:
+  en: Changes pulled
 git_panel.syncing_rebase:
   en: Rebasing…
 git_panel.syncing_merge:

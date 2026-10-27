@@ -1,0 +1,1 @@
+- Use the manual Pull changes suggestion when a clean branch is strictly behind its upstream; it rechecks the checkout and fast-forwards only, without merging or rebasing local commits.

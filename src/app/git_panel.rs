@@ -44,7 +44,7 @@ fn journal_git_action(pending: &GitPanelPending) -> Option<action_predictions::J
         GitPanelPending::Committing => Some(J::GitCommit),
         GitPanelPending::Pushing => Some(J::GitPush),
         GitPanelPending::PushingBase | GitPanelPending::SyncingBase => Some(J::GitSyncBase),
-        GitPanelPending::Syncing(_) => Some(J::GitSync),
+        GitPanelPending::Syncing(_) | GitPanelPending::Pulling => Some(J::GitSync),
         GitPanelPending::Landing => Some(J::GitLand),
         GitPanelPending::Rebasing => Some(J::GitRebase),
         GitPanelPending::AbortingSync | GitPanelPending::Generating { .. } => None,
@@ -107,6 +107,8 @@ pub(super) enum GitPanelPending {
     /// the push modal rather than the panel's error line.
     PushingBase,
     Syncing(PullStrategy),
+    /// The manual suggestion's guarded fast-forward pull.
+    Pulling,
     /// The failure modal's "Sync & retry push": a `SyncBase` pull whose
     /// clean outcome re-fires the push it is recovering.
     SyncingBase,
@@ -125,6 +127,7 @@ impl GitPanelPending {
                 tr!("git_panel.syncing_rebase")
             }
             GitPanelPending::Syncing(PullStrategy::Merge) => tr!("git_panel.syncing_merge"),
+            GitPanelPending::Pulling => tr!("git_panel.pulling"),
             GitPanelPending::Landing => tr!("git_panel.landing"),
             GitPanelPending::Rebasing => tr!("git_panel.rebasing"),
             GitPanelPending::AbortingSync => tr!("git_panel.aborting"),
@@ -1447,11 +1450,39 @@ impl Waku {
         strategy: PullStrategy,
         cx: &mut Context<Self>,
     ) {
-        let Some((op_id, workspace)) =
-            self.begin_workspace_op(GitPanelPending::Syncing(strategy), workspace, cx)
-        else {
+        self.start_workspace_sync_inner(workspace, strategy, false, cx);
+    }
+
+    pub(super) fn start_workspace_pull_changes(
+        &mut self,
+        workspace: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_workspace_sync_inner(workspace, PullStrategy::Merge, true, cx);
+    }
+
+    fn start_workspace_sync_inner(
+        &mut self,
+        workspace: PathBuf,
+        strategy: PullStrategy,
+        fast_forward_only: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let pending = if fast_forward_only {
+            GitPanelPending::Pulling
+        } else {
+            GitPanelPending::Syncing(strategy)
+        };
+        let Some((op_id, workspace)) = self.begin_workspace_op(pending, workspace, cx) else {
             return;
         };
+        if fast_forward_only {
+            let toast_id =
+                self.show_progress_toast(tr!("git_panel.pulling"), PROGRESS_TOAST_DURATION);
+            if let Some(operation) = self.git_panel_operation.as_mut() {
+                operation.toast_id = Some(toast_id);
+            }
+        }
         let Some(client) = self.workspace_client_for_path(&workspace) else {
             self.finish_git_panel_op(
                 op_id,
@@ -1467,6 +1498,7 @@ impl Waku {
                     client.request(WorkspaceOperation::PullUpstream {
                         cwd: workspace,
                         strategy,
+                        fast_forward_only: fast_forward_only.then_some(true),
                     })
                 })
                 .await;
@@ -1697,6 +1729,7 @@ impl Waku {
                                 client.request(WorkspaceOperation::PullUpstream {
                                     cwd: workspace,
                                     strategy: PullStrategy::Merge,
+                                    fast_forward_only: None,
                                 })
                             }
                             SyncConflict::Land { base, .. } => {
@@ -1975,7 +2008,7 @@ impl Waku {
             GitPanelPending::Pushing => Some("push"),
             GitPanelPending::PushingBase => Some("push_base"),
             GitPanelPending::SyncingBase => Some("sync_base"),
-            GitPanelPending::Syncing(_) => Some("sync"),
+            GitPanelPending::Syncing(_) | GitPanelPending::Pulling => Some("sync"),
             GitPanelPending::Landing => Some("land"),
             GitPanelPending::Rebasing => Some("rebase"),
             GitPanelPending::AbortingSync => Some("abort_sync"),
@@ -2163,6 +2196,13 @@ impl Waku {
                 self.finish_sync_base(&op, checkout, outcome, cx);
             }
             Ok(result) => {
+                if op.pending == GitPanelPending::Pulling {
+                    self.settle_operation_toast(
+                        op.toast_id,
+                        tr!("git_panel.pulled"),
+                        ToastTone::Success,
+                    );
+                }
                 if same_panel && let Some(panel) = self.git_panel.as_mut() {
                     panel.error = None;
                     if matches!(op.pending, GitPanelPending::Committing) {

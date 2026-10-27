@@ -274,6 +274,58 @@ pub fn pull(cwd: &Path, strategy: PullStrategy) -> anyhow::Result<PullOutcome> {
     bail!("{}", command_error(&output))
 }
 
+/// Eligibility for the manual pull suggestion. Never fetches: the caller
+/// observes the remote-tracking state established by the last fetch.
+pub fn can_pull_clean_behind(cwd: &Path) -> anyhow::Result<bool> {
+    if !crate::git_branch::upstream_status(cwd)
+        .is_some_and(|upstream| upstream.ahead == 0 && upstream.behind > 0)
+    {
+        return Ok(false);
+    }
+    let git_dir = git_stdout(cwd, &["rev-parse", "--absolute-git-dir"])?;
+    for state in [
+        "rebase-merge",
+        "rebase-apply",
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "BISECT_START",
+        "sequencer",
+        "index.lock",
+        "HEAD.lock",
+    ] {
+        if Path::new(&git_dir).join(state).exists() {
+            return Ok(false);
+        }
+    }
+    Ok(git_stdout(
+        cwd,
+        &[
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--ignore-submodules=none",
+        ],
+    )?
+    .is_empty())
+}
+
+/// Recheck the suggestion at execution and fast-forward only. Git's own
+/// fast-forward guard also rejects divergence introduced by the fetch.
+pub fn pull_clean_behind(cwd: &Path) -> anyhow::Result<PullOutcome> {
+    ensure_repository(cwd)?;
+    if !can_pull_clean_behind(cwd)? {
+        bail!(
+            "Pull changes is no longer available: the branch must be clean, strictly behind its upstream, and have no Git operation in progress"
+        );
+    }
+    let output = git_capture(cwd, &["pull", "--no-rebase", "--ff-only", "--no-autostash"])?;
+    if !output.status.success() {
+        bail!("{}", command_error(&output));
+    }
+    Ok(PullOutcome::Clean)
+}
+
 /// The checkout's tracking ref and the commits it has that HEAD lacks —
 /// `None` when there is nothing to measure: a detached HEAD, a branch
 /// tracking nothing, or a tracking ref that still does not resolve after a
@@ -1814,6 +1866,127 @@ mod tests {
             panic!("expected Rejected, got {outcome:?}");
         };
         assert!(message.contains("rejected") || message.contains("fetch first"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn manual_pull_eligibility_requires_a_clean_strictly_behind_checkout() {
+        let (root, repository, remote) = remote_repository();
+        assert!(!can_pull_clean_behind(&repository).unwrap());
+        remote_writer(&root, &remote);
+        run_git(&repository, &["fetch", "-q", "origin"]);
+        assert!(
+            crate::git_branch::inspect(&repository)
+                .unwrap()
+                .unwrap()
+                .can_pull
+        );
+
+        // Even an empty untracked file must hide the suggestion: line
+        // counts alone cannot establish a clean checkout.
+        std::fs::write(repository.join("untracked"), "").unwrap();
+        assert!(!can_pull_clean_behind(&repository).unwrap());
+        std::fs::remove_file(repository.join("untracked")).unwrap();
+        std::fs::write(repository.join("file.txt"), "dirty\n").unwrap();
+        assert!(!can_pull_clean_behind(&repository).unwrap());
+        run_git(&repository, &["add", "file.txt"]);
+        assert!(!can_pull_clean_behind(&repository).unwrap());
+        run_git(&repository, &["reset", "--hard", "HEAD"]);
+        for state in [
+            "index.lock",
+            "CHERRY_PICK_HEAD",
+            "REVERT_HEAD",
+            "BISECT_START",
+            "MERGE_HEAD",
+        ] {
+            let path = repository.join(".git").join(state);
+            std::fs::write(
+                &path,
+                git_stdout(&repository, &["rev-parse", "HEAD"]).unwrap(),
+            )
+            .unwrap();
+            assert!(!can_pull_clean_behind(&repository).unwrap(), "{state}");
+            std::fs::remove_file(path).unwrap();
+        }
+        let rebase = repository.join(".git/rebase-merge");
+        std::fs::create_dir(&rebase).unwrap();
+        assert!(!can_pull_clean_behind(&repository).unwrap());
+        std::fs::remove_dir(rebase).unwrap();
+        assert!(can_pull_clean_behind(&repository).unwrap());
+
+        run_git(&repository, &["checkout", "--detach", "HEAD"]);
+        assert!(!can_pull_clean_behind(&repository).unwrap());
+        run_git(&repository, &["checkout", "main"]);
+        run_git(&repository, &["branch", "--unset-upstream"]);
+        assert!(!can_pull_clean_behind(&repository).unwrap());
+        run_git(
+            &repository,
+            &["branch", "--set-upstream-to=origin/main", "main"],
+        );
+        assert!(can_pull_clean_behind(&repository).unwrap());
+
+        commit_in(&repository, "local.txt", "local work\n");
+        assert!(!can_pull_clean_behind(&repository).unwrap());
+        let head = git_stdout(&repository, &["rev-parse", "HEAD"]).unwrap();
+        assert!(pull_clean_behind(&repository).is_err());
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "HEAD"]).unwrap(),
+            head
+        );
+        assert!(sync_in_progress(&repository).unwrap().is_none());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn manual_pull_rechecks_then_fast_forwards_without_autostash_or_rebase() {
+        let (root, repository, remote) = remote_repository();
+        remote_writer(&root, &remote);
+        run_git(&repository, &["fetch", "-q", "origin"]);
+        assert!(can_pull_clean_behind(&repository).unwrap());
+        let head = git_stdout(&repository, &["rev-parse", "HEAD"]).unwrap();
+        run_git(&repository, &["config", "pull.rebase", "true"]);
+        run_git(&repository, &["config", "branch.main.rebase", "true"]);
+        run_git(&repository, &["config", "rebase.autostash", "true"]);
+        std::fs::write(repository.join("file.txt"), "new local edit\n").unwrap();
+        assert!(pull_clean_behind(&repository).is_err());
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "HEAD"]).unwrap(),
+            head
+        );
+        assert_eq!(
+            std::fs::read_to_string(repository.join("file.txt")).unwrap(),
+            "new local edit\n"
+        );
+        run_git(&repository, &["checkout", "--", "file.txt"]);
+        assert_eq!(pull_clean_behind(&repository).unwrap(), PullOutcome::Clean);
+        assert!(repository.join("remote.txt").exists());
+        assert!(!can_pull_clean_behind(&repository).unwrap());
+        assert!(sync_in_progress(&repository).unwrap().is_none());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn manual_pull_refuses_remote_divergence_discovered_during_fetch() {
+        let (root, repository, remote) = remote_repository();
+        let other = remote_writer(&root, &remote);
+        run_git(&repository, &["fetch", "-q", "origin"]);
+        assert!(can_pull_clean_behind(&repository).unwrap());
+        let head = git_stdout(&repository, &["rev-parse", "HEAD"]).unwrap();
+        // The snapshot is eligible, but a force-push replaces the upstream
+        // before the user clicks. Fetch may update refs, never local history.
+        run_git(&other, &["checkout", "--orphan", "replacement"]);
+        commit_in(&other, "replacement.txt", "replacement history\n");
+        run_git(&other, &["push", "-q", "--force", "origin", "HEAD:main"]);
+        assert!(pull_clean_behind(&repository).is_err());
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "HEAD"]).unwrap(),
+            head
+        );
+        assert_eq!(
+            std::fs::read_to_string(repository.join("file.txt")).unwrap(),
+            "base\n"
+        );
+        assert!(sync_in_progress(&repository).unwrap().is_none());
         std::fs::remove_dir_all(root).ok();
     }
 

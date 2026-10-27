@@ -500,6 +500,7 @@ impl Waku {
                     client.request(WorkspaceOperation::PullUpstream {
                         cwd: workspace,
                         strategy,
+                        fast_forward_only: None,
                     })
                 })
                 .await;

@@ -728,6 +728,7 @@ mod tests {
             branches: Vec::new(),
             additions: 0,
             deletions: 0,
+            can_pull: false,
         }
     }
 

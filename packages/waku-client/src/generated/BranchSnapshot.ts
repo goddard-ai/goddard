@@ -23,4 +23,9 @@ origin_url: string | null,
 /**
  * `None` for a detached HEAD or a branch with no upstream configured.
  */
-upstream: UpstreamStatus | null, branches: Array<BranchEntry>, additions: number, deletions: number, };
+upstream: UpstreamStatus | null, branches: Array<BranchEntry>, additions: number, deletions: number,
+/**
+ * A clean, attached checkout strictly behind its known upstream, with
+ * no integration or Git lock in progress, as of this inspection.
+ */
+can_pull: boolean, };
