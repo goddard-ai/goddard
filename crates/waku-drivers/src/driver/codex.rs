@@ -399,7 +399,7 @@ impl CodexDriver {
         let title_cwd = cwd.clone();
         let title_sandbox = sandbox.clone();
         let mut command = crate::command_env::command(&binary);
-        command.args(["app-server", "--stdio"]);
+        command.args(["app-server", "--listen", "stdio://"]);
         configure_computer_use_command(command.command_mut(), announce_computer_use, &mcp_servers);
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(command.command_mut(), agent);
@@ -1684,7 +1684,7 @@ fn generate_codex_title(
 ) -> anyhow::Result<String> {
     let mut command = crate::command_env::command(binary);
     let command = command
-        .args(["app-server", "--stdio"])
+        .args(["app-server", "--listen", "stdio://"])
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
