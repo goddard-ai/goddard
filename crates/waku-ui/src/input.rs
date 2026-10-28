@@ -66,6 +66,8 @@ actions!(
         Redo,
         Enter,
         Newline,
+        IndentBullet,
+        OutdentBullet,
         SubmitSteer,
         Clear,
     ]
@@ -111,6 +113,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-shift-z", Redo, Some("TextInput")),
         KeyBinding::new("enter", Enter, Some("TextInput")),
         KeyBinding::new("shift-enter", Newline, Some("TextInput")),
+        KeyBinding::new("tab", IndentBullet, Some(COMPOSER_ENTER_CONTEXT)),
+        KeyBinding::new("shift-tab", OutdentBullet, Some(COMPOSER_ENTER_CONTEXT)),
         // Native field editors take ctrl-enter and alt-enter as a literal line
         // break where Enter itself would submit.
         KeyBinding::new("ctrl-enter", Newline, Some("TextInput")),
@@ -2484,6 +2488,58 @@ impl TextInput {
         self.insert_newline(window, cx);
     }
 
+    fn indent_bullet(&mut self, _: &IndentBullet, _: &mut Window, cx: &mut Context<Self>) {
+        self.change_bullet_indent(false, cx);
+    }
+
+    fn outdent_bullet(&mut self, _: &OutdentBullet, _: &mut Window, cx: &mut Context<Self>) {
+        self.change_bullet_indent(true, cx);
+    }
+
+    fn change_bullet_indent(&mut self, outdent: bool, cx: &mut Context<Self>) {
+        if self.read_only || !self.list_continuation || !self.selected_range.is_empty() {
+            cx.propagate();
+            return;
+        }
+        let start = self.hard_line_start();
+        let line = &self.content[start..self.hard_line_end()];
+        let Some(item) = highlight::list_item(line).filter(|item| item.number.is_none()) else {
+            cx.propagate();
+            return;
+        };
+        // A preceding bullet supplies the parent when nesting. Stop at the
+        // start of this list, allowing indented continuation text in between.
+        let has_previous = self.content[..start]
+            .lines()
+            .rev()
+            .find(|line| {
+                line.trim().is_empty()
+                    || highlight::list_item(line).is_some()
+                    || !line.starts_with(' ')
+            })
+            .and_then(highlight::list_item)
+            .is_some_and(|previous| previous.number.is_none());
+        if !has_previous {
+            // Consume the key: propagating would insert a literal tab in
+            // the field, changing the first bullet's text or indentation.
+            return;
+        }
+
+        let caret = self.cursor_offset();
+        if outdent {
+            let removed = item.indent.min(2);
+            if removed == 0 {
+                return;
+            }
+            self.replace_range(start..start + removed, "", cx);
+            let caret = caret.saturating_sub(removed).max(start);
+            self.select_range(caret..caret, cx);
+        } else {
+            self.replace_range(start..start, "  ", cx);
+            self.select_range(caret + 2..caret + 2, cx);
+        }
+    }
+
     /// A `\n` at the caret — or, with
     /// [`list_continuation`](Self::list_continuation), the next Markdown list
     /// item when the caret's line is one. What counts as a marker is the
@@ -4273,6 +4329,8 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::enter))
             .on_action(cx.listener(Self::newline))
+            .on_action(cx.listener(Self::indent_bullet))
+            .on_action(cx.listener(Self::outdent_bullet))
             .on_action(cx.listener(Self::submit_steer))
             .on_action(cx.listener(Self::clear_field))
             .when(!self.read_only, |field| {
@@ -5237,6 +5295,87 @@ mod tests {
             assert_eq!(input.content(), "hello\n world");
             assert_eq!(input.cursor(), 6);
         });
+    }
+
+    #[gpui::test]
+    fn tab_indents_a_later_bullet_and_shift_tab_restores_it(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        for marker in ["-", "*", "+", "- [x]"] {
+            let original = format!("{marker} first\n{marker} café");
+            composer.update(cx, |composer, cx| {
+                composer.set_content(original.clone(), cx)
+            });
+
+            cx.simulate_keystrokes("tab");
+            cx.read_entity(&composer, |composer, cx| {
+                assert_eq!(
+                    composer.content(cx),
+                    format!("{marker} first\n  {marker} café")
+                );
+                assert_eq!(composer.cursor(cx), original.len() + 2);
+            });
+
+            cx.simulate_keystrokes("shift-tab");
+            cx.read_entity(&composer, |composer, cx| {
+                assert_eq!(composer.content(cx), original);
+                assert_eq!(composer.cursor(cx), original.len());
+            });
+
+            cx.simulate_keystrokes("secondary-z");
+            cx.read_entity(&composer, |composer, cx| {
+                assert_eq!(
+                    composer.content(cx),
+                    format!("{marker} first\n  {marker} café")
+                );
+            });
+            cx.simulate_keystrokes("secondary-z");
+            cx.read_entity(&composer, |composer, cx| {
+                assert_eq!(composer.content(cx), original)
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn tab_targets_the_carets_bullet(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        let text = "- first\n- second\n- third";
+        composer.update(cx, |composer, cx| {
+            composer.set_content(text, cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(3..3, cx));
+        });
+        cx.simulate_keystrokes("tab");
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), text)
+        });
+
+        cx.update(|window, cx| window.focus(&composer.read(cx).focus(), cx));
+        composer.update(cx, |composer, cx| {
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(12..12, cx));
+        });
+        cx.simulate_keystrokes("tab");
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "- first\n  - second\n- third");
+            assert_eq!(composer.cursor(cx), 14);
+        });
+    }
+
+    #[gpui::test]
+    fn tab_leaves_the_first_bullet_unchanged(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        for text in ["- first", "  - first", "- old\n\n- first", "text\n- first"] {
+            for key in ["tab", "shift-tab"] {
+                composer.update(cx, |composer, cx| composer.set_content(text, cx));
+                cx.update(|window, cx| window.focus(&composer.read(cx).focus(), cx));
+                cx.simulate_keystrokes(key);
+                cx.read_entity(&composer, |composer, cx| {
+                    assert_eq!(composer.content(cx), text)
+                });
+            }
+        }
     }
 
     #[gpui::test]

@@ -1,0 +1,1 @@
+- Use Tab and Shift+Tab in the composer to indent and outdent unordered list bullets by two spaces, leaving the first bullet unchanged.
