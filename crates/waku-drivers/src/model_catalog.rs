@@ -840,6 +840,11 @@ fn packed_suffix_traits(suffix: &str) -> Option<(Option<String>, bool)> {
 /// Strip the trailing trait words off a slug that has no listed base —
 /// `swe-2-high-fast` gives base `swe-2` and suffix `high-fast`.
 pub(crate) fn packed_self_strip(id: &str) -> Option<(&str, &str)> {
+    // Fusion encodes two models. Its trailing effort is part of the
+    // sidekick's identity, not a trait of the selected lead.
+    if id.starts_with("fusion-") && id.contains("-sidekick-") {
+        return None;
+    }
     let mut cut = id.len();
     while let Some(before) = id[..cut].rfind('-') {
         let token = &id[before + 1..cut];
@@ -3083,6 +3088,28 @@ printf '%s\n' '{"type":"control_response","response":{"request_id":"waku-initial
                 .map(|option| option.id.as_str())
                 .collect::<Vec<_>>(),
             ["high", "max"]
+        );
+    }
+
+    #[test]
+    fn fusion_pairs_keep_the_sidekicks_fixed_effort() {
+        let ids = [
+            "fusion-claude-opus-5-5-medium-sidekick-swe-2-medium",
+            "fusion-claude-opus-5-5-medium-sidekick-swe-2-high",
+        ];
+        let models =
+            fold_packed_aliases(ids.iter().map(|id| ProviderModel::new(*id, *id)).collect());
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            ids
+        );
+        assert!(
+            models
+                .iter()
+                .all(|model| model.reasoning_efforts.is_empty())
         );
     }
 

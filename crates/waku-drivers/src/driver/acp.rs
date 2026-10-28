@@ -940,7 +940,7 @@ async fn run_sdk_connection(
             // ACP v1 requires all agents to support stdio; HTTP is opt-in and
             // has an explicit capability bit in InitializeResponse.
             let mcp_servers = acp_mcp_servers(&mcp_server_specs, http_mcp_supported);
-            let (session_id, modes, config_options) = establish_session(
+            let (session_id, modes, mut config_options) = establish_session(
                 &connection,
                 &initialize,
                 resume_session_id.as_deref(),
@@ -978,7 +978,7 @@ async fn run_sdk_connection(
                 &connection,
                 provider,
                 &session_id,
-                config_options.as_deref(),
+                &mut config_options,
                 current_model.as_deref(),
                 current_effort.as_deref(),
                 current_tier.as_deref(),
@@ -1131,7 +1131,7 @@ async fn run_sdk_connection(
                                 &connection,
                                 provider,
                                 &session_id,
-                                config_options.as_deref(),
+                                &mut config_options,
                                 current_model.as_deref(),
                                 current_effort.as_deref(),
                                 current_tier.as_deref(),
@@ -1765,6 +1765,14 @@ fn session_effort_config_option(
     })
 }
 
+fn session_speed_config_option(
+    config_options: &[SessionConfigOption],
+) -> Option<&SessionConfigOption> {
+    config_options.iter().find(|option| {
+        option.id.to_string() == "speed" && matches!(option.kind, SessionConfigKind::Select(_))
+    })
+}
+
 fn models_from_session_config_options(
     config_options: &[SessionConfigOption],
 ) -> Vec<ProviderModel> {
@@ -1810,6 +1818,19 @@ fn models_from_session_config_options(
             }
         }
     }
+    if let Some(speed) = session_speed_config_option(config_options) {
+        let values = session_config_select_values(speed);
+        if values.contains(&"fast") && values.contains(&"standard") {
+            for model in &mut models {
+                model.service_tiers = vec![
+                    ProviderModelOption::keyed("fast", localized!("model_option.fast"))
+                        .keyed_description(localized!("model_option.fast_description")),
+                ];
+                model.default_service_tier = Some("default".to_owned());
+            }
+        }
+    }
+
     models
 }
 
@@ -1872,7 +1893,13 @@ fn devin_thought_level_value(
         .filter(|effort| !effort.is_empty())
         .map(normalize_reasoning_effort)
         .or_else(|| {
-            crate::model_catalog::packed_self_strip(model)
+            // Fusion's trailing effort belongs to the sidekick. The lead's
+            // embedded effort appears before `-sidekick-`.
+            let lead = model
+                .strip_prefix("fusion-")
+                .and_then(|pair| pair.split_once("-sidekick-"))
+                .map_or(model, |(lead, _)| lead);
+            crate::model_catalog::packed_self_strip(lead)
                 .map(|(_, suffix)| normalize_reasoning_effort(suffix))
         })?;
     session_config_select_values(option)
@@ -2002,7 +2029,7 @@ async fn apply_model(
     connection: &ConnectionTo<Agent>,
     provider: ProviderKind,
     session_id: &SessionId,
-    config_options: Option<&[SessionConfigOption]>,
+    session_config: &mut Option<Vec<SessionConfigOption>>,
     model: Option<&str>,
     reasoning_effort: Option<&str>,
     service_tier: Option<&str>,
@@ -2013,6 +2040,7 @@ async fn apply_model(
     let Some(model) = model else {
         return;
     };
+    let config_options = session_config.as_deref();
     let cursor_model_option = (provider == ProviderKind::Cursor)
         .then_some(config_options)
         .flatten()
@@ -2153,21 +2181,57 @@ async fn apply_model(
                 // agent advertises one — applied after the model set against
                 // the refreshed option list, and deliberately non-fatal like
                 // every other provider's effort write.
-                let refreshed: &[SessionConfigOption] = &options;
-                if let Some(effort_option) = session_effort_config_option(refreshed)
+                if let Some(effort_option) = session_effort_config_option(&options)
                     && let Some(effort) =
                         devin_thought_level_value(effort_option, model, reasoning_effort)
                     && session_config_current_value(effort_option) != Some(effort.as_str())
                 {
-                    let _ = connection
+                    if let Ok(response) = connection
                         .send_request(SetSessionConfigOptionRequest::new(
                             session_id.clone(),
                             effort_option.id.clone(),
                             effort.as_str(),
                         ))
                         .block_task()
-                        .await;
+                        .await
+                    {
+                        options = response.config_options;
+                    }
                 }
+                let speed = if service_tier == Some("fast") {
+                    "fast"
+                } else {
+                    "standard"
+                };
+                if let Some(option) = session_speed_config_option(&options) {
+                    if !session_config_select_values(option).contains(&speed) {
+                        let _ = events.send(DriverEvent::localized_error(localized!(
+                            "errors.select_model",
+                            error = format!("Devin did not advertise speed {speed}")
+                        )));
+                    } else if session_config_current_value(option) != Some(speed) {
+                        match connection
+                            .send_request(SetSessionConfigOptionRequest::new(
+                                session_id.clone(),
+                                option.id.clone(),
+                                speed,
+                            ))
+                            .block_task()
+                            .await
+                        {
+                            Ok(response) => options = response.config_options,
+                            Err(error) => {
+                                let _ = events.send(DriverEvent::localized_error(localized!(
+                                    "errors.select_model",
+                                    error = error
+                                )));
+                            }
+                        }
+                    }
+                }
+                // Keep provider-confirmed values for subsequent changes, including
+                // switching Fast back off or returning to the original pairing.
+                *session_config = Some(options);
                 return;
             }
         } else {
@@ -4324,6 +4388,213 @@ mod tests {
         assert_eq!(models[0].id, "swe-1-6-slow");
         assert_eq!(models[0].name, "swe-1-6-slow");
         assert!(models[0].is_default);
+    }
+
+    #[test]
+    fn devin_fusion_and_fast_changes_use_confirmed_session_configuration() {
+        use futures::{SinkExt, StreamExt};
+        let pair = "fusion-claude-opus-5-5-medium-sidekick-swe-2-high";
+        let initial = vec![
+            select_config_option(
+                "model",
+                SessionConfigOptionCategory::Model,
+                "swe-2-high",
+                &["swe-2-high", pair],
+            ),
+            select_config_option(
+                "thought_level",
+                SessionConfigOptionCategory::ThoughtLevel,
+                "high",
+                &["medium", "high", "max"],
+            ),
+            select_config_option(
+                "speed",
+                SessionConfigOptionCategory::Model,
+                "standard",
+                &["standard", "fast"],
+            ),
+        ];
+        let models =
+            crate::model_catalog::fold_packed_aliases(models_from_session_config_options(&initial));
+        let fusion = models.iter().find(|model| model.id == pair).unwrap();
+        assert_eq!(fusion.service_tiers[0].id, "fast");
+        assert_eq!(fusion.default_service_tier.as_deref(), Some("default"));
+        assert_eq!(
+            devin_thought_level_value(&initial[1], pair, None).as_deref(),
+            Some("medium")
+        );
+
+        let (request_tx, mut request_rx) = futures::channel::mpsc::channel::<String>(16);
+        let (mut response_tx, response_rx) = futures::channel::mpsc::channel::<String>(16);
+        let outgoing: std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>> =
+            Box::pin(request_tx.sink_map_err(std::io::Error::other));
+        let incoming: std::pin::Pin<
+            Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>,
+        > = Box::pin(response_rx.map(Ok::<String, std::io::Error>));
+        let transport = agent_client_protocol::Lines::new(outgoing, incoming);
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let seen = writes.clone();
+        let mut advertised = serde_json::to_value(&initial).unwrap();
+        let peer = thread::spawn(move || {
+            smol::block_on(async move {
+                while let Some(line) = request_rx.next().await {
+                    let message: Value = serde_json::from_str(&line).unwrap();
+                    assert_eq!(message["method"], "session/set_config_option");
+                    let config = message["params"]["configId"].as_str().unwrap();
+                    let value = message["params"]["value"].as_str().unwrap();
+                    seen.lock().push((config.to_owned(), value.to_owned()));
+                    let option = advertised
+                        .as_array_mut()
+                        .unwrap()
+                        .iter_mut()
+                        .find(|option| option["id"] == config)
+                        .unwrap();
+                    option["currentValue"] = json!(value);
+                    // Switching to Fusion expands the lead's effort ladder.
+                    if config == "model" && value == pair {
+                        advertised[1]["options"] = json!([
+                            {"value":"medium", "name":"Medium"},
+                            {"value":"high", "name":"High"},
+                            {"value":"xhigh", "name":"XHigh"}
+                        ]);
+                    }
+                    let response = json!({"jsonrpc":"2.0", "id":message["id"],
+                        "result":{"configOptions":advertised}});
+                    if response_tx.send(response.to_string()).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        });
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let run = Client
+            .builder()
+            .name("waku-devin-config-test")
+            .connect_with(transport, async move |connection: ConnectionTo<Agent>| {
+                let mut config = Some(initial);
+                for (model, effort, tier) in [
+                    (pair, Some("xhigh"), Some("fast")),
+                    (pair, Some("medium"), Some("default")),
+                    ("swe-2-high", Some("high"), None),
+                ] {
+                    apply_model(
+                        &connection,
+                        ProviderKind::Devin,
+                        &SessionId::new("session"),
+                        &mut config,
+                        Some(model),
+                        effort,
+                        tier,
+                        None,
+                        false,
+                        &events,
+                    )
+                    .await;
+                }
+                Ok(())
+            });
+        smol::block_on(run).unwrap();
+        peer.join().unwrap();
+        assert!(event_rx.try_iter().next().is_none());
+        assert_eq!(
+            *writes.lock(),
+            vec![
+                ("model".to_owned(), pair.to_owned()),
+                ("thought_level".to_owned(), "xhigh".to_owned()),
+                ("speed".to_owned(), "fast".to_owned()),
+                ("thought_level".to_owned(), "medium".to_owned()),
+                ("speed".to_owned(), "standard".to_owned()),
+                ("model".to_owned(), "swe-2-high".to_owned()),
+                ("thought_level".to_owned(), "high".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "requires an installed, authenticated Devin with Fusion"]
+    fn installed_devin_fusion_and_speed_round_trip() {
+        let binary = crate::command_env::find_executable("devin").expect("Devin is not installed");
+        let cwd = crate::acp_session::catalog_working_directory().unwrap();
+        let agent = catalog_agent(ProviderKind::Devin, &binary, &cwd).unwrap();
+        let run = Client
+            .builder()
+            .name("waku-devin-config-live")
+            .connect_with(agent, async move |connection: ConnectionTo<Agent>| {
+                connection
+                    .send_request(
+                        InitializeRequest::new(ProtocolVersion::V1)
+                            .client_capabilities(ClientCapabilities::new().terminal(false))
+                            .client_info(Implementation::new("waku", env!("CARGO_PKG_VERSION"))),
+                    )
+                    .block_task()
+                    .await?;
+                let response = connection
+                    .send_request(NewSessionRequest::new(cwd))
+                    .block_task()
+                    .await?;
+                let session_id = response.session_id;
+                let mut config = response.config_options;
+                let result = async {
+                    let options = config.as_deref().unwrap_or_default();
+                    let original = advertised_model_option(options)
+                        .and_then(session_config_current_value)
+                        .unwrap()
+                        .to_owned();
+                    let pair =
+                        session_config_select_values(advertised_model_option(options).unwrap())
+                            .into_iter()
+                            .find(|id| id.starts_with("fusion-"))
+                            .unwrap()
+                            .to_owned();
+                    let models = crate::model_catalog::fold_packed_aliases(
+                        models_from_session_config_options(options),
+                    );
+                    assert!(models.iter().any(|model| model.id == pair
+                        && model.service_tiers.iter().any(|tier| tier.id == "fast")));
+                    let (events, event_rx) = crate::driver::test_event_channel();
+                    for (model, tier, expected_speed) in [
+                        (pair.as_str(), "fast", "fast"),
+                        (pair.as_str(), "default", "standard"),
+                        (original.as_str(), "default", "standard"),
+                    ] {
+                        apply_model(
+                            &connection,
+                            ProviderKind::Devin,
+                            &session_id,
+                            &mut config,
+                            Some(model),
+                            None,
+                            Some(tier),
+                            None,
+                            false,
+                            &events,
+                        )
+                        .await;
+                        assert!(
+                            event_rx.try_iter().next().is_none(),
+                            "Devin configuration reported an error"
+                        );
+                        let options = config.as_deref().unwrap();
+                        assert_eq!(
+                            advertised_model_option(options).and_then(session_config_current_value),
+                            Some(model)
+                        );
+                        assert_eq!(
+                            session_speed_config_option(options)
+                                .and_then(session_config_current_value),
+                            Some(expected_speed)
+                        );
+                    }
+                    agent_client_protocol::Result::Ok(())
+                }
+                .await;
+                let _ = connection
+                    .send_request(DeleteSessionRequest::new(session_id))
+                    .block_task()
+                    .await;
+                result
+            });
+        smol::block_on(run).expect("Devin should confirm Fusion and speed settings");
     }
 
     #[test]
