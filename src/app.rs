@@ -4235,6 +4235,8 @@ pub struct Waku {
     /// manual relocation discards its stale outcomes.
     project_location_generation: Cell<u64>,
     transcript_row_kinds: RefCell<TranscriptRowSnapshot>,
+    /// Reuse history hashes across unchanged frames without retaining history.
+    transcript_fingerprint_cache: RefCell<TranscriptFingerprintCache>,
     /// Fingerprint of the transcript inputs `transcript_row_kinds` was folded
     /// from, so an unchanged transcript costs nothing on a frame. `None` until
     /// the first fold. See `transcript_rows_fingerprint`.
@@ -8091,6 +8093,7 @@ impl Waku {
                 missing_projects: HashSet::new(),
                 project_location_generation: Cell::new(0),
                 transcript_row_kinds: RefCell::default(),
+                transcript_fingerprint_cache: RefCell::default(),
                 transcript_row_kinds_fingerprint: Cell::new(None),
                 transcript_frame_epoch: Cell::new(0),
                 transcript_frame_scan: Cell::new(None),

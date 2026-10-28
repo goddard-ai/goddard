@@ -256,6 +256,14 @@
   keep GPUI list state on the UI thread. Row folding, splice comparison, Boss
   history projection and search still scan or prepare rows synchronously and
   need separate bounds; shared snapshots do not establish a frame-time budget.
+- The selected transcript's fingerprint cache compares weak identities of
+  messages, blocks, turns and queued messages before rescanning their metadata.
+  Identity changes include nested same-length edits with a single strong owner;
+  never replace this with length, timestamp or raw-address equality. Keep busy
+  status, disclosure membership, pending checkpoint, Boss-history revision and
+  queued-card presence outside the history cache. An unchanged history hit
+  holds no strong transcript snapshot. Streaming edits still scan changed
+  history, and other transcript views need their own cache/admission audit.
 - Native driver factories record an immutable attempt origin before contact,
   including factories that fail after starting work. Task/runtime removal and
   runtime-id reuse do not retire that origin. Only the selected attempt's

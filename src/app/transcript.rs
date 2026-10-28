@@ -1,4 +1,5 @@
 use super::*;
+use waku_protocol::shared_history::HistoryIdentity;
 
 /// Immutable row backing is shared by visibility-transition snapshots. The
 /// final owner retires its allocation off the UI thread, including after a
@@ -24,6 +25,60 @@ impl std::ops::Deref for TranscriptRowSnapshot {
 
     fn deref(&self) -> &Self::Target {
         self.0.get()
+    }
+}
+
+#[derive(PartialEq, Eq)]
+struct TranscriptHistoryKey {
+    session_id: Uuid,
+    messages: HistoryIdentity<Message>,
+    blocks: HistoryIdentity<TranscriptBlock>,
+    turns: HistoryIdentity<crate::model::AgentTurn>,
+    queued: HistoryIdentity<QueuedMessage>,
+}
+
+/// Cache only weak history identities, so repainting an unchanged transcript
+/// does not scan it or retain an old session's contents. Mutable history access
+/// revokes these identities even when no save snapshot shares the payload.
+#[derive(Default)]
+pub(super) struct TranscriptFingerprintCache {
+    history: Option<(TranscriptHistoryKey, u64)>,
+    #[cfg(test)]
+    history_scans: usize,
+}
+
+impl TranscriptFingerprintCache {
+    pub(super) fn fingerprint(
+        &mut self,
+        session: &AgentSession,
+        expanded_turns: &HashSet<Uuid>,
+        pending_turn: Option<Uuid>,
+    ) -> u64 {
+        let key = TranscriptHistoryKey {
+            session_id: session.id,
+            messages: session.messages.snapshot_identity(),
+            blocks: session.transcript_blocks.snapshot_identity(),
+            turns: session.turns.snapshot_identity(),
+            queued: session.queued_messages.snapshot_identity(),
+        };
+        let history = match &self.history {
+            Some((previous, hash)) if *previous == key => *hash,
+            _ => {
+                #[cfg(test)]
+                {
+                    self.history_scans += 1;
+                }
+                let hash = transcript_history_fingerprint(session);
+                self.history = Some((key, hash));
+                hash
+            }
+        };
+        finish_transcript_rows_fingerprint(
+            history,
+            session.status.is_busy(),
+            expanded_turns,
+            pending_turn,
+        )
     }
 }
 
@@ -60,11 +115,9 @@ impl Waku {
     /// Refold the cached row kinds, but only when the transcript they were
     /// folded from actually changed. Returns the row count.
     ///
-    /// `render` calls this on every frame and folding is O(turns × messages) —
-    /// a long session pays tens of thousands of operations plus a handful of
-    /// allocations to rebuild rows that are almost always identical to the ones
-    /// already cached. The fingerprint is one allocation-free linear pass, so a
-    /// settled transcript now costs a scan instead of a fold.
+    /// Weak history identities reuse the content fingerprint across unchanged
+    /// frames. A history change scans its metadata before deciding whether to
+    /// refold; status, disclosures and pending capture state are checked each time.
     pub(super) fn refresh_transcript_row_kinds(&self) -> usize {
         let fingerprint = self.scan_transcript_rows_fingerprint();
         self.transcript_frame_scan
@@ -75,8 +128,8 @@ impl Waku {
     /// `refresh_transcript_row_kinds` inside a `render_transcript` pass.
     ///
     /// The row builders reach this once per visible row per frame, and the
-    /// fingerprint scan is O(transcript) — so after the pass's first scan the
-    /// rest reuse `transcript_frame_scan`. `render_transcript` bumps
+    /// fingerprint lookup reuses unchanged history, and later rows in the
+    /// same pass reuse `transcript_frame_scan`. `render_transcript` bumps
     /// `transcript_frame_epoch` at its top, and nothing can mutate the
     /// session mid-draw, so the fingerprint cannot move until the next pass.
     pub(super) fn refresh_transcript_row_kinds_for_frame(&self) -> usize {
@@ -113,7 +166,7 @@ impl Waku {
             mix(
                 self.selected_session()
                     .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
-                        transcript_rows_fingerprint(
+                        self.transcript_fingerprint_cache.borrow_mut().fingerprint(
                             session,
                             &self.expanded_turns,
                             self.blocked_checkpoint_turn(session.id),
@@ -1536,18 +1589,16 @@ pub(super) fn transcript_rows_fingerprint(
     expanded_turns: &HashSet<Uuid>,
     pending_turn: Option<Uuid>,
 ) -> u64 {
+    finish_transcript_rows_fingerprint(
+        transcript_history_fingerprint(session),
+        session.status.is_busy(),
+        expanded_turns,
+        pending_turn,
+    )
+}
+
+fn transcript_history_fingerprint(session: &AgentSession) -> u64 {
     let mut hash = mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, session.id);
-
-    // The pending changed-files card's turn lives in the caller's capture
-    // queues and send queue, not the fold — a capture landing or a send
-    // queueing behind one must move the fingerprint or the card would
-    // appear and fill in a fold late.
-    hash = mix_turn_id(hash, pending_turn);
-
-    // The working indicator row exists only while the session is busy, and a
-    // driver error can drop the busy status without touching any turn — the
-    // turn statuses below would hold still while the rows moved.
-    hash = mix(hash, session.status.is_busy() as u64);
 
     hash = mix(hash, session.messages.len() as u64);
     for message in &session.messages {
@@ -1591,12 +1642,131 @@ pub(super) fn transcript_rows_fingerprint(
         );
     }
 
+    hash
+}
+
+fn finish_transcript_rows_fingerprint(
+    hash: u64,
+    busy: bool,
+    expanded_turns: &HashSet<Uuid>,
+    pending_turn: Option<Uuid>,
+) -> u64 {
+    // These inputs live outside the shared histories. Recheck them even on a
+    // history-cache hit, so status, disclosure and pending cards stay current.
+    let hash = mix(mix_turn_id(hash, pending_turn), busy as u64);
     // A set has no stable iteration order, so combine its members with an
     // order-independent sum instead of folding them in sequence.
     let expanded = expanded_turns.iter().fold(0u64, |combined, turn_id| {
         combined.wrapping_add(mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, *turn_id))
     });
     mix(mix(hash, expanded_turns.len() as u64), expanded)
+}
+
+#[cfg(test)]
+mod fingerprint_cache_tests {
+    use super::*;
+
+    fn fixture() -> AgentSession {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let turn = session.begin_turn("inspect the project");
+        session.push_message(MessageRole::Assistant, "the answer");
+        session.transcript_blocks.push(TranscriptBlock {
+            after_message: 1,
+            turn_id: Some(turn),
+            activities: Vec::new().into(),
+        });
+        session.finish_active_turn(TurnStatus::Completed);
+        session.status = SessionStatus::Idle;
+        session.queued_messages.push(QueuedMessage::new("next"));
+        session
+    }
+
+    #[test]
+    fn unchanged_frames_reuse_history_and_recheck_external_row_state() {
+        let mut session = fixture();
+        let turn = session.turns[0].id;
+        let mut cache = TranscriptFingerprintCache::default();
+        let mut expanded = HashSet::new();
+        let baseline = transcript_rows_fingerprint(&session, &expanded, None);
+        for _ in 0..256 {
+            assert_eq!(cache.fingerprint(&session, &expanded, None), baseline);
+        }
+        assert_eq!(cache.history_scans, 1);
+
+        session.title = "renamed".into();
+        for flags in 0..8 {
+            session.status = if flags & 1 == 0 {
+                SessionStatus::Idle
+            } else {
+                SessionStatus::Working
+            };
+            expanded.clear();
+            if flags & 2 != 0 {
+                expanded.insert(turn);
+            }
+            let pending = (flags & 4 != 0).then_some(turn);
+            let fingerprint = cache.fingerprint(&session, &expanded, pending);
+            assert_eq!(
+                fingerprint,
+                transcript_rows_fingerprint(&session, &expanded, pending)
+            );
+            assert_eq!(fingerprint == baseline, flags == 0);
+        }
+        assert_eq!(cache.history_scans, 1);
+
+        // Text can change without moving any row. Re-evaluate its history
+        // metadata once, but retain the same row fingerprint and fold.
+        let before = cache.fingerprint(&session, &expanded, None);
+        session.messages[1].content.push_str(" with more text");
+        assert_eq!(cache.fingerprint(&session, &expanded, None), before);
+        assert_eq!(cache.history_scans, 2);
+    }
+
+    #[test]
+    fn same_length_history_edits_revoke_cache_with_or_without_saved_snapshots() {
+        let mutations: [fn(&mut AgentSession); 4] = [
+            |session| session.messages[1].hidden = true,
+            |session| session.transcript_blocks[0].after_message = 2,
+            |session| session.turns[0].status = TurnStatus::Running,
+            |session| session.queued_messages[0].id = Uuid::new_v4(),
+        ];
+        for shared in [false, true] {
+            for mutate in mutations {
+                let mut session = fixture();
+                let saved = shared.then(|| session.clone());
+                let mut cache = TranscriptFingerprintCache::default();
+                let expanded = HashSet::new();
+                let before = cache.fingerprint(&session, &expanded, None);
+                let lengths = (
+                    session.messages.len(),
+                    session.transcript_blocks.len(),
+                    session.turns.len(),
+                    session.queued_messages.len(),
+                );
+                mutate(&mut session);
+                assert_eq!(
+                    lengths,
+                    (
+                        session.messages.len(),
+                        session.transcript_blocks.len(),
+                        session.turns.len(),
+                        session.queued_messages.len(),
+                    )
+                );
+                let after = cache.fingerprint(&session, &expanded, None);
+                assert_ne!(after, before);
+                assert_eq!(
+                    after,
+                    transcript_rows_fingerprint(&session, &expanded, None)
+                );
+                assert_eq!(cache.fingerprint(&session, &expanded, None), after);
+                assert_eq!(cache.history_scans, 2);
+                if let Some(saved) = saved {
+                    assert_eq!(cache.fingerprint(&saved, &expanded, None), before);
+                }
+            }
+        }
+    }
 }
 
 /// The fingerprint of "no session selected", and the seed everything else

@@ -1,0 +1,1 @@
+- The main transcript avoids rescanning unchanged message and turn histories on every repaint, reducing repeated work in long tasks.
