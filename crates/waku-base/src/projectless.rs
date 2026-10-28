@@ -13,6 +13,9 @@ use std::sync::{OnceLock, RwLock};
 use chrono::{Local, NaiveDate};
 use uuid::Uuid;
 
+mod verification;
+pub use verification::ArchiveVerification;
+
 const DEFAULT_SLUG: &str = "new-chat";
 const MAX_SLUG_BYTES: usize = 80;
 const MAX_NUMBERED_CANDIDATES: usize = 100;
@@ -183,12 +186,17 @@ fn archive_workspace_in(root: &Path, path: &Path) -> io::Result<PathBuf> {
     if let Some(parent) = destination.parent() {
         ensure_real_directory(parent)?;
     }
-    let staging = destination.with_extension("zip.partial");
-    let captured = write_workspace_zip(path, &staging).and_then(|()| {
-        // Reopen before the rename: a corrupt archive must not retire the
-        // directory it claims to preserve.
-        zip::ZipArchive::new(fs::File::open(&staging)?).map_err(zip_io_error)?;
-        fs::rename(&staging, &destination)
+    // Claim a private staging name before writing. Another capture must not
+    // truncate this attempt, and failed allocation owns nothing to unlink.
+    let staging = destination.with_extension(format!("zip.{}.partial", Uuid::new_v4()));
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&staging)?;
+    let captured = write_workspace_zip(path, file).and_then(|file| {
+        file.sync_all()?;
+        drop(file);
+        publish_workspace_zip(&staging, &destination)
     });
     if let Err(error) = captured {
         fs::remove_file(&staging).ok();
@@ -287,8 +295,8 @@ fn zip_io_error(error: zip::result::ZipError) -> io::Error {
 /// The zip stores workspace-relative paths so extraction can land wherever
 /// the session's recorded path points. Symlinks are preserved as symlinks —
 /// agent workspaces carry them in dependency trees like `node_modules/.bin`.
-fn write_workspace_zip(root: &Path, destination: &Path) -> io::Result<()> {
-    let mut writer = zip::ZipWriter::new(fs::File::create(destination)?);
+fn write_workspace_zip(root: &Path, destination: fs::File) -> io::Result<fs::File> {
+    let mut writer = zip::ZipWriter::new(destination);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
     let mut pending = vec![PathBuf::new()];
@@ -312,7 +320,28 @@ fn write_workspace_zip(root: &Path, destination: &Path) -> io::Result<()> {
             }
         }
     }
-    writer.finish().map_err(zip_io_error)?;
+    writer.finish().map_err(zip_io_error)
+}
+
+fn publish_workspace_zip(staging: &Path, destination: &Path) -> io::Result<()> {
+    let mut verification = ArchiveVerification::new(fs::File::open(staging)?);
+    loop {
+        match verification.advance() {
+            std::task::Poll::Pending => {}
+            std::task::Poll::Ready(result) => {
+                result?;
+                break;
+            }
+        }
+    }
+    drop(verification);
+    fs::rename(staging, destination)?;
+    // The verified archive's directory entry must be durable before the live
+    // workspace is removed. File contents were synced before verification.
+    #[cfg(unix)]
+    if let Some(parent) = destination.parent() {
+        fs::File::open(parent)?.sync_all()?;
+    }
     Ok(())
 }
 
@@ -792,6 +821,89 @@ mod tests {
         assert!(!restore_workspace_in(&root, &workspace).unwrap());
 
         fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn corrupt_zip_payload_cannot_replace_a_previous_archive() {
+        use io::{Read as _, Seek as _, Write as _};
+
+        let home = test_root();
+        let workspace = home.join("projects/2026-09-16/preserve-data");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(workspace.join("notes"), b"only live copy").unwrap();
+        let destination = home.join("previous.zip");
+        let mut previous = zip::ZipWriter::new(fs::File::create(&destination).unwrap());
+        previous
+            .start_file("notes", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        previous.write_all(b"previous valid copy").unwrap();
+        previous.finish().unwrap();
+        let previous_bytes = fs::read(&destination).unwrap();
+        let staging = home.join("attempt.zip.partial");
+        let mut capture = zip::ZipWriter::new(fs::File::create(&staging).unwrap());
+        capture
+            .start_file(
+                "notes",
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .unwrap();
+        capture.write_all(b"only live copy").unwrap();
+        capture.finish().unwrap();
+        let offset = zip::ZipArchive::new(fs::File::open(&staging).unwrap())
+            .unwrap()
+            .by_index(0)
+            .unwrap()
+            .data_start()
+            .expect("stored entry has a data offset");
+        let mut file = fs::OpenOptions::new().write(true).open(&staging).unwrap();
+        file.seek(io::SeekFrom::Start(offset)).unwrap();
+        file.write_all(b"X").unwrap();
+        drop(file);
+
+        // Reproduce the old verification: the central directory still opens.
+        assert!(zip::ZipArchive::new(fs::File::open(&staging).unwrap()).is_ok());
+        assert!(publish_workspace_zip(&staging, &destination).is_err());
+        assert_eq!(fs::read(&destination).unwrap(), previous_bytes);
+        assert_eq!(
+            fs::read(workspace.join("notes")).unwrap(),
+            b"only live copy"
+        );
+        assert!(staging.exists());
+        let mut archive = zip::ZipArchive::new(fs::File::open(&destination).unwrap()).unwrap();
+        let mut restored = String::new();
+        archive
+            .by_index(0)
+            .unwrap()
+            .read_to_string(&mut restored)
+            .unwrap();
+        assert_eq!(restored, "previous valid copy");
+        drop(archive);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn archive_does_not_reuse_another_attempts_partial_file() {
+        let home = test_root();
+        let root = home.join("projects");
+        let workspace = root.join("2026-09-16/preserve-data");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(workspace.join("notes"), b"live copy").unwrap();
+        let destination = archive_path_in(&root, &workspace).unwrap();
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        let other_attempt = destination.with_extension("zip.partial");
+        fs::write(&other_attempt, b"another attempt owns these bytes").unwrap();
+        assert_eq!(
+            archive_workspace_in(&root, &workspace).unwrap(),
+            destination
+        );
+        assert_eq!(
+            fs::read(&other_attempt).unwrap(),
+            b"another attempt owns these bytes"
+        );
+        assert!(restore_workspace_in(&root, &workspace).unwrap());
+        assert_eq!(fs::read(workspace.join("notes")).unwrap(), b"live copy");
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

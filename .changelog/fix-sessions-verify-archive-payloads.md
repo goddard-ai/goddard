@@ -1,0 +1,1 @@
+- Projectless workspace archiving verifies every file before replacing the saved archive or removing the live directory, preserving the previous archive when verification fails.

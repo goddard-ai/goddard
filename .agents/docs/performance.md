@@ -224,6 +224,16 @@
   initialized database without creating it or rerunning migrations, and defer
   SQLite write contention immediately. Heavy preservation/removal must use
   separate heavy admission, never this bounded unknown-telemetry fallback.
+- Projectless archive publication reads every ZIP payload to EOF before rename
+  or live-directory retirement: opening the central directory does not validate
+  entry CRCs. `ArchiveVerification` is worker-only and retains read progress
+  across 64 KiB payload/entry boundaries; dropping it does not drain the current
+  entry. Its first step parses central-directory metadata, so advance it only
+  under heavy admission. Legacy archive RPCs still drive it to completion;
+  this verifier alone does not make archive capture or retirement idle-gated.
+  Each capture exclusively claims a unique partial file, syncs written bytes,
+  verifies, publishes and syncs the parent directory on Unix before retiring
+  the live workspace. Failed capture/verification retains the prior archive.
 - Daemon `RestoreRef` and `RestoreProjectlessWorkspace` requests hold a
   destination materialization lease through the full filesystem operation.
   `EnsureWorktree` uses typed source/destination admission at the real checkout
