@@ -18,7 +18,7 @@ const READY: &str = "SELECT intent.session_id, intent.generation, intent.phase,
  WHERE intent.phase NOT IN ('complete', 'ignored') AND intent.retry_at <= ?1
  ORDER BY intent.retry_at, intent.session_id LIMIT 128";
 
-const CURRENT_CATALOG: &str = "SELECT 1 FROM sessions AS session
+pub(super) const CURRENT_CATALOG: &str = "SELECT 1 FROM sessions AS session
  JOIN projects AS project ON project.id = session.project_id
  WHERE session.id = intent.session_id
    AND session.project_id IS intent.project_id
@@ -40,6 +40,7 @@ struct QueuedIntent {
 enum Disposition {
     Ignore,
     AwaitExecutor,
+    AwaitRetirement,
     Invalid(&'static str),
 }
 
@@ -55,6 +56,9 @@ impl QueuedIntent {
             return Disposition::Invalid("oversized-cleanup-descriptor");
         }
         if self.phase != "pending" {
+            if self.phase == "preserved" {
+                return Disposition::AwaitRetirement;
+            }
             return if matches!(self.phase.as_str(), "captured" | "verified" | "retired") {
                 Disposition::AwaitExecutor
             } else {
@@ -117,9 +121,9 @@ impl StateStore {
         &self,
         now: u64,
         should_continue: impl Fn() -> bool,
-    ) -> io::Result<()> {
+    ) -> io::Result<Vec<CleanupToken>> {
         if !should_continue() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         // Startup already initialized this database. Do not run migrations,
         // change journal mode, create directories, or wait behind a mandatory
@@ -158,11 +162,14 @@ impl StateStore {
              WHERE session_id = ?1 AND generation = ?2 AND phase = ?3
                AND EXISTS ({CURRENT_CATALOG})"
         );
+        let mut offered = Vec::new();
         for row in rows {
             if !should_continue() {
                 break;
             }
-            let (reason, failure) = match row.disposition() {
+            let disposition = row.disposition();
+            let offer = matches!(disposition, Disposition::AwaitExecutor);
+            let (reason, failure) = match disposition {
                 Disposition::Ignore => {
                     let changed = connection
                         .execute(&ignore, params![row.session_id, row.generation, row.phase])
@@ -173,6 +180,7 @@ impl StateStore {
                     ("catalog-state-mismatch", true)
                 }
                 Disposition::AwaitExecutor => ("awaiting-preservation-executor", false),
+                Disposition::AwaitRetirement => ("awaiting-qualified-retirement", false),
                 Disposition::Invalid(reason) => (reason, true),
             };
             let failures = if failure {
@@ -182,10 +190,12 @@ impl StateStore {
             };
             let delay = if failure {
                 (2i64.saturating_pow(failures.min(8) as u32)).min(300)
-            } else {
+            } else if offer {
                 30
+            } else {
+                300
             };
-            connection
+            let changed = connection
                 .execute(
                     "UPDATE workspace_cleanup_intents
                 SET retry_at = ?4, failures = ?5, last_error = ?6
@@ -200,8 +210,14 @@ impl StateStore {
                     ],
                 )
                 .map_err(to_io_error)?;
+            if offer && changed != 0 {
+                offered.push(CleanupToken {
+                    session_id: Uuid::parse_str(&row.session_id).map_err(to_io_error)?,
+                    generation: Uuid::parse_str(&row.generation).map_err(to_io_error)?,
+                });
+            }
         }
-        Ok(())
+        Ok(offered)
     }
 }
 

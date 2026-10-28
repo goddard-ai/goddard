@@ -5,6 +5,8 @@
 use super::*;
 
 mod queue;
+mod execution;
+pub use execution::{CleanupCatalogRow, CleanupDescriptor, CleanupRun, CleanupToken};
 
 /// Read the committed row, never the incoming client projection: metadata
 /// fencing may have preserved a newer archive flag or workspace descriptor.

@@ -17,6 +17,7 @@ mod stable_stop;
 mod stable_writer;
 pub use stable_writer::StableWriterOrigin;
 mod workspace_cleanup;
+pub use workspace_cleanup::{CleanupCatalogRow, CleanupDescriptor, CleanupRun, CleanupToken};
 mod terminal_writer;
 pub use terminal_writer::TerminalWriterOrigin;
 mod native_writer;

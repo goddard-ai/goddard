@@ -740,6 +740,8 @@ mod task_creation;
 mod transfer;
 mod workspace_admission;
 mod workspace_writers;
+#[cfg(unix)]
+mod projectless_cleanup;
 
 use driver_commands::*;
 use events::*;

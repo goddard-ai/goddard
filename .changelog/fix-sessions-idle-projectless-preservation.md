@@ -1,0 +1,1 @@
+- The daemon can prepare verified recovery archives for archived projectless tasks during idle time, without a desktop client staying open; the live workspace remains available.

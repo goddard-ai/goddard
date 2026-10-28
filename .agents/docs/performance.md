@@ -224,6 +224,24 @@
   initialized database without creating it or rerunning migrations, and defer
   SQLite write contention immediately. Heavy preservation/removal must use
   separate heavy admission, never this bounded unknown-telemetry fallback.
+- The cleanup consumer offers at most 128 generation tokens, after committing
+  their next due time. A full scheduler or interrupted dispatch leaves the
+  durable rows eligible for retry. Unix projectless preservation runs through
+  `Unit::Heavy`, loading its descriptor only after admission. The worker holds
+  source and archive-destination admission through capture and publication,
+  pages narrow owner metadata with alias checks, and checks load/cancellation
+  between chunks and stages. It releases heavy state and its leases when load
+  rises; retry recaptures current contents under a fresh lease. Failed or paused
+  attempts return to durable bounded backoff and release their scheduler keys;
+  uncertain artifacts cannot permanently occupy every in-memory queue slot.
+- `workspace_cleanup_runs` records capture/verify/publish/preserved progress
+  with FULL SQLite synchronization before effects. Recovery compares the
+  promoted catalog, archive generation, source and artifact identities. Unknown
+  prior archives and ambiguous partials are retained. Records outlive revoked
+  intents so older artifacts do not become anonymous. Preservation leaves the
+  live directory and intent pending in `preserved`, which dispatches only
+  lightweight metadata until retirement is implemented. Qualified retirement, orphan reclamation,
+  managed-worktree execution and replacing desktop archive chains remain open.
 - Projectless archive publication reads every ZIP payload to EOF before rename
   or live-directory retirement: opening the central directory does not validate
   entry CRCs. `ArchiveVerification` is worker-only and retains read progress

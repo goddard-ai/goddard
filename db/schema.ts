@@ -12,7 +12,7 @@
  * fetched only when a session is opened.
  */
 
-import { blob, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { blob, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const projects = sqliteTable("projects", {
@@ -277,7 +277,7 @@ export const workspaceCleanupIntents = sqliteTable(
     /** Exact promoted workspace descriptor; NULL means the project's ordinary cwd. */
     workspace: text("workspace"),
     archivedAt: integer("archived_at").notNull(),
-    /** pending | captured | verified | retired | complete | ignored */
+    /** pending | captured | verified | preserved | retired | complete | ignored */
     phase: text("phase").notNull().default("pending"),
     retryAt: integer("retry_at").notNull().default(0),
     failures: integer("failures").notNull().default(0),
@@ -288,6 +288,19 @@ export const workspaceCleanupIntents = sqliteTable(
     index("workspace_cleanup_dispatch").on(table.retryAt, table.sessionId)
       .where(sql`${table.phase} NOT IN ('complete', 'ignored')`),
   ],
+);
+
+/** Filesystem recovery records outlive the archive intent that created them. */
+export const workspaceCleanupRuns = sqliteTable(
+  "workspace_cleanup_runs",
+  {
+    sessionId: text("session_id").notNull(),
+    generation: text("generation").notNull(),
+    phase: text("phase").notNull(),
+    /** Versioned worker descriptor; never a transcript or deletion permission. */
+    payload: text("payload").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.sessionId, table.generation] })],
 );
 
 /** Unqualified terminal origins survive closure and restart; no task FK or exit inference. */

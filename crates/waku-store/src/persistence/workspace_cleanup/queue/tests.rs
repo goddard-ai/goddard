@@ -60,9 +60,12 @@ fn dispatch_is_indexed_bounded_and_does_not_hydrate_transcripts() {
         .advance_workspace_cleanup_queue(1000, || false)
         .unwrap();
     assert_eq!(ignored(), 0);
-    store
-        .advance_workspace_cleanup_queue(1000, || true)
-        .unwrap();
+    assert!(
+        store
+            .advance_workspace_cleanup_queue(1000, || true)
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(ignored(), 128);
     let calls = Cell::new(0);
     store
@@ -151,9 +154,18 @@ fn dispatch_retains_owned_uncertain_and_later_stage_intents_across_reopen() {
     drop(store);
     let store = StateStore::daemon(root.join("app.db"));
     // Maintenance reads only the promoted catalog, even before detail loading.
-    store
+    let offered = store
         .advance_workspace_cleanup_queue(1000, || true)
         .unwrap();
+    assert_eq!(offered.len(), 3);
+    for token in offered {
+        assert!(
+            [0, 4, 7]
+                .iter()
+                .any(|&index| state.sessions[index].id == token.session_id)
+        );
+        assert!(store.workspace_cleanup_run(token).unwrap().is_none());
+    }
     for index in [1, 2, 3] {
         assert_eq!(
             row(&store, state.sessions[index].id),

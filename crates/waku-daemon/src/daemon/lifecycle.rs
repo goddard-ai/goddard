@@ -1093,11 +1093,20 @@ impl WakuBackend {
                         })?;
                     return Ok(Progress::More);
                 }
-                backend
+                let offered = backend
                     .task_store
                     .advance_workspace_cleanup_queue(crate::model::unix_time(), || {
                         permit.should_continue()
                     })?;
+                #[cfg(unix)]
+                for token in offered {
+                    if !permit.should_continue() {
+                        break;
+                    }
+                    backend.schedule_projectless_cleanup(token)?;
+                }
+                #[cfg(not(unix))]
+                let _ = offered;
                 // Keep one lightweight consumer alive for archive writes that
                 // arrive after startup. Queue membership never grants deletion.
                 Ok(Progress::More)

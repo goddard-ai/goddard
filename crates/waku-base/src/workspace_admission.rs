@@ -195,7 +195,9 @@ impl WorkspaceAdmission {
 /// Resolve the nearest existing ancestor without treating a dangling symlink
 /// as a missing ordinary directory. The suffix may contain only normal names.
 #[cfg(unix)]
-fn catalog_path(path: &Path) -> anyhow::Result<PathBuf> {
+/// Resolve existing aliases and missing suffixes using the same bounded rules
+/// as catalog admission. Call only on workers, before comparing physical owners.
+pub fn catalog_path(path: &Path) -> anyhow::Result<PathBuf> {
     let absolute = std::path::absolute(path)?;
     let mut existing = absolute.as_path();
     let mut suffix = Vec::new();

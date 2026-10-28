@@ -15,6 +15,8 @@ use uuid::Uuid;
 
 mod capture;
 pub use capture::ArchiveCapture;
+mod locations;
+pub use locations::ArchiveLocations;
 mod verification;
 pub use verification::ArchiveVerification;
 
