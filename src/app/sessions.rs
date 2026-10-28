@@ -2930,6 +2930,7 @@ impl Waku {
             self.cancel_session_turn(session_id, cx);
         }
         self.evict_session_runtime(session_id);
+        self.detach_pinned_session_terminals(session_id, cx);
         // Side chats die with their parent rather than archiving: the
         // workspace cleanup below removes the checkout they work in.
         for child_id in self.side_chat_descendants(session_id) {

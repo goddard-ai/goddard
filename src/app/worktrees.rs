@@ -1,6 +1,42 @@
 use super::*;
 use futures::{StreamExt, stream::FuturesUnordered};
 
+#[derive(Debug, PartialEq, Eq)]
+enum WorkspaceTerminalCleanup {
+    Detach(Uuid),
+    Close(Uuid),
+}
+
+fn workspace_terminal_cleanup(
+    records: &HashMap<Uuid, TerminalRecord>,
+    session_id: Uuid,
+    workspace_path: &Path,
+) -> Vec<WorkspaceTerminalCleanup> {
+    let anchors = records
+        .iter()
+        .filter(|(_, record)| {
+            record.session == Some(session_id)
+                || record
+                    .working_directory
+                    .as_ref()
+                    .is_some_and(|dir| dir.starts_with(workspace_path))
+        })
+        .map(|(id, record)| record.pane_of.unwrap_or(*id))
+        .collect::<HashSet<_>>();
+    anchors
+        .into_iter()
+        .filter_map(|id| {
+            let record = records.get(&id)?;
+            if record.pinned {
+                // Already detached groups need no further surface changes.
+                record.session.map(|_| WorkspaceTerminalCleanup::Detach(id))
+            } else {
+                Some(WorkspaceTerminalCleanup::Close(id))
+            }
+        })
+        .collect()
+}
+
 /// Keyboard-navigable rows in the composer worktree picker.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum WorktreePickerAction {
@@ -1287,30 +1323,20 @@ impl Waku {
         .detach();
     }
 
-    /// Close every terminal whose PTY ran inside a removed workspace — the
-    /// session's own, wherever their surfaces live, plus any global terminal
-    /// spawned into the directory. A surviving shell would keep running
-    /// against a deleted cwd.
+    /// Retire terminals in a removed workspace. Pinned groups keep their PTYs
+    /// as standalone terminals; unpinned groups close with the workspace.
     fn close_workspace_terminals(
         &mut self,
         session_id: Uuid,
         workspace_path: &Path,
         cx: &mut Context<Self>,
     ) {
-        let terminal_ids = self
-            .terminal_records
-            .iter()
-            .filter_map(|(terminal_id, record)| {
-                (record.session == Some(session_id)
-                    || record
-                        .working_directory
-                        .as_ref()
-                        .is_some_and(|dir| dir.starts_with(workspace_path)))
-                .then_some(*terminal_id)
-            })
-            .collect::<Vec<_>>();
-        for terminal_id in terminal_ids {
-            self.close_terminal(terminal_id, cx);
+        for action in workspace_terminal_cleanup(&self.terminal_records, session_id, workspace_path)
+        {
+            match action {
+                WorkspaceTerminalCleanup::Detach(id) => self.detach_terminal_to_group(id, cx),
+                WorkspaceTerminalCleanup::Close(id) => self.close_terminal(id, cx),
+            }
         }
     }
 
@@ -1832,6 +1858,65 @@ impl ExistingWorktreePicker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_cleanup_preserves_pinned_groups_and_closes_unpinned_groups() {
+        let session = Uuid::from_u128(1);
+        let pinned = Uuid::from_u128(2);
+        let pane = Uuid::from_u128(3);
+        let unpinned = Uuid::from_u128(4);
+        let standalone = Uuid::from_u128(5);
+        let unrelated = Uuid::from_u128(6);
+        let workspace = Path::new("/workspace/task");
+        let record = |session, pinned, directory: &Path, pane_of, panes| TerminalRecord {
+            session,
+            pinned,
+            working_directory: Some(directory.to_path_buf()),
+            last_working_directory: None,
+            workspace_directory: None,
+            opened_at: 42,
+            custom_title: None,
+            pane_of,
+            panes,
+            pane_layout: None,
+        };
+        let mut records = HashMap::from([
+            (
+                pinned,
+                record(Some(session), true, workspace, None, vec![pane]),
+            ),
+            (
+                pane,
+                record(Some(session), false, workspace, Some(pinned), vec![]),
+            ),
+            (
+                unpinned,
+                record(Some(session), false, workspace, None, vec![]),
+            ),
+            (
+                standalone,
+                record(None, false, &workspace.join("nested"), None, vec![]),
+            ),
+            (
+                unrelated,
+                record(None, false, Path::new("/elsewhere"), None, vec![]),
+            ),
+        ]);
+        let actions = workspace_terminal_cleanup(&records, session, workspace);
+        assert_eq!(actions.len(), 3);
+        assert!(actions.contains(&WorkspaceTerminalCleanup::Detach(pinned)));
+        assert!(actions.contains(&WorkspaceTerminalCleanup::Close(unpinned)));
+        assert!(actions.contains(&WorkspaceTerminalCleanup::Close(standalone)));
+
+        // A later cleanup still sees the detached group's old cwd. Neither
+        // the anchor nor its unpinned pane may be closed through that match.
+        records.get_mut(&pinned).unwrap().session = None;
+        records.get_mut(&pane).unwrap().session = None;
+        let actions = workspace_terminal_cleanup(&records, session, workspace);
+        assert_eq!(actions.len(), 2);
+        assert!(actions.contains(&WorkspaceTerminalCleanup::Close(unpinned)));
+        assert!(actions.contains(&WorkspaceTerminalCleanup::Close(standalone)));
+    }
 
     #[test]
     fn existing_worktrees_show_their_name_in_both_checkout_layouts() {

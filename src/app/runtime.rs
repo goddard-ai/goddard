@@ -2778,6 +2778,11 @@ impl Waku {
                 .retain(|session| remote_session_visible(session, boss_experiment_enabled));
         }
         let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
+        for session in &snapshot.sessions {
+            if session.archived_at.is_some() {
+                self.detach_pinned_session_terminals(session.id, cx);
+            }
+        }
         let known_session_ids = self
             .state
             .sessions

@@ -933,6 +933,10 @@ impl Waku {
     /// The record half of a detach: drop the session binding and pin the
     /// live directory so the shell keeps running where it is.
     fn detach_terminal_record(&mut self, terminal_id: Uuid, cx: &App) {
+        let directory = self
+            .terminal_records
+            .get(&terminal_id)
+            .and_then(|record| self.terminal_spawn_directory(record));
         let Some(record) = self.terminal_records.get_mut(&terminal_id) else {
             return;
         };
@@ -941,13 +945,33 @@ impl Waku {
             record.working_directory = self
                 .right_panel_terminals
                 .get(&terminal_id)
-                .map(|terminal| terminal.read(cx).working_directory().to_path_buf());
+                .map(|terminal| terminal.read(cx).working_directory().to_path_buf())
+                .or(directory);
         }
         record.last_working_directory = record
             .working_directory
             .clone()
             .or_else(|| record.last_working_directory.clone());
         record.workspace_directory = None;
+    }
+
+    /// Pinned groups outlive their task, including panes without their own pin.
+    pub(super) fn detach_pinned_session_terminals(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let terminals = self
+            .terminal_records
+            .iter()
+            .filter_map(|(id, record)| {
+                (record.session == Some(session_id) && record.pinned && record.pane_of.is_none())
+                    .then_some(*id)
+            })
+            .collect::<Vec<_>>();
+        for terminal_id in terminals {
+            self.detach_terminal_to_group(terminal_id, cx);
+        }
     }
 
     /// Move a session-scoped terminal out of every session strip and into
@@ -976,21 +1000,7 @@ impl Waku {
         for pane in panes {
             self.detach_terminal_record(pane, cx);
         }
-        let Some(record) = self.terminal_records.get_mut(&terminal_id) else {
-            return;
-        };
-        record.session = None;
-        if record.working_directory.is_none() {
-            record.working_directory = self
-                .right_panel_terminals
-                .get(&terminal_id)
-                .map(|terminal| terminal.read(cx).working_directory().to_path_buf());
-        }
-        record.last_working_directory = record
-            .working_directory
-            .clone()
-            .or_else(|| record.last_working_directory.clone());
-        record.workspace_directory = None;
+        self.detach_terminal_record(terminal_id, cx);
         self.remove_terminal_surfaces(terminal_id, cx);
         self.sidebar_rows_fingerprint.set(None);
         // Reveal the terminal's new home — under a folded group the row
