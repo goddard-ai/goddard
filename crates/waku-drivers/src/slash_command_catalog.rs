@@ -76,7 +76,7 @@ fn discover_claude(binary: &Path, project_root: &Path) -> Option<Vec<SlashComman
 fn discover_codex(binary: &Path, project_root: &Path) -> Option<Vec<SlashCommand>> {
     let mut command = crate::command_env::command(binary);
     command
-        .args(["app-server", "--stdio"])
+        .args(["app-server", "--listen", "stdio://"])
         .current_dir(project_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
