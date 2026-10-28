@@ -13,6 +13,8 @@ use std::sync::{OnceLock, RwLock};
 use chrono::{Local, NaiveDate};
 use uuid::Uuid;
 
+mod capture;
+pub use capture::ArchiveCapture;
 mod verification;
 pub use verification::ArchiveVerification;
 
@@ -296,31 +298,15 @@ fn zip_io_error(error: zip::result::ZipError) -> io::Error {
 /// the session's recorded path points. Symlinks are preserved as symlinks —
 /// agent workspaces carry them in dependency trees like `node_modules/.bin`.
 fn write_workspace_zip(root: &Path, destination: fs::File) -> io::Result<fs::File> {
-    let mut writer = zip::ZipWriter::new(destination);
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-    let mut pending = vec![PathBuf::new()];
-    while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(root.join(&directory))? {
-            let entry = entry?;
-            let relative = directory.join(entry.file_name());
-            let name = relative.to_string_lossy().into_owned();
-            let file_type = entry.file_type()?;
-            if file_type.is_dir() {
-                writer.add_directory(name, options).map_err(zip_io_error)?;
-                pending.push(relative);
-            } else if file_type.is_symlink() {
-                let target = fs::read_link(entry.path())?;
-                writer
-                    .add_symlink(name, target.to_string_lossy().into_owned(), options)
-                    .map_err(zip_io_error)?;
-            } else if file_type.is_file() {
-                writer.start_file(name, options).map_err(zip_io_error)?;
-                io::copy(&mut fs::File::open(entry.path())?, &mut writer)?;
+    let mut capture = ArchiveCapture::new(root.to_path_buf(), destination);
+    loop {
+        match capture.advance() {
+            std::task::Poll::Pending => {}
+            std::task::Poll::Ready(result) => {
+                return result;
             }
         }
     }
-    writer.finish().map_err(zip_io_error)
 }
 
 fn publish_workspace_zip(staging: &Path, destination: &Path) -> io::Result<()> {

@@ -6,7 +6,7 @@ use std::io::Read as _;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
-const CHUNK_BYTES: usize = 64 * 1024;
+pub(super) const CHUNK_BYTES: usize = 64 * 1024;
 
 /// Worker-only verification, with no I/O at construction. Each advance reads
 /// at most one 64 KiB payload chunk or visits an empty/finished entry. Opening
@@ -52,7 +52,7 @@ impl ArchiveVerification {
     }
 }
 
-async fn boundary() {
+pub(super) async fn boundary() {
     let mut first = true;
     poll_fn(move |cx| {
         if std::mem::replace(&mut first, false) {

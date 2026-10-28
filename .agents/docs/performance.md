@@ -234,6 +234,14 @@
   Each capture exclusively claims a unique partial file, syncs written bytes,
   verifies, publishes and syncs the parent directory on Unix before retiring
   the live workspace. Failed capture/verification retains the prior archive.
+- `ArchiveCapture` retains directory traversal, source reads and compression
+  state across 64 KiB/entry/directory boundaries on a worker. Its cancellation
+  guard disables output before ZIP's automatic drop-time finalization, including
+  on source errors; dropping a paused capture leaves its partial file unfinished
+  and preserves the source. The caller owns that partial pathname and its later
+  cleanup. Finalizing the central directory is still one metadata step and
+  requires heavy admission. The legacy archive RPC currently drives all steps
+  immediately; cooperative capture alone does not defer it until idle.
 - Daemon `RestoreRef` and `RestoreProjectlessWorkspace` requests hold a
   destination materialization lease through the full filesystem operation.
   `EnsureWorktree` uses typed source/destination admission at the real checkout
