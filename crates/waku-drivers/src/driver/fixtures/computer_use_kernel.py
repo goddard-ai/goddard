@@ -21,9 +21,9 @@ for line in sys.stdin:
         sys.stderr.write("synthetic startup failure\n" + "x" * (128 * 1024))
         sys.stderr.flush()
         sys.exit(23)
-    if code == "block":
+    if code in ("block", "stuck"):
         (root / "started").touch()
-        while not (root / "cancel-kernel").exists():
+        while code == "stuck" or not (root / "cancel-kernel").exists():
             time.sleep(0.01)
     if request["params"]["name"] == "js_reset":
         calls = 0

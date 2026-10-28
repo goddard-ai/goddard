@@ -3208,7 +3208,24 @@ fn computer_command(arguments: &[String]) -> anyhow::Result<Command> {
 
 fn computer(arguments: Vec<String>) -> anyhow::Result<()> {
     let command = computer_command(&arguments)?;
-    match connect()?.request_with_timeout(request_session_id(), Uuid::nil(), command, None)? {
+    // Bound the caller too: an unhealthy daemon must not strand the shell or
+    // its resource supervisor. The service owns cancellation and action safety;
+    // a lost wire response remains ambiguous and must never be replayed.
+    let budget_ms = match &command {
+        Command::AgentComputerUse { timeout_ms, .. } => timeout_ms.unwrap_or(300_000).min(300_000),
+        // The bounded browser runner has a separate 10-second cleanup call.
+        Command::AgentComputerUseRun { request } => {
+            request.timeout_ms.unwrap_or(60_000).min(120_000) + 10_000
+        }
+        Command::AgentComputerUseReset => 10_000,
+        _ => unreachable!(),
+    };
+    match connect()?.request_with_timeout(
+        request_session_id(),
+        Uuid::nil(),
+        command,
+        Some(std::time::Duration::from_millis(budget_ms + 2_000)),
+    )? {
         ResponsePayload::AgentComputerUseResult { result } => {
             println!("{}", serde_json::to_string_pretty(&result)?);
             if result["isError"] == true {

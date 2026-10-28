@@ -48,6 +48,13 @@ exit status. A lost transport response must not be retried automatically:
 the action may already have run. A new call after transport failure starts a
 fresh kernel. Computer use remains unavailable in cloud and sandbox tasks.
 
+`--timeout-ms` includes waiting behind another kernel call. Reset cancels active
+and queued calls before resetting, with a 10-second service budget. The CLI
+allows a further 2 seconds for the connected transport to deliver a result.
+Connection establishment has its own transport limits. Reset does not restore denied
+or disabled access. After a timeout or lost response, observe the app before
+deciding on another action; the earlier action may already have run.
+
  Use the direct `cua` methods documented here;
 all methods are available immediately after bootstrap. Goddard shows Cua's native
 virtual cursor automatically while actions run; no cursor setup is needed.
@@ -184,6 +191,20 @@ for (var image of state.content ?? []) {
 
 Each method returns `content`, optional `structuredContent`, and optional
 `isError`. If `isError` is true, read the error before deciding what to do next.
+Printing a native result does not make the JavaScript call fail: the script
+successfully printed a value. For scripts that must fail on a native error:
+
+```js
+var result = await cua.list_apps();
+jsRepl.write(result);
+if (result.isError) throw new Error("Native Computer Use call failed; see result");
+```
+
+An `AXPopUpButton` role alone does not prove a web control is an HTML `select`.
+If background opening is refused, do not switch to foreground input without the
+user's agreement. Use `set_value` only for an actual selectable option; a custom
+menu's action may require opening the menu. A returned list containing only the
+button label is insufficient evidence that its menu options were enumerated.
 Keep native window IDs intact; do not convert them to 32-bit integers.
 
 ## Act and verify

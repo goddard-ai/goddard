@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
 use base64::Engine as _;
@@ -32,7 +32,7 @@ pub fn for_task(task: Uuid) -> anyhow::Result<Arc<Service>> {
 }
 
 struct Connection {
-    input: ChildStdin,
+    input: Option<ChildStdin>,
     output: Receiver<anyhow::Result<Value>>,
     stderr_path: PathBuf,
 }
@@ -174,7 +174,7 @@ impl Service {
             return Err(error.into());
         }
         Ok(Connection {
-            input,
+            input: Some(input),
             output: receiver,
             stderr_path,
         })
@@ -186,7 +186,17 @@ impl Service {
         timeout_ms: Option<u64>,
         title: Option<&str>,
     ) -> anyhow::Result<Value> {
-        self.call_inner(code, timeout_ms, title, None)
+        // Reset is a recovery operation: invalidate active and queued calls
+        // before waiting for the execution lock. Never revive their actions.
+        if code.is_none() {
+            self.cancel();
+        }
+        self.call_inner(
+            code,
+            timeout_ms.or(code.is_none().then_some(10_000)),
+            title,
+            None,
+        )
     }
 
     pub fn cancellation_generation(&self) -> u64 {
@@ -221,15 +231,29 @@ impl Service {
         if code.is_some_and(|code| code.len() > 1024 * 1024) {
             bail!("JavaScript exceeds 1 MB");
         }
-        let mut connection = self.connection.lock();
-        if expected_generation
-            .is_some_and(|generation| self.cancellation_generation() != generation)
-        {
-            bail!("computer-use run was cancelled");
-        }
-        if self.closed.load(Ordering::Acquire) {
-            bail!("computer-use runtime has closed");
-        }
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        let generation = expected_generation.unwrap_or_else(|| self.cancellation_generation());
+        let check_active = || -> anyhow::Result<()> {
+            if self.closed.load(Ordering::Acquire) {
+                bail!("computer-use runtime has closed");
+            }
+            if self.cancellation_generation() != generation {
+                bail!("computer-use run was cancelled");
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "computer-use request timed out after {timeout_ms} ms (including queue wait)"
+                );
+            }
+            Ok(())
+        };
+        let mut connection = loop {
+            check_active()?;
+            if let Some(connection) = self.connection.try_lock_for(Duration::from_millis(10)) {
+                break connection;
+            }
+        };
+        check_active()?;
         if self
             .config
             .process_directory
@@ -241,14 +265,12 @@ impl Service {
         if connection.is_none() {
             *connection = Some(self.connect()?);
         }
-        if expected_generation
-            .is_some_and(|generation| self.cancellation_generation() != generation)
-        {
-            bail!("computer-use run was cancelled");
-        }
+        check_active()?;
         let id = Uuid::new_v4().to_string();
         let mut arguments = match code {
-            Some(code) => json!({"code": code, "timeout_ms": timeout_ms}),
+            Some(code) => {
+                json!({"code": code, "timeout_ms": deadline.saturating_duration_since(Instant::now()).as_millis().max(1) as u64})
+            }
             None => json!({}),
         };
         if code.is_some() {
@@ -261,21 +283,46 @@ impl Service {
         }});
         let transport = connection.as_mut().unwrap();
         let response = (|| -> anyhow::Result<Value> {
-            serde_json::to_writer(&mut transport.input, &request)?;
-            transport.input.write_all(b"\n")?;
-            transport.input.flush()?;
-            let response = transport
-                .output
-                .recv_timeout(Duration::from_millis(timeout_ms + 10_000))
-                .map_err(|error| match error {
-                    RecvTimeoutError::Timeout => anyhow::anyhow!(
-                        "computer-use kernel response timed out after {} ms; kernel state was lost",
-                        timeout_ms + 10_000
-                    ),
-                    RecvTimeoutError::Disconnected => anyhow::anyhow!(
+            // A wedged kernel may stop reading stdin too. Keep pipe writes
+            // off this waiter so the same cancellation/deadline covers them.
+            let mut input = transport.input.take().context("kernel stdin unavailable")?;
+            let mut bytes = serde_json::to_vec(&request)?;
+            bytes.push(b'\n');
+            let (written, writing) = bounded(1);
+            std::thread::Builder::new()
+                .name("goddard-computer-use-writer".into())
+                .spawn(move || {
+                    let result = input.write_all(&bytes).and_then(|_| input.flush());
+                    let _ = written.send((input, result));
+                })?;
+            loop {
+                check_active()?;
+                match writing.recv_timeout(Duration::from_millis(10)) {
+                    Ok((input, result)) => {
+                        transport.input = Some(input);
+                        result?;
+                        break;
+                    }
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        bail!("kernel input writer disconnected")
+                    }
+                }
+            }
+            let response = loop {
+                check_active()?;
+                match transport.output.recv_timeout(
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(10)),
+                ) {
+                    Ok(response) => break response?,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => bail!(
                         "computer-use kernel output disconnected before a response; kernel state was lost"
                     ),
-                })??;
+                }
+            };
             if response["id"] != id {
                 bail!("unexpected computer-use response id");
             }
@@ -535,12 +582,20 @@ mod tests {
                 .to_string()
                 .contains("disabled")
         );
+        assert!(
+            fixture
+                .service
+                .call(None, None, None)
+                .unwrap_err()
+                .to_string()
+                .contains("disabled")
+        );
         assert!(!fixture.root.join("executions").exists());
         std::fs::remove_file(fixture.root.join("computer-use-disabled")).unwrap();
         assert!(
             fixture
                 .service
-                .call(Some("disconnect"), Some(100), None)
+                .call(Some("disconnect"), Some(2000), None)
                 .is_err()
         );
         assert_eq!(
@@ -555,7 +610,7 @@ mod tests {
         let fixture = Fixture::new(None);
         let error = fixture
             .service
-            .call(Some("crash"), Some(100), None)
+            .call(Some("crash"), Some(2000), None)
             .unwrap_err();
         let message = format!("{error:#}");
         assert!(
@@ -592,14 +647,94 @@ mod tests {
         std::fs::remove_file(fixture.root.join("cancel-kernel")).unwrap();
         let error = fixture
             .service
-            .call(Some("block"), Some(1), None)
+            .call(Some("block"), Some(100), None)
             .unwrap_err();
         let message = format!("{error:#}");
-        assert!(
-            message.contains("response timed out after 10001 ms"),
-            "{message}"
-        );
+        assert!(message.contains("timed out after 100 ms"), "{message}");
         assert!(!message.contains("output disconnected"));
+    }
+
+    #[test]
+    fn cli_service_deadline_covers_a_kernel_that_never_reads_its_input() {
+        let root = std::env::temp_dir().join(format!("goddard-unread-kernel-{}", Uuid::new_v4()));
+        crate::fs_ext::create_private_dir_all(&root).unwrap();
+        let kernel = root.join("kernel");
+        std::fs::write(
+            &kernel,
+            "#!/usr/bin/env python3\nimport time\ntime.sleep(30)\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&kernel, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let fixture = Fixture::new(Some(kernel));
+        let started = Instant::now();
+        let error = fixture
+            .service
+            .call(Some(&"x".repeat(1024 * 1024)), Some(200), None)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("timed out after 200 ms"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(fixture.service.connection.lock().is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cli_service_queue_wait_is_bounded_and_never_executes_an_expired_call() {
+        let fixture = Fixture::new(None);
+        let held = fixture.service.connection.lock();
+        let started = Instant::now();
+        let error = fixture
+            .service
+            .call(Some("must not run"), Some(30), None)
+            .unwrap_err();
+        assert!(error.to_string().contains("including queue wait"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(!fixture.root.join("executions").exists());
+        drop(held);
+        assert_eq!(fixture.call("text")["content"][0]["text"], "1");
+    }
+
+    #[test]
+    fn cli_service_reset_interrupts_an_unresponsive_kernel_and_invalidates_queued_actions() {
+        let fixture = Fixture::new(None);
+        let generation = fixture.service.cancellation_generation();
+        let service = fixture.service.clone();
+        let active = std::thread::spawn(move || service.call(Some("stuck"), Some(300_000), None));
+        fixture.await_started();
+        let service = fixture.service.clone();
+        let queued = std::thread::spawn(move || {
+            service.call_for_generation(generation, "must not run", 300_000, "Queued action")
+        });
+        let started = Instant::now();
+        let reset = fixture.service.call(None, Some(2000), None).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(reset["isError"], false);
+        let error = active.join().unwrap().unwrap_err();
+        assert!(format!("{error:#}").contains("cancelled"));
+        assert!(
+            queued
+                .join()
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("cancelled")
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join("executions")).unwrap(),
+            "stuck\n\n"
+        );
+        assert_eq!(fixture.call("text")["content"][0]["text"], "1");
+    }
+
+    #[test]
+    fn cli_service_stop_interrupts_an_unresponsive_kernel_without_reset() {
+        let fixture = Fixture::new(None);
+        let service = fixture.service.clone();
+        let active = std::thread::spawn(move || service.call(Some("stuck"), Some(300_000), None));
+        fixture.await_started();
+        fixture.service.cancel();
+        let error = active.join().unwrap().unwrap_err();
+        assert!(format!("{error:#}").contains("cancelled"));
+        assert_eq!(fixture.call("text")["content"][0]["text"], "1");
     }
 
     #[test]

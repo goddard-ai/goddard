@@ -13,6 +13,74 @@ use waku_protocol::{
 };
 
 #[test]
+fn computer_js_bounds_a_request_even_when_the_daemon_never_answers() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let server = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut socket = tungstenite::accept(stream).unwrap();
+        assert!(matches!(
+            serde_json::from_str::<ClientMessage>(socket.read().unwrap().to_text().unwrap())
+                .unwrap(),
+            ClientMessage::Hello { .. }
+        ));
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&ServerMessage::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    daemon_version: "test".into(),
+                    daemon_commit: None,
+                    agent_cli_available: true,
+                })
+                .unwrap()
+                .into(),
+            ))
+            .unwrap();
+        let request = socket.read().unwrap();
+        let ClientMessage::Request(request) =
+            serde_json::from_str(request.to_text().unwrap()).unwrap()
+        else {
+            panic!("expected request");
+        };
+        assert!(matches!(
+            request.command,
+            WireCommand::AgentComputerUse {
+                timeout_ms: Some(20),
+                ..
+            }
+        ));
+        // Keep transport healthy but deliberately never answer the RPC.
+        loop {
+            match socket.read() {
+                Ok(Message::Close(_)) => {
+                    let _ = socket.flush();
+                    break;
+                }
+                Ok(Message::Ping(_)) => socket.flush().unwrap(),
+                other => panic!("CLI failed to close after its request deadline: {other:?}"),
+            }
+        }
+    });
+    let started = Instant::now();
+    let output = Command::new(env!("CARGO_BIN_EXE_goddard-agent"))
+        .args(["computer", "js", "--text", "1", "--timeout-ms", "20"])
+        .env(waku_protocol::DAEMON_ADDRESS_ENV, address)
+        .env(waku_protocol::AGENT_TOKEN_ENV, "test-task-token")
+        .env_remove(waku_protocol::RUNTIME_INGRESS_ENV)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("timed out waiting for Goddard daemon")
+    );
+    assert!(started.elapsed() < Duration::from_secs(4));
+    server.join().unwrap();
+}
+
+#[test]
 fn cli_closes_cleanly_after_success_and_failure_without_waiting_for_a_stalled_peer() {
     for (success, reply_to_close) in [(true, true), (false, true), (true, false)] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
