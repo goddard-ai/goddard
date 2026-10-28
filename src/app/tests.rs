@@ -3808,6 +3808,31 @@ fn rejoining_the_tail_only_reengages_the_anchor_once_its_space_collapses() {
 }
 
 #[test]
+fn transcript_row_snapshots_share_backing_and_preserve_splice_inputs() {
+    use super::transcript::{TranscriptRowKind, TranscriptRowSnapshot};
+
+    let cached = TranscriptRowSnapshot::from(
+        (0..8192)
+            .map(TranscriptRowKind::Message)
+            .collect::<Vec<_>>(),
+    );
+    let pending = cached.clone();
+    assert_eq!(cached.as_ptr(), pending.as_ptr());
+    let mut replacement = (0..8191)
+        .map(TranscriptRowKind::Message)
+        .collect::<Vec<_>>();
+    replacement.push(TranscriptRowKind::WorkingIndicator);
+    let cached = TranscriptRowSnapshot::from(replacement);
+    assert_eq!(pending.last(), Some(&TranscriptRowKind::Message(8191)));
+    assert_eq!(
+        transcript_row_splice(&pending, &cached),
+        Some((8191..8192, 1)),
+    );
+    drop(cached);
+    assert_eq!(pending.len(), 8192);
+}
+
+#[test]
 fn settling_an_anchored_turn_splices_without_resetting_its_prompt() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     session.begin_turn("hi");

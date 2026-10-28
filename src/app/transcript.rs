@@ -1,5 +1,32 @@
 use super::*;
 
+/// Immutable row backing is shared by visibility-transition snapshots. The
+/// final owner retires its allocation off the UI thread, including after a
+/// replaced cache or abandoned callback releases the last snapshot.
+#[derive(Clone)]
+pub(super) struct TranscriptRowSnapshot(Arc<BackgroundOwned<Vec<TranscriptRowKind>>>);
+
+impl From<Vec<TranscriptRowKind>> for TranscriptRowSnapshot {
+    fn from(rows: Vec<TranscriptRowKind>) -> Self {
+        Self(Arc::new(BackgroundOwned::new(rows)))
+    }
+}
+
+impl Default for TranscriptRowSnapshot {
+    fn default() -> Self {
+        static EMPTY: std::sync::OnceLock<TranscriptRowSnapshot> = std::sync::OnceLock::new();
+        EMPTY.get_or_init(|| Vec::new().into()).clone()
+    }
+}
+
+impl std::ops::Deref for TranscriptRowSnapshot {
+    type Target = [TranscriptRowKind];
+
+    fn deref(&self) -> &Self::Target {
+        self.0.get()
+    }
+}
+
 pub(super) fn display_message_content(message: &Message) -> String {
     const OPEN: &str = "<boss-session-rotation>";
     const CLOSE: &str = "</boss-session-rotation>";
@@ -169,7 +196,7 @@ impl Waku {
                     .map(|session| session.id)
                     .filter(|_| next_kinds.contains(&TranscriptRowKind::QueuedEmployee)),
             );
-            *self.transcript_row_kinds.borrow_mut() = next_kinds;
+            *self.transcript_row_kinds.borrow_mut() = next_kinds.into();
             self.transcript_row_kinds_fingerprint.set(Some(fingerprint));
         }
         self.transcript_row_kinds.borrow().len()
@@ -367,7 +394,7 @@ impl Waku {
     pub(super) fn snapshot_selected_transcript_rows(
         &self,
         session_id: Uuid,
-    ) -> Option<Vec<TranscriptRowKind>> {
+    ) -> Option<TranscriptRowSnapshot> {
         if self.state.selected_session != Some(session_id) {
             return None;
         }

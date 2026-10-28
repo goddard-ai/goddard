@@ -1,0 +1,1 @@
+- Long transcripts avoid copying their cached row lists when stopping, rewinding, searching, or updating visible transcript rows.

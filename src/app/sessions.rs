@@ -7016,7 +7016,7 @@ impl Waku {
         let previous_kinds = if selected {
             self.transcript_row_kinds.borrow().clone()
         } else {
-            Vec::new()
+            TranscriptRowSnapshot::default()
         };
         // The original submission is parked inside the discarded background
         // task, so the unstarted turn's own message rebuilds the draft.

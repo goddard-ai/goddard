@@ -426,13 +426,15 @@ impl Waku {
         self.pin_transcript_for_disclosure();
         let previous = self.transcript_row_kinds.borrow().clone();
         let scroll = self.active_transcript_rows().logical_scroll_top();
-        let previous: Vec<_> = previous
-            .into_iter()
+        let previous: TranscriptRowSnapshot = previous
+            .iter()
+            .copied()
             .map(|row| {
                 BossHistoryRow::from_content(row)
                     .map_or(row, |content| TranscriptRowKind::BossHistory(from, content))
             })
-            .collect();
+            .collect::<Vec<_>>()
+            .into();
         let history = self.boss_ui.chat_history.entry(key).or_default();
         if !history.swap_live_session(&self.state.sessions, &mut self.state.selected_session, to) {
             return;

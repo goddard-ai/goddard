@@ -249,6 +249,13 @@
   completion wakes the pump to re-evaluate current queue gates. These checks
   fence the UI handoff; daemon-side ref publication and persistence still need
   their own generation authority.
+- The selected transcript's cached row list is an immutable
+  `TranscriptRowSnapshot`. Snapshot clones share the allocation for cancellation,
+  completion, disclosure, search, rewind and attachment handoffs. Replacement and
+  final snapshot release reclaim the row backing through `BackgroundOwned`;
+  keep GPUI list state on the UI thread. Row folding, splice comparison, Boss
+  history projection and search still scan or prepare rows synchronously and
+  need separate bounds; shared snapshots do not establish a frame-time budget.
 - Native driver factories record an immutable attempt origin before contact,
   including factories that fail after starting work. Task/runtime removal and
   runtime-id reuse do not retire that origin. Only the selected attempt's

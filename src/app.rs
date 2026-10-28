@@ -4234,7 +4234,7 @@ pub struct Waku {
     /// Guards `refresh_project_locations`: a pass that started before a
     /// manual relocation discards its stale outcomes.
     project_location_generation: Cell<u64>,
-    transcript_row_kinds: RefCell<Vec<TranscriptRowKind>>,
+    transcript_row_kinds: RefCell<TranscriptRowSnapshot>,
     /// Fingerprint of the transcript inputs `transcript_row_kinds` was folded
     /// from, so an unchanged transcript costs nothing on a frame. `None` until
     /// the first fold. See `transcript_rows_fingerprint`.
@@ -8090,7 +8090,7 @@ impl Waku {
                 git_page_refresh_pending: false,
                 missing_projects: HashSet::new(),
                 project_location_generation: Cell::new(0),
-                transcript_row_kinds: RefCell::new(Vec::new()),
+                transcript_row_kinds: RefCell::default(),
                 transcript_row_kinds_fingerprint: Cell::new(None),
                 transcript_frame_epoch: Cell::new(0),
                 transcript_frame_scan: Cell::new(None),

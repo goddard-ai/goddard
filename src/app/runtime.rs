@@ -5176,7 +5176,7 @@ impl Waku {
                     let previous_kinds = if selected {
                         waku.transcript_row_kinds.borrow().clone()
                     } else {
-                        Vec::new()
+                        TranscriptRowSnapshot::default()
                     };
                     let checkpoint = match captured.into_inner() {
                         Ok(checkpoint) => checkpoint,
@@ -5935,7 +5935,7 @@ impl Waku {
         let previous_kinds = if selected {
             self.transcript_row_kinds.borrow().clone()
         } else {
-            Vec::new()
+            TranscriptRowSnapshot::default()
         };
         if let Some(session) = self.state.session_mut(session_id) {
             if let Some(fork) = &claude_fork {
@@ -7872,7 +7872,7 @@ impl Waku {
         let previous_kinds = if selected {
             self.transcript_row_kinds.borrow().clone()
         } else {
-            Vec::new()
+            TranscriptRowSnapshot::default()
         };
         // A selection only counts as recently used once a session is actually
         // started with it, so the first turn records the picker's combo —
@@ -8099,7 +8099,7 @@ impl Waku {
                 let previous_kinds = if selected {
                     self.transcript_row_kinds.borrow().clone()
                 } else {
-                    Vec::new()
+                    TranscriptRowSnapshot::default()
                 };
                 if let Some(session) = self.state.session_mut(session_id)
                     && session.status == SessionStatus::Connecting
@@ -8427,7 +8427,7 @@ impl Waku {
                     let previous_kinds = if selected {
                         self.transcript_row_kinds.borrow().clone()
                     } else {
-                        Vec::new()
+                        TranscriptRowSnapshot::default()
                     };
                     if let Some(session) = self.state.session_mut(session_id)
                         && session.status == SessionStatus::Connecting
