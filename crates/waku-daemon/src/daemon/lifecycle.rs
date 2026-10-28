@@ -1079,21 +1079,28 @@ impl WakuBackend {
             backend.as_ptr()
         );
         let mut cursor = None;
+        let mut recovery_complete = false;
         let result = Scheduler::shared().and_then(|scheduler| {
-            scheduler.submit(key, Unit::Heavy, move |permit| {
+            scheduler.submit(key, Unit::Bounded, move |permit| {
                 let Some(backend) = backend.upgrade() else {
                     return Ok(Progress::Complete);
                 };
+                if !recovery_complete {
+                    recovery_complete = !backend
+                        .task_store
+                        .recover_workspace_cleanup_intents(&mut cursor, || {
+                            permit.should_continue()
+                        })?;
+                    return Ok(Progress::More);
+                }
                 backend
                     .task_store
-                    .recover_workspace_cleanup_intents(&mut cursor, || permit.should_continue())
-                    .map(|more| {
-                        if more {
-                            Progress::More
-                        } else {
-                            Progress::Complete
-                        }
-                    })
+                    .advance_workspace_cleanup_queue(crate::model::unix_time(), || {
+                        permit.should_continue()
+                    })?;
+                // Keep one lightweight consumer alive for archive writes that
+                // arrive after startup. Queue membership never grants deletion.
+                Ok(Progress::More)
             })
         });
         if let Err(error) = result {

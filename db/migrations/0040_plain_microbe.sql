@@ -1,0 +1,1 @@
+CREATE INDEX `workspace_cleanup_dispatch` ON `workspace_cleanup_intents` (`retry_at`,`session_id`) WHERE "workspace_cleanup_intents"."phase" NOT IN ('complete', 'ignored');

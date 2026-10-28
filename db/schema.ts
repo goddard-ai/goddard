@@ -283,7 +283,11 @@ export const workspaceCleanupIntents = sqliteTable(
     failures: integer("failures").notNull().default(0),
     lastError: text("last_error"),
   },
-  (table) => [index("workspace_cleanup_ready").on(table.phase, table.retryAt)],
+  (table) => [
+    index("workspace_cleanup_ready").on(table.phase, table.retryAt),
+    index("workspace_cleanup_dispatch").on(table.retryAt, table.sessionId)
+      .where(sql`${table.phase} NOT IN ('complete', 'ignored')`),
+  ],
 );
 
 /** Unqualified terminal origins survive closure and restart; no task FK or exit inference. */

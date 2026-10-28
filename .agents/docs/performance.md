@@ -214,6 +214,16 @@
   paths through an existing ancestor; unresolved aliases fail closed. These
   publication checks do not replace generation/owner checks between cleanup
   stages, restore admission or prepared-history generation fencing.
+- Cleanup recovery keeps one weak, lightweight scheduler consumer per backend.
+  Its `Unit::Bounded` units backfill and dispatch at most 128 narrow metadata
+  rows, using the due-job index without reading transcript tables. Ignore only
+  descriptors that own no removable workspace, after rechecking the promoted
+  catalog and archive generation/phase in the update. Retain owned workspaces,
+  later preservation stages and invalid descriptors with durable retry fields;
+  never infer filesystem permission from their queue membership. Open the
+  initialized database without creating it or rerunning migrations, and defer
+  SQLite write contention immediately. Heavy preservation/removal must use
+  separate heavy admission, never this bounded unknown-telemetry fallback.
 - Daemon `RestoreRef` and `RestoreProjectlessWorkspace` requests hold a
   destination materialization lease through the full filesystem operation.
   `EnsureWorktree` uses typed source/destination admission at the real checkout

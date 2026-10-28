@@ -4,6 +4,8 @@
 
 use super::*;
 
+mod queue;
+
 /// Read the committed row, never the incoming client projection: metadata
 /// fencing may have preserved a newer archive flag or workspace descriptor.
 /// Backfill runs separately in bounded, idle-admitted pages.
