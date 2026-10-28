@@ -1,0 +1,1 @@
+- Fixed Codex tasks failing to start when Goddard finds a Codex CLI version that does not accept `--stdio`.
