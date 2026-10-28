@@ -40,6 +40,9 @@ struct TranscriptHistoryKey {
 /// Cache only weak history identities, so repainting an unchanged transcript
 /// does not scan it or retain an old session's contents. Mutable history access
 /// revokes these identities even when no save snapshot shares the payload.
+/// Every field read by `folded_transcript_row_kinds` or `row_turn_id` must be
+/// mixed into the history hash or its external-state finishing step. Missing
+/// inputs leave stale rows that can fall back to `Message(n)`, hiding activity.
 #[derive(Default)]
 pub(super) struct TranscriptFingerprintCache {
     history: Option<(TranscriptHistoryKey, u64)>,
@@ -325,7 +328,7 @@ impl Waku {
     /// `render_transcript` needs this every frame, and extracting prompt and
     /// response snippets for every turn of a long session is far too much to
     /// redo per frame. Every input the extraction reads is settled under an
-    /// unchanged [`transcript_rows_fingerprint`]: prompts are immutable once
+    /// unchanged [`TranscriptFingerprintCache`] result: prompts are immutable once
     /// sent, a response snippet is read only after its turn stopped running,
     /// and completions, rewinds, and refolds all move the fingerprint.
     pub(super) fn navigation_turns(&self) -> Rc<Vec<TranscriptNavigationTurn>> {
@@ -1576,14 +1579,9 @@ pub(super) fn transcript_row_kinds(
     rows
 }
 
-/// Fingerprint of every field [`folded_transcript_row_kinds`] reads, so a frame
-/// can tell a settled transcript from a changed one without refolding it.
-///
-/// Keep this in step with that function and with [`row_turn_id`]. A field they
-/// consult but this one misses leaves the cached rows stale, and stale rows
-/// fall back to `Message(n)` — silently dropping every reasoning block and tool
-/// activity from the transcript. Cheap mixing, not a real hash: this runs on
-/// the frame path, and the values it folds in are already well distributed.
+/// Uncached reference for cache/fold equivalence tests. Production surfaces
+/// retain their own history cache instead of rescanning on every repaint.
+#[cfg(test)]
 pub(super) fn transcript_rows_fingerprint(
     session: &AgentSession,
     expanded_turns: &HashSet<Uuid>,
@@ -1801,7 +1799,7 @@ fn mix_turn_id(hash: u64, turn_id: Option<Uuid>) -> u64 {
 /// 19 seconds" with more work listed below it, as if the response had been cut
 /// in half. Expanding it restores the turn's full order in place.
 ///
-/// Every field this reads is fingerprinted by [`transcript_rows_fingerprint`]
+/// Every field this reads is fingerprinted by [`TranscriptFingerprintCache`]
 /// so frames can skip the fold; consult a new one and that must learn it too.
 pub(super) fn folded_transcript_row_kinds(
     session: &AgentSession,

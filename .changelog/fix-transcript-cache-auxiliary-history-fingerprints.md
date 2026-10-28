@@ -1,0 +1,1 @@
+- Side chats and Big Picture cards avoid rescanning unchanged transcript histories on every repaint.

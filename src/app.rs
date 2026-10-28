@@ -993,6 +993,7 @@ impl PlanDoc {
 struct SideChatView {
     rows: ListState,
     scrollbar: Rc<ScrollbarState>,
+    fingerprint_cache: TranscriptFingerprintCache,
     kinds: (u64, Rc<Vec<TranscriptRowKind>>),
     response_footers: HashMap<usize, (SharedString, u64)>,
     expanded_turns: HashSet<Uuid>,
@@ -4239,13 +4240,13 @@ pub struct Waku {
     transcript_fingerprint_cache: RefCell<TranscriptFingerprintCache>,
     /// Fingerprint of the transcript inputs `transcript_row_kinds` was folded
     /// from, so an unchanged transcript costs nothing on a frame. `None` until
-    /// the first fold. See `transcript_rows_fingerprint`.
+    /// the first fold. See `TranscriptFingerprintCache`.
     transcript_row_kinds_fingerprint: Cell<Option<u64>>,
     /// Bumped at the top of `render_transcript`; `transcript_frame_scan`
     /// records the epoch its fingerprint was scanned in so the row builders
     /// reuse one scan per frame instead of rescanning per visible row.
     transcript_frame_epoch: Cell<u64>,
-    /// `(epoch, fingerprint)` of the latest `transcript_rows_fingerprint`
+    /// `(epoch, fingerprint)` of the latest `scan_transcript_rows_fingerprint`
     /// scan. Nothing can mutate the session mid-draw, so a scan at the
     /// current epoch stays valid until `render_transcript` bumps it.
     transcript_frame_scan: Cell<Option<(u64, u64)>>,

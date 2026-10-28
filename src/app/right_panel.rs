@@ -7243,6 +7243,7 @@ impl Waku {
                         rows
                     },
                     scrollbar: ScrollbarState::new(),
+                    fingerprint_cache: TranscriptFingerprintCache::default(),
                     kinds: (0, Rc::new(Vec::new())),
                     response_footers: HashMap::new(),
                     expanded_turns: HashSet::new(),
@@ -7252,11 +7253,13 @@ impl Waku {
                     selection,
                 }
             });
-        let expanded_turns = view.expanded_turns.clone();
-        let fingerprint = transcript_rows_fingerprint(&session, &expanded_turns, pending_turn);
+        let fingerprint =
+            view.fingerprint_cache
+                .fingerprint(&session, &view.expanded_turns, pending_turn);
         let previous_kinds = view.kinds.1.clone();
         let (kinds, refolded) = if view.kinds.0 != fingerprint {
-            let mut folded = folded_transcript_row_kinds(&session, &expanded_turns, pending_turn);
+            let mut folded =
+                folded_transcript_row_kinds(&session, &view.expanded_turns, pending_turn);
             view.response_footers = folded
                 .iter()
                 .filter_map(|kind| {

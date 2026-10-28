@@ -308,8 +308,12 @@
   never replace this with length, timestamp or raw-address equality. Keep busy
   status, disclosure membership, pending checkpoint, Boss-history revision and
   queued-card presence outside the history cache. An unchanged history hit
-  holds no strong transcript snapshot. Streaming edits still scan changed
-  history, and other transcript views need their own cache/admission audit.
+  holds no strong transcript snapshot. Each side-chat view and Big Picture
+  card retains its own cache; card render clones share that cache handle so
+  different sessions cannot evict one another on each repaint. Side-chat
+  fingerprint/fold preparation borrows disclosure state instead of copying it.
+  Streaming edits still scan changed history, and first folds, ranking,
+  annotation preparation and other view helpers need their own bounds.
 - Native driver factories record an immutable attempt origin before contact,
   including factories that fail after starting work. Task/runtime removal and
   runtime-id reuse do not retire that origin. Only the selected attempt's

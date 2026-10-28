@@ -210,12 +210,13 @@ pub(super) struct BigPictureUi {
     card_markdown: RefCell<HashMap<Uuid, MarkdownView>>,
 }
 
-/// One card's scroll surface. `ListState` and the scrollbar are handles into
-/// window state, so the entry clones freely.
+/// One card's scroll surface and weak history cache. Clone handles together
+/// so rendering a cloned card reuses its own cache instead of rescanning.
 #[derive(Clone)]
 struct CardTranscript {
     rows: ListState,
     scrollbar: Rc<ScrollbarState>,
+    fingerprint_cache: Rc<RefCell<TranscriptFingerprintCache>>,
 }
 
 impl BigPictureUi {
@@ -1285,12 +1286,19 @@ impl Waku {
                     CardTranscript {
                         rows,
                         scrollbar: ScrollbarState::new(),
+                        fingerprint_cache: Rc::new(RefCell::new(
+                            TranscriptFingerprintCache::default(),
+                        )),
                     }
                 })
                 .clone()
         };
         let pending_turn = self.blocked_checkpoint_turn(session.id);
-        let fingerprint = transcript_rows_fingerprint(session, &self.expanded_turns, pending_turn);
+        let fingerprint = card.fingerprint_cache.borrow_mut().fingerprint(
+            session,
+            &self.expanded_turns,
+            pending_turn,
+        );
         let (kinds, refolded) = {
             let mut cache = self.big_picture.card_kinds.borrow_mut();
             let entry = cache
