@@ -1,0 +1,1 @@
+- Fixed archived tasks reappearing in the sidebar when a refresh overlaps the archive action.

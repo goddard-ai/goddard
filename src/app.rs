@@ -3061,6 +3061,8 @@ pub struct Waku {
     archive_dialog: Option<archive_dialog::ArchiveDialogState>,
     archive_preview_pending: HashSet<Uuid>,
     archive_preview_toasts: HashSet<u64>,
+    /// Local archives awaiting confirmation in the ordered task catalog stream.
+    pending_session_archives: HashMap<Uuid, u64>,
     /// Session ids of the most recent archive — the set the palette's
     /// "Undo last archive" restores. In-memory only: a restart drops it.
     /// Members join while their archive toast is still up, matching the
@@ -7588,6 +7590,7 @@ impl Waku {
                 provider_switch_in_flight: HashSet::new(),
                 archive_preview_pending: HashSet::new(),
                 archive_preview_toasts: HashSet::new(),
+                pending_session_archives: HashMap::new(),
                 undoable_archive: Vec::new(),
                 full_access_dialog: None,
                 incognito_dialog: None,

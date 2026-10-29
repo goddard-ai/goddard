@@ -2497,6 +2497,7 @@ impl Waku {
         else {
             return;
         };
+        self.pending_session_archives.remove(&session_id);
         let project_id = self.state.sessions[index].project_id;
         let composer_draft_key =
             crate::persistence::ComposerDraftKey::for_session(&self.state.sessions[index]);
@@ -2981,6 +2982,7 @@ impl Waku {
             // clobber the flag.
             session.updated_at = now;
         }
+        self.pending_session_archives.insert(session_id, now);
         self.record_action(
             Some(session_id),
             action_predictions::JournalAction::SessionArchive,
@@ -3048,6 +3050,7 @@ impl Waku {
         if session.archived_at.is_none() {
             return;
         }
+        self.pending_session_archives.remove(&session_id);
         let now = unix_time();
         if let Some(session) = self.state.session_mut(session_id) {
             session.archived_at = None;
