@@ -29,7 +29,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 20;
+pub const PROTOCOL_VERSION: u32 = 21;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "GODDARD_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "GODDARD_DAEMON_ADDRESS";
@@ -387,6 +387,10 @@ pub enum Command {
         dirs: Vec<PathBuf>,
     },
     LoadTaskState,
+    /// Apply only the named metadata fields, then acknowledge their durable revision.
+    UpdateTaskMetadata {
+        updates: Vec<crate::task_metadata::TaskMetadataUpdate>,
+    },
     SaveTaskState {
         projects: Vec<Project>,
         live_session_ids: Vec<Uuid>,

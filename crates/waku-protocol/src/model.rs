@@ -1786,6 +1786,10 @@ impl SessionPlanning {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct AgentSession {
     pub id: Uuid,
+    /// Daemon-owned version of task metadata. Older saves and snapshots cannot
+    /// replace metadata from a newer acknowledged edit.
+    #[serde(default, skip_serializing_if = "metadata_revision_is_zero")]
+    pub metadata_revision: u64,
     /// A title explicitly chosen by the user. [`Self::DEFAULT_TITLE`] means
     /// no explicit title has been set, so [`Self::auto_title`] may be shown.
     pub title: String,
@@ -2008,6 +2012,10 @@ pub struct AgentSession {
     pub detail_loaded: bool,
 }
 
+fn metadata_revision_is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
 /// Anything deserialized from a `data` blob carries its full detail.
 fn detail_loaded_default() -> bool {
     true
@@ -2087,6 +2095,7 @@ impl AgentSession {
             service_tier: None,
             context_window: None,
             config_activation: None,
+            metadata_revision: 0,
             agent_preset: None,
             auto_route: false,
             route_decision: None,
@@ -2130,6 +2139,7 @@ impl AgentSession {
     pub fn list_projection(&self) -> Self {
         Self {
             id: self.id,
+            metadata_revision: self.metadata_revision,
             title: self.title.clone(),
             auto_title: self.auto_title.clone(),
             project_id: self.project_id,

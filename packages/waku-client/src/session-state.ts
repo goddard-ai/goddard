@@ -1,5 +1,24 @@
 import type { AgentSession, QueuedMessage } from './generated'
 
+/** Adopt acknowledged metadata without replacing a loaded transcript with a list row. */
+export function reconcileSavedSession(local: AgentSession, saved?: AgentSession): AgentSession {
+  if (!saved) return local
+  const metadata = (saved.metadata_revision ?? 0) < (local.metadata_revision ?? 0) ? local : saved
+  if (saved.detail_loaded !== false && metadata === saved) return saved
+  return {
+    ...(saved.detail_loaded === false ? local : saved),
+    metadata_revision: metadata.metadata_revision,
+    title: metadata.title,
+    auto_title: metadata.auto_title,
+    agent_rename_allowed: metadata.agent_rename_allowed,
+    pinned_at: metadata.pinned_at,
+    archived_at: metadata.archived_at,
+    dormant_at: metadata.dormant_at,
+    dormant_exempt_until: metadata.dormant_exempt_until,
+    updated_at: metadata.updated_at,
+  }
+}
+
 /** Whether the session has a provider conversation whose provider must be preserved. */
 export function sessionProviderLocked(session: AgentSession): boolean {
   return session.detail_loaded === false

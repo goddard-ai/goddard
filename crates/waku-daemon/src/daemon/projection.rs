@@ -148,6 +148,7 @@ pub(super) fn merge_session_list_columns(
     if incoming.updated_at < existing.updated_at {
         return false;
     }
+    existing.metadata_revision = existing.metadata_revision.max(incoming.metadata_revision);
     existing.title = incoming.title;
     existing.auto_title = incoming.auto_title;
     existing.agent_rename_allowed = incoming.agent_rename_allowed;
@@ -185,6 +186,7 @@ pub(super) fn merge_session_list_columns(
 
 pub(super) fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSession) {
     if incoming.updated_at >= existing.updated_at {
+        existing.metadata_revision = existing.metadata_revision.max(incoming.metadata_revision);
         existing.title = incoming.title;
         existing.agent_rename_allowed = incoming.agent_rename_allowed;
         existing.project_id = incoming.project_id;

@@ -5,6 +5,7 @@ import {
   appendQueuedSteerPreview,
   dropQueuedMessage,
   queuedMessageIsPendingSteer,
+  reconcileSavedSession,
   sessionAcceptsImmediateSteer,
   sessionProviderLocked,
 } from "./session-state";
@@ -19,6 +20,26 @@ function session(overrides: Partial<AgentSession>): AgentSession {
     ...overrides,
   } as AgentSession;
 }
+
+test("list-only save replies retain loaded detail and advance metadata without accepting older replies", () => {
+  const local = session({
+    title: "Local name", metadata_revision: 2,
+    messages: [{ role: "user", content: "Keep this transcript" } as never],
+  });
+  const saved = session({
+    detail_loaded: false, title: "Stored name", metadata_revision: 3, pinned_at: 10,
+  });
+  const merged = reconcileSavedSession(local, saved);
+  expect(merged.detail_loaded).toBe(true);
+  expect(merged.messages).toBe(local.messages);
+  expect(merged.metadata_revision).toBe(3);
+  expect(merged.title).toBe("Stored name");
+  expect(merged.pinned_at).toBe(10);
+  const older = reconcileSavedSession(merged, local);
+  expect(older.title).toBe("Stored name");
+  expect(older.metadata_revision).toBe(3);
+  expect(older.pinned_at).toBe(10);
+});
 
 test("assistant-only receipts do not lock the session provider", () => {
   const transfer = session({

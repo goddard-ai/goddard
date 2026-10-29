@@ -16,8 +16,8 @@ use super::model_picker::{
 use super::plan_approval::session_plan_approval_sent;
 use super::runtime::{
     DeferredSteer, append_queued_steer_preview, expired_employee_operation,
-    merge_remote_project_catalog, merge_remote_session_catalog, reconcile_pending_session_archives,
-    session_accepts_immediate_steer, session_has_active_provider_turn, take_ready_deferred_steers,
+    merge_remote_project_catalog, merge_remote_session_catalog, session_accepts_immediate_steer,
+    session_has_active_provider_turn, take_ready_deferred_steers,
 };
 use super::sessions::{
     UnreadTarget, dormant_session_ids, next_attention_target, next_idle_session,
@@ -201,42 +201,6 @@ fn remote_task_catalog_adds_web_tasks_without_replacing_hydrated_detail() {
     assert_eq!(merged_local.messages.len(), 1);
     assert_eq!(merged_local.messages[0].content, "keep this transcript");
     assert!(catalog.iter().any(|session| session.id == web_task_id));
-}
-
-#[test]
-fn pending_archive_survives_stale_catalogs_until_daemon_confirmation() {
-    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-    session.begin_turn("Archive this task");
-    session.updated_at = 100;
-    let stale = session.list_projection();
-    let id = session.id;
-    // An archive within the same second cannot rely on updated_at ordering.
-    session.archived_at = Some(100);
-    let mut pending = HashMap::from([(id, 100)]);
-    let mut catalog = vec![session];
-
-    // Neither an equal-timestamp load nor an already-running background
-    // update may undo the local archive before the save is observed.
-    for updated_at in [100, 101] {
-        let mut remote = vec![stale.clone()];
-        remote[0].updated_at = updated_at;
-        reconcile_pending_session_archives(&mut pending, &mut remote);
-        merge_remote_session_catalog(&mut catalog, remote, |_| true, |_| false, false);
-        assert_eq!(catalog[0].archived_at, Some(100));
-        assert!(pending.contains_key(&id));
-    }
-
-    let mut confirmed = vec![catalog[0].list_projection()];
-    reconcile_pending_session_archives(&mut pending, &mut confirmed);
-    merge_remote_session_catalog(&mut catalog, confirmed, |_| true, |_| false, false);
-    assert!(pending.is_empty());
-
-    // Once confirmed, an intentional restore by another client still wins.
-    let mut restored = vec![stale];
-    restored[0].updated_at = 102;
-    reconcile_pending_session_archives(&mut pending, &mut restored);
-    merge_remote_session_catalog(&mut catalog, restored, |_| true, |_| false, false);
-    assert_eq!(catalog[0].archived_at, None);
 }
 
 #[test]

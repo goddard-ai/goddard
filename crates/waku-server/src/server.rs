@@ -2935,6 +2935,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::TrashSkills { .. } => "trashSkills",
         Command::LoadTaskState => "loadTaskState",
         Command::SaveTaskState { .. } => "saveTaskState",
+        Command::UpdateTaskMetadata { .. } => "updateTaskMetadata",
         Command::RemoveSession => "removeSession",
         Command::RemoveProject { .. } => "removeProject",
         Command::HydrateSession { .. } => "hydrateSession",
@@ -3163,6 +3164,7 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
             | waku_protocol::boss::BossOperation::ReportBlocker { .. }
             | waku_protocol::boss::BossOperation::Eval { .. }
             | waku_protocol::boss::BossOperation::Rename { .. } }
+        | Command::UpdateTaskMetadata { .. }
         | Command::RemoveSession
         | Command::ForkSessionFromResponse { .. }
         | Command::RewindSessionToMessage { .. }

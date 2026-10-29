@@ -3061,8 +3061,10 @@ pub struct Waku {
     archive_dialog: Option<archive_dialog::ArchiveDialogState>,
     archive_preview_pending: HashSet<Uuid>,
     archive_preview_toasts: HashSet<u64>,
-    /// Local archives awaiting confirmation in the ordered task catalog stream.
-    pending_session_archives: HashMap<Uuid, u64>,
+    pending_task_metadata: task_metadata::PendingTaskMetadata,
+    task_metadata_workers: HashMap<waku_client::DaemonKey, Sender<task_metadata::MetadataRequest>>,
+    task_metadata_tx: Sender<task_metadata::MetadataResult>,
+    task_metadata_events: Receiver<task_metadata::MetadataResult>,
     /// Session ids of the most recent archive — the set the palette's
     /// "Undo last archive" restores. In-memory only: a restart drops it.
     /// Members join while their archive toast is still up, matching the
@@ -4579,6 +4581,7 @@ mod speed_reader;
 mod status_markers;
 mod streaming;
 mod sync_branch;
+mod task_metadata;
 mod task_switcher;
 mod terminal_close_dialog;
 mod terminals;
@@ -6231,6 +6234,7 @@ impl Waku {
         let (agy_poll_tx, agy_poll_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
+        let (task_metadata_tx, task_metadata_events) = unbounded();
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (daemon_recovery_tx, daemon_recovery_events) = unbounded();
         let (daemon_status_tx, daemon_status_events) = unbounded();
@@ -7590,7 +7594,10 @@ impl Waku {
                 provider_switch_in_flight: HashSet::new(),
                 archive_preview_pending: HashSet::new(),
                 archive_preview_toasts: HashSet::new(),
-                pending_session_archives: HashMap::new(),
+                pending_task_metadata: task_metadata::PendingTaskMetadata::default(),
+                task_metadata_workers: HashMap::new(),
+                task_metadata_tx,
+                task_metadata_events,
                 undoable_archive: Vec::new(),
                 full_access_dialog: None,
                 incognito_dialog: None,

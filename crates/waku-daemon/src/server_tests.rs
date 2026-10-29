@@ -701,13 +701,20 @@ fn a_scoped_agent_token_reaches_only_agent_commands() {
         .unwrap();
 
     // The credential is confined to the agent command surface.
-    let error = agent
-        .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
-        .unwrap_err();
-    assert!(
-        error.to_string().contains("may only run agent commands"),
-        "{error}"
-    );
+    for command in [
+        Command::LoadTaskState,
+        Command::UpdateTaskMetadata {
+            updates: Vec::new(),
+        },
+    ] {
+        let error = agent
+            .request(Uuid::nil(), Uuid::nil(), command)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("may only run agent commands"),
+            "{error}"
+        );
+    }
 
     // UI interaction intent is not an agent capability, even for a Boss
     // credential. Supplied human-looking fields cannot change authentication.

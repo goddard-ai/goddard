@@ -23,6 +23,11 @@ import type { WorkspaceMove } from "./WorkspaceMove";
 
 export type AgentSession = { id: string,
 /**
+ * Daemon-owned version of task metadata. Older saves and snapshots cannot
+ * replace metadata from a newer acknowledged edit.
+ */
+metadata_revision?: number,
+/**
  * A title explicitly chosen by the user. [`Self::DEFAULT_TITLE`] means
  * no explicit title has been set, so [`Self::auto_title`] may be shown.
  */

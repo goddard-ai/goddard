@@ -350,6 +350,8 @@ export type { SyncAlertKind } from "./SyncAlertKind";
 export type { SyncInProgress } from "./SyncInProgress";
 export type { SyncLinkInfo } from "./SyncLinkInfo";
 export type { TaskClass } from "./TaskClass";
+export type { TaskMetadataEdit } from "./TaskMetadataEdit";
+export type { TaskMetadataUpdate } from "./TaskMetadataUpdate";
 export type { ThreadGoal } from "./ThreadGoal";
 export type { ThreadGoalStatus } from "./ThreadGoalStatus";
 export type { TokenTotals } from "./TokenTotals";

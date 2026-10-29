@@ -4094,6 +4094,9 @@ errors.no_live_runtime:
   en: This task has no live runtime
 errors.unexpected_daemon_response:
   en: "Expected %{expected}, received %{actual} from the daemon"
+errors.task_changes_retrying:
+  en: Could not save task changes; retrying.
+
 errors.daemon_disconnected:
   en: Goddard daemon is disconnected
 errors.remote_connect:

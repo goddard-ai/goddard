@@ -124,6 +124,7 @@ export const sessions = sqliteTable(
      * confirmed.
      */
     configActivation: text("config_activation"),
+    metadataRevision: integer("metadata_revision").notNull().default(0),
   },
   (table) => [
     index("sessions_by_project").on(table.projectId, table.updatedAt),

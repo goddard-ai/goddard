@@ -22382,3 +22382,213 @@ fn task_wireframes_require_opt_in_valid_documents_and_workspace_containment() {
 
 #[path = "tests/audit_regressions.rs"]
 mod audit_regressions;
+
+#[test]
+fn task_metadata_edits_survive_stale_saves_and_reload() {
+    use waku_protocol::task_metadata::{TaskMetadataEdit, TaskMetadataUpdate};
+    let root = std::env::temp_dir().join(format!("task-metadata-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let mut original = {
+        let state = backend.task_state.lock();
+        AgentSession::new(state.projects[0].id, ProviderKind::Codex)
+    };
+    original.begin_turn("Keep this transcript");
+    let id = original.id;
+    let mut sibling = original.clone();
+    sibling.id = Uuid::new_v4();
+    let sibling_id = sibling.id;
+    {
+        let mut state = backend.task_state.lock();
+        state.sessions.push(original.clone());
+        state.sessions.push(sibling);
+        state.mark_session_dirty(id);
+        state.mark_session_dirty(sibling_id);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let request = |command| {
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command,
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap()
+    };
+    let edits = [
+        TaskMetadataEdit::Placement {
+            pinned_at: Some(10),
+            dormant_at: None,
+            dormant_exempt_until: None,
+        },
+        TaskMetadataEdit::Rename {
+            title: "Human name".into(),
+        },
+        TaskMetadataEdit::Archive {
+            archived_at: Some(10),
+        },
+        TaskMetadataEdit::Archive { archived_at: None },
+        TaskMetadataEdit::Placement {
+            dormant_at: Some(10),
+            dormant_exempt_until: None,
+            pinned_at: None,
+        },
+        TaskMetadataEdit::Placement {
+            dormant_at: None,
+            dormant_exempt_until: Some(20),
+            pinned_at: None,
+        },
+        TaskMetadataEdit::Placement {
+            pinned_at: Some(30),
+            dormant_at: None,
+            dormant_exempt_until: Some(20),
+        },
+        TaskMetadataEdit::Placement {
+            pinned_at: None,
+            dormant_at: None,
+            dormant_exempt_until: Some(20),
+        },
+    ];
+    let mut expected = original.clone();
+    for (index, edit) in edits.into_iter().enumerate() {
+        edit.apply(&mut expected);
+        let mut updates = vec![TaskMetadataUpdate {
+            session_id: id,
+            edit,
+        }];
+        if index == 0 {
+            updates.push(TaskMetadataUpdate {
+                session_id: sibling_id,
+                edit: TaskMetadataEdit::Rename {
+                    title: "Batch name".into(),
+                },
+            });
+        }
+        let ResponsePayload::TaskStateSaved { sessions } =
+            request(Command::UpdateTaskMetadata { updates })
+        else {
+            panic!("missing metadata acknowledgement");
+        };
+        let saved = sessions.iter().find(|s| s.id == id).unwrap();
+        if expected.dormant_at.is_some() {
+            assert!(saved.dormant_at.is_some_and(|at| at >= saved.updated_at));
+            expected.dormant_at = saved.dormant_at;
+        }
+        assert_eq!(saved.metadata_revision, index as u64 + 1);
+        // A stale save can have a newer wall-clock timestamp, and can be
+        // either a full transcript or a list-only projection.
+        let mut stale = if index % 2 == 0 {
+            original.clone()
+        } else {
+            original.list_projection()
+        };
+        stale.updated_at = saved.updated_at + 100;
+        request(Command::SaveTaskState {
+            projects: Vec::new(),
+            live_session_ids: vec![id],
+            sessions: vec![stale],
+            session_tails: Vec::new(),
+        });
+        let mut restored = backend.task_store.load().unwrap();
+        let stored = restored
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == id)
+            .unwrap();
+        backend.task_store.hydrate(stored).unwrap();
+        assert_eq!(stored.metadata_revision, saved.metadata_revision);
+        assert_eq!(stored.title, expected.title);
+        assert_eq!(stored.pinned_at, expected.pinned_at);
+        assert_eq!(stored.archived_at, expected.archived_at);
+        assert_eq!(stored.dormant_at, expected.dormant_at);
+        if let Some(at) = stored.dormant_at {
+            assert!(
+                at >= stored.updated_at,
+                "stale saves must not wake a swept task"
+            );
+        }
+        assert_eq!(stored.dormant_exempt_until, expected.dormant_exempt_until);
+        assert_eq!(stored.messages.len(), original.messages.len());
+        assert_eq!(stored.messages[0].content, original.messages[0].content);
+    }
+    let restored = backend.task_store.load().unwrap();
+    let row = restored
+        .sessions
+        .iter()
+        .find(|session| session.id == id)
+        .unwrap();
+    assert!(!row.detail_loaded);
+    assert_eq!(row.metadata_revision, 8);
+    assert_eq!(row.title, "Human name");
+    assert_eq!(row.pinned_at, None);
+    let sibling = restored
+        .sessions
+        .iter()
+        .find(|session| session.id == sibling_id)
+        .unwrap();
+    assert_eq!(sibling.title, "Batch name");
+    assert_eq!(sibling.metadata_revision, 1);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn task_metadata_incognito_adoption_keeps_the_client_high_water() {
+    use waku_protocol::task_metadata::{TaskMetadataEdit, TaskMetadataUpdate};
+    let root = std::env::temp_dir().join(format!("metadata-incognito-{}", Uuid::new_v4()));
+    let (backend, _) = surface_test_backend(&root);
+    let project = backend.task_state.lock().projects[0].id;
+    let mut task = AgentSession::new(project, ProviderKind::Codex);
+    task.begin_turn("Private task");
+    task.incognito = true;
+    task.metadata_revision = 17;
+    let id = task.id;
+    let request = |command| {
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command,
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap()
+    };
+    let ResponsePayload::TaskStateSaved { sessions } = request(Command::SaveTaskState {
+        projects: Vec::new(),
+        live_session_ids: vec![id],
+        sessions: vec![task],
+        session_tails: Vec::new(),
+    }) else {
+        panic!("missing adoption acknowledgement");
+    };
+    assert_eq!(sessions[0].metadata_revision, 17);
+    let ResponsePayload::TaskStateSaved { sessions } = request(Command::UpdateTaskMetadata {
+        updates: vec![TaskMetadataUpdate {
+            session_id: id,
+            edit: TaskMetadataEdit::Rename {
+                title: "Private name".into(),
+            },
+        }],
+    }) else {
+        panic!("missing metadata acknowledgement");
+    };
+    assert_eq!(sessions[0].metadata_revision, 18);
+    assert_eq!(sessions[0].title, "Private name");
+    assert!(
+        !backend
+            .task_store
+            .load()
+            .unwrap()
+            .sessions
+            .iter()
+            .any(|session| session.id == id)
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -1,1 +1,1 @@
-- Fixed archived tasks reappearing in the sidebar when a refresh overlaps the archive action.
+- Task renames, pinning, archiving, and dormant-state changes now stay applied when background refreshes overlap the action.

@@ -897,7 +897,8 @@ impl Waku {
                 let _ = waku.update(cx, |waku, cx| {
                     waku.session_hydrations.running.remove(&session_id);
                     match result {
-                        Ok((session, interrupted_turn)) => {
+                        Ok((mut session, interrupted_turn)) => {
+                            waku.pending_task_metadata.observe(&mut session);
                             waku.trim_resident_transcripts();
                             let applied = if let Some(existing) = waku
                                 .state
@@ -905,7 +906,10 @@ impl Waku {
                                 .iter_mut()
                                 .find(|existing| existing.id == session_id)
                             {
-                                super::runtime::merge_hydrated_session(existing, session)
+                                let merged =
+                                    super::runtime::merge_hydrated_session(existing, session);
+                                waku.pending_task_metadata.overlay(existing);
+                                merged
                             } else {
                                 false
                             };
@@ -2497,7 +2501,7 @@ impl Waku {
         else {
             return;
         };
-        self.pending_session_archives.remove(&session_id);
+        self.pending_task_metadata.remove(&session_id);
         let project_id = self.state.sessions[index].project_id;
         let composer_draft_key =
             crate::persistence::ComposerDraftKey::for_session(&self.state.sessions[index]);
@@ -2982,7 +2986,10 @@ impl Waku {
             // clobber the flag.
             session.updated_at = now;
         }
-        self.pending_session_archives.insert(session_id, now);
+        self.record_task_metadata(
+            session_id,
+            waku_protocol::task_metadata::TaskMetadataField::Archive,
+        );
         self.record_action(
             Some(session_id),
             action_predictions::JournalAction::SessionArchive,
@@ -3050,12 +3057,15 @@ impl Waku {
         if session.archived_at.is_none() {
             return;
         }
-        self.pending_session_archives.remove(&session_id);
         let now = unix_time();
         if let Some(session) = self.state.session_mut(session_id) {
             session.archived_at = None;
             session.updated_at = now;
         }
+        self.record_task_metadata(
+            session_id,
+            waku_protocol::task_metadata::TaskMetadataField::Archive,
+        );
         // Restored by any path, it's no longer the palette's undoable
         // archive.
         self.undoable_archive.retain(|id| *id != session_id);
@@ -3252,6 +3262,10 @@ impl Waku {
             session.dormant_exempt_until = None;
             session.updated_at = now;
         }
+        self.record_task_metadata(
+            session_id,
+            waku_protocol::task_metadata::TaskMetadataField::Placement,
+        );
         // The sweep's own teardown goes through the archive drain, so an
         // earlier background sweep's bookkeeping starts over.
         self.dormant_worktrees_swept
@@ -3308,6 +3322,10 @@ impl Waku {
                 session.dormant_exempt_until = exempt_until;
                 session.updated_at = now;
             }
+            self.record_task_metadata(
+                *session_id,
+                waku_protocol::task_metadata::TaskMetadataField::Placement,
+            );
             // A queued sweep teardown must not fire once the task is back,
             // and a worktree the sweep already removed comes back now rather
             // than at the next prompt.
@@ -3374,6 +3392,10 @@ impl Waku {
             session.pinned_at = if pinned { None } else { Some(now) };
             session.updated_at = now;
         }
+        self.record_task_metadata(
+            session_id,
+            waku_protocol::task_metadata::TaskMetadataField::Placement,
+        );
         self.save();
         cx.notify();
         Some(!pinned)
@@ -3425,6 +3447,10 @@ impl Waku {
                 session.pinned_at = pinned.then_some(now);
                 session.updated_at = now;
             }
+            self.record_task_metadata(
+                *session_id,
+                waku_protocol::task_metadata::TaskMetadataField::Placement,
+            );
             changed += 1;
         }
         if changed > 0 {

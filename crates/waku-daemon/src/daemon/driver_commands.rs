@@ -104,6 +104,7 @@ pub(super) fn handle_driver_command(
         | Command::TrashSkills { .. }
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
+        | Command::UpdateTaskMetadata { .. }
         | Command::RemoveSession
         | Command::RemoveProject { .. }
         | Command::HydrateSession { .. }

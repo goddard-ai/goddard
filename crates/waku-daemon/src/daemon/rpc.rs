@@ -1064,12 +1064,20 @@ impl Backend for WakuBackend {
                     projectless_root: crate::projectless::workspace_root(),
                 })
             }
-            Command::SaveTaskState {
-                projects,
-                live_session_ids: _,
-                sessions,
-                session_tails,
-            } => {
+            command @ (Command::SaveTaskState { .. } | Command::UpdateTaskMetadata { .. }) => {
+                let metadata_only = matches!(&command, Command::UpdateTaskMetadata { .. });
+                let (projects, sessions, session_tails, metadata_updates) = match command {
+                    Command::SaveTaskState {
+                        projects,
+                        sessions,
+                        session_tails,
+                        ..
+                    } => (projects, sessions, session_tails, Vec::new()),
+                    Command::UpdateTaskMetadata { updates } => {
+                        (Vec::new(), Vec::new(), Vec::new(), updates)
+                    }
+                    _ => unreachable!(),
+                };
                 let active_runtimes = self
                     .sessions
                     .lock()
@@ -1131,7 +1139,61 @@ impl Backend for WakuBackend {
                     .filter(|session| !removed_session_ids.contains(&session.id))
                     .collect::<Vec<_>>();
                 drop(removed_session_ids);
-                let mut saved_ids = Vec::with_capacity(sessions.len());
+                // Explicit edits apply to the resident row, never a client's
+                // stale copy of unrelated fields. Validate the whole batch first.
+                for update in &metadata_updates {
+                    let existing = state
+                        .sessions
+                        .iter()
+                        .find(|s| s.id == update.session_id)
+                        .ok_or_else(|| anyhow::anyhow!("task no longer exists"))?;
+                    if existing
+                        .metadata_revision
+                        .checked_add(metadata_updates.len() as u64)
+                        .is_none_or(|revision| revision > i64::MAX as u64)
+                    {
+                        bail!("task metadata revision exhausted");
+                    }
+                    if matches!(&update.edit, waku_protocol::task_metadata::TaskMetadataEdit::Rename { title } if title.trim().is_empty())
+                    {
+                        bail!("task title must not be empty");
+                    }
+                    if matches!(
+                        &update.edit,
+                        waku_protocol::task_metadata::TaskMetadataEdit::Archive { .. }
+                    ) && existing.boss_managed
+                        && existing.planning.is_none()
+                        && existing.project_id == self.boss.identity_and_session().0.id
+                        && self.boss.employee_including_retired(existing.id).is_none()
+                    {
+                        bail!("Boss chat archival belongs to rotation");
+                    }
+                }
+                let mut saved_ids = Vec::with_capacity(sessions.len() + metadata_updates.len());
+                for update in metadata_updates {
+                    let existing = state
+                        .sessions
+                        .iter_mut()
+                        .find(|s| s.id == update.session_id)
+                        .expect("validated task metadata target");
+                    let was_archived = existing.archived_at.is_some();
+                    update.edit.apply(existing);
+                    existing.metadata_revision += 1;
+                    existing.updated_at = existing.updated_at.max(crate::model::unix_time());
+                    // A sweep is an intent to be dormant. The save's own
+                    // timestamp must not immediately wake it again.
+                    if let waku_protocol::task_metadata::TaskMetadataEdit::Placement {
+                        dormant_at: Some(at),
+                        ..
+                    } = update.edit
+                    {
+                        existing.dormant_at = Some(at.max(existing.updated_at));
+                    }
+                    if !was_archived && existing.archived_at.is_some() {
+                        newly_archived.push(existing.id);
+                    }
+                    saved_ids.push(existing.id);
+                }
                 for mut session in sessions {
                     let session_id = session.id;
                     if let Some(tail) = tails.remove(&session_id) {
@@ -1151,6 +1213,30 @@ impl Backend for WakuBackend {
                             && existing.project_id == self.boss.identity_and_session().0.id
                         {
                             session.archived_at = existing.archived_at;
+                        }
+                        // Metadata versions are independent of streaming timestamps.
+                        // A delayed transcript save cannot undo a confirmed edit.
+                        use waku_protocol::task_metadata::TaskMetadata;
+                        if session.metadata_revision < existing.metadata_revision {
+                            TaskMetadata::capture(existing).apply(&mut session);
+                            session.metadata_revision = existing.metadata_revision;
+                            // A stale transcript checkpoint is not an intent
+                            // to wake a task the user explicitly swept.
+                            if existing
+                                .dormant_at
+                                .is_some_and(|at| at >= existing.updated_at)
+                            {
+                                session.updated_at = existing.updated_at;
+                            }
+                        } else {
+                            session.metadata_revision = existing
+                                .metadata_revision
+                                .checked_add(u64::from(
+                                    TaskMetadata::capture(existing)
+                                        != TaskMetadata::capture(&session),
+                                ))
+                                .filter(|revision| *revision <= i64::MAX as u64)
+                                .ok_or_else(|| anyhow!("task metadata revision exhausted"))?;
                         }
                         // Employee launch selection belongs to the daemon, including
                         // retired employees. Boss chats still accept human picker edits.
@@ -1232,6 +1318,12 @@ impl Backend for WakuBackend {
                             true
                         }
                     } else if session.detail_loaded && session.has_started() {
+                        // Re-registering an incognito task after a restart must
+                        // preserve the client's metadata high-water as well as
+                        // its transcript. A counter outside SQLite's range is invalid.
+                        if session.metadata_revision >= i64::MAX as u64 {
+                            bail!("invalid task metadata revision");
+                        }
                         state.sessions.push(session);
                         true
                     } else {
@@ -1297,6 +1389,20 @@ impl Backend for WakuBackend {
                 // The batch claims the dirty marks up front so a session
                 // re-dirtied while the write runs unlocked keeps its flag.
                 let batch = self.task_store.save_batch(&mut state);
+                // Acknowledge the exact revision in this durable batch, not
+                // a later resident edit that might still be waiting to write.
+                let metadata_reply = metadata_only.then(|| {
+                    saved_ids
+                        .iter()
+                        .filter_map(|id| {
+                            state
+                                .sessions
+                                .iter()
+                                .find(|session| session.id == *id)
+                                .map(AgentSession::list_projection)
+                        })
+                        .collect::<Vec<_>>()
+                });
                 state.unmark_sessions_dirty(&batch.dirty_ids);
                 // A delayed client-save snapshot must not overwrite a newer
                 // stable transcript after its host cursor has committed. Keep
@@ -1334,16 +1440,18 @@ impl Backend for WakuBackend {
                     .collect::<Vec<_>>();
                 drop_detached(removed_runtimes);
                 let mut state = self.task_state.lock();
-                let sessions = saved_ids
-                    .into_iter()
-                    .filter_map(|session_id| {
-                        state
-                            .sessions
-                            .iter()
-                            .find(|session| session.id == session_id)
-                            .cloned()
-                    })
-                    .collect::<Vec<_>>();
+                let sessions = metadata_reply.unwrap_or_else(|| {
+                    saved_ids
+                        .into_iter()
+                        .filter_map(|id| {
+                            state
+                                .sessions
+                                .iter()
+                                .find(|session| session.id == id)
+                                .cloned()
+                        })
+                        .collect::<Vec<_>>()
+                });
                 self.auto_prompts.consider(
                     &sessions
                         .iter()

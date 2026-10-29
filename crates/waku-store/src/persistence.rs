@@ -1505,6 +1505,9 @@ pub struct StateStore {
     /// Read-only migration sources for the former combined settings document.
     legacy_settings_paths: Vec<PathBuf>,
     storage: Mutex<Option<Storage>>,
+    /// Last prepared metadata, including writes still in flight. Direct daemon
+    /// mutations must advance the same version as explicit client edits.
+    metadata_versions: Mutex<HashMap<Uuid, (u64, waku_protocol::task_metadata::TaskMetadata)>>,
     blobs: Arc<BlobStore>,
     desktop_files: bool,
 }
@@ -1582,6 +1585,7 @@ impl StateStore {
             legacy_settings_paths,
             path,
             storage: Mutex::new(None),
+            metadata_versions: Mutex::new(HashMap::new()),
             blobs,
             desktop_files: true,
         }
@@ -1825,7 +1829,7 @@ impl StateStore {
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
                         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
                         agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-                        friend_peer_id, friend_peer_name, reasoning_effort, config_activation
+                        friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1858,6 +1862,7 @@ impl StateStore {
                     row.get::<_, Option<String>>(22)?,
                     row.get::<_, Option<String>>(23)?,
                     row.get::<_, Option<String>>(24)?,
+                    row.get::<_, i64>(25)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1905,6 +1910,23 @@ impl StateStore {
                 0
             },
         });
+        {
+            let mut versions = self.metadata_versions.lock();
+            for session in &state.sessions {
+                if versions
+                    .get(&session.id)
+                    .is_none_or(|(revision, _)| *revision < session.metadata_revision)
+                {
+                    versions.insert(
+                        session.id,
+                        (
+                            session.metadata_revision,
+                            waku_protocol::task_metadata::TaskMetadata::capture(session),
+                        ),
+                    );
+                }
+            }
+        }
         Ok(state)
     }
 
@@ -2311,6 +2333,34 @@ impl StateStore {
             .map(|session| session.id)
             .collect();
         let persisted = self.persisted_session_ids();
+        {
+            let known_ids = state
+                .sessions
+                .iter()
+                .map(|session| session.id)
+                .collect::<HashSet<_>>();
+            let mut versions = self.metadata_versions.lock();
+            versions.retain(|id, _| known_ids.contains(id));
+            for session in state.sessions.iter_mut().filter(|session| {
+                session.has_started()
+                    && (dirty.contains(&session.id) || !persisted.contains(&session.id))
+            }) {
+                let mut metadata = waku_protocol::task_metadata::TaskMetadata::capture(session);
+                if let Some((revision, previous)) = versions.get(&session.id) {
+                    if session.metadata_revision < *revision {
+                        metadata = previous.clone();
+                        metadata.clone().apply(session);
+                    } else if previous != &metadata && session.metadata_revision == *revision {
+                        session.metadata_revision = revision
+                            .checked_add(1)
+                            .filter(|revision| *revision <= i64::MAX as u64)
+                            .expect("task metadata revision exhausted");
+                    }
+                    session.metadata_revision = session.metadata_revision.max(*revision);
+                }
+                versions.insert(session.id, (session.metadata_revision, metadata));
+            }
+        }
         let sessions = state
             .sessions
             .iter()
@@ -2590,6 +2640,7 @@ type SessionColumns = (
     Option<String>,
     Option<String>,
     Option<String>,
+    i64,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -2624,6 +2675,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         friend_peer_name,
         reasoning_effort,
         config_activation,
+        metadata_revision,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
     // it. Rows migrated before the column existed or whose JSON fails to parse
@@ -2642,6 +2694,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         planning.and_then(|planning| serde_json::from_str::<SessionPlanning>(&planning).ok());
     Some(AgentSession {
         id: Uuid::parse_str(&id).ok()?,
+        metadata_revision: u64::try_from(metadata_revision).ok()?,
         title,
         auto_title,
         project_id: Uuid::parse_str(&project_id).ok()?,
@@ -2735,6 +2788,7 @@ pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
     // ahead of the blob — merge forward only so a stale blob cannot lower
     // it and reopen stale redeliveries.
     session.config_activation = session.config_activation.max(stored.config_activation);
+    session.metadata_revision = session.metadata_revision.max(stored.metadata_revision);
     // Quarantine is detail, not a list column — the skeleton's flag is a
     // placeholder and the stored blob carries the real value.
     session.quarantined = stored.quarantined;
@@ -3367,33 +3421,34 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
          dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
          agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-         friend_peer_id, friend_peer_name, reasoning_effort, config_activation
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)
+         friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
-         title         = excluded.title,
-         auto_title    = excluded.auto_title,
+         title         = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.title ELSE sessions.title END,
+         auto_title    = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.auto_title ELSE sessions.auto_title END,
          provider      = excluded.provider,
          model         = excluded.model,
          status        = excluded.status,
          created_at    = excluded.created_at,
          updated_at    = excluded.updated_at,
          last_reply_at = excluded.last_reply_at,
-         archived_at   = excluded.archived_at,
-         pinned_at     = excluded.pinned_at,
-         dormant_at    = excluded.dormant_at,
-         dormant_exempt_until = excluded.dormant_exempt_until,
+         archived_at   = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.archived_at ELSE sessions.archived_at END,
+         pinned_at     = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.pinned_at ELSE sessions.pinned_at END,
+         dormant_at    = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.dormant_at ELSE sessions.dormant_at END,
+         dormant_exempt_until = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.dormant_exempt_until ELSE sessions.dormant_exempt_until END,
          landed_at     = excluded.landed_at,
          workspace     = excluded.workspace,
          side_chat_of  = excluded.side_chat_of,
-         agent_rename_allowed = excluded.agent_rename_allowed,
+         agent_rename_allowed = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.agent_rename_allowed ELSE sessions.agent_rename_allowed END,
          boss_managed = excluded.boss_managed,
          planning = excluded.planning,
          runtime_event_cursor = excluded.runtime_event_cursor,
          friend_peer_id = excluded.friend_peer_id,
          friend_peer_name = excluded.friend_peer_name,
          reasoning_effort = excluded.reasoning_effort,
-         config_activation = excluded.config_activation";
+         config_activation = excluded.config_activation,
+         metadata_revision = MAX(sessions.metadata_revision, excluded.metadata_revision)";
 
 const INSERT_PROJECT: &str =
     "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred, submissions_enabled, qa_branch, friend_peer_id, kind)
@@ -3501,6 +3556,9 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
             .as_ref()
             .and_then(|mark| serde_json::to_string(mark).ok())
             .map_or(Value::Null, Value::Text),
+        Value::Integer(
+            i64::try_from(session.metadata_revision).expect("metadata revision fits SQLite"),
+        ),
     ]
 }
 
@@ -4397,7 +4455,37 @@ mod tests {
     }
 
     #[test]
-    fn config_activation_round_trips_on_the_skeleton() {
+    fn task_metadata_columns_reject_out_of_order_writes() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let id = state.sessions[0].id;
+        state.sessions[0].begin_turn("Keep the transcript");
+        store.save(&mut state).unwrap();
+        state.mark_session_dirty(id);
+        let stale = store.save_batch(&mut state);
+        let mut stale_view = state.clone();
+        state.sessions[0].title = "Confirmed name".into();
+        state.sessions[0].pinned_at = Some(10);
+        state.sessions[0].metadata_revision = 1;
+        state.mark_session_dirty(id);
+        store.save(&mut state).unwrap();
+        store.write_batch(&stale).unwrap();
+        store.save(&mut stale_view).unwrap();
+        let mut restored = store_in(&directory).load().unwrap();
+        let session = restored.sessions.iter_mut().find(|s| s.id == id).unwrap();
+        assert_eq!(session.metadata_revision, 1);
+        assert_eq!(session.title, "Confirmed name");
+        assert_eq!(session.pinned_at, Some(10));
+        store.hydrate(session).unwrap();
+        assert_eq!(session.metadata_revision, 1);
+        assert_eq!(session.title, "Confirmed name");
+        assert_eq!(session.pinned_at, Some(10));
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn session_versions_round_trip_on_the_skeleton() {
         let directory = temporary_directory();
         let store = store_in(&directory);
         let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
@@ -4407,18 +4495,27 @@ mod tests {
             revision: 7,
         };
         state.sessions[0].config_activation = Some(activation);
+        state.sessions[0].metadata_revision = 7;
         store.save(&mut state).unwrap();
+        // Agent renames and other daemon mutations also advance the version,
+        // without needing to know about the client metadata command.
+        state.sessions[0].set_title("Daemon rename");
+        state.mark_session_dirty(state.sessions[0].id);
+        store.save(&mut state).unwrap();
+        assert_eq!(state.sessions[0].metadata_revision, 8);
 
         let mut restored = store_in(&directory).load().unwrap();
         // Catalog merges read the mark straight off the list row — no hydrate.
         assert!(!restored.sessions[0].detail_loaded);
         assert_eq!(restored.sessions[0].config_activation, Some(activation));
+        assert_eq!(restored.sessions[0].metadata_revision, 8);
 
         // Hydrating over it keeps the column's value — a blob at or below
         // the mark cannot lower it.
         let reopened = store_in(&directory);
         reopened.hydrate(&mut restored.sessions[0]).unwrap();
         assert_eq!(restored.sessions[0].config_activation, Some(activation));
+        assert_eq!(restored.sessions[0].metadata_revision, 8);
 
         fs::remove_dir_all(directory).ok();
     }

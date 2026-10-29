@@ -4019,9 +4019,9 @@ impl Waku {
         // Pending archives stay hidden even if another update still carries
         // an unarchived session. HashMap iteration must not affect the cache.
         let pending_archives = self
-            .pending_session_archives
-            .keys()
-            .fold(0u64, |combined, id| combined.wrapping_add(mix_uuid(0, *id)));
+            .pending_task_metadata
+            .archiving_ids()
+            .fold(0u64, |combined, id| combined.wrapping_add(mix_uuid(0, id)));
         fingerprint = mix(fingerprint, pending_archives);
         fingerprint = mix(fingerprint, u64::from(self.state.sidebar_employee_groups));
         fingerprint = mix(
@@ -4306,7 +4306,7 @@ impl Waku {
             .filter(|session| {
                 session.has_started()
                     && session.archived_at.is_none()
-                    && !self.pending_session_archives.contains_key(&session.id)
+                    && !self.pending_task_metadata.is_archiving(&session.id)
                     && !session.is_side_chat()
                     && !self.friend_sessions.contains_key(&session.id)
                     && session
@@ -4466,7 +4466,7 @@ impl Waku {
                 let planning_ids = self
                     .sidebar_planning_session_ids(*key)
                     .into_iter()
-                    .filter(|id| !self.pending_session_archives.contains_key(id))
+                    .filter(|id| !self.pending_task_metadata.is_archiving(id))
                     .collect::<Vec<_>>();
                 if !self.state.sidebar_employee_groups {
                     let employees = self
@@ -4485,7 +4485,7 @@ impl Waku {
                         )
                         .copied()
                         .filter(|id| {
-                            !self.pending_session_archives.contains_key(id)
+                            !self.pending_task_metadata.is_archiving(id)
                                 && sidebar_employee_shown(
                                     id,
                                     &self.state.sessions,
@@ -4518,7 +4518,7 @@ impl Waku {
                 ] {
                     let shown = |id: &&Uuid| {
                         self.sidebar_employee_group(**id) == group
-                            && !self.pending_session_archives.contains_key(*id)
+                            && !self.pending_task_metadata.is_archiving(*id)
                             && sidebar_employee_shown(
                                 id,
                                 &self.state.sessions,
@@ -6332,6 +6332,10 @@ impl Waku {
                 .session_mut(session_id)
                 .is_some_and(|session| session.set_title_from_user(&title))
         {
+            self.record_task_metadata(
+                session_id,
+                waku_protocol::task_metadata::TaskMetadataField::Title,
+            );
             self.save();
         }
         cx.notify();

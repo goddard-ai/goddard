@@ -485,27 +485,6 @@ pub(super) fn take_ready_deferred_steers(
     deferred.drain(..).map(|steer| steer.queued_id).collect()
 }
 
-/// A save is queued without waiting for its daemon acknowledgement. Catalog
-/// loads already in flight can therefore still report an unarchived row.
-/// Only the ordered sync worker's catalog can confirm an archive; unrelated
-/// RPC replies must not release this protection. Restore cancels it explicitly.
-pub(super) fn reconcile_pending_session_archives(
-    pending: &mut HashMap<Uuid, u64>,
-    remote: &mut [AgentSession],
-) {
-    for session in remote {
-        let Some(&archived_at) = pending.get(&session.id) else {
-            continue;
-        };
-        if session.archived_at.is_some() {
-            pending.remove(&session.id);
-        } else {
-            session.archived_at = Some(archived_at);
-            session.updated_at = session.updated_at.max(archived_at);
-        }
-    }
-}
-
 /// Merge the daemon's list-only session projection into the desktop catalog.
 ///
 /// Existing rows may already contain a hydrated transcript, so only list
@@ -609,6 +588,13 @@ fn merge_session_catalog_row(
     remote: AgentSession,
     has_local_runtime: bool,
 ) {
+    let mut remote = remote;
+    if remote.metadata_revision < local.metadata_revision {
+        waku_protocol::task_metadata::TaskMetadata::capture(local).apply(&mut remote);
+        remote.updated_at = remote.updated_at.max(local.updated_at);
+    }
+    local.metadata_revision = local.metadata_revision.max(remote.metadata_revision);
+    local.agent_rename_allowed = remote.agent_rename_allowed;
     local.title = remote.title;
     local.auto_title = remote.auto_title;
     local.project_id = remote.project_id;
@@ -2799,10 +2785,9 @@ impl Waku {
                 .retain(|session| remote_session_visible(session, boss_experiment_enabled));
         }
         let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
-        reconcile_pending_session_archives(
-            &mut self.pending_session_archives,
-            &mut snapshot.sessions,
-        );
+        for session in &mut snapshot.sessions {
+            self.pending_task_metadata.observe(session);
+        }
         for session in &snapshot.sessions {
             if session.archived_at.is_some() {
                 self.detach_pinned_session_terminals(session.id, cx);
@@ -2859,7 +2844,7 @@ impl Waku {
             }
         }
         for session_id in &removed {
-            self.pending_session_archives.remove(session_id);
+            self.pending_task_metadata.remove(session_id);
             self.runtime_attach_pending.remove(session_id);
             self.pending_session_cancels.remove(session_id);
             self.runtime_attach_misses.remove(session_id);
@@ -8694,6 +8679,7 @@ impl Waku {
             | self.drain_plan_usage_events()
             | self.drain_reset_credit_events()
             | self.drain_agy_poll_events()
+            | self.drain_task_metadata_results(cx)
             | self.drain_task_state_sync_events(cx)
             | self.drain_daemon_settings_events(cx)
             | self.drain_friends_events(cx)

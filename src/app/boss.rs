@@ -5749,6 +5749,10 @@ impl Waku {
                                 let now = unix_time();
                                 session.archived_at = Some(now);
                                 session.updated_at = now;
+                                this.record_task_metadata(
+                                    session_id,
+                                    waku_protocol::task_metadata::TaskMetadataField::Archive,
+                                );
                                 this.save();
                             } else {
                                 // A requeued session keeps the ordinary workspace

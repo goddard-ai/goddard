@@ -27,6 +27,7 @@ import type {
   WorkspaceOperation,
   WorkspaceResult,
 } from '@waku/client';
+import { reconcileSavedSession } from '@waku/client/session-state';
 
 export type TaskState = Extract<ResponsePayload, { type: 'taskState' }>;
 export type DaemonDirectory = Extract<WorkspaceResult, { type: 'directory' }>;
@@ -728,12 +729,7 @@ export async function persistSession(
     }),
     'taskStateSaved',
   );
-  // A skeleton save is echoed as a skeleton — never let it replace the
-  // loaded session this client is holding.
-  return (
-    response.sessions.find((item) => item.id === session.id && item.detail_loaded !== false)
-    ?? session
-  );
+  return reconcileSavedSession(session, response.sessions.find((item) => item.id === session.id));
 }
 
 function expectResponse<T extends ResponsePayload['type']>(

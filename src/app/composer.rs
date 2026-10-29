@@ -3926,6 +3926,10 @@ impl Waku {
                 .session_mut(session_id)
                 .is_some_and(|session| session.set_title_from_user(title))
             {
+                self.record_task_metadata(
+                    session_id,
+                    waku_protocol::task_metadata::TaskMetadataField::Title,
+                );
                 self.save();
                 cx.notify();
             }
@@ -4269,6 +4273,10 @@ impl Waku {
             .session_mut(session_id)
             .is_some_and(|session| session.set_title_from_user(title))
         {
+            self.record_task_metadata(
+                session_id,
+                waku_protocol::task_metadata::TaskMetadataField::Title,
+            );
             self.save();
             cx.notify();
         }
