@@ -4016,6 +4016,13 @@ impl Waku {
         fingerprint = mix(fingerprint, u64::from(dates.day_start_hour));
         fingerprint = mix(fingerprint, dates.calendar_year as u64);
         fingerprint = mix(fingerprint, self.boss_ui.revision);
+        // Pending archives stay hidden even if another update still carries
+        // an unarchived session. HashMap iteration must not affect the cache.
+        let pending_archives = self
+            .pending_session_archives
+            .keys()
+            .fold(0u64, |combined, id| combined.wrapping_add(mix_uuid(0, *id)));
+        fingerprint = mix(fingerprint, pending_archives);
         fingerprint = mix(fingerprint, u64::from(self.state.sidebar_employee_groups));
         fingerprint = mix(
             fingerprint,
@@ -4299,6 +4306,7 @@ impl Waku {
             .filter(|session| {
                 session.has_started()
                     && session.archived_at.is_none()
+                    && !self.pending_session_archives.contains_key(&session.id)
                     && !session.is_side_chat()
                     && !self.friend_sessions.contains_key(&session.id)
                     && session
@@ -4455,7 +4463,11 @@ impl Waku {
                 // its employees — they are the boss's own work, not
                 // delegated tasks. The fold flag is shared across hosts like
                 // the employee groups', so the member lists merge too.
-                let planning_ids = self.sidebar_planning_session_ids(*key);
+                let planning_ids = self
+                    .sidebar_planning_session_ids(*key)
+                    .into_iter()
+                    .filter(|id| !self.pending_session_archives.contains_key(id))
+                    .collect::<Vec<_>>();
                 if !self.state.sidebar_employee_groups {
                     let employees = self
                         .boss_ui
@@ -4473,12 +4485,14 @@ impl Waku {
                         )
                         .copied()
                         .filter(|id| {
-                            sidebar_employee_shown(
-                                id,
-                                &self.state.sessions,
-                                &self.state.sidebar_archived_employees,
-                                self.boss_ui.working.contains(id),
-                            ) && self.sidebar_employee_avatar_ready(*id)
+                            !self.pending_session_archives.contains_key(id)
+                                && sidebar_employee_shown(
+                                    id,
+                                    &self.state.sessions,
+                                    &self.state.sidebar_archived_employees,
+                                    self.boss_ui.working.contains(id),
+                                )
+                                && self.sidebar_employee_avatar_ready(*id)
                         });
                     append_sidebar_ungrouped_roster(&mut rows, &planning_ids, employees);
                     continue;
@@ -4504,6 +4518,7 @@ impl Waku {
                 ] {
                     let shown = |id: &&Uuid| {
                         self.sidebar_employee_group(**id) == group
+                            && !self.pending_session_archives.contains_key(*id)
                             && sidebar_employee_shown(
                                 id,
                                 &self.state.sessions,
