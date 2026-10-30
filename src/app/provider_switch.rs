@@ -836,10 +836,9 @@ impl Waku {
         session.agent_preset = None;
         session.auto_route = false;
         session.route_decision = None;
-        // These belong to the previous provider's process.
+        // Clear process-specific state; the goal belongs to the task and survives.
         session.available_commands.clear();
         session.context_usage = None;
-        session.thread_goal = None;
         let restarted = outcome.restarted();
         session.pending_provider_context = Some(outcome.envelope);
         let mut marker = Message::new(
