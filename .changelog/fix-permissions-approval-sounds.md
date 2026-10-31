@@ -1,0 +1,1 @@
+- Approval requests now play your completion sound when they arrive in another task, respecting sound settings and project focus.

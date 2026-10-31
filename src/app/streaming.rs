@@ -1,5 +1,31 @@
 use super::*;
 
+/// Shared by completed turns and approvals that need the user's attention.
+fn attention_sound(
+    state: &PersistedState,
+    session: &AgentSession,
+    focused_project: Option<Uuid>,
+    employee: bool,
+) -> Option<CompletionSound> {
+    if !state.completion_sound_enabled
+        || state.selected_session == Some(session.id)
+        || employee
+        || !session.queued_messages.is_empty()
+        || focused_project.is_some_and(|focused| session.project_id != focused)
+    {
+        return None;
+    }
+    let starred = state
+        .projects
+        .iter()
+        .any(|project| project.id == session.project_id && project.starred);
+    Some(if starred && state.starred_completion_sound {
+        CompletionSound::Crystal
+    } else {
+        state.completion_sound
+    })
+}
+
 impl Waku {
     pub(super) fn finish_streaming_assistant(&mut self, session_id: Uuid) {
         if let Some(session) = self.state.session_mut(session_id) {
@@ -210,6 +236,25 @@ impl Waku {
             &body,
             cx,
         );
+    }
+
+    fn play_attention_sound(&self, session_id: Uuid) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        if let Some(sound) = attention_sound(
+            &self.state,
+            session,
+            self.focused_project_id(),
+            self.session_is_employee(session),
+        ) {
+            crate::platform::play_completion_sound(sound, self.state.completion_sound_volume);
+        }
     }
 
     pub(super) fn accepts_turn_output(&mut self, session_id: Uuid) -> bool {
@@ -550,6 +595,10 @@ impl Waku {
                     || request_id.starts_with(waku_protocol::AGENT_ARCHIVE_REQUEST_PREFIX)
                     || request_id.starts_with(waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX)
                 {
+                    let new_request = runtime
+                        .pending_daemon_request
+                        .as_ref()
+                        .is_none_or(|pending| pending.request_id != request_id);
                     runtime.pending_daemon_request = Some(PendingPermission {
                         request_id,
                         title,
@@ -560,6 +609,9 @@ impl Waku {
                     });
                     if let Some(session) = self.state.session_mut(session_id) {
                         session.status = SessionStatus::Waiting;
+                    }
+                    if new_request {
+                        self.play_attention_sound(session_id);
                     }
                     self.notify_waiting_input(session_id, tr!("session.waiting_for_approval"), cx);
                 } else if self.accepts_turn_output(session_id) {
@@ -575,6 +627,10 @@ impl Waku {
                     if already_allowed && self.state.computer_use_enabled {
                         runtime.driver.respond(request_id, "task".into());
                     } else {
+                        let new_request = runtime
+                            .pending_permission
+                            .as_ref()
+                            .is_none_or(|pending| pending.request_id != request_id);
                         runtime.pending_permission = Some(PendingPermission {
                             request_id,
                             title,
@@ -585,6 +641,9 @@ impl Waku {
                         });
                         if let Some(session) = self.state.session_mut(session_id) {
                             session.status = SessionStatus::Waiting;
+                        }
+                        if new_request {
+                            self.play_attention_sound(session_id);
                         }
                         self.notify_waiting_input(
                             session_id,
@@ -1149,31 +1208,8 @@ impl Waku {
                                     .is_some_and(|turn_id| Some(turn_id) == goal.managed_last_turn))
                     })
                 });
-                if self.state.completion_sound_enabled
-                    && self.state.selected_session != Some(session_id)
-                    && finished.is_some_and(|session| {
-                        !self.session_is_employee(session) && session.queued_messages.is_empty()
-                    })
-                    && inside_focus
-                    && !managed_goal_turn
-                {
-                    // A starred project's finish plays its own sound unless
-                    // the user disabled the override.
-                    let starred = finished.is_some_and(|session| {
-                        self.state
-                            .projects
-                            .iter()
-                            .any(|project| project.id == session.project_id && project.starred)
-                    });
-                    let sound = if starred && self.state.starred_completion_sound {
-                        waku_client::persistence::CompletionSound::Crystal
-                    } else {
-                        self.state.completion_sound
-                    };
-                    crate::platform::play_completion_sound(
-                        sound,
-                        self.state.completion_sound_volume,
-                    );
+                if !managed_goal_turn {
+                    self.play_attention_sound(session_id);
                 }
                 // A turn settling off screen is an away-completion
                 // candidate; on screen it is simply read.
@@ -1872,5 +1908,56 @@ mod config_activation_tests {
                 revision: 0
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod attention_sound_tests {
+    use super::*;
+
+    #[test]
+    fn approvals_follow_completion_sound_settings() {
+        let mut state = PersistedState::empty();
+        state.completion_sound_enabled = true;
+        state.completion_sound = CompletionSound::Gentle;
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.status = SessionStatus::Waiting;
+        assert_eq!(
+            attention_sound(&state, &session, None, false),
+            Some(CompletionSound::Gentle)
+        );
+        state.selected_session = Some(session.id);
+        assert_eq!(attention_sound(&state, &session, None, false), None);
+        state.selected_session = None;
+        assert_eq!(attention_sound(&state, &session, None, true), None);
+        assert_eq!(
+            attention_sound(&state, &session, Some(Uuid::new_v4()), false),
+            None
+        );
+        assert_eq!(
+            attention_sound(&state, &session, Some(session.project_id), false),
+            Some(CompletionSound::Gentle)
+        );
+        let mut project = Project::from_path(std::path::PathBuf::from("/tmp/waku-sound-test"));
+        project.id = session.project_id;
+        project.starred = true;
+        state.projects.push(project);
+        state.starred_completion_sound = true;
+        assert_eq!(
+            attention_sound(&state, &session, None, false),
+            Some(CompletionSound::Crystal)
+        );
+        state.starred_completion_sound = false;
+        assert_eq!(
+            attention_sound(&state, &session, None, false),
+            Some(CompletionSound::Gentle)
+        );
+        session
+            .queued_messages
+            .push(QueuedMessage::new("follow up"));
+        assert_eq!(attention_sound(&state, &session, None, false), None);
+        session.queued_messages.clear();
+        state.completion_sound_enabled = false;
+        assert_eq!(attention_sound(&state, &session, None, false), None);
     }
 }

@@ -8644,3 +8644,32 @@ fn a_retried_report_dedupes_its_marker_entry() {
     );
     let _ = retry_id;
 }
+
+#[test]
+fn pending_approval_is_a_bell_target_without_an_unread_completion() {
+    let id = Uuid::new_v4();
+    let mut session = started_session(id);
+    session.status = SessionStatus::Waiting;
+    let sessions = vec![session];
+    let rows = vec![SidebarRow::Session(id)];
+    for selected in [None, Some(id)] {
+        assert_eq!(
+            next_unread_completion(
+                &sessions,
+                &HashMap::new(),
+                &HashMap::new(),
+                &rows,
+                selected,
+                None,
+                &HashSet::new(),
+                None,
+                None,
+            ),
+            if selected.is_none() {
+                Some(UnreadTarget::Session(id))
+            } else {
+                None
+            }
+        );
+    }
+}
