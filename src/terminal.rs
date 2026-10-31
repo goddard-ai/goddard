@@ -32,8 +32,8 @@ use gpui::{
     KeyBinding, KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
     MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
     Render, ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, Styled, StyledText,
-    Subscription, Task, TextAlign, TextRun, UnderlineStyle, Window, actions, canvas, div, fill, font, point,
-    px, rgb, size,
+    Subscription, Task, TextAlign, TextRun, UnderlineStyle, Window, actions, canvas, div, fill,
+    font, point, px, rgb, size,
 };
 use parking_lot::Mutex;
 
@@ -1226,7 +1226,11 @@ fn cell_row_text(
             .iter()
             .any(|&c| c == '\u{FE0F}' || c == '\u{200D}')
     });
-    let mut text = if emoji { " ".to_owned() } else { cell.c.to_string() };
+    let mut text = if emoji {
+        " ".to_owned()
+    } else {
+        cell.c.to_string()
+    };
     let mut emoji_text = emoji.then(|| cell.c.to_string());
     if let Some(zerowidth) = cell.zerowidth() {
         if let Some(emoji_text) = emoji_text.as_mut() {

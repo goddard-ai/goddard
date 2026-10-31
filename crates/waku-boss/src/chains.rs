@@ -2668,7 +2668,13 @@ mod tests {
         assert_eq!(accepted.steps[0].status, StepStatus::Succeeded);
         assert!(accepted.steps[0].attempts[0].handoff_accepted);
         // The sealed packet stays immutable — only the live flag moved.
-        assert!(!accepted.steps[0].attempts[0].sealed.as_ref().unwrap().accepted);
+        assert!(
+            !accepted.steps[0].attempts[0]
+                .sealed
+                .as_ref()
+                .unwrap()
+                .accepted
+        );
         assert!(accepted.attention.as_ref().unwrap().handled_at.is_some());
         assert!(
             fixture

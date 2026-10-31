@@ -1206,10 +1206,7 @@ fn remote_catalog_session_ids(
     catalog_sessions: &[AgentSession],
     sessions: &[AgentSession],
 ) -> Vec<Uuid> {
-    let projects: HashSet<Uuid> = catalog_projects
-        .iter()
-        .map(|project| project.id)
-        .collect();
+    let projects: HashSet<Uuid> = catalog_projects.iter().map(|project| project.id).collect();
     catalog_sessions
         .iter()
         .map(|session| session.id)

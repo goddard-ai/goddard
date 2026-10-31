@@ -145,8 +145,7 @@ fn remote_catalog_claims_include_client_drafts_only_for_its_projects() {
     }
     let reported = AgentSession::new(catalog.projects[0].id, ProviderKind::Claude);
     catalog.sessions.push(reported.clone());
-    let claims =
-        super::remote_catalog_session_ids(&catalog.projects, &catalog.sessions, &sessions);
+    let claims = super::remote_catalog_session_ids(&catalog.projects, &catalog.sessions, &sessions);
     assert_eq!(claims.len(), 2);
     assert!(claims.contains(&draft.id));
     assert!(claims.contains(&reported.id));

@@ -8658,7 +8658,10 @@ mod tests {
             .unwrap()
             .and_hms_opt(2, 0, 0)
             .unwrap();
-        if matches!(Local.from_local_datetime(&missing), chrono::LocalResult::None) {
+        if matches!(
+            Local.from_local_datetime(&missing),
+            chrono::LocalResult::None
+        ) {
             let before = Local
                 .with_ymd_and_hms(2026, 3, 8, 1, 59, 59)
                 .earliest()

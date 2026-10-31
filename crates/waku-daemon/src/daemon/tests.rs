@@ -21963,8 +21963,8 @@ mod rotation_oracle;
 mod rotation_status;
 mod summon_recovery;
 
-mod employee_composer;
 mod client_stop;
+mod employee_composer;
 
 #[test]
 fn boss_prompt_cancels_unsupported_provider_and_preserves_durable_correction() {

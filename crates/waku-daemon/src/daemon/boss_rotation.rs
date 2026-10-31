@@ -260,11 +260,7 @@ impl WakuBackend {
         }
         let mut state = self.task_state.lock();
         for id in self.boss_lineage_sessions(session_id) {
-            if let Some(session) = state
-                .sessions
-                .iter_mut()
-                .find(|session| session.id == id)
-            {
+            if let Some(session) = state.sessions.iter_mut().find(|session| session.id == id) {
                 self.task_store.hydrate(session)?;
                 if session.queued_messages.iter().any(|m| m.id == message_id)
                     || session.messages.iter().any(|m| m.id == message_id)
