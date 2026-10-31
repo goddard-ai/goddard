@@ -2806,6 +2806,8 @@ shortcuts.move_up: 上移
 shortcuts.navigate_back: 后退
 shortcuts.navigate_forward: 前进
 shortcuts.newline: 插入换行
+shortcuts.indent_bullet: 缩进列表项
+shortcuts.outdent_bullet: 减少列表项缩进
 shortcuts.next_field: 下一个字段
 shortcuts.next_turn: 下一轮
 shortcuts.next_unread_completion: 前往下一个未读完成的任务

@@ -2854,6 +2854,8 @@ shortcuts.move_up: 上に移動
 shortcuts.navigate_back: 戻る
 shortcuts.navigate_forward: 進む
 shortcuts.newline: 改行を挿入
+shortcuts.indent_bullet: 箇条書きをインデント
+shortcuts.outdent_bullet: 箇条書きのインデントを解除
 shortcuts.next_field: 次のフィールド
 shortcuts.next_turn: 次のターン
 shortcuts.next_unread_completion: 次の未読の完了へ移動

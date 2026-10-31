@@ -284,6 +284,24 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "text.indent_bullet",
+        action: || Box::new(crate::input::IndentBullet),
+        title_key: "shortcuts.indent_bullet",
+        title_index: None,
+        category: C::TextInput,
+        editability: TEXT_ENTRY,
+        builtin_label: None,
+    },
+    CommandDescriptor {
+        id: "text.outdent_bullet",
+        action: || Box::new(crate::input::OutdentBullet),
+        title_key: "shortcuts.outdent_bullet",
+        title_index: None,
+        category: C::TextInput,
+        editability: TEXT_ENTRY,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "text.submit_steer",
         action: || Box::new(crate::input::SubmitSteer),
         title_key: "shortcuts.steer",
@@ -2452,6 +2470,8 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("text.redo", All, "secondary-shift-z", TextInput),
     e("text.enter", All, "enter", TextInput),
     e("text.newline", All, "shift-enter", TextInput),
+    e("text.indent_bullet", All, "tab", ComposerInput),
+    e("text.outdent_bullet", All, "shift-tab", ComposerInput),
     e("text.newline", All, "ctrl-enter", TextInput),
     e("text.newline", All, "alt-enter", TextInput),
     e("text.submit_steer", All, "secondary-enter", TextInput),
@@ -3128,6 +3148,7 @@ use PlatformSet::*;
 #[allow(non_upper_case_globals)]
 mod ctx {
     pub const TextInput: &str = "TextInput";
+    pub const ComposerInput: &str = "(Composer > TextInput) && !ComposerAutocomplete";
     pub const Menu: &str = "Menu";
     pub const MenuPanelField: &str = "Menu > TextInput";
     pub const KeyboardOptionsSearch: &str = "KeyboardOptions > TextInput";

@@ -5496,6 +5496,10 @@ shortcuts.submit:
   en: Submit
 shortcuts.newline:
   en: Insert Newline
+shortcuts.indent_bullet:
+  en: Indent Bullet
+shortcuts.outdent_bullet:
+  en: Outdent Bullet
 shortcuts.steer:
   en: Steer the Running Turn
 shortcuts.clear_field:
