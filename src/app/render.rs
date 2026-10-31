@@ -494,6 +494,29 @@ impl Waku {
         }
     }
 
+    /// Shared composer lane for task and QA conversations.
+    #[track_caller]
+    pub(super) fn render_session_composer_lane(
+        &mut self,
+        approval_visible: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let lane_height = self.composer_lane_height.clone();
+        composer_lane(approval_visible, self.main_composer_press_to_talk_claimed())
+            .child(
+                canvas(
+                    move |bounds, _, _| lane_height.set(f32::from(bounds.size.height)),
+                    |_, _, _, _| (),
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .children(self.render_queued_messages(cx))
+            .child(self.render_composer(window, cx))
+            .child(self.render_workspace_footer(cx))
+    }
+
     /// [`WakuPane`] delegate for the sidebar island.
     pub(super) fn sidebar_pane_content(
         &mut self,
@@ -569,13 +592,13 @@ impl Render for Waku {
         // panel is mid-slide, and settling here rather than at the point of
         // use keeps the pane islands and the transcript on one set of widths.
         let panels = self.settle_panel_slides(window);
-        if self.qa_window.is_some() {
-            return self.render_qa_window(window, cx);
-        }
         if panels.sliding {
             // The manual drive for the width tweens — the same scheduling
             // `with_animation` would do, minus its element-id keying.
             window.request_animation_frame();
+        }
+        if self.qa_window.is_some() {
+            return self.render_qa_window(window, cx);
         }
         let sidebar_peek = self.settle_sidebar_peek(window, cx);
         // Before anything can early-return (the settings page below), settle
@@ -1066,26 +1089,11 @@ impl Render for Waku {
                         if self.big_picture.is_open() {
                             element.child(div().flex_none().h(px(self.composer_lane_height.get())))
                         } else {
-                            let lane_height = self.composer_lane_height.clone();
-                            element.child(
-                                composer_lane(
-                                    approval_visible,
-                                    self.main_composer_press_to_talk_claimed(),
-                                )
-                                .child(
-                                    canvas(
-                                        move |bounds, _, _| {
-                                            lane_height.set(f32::from(bounds.size.height))
-                                        },
-                                        |_, _, _, _| (),
-                                    )
-                                    .absolute()
-                                    .inset_0(),
-                                )
-                                .children(self.render_queued_messages(cx))
-                                .child(self.render_composer(window, cx))
-                                .child(self.render_workspace_footer(cx)),
-                            )
+                            element.child(self.render_session_composer_lane(
+                                approval_visible,
+                                window,
+                                cx,
+                            ))
                         }
                     })
                     .relative()

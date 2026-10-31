@@ -330,18 +330,13 @@ impl Waku {
         self.settings_page = None;
         self.selected_terminal = None;
         self.git_panel_visible = false;
+        self.select_session(record.session_id, cx);
         self.right_panel_visible = true;
         self.right_panel_width = 660.0;
-        self.select_session(record.session_id, cx);
         self.right_panel_surfaces = vec![RightPanelSurface::Diff];
         self.right_panel_active_surface = Some(0);
-        self.open_right_panel_commit_review(
-            record.checkout.worktree.path.clone(),
-            &record.checkout.commit.sha,
-            cx,
-        );
         self.start_qa_server(cx);
-        self.open_right_panel_surface(RightPanelSurface::Diff, cx);
+        self.open_qa_commit_review(cx);
         window.focus(&self.composer_focus(cx), cx);
         if is_new {
             let c = &record.checkout;
@@ -362,6 +357,15 @@ impl Waku {
             );
         }
         self.poll_qa_checkout(cx);
+    }
+
+    fn open_qa_commit_review(&mut self, cx: &mut Context<Self>) {
+        let Some(qa) = &self.qa_window else {
+            return;
+        };
+        let workspace = qa.record.checkout.worktree.path.clone();
+        let sha = qa.record.checkout.commit.sha.clone();
+        self.open_right_panel_commit_review(workspace, &sha, cx);
     }
 
     fn start_qa_server(&mut self, cx: &mut Context<Self>) {
@@ -733,6 +737,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.sync_browser_webviews(cx);
+        self.schedule_time_label_wake(cx);
         let theme = Theme::current(cx);
         let qa = self.qa_window.as_ref().expect("QA window renderer");
         let title = qa.record.checkout.commit.subject.clone();
@@ -793,6 +798,16 @@ impl Waku {
                             .child(detail),
                     ),
             )
+            .child(settings::settings_button(
+                "qa-show-diff",
+                tr!("diff.source_commit"),
+                true,
+                false,
+                false,
+                theme,
+                cx,
+                |this, _, cx| this.open_qa_commit_review(cx),
+            ))
             .child(dropdown_menu(
                 MenuChip::new("qa-actions").label(tr!("qa.actions")),
                 "qa-actions-menu",
@@ -845,6 +860,8 @@ impl Waku {
                 .bg(theme.accent)
                 .text_color(theme.surface),
             );
+        let permission = self.render_permission(cx);
+        let approval_visible = permission.is_some();
         let transcript = self.transcript_pane.clone();
         let panel = self.right_panel_pane.clone();
         let content = div()
@@ -909,25 +926,39 @@ impl Waku {
                 div()
                     .flex_1()
                     .min_h_0()
+                    .w_full()
                     .flex()
                     .child(
                         div()
+                            .h_full()
                             .flex_1()
+                            .min_h_0()
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(transcript.cached(StyleRefinement::default().flex_1().min_h_0()))
-                            .children(self.render_queued_messages(cx))
+                            .child(
+                                transcript
+                                    .cached(StyleRefinement::default().flex_1().min_h_0().w_full()),
+                            )
+                            .children(permission.map(|card| div().flex_none().child(card)))
                             .when(accepts_submission, |element| {
-                                element.child(self.render_composer(window, cx))
+                                element.child(self.render_session_composer_lane(
+                                    approval_visible,
+                                    window,
+                                    cx,
+                                ))
                             }),
                     )
                     .child(
-                        panel.cached(
-                            StyleRefinement::default()
-                                .w(px(self.right_panel_content_width))
-                                .h_full(),
-                        ),
+                        // Keep the review slot out of flex shrink. The chat
+                        // column receives the remaining width, just as in the
+                        // main workspace; cached panes need explicit bounds.
+                        div()
+                            .flex_none()
+                            .w(px(self.right_panel_content_width))
+                            .h_full()
+                            .relative()
+                            .child(panel.cached(StyleRefinement::default().size_full())),
                     ),
             )
             .children(self.render_full_access_dialog(cx))
