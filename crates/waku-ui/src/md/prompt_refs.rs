@@ -61,6 +61,7 @@ pub(super) fn display(text: &str) -> Cow<'_, str> {
                 "bucket" => AtomRefKind::MemoryBucket,
                 "automation" => AtomRefKind::Automation,
                 "file" => AtomRefKind::MemoryFile,
+                "skill" => AtomRefKind::Skill,
                 _ => continue,
             };
             if key != kind.operand_key() {

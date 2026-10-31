@@ -3616,6 +3616,7 @@ pub enum AtomRefKind {
     MemoryBucket,
     Automation,
     MemoryFile,
+    Skill,
 }
 
 impl AtomRefKind {
@@ -3624,7 +3625,7 @@ impl AtomRefKind {
         char::from_u32(0xFE00 + self as u32).unwrap()
     }
 
-    /// The kind a mark nibble encodes — `None` outside U+FE00–U+FE04.
+    /// The kind a mark nibble encodes — `None` outside U+FE00–U+FE06.
     pub fn from_mark(ch: char) -> Option<Self> {
         match ch {
             '\u{FE00}' => Some(Self::Project),
@@ -3633,6 +3634,7 @@ impl AtomRefKind {
             '\u{FE03}' => Some(Self::MemoryBucket),
             '\u{FE04}' => Some(Self::Automation),
             '\u{FE05}' => Some(Self::MemoryFile),
+            '\u{FE06}' => Some(Self::Skill),
             _ => None,
         }
     }
@@ -3646,6 +3648,7 @@ impl AtomRefKind {
             Self::MemoryBucket => "bucket",
             Self::Automation => "automation",
             Self::MemoryFile => "file",
+            Self::Skill => "skill",
         }
     }
 
@@ -3661,6 +3664,7 @@ impl AtomRefKind {
             Self::MemoryBucket => "bucket_id",
             Self::Automation => "automation_id",
             Self::MemoryFile => "path",
+            Self::Skill => "name",
         }
     }
 }

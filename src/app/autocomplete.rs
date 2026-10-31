@@ -346,6 +346,8 @@ struct ResultsMemo {
     query: String,
     /// `Rc::as_ptr` identity of the source index the rows were filtered from.
     source: usize,
+    /// Skills share the @ picker, so command catalog refreshes invalidate it too.
+    commands: usize,
     /// Whether `/incognito` was offered — the draft-only command is filtered
     /// out once the composer session has started, so it keys the memo too.
     incognito_offered: bool,
@@ -1302,6 +1304,7 @@ impl Waku {
                 memo.kind == trigger.kind
                     && memo.query == trigger.query
                     && memo.source == source
+                    && memo.commands == Rc::as_ptr(&commands) as usize
                     && memo.incognito_offered == incognito_offered
                     && memo.chat == chat
             }) {
@@ -1373,6 +1376,37 @@ impl Waku {
                 )
                 .chain(reference_rows.into_iter().map(AutocompleteRow::Ref))
                 .collect::<Vec<_>>();
+                let skills = commands
+                    .iter()
+                    .filter(|command| command.scope == composer_complete::CommandScope::Skill)
+                    .collect::<Vec<_>>();
+                let names = skills
+                    .iter()
+                    .map(|command| command.name.as_str())
+                    .collect::<Vec<_>>();
+                rows.extend(
+                    composer_complete::filter_mentions(
+                        &names,
+                        &trigger.query,
+                        &mut matcher,
+                        REF_MENTION_CAP,
+                        |index| usage_priority(uses, &format!("ref:Skill:{}", skills[index].name)),
+                    )
+                    .into_iter()
+                    .map(|(index, positions)| {
+                        let skill = skills[index];
+                        AutocompleteRow::Ref(Scored {
+                            item: composer::ComposerRef {
+                                kind: AtomRefKind::Skill,
+                                name: skill.name.clone().into(),
+                                target: skill.name.clone().into(),
+                                detail: format!("{} · {}", skill.scope.label(), skill.description)
+                                    .into(),
+                            },
+                            positions,
+                        })
+                    }),
+                );
                 rank_mentions_by_usage(&mut rows, uses);
                 rows
             }
@@ -1394,6 +1428,7 @@ impl Waku {
             kind: trigger.kind,
             query: trigger.query.clone(),
             source,
+            commands: Rc::as_ptr(&commands) as usize,
             incognito_offered,
             chat,
             rows: rows.clone(),
@@ -1950,7 +1985,9 @@ impl Waku {
         let (loading, hint) = match trigger.kind {
             TriggerKind::Command => (self.surface_commands_loading(surface), None),
             TriggerKind::File => (
-                self.surface_files_loading(surface) || !ui.transcript_mentions_ready.get(),
+                self.surface_files_loading(surface)
+                    || self.surface_commands_loading(surface)
+                    || !ui.transcript_mentions_ready.get(),
                 None,
             ),
             TriggerKind::WorkItem => {

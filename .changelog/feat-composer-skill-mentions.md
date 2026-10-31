@@ -1,0 +1,1 @@
+- Mention skills with `@` in the desktop composer, alongside files and tasks, and insert them as inline chips.

@@ -297,6 +297,9 @@ pub fn resolved_submission(
     prompt: &str,
     commands: &[SlashCommand],
 ) -> Option<String> {
+    if let Some(resolved) = resolved_inline_skills(provider, prompt, commands) {
+        return Some(resolved_submission(provider, &resolved, commands).unwrap_or(resolved));
+    }
     if let Some(skill) = resolved_skill_submission(provider, prompt, commands) {
         return Some(skill);
     }
@@ -315,6 +318,9 @@ pub fn resolved_skill_submission(
     prompt: &str,
     commands: &[SlashCommand],
 ) -> Option<String> {
+    if let Some(resolved) = resolved_inline_skills(provider, prompt, commands) {
+        return Some(resolved_skill_submission(provider, &resolved, commands).unwrap_or(resolved));
+    }
     if !matches!(
         provider,
         ProviderKind::Codex | ProviderKind::Fx | ProviderKind::Pi | ProviderKind::OhMyPi
@@ -336,6 +342,32 @@ pub fn resolved_skill_submission(
         ProviderKind::Pi | ProviderKind::OhMyPi => format!("/skill:{invocation}"),
         _ => unreachable!("non-native skill providers returned above"),
     })
+}
+
+/// Resolve only exact skill references drawn from the current provider catalog.
+/// Codex accepts inline dollar references; other providers receive an explicit
+/// instruction because their slash invocation is only valid at prompt start.
+fn resolved_inline_skills(
+    provider: ProviderKind,
+    prompt: &str,
+    commands: &[SlashCommand],
+) -> Option<String> {
+    if !prompt.contains("[skill ") {
+        return None;
+    }
+    let mut resolved = prompt.to_owned();
+    for command in commands
+        .iter()
+        .filter(|command| command.scope == CommandScope::Skill)
+    {
+        let token = format!("[skill \"{}\" (name: {})]", command.name, command.name);
+        let invocation = match provider {
+            ProviderKind::Codex | ProviderKind::Fx => format!("${}", command.name),
+            _ => format!("(use the \"{}\" skill)", command.name),
+        };
+        resolved = resolved.replace(&token, &invocation);
+    }
+    (resolved != prompt).then_some(resolved)
 }
 
 pub fn matcher() -> Matcher {
@@ -701,6 +733,56 @@ pub fn highlight_byte_ranges(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_skill_mentions_resolve_only_catalog_skills() {
+        let commands = vec![SlashCommand {
+            name: "review".into(),
+            description: "Review changes".into(),
+            scope: CommandScope::Skill,
+            argument_hint: None,
+            template: None,
+        }];
+        let prompt =
+            "Use [skill \"review\" (name: review)] here and [skill \"missing\" (name: missing)]";
+        assert_eq!(
+            resolved_submission(ProviderKind::Codex, prompt, &commands).unwrap(),
+            "Use $review here and [skill \"missing\" (name: missing)]"
+        );
+        assert_eq!(
+            resolved_skill_submission(ProviderKind::Claude, prompt, &commands).unwrap(),
+            "Use (use the \"review\" skill) here and [skill \"missing\" (name: missing)]"
+        );
+        assert_eq!(
+            resolved_skill_submission(
+                ProviderKind::Codex,
+                "/review with [skill \"review\" (name: review)]",
+                &commands
+            )
+            .unwrap(),
+            "$review with $review"
+        );
+        let mut with_template = commands.clone();
+        with_template.push(SlashCommand {
+            name: "explain".into(),
+            description: String::new(),
+            scope: CommandScope::User,
+            argument_hint: None,
+            template: Some("Explain $ARGUMENTS".into()),
+        });
+        assert_eq!(
+            resolved_submission(
+                ProviderKind::Codex,
+                "/explain [skill \"review\" (name: review)]",
+                &with_template
+            )
+            .unwrap(),
+            "Explain $review"
+        );
+        let mut builtin = commands;
+        builtin[0].scope = CommandScope::Builtin;
+        assert!(resolved_submission(ProviderKind::Codex, prompt, &builtin).is_none());
+    }
 
     #[test]
     fn mention_filter_rejects_scattered_matches_before_capping() {

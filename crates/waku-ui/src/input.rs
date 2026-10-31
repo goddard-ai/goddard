@@ -700,6 +700,7 @@ pub fn atom_ref_icon(kind: waku_protocol::model::AtomRefKind) -> &'static str {
         AtomRefKind::MemoryBucket => "icons/database.svg",
         AtomRefKind::Automation => "icons/automations.svg",
         AtomRefKind::MemoryFile => "icons/brain.svg",
+        AtomRefKind::Skill => "icons/sparkle.svg",
     }
 }
 

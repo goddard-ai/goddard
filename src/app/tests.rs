@@ -972,6 +972,30 @@ fn reference_atoms_splice_their_token_and_chip() {
 }
 
 #[test]
+fn skill_mentions_survive_draft_round_trip() {
+    use super::composer::{composer_draft_content, restore_inline_atoms};
+    use crate::input::INLINE_ATOM_MARKER as M;
+    let atom = ComposerInlineAtom {
+        marker: 4,
+        revision: Uuid::new_v4(),
+        paste_category: None,
+        kind: ComposerAtomKind::Ref(ComposerRef {
+            kind: AtomRefKind::Skill,
+            name: "review".into(),
+            target: "review".into(),
+            detail: "".into(),
+        }),
+    };
+    let content = format!("Use {M} here");
+    let (body, saved) = composer_draft_content(&content, std::slice::from_ref(&atom));
+    assert_eq!(body, "Use [skill \"review\" (name: review)] here");
+    let (restored, atoms) = restore_inline_atoms(&body, &saved);
+    assert_eq!(restored, content);
+    assert_eq!(splice_inline_atoms(&restored, &atoms), body);
+    assert_eq!(atoms[0].icon(), "icons/sparkle.svg");
+}
+
+#[test]
 fn boss_prompt_project_reference_sets_response_context_only_for_one_project() {
     use super::transcript::single_project_prompt_context;
 
