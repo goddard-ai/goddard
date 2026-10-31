@@ -11535,6 +11535,8 @@ fn setmodel_selection_survives_stale_saves_broadcast_hydration_and_reload() {
             stale.clone()
         };
         incoming.updated_at += (index as u64 + 1) * 10_000;
+        // The title edit is current, while launch selection stays stale.
+        incoming.metadata_revision = catalog(&writer).metadata_revision;
         incoming.title = format!("Stale client metadata edit {index}");
         let mut tails = Vec::new();
         if incremental {
@@ -11586,6 +11588,7 @@ fn setmodel_selection_survives_stale_saves_broadcast_hydration_and_reload() {
     // selection or erase the daemon's prompt while it is working.
     let mut incoming = stale.clone();
     incoming.updated_at += 40_000;
+    incoming.metadata_revision = catalog(&writer).metadata_revision;
     incoming.title = "Stale working client metadata edit".into();
     incoming.reasoning_effort = None;
     request(Command::SaveTaskState {
