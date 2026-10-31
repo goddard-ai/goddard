@@ -1,0 +1,1 @@
+- Pressing Escape inside a floating terminal that's running a command no longer hides the card outright: the press still reaches the program (vim, fzf, and other TUIs keep working) and the card's close button arms — a deliberate second Escape within three seconds hides it. An idle shell still hides on one press.

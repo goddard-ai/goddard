@@ -1268,14 +1268,19 @@ fn seed_remote_catalog(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct EscapeStopTarget {
-    session_id: Uuid,
-    turn_id: Option<Uuid>,
+enum EscapeStopTarget {
+    Turn {
+        session_id: Uuid,
+        turn_id: Option<Uuid>,
+    },
+    /// The floating card's second-press hide — keyed to the anchor so a
+    /// different card never inherits the arm.
+    DockedTerminal(Uuid),
 }
 
 impl EscapeStopTarget {
     fn for_session(session: &AgentSession) -> Self {
-        Self {
+        Self::Turn {
             session_id: session.id,
             turn_id: session.active_turn_id(),
         }

@@ -784,12 +784,13 @@ fn completed_mutating_activities_refresh_git_status() {
 
 #[test]
 fn escape_stop_requires_a_matching_second_press_and_expires() {
-    let target = EscapeStopTarget {
-        session_id: Uuid::new_v4(),
+    let session_id = Uuid::new_v4();
+    let target = EscapeStopTarget::Turn {
+        session_id,
         turn_id: Some(Uuid::new_v4()),
     };
-    let other_turn = EscapeStopTarget {
-        session_id: target.session_id,
+    let other_turn = EscapeStopTarget::Turn {
+        session_id,
         turn_id: Some(Uuid::new_v4()),
     };
     let mut confirmation = EscapeStopConfirmation::default();

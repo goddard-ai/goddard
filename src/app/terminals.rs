@@ -222,6 +222,33 @@ fn new_terminal_split_target(
     }
 }
 
+/// What Escape does inside the floating card. `Hide` parks the shell
+/// under its sidebar row; `Arm` starts the second-press window and keeps
+/// the card; `ArmPassthrough` arms and also lets the keystroke through —
+/// Escape is real input to a program holding focus, so the arm claims
+/// only the deliberate follow-up press.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DockedTerminalEscape {
+    Hide,
+    Arm,
+    ArmPassthrough,
+}
+
+fn docked_terminal_escape(
+    group_busy: bool,
+    armed: bool,
+    focused_pane_busy: bool,
+) -> DockedTerminalEscape {
+    if !group_busy || armed {
+        return DockedTerminalEscape::Hide;
+    }
+    if focused_pane_busy {
+        DockedTerminalEscape::ArmPassthrough
+    } else {
+        DockedTerminalEscape::Arm
+    }
+}
+
 fn terminal_groups_fit(
     records: &HashMap<Uuid, TerminalRecord>,
     dragged_id: Uuid,
@@ -2822,6 +2849,66 @@ impl Waku {
         cx.notify();
     }
 
+    /// The card's bare Escape: an idle group hides on one press, while a
+    /// pane mid-command earns the same second-press confirmation the
+    /// composer's stop uses — the card covers a program the user may have
+    /// meant to keep watching. When the busy pane itself holds focus the
+    /// first press still reaches the program — vim's Escape is real
+    /// input — and the arm claims only the follow-up inside the window.
+    fn dismiss_docked_terminal_action(
+        &mut self,
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut group_busy = false;
+        let mut focused_pane_busy = false;
+        for pane_id in self.terminal_group_panes(terminal_id) {
+            let Some(terminal) = self.right_panel_terminals.get(&pane_id) else {
+                continue;
+            };
+            if !terminal.read(cx).command_running() {
+                continue;
+            }
+            group_busy = true;
+            focused_pane_busy |= terminal
+                .read(cx)
+                .focus_handle(cx)
+                .contains_focused(window, cx);
+        }
+        let target = EscapeStopTarget::DockedTerminal(terminal_id);
+        let armed = self
+            .escape_stop_confirmation
+            .is_armed_for(target, Instant::now());
+        let escape = docked_terminal_escape(group_busy, armed, focused_pane_busy);
+        if matches!(escape, DockedTerminalEscape::Hide) {
+            self.escape_stop_confirmation.clear();
+            self.dismiss_docked_terminal(window, cx);
+            return;
+        }
+        // `armed` was just established false for this target — `press`
+        // cannot resolve to Stop here.
+        let EscapeStopPress::Arm(arm) = self.escape_stop_confirmation.press(target, Instant::now())
+        else {
+            return;
+        };
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(ESCAPE_STOP_CONFIRMATION_TIMEOUT)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.escape_stop_confirmation.expire(arm) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        if matches!(escape, DockedTerminalEscape::ArmPassthrough) {
+            cx.propagate();
+        }
+    }
+
     /// The standalone page's minimize: the terminal drops to the floating
     /// card and the main area returns to the page history came from — or,
     /// with no back entry recorded, the empty state below the card. The
@@ -3402,6 +3489,12 @@ impl Waku {
             self.transcript_control_focus(format!("docked-terminal-expand-{terminal_id}"), cx);
         let close_focus =
             self.transcript_control_focus(format!("docked-terminal-close-{terminal_id}"), cx);
+        // The armed second-press confirmation wears the composer's "Esc"
+        // badge — one more Escape inside the window hides the card.
+        let escape_armed = self.escape_stop_confirmation.is_armed_for(
+            EscapeStopTarget::DockedTerminal(terminal_id),
+            Instant::now(),
+        );
         let expand_button = div()
             .id(SharedString::from(format!(
                 "docked-terminal-expand-{terminal_id}"
@@ -3446,7 +3539,20 @@ impl Waku {
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
-            .child(icon("icons/x.svg", 13.0, theme.text_tertiary))
+            .when(escape_armed, |element| {
+                element
+                    .bg(theme.inverse)
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.on_inverse)
+                            .child("Esc"),
+                    )
+            })
+            .when(!escape_armed, |element| {
+                element.child(icon("icons/x.svg", 13.0, theme.text_tertiary))
+            })
             .tooltip(|window, cx| Tooltip::new(tr!("common.close")).build(window, cx))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -3475,8 +3581,8 @@ impl Waku {
                             this.close_main_terminal(terminal_id, window, cx);
                         }),
                     )
-                    .on_action(cx.listener(|this, _: &DismissDockedTerminal, window, cx| {
-                        this.dismiss_docked_terminal(window, cx);
+                    .on_action(cx.listener(move |this, _: &DismissDockedTerminal, window, cx| {
+                        this.dismiss_docked_terminal_action(terminal_id, window, cx);
                     }))
                     .w_full()
                     .h(px(card_height))
@@ -4457,6 +4563,39 @@ mod tests {
             Some(standalone)
         );
         assert_eq!(new_terminal_split_target(None, Some(floating), None), None);
+    }
+
+    #[test]
+    fn escape_in_the_floating_card_hides_arms_and_passes_through() {
+        // An idle group hides on a single press — no arm stands between
+        // a quiet shell and the sidebar row.
+        assert_eq!(
+            docked_terminal_escape(false, false, false),
+            DockedTerminalEscape::Hide
+        );
+        assert_eq!(
+            docked_terminal_escape(false, true, false),
+            DockedTerminalEscape::Hide
+        );
+        // A busy group's first press only arms — unless it lands on the
+        // busy pane itself, where Escape is real input for the program.
+        assert_eq!(
+            docked_terminal_escape(true, false, false),
+            DockedTerminalEscape::Arm
+        );
+        assert_eq!(
+            docked_terminal_escape(true, false, true),
+            DockedTerminalEscape::ArmPassthrough
+        );
+        // The confirming second press inside the window always hides.
+        assert_eq!(
+            docked_terminal_escape(true, true, false),
+            DockedTerminalEscape::Hide
+        );
+        assert_eq!(
+            docked_terminal_escape(true, true, true),
+            DockedTerminalEscape::Hide
+        );
     }
 
     fn split_record(id: Uuid) -> TerminalRecord {
