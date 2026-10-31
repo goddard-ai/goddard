@@ -1962,6 +1962,8 @@ struct AppState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     recent_project_scripts: Vec<RecentProjectScript>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    mention_uses: HashMap<Uuid, HashMap<String, u64>>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     new_task_project_uses: HashMap<Uuid, NewTaskProjectUse>,
     /// Replies the voice briefing already played, so a restart does not
     /// re-speak them. Bounded by the runtime cap; dead ids are inert.
@@ -2145,6 +2147,11 @@ pub struct PersistedState {
     /// Project scripts run from the command palette, newest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_project_scripts: Vec<RecentProjectScript>,
+    /// Accepted @ suggestions, keyed by project and stable mention identity.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub mention_uses: HashMap<Uuid, HashMap<String, u64>>,
+    #[serde(skip)]
+    pub mention_uses_revision: u64,
     /// Explicit new-task picker choices, with a 30-day frequency half-life.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub new_task_project_uses: HashMap<Uuid, NewTaskProjectUse>,
@@ -2848,6 +2855,8 @@ impl PersistedState {
             unseen_completions: HashMap::new(),
             recent_sessions: Vec::new(),
             recent_project_scripts: Vec::new(),
+            mention_uses: HashMap::new(),
+            mention_uses_revision: 0,
             new_task_project_uses: HashMap::new(),
             briefed_messages: Vec::new(),
             last_provider: ProviderKind::Codex,
@@ -3265,6 +3274,18 @@ impl PersistedState {
             .map_or(0.0, |usage| usage.score_at(now))
     }
 
+    /// Count an accepted mention without wrapping a frequently used entry.
+    pub fn record_mention_use(&mut self, project_id: Uuid, key: String) {
+        let count = self
+            .mention_uses
+            .entry(project_id)
+            .or_default()
+            .entry(key)
+            .or_default();
+        *count = count.saturating_add(1);
+        self.mention_uses_revision = self.mention_uses_revision.wrapping_add(1);
+    }
+
     /// Records a script run, moving its project-scoped key to the front.
     pub fn record_project_script_use(&mut self, project_id: Uuid, key: &str) {
         self.recent_project_scripts
@@ -3501,6 +3522,7 @@ impl PersistedState {
             unseen_completions: self.unseen_completions.clone(),
             recent_sessions: self.recent_sessions.clone(),
             recent_project_scripts: self.recent_project_scripts.clone(),
+            mention_uses: self.mention_uses.clone(),
             new_task_project_uses: self.new_task_project_uses.clone(),
             briefed_messages: self.briefed_messages.clone(),
             last_provider: self.last_provider,
@@ -3691,6 +3713,8 @@ impl PersistedState {
         self.unseen_completions = app_state.unseen_completions;
         self.recent_sessions = app_state.recent_sessions;
         self.recent_project_scripts = app_state.recent_project_scripts;
+        self.mention_uses = app_state.mention_uses;
+        self.mention_uses_revision = self.mention_uses_revision.wrapping_add(1);
         self.new_task_project_uses = app_state.new_task_project_uses;
         self.briefed_messages = app_state.briefed_messages;
         self.last_provider = app_state.last_provider;
@@ -6458,6 +6482,26 @@ mod tests {
             .remove("new_task_project_uses");
         restored.apply_app_state(serde_json::from_value(app_state).unwrap());
         assert_eq!(restored.new_task_project_score(frequent, MONTH * 3), 0.0);
+    }
+
+    #[test]
+    fn mention_frequency_is_project_scoped_and_survives_restart() {
+        let project = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let mut state = PersistedState::empty();
+        state.record_mention_use(project, "file:README.md".into());
+        state.record_mention_use(project, "file:README.md".into());
+        state.record_mention_use(other, "file:README.md".into());
+        let mut saved = serde_json::to_value(state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(serde_json::from_value(saved.clone()).unwrap());
+        assert_eq!(restored.mention_uses[&project]["file:README.md"], 2);
+        assert_eq!(restored.mention_uses[&other]["file:README.md"], 1);
+        restored.record_mention_use(project, "file:README.md".into());
+        assert_eq!(restored.mention_uses[&project]["file:README.md"], 3);
+        saved.as_object_mut().unwrap().remove("mention_uses");
+        restored.apply_app_state(serde_json::from_value(saved).unwrap());
+        assert!(restored.mention_uses.is_empty());
     }
 
     #[test]

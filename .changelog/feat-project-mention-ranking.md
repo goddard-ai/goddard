@@ -1,0 +1,1 @@
+- Your most-used `@` suggestions now rank first within each project, ahead of suggestion type, with usage remembered across restarts.

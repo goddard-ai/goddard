@@ -1501,7 +1501,7 @@ fn transcript_mentions_prioritize_indexed_files_and_directories() {
         }
     });
     let mut matcher = crate::composer_complete::matcher();
-    let rows = rank_file_mentions(&files, &mentioned, "", &mut matcher);
+    let rows = rank_file_mentions(&files, &mentioned, &HashMap::new(), "", &mut matcher);
     assert_eq!(
         rows.iter()
             .map(|row| row.item.path.as_str())
@@ -1509,10 +1509,75 @@ fn transcript_mentions_prioritize_indexed_files_and_directories() {
         vec!["src/nested/", "src/zebra.rs", "src/alpha.rs"]
     );
     assert_eq!(
-        rank_file_mentions(&files, &mentioned, "zebra", &mut matcher).len(),
+        rank_file_mentions(&files, &mentioned, &HashMap::new(), "zebra", &mut matcher).len(),
         1
     );
-    assert!(rank_file_mentions(&files, &mentioned, "missing", &mut matcher).is_empty());
+    assert!(
+        rank_file_mentions(&files, &mentioned, &HashMap::new(), "missing", &mut matcher).is_empty()
+    );
+}
+
+#[test]
+fn mention_frequency_precedes_kind_and_transcript_priority_before_caps() {
+    use super::autocomplete::{AutocompleteRow, rank_mentions_by_usage};
+    use crate::composer_complete::{FILTER_CAP, FileEntry, Scored};
+    let files = (0..=FILTER_CAP)
+        .map(|index| FileEntry {
+            path: format!("file-{index}"),
+            is_dir: false,
+        })
+        .collect::<Vec<_>>();
+    let favorite = files.last().unwrap().path.clone();
+    let uses = HashMap::from([
+        (format!("file:{favorite}"), 2),
+        ("ref:Project:/favorite".into(), 3),
+    ]);
+    let projects = (0..10)
+        .map(|index| ComposerRef {
+            kind: AtomRefKind::Project,
+            name: format!("project-{index}").into(),
+            target: if index == 9 {
+                "/favorite".into()
+            } else {
+                format!("/{index}").into()
+            },
+            detail: "".into(),
+        })
+        .collect::<Vec<_>>();
+    let (project_rows, _) = rank_reference_mentions(
+        &projects,
+        &[],
+        &[],
+        &uses,
+        "project",
+        &mut crate::composer_complete::matcher(),
+    );
+    assert_eq!(project_rows.len(), 8);
+    assert_eq!(project_rows[0].item.target, "/favorite");
+    let mentioned = HashSet::from([files[0].path.clone()]);
+    let mut matcher = crate::composer_complete::matcher();
+    for query in ["", "file"] {
+        let files = rank_file_mentions(&files, &mentioned, &uses, query, &mut matcher);
+        assert_eq!(files.len(), FILTER_CAP);
+        assert_eq!(files[0].item.path, favorite);
+        let mut rows = files
+            .into_iter()
+            .map(AutocompleteRow::File)
+            .collect::<Vec<_>>();
+        rows.push(AutocompleteRow::Ref(Scored {
+            item: ComposerRef {
+                kind: AtomRefKind::Project,
+                name: "favorite".into(),
+                target: "/favorite".into(),
+                detail: "".into(),
+            },
+            positions: Vec::new(),
+        }));
+        rank_mentions_by_usage(&mut rows, &uses);
+        assert!(matches!(&rows[0], AutocompleteRow::Ref(_)));
+        assert!(matches!(&rows[1], AutocompleteRow::File(file) if file.item.path == favorite));
+        assert!(matches!(&rows[2], AutocompleteRow::File(file) if file.item.path == "file-0"));
+    }
 }
 
 #[test]
@@ -1541,6 +1606,7 @@ fn reference_mentions_keep_kind_precedence_and_separate_caps() {
         &projects,
         &references,
         &[],
+        &HashMap::new(),
         "",
         &mut crate::composer_complete::matcher(),
     );
@@ -1569,6 +1635,7 @@ fn project_mentions_rank_before_other_references_and_memory_files_are_excluded()
         &[project],
         &[persona],
         &[],
+        &HashMap::new(),
         "matching",
         &mut nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT),
     );
@@ -1598,6 +1665,7 @@ fn recent_project_references_break_equal_matches_but_not_stronger_matches() {
         &projects,
         &[],
         &recent,
+        &HashMap::new(),
         "polly",
         &mut nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT),
     );
@@ -1609,6 +1677,7 @@ fn recent_project_references_break_equal_matches_but_not_stronger_matches() {
         &projects,
         &[],
         &recent,
+        &HashMap::new(),
         "polly",
         &mut nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT),
     );

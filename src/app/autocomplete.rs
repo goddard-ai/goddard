@@ -69,6 +69,30 @@ pub(super) enum AutocompleteRow {
     WorkItem(Scored<ComposerWorkItem>),
 }
 
+impl AutocompleteRow {
+    fn mention_key(&self) -> Option<String> {
+        match self {
+            Self::File(row) => Some(format!("file:{}", row.item.path)),
+            Self::Session(row) => Some(format!("session:{}", row.item.id)),
+            Self::Ref(row) => Some(reference_usage_key(&row.item)),
+            _ => None,
+        }
+    }
+}
+
+pub(super) fn rank_mentions_by_usage(rows: &mut [AutocompleteRow], uses: &HashMap<String, u64>) {
+    // Stable sorting preserves the existing kind and match order on ties.
+    rows.sort_by_cached_key(|row| row.mention_key().map(|key| usage_priority(uses, &key)));
+}
+
+fn reference_usage_key(reference: &composer::ComposerRef) -> String {
+    format!("ref:{:?}:{}", reference.kind, reference.target)
+}
+
+fn usage_priority(uses: &HashMap<String, u64>, key: &str) -> std::cmp::Reverse<u64> {
+    std::cmp::Reverse(uses.get(key).copied().unwrap_or(0))
+}
+
 /// What a session `@` row carries: the id the atom records, the title the
 /// popup matches and the mention paints, the project for disambiguation,
 /// and the row's glyph — the boss chat's seeded identity, or the planning
@@ -92,13 +116,14 @@ pub(super) fn rank_reference_mentions(
     projects: &[composer::ComposerRef],
     references: &[composer::ComposerRef],
     recent_project_targets: &[String],
+    uses: &HashMap<String, u64>,
     query: &str,
     matcher: &mut Matcher,
 ) -> (
     Vec<Scored<composer::ComposerRef>>,
     Vec<Scored<composer::ComposerRef>>,
 ) {
-    // Fuzzy score stays primary; recency only breaks equal-score ties.
+    // Within equal usage counts, fuzzy score leads and recency breaks ties.
     let mut projects = projects.iter().collect::<Vec<_>>();
     projects.sort_by_cached_key(|item| {
         let recent_rank = recent_project_targets
@@ -115,14 +140,19 @@ pub(super) fn rank_reference_mentions(
         .iter()
         .map(|item| item.name.as_str())
         .collect::<Vec<_>>();
-    let ranked =
-        composer_complete::filter_mentions(&project_names, query, matcher, REF_MENTION_CAP, |_| 0)
-            .into_iter()
-            .map(|(index, positions)| Scored {
-                item: (*projects[index]).clone(),
-                positions,
-            })
-            .collect::<Vec<_>>();
+    let ranked = composer_complete::filter_mentions(
+        &project_names,
+        query,
+        matcher,
+        REF_MENTION_CAP,
+        |index| usage_priority(uses, &reference_usage_key(projects[index])),
+    )
+    .into_iter()
+    .map(|(index, positions)| Scored {
+        item: (*projects[index]).clone(),
+        positions,
+    })
+    .collect::<Vec<_>>();
     let mut other_ranked = Vec::new();
     for kind in [
         AtomRefKind::Persona,
@@ -139,22 +169,25 @@ pub(super) fn rank_reference_mentions(
             .map(|item| item.name.as_str())
             .collect::<Vec<_>>();
         other_ranked.extend(
-            composer_complete::filter_mentions(&names, query, matcher, REF_MENTION_CAP, |_| 0)
-                .into_iter()
-                .map(|(index, positions)| Scored {
-                    item: (*candidates[index]).clone(),
-                    positions,
-                }),
+            composer_complete::filter_mentions(&names, query, matcher, REF_MENTION_CAP, |index| {
+                usage_priority(uses, &reference_usage_key(candidates[index]))
+            })
+            .into_iter()
+            .map(|(index, positions)| Scored {
+                item: (*candidates[index]).clone(),
+                positions,
+            }),
         );
     }
     (ranked, other_ranked)
 }
 
-/// Prefer transcript-mentioned entries before applying the file cap. Each
+/// Prefer frequent selections, then transcript mentions, before the file cap. Each
 /// indexed path is visited once, so a mentioned file never produces a duplicate.
 pub(super) fn rank_file_mentions(
     files: &[FileEntry],
     mentioned: &HashSet<String>,
+    uses: &HashMap<String, u64>,
     query: &str,
     matcher: &mut Matcher,
 ) -> Vec<Scored<FileEntry>> {
@@ -167,7 +200,12 @@ pub(super) fn rank_file_mentions(
         query,
         matcher,
         composer_complete::FILTER_CAP,
-        |index| usize::from(!mentioned.contains(files[index].path.trim_end_matches('/'))),
+        |index| {
+            (
+                usage_priority(uses, &format!("file:{}", files[index].path)),
+                usize::from(!mentioned.contains(files[index].path.trim_end_matches('/'))),
+            )
+        },
     )
     .into_iter()
     .map(|(index, positions)| Scored {
@@ -1141,6 +1179,7 @@ impl Waku {
             composer::ComposerCard::SideChat { session_id, .. } => Some(*session_id),
         };
         target.hash(&mut hasher);
+        self.state.mention_uses_revision.hash(&mut hasher);
         let project = self.surface_project_id(surface);
         project.hash(&mut hasher);
         for atom in self.surface_atoms(surface) {
@@ -1283,7 +1322,12 @@ impl Waku {
                     .collect::<Vec<_>>()
             }
             TriggerKind::File => {
-                // Files (transcript mentions first), projects, tasks, then
+                let empty_uses = HashMap::new();
+                let uses = self
+                    .surface_project_id(surface)
+                    .and_then(|project| self.state.mention_uses.get(&project))
+                    .unwrap_or(&empty_uses);
+                // Usage leads; ties retain files, projects, tasks, then
                 // each Boss reference kind in its explicit precedence.
                 let sessions = self.mentionable_sessions_for(surface);
                 let titles = sessions
@@ -1297,12 +1341,14 @@ impl Waku {
                     &projects,
                     &references,
                     &recent_project_targets,
+                    uses,
                     &trigger.query,
                     &mut matcher,
                 );
-                rank_file_mentions(
+                let mut rows = rank_file_mentions(
                     &files,
                     &ui.transcript_mentions.borrow(),
+                    uses,
                     &trigger.query,
                     &mut matcher,
                 )
@@ -1315,7 +1361,7 @@ impl Waku {
                         &trigger.query,
                         &mut matcher,
                         SESSION_MENTION_CAP,
-                        |_| 0,
+                        |index| usage_priority(uses, &format!("session:{}", sessions[index].id)),
                     )
                     .into_iter()
                     .map(|(index, positions)| {
@@ -1326,7 +1372,9 @@ impl Waku {
                     }),
                 )
                 .chain(reference_rows.into_iter().map(AutocompleteRow::Ref))
-                .collect()
+                .collect::<Vec<_>>();
+                rank_mentions_by_usage(&mut rows, uses);
+                rows
             }
             // The remote search already narrowed `items` to the query; the
             // local pass only re-ranks so digits hit the number and text hits
@@ -1409,6 +1457,7 @@ impl Waku {
                     input.insert_inline_marker_at(trigger.range.clone(), cx)
                 });
                 self.record_session_atom_for(surface, session.id, &session.title, marker, cx);
+                self.record_mention_selection(surface, row);
             }
             cx.notify();
             return;
@@ -1422,6 +1471,7 @@ impl Waku {
                     input.insert_inline_marker_at(trigger.range.clone(), cx)
                 });
                 self.record_ref_atom_for(surface, reference, marker, cx);
+                self.record_mention_selection(surface, row);
             }
             cx.notify();
             return;
@@ -1448,7 +1498,19 @@ impl Waku {
         composer.update(cx, |input, cx| {
             input.replace_range(trigger.range.clone(), &insert, cx);
         });
+        self.record_mention_selection(surface, row);
         cx.notify();
+    }
+
+    fn record_mention_selection(
+        &mut self,
+        surface: &composer::ComposerCard,
+        row: &AutocompleteRow,
+    ) {
+        if let Some((project, key)) = self.surface_project_id(surface).zip(row.mention_key()) {
+            self.state.record_mention_use(project, key);
+            self.save();
+        }
     }
 
     /// Record the atom a freshly seated `marker` stands for, in `surface`'s

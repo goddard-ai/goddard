@@ -390,16 +390,16 @@ pub fn filter_scored(
 
 /// Match `@` candidates with compact fuzzy matches only. Priority groups win
 /// over fuzzy score; weak matches are removed before applying the result cap.
-pub fn filter_mentions(
+pub fn filter_mentions<P: Ord>(
     haystack: &[&str],
     query: &str,
     matcher: &mut Matcher,
     cap: usize,
-    priority: impl Fn(usize) -> usize,
+    priority: impl Fn(usize) -> P,
 ) -> Vec<(usize, Vec<u32>)> {
     if query.trim().is_empty() {
         let mut indexes = (0..haystack.len()).collect::<Vec<_>>();
-        indexes.sort_by_key(|&index| priority(index));
+        indexes.sort_by_cached_key(|&index| priority(index));
         indexes.truncate(cap);
         return indexes
             .into_iter()
