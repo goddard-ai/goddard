@@ -1,1 +1,0 @@
-- Switching providers preserves the task's goal, status, and progress.

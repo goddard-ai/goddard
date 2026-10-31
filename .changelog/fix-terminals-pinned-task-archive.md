@@ -1,1 +1,0 @@
-- Pinned task terminals become standalone terminals when their task is archived, keeping their running processes and split panes.

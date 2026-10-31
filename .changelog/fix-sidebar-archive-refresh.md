@@ -1,1 +1,0 @@
-- Task renames, pinning, archiving, and dormant-state changes now stay applied when background refreshes overlap the action.

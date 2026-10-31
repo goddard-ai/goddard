@@ -4,6 +4,52 @@ Release notes for Goddard Desktop and features shared across clients.
 Changes specific to the mobile app are in
 [the mobile changelog](CHANGELOG.mobile.md).
 
+## [0.18.0]
+
+### Features
+
+- **Composer**
+  - Use Tab and Shift+Tab in the composer to indent and outdent unordered list bullets by two spaces, leaving the first bullet unchanged.
+  - The new-task project picker boosts projects you choose frequently, with older choices gradually losing weight. Stars and the current project keep their priority, and preferences survive app restarts.
+- Opening a file from a transcript link or Cmd+P hides the right panel's file tree by default; you can show it again with the tree toggle.
+- Use the manual Pull changes suggestion when a clean branch is strictly behind its upstream; it rechecks the checkout and fast-forwards only, without merging or rebasing local commits.
+- See which Jev actions are on at a glance, with an enabled count, clear switches, muted disabled rows, and descriptions explaining when each suggestion is considered.
+- Keep late-night tasks together with sidebar days that start at 4 AM local time; change “Day starts at” in General settings from midnight through 6 AM. Older tasks use rolling “Last 7 days” and “Last 30 days” groups.
+
+### Experiments
+
+- **Boss**
+  - Boss employees can no longer read unrelated retired assignments, and permission changes revoke stale integration access.
+  - **Boss chains:** Recover paused chains by accepting a failed handoff check, revising the paused step, or retrying from its recorded base. Accepting a handoff still requires an explicit resume. Repaired checks resume without stale-revision errors, and simultaneous resumes cannot launch duplicate employees.
+  - Boss chat refreshes recover automatically from abandoned, unsubmitted transitions left behind by an earlier `/clear`, so those stale transitions no longer pause coordination again.
+  - Boss completion reports survive restarts, failed employee resumption preserves parked prompts, and failed deliverable updates preserve the last published copy.
+  - Boss automatically recovers valid employee history after a checksum mismatch without an app warning; missing or unreadable history no longer prevents the daemon from starting.
+  - Boss queue positions now reflect priority and the Start now control, matching the order in which employees are considered for admission.
+  - A remote host's employees, plans, and boss chats no longer appear as ordinary tasks on clients without the Boss experiment enabled.
+  - Find avatar style, employee chat search, and sidebar grouping in Settings → Boss. Turn off “Group employees in sidebar” for one list without group headers, with planning sessions first.
+  - **Boss chains:** Accepting a handoff with an unavailable artifact now lets the next step start with a warning naming the missing reference. When a step cannot start, the paused chain shows the actual cause.
+- Updated Computer Use with upstream improvements to macOS background input and browser interactions.
+- **QA Sessions:** Turn on the QA Sessions experiment in Settings → Experiments to show the start and setup actions in the Command Palette.
+- Enable Wireframes in Settings → Experiments to preview HTML/CSS designs in Goddard's active theme on macOS and Windows, with persistent comment markers and reply threads. Use Add to message to stage feedback for the agent, then send it explicitly.
+
+### Fixed
+
+- **Sidebar**
+  - Task renames, pinning, archiving, and dormant-state changes now stay applied when background refreshes overlap the action.
+  - Archiving, pinning, or moving a task to Dormant now updates the task list on other connected clients, including mobile and web clients, without reloading.
+- **Providers**
+  - Select Devin Fusion lead/sidekick pairs without mixing up their reasoning levels, and switch Fast mode on or off from the model picker.
+  - Switching providers preserves the task's goal, status, and progress.
+  - Fixed the new-task model picker showing local providers for a remote project; remote project chips now show a server icon and the host name after the project name.
+- **Terminals**
+  - Fixed an emoji like ⚠️ in terminal output pushing the rest of its line sideways and clipping characters off the edge; it now draws in place over its own cell.
+  - Pinned task terminals become standalone terminals when their task is archived, keeping their running processes and split panes.
+- Fixed Computer Use calls waiting indefinitely behind busy automation; stop cancels queued calls, timeouts include queue waits, and reset interrupts an unresponsive kernel.
+- Removed the repeated “Could not save local state” toast; save failures remain in diagnostic logs.
+- Remote desktop clients now show manual interruptions as Stopped and release closed agent runtimes so they can follow the next prompt's stream.
+- Jev action switches now also hide status-based suggestions, including You decide and Diagnose, and prevent their keyboard shortcuts from sending disabled prompts.
+- Tasks started from a desktop connected to a remote host now use that host’s Computer Use settings.
+
 ## [0.17.0]
 
 ### Features

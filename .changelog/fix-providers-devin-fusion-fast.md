@@ -1,1 +1,0 @@
-- Select Devin Fusion lead/sidekick pairs without mixing up their reasoning levels, and switch Fast mode on or off from the model picker.

@@ -1,1 +1,0 @@
-- Fixed Computer Use calls waiting indefinitely behind busy automation; stop cancels queued calls, timeouts include queue waits, and reset interrupts an unresponsive kernel.

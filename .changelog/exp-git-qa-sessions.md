@@ -1,1 +1,0 @@
-- **QA Sessions:** Turn on the QA Sessions experiment in Settings → Experiments to show the start and setup actions in the Command Palette.

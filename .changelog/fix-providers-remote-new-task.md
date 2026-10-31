@@ -1,1 +1,0 @@
-- Fixed the new-task model picker showing local providers for a remote project; remote project chips now show a server icon and the host name after the project name.

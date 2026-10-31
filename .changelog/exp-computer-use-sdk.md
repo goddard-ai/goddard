@@ -1,1 +1,0 @@
-- Updated Computer Use with upstream improvements to macOS background input and browser interactions.

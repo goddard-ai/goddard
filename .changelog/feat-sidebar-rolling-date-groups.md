@@ -1,1 +1,0 @@
-- Keep late-night tasks together with sidebar days that start at 4 AM local time; change “Day starts at” in General settings from midnight through 6 AM. Older tasks use rolling “Last 7 days” and “Last 30 days” groups.

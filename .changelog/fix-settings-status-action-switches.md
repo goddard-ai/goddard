@@ -1,1 +1,0 @@
-- Jev action switches now also hide status-based suggestions, including You decide and Diagnose, and prevent their keyboard shortcuts from sending disabled prompts.
