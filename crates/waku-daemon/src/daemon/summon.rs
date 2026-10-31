@@ -503,7 +503,15 @@ impl WakuBackend {
         &self,
         employee: &waku_protocol::boss::BossEmployee,
     ) -> anyhow::Result<bool> {
-        if self.memory_guard.host_critical() || self.memory_guard.paused(employee.session_id) {
+        if let Err(error) = self.memory_guard.check_admission(employee.session_id) {
+            // A held fence denies like any capacity check — the ticket
+            // records the same truthful reason instead of waiting blank.
+            self.boss.record_blocked(
+                employee.session_id,
+                vec![waku_protocol::boss::AdmissionBlocker::HostResources {
+                    detail: format!("{error:#}"),
+                }],
+            )?;
             return Ok(false);
         }
         let lifecycle = self.runtime_lifecycles.session(employee.session_id);
@@ -1993,10 +2001,18 @@ impl WakuBackend {
             let lifecycle = self.runtime_lifecycles.session(session_id);
             let _owner = lifecycle.lock();
             self.boss.require_control(caller, session_id)?;
-            Ok(
-                self.boss.employee_lifecycle(session_id) == Some(EmployeeLifecycle::Queued)
-                    && self.boss.force_start_employee(session_id)?,
-            )
+            if self.boss.employee_lifecycle(session_id) != Some(EmployeeLifecycle::Queued) {
+                return Ok(false);
+            }
+            // A human press is the explicit continue the memory guard's
+            // pause fence exists to wait for — the same acknowledgment a
+            // task `Start` or a human `resume` already carries. A boss or
+            // supervisor press keeps the fence and reports the wait reason;
+            // admission itself never clears it.
+            if caller.is_none() {
+                self.memory_guard.user_resume(session_id)?;
+            }
+            self.boss.force_start_employee(session_id)
         })?;
         if queued {
             if let Some(employee) = self.boss.employee(session_id) {

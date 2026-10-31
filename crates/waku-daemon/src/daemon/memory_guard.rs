@@ -124,6 +124,16 @@ impl MemoryGuard {
         self.save(&recovery)
     }
 
+    /// The durable end state after a completed containment — the pause
+    /// fence without the in-flight stop marker. Tests reach the settled
+    /// state the teardown leaves, not its transient phase.
+    #[cfg(test)]
+    pub(super) fn pause_for_test(&self, session: Uuid) {
+        let mut recovery = self.recovery.lock();
+        recovery.entry(session).or_default().paused = true;
+        self.save(&recovery).unwrap();
+    }
+
     fn claim_restart(&self, session: Uuid) -> anyhow::Result<bool> {
         let mut recovery = self.recovery.lock();
         let entry = recovery.entry(session).or_default();

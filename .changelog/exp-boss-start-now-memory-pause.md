@@ -1,0 +1,1 @@
+- **Boss:** "Start now" on a queued employee now continues a task paused by host memory protection instead of hanging on "Starting," and a queued ticket that cannot dispatch yet reports the real wait reason.

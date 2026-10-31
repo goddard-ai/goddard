@@ -10653,6 +10653,133 @@ fn start_now_flag_survives_restart_and_never_steals_held_resources() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A queued ticket under the memory guard's pause fence reports the
+/// fence as its wait reason instead of hanging blank — the scheduler
+/// itself never clears a review fence, so a boss press keeps it. The
+/// human's `startNow` is the explicit continue the pause exists to wait
+/// for: it clears the fence, then the committed flag drives the same
+/// dispatch every press gets.
+// Host resource supervision is Unix-only; the admission path bails elsewhere.
+#[cfg(unix)]
+#[test]
+fn start_now_clears_the_memory_guard_pause_for_the_human() {
+    use waku_protocol::boss::{
+        AdmissionBlocker, BossOperation, BossResult, EmployeeControl, EmployeeLifecycle,
+    };
+    let root = std::env::temp_dir().join(format!("summon-startnow-pause-{}", Uuid::new_v4()));
+    let (mut backend, boss) = summon_test_backend(&root);
+    // No live headroom, burst room to spare: the ticket queues on the
+    // model cap and a forced admission spends the burst slot.
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 2);
+    // Launches succeed, so a dispatched ticket lands Working instead of
+    // expiring on the fixture's missing binary.
+    backend.set_daemon_address("http://127.0.0.1:1".into());
+    backend.runtime_test_cli = Some("/usr/bin/true".into());
+    let launches = Arc::new(Mutex::new(0usize));
+    let counting = launches.clone();
+    backend.runtime_test_start = Some(Arc::new(move |_, _, _| {
+        *counting.lock() += 1;
+        Ok(DriverHandle::from_control(Arc::new(
+            CaptureDriver::default(),
+        )))
+    }));
+    let mut daemon_settings = backend.settings.get();
+    daemon_settings
+        .provider_binary_overrides
+        .insert(ProviderKind::Codex, stub_binary(&root, "codex-stub"));
+    backend.settings.replace(daemon_settings).unwrap();
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "paused job",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+
+    // The containment's settled state — paused, no stop in flight.
+    backend.memory_guard.pause_for_test(session_id);
+
+    // A scheduler pass reports the fence as the ticket's wait reason
+    // rather than skipping it blank.
+    backend.run_summon_scheduler();
+    let ticket = backend.boss.employee(session_id).unwrap().ticket.unwrap();
+    assert!(
+        ticket.blocked_by.iter().any(|blocker| matches!(
+            blocker,
+            AdmissionBlocker::HostResources { detail } if detail.contains("paused")
+        )),
+        "the pause reports as the wait reason: {:?}",
+        ticket.blocked_by
+    );
+
+    // A boss press keeps the fence — only the human's explicit continue
+    // clears it — and the settled reply carries the same reason.
+    let result = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::StartNow,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let BossResult::Summoned {
+        state, admission, ..
+    } = result
+    else {
+        panic!("startNow answers with the employee's settled state")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    assert!(backend.memory_guard.paused(session_id));
+    let admission = admission.expect("a queued result carries its admission");
+    assert!(
+        admission
+            .blocked_by
+            .iter()
+            .any(|blocker| matches!(
+                blocker,
+                AdmissionBlocker::HostResources { detail } if detail.contains("paused")
+            )),
+        "the kept fence reports as the wait reason: {:?}",
+        admission.blocked_by
+    );
+    assert_eq!(*launches.lock(), 0);
+
+    // The human's press clears the fence and dispatches in one motion —
+    // the committed flag spends the burst slot the same as any startNow.
+    let result = backend
+        .handle_boss_operation(
+            None,
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::StartNow,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let BossResult::Summoned { state, .. } = result else {
+        panic!("startNow answers with the employee's settled state")
+    };
+    assert_eq!(state, EmployeeLifecycle::Working);
+    assert!(!backend.memory_guard.paused(session_id));
+    assert_eq!(*launches.lock(), 1);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// `setResources` rewrites a queued ticket in place: the next
 /// admission attempt must satisfy the declared host set, so a ticket
 /// that would have dispatched on the freed model slot keeps waiting
