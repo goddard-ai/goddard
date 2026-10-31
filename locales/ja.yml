@@ -1365,7 +1365,6 @@ jev.no_enabled_actions: すべての提案アクションがオフになって�
 suggestions.settings_title: 提案するプロンプト
 suggestions.automatic_actions_title: 自動で実行する提案
 suggestions.automatic_action_description: 有効にすると、Jev の確率が設定値（最低 80%）に達したときに自動で実行します。
-suggestions.action_description: ターン終了後の次のステップとして Jev が提案できます。
 suggestions.edit_prompt: 編集
 suggestions.reset_prompt: リセット
 suggestions.prompt_text: 提案するプロンプトの本文
@@ -3732,3 +3731,36 @@ qa.command_stopped: サーバーを停止しました
 qa.actions: その他
 command_palette.transcript_search_failed: 会話ログの検索に失敗しました。クエリを編集して再試行してください。
 command_palette.transcript_search_incomplete: 一部のホストを検索できませんでした。クエリを編集して再試行してください。
+settings.sidebar_day_start: "1日の開始時刻"
+settings.sidebar_day_start_description: "サイドバーの「今日」と「昨日」が切り替わる現地時刻です。遅い時刻にすると、深夜の作業を同じ日にまとめられます。"
+settings.sidebar_day_start_midnight: "午前0時"
+settings.sidebar_day_start_am: "午前%{hour}時"
+suggestions.actions_description: "コンポーザーの上に表示する次のアクションを選びます。Jev はターンの結果と最近の操作を使い、「変更を取得」は Git の状態を使います。「自動化」で有効にしない限り、提案はクリックするまで実行されません。これらのスイッチはステータスに基づくプロンプトにも適用されます。"
+suggestions.actions_enabled_count: "%{total}件中%{enabled}件のアクションが有効"
+suggestions.action_on: "オン"
+suggestions.action_off: "オフ"
+suggestions.action_disabled: "オフ — 提案されません。有効にした場合：%{description}"
+suggestions.action_run_tests: "ファイルの変更後、Jev がテストを提案するか判断します。ステータスマーカーがテストの不足を示す場合にも提案されます。"
+suggestions.action_fix_errors: "コマンドやツールの失敗後、Jev が修正を提案するか判断します。ステータスマーカーが未解決のエラーを示す場合にも提案されます。"
+suggestions.action_commit_changes: "ファイルの変更後、Jev が作業のコミットをエージェントに依頼するか判断します。"
+suggestions.action_add_tests: "ファイルの変更後、Jev が次のステップとしてテストの追加をエージェントに依頼するか判断します。"
+suggestions.action_review_changes: "ファイルの変更後、Jev が作業のレビューをエージェントに依頼するか判断します。"
+suggestions.action_open_pr: "ファイルが変更され PR を作成できる場合、Jev がプッシュと PR の作成をエージェントに依頼するか判断します。"
+suggestions.action_you_decide: "Jev のステータス判定が判断や入力の必要を示す場合に表示されます。進め方をエージェントに任せます。ステータスマーカーを有効にする必要があります。"
+suggestions.action_implement_plan: "計画段階で、Jev がエージェントによる実装を開始できる状態か判断します。"
+suggestions.action_diagnose: "Jev のステータス判定が失敗や障害を示す場合に表示されます。エージェントに原因の調査を依頼します。ステータスマーカーを有効にする必要があります。"
+suggestions.action_whats_next: "ターン終了後、Jev が次にすべきことをエージェントに尋ねるか判断します。"
+suggestions.action_address_review: "PR の通知が届くと、Jev がレビューの状態と最近の操作を考慮し、フォローアップを提案するか判断します。"
+suggestions.action_fix_ci: "PR のチェック通知が届くと、Jev がチェックの状態と最近の操作を考慮し、修正を提案するか判断します。"
+suggestions.action_commit: "ファイルの変更後、Jev が Git のコミットダイアログを開くことが次の操作として適切か判断します。"
+suggestions.action_push: "ファイルの変更後、Jev がリモートへのプッシュが次の操作として適切か判断します。"
+suggestions.action_sync: "作業ツリーがクリーンで、最後に取得した上流より遅れているだけのブランチに、Git 操作が進行中でなければ表示されます。クリック後に fast-forward のみで取得し、自動実行はしません。"
+suggestions.action_land: "ワークツリーのタスクで、Jev がコミットをベースブランチに取り込むことが次の操作として適切か判断します。"
+errors.task_changes_retrying: "タスクの変更を保存できませんでした。再試行しています。"
+git_panel.pulling: "変更を取得中…"
+git_panel.pulled: "変更を取得しました"
+settings.boss: "Boss"
+settings.boss_keywords: "Boss 従業員 ペルソナ 計画セッション アバタースタイル サイドバー グループ グループ化 成果 用事 待機 検索 履歴"
+boss.employee_groups: "サイドバーで従業員をグループ化"
+boss.employee_groups_description: "目的とキューの状態で従業員をグループ化します。オフにすると見出しのない1つのリストになり、計画セッションが先頭に表示されます。"
+boss.employee_search_description: "「従業員のチャットを検索」で、アーカイブ済みを含めて遡る期間です。オフにするとコマンドが非表示になります。"

@@ -1337,7 +1337,6 @@ jev.no_enabled_actions: 所有建议操作均已关闭。在“建议”标签�
 suggestions.settings_title: 建议提示词
 suggestions.automatic_actions_title: 自动执行的建议操作
 suggestions.automatic_action_description: 启用后，Jev 的概率达到设定阈值（最低 80%）时自动执行。
-suggestions.action_description: Jev 可在回合结束后将其建议为下一步。
 suggestions.edit_prompt: 编辑
 suggestions.reset_prompt: 重置
 suggestions.prompt_text: 建议提示词内容
@@ -3683,3 +3682,36 @@ qa.command_stopped: 服务器已停止
 qa.actions: 更多
 command_palette.transcript_search_failed: 对话记录搜索失败。编辑查询后重试。
 command_palette.transcript_search_incomplete: 部分主机无法搜索。编辑查询后重试。
+settings.sidebar_day_start: "一天开始于"
+settings.sidebar_day_start_description: "侧边栏中“今天”和“昨天”切换的本地时间。设置较晚的时间可将深夜的工作归到同一天。"
+settings.sidebar_day_start_midnight: "午夜"
+settings.sidebar_day_start_am: "上午 %{hour} 点"
+suggestions.actions_description: "选择在输入框上方显示哪些后续操作。Jev 根据轮次结果和最近的操作给出建议；“拉取更改”则依据 Git 状态。除非在“自动化”中启用，否则建议会等待你点击后再执行。这些开关也控制基于状态的提示词。"
+suggestions.actions_enabled_count: "已启用 %{enabled} 项操作，共 %{total} 项"
+suggestions.action_on: "开启"
+suggestions.action_off: "关闭"
+suggestions.action_disabled: "已关闭 — 不会建议。启用后：%{description}"
+suggestions.action_run_tests: "文件更改后，Jev 会判断是否建议运行测试。当状态标记表明缺少测试时也会提供此建议。"
+suggestions.action_fix_errors: "命令或工具失败后，Jev 会判断是否建议修复。当状态标记表明仍有未解决的错误时也会提供此建议。"
+suggestions.action_commit_changes: "文件更改后，Jev 会判断是否请代理提交工作。"
+suggestions.action_add_tests: "文件更改后，Jev 会判断下一步是否应请代理添加测试。"
+suggestions.action_review_changes: "文件更改后，Jev 会判断是否请代理审查工作。"
+suggestions.action_open_pr: "文件更改且可以创建 PR 时，Jev 会判断是否请代理推送并创建 PR。"
+suggestions.action_you_decide: "当 Jev 的状态判定表明需要决定或输入时显示。请代理决定如何继续。需要启用状态标记。"
+suggestions.action_implement_plan: "在规划阶段，Jev 会判断计划是否已准备好由代理实施。"
+suggestions.action_diagnose: "当 Jev 的状态判定表明失败或受阻时显示。请代理调查原因。需要启用状态标记。"
+suggestions.action_whats_next: "轮次结束后，Jev 会判断是否询问代理下一步该做什么。"
+suggestions.action_address_review: "收到 PR 通知时，Jev 会结合评审状态和你最近的操作，判断是否建议跟进。"
+suggestions.action_fix_ci: "收到 PR 检查通知时，Jev 会结合检查状态和你最近的操作，判断是否建议修复。"
+suggestions.action_commit: "文件更改后，Jev 会判断下一步是否可能需要打开 Git 提交对话框。"
+suggestions.action_push: "文件更改后，Jev 会判断下一步是否可能需要将工作推送到远程。"
+suggestions.action_sync: "当分支工作区干净、仅落后于上次获取的上游且没有正在进行的 Git 操作时提供。点击后仅以快进方式拉取，绝不自动运行。"
+suggestions.action_land: "在工作树任务中，Jev 会判断下一步是否可能需要将提交合入基准分支。"
+errors.task_changes_retrying: "无法保存任务更改；正在重试。"
+git_panel.pulling: "正在拉取更改…"
+git_panel.pulled: "已拉取更改"
+settings.boss: "Boss"
+settings.boss_keywords: "Boss 员工 角色 规划会话 头像样式 侧边栏 分组 成果 杂务 等待 搜索 历史"
+boss.employee_groups: "在侧边栏中对员工分组"
+boss.employee_groups_description: "按用途和队列状态对员工分组。关闭后将显示为没有分组标题的单一列表，规划会话排在最前。"
+boss.employee_search_description: "“搜索员工聊天”回溯的时间范围，包括已归档的聊天。关闭后隐藏该命令。"
