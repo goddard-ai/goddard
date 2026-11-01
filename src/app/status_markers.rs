@@ -1496,7 +1496,9 @@ impl Waku {
         {
             return None;
         }
-        let cleared = cleared_markers(self.turn_status_markers.get(&turn_id)?);
+        let mut cleared = cleared_markers(self.turn_status_markers.get(&turn_id)?);
+        // Keep equal scores in their existing order; sidebar priority is independent.
+        cleared.sort_by(|(_, left), (_, right)| right.total_cmp(left));
         if cleared.is_empty() {
             return None;
         }
@@ -1587,7 +1589,9 @@ impl Waku {
             return None;
         }
         let turn_id = session.turns.last()?.id;
-        let cleared = cleared_markers(self.turn_status_markers.get(&turn_id)?);
+        let mut cleared = cleared_markers(self.turn_status_markers.get(&turn_id)?);
+        // Keep equal scores in their existing order; sidebar priority is independent.
+        cleared.sort_by(|(_, left), (_, right)| right.total_cmp(left));
         if cleared.is_empty() {
             return None;
         }
