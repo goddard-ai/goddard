@@ -41,7 +41,7 @@ fn app_server_request_in(binary: &Path, cwd: &Path, request: Value) -> anyhow::R
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     let mut child = crate::sandbox::spawn(command.command_ref(), None)
         .with_context(|| format!("could not start {} app-server", binary.display()))?;
     let mut stdin = child
@@ -302,10 +302,15 @@ fn parse_session_history(response: &Value) -> ProviderSessionHistory {
             .get("startedAt")
             .and_then(Value::as_u64)
             .unwrap_or_default();
-        let completed_at = native_turn
-            .get("completedAt")
-            .and_then(Value::as_u64)
-            .or(Some(started_at));
+        let completed_at =
+            if native_turn.get("status").and_then(Value::as_str) == Some("inProgress") {
+                None
+            } else {
+                native_turn
+                    .get("completedAt")
+                    .and_then(Value::as_u64)
+                    .or(Some(started_at))
+            };
         let status = match native_turn.get("status").and_then(Value::as_str) {
             Some("failed") => TurnStatus::Failed,
             Some("interrupted" | "inProgress") => TurnStatus::Interrupted,
@@ -403,6 +408,15 @@ pub fn provider_session_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unfinished_native_turn_is_not_treated_as_a_completed_history_snapshot() {
+        let history = parse_session_history(&json!({"result": {"thread": {"turns": [{
+            "id": Uuid::new_v4(), "status": "inProgress", "startedAt": 10,
+            "items": [{"type": "userMessage", "content": [{"type": "text", "text": "still running"}]}]
+        }]}}}));
+        assert!(history.turns[0].completed_at.is_none());
+    }
 
     #[test]
     fn parses_thread_catalog_metadata_and_filters_subagents() {

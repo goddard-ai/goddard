@@ -6,6 +6,7 @@ use super::*;
 pub(super) struct SessionHydrations {
     queued: VecDeque<Uuid>,
     running: HashSet<Uuid>,
+    provider_refreshes: HashSet<Uuid>,
 }
 
 impl SessionHydrations {
@@ -719,6 +720,82 @@ impl Waku {
         self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
     }
 
+    fn refresh_codex_history(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        use waku_protocol::provider_session::{CodexHistoryRefresh, append_codex_history};
+        let Some(baseline) = self
+            .state
+            .sessions
+            .iter()
+            .find(|s| s.id == session_id)
+            .and_then(CodexHistoryRefresh::capture)
+        else {
+            return;
+        };
+        if self.submission_preparations.contains(&session_id)
+            || !self
+                .session_hydrations
+                .provider_refreshes
+                .insert(session_id)
+        {
+            return;
+        }
+        let Some(daemon) = self.daemon_for_session(session_id) else {
+            self.session_hydrations
+                .provider_refreshes
+                .remove(&session_id);
+            return;
+        };
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.client().request(
+                        session_id,
+                        Uuid::nil(),
+                        waku_client::Command::RefreshSessionHistory,
+                    )
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                waku.session_hydrations
+                    .provider_refreshes
+                    .remove(&session_id);
+                match result {
+                    Ok(waku_client::ResponsePayload::ProviderSessionHistory {
+                        history, ..
+                    }) => {
+                        let applied = waku
+                            .state
+                            .sessions
+                            .iter_mut()
+                            .find(|s| s.id == session_id)
+                            .is_some_and(|session| {
+                                baseline.still_current(session)
+                                    && append_codex_history(session, &history)
+                            });
+                        if applied {
+                            waku.state.mark_session_dirty(session_id);
+                            if waku.state.selected_session == Some(session_id) {
+                                waku.reset_transcript_rows(waku.transcript_row_count());
+                            }
+                            waku.save();
+                            cx.notify();
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("could not refresh Codex task {session_id}: {error}");
+                        if waku.state.selected_session == Some(session_id) {
+                            waku.show_toast(tr!("errors.open_session", error = error));
+                            cx.notify();
+                        }
+                    }
+                    _ => {}
+                }
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn request_session_activation(
         &mut self,
         session_id: Uuid,
@@ -1005,6 +1082,7 @@ impl Waku {
         for employee_id in self.summon_card_employees() {
             self.ensure_session_loaded(employee_id, cx);
         }
+        self.refresh_codex_history(session_id, cx);
         self.refresh_composer_sources(cx);
         self.ensure_recent_boss_history(cx);
         self.maybe_voice_brief(session_id, cx);
@@ -1282,6 +1360,7 @@ impl Waku {
             self.drain_pending_workspace_cleanups(cx);
         }
         if detail_loaded {
+            self.refresh_codex_history(session_id, cx);
             self.maybe_voice_brief(session_id, cx);
         } else {
             self.ensure_session_loaded(session_id, cx);

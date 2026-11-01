@@ -107,6 +107,7 @@ pub(super) fn handle_driver_command(
         | Command::UpdateTaskMetadata { .. }
         | Command::RemoveSession
         | Command::RemoveProject { .. }
+        | Command::RefreshSessionHistory
         | Command::HydrateSession { .. }
         | Command::IndexSession
         | Command::SearchSessionMessages { .. }

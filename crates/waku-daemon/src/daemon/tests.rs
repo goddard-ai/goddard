@@ -1,3 +1,6 @@
+#[cfg(unix)]
+mod codex_history;
+
 use super::*;
 use crate::model::{ActivityItem, MessageRole, TranscriptBlock};
 use waku_protocol::boss::{BossOperation, BossResult};

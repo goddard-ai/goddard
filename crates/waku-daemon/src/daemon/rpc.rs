@@ -1481,6 +1481,46 @@ impl Backend for WakuBackend {
                 self.remove_project(project_id)?;
                 Ok(ResponsePayload::Ack)
             }
+            Command::RefreshSessionHistory => {
+                use waku_protocol::provider_session::CodexHistoryRefresh;
+                let baseline = {
+                    let mut state = self.task_state.lock();
+                    let session = state
+                        .sessions
+                        .iter_mut()
+                        .find(|s| s.id == session_id)
+                        .ok_or_else(|| anyhow!("the task no longer exists"))?;
+                    self.task_store.hydrate(session)?;
+                    CodexHistoryRefresh::capture(session)
+                };
+                let Some(baseline) = baseline else {
+                    return Ok(ResponsePayload::ProviderSessionHistory {
+                        history: Default::default(),
+                        resolved_cwd: None,
+                    });
+                };
+                let binary = self.provider_binary(ProviderKind::Codex)?;
+                // Read all display text for the missing suffix, including gaps
+                // longer than the catalog import's 100-turn preview window.
+                let history = crate::codex_session::provider_session_history(
+                    &binary,
+                    baseline.thread_id(),
+                    usize::MAX,
+                )?;
+                let state = self.task_state.lock();
+                let current = state
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == session_id)
+                    .is_some_and(|session| baseline.still_current(session));
+                // The client checks its own baseline before merging and saving.
+                // Persisting here would race a client prompt that starts while
+                // this reply is in flight and could overwrite the new suffix.
+                Ok(ResponsePayload::ProviderSessionHistory {
+                    history: if current { history } else { Default::default() },
+                    resolved_cwd: None,
+                })
+            }
             Command::HydrateSession { session_id } => {
                 // The skeleton leaves the global lock for the SQLite read and
                 // JSON parse — `load_session_detail` opens its own connection,

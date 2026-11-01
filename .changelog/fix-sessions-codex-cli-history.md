@@ -1,0 +1,1 @@
+- Reopening an idle Codex task now includes turns added by resuming the same thread in Codex CLI.

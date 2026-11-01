@@ -411,6 +411,9 @@ pub enum Command {
     RemoveProject {
         project_id: Uuid,
     },
+    /// Read current native history for an idle Codex task. The client guards,
+    /// appends, and saves the suffix through the ordinary task-save path.
+    RefreshSessionHistory,
     HydrateSession {
         session_id: Uuid,
     },

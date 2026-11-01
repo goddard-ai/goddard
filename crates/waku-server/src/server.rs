@@ -2609,6 +2609,7 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::FetchPlanUsage { .. }
             | Command::LoadUsageHistory { .. }
             | Command::ListProviderSessions { .. }
+            | Command::RefreshSessionHistory
             | Command::LoadProviderSession { .. }
             | Command::ForkProviderSession { .. }
             | Command::Workspace { .. }
@@ -2938,6 +2939,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::UpdateTaskMetadata { .. } => "updateTaskMetadata",
         Command::RemoveSession => "removeSession",
         Command::RemoveProject { .. } => "removeProject",
+        Command::RefreshSessionHistory => "refreshSessionHistory",
         Command::HydrateSession { .. } => "hydrateSession",
         Command::IndexSession => "indexSession",
         Command::SearchSessionMessages { .. } => "searchSessionMessages",
