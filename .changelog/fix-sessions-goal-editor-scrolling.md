@@ -1,0 +1,1 @@
+- Long goals now scroll inside the Goal editor instead of overflowing into the modal’s actions.

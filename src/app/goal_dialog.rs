@@ -117,6 +117,10 @@ impl Waku {
         let objective = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
+                .auto_height()
+                .min_height(px(84.0))
+                .max_lines(4)
+                .text_metrics(14.0, 21.0)
                 .accessibility_label(tr!("goal.title"))
                 .placeholder(tr!("goal.objective_placeholder"))
         });
@@ -778,7 +782,9 @@ impl Waku {
             )
             .child(
                 div()
-                    .h(px(112.0))
+                    .min_h(px(112.0))
+                    .flex_none()
+                    .overflow_hidden()
                     .px(px(16.0))
                     .py(px(10.0))
                     .text_size(sp(14.0))
