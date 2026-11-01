@@ -3849,9 +3849,23 @@ suggestions.edit_prompt:
 suggestions.reset_prompt:
   en: Reset
 suggestions.prompt_text:
-  en: Suggested prompt text
+  en: Prompt
 suggestions.prompt_editor_description:
-  en: Clicking the suggestion sends this text.
+  en: Customize this suggestion. Existing eligibility rules still apply.
+suggestions.label:
+  en: Label
+suggestions.label_help:
+  en: Text shown above the composer when this prompt is suggested.
+suggestions.prompt_help:
+  en: Text sent to the agent when you choose this suggestion.
+suggestions.condition:
+  en: Condition
+suggestions.condition_help:
+  en: Instructions Jev uses to judge whether suggesting this prompt is appropriate.
+suggestions.workflow_condition_help:
+  en: This suggestion is controlled by its workflow. Its condition is informational and is not evaluated by Jev.
+suggestions.fields_invalid:
+  en: Enter a label of 1–96 characters and a condition of 1–2,000 characters.
 suggestions.prompt_invalid:
   en: Enter a prompt of at most 2,000 characters.
 suggestions.prompt_duplicate:

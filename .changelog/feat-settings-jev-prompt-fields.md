@@ -1,0 +1,1 @@
+- Edit suggested prompts directly beneath their row in Jev → Prompts, with separate Label, Prompt, and Condition fields for composer text, agent instructions, and Jev’s suggestion criteria.

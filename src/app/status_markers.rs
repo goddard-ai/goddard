@@ -1052,69 +1052,14 @@ impl Waku {
                 .gap(px(6.0))
                 .children(marker_pill)
                 .children(actions.enumerate().map(|(index, action)| {
-                    let (icon_path, label) = match action {
-                        StatusSuggestedAction::Proceed => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "proceed",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.proceed")),
-                        ),
-                        StatusSuggestedAction::MakeItHappen => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "make-it-happen",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.make_it_happen")),
-                        ),
-                        StatusSuggestedAction::KeepGoing => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "keep-going",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.keep_going")),
-                        ),
-                        StatusSuggestedAction::FixErrors => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "fix-errors",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.fix_errors")),
-                        ),
-                        StatusSuggestedAction::RunTests => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "run-tests",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.run_tests")),
-                        ),
-                        // These chips label the action; the
-                        // tooltip below shows the prompt text
-                        // that clicking sends.
-                        StatusSuggestedAction::YouDecide => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_action_title("you-decide")
-                                .unwrap_or_else(|| tr!("suggestions.you_decide")),
-                        ),
-                        StatusSuggestedAction::Diagnose => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_action_title("diagnose")
-                                .unwrap_or_else(|| tr!("suggestions.diagnose")),
-                        ),
-                        StatusSuggestedAction::Done => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "done",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.done")),
-                        ),
-                    };
+                    let icon_path = "icons/chat.svg";
+                    let label = self
+                        .state
+                        .suggested_prompt_labels
+                        .get(action.canned_id())
+                        .cloned()
+                        .or_else(|| action_predictions::suggested_action_title(action.canned_id()))
+                        .unwrap_or_default();
                     let tooltip = action_predictions::suggested_prompt(
                         action.canned_id(),
                         &self.state.suggested_prompts,
@@ -1332,7 +1277,30 @@ impl Waku {
             return;
         }
         let state = turn_eval_state(session, turn_id, summary.as_deref());
-        let questions = status_marker_questions();
+        let mut questions = status_marker_questions();
+        for (id, condition) in &self.state.suggested_prompt_conditions {
+            if matches!(
+                id.as_str(),
+                "proceed"
+                    | "make-it-happen"
+                    | "keep-going"
+                    | "fix-errors"
+                    | "run-tests"
+                    | "you-decide"
+                    | "diagnose"
+                    | "done"
+            ) {
+                questions.insert(
+                    format!("suggest-prompt-{id}"),
+                    EvalQuestion::Noul {
+                        instructions: format!(
+                            "Is suggesting this follow-up appropriate? {condition}"
+                        ),
+                        criteria: None,
+                    },
+                );
+            }
+        }
         let tx = self.status_marker_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         self.status_marker_in_flight.insert(turn_id);
@@ -1382,7 +1350,11 @@ impl Waku {
                             continue;
                         }
                         let session_id = session.id;
-                        let actions = suggested_actions(&evaluation);
+                        let actions = suggested_actions(&evaluation).into_iter().filter(|action| {
+                            !self.state.suggested_prompt_conditions.contains_key(action.canned_id())
+                                || matches!(evaluation.answers.get(&format!("suggest-prompt-{}", action.canned_id())),
+                                    Some(EvalAnswer::Noul { noul }) if *noul >= 0.5)
+                        }).collect::<Vec<_>>();
                         let offered = enabled_status_suggestions(
                             &actions,
                             &self.state.disabled_suggested_actions,

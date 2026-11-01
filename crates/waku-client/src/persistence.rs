@@ -1595,6 +1595,10 @@ pub struct AppSettings {
     /// Desktop-owned overrides for the fixed suggested-prompt actions.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub suggested_prompts: BTreeMap<String, String>,
+    #[serde(default)]
+    pub suggested_prompt_labels: BTreeMap<String, String>,
+    #[serde(default)]
+    pub suggested_prompt_conditions: BTreeMap<String, String>,
     /// Action id -> minimum Jev probability (80–100). Presence is opt-in.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub automatic_suggested_actions: BTreeMap<String, u8>,
@@ -1783,6 +1787,8 @@ impl Default for AppSettings {
             move_fast_break_things: false,
             phase_routing_enabled: false,
             suggested_prompts: BTreeMap::new(),
+            suggested_prompt_labels: BTreeMap::new(),
+            suggested_prompt_conditions: BTreeMap::new(),
             automatic_suggested_actions: BTreeMap::new(),
             disabled_suggested_actions: BTreeSet::new(),
             automations_enabled: default_experiment_enabled(),
@@ -2431,6 +2437,10 @@ pub struct PersistedState {
     #[serde(default)]
     pub suggested_prompts: BTreeMap<String, String>,
     #[serde(default)]
+    pub suggested_prompt_labels: BTreeMap<String, String>,
+    #[serde(default)]
+    pub suggested_prompt_conditions: BTreeMap<String, String>,
+    #[serde(default)]
     pub automatic_suggested_actions: BTreeMap<String, u8>,
     /// Suggested-action ids switched off in Settings — they cannot surface
     /// as chips or run automatically.
@@ -2942,6 +2952,8 @@ impl PersistedState {
             move_fast_break_things: false,
             phase_routing_enabled: false,
             suggested_prompts: BTreeMap::new(),
+            suggested_prompt_labels: BTreeMap::new(),
+            suggested_prompt_conditions: BTreeMap::new(),
             automatic_suggested_actions: BTreeMap::new(),
             disabled_suggested_actions: BTreeSet::new(),
             automations_enabled: default_experiment_enabled(),
@@ -3473,6 +3485,8 @@ impl PersistedState {
             move_fast_break_things: self.move_fast_break_things,
             phase_routing_enabled: self.phase_routing_enabled,
             suggested_prompts: self.suggested_prompts.clone(),
+            suggested_prompt_labels: self.suggested_prompt_labels.clone(),
+            suggested_prompt_conditions: self.suggested_prompt_conditions.clone(),
             automatic_suggested_actions: self.automatic_suggested_actions.clone(),
             disabled_suggested_actions: self.disabled_suggested_actions.clone(),
             automations_enabled: self.automations_enabled,
@@ -3653,6 +3667,8 @@ impl PersistedState {
         self.move_fast_break_things = settings.move_fast_break_things;
         self.phase_routing_enabled = settings.phase_routing_enabled;
         self.suggested_prompts = settings.suggested_prompts;
+        self.suggested_prompt_labels = settings.suggested_prompt_labels;
+        self.suggested_prompt_conditions = settings.suggested_prompt_conditions;
         self.automatic_suggested_actions = settings
             .automatic_suggested_actions
             .into_iter()
@@ -6145,9 +6161,24 @@ mod tests {
             .disabled_suggested_actions
             .insert("fix-errors".to_owned());
 
+        state
+            .suggested_prompt_labels
+            .insert("run-tests".into(), "Test it".into());
+        state.suggested_prompt_conditions.insert(
+            "run-tests".into(),
+            "The changed behavior needs verification.".into(),
+        );
         let settings = serde_json::to_value(state.app_settings()).unwrap();
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(
+            restored.suggested_prompt_labels,
+            state.suggested_prompt_labels
+        );
+        assert_eq!(
+            restored.suggested_prompt_conditions,
+            state.suggested_prompt_conditions
+        );
         assert_eq!(restored.suggested_prompts, state.suggested_prompts);
         assert_eq!(
             restored.automatic_suggested_actions,
@@ -6160,6 +6191,8 @@ mod tests {
 
         let legacy: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(legacy.suggested_prompts.is_empty());
+        assert!(legacy.suggested_prompt_labels.is_empty());
+        assert!(legacy.suggested_prompt_conditions.is_empty());
         assert!(legacy.automatic_suggested_actions.is_empty());
         assert!(legacy.disabled_suggested_actions.is_empty());
 

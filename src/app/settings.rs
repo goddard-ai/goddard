@@ -232,6 +232,8 @@ pub(super) struct CustomCommandEditor {
 
 pub(super) struct SuggestedPromptEditor {
     id: &'static str,
+    label: Entity<TextInput>,
+    condition: Entity<TextInput>,
     input: Entity<TextInput>,
     error: Option<String>,
 }
@@ -7102,7 +7104,7 @@ impl Waku {
         };
         let input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
-                .tab_index(0)
+                .tab_index(1)
                 .multi_line()
                 .auto_height()
                 .max_lines(10)
@@ -7110,9 +7112,43 @@ impl Waku {
             input.set_content(prompt, cx);
             input
         });
-        let focus = input.read(cx).focus_handle(cx);
+        let label = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .accessibility_label(tr!("suggestions.label"));
+            input.set_content(
+                self.state
+                    .suggested_prompt_labels
+                    .get(id)
+                    .cloned()
+                    .or_else(|| action_predictions::suggested_action_title(id))
+                    .unwrap_or_default(),
+                cx,
+            );
+            input
+        });
+        let condition = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(2)
+                .multi_line()
+                .auto_height()
+                .max_lines(10)
+                .accessibility_label(tr!("suggestions.condition"));
+            input.set_content(
+                self.state
+                    .suggested_prompt_conditions
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| action_predictions::default_prompt_condition(id).to_owned()),
+                cx,
+            );
+            input
+        });
+        let focus = label.read(cx).focus_handle(cx);
         self.suggested_prompt_editor = Some(SuggestedPromptEditor {
             id,
+            label,
+            condition,
             input,
             error: None,
         });
@@ -7126,6 +7162,19 @@ impl Waku {
         };
         let id = editor.id;
         let prompt = editor.input.read(cx).content().trim().to_owned();
+        let label = editor.label.read(cx).content().trim().to_owned();
+        let condition = editor.condition.read(cx).content().trim().to_owned();
+        if label.is_empty()
+            || label.chars().count() > 96
+            || condition.is_empty()
+            || condition.chars().count() > 2_000
+        {
+            self.suggested_prompt_editor.as_mut().unwrap().error =
+                Some(tr!("suggestions.fields_invalid"));
+            cx.notify();
+            return;
+        }
+
         if !action_predictions::valid_suggested_prompt(id, &prompt) {
             self.suggested_prompt_editor.as_mut().unwrap().error =
                 Some(tr!("suggestions.prompt_invalid"));
@@ -7147,6 +7196,20 @@ impl Waku {
         } else {
             self.state.suggested_prompts.insert(id.to_owned(), prompt);
         }
+        if action_predictions::suggested_action_title(id).as_deref() == Some(label.as_str()) {
+            self.state.suggested_prompt_labels.remove(id);
+        } else {
+            self.state
+                .suggested_prompt_labels
+                .insert(id.to_owned(), label);
+        }
+        if action_predictions::default_prompt_condition(id) == condition {
+            self.state.suggested_prompt_conditions.remove(id);
+        } else {
+            self.state
+                .suggested_prompt_conditions
+                .insert(id.to_owned(), condition);
+        }
         self.suggested_prompt_editor = None;
         self.save();
         cx.notify();
@@ -7154,6 +7217,8 @@ impl Waku {
 
     fn reset_suggested_prompt(&mut self, id: &'static str, cx: &mut Context<Self>) {
         self.state.suggested_prompts.remove(id);
+        self.state.suggested_prompt_labels.remove(id);
+        self.state.suggested_prompt_conditions.remove(id);
         if self
             .suggested_prompt_editor
             .as_ref()
@@ -7173,9 +7238,9 @@ impl Waku {
     ) -> Option<AnyElement> {
         let search = &search.for_group(&tr!("jev.group_prompts"));
         let entries = action_predictions::CANNED_PROMPTS.iter().copied();
-        let mut editor_visible = !search.active();
-        let rows = entries
-            .map(|(id, _label_key)| {
+        let mut cards = Vec::new();
+        for (id, _label_key) in entries {
+            let row = (|| {
                 let (_, chip_label) = self.suggestion_parts(id)?;
                 let title = action_predictions::visible_suggestion_label(&chip_label);
                 let prompt =
@@ -7203,7 +7268,9 @@ impl Waku {
                     .child(settings_button(
                         format!("reset-suggested-prompt-{id}"),
                         tr!("suggestions.reset_prompt"),
-                        self.state.suggested_prompts.contains_key(id),
+                        self.state.suggested_prompts.contains_key(id)
+                            || self.state.suggested_prompt_labels.contains_key(id)
+                            || self.state.suggested_prompt_conditions.contains_key(id),
                         false,
                         true,
                         theme,
@@ -7218,23 +7285,18 @@ impl Waku {
                     theme,
                     search,
                 );
-                if row.is_some()
-                    && self
-                        .suggested_prompt_editor
-                        .as_ref()
-                        .is_some_and(|editor| editor.id == id)
-                {
-                    editor_visible = true;
-                }
                 row
-            })
-            .collect::<Vec<_>>();
-        let mut cards = Vec::new();
-        if let Some(rows) = settings_row_card(rows, theme) {
-            cards.push(rows.into_any_element());
-        }
-        if editor_visible {
-            if let Some(editor) = &self.suggested_prompt_editor {
+            })();
+            let visible = row.is_some();
+            if let Some(row) = row {
+                cards.push(row);
+            }
+            if visible
+                && let Some(editor) = self
+                    .suggested_prompt_editor
+                    .as_ref()
+                    .filter(|editor| editor.id == id)
+            {
                 let form = div()
                     .w_full()
                     .px(px(20.0))
@@ -7257,18 +7319,54 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .child(tr!("suggestions.prompt_editor_description")),
                     )
-                    .child(
-                        div()
-                            .w_full()
-                            .px(px(8.0))
-                            .py(px(6.0))
-                            .rounded(px(8.0))
-                            .border(hairline())
-                            .border_color(theme.border_strong)
-                            .bg(theme.inset)
-                            .text_size(sp(12.5))
-                            .line_height(sp(17.0))
-                            .child(editor.input.clone()),
+                    .children(
+                        [
+                            (
+                                tr!("suggestions.label"),
+                                tr!("suggestions.label_help"),
+                                editor.label.clone(),
+                            ),
+                            (
+                                tr!("suggestions.prompt_text"),
+                                tr!("suggestions.prompt_help"),
+                                editor.input.clone(),
+                            ),
+                            (
+                                tr!("suggestions.condition"),
+                                if matches!(editor.id, "approve-plan" | "address-review" | "fix-ci")
+                                {
+                                    tr!("suggestions.workflow_condition_help")
+                                } else {
+                                    tr!("suggestions.condition_help")
+                                },
+                                editor.condition.clone(),
+                            ),
+                        ]
+                        .into_iter()
+                        .map(|(title, help, input)| {
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(5.0))
+                                .child(div().text_color(theme.text).child(title))
+                                .child(
+                                    div()
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(help),
+                                )
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .px(px(8.0))
+                                        .py(px(6.0))
+                                        .rounded(px(8.0))
+                                        .border(hairline())
+                                        .border_color(theme.border_strong)
+                                        .bg(theme.inset)
+                                        .child(input),
+                                )
+                        }),
                     )
                     .when_some(editor.error.as_ref(), |card, error| {
                         card.child(
@@ -7310,6 +7408,9 @@ impl Waku {
                 cards.push(form.into_any_element());
             }
         }
+        let cards = settings_row_card(cards.into_iter().map(Some).collect(), theme)
+            .map(|card| vec![card.into_any_element()])
+            .unwrap_or_default();
         settings_group(tr!("jev.group_prompts"), cards, theme)
             .map(|group| div().mt(px(15.0)).child(group).into_any_element())
     }

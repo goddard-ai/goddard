@@ -134,6 +134,38 @@ pub(super) fn suggested_prompt(
     Some(template)
 }
 
+/// Human-readable defaults for the evaluator, independent of the sent text.
+pub(super) fn default_prompt_condition(action: &str) -> &'static str {
+    match action {
+        "proceed" => "The agent is waiting for permission to continue with an agreed approach.",
+        "make-it-happen" => {
+            "The user needs to perform an action that the agent could handle instead."
+        }
+        "keep-going" => {
+            "Requested work remains unfinished and the agent can make progress without more user input."
+        }
+        "done" => "The requested work is complete and the task can be closed.",
+        "run-tests" => "Executable code changed and relevant tests have not been run.",
+        "fix-errors" => "An unresolved error prevents completion of the requested work.",
+        "commit-changes" => "Changes are ready to be committed.",
+        "add-tests" => "The changes need additional test coverage.",
+        "review-changes" => "Completed changes would benefit from review.",
+        "open-pr" => "The branch is ready to push and open a pull request.",
+        "you-decide" => {
+            "The agent asks for a decision it can reasonably make on the user's behalf."
+        }
+        "implement-plan" => "A plan is ready for implementation.",
+        "approve-plan" => {
+            "The plan is ready for finalization. This suggestion is controlled by the plan workflow, not Jev."
+        }
+        "diagnose" => "The agent is blocked and further diagnosis could identify a way forward.",
+        "whats-next" => "The user would benefit from asking the agent what to do next.",
+        "address-review" => "Review feedback is available and needs to be addressed.",
+        "fix-ci" => "CI is failing and the agent should investigate and fix it.",
+        _ => "Suggest when this action is appropriate for the current turn.",
+    }
+}
+
 pub(super) fn include_employee_context(prompt: String, employee: Option<(&str, &str)>) -> String {
     let Some((name, job_title)) = employee else {
         return prompt;
@@ -207,6 +239,7 @@ pub(super) fn suggested_action_title(action: &str) -> Option<String> {
         // The newer ids carry their own titles — their chips label the
         // action while their canned prompts hold the text that sends.
         "you-decide" => Some(tr!("suggestions.you_decide")),
+        "approve-plan" => Some(tr!("boss.plan_finalize")),
         "implement-plan" => Some(tr!("suggestions.implement_plan")),
         "diagnose" => Some(tr!("suggestions.diagnose")),
         "whats-next" => Some(tr!("suggestions.whats_next")),
@@ -759,10 +792,23 @@ impl Waku {
                 ),
             );
         }
-        let questions = action_prediction_questions(
+        let mut questions = action_prediction_questions(
             next_action_candidates(session, turn_id, open_pr),
             self.state.move_fast_break_things,
         );
+        if let Some(EvalQuestion::Choice { criteria, .. }) = questions.get_mut("nextAction") {
+            for (id, description) in criteria.iter_mut() {
+                if CANNED_PROMPTS.iter().any(|(action, _)| action == id) {
+                    *description = Some(
+                        self.state
+                            .suggested_prompt_conditions
+                            .get(id)
+                            .cloned()
+                            .unwrap_or_else(|| default_prompt_condition(id).to_owned()),
+                    );
+                }
+            }
+        }
         let tx = self.action_prediction_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         self.action_prediction_in_flight.insert(turn_id);
@@ -1448,6 +1494,9 @@ impl Waku {
     /// candidate is not renderable — call sites reach here only through
     /// `gated_suggestion`, which already filtered to actionable ids.
     pub(super) fn suggestion_parts(&self, action: &str) -> Option<(&'static str, String)> {
+        if let Some(label) = self.state.suggested_prompt_labels.get(action) {
+            return Some(("icons/chat.svg", label.clone()));
+        }
         match action {
             "commit" => Some(("icons/git-commit-horizontal.svg", tr!("suggestions.commit"))),
             "push" => Some(("icons/arrow-up.svg", tr!("suggestions.push"))),
@@ -1463,8 +1512,8 @@ impl Waku {
             "address-review" => Some(("icons/chat.svg", tr!("suggestions.address_review"))),
             "fix-ci" => Some(("icons/chat.svg", tr!("suggestions.fix_ci"))),
             canned => {
-                let prompt = suggested_prompt(canned, &self.state.suggested_prompts)?;
-                Some(("icons/chat.svg", prompt))
+                let label = suggested_action_title(canned)?;
+                Some(("icons/chat.svg", label))
             }
         }
     }
