@@ -10966,7 +10966,7 @@ fn set_resources_on_a_working_employee_swaps_in_place() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -11873,7 +11873,7 @@ fn setmodel_on_a_working_employee_interrupts_and_requeues() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -12010,7 +12010,7 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -12422,7 +12422,7 @@ fn setmodel_requeue_relaunches_on_the_new_provider() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -12612,7 +12612,7 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -12903,7 +12903,7 @@ fn setmodel_retune_resets_to_the_models_default_effort() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -14760,7 +14760,7 @@ fn legacy_dispatch_notifications_are_retired_without_delivery() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());

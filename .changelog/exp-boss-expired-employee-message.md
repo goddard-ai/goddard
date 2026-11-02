@@ -1,0 +1,1 @@
+- **Boss:** Sending a message to an expired employee from its page now resumes it even when the assignment's outcome already closed, instead of parking the chat on an "assignment outcome is closed" wait.

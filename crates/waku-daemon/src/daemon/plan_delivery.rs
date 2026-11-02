@@ -680,7 +680,12 @@ impl WakuBackend {
         let Some(employee) = snapshot.cloned() else {
             return Ok(None);
         };
-        self.boss.validate_plan_binding(&employee)?;
+        // Launch-time validation runs the revival variant: admission
+        // already applied the first-dispatch scope gates, so an outcome
+        // or plan that settled in the grant window cannot strand this
+        // dispatch — the same "working siblings keep running" the outcome
+        // close path applies.
+        self.boss.validate_revived_plan_binding(&employee)?;
         if employee.assignment_kind != PlanAssignmentKind::Implementation
             || employee.plan_binding.is_none()
         {
@@ -768,7 +773,7 @@ impl WakuBackend {
             let current = boss
                 .employee(session_id)
                 .ok_or_else(|| anyhow!("plan principal missing"))?;
-            boss.validate_plan_binding(&current)?;
+            boss.validate_revived_plan_binding(&current)?;
             anyhow::ensure!(
                 current.plan_binding.as_ref() == Some(&binding)
                     && current.assignment_kind == PlanAssignmentKind::Implementation

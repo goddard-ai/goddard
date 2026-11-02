@@ -475,3 +475,81 @@ fn employee_composer_expired_reentry_and_uncertain_forwarding_never_replay() {
     drop(restored);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// A direct message re-admits an expired employee whose assignment
+/// outcome has since closed — the closed record describes work that
+/// already ran, not a gate on the revival, so the parked prompt still
+/// dispatches instead of parking on a contract blocker.
+#[test]
+fn employee_composer_revives_an_expired_employee_on_a_closed_outcome() {
+    use waku_protocol::boss::{BossResult, EmployeeSettle, OutcomeState};
+    let root = std::env::temp_dir().join(format!("composer-outcome-revive-{}", Uuid::new_v4()));
+    let (backend, boss, capture, launches) = fixture(&root);
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 1, 1);
+    let outcome = backend
+        .boss
+        .create_outcome(None, "Close me", "criteria")
+        .unwrap()
+        .id;
+    let mut operation = summon_op(
+        &backend,
+        &root,
+        "viewed",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon { outcome_id, .. } = &mut operation {
+        *outcome_id = Some(outcome);
+    }
+    let BossResult::Summoned {
+        session_id: employee,
+        ..
+    } = backend
+        .handle_boss_operation(Some(boss), operation, &EventSink::detached())
+        .unwrap()
+    else {
+        panic!("expected summon")
+    };
+    backend.run_summon_scheduler();
+    assert_eq!(
+        backend.boss.employee_lifecycle(employee),
+        Some(EmployeeLifecycle::Working)
+    );
+    backend
+        .finish_boss_employee(employee, false, EmployeeSettle::TurnFinished)
+        .unwrap();
+    assert_eq!(
+        backend.boss.employee_lifecycle(employee),
+        Some(EmployeeLifecycle::Expired)
+    );
+    backend
+        .handle_boss_operation(
+            None,
+            BossOperation::SetOutcomeState {
+                outcome,
+                state: OutcomeState::Cancelled,
+                evidence: Some("superseded".into()),
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    // The direct message revives the employee: admission grants, the
+    // session launches, and the parked prompt drains as a new turn.
+    submit(&backend, employee, Uuid::new_v4(), "follow-up").unwrap();
+    assert_eq!(
+        backend.boss.employee_lifecycle(employee),
+        Some(EmployeeLifecycle::Working)
+    );
+    let ticket = backend.boss.employee(employee).unwrap().ticket.unwrap();
+    assert!(ticket.blocked_by.is_empty());
+    assert_eq!(launches.load(Ordering::SeqCst), 2);
+    assert!(
+        capture
+            .prompts
+            .lock()
+            .iter()
+            .any(|prompt| prompt.contains("follow-up"))
+    );
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}

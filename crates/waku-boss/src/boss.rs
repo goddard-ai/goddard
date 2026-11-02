@@ -3743,12 +3743,17 @@ impl BossService {
     /// Grant a queued ticket its claims and move it to `dispatching`.
     /// `false` means the generation went stale — the ticket was stopped
     /// or re-admitted while the broker grant was in flight, and the
-    /// caller must release what it just took.
+    /// caller must release what it just took. `revival` reports the
+    /// caller's read on the admission: a requeue behind an
+    /// already-started session validates its binding without the
+    /// first-dispatch scope gates, so a since-closed outcome or plan
+    /// cannot strand the prompts that re-admitted it.
     pub fn mark_dispatching(
         &self,
         session: Uuid,
         generation: u64,
         reservation: Option<Uuid>,
+        revival: bool,
     ) -> anyhow::Result<bool> {
         let mut marked = false;
         self.update(|state| {
@@ -3767,7 +3772,11 @@ impl BossService {
             if stale {
                 return Ok(());
             }
-            plan_contract::validate_binding(state, entry)?;
+            if revival {
+                plan_contract::validate_revived_binding(state, entry)?;
+            } else {
+                plan_contract::validate_binding(state, entry)?;
+            }
             let entry = state
                 .employees
                 .iter_mut()
@@ -11958,7 +11967,7 @@ mod memory_op_tests {
         );
 
         let held = Uuid::new_v4();
-        service.mark_dispatching(session, 1, Some(held)).unwrap();
+        service.mark_dispatching(session, 1, Some(held), false).unwrap();
         service.mark_working(session, 1).unwrap();
 
         let update = Uuid::new_v4();
@@ -12006,7 +12015,7 @@ mod memory_op_tests {
         // id so nothing leaks mid-flight.
         let held_two = Uuid::new_v4();
         service
-            .mark_dispatching(session, 2, Some(held_two))
+            .mark_dispatching(session, 2, Some(held_two), false)
             .unwrap();
         service.mark_working(session, 2).unwrap();
         let parked = Uuid::new_v4();
@@ -13835,7 +13844,7 @@ mod memory_op_tests {
         // Drive the first generation to working, then requeue it — the
         // live replacement ends the admission superseded.
         service
-            .mark_dispatching(employee.session_id, 1, None)
+            .mark_dispatching(employee.session_id, 1, None, false)
             .unwrap();
         service.mark_working(employee.session_id, 1).unwrap();
         service

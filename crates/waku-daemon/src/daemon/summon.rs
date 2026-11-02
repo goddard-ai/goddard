@@ -578,7 +578,17 @@ impl WakuBackend {
                 return Ok(true);
             }
         }
-        if let Err(error) = self.boss.validate_plan_binding(employee) {
+        // A requeue behind an already-started session is a revival, not
+        // a first dispatch: the assignment's scope gates settled when it
+        // first admitted, so a since-closed outcome cannot strand the
+        // prompts that re-admitted the record.
+        let revival = self.employee_session_started(session_id);
+        let binding_check = if revival {
+            self.boss.validate_revived_plan_binding(employee)
+        } else {
+            self.boss.validate_plan_binding(employee)
+        };
+        if let Err(error) = binding_check {
             self.record_queued_plan_failure(employee, error.clone())?;
             self.boss.record_blocked(
                 session_id,
@@ -602,8 +612,11 @@ impl WakuBackend {
         // A linked assignment holds at the queue head until its readiness
         // lands — the finishing assignment waits on settled siblings
         // and handoff decisions, an ordinary one on its prerequisites.
-        // Each pass re-evaluates; the hold reads as ordinary Waiting work.
-        if !self.boss.assignment_ready(employee) {
+        // Readiness orders a first dispatch only; a revival already began
+        // the assignment, so a settled outcome cannot strand its parked
+        // prompts. Each pass re-evaluates; the hold reads as ordinary
+        // Waiting work.
+        if !revival && !self.boss.assignment_ready(employee) {
             self.boss.record_blocked(
                 session_id,
                 vec![waku_protocol::boss::AdmissionBlocker::OutcomeWait {
@@ -652,9 +665,12 @@ impl WakuBackend {
             self.boss.record_blocked(session_id, attempt.blockers)?;
             return Ok(false);
         }
-        let dispatching =
-            self.boss
-                .mark_dispatching(session_id, ticket.generation, Some(reservation_id));
+        let dispatching = self.boss.mark_dispatching(
+            session_id,
+            ticket.generation,
+            Some(reservation_id),
+            revival,
+        );
         let dispatching = match dispatching {
             Ok(marked) => marked,
             Err(error) => {
@@ -789,6 +805,18 @@ impl WakuBackend {
         }
     }
 
+    /// Whether the employee's session already ran — the read that marks a
+    /// requeued ticket as a revival rather than a first dispatch. Stored
+    /// sessions and hydrated transcripts count; an unstarted shell or a
+    /// missing record does not.
+    fn employee_session_started(&self, session_id: Uuid) -> bool {
+        self.task_state
+            .lock()
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && session.has_started())
+    }
+
     /// The persisted launch for a granted ticket. Fresh summons adopt the
     /// envelope — assignment plus every prompt parked while queued — onto
     /// the shell and start the provider; re-admitted employees (revival,
@@ -808,7 +836,11 @@ impl WakuBackend {
             .boss
             .employee(session_id)
             .ok_or_else(|| anyhow!("employee is missing"))?;
-        self.boss.validate_plan_binding(&current)?;
+        if self.employee_session_started(session_id) {
+            self.boss.validate_revived_plan_binding(&current)?;
+        } else {
+            self.boss.validate_plan_binding(&current)?;
+        }
         anyhow::ensure!(
             current.plan_binding == employee.plan_binding,
             "assignment binding changed before dispatch"
