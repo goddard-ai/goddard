@@ -1976,7 +1976,7 @@ impl BossService {
         let mut due = Vec::new();
         self.update(|state| {
             for task in state.outcomes.iter_mut() {
-                let eligible = task.reminder_eligible(&state.employees, now);
+                let eligible = task.reminder_eligible(&state.employees, &state.chains, now);
                 match (eligible, task.unattended_since) {
                     (true, None) => task.unattended_since = Some(now),
                     (false, Some(_)) => task.unattended_since = None,

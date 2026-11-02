@@ -1,0 +1,1 @@
+- **Boss:** stopped false "no work assigned" reminders for outcomes whose employee chain is actively dispatching or executing a step; the reminder still fires when the chain is paused, cancelled, or finished.

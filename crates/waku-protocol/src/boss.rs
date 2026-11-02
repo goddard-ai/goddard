@@ -2978,11 +2978,33 @@ impl BossOutcome {
     /// open, no live assignment, no pending handoff, no intervention issue —
     /// and not shielded by a recorded wait or snooze. A task covered by
     /// its own pending delivery is never "missing coordination."
-    pub fn reminder_eligible(&self, employees: &[BossEmployee], now: u64) -> bool {
+    ///
+    /// A chain bound to the outcome counts as live work for every status
+    /// that still owns its step — Waiting through CheckingHandoff are
+    /// dispatching or executing, Pausing and Cancelling hold the outcome
+    /// while they settle — so a long-running step stays covered between
+    /// lifecycle events. A Paused chain awaits a decision: that is genuine
+    /// stalled work the reminder must still surface, and terminal chains
+    /// no longer own anything.
+    pub fn reminder_eligible(
+        &self,
+        employees: &[BossEmployee],
+        chains: &[crate::chains::EmployeeChain],
+        now: u64,
+    ) -> bool {
         !self.terminal()
             && !self.wait_shields(now)
             && self.completion_conflict.is_none()
             && self.pending_handoffs().next().is_none()
+            && !chains.iter().any(|chain| {
+                chain.request.outcome_id == self.id
+                    && !matches!(
+                        chain.status,
+                        crate::chains::ChainStatus::Paused
+                            | crate::chains::ChainStatus::Completed
+                            | crate::chains::ChainStatus::Cancelled
+                    )
+            })
             && !employees.iter().any(|employee| {
                 employee
                     .assignment

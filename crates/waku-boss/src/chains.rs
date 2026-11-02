@@ -2887,4 +2887,156 @@ mod tests {
         result.code.as_mut().unwrap().qa_branch = Some("release".into());
         assert!(gate_reason(&step, &result, &verification, 1).is_some());
     }
+
+    /// An owned chain counts as outcome work for the unattended-reminder
+    /// scan — a long-running step stays covered between lifecycle events —
+    /// while paused or terminal chains leave genuinely stalled work
+    /// eligible. Regression: the scan only saw employee assignment
+    /// records, which chain attempts never carry, so it reminded "no work
+    /// assigned" one grace period after the last chain event even though
+    /// an employee was actively executing the step.
+    #[test]
+    fn owned_chains_shield_outcomes_from_unattended_reminders() {
+        let fixture = Fixture::new();
+        let outcome = fixture.definition.outcome_id;
+        let unattended_since = |service: &BossService| {
+            service
+                .document()
+                .outcomes
+                .iter()
+                .find(|entry| entry.id == outcome)
+                .and_then(|entry| entry.unattended_since)
+        };
+        let now = waku_protocol::model::unix_time();
+        let grace = waku_protocol::boss::OUTCOME_UNATTENDED_GRACE;
+
+        // An unworked outcome enters eligibility on the first scan — the
+        // shape the false alert fired from.
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(now)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(unattended_since(&fixture.service), Some(now));
+
+        // Chain create already clears the stamp: waiting for admission is
+        // owned work, not a missing assignment.
+        let chain = fixture.create();
+        assert_eq!(chain.status, ChainStatus::Waiting);
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(now + 1)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(unattended_since(&fixture.service), None);
+
+        // The reported failure: an executing step emits no chain events
+        // for its whole run, so activity alone cannot keep it covered.
+        fixture.admit(&chain);
+        fixture.observe(&chain, ChainObservation::Starting);
+        fixture.observe(
+            &chain,
+            ChainObservation::Working {
+                starting_revision: "rev".into(),
+                workspace: "/tmp/chain-workspace".into(),
+            },
+        );
+        assert_eq!(fixture.read(chain.id).status, ChainStatus::Working);
+        for offset in [grace + 1, 12 * grace, 24 * 60 * 60] {
+            assert!(
+                fixture
+                    .service
+                    .scan_outcome_reminders(now + offset)
+                    .unwrap()
+                    .is_empty(),
+                "an executing chain must never read as unattended"
+            );
+            assert_eq!(unattended_since(&fixture.service), None);
+        }
+
+        // Sealing success evidence — CheckingHandoff — stays covered, and
+        // so does the Waiting state between steps.
+        fixture.packet(&chain, ResultDisposition::Success);
+        fixture.terminal(&chain, ResultDisposition::Success);
+        assert_eq!(fixture.read(chain.id).status, ChainStatus::CheckingHandoff);
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(now + 25 * 60 * 60)
+                .unwrap()
+                .is_empty()
+        );
+        fixture.release(&chain);
+        fixture.seal(&chain, &verified()).unwrap();
+        let chain = fixture.read(chain.id);
+        assert_eq!(chain.status, ChainStatus::Waiting);
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(now + 26 * 60 * 60)
+                .unwrap()
+                .is_empty(),
+            "a chain between steps still owns the outcome"
+        );
+
+        // A pause in flight holds the outcome while the attempt settles…
+        fixture.admit(&chain);
+        fixture.observe(&chain, ChainObservation::Starting);
+        fixture.observe(
+            &chain,
+            ChainObservation::Working {
+                starting_revision: "rev".into(),
+                workspace: "/tmp/chain-workspace".into(),
+            },
+        );
+        let pausing = fixture.control(chain.id, ChainControl::Pause).unwrap();
+        assert_eq!(pausing.status, ChainStatus::Pausing);
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(now + 27 * 60 * 60)
+                .unwrap()
+                .is_empty(),
+            "a stopping chain still owns its outcome"
+        );
+
+        // …but a settled pause is genuine stalled work: the outcome
+        // re-enters eligibility and the reminder still lands.
+        let chain = fixture.read(chain.id);
+        fixture.release(&chain);
+        assert_eq!(fixture.read(chain.id).status, ChainStatus::Paused);
+        let paused_at = now + 28 * 60 * 60;
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(paused_at)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(unattended_since(&fixture.service), Some(paused_at));
+        assert_eq!(
+            fixture
+                .service
+                .scan_outcome_reminders(paused_at + grace + 1)
+                .unwrap(),
+            vec![outcome],
+            "a paused chain must not hide stalled work"
+        );
+
+        // Cancel releases ownership entirely — the outcome stays eligible.
+        let cancelled = fixture.control(chain.id, ChainControl::Cancel).unwrap();
+        assert_eq!(cancelled.status, ChainStatus::Cancelled);
+        assert_eq!(
+            fixture
+                .service
+                .scan_outcome_reminders(paused_at + grace + 2)
+                .unwrap(),
+            vec![outcome],
+            "a cancelled chain leaves the outcome unowned"
+        );
+    }
 }
