@@ -1,0 +1,1 @@
+- Fixed screenshots linked from local files in agent responses showing only their captions.

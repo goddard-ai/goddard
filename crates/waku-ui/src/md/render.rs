@@ -3687,7 +3687,10 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
 
     let decoded = decode_data_url(url);
     let resolved = if decoded.is_none() {
-        ctx.image_resolver.as_ref().and_then(|resolve| resolve(url))
+        ctx.image_resolver
+            .as_ref()
+            .and_then(|resolve| resolve(url))
+            .or_else(|| local_image_path(url))
     } else {
         None
     };
@@ -3720,6 +3723,19 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
                 .object_fit(gpui::ObjectFit::ScaleDown),
         )
         .into_any_element()
+}
+
+// Strings are URI image sources in GPUI; local files must use its path source.
+// Keep this lexical: GPUI loads the file asynchronously, outside rendering.
+fn local_image_path(source: &str) -> Option<PathBuf> {
+    if Path::new(source).is_absolute() {
+        return Some(PathBuf::from(source));
+    }
+    url::Url::parse(source)
+        .ok()
+        .filter(|url| url.scheme() == "file")?
+        .to_file_path()
+        .ok()
 }
 
 const CODE_COPY_FEEDBACK_DURATION: Duration = Duration::from_secs(3);
@@ -4579,6 +4595,18 @@ mod tests {
     use super::*;
     use crate::md::parser;
     use gpui::TestAppContext;
+
+    #[test]
+    fn local_markdown_images_use_file_sources() {
+        let path = "/Users/alec/dev/reports/thread screenshot.png";
+        assert_eq!(local_image_path(path), Some(PathBuf::from(path)));
+        assert_eq!(
+            local_image_path("file:///Users/alec/dev/reports/thread%20screenshot.png"),
+            Some(PathBuf::from(path))
+        );
+        assert_eq!(local_image_path("https://example.com/image.png"), None);
+        assert_eq!(local_image_path("data:image/png;base64,aGVsbG8="), None);
+    }
 
     fn palette() -> Palette {
         Palette::from_theme(&Theme::dark())
