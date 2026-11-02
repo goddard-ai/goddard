@@ -2850,7 +2850,7 @@ pub(super) fn outcome_reminder_prompt(
                 .iter()
                 .find(|task| task.id == reference.task_id)?;
             if task.unattended_since != Some(reference.unattended_since)
-                || !task.reminder_eligible(&document.employees, now)
+                || !task.reminder_eligible(&document.employees, &document.chains, now)
                 || task.last_activity_at != reference.last_activity_at
             {
                 return None;
