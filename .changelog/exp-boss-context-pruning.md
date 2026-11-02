@@ -1,0 +1,1 @@
+- Boss context now focuses on current work and pending decisions, leaving project catalogs, finished employees, and automation details available on demand.

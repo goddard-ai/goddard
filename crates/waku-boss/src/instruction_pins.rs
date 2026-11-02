@@ -360,7 +360,7 @@ impl BossService {
             return body;
         }
         format!(
-            "<goddard-instruction-pins>\nThis is the current instruction-pin snapshot and supersedes all earlier pin snapshots. Only pins listed as active here remain binding. Temporary user obligations complement personas and memory buckets. Apply active pins within their stated scope; keep them active until their retirement condition has evidence. Carry applicable constraints when delegating work. Review candidates with `goddard-agent boss instructions show ID`, then activate with `instructions edit ID --revision N --text INSTRUCTION --retire-when CONDITION`. Dismiss or retire with `instructions retire ID --revision N --evidence EVIDENCE`. A changed instruction may supersede an older pin.\n{body}</goddard-instruction-pins>"
+            "<goddard-instruction-pins>\nThis is the current instruction-pin snapshot and supersedes all earlier pin snapshots. Only pins listed as active here remain binding. Temporary user obligations complement personas and memory buckets. Apply active pins within their stated scope; keep them active until their retirement condition has evidence. Carry applicable constraints when delegating work. Manage pins with `goddard-agent boss instructions --help`.\n{body}</goddard-instruction-pins>"
         )
     }
 }

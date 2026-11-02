@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use waku_protocol::automations::{AutomationSchedule, AutomationsState};
+use waku_protocol::automations::AutomationsState;
 use waku_protocol::boss::BossState;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
 use waku_protocol::model::{
@@ -36,15 +36,13 @@ const BRIEF_CAP: usize = 6_000;
 /// projects fold into a count rather than dropping silently.
 const HEADER_CAP: usize = 1_000;
 const TITLE_CAP: usize = 80;
-const PATH_CAP: usize = 120;
 const EMPLOYEES_LISTED: usize = 8;
-const AUTOMATION_PROMPT_CAP: usize = 100;
 /// The user prompt's budget inside eval `state`.
 const PROMPT_CAP: usize = 4_000;
 
 /// The work snapshot: an always-on header and brief, plus an optional digest.
 pub struct WorkContext {
-    /// Compact per-project live counts — attaches to every boss prompt,
+    /// Compact per-project active/waiting counts — attaches to every boss prompt,
     /// never gated.
     pub header: String,
     /// Current work and pending decisions, always available to the Boss.
@@ -205,11 +203,9 @@ fn compact_duration(seconds: u64) -> String {
     }
 }
 
-/// Render the daemon's view of the user's work: every registered project
-/// with its live tasks and statuses, the boss's employees, and the
-/// scheduled automations. Bounded at every level; a daemon with no user
-/// projects yields an empty digest, which callers treat as "nothing to
-/// route or attach".
+/// Render current work for every prompt, with project/task inventory available
+/// in the optional digest. Automation details and employee history are fetched
+/// through their dedicated commands. Both representations are bounded.
 pub fn work_context(
     project_snapshot: &[Project],
     session_snapshot: &[AgentSession],
@@ -257,6 +253,15 @@ pub fn work_context(
             .find(|session| session.id == employee.session_id)
             .map(|session| session.project_id)
     };
+    let current = |session: &&AgentSession| {
+        matches!(
+            session.status,
+            SessionStatus::Connecting
+                | SessionStatus::Working
+                | SessionStatus::Background
+                | SessionStatus::Waiting
+        )
+    };
     let live_employees = || boss.employees.iter().filter(|entry| !entry.expired());
     let mut digest = String::new();
     let mut header_lines = Vec::new();
@@ -269,20 +274,23 @@ pub fn work_context(
             .filter(live)
             .collect();
         sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
-        // The header lists every user project — only the digest folds.
+        // Historical idle/failed sessions remain discoverable in the digest.
         let employees_here: Vec<_> = live_employees()
             .filter(|employee| employee_project(employee) == Some(project.id))
             .collect();
         mapped_employees += employees_here.len();
-        header_lines.push(header_line(
-            project,
-            &sessions,
-            employees_here.len(),
-            employees_here
-                .iter()
-                .filter(|employee| employee.blocker.is_some())
-                .count(),
-        ));
+        let current_sessions: Vec<_> = sessions.iter().copied().filter(current).collect();
+        if !current_sessions.is_empty() || !employees_here.is_empty() {
+            header_lines.push(header_line(
+                project,
+                &current_sessions,
+                employees_here.len(),
+                employees_here
+                    .iter()
+                    .filter(|employee| employee.blocker.is_some())
+                    .count(),
+            ));
+        }
         let mut section = String::new();
         // Every listed project entry carries its canonical registered id
         // alongside name and path — chain steps and `projects resolve`
@@ -319,7 +327,7 @@ pub fn work_context(
             "## …{omitted_projects} more projects omitted — `goddard-agent boss projects list` returns the complete registered catalog\n"
         ));
     }
-    // The always-on header: one counts line per user project, then the
+    // The always-on header: counts only for projects with current work, then the
     // fleet tallies no project line can carry. It points at the `context`
     // operation so a gate miss still leaves the boss a path to the detail.
     let unmapped_employees = live_employees().count() - mapped_employees;
@@ -329,7 +337,13 @@ pub fn work_context(
         .iter()
         .map(|task| task.pending_handoffs().count())
         .sum();
-    let has_fleet = unmapped_employees > 0 || !automations.automations.is_empty() || open_tasks > 0;
+    let has_fleet = unmapped_employees > 0
+        || open_tasks > 0
+        || pending_handoffs > 0
+        || boss
+            .outcomes
+            .iter()
+            .any(|task| task.completion_conflict.is_some());
     let mut header = String::new();
     if !header_lines.is_empty() || has_fleet {
         header.push_str(
@@ -357,20 +371,27 @@ pub fn work_context(
             if pending_handoffs == 1 { "" } else { "s" }
         ));
     }
-    if !automations.automations.is_empty() {
-        header.push_str(&format!(
-            "automations: {} scheduled\n",
-            automations.automations.len()
-        ));
-    }
-    // Put actionable outcomes before the project inventory so truncation
-    // keeps pending decisions visible rather than spending the brief on rows.
+    // Pending decisions take priority; project inventory stays out of the brief.
     let project_digest = std::mem::take(&mut digest);
     let mut task_digest = String::new();
-    if !boss.employees.is_empty() {
+    let mut employees: Vec<_> = boss
+        .employees
+        .iter()
+        .filter(|entry| {
+            !entry.expired()
+                || entry.blocker.is_some()
+                || boss
+                    .outcomes
+                    .iter()
+                    .flat_map(|task| task.pending_handoffs())
+                    .any(|handoff| handoff.assignment == entry.session_id)
+        })
+        .collect();
+    employees.sort_by_key(|entry| (entry.blocker.is_none(), entry.expired()));
+    if !employees.is_empty() {
         digest.push_str("## Employees\n");
-        let extra = boss.employees.len().saturating_sub(EMPLOYEES_LISTED);
-        for entry in boss.employees.iter().take(EMPLOYEES_LISTED) {
+        let extra = employees.len().saturating_sub(EMPLOYEES_LISTED);
+        for entry in employees.iter().take(EMPLOYEES_LISTED) {
             let status = session_snapshot
                 .iter()
                 .find(|session| session.id == entry.session_id)
@@ -389,7 +410,9 @@ pub fn work_context(
             ));
         }
         if extra > 0 {
-            digest.push_str(&format!("  - …{extra} more employees\n"));
+            digest.push_str(&format!(
+                "  - …{extra} more employees — use `goddard-agent boss roster`\n"
+            ));
         }
     }
     if !boss.outcomes.is_empty() {
@@ -407,7 +430,8 @@ pub fn work_context(
             .collect();
         tasks.sort_by_key(|task| {
             (
-                !task.needs_attention(&boss.employees),
+                !(task.needs_attention(&boss.employees)
+                    || task.pending_handoffs().next().is_some()),
                 std::cmp::Reverse(task.created_at),
             )
         });
@@ -416,10 +440,14 @@ pub fn work_context(
             digest.push_str("## Tasks\n");
         }
         for task in tasks {
+            let attention =
+                task.needs_attention(&boss.employees) || task.pending_handoffs().next().is_some();
             let status = if task.terminal() {
                 task.state.label()
-            } else if task.needs_attention(&boss.employees) {
+            } else if attention {
                 "needs attention"
+            } else if task.waiting.is_some() {
+                "waiting"
             } else {
                 "open"
             };
@@ -429,13 +457,13 @@ pub fn work_context(
                 truncate_chars(&task.outcome, TITLE_CAP),
                 task.id
             ));
-            if !task.success_criteria.trim().is_empty() {
+            if attention && !task.success_criteria.trim().is_empty() {
                 digest.push_str(&format!(
                     "    done when: {}\n",
                     truncate_chars(&task.success_criteria.replace('\n', " "), 200)
                 ));
             }
-            if let Some(waiting) = &task.waiting {
+            if let Some(waiting) = task.waiting.as_ref().filter(|_| attention) {
                 let reason = match waiting {
                     waku_protocol::boss::OutcomeWait::Until { at } => format!("until {at}"),
                     waku_protocol::boss::OutcomeWait::Dependency { note } => {
@@ -472,26 +500,9 @@ pub fn work_context(
         task_digest = std::mem::take(&mut digest);
         digest = employee_digest;
     }
-    let brief = bounded_brief(format!("{task_digest}{digest}{project_digest}"), BRIEF_CAP);
+    let brief = bounded_brief(format!("{task_digest}{digest}"), BRIEF_CAP);
     if !automations.automations.is_empty() {
-        digest.push_str("## Automations\n");
-        for automation in &automations.automations {
-            let mut line = format!(
-                "  - \"{}\" — {} — {}",
-                truncate_chars(&automation.name, TITLE_CAP),
-                schedule_label(&automation.schedule),
-                truncate_chars(&automation.project_path.display().to_string(), PATH_CAP),
-            );
-            let prompt = automation.prompt.trim();
-            if !prompt.is_empty() {
-                line.push_str(&format!(
-                    " — {}",
-                    truncate_chars(&prompt.replace('\n', " "), AUTOMATION_PROMPT_CAP)
-                ));
-            }
-            line.push('\n');
-            digest.push_str(&line);
-        }
+        digest.push_str(&format!("## Automations\n{} configured — use `goddard-agent boss automation list` for schedules and details.\n", automations.automations.len()));
     }
     digest = format!("{task_digest}{digest}{project_digest}");
     digest = bounded_brief(digest, DIGEST_CAP);
@@ -607,30 +618,6 @@ fn status_label(status: SessionStatus) -> &'static str {
     }
 }
 
-fn schedule_label(schedule: &Option<AutomationSchedule>) -> String {
-    match schedule {
-        Some(AutomationSchedule::Hourly { minute }) => format!("hourly at :{minute:02}"),
-        Some(AutomationSchedule::Daily { hour, minute })
-        | Some(AutomationSchedule::Weekdays { hour, minute }) => {
-            let days = if matches!(schedule, Some(AutomationSchedule::Weekdays { .. })) {
-                " on weekdays"
-            } else {
-                ""
-            };
-            format!("at {hour:02}:{minute:02}{days}")
-        }
-        Some(AutomationSchedule::Weekly {
-            day_of_week,
-            hour,
-            minute,
-        }) => format!("weekly day {day_of_week} at {hour:02}:{minute:02}"),
-        Some(AutomationSchedule::Cron { expression }) => {
-            format!("cron \"{expression}\"")
-        }
-        None => "manual".to_owned(),
-    }
-}
-
 fn age_label(updated_at: u64, now: u64) -> String {
     let seconds = now.saturating_sub(updated_at);
     let (count, unit) = if seconds < 90 {
@@ -693,6 +680,7 @@ pub fn apply_verdict(evaluation: &Evaluation) -> RouterVerdict {
 mod tests {
     use super::*;
     use uuid::Uuid;
+    use waku_protocol::automations::AutomationSchedule;
     use waku_protocol::boss::{
         BossEmployee, BossIdentity, BossResourcePolicy, EmployeeGoal, EmployeeLifecycle,
         PersonaPermissions,
@@ -880,6 +868,12 @@ mod tests {
         urgent.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
             note: "User restart confirmation".into(),
         });
+        urgent.completion_conflict = Some(waku_protocol::boss::CompletionConflict {
+            assignment: Uuid::new_v4(),
+            attempt: 1,
+            reason: "User restart confirmation still required".into(),
+            at: 0,
+        });
         boss.outcomes.push(urgent.clone());
         for index in 0..100 {
             let mut outcome = urgent.clone();
@@ -892,6 +886,7 @@ mod tests {
         completed.id = Uuid::new_v4();
         completed.outcome = "Old completed outcome".into();
         completed.state = waku_protocol::boss::OutcomeState::Completed;
+        completed.completion_conflict = None;
         boss.outcomes.push(completed);
         let projects: Vec<_> = (0..40)
             .map(|index| project(&format!("project-{index}")))
@@ -908,6 +903,54 @@ mod tests {
         assert!(work.brief.chars().count() <= BRIEF_CAP);
         assert!(work.digest.chars().count() <= DIGEST_CAP);
         assert!(work.brief.contains("Work brief shortened"));
+        let mut finished = boss.outcomes[0].clone();
+        finished.state = waku_protocol::boss::OutcomeState::Completed;
+        let assignment = Uuid::new_v4();
+        finished.handoffs.push(waku_protocol::boss::OutcomeHandoff {
+            id: Uuid::new_v4(),
+            assignment,
+            attempt: 1,
+            intent: "Review result".into(),
+            created_at: 0,
+            resolution: None,
+        });
+        boss.outcomes = vec![finished];
+        boss.employees = (0..10)
+            .map(|_| {
+                employee(
+                    Uuid::new_v4(),
+                    "Old employee",
+                    true,
+                    boss.session_id.unwrap(),
+                )
+            })
+            .collect();
+        boss.employees.push(employee(
+            assignment,
+            "Pending review",
+            true,
+            boss.session_id.unwrap(),
+        ));
+        let work = work_context(&projects, &[], &boss, &AutomationsState::default());
+        assert!(work.brief.contains("handoff"));
+        assert!(work.brief.contains("closure conflict"));
+        assert!(work.brief.contains("Pending review"));
+        assert!(!work.brief.contains("Old employee"));
+        assert!(!work.brief.contains("/work/"));
+        // Either unresolved decision alone must survive terminal state.
+        let conflict = boss.outcomes[0].completion_conflict.take();
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.brief.contains("handoff"));
+        boss.outcomes[0].handoffs.clear();
+        boss.outcomes[0].completion_conflict = conflict;
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.brief.contains("closure conflict"));
+        boss.outcomes[0].completion_conflict = None;
+        boss.outcomes[0].state = waku_protocol::boss::OutcomeState::Open;
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.brief.contains("Repair the daemon"));
+        assert!(!work.brief.contains("done when:"));
+        assert!(!work.brief.contains("waiting:"));
         drop(service);
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -1060,11 +1103,14 @@ mod tests {
             &AutomationsState::default(),
         );
         assert!(work.header.starts_with("Work overview"));
-        assert!(work.header.contains("app: 3 tasks (1 active, 1 waiting)"));
-        assert!(work.header.contains("lib: 1 task (1 failed)"));
+        assert!(work.header.contains("app: 2 tasks (1 active, 1 waiting)"));
+        assert!(!work.header.contains("lib:"));
         // Names and counts only — titles and paths stay in the digest.
         assert!(!work.header.contains("Fix login"));
         assert!(!work.header.contains("/work/app"));
+        assert!(!work.brief.contains("Fix login"));
+        assert!(!work.brief.contains("Nap"));
+        assert!(!work.brief.contains("/work/app"));
     }
 
     #[test]
@@ -1096,10 +1142,12 @@ mod tests {
         let work = work_context(&state.projects, &state.sessions, &boss, &automations);
         assert!(
             work.header
-                .contains("app: 2 tasks (1 active), 2 employees (1 blocked)")
+                .contains("app: 1 task (1 active), 2 employees (1 blocked)")
         );
         assert!(work.header.contains("employees: 1 live"));
-        assert!(work.header.contains("automations: 2 scheduled"));
+        assert!(!work.header.contains("automations:"));
+        assert!(!work.digest.contains("nightly"));
+        assert!(work.digest.contains("boss automation list"));
         assert!(!work.header.contains("Bea"));
     }
 
@@ -1138,7 +1186,11 @@ mod tests {
         let boss = boss_state();
         let mut state = WorkSnapshot::default();
         for index in 0..60 {
-            state.projects.push(project(&format!("project-{index:02}")));
+            let project = project(&format!("project-{index:02}"));
+            state
+                .sessions
+                .push(session(&project, "Working", SessionStatus::Working));
+            state.projects.push(project);
         }
 
         let work = work_context(

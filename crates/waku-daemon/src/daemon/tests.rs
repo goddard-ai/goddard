@@ -2009,7 +2009,7 @@ fn boss_prompts_carry_the_header_and_a_pending_verdict_upgrades_to_the_digest() 
         wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "hello".into());
     assert!(wrapped.contains("<goddard-boss-context>\nWork overview"));
     assert!(wrapped.contains("app: 1 task (1 active)"));
-    assert!(wrapped.contains("Fix login"));
+    assert!(!wrapped.contains("Fix login"));
     assert!(wrapped.ends_with("hello"));
 
     // A deferred attach upgrades the same block to the full digest —
@@ -2023,6 +2023,12 @@ fn boss_prompts_carry_the_header_and_a_pending_verdict_upgrades_to_the_digest() 
     let wrapped =
         wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "hello".into());
     assert!(wrapped.contains("Work overview"));
+
+    // Idle historical tasks alone no longer attach a context block.
+    task_state.lock().sessions[0].status = SessionStatus::Idle;
+    let wrapped =
+        wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "hello".into());
+    assert!(!wrapped.contains("<goddard-boss-context>"));
 
     // Prompts to other sessions are never wrapped.
     let untouched = wrap_boss_outbound_prompt(

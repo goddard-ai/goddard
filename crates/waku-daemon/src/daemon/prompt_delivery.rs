@@ -427,7 +427,7 @@ pub(super) fn wrap_boss_outbound_prompt(
     let block = if pending && !work.digest.is_empty() {
         work.digest
     } else {
-        format!("{}\n{}", work.header, work.brief)
+        format!("{}{}", work.header, work.brief)
     };
     if block.is_empty() {
         return prompt;
