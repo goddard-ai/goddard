@@ -288,21 +288,36 @@ impl WakuBackend {
         report_trigger: Option<crate::model::ReportTrigger>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
-        // A queued event addressed to a retired Boss chat belongs to the
-        // committed owner — retarget before it is enqueued or mirrored so
-        // the successor receives it exactly once.
+        let mut message = crate::model::QueuedMessage::agent(prompt, sender);
+        message.id = queued_id.unwrap_or_else(Uuid::new_v4);
+        message.hidden = hidden;
+        message.report_trigger = report_trigger;
+        self.queue_agent_message(target, message, events)
+    }
+
+    /// Queue a durable daemon message, including any delivery-time references.
+    pub(super) fn queue_agent_message(
+        &self,
+        target: Uuid,
+        mut message: crate::model::QueuedMessage,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
+        let crate::model::QueuedMessageSource::Agent { sent_by: sender } = message.source else {
+            anyhow::bail!("daemon prompt must be agent-owned");
+        };
+        let prompt = message.content.clone();
+        let hidden = message.hidden;
+        let queued_id = message.id;
+        // Rotation preserves the message and its task references together.
         let target = self.boss_active_alias(target);
-        let plan_finalized = report_trigger
+        let plan_finalized = message
+            .report_trigger
             .as_ref()
             .is_some_and(|trigger| trigger.kind == crate::model::ReportTriggerKind::PlanFinalized);
-        let queued_id = queued_id.unwrap_or_else(Uuid::new_v4);
-        // The parked id doubles as the delivered message's — the trigger's
-        // dedupe identity matches it so a redriven delivery folds onto the
-        // same marker.
-        let report_trigger = report_trigger.map(|mut trigger| {
+        if let Some(trigger) = &mut message.report_trigger {
             trigger.event_id = queued_id;
-            trigger
-        });
+        }
+        let report_trigger = message.report_trigger.clone();
         self.agent.enqueue(
             target,
             crate::agent::AgentPrompt {
@@ -322,15 +337,11 @@ impl WakuBackend {
         if managed {
             // Result indexes must survive a failed supervisor launch and a
             // subsequent daemon restart, even when the supervisor was idle.
-            mirror_agent_queued_prompt(
+            mirror_agent_queued_message(
                 &self.task_state,
                 &self.task_store,
                 target,
-                queued_id,
-                &prompt,
-                sender,
-                hidden,
-                report_trigger.clone(),
+                message.clone(),
             )?;
         }
         // A queued or dispatching ticket owns no settled runtime — park
@@ -388,15 +399,11 @@ impl WakuBackend {
             // into the session document so every client renders the parked
             // prompt as a queued follow-up chip.
             if !managed {
-                mirror_agent_queued_prompt(
+                mirror_agent_queued_message(
                     &self.task_state,
                     &self.task_store,
                     target,
-                    queued_id,
-                    &prompt,
-                    sender,
-                    hidden,
-                    report_trigger,
+                    message.clone(),
                 )?;
             }
             if let Some(runtime_id) = self.runtime_id_for(target) {

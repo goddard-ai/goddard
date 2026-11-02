@@ -205,6 +205,7 @@ export type { NotificationThread } from "./NotificationThread";
 export type { OutcomeAssignment } from "./OutcomeAssignment";
 export type { OutcomeHandoff } from "./OutcomeHandoff";
 export type { OutcomeReminder } from "./OutcomeReminder";
+export type { OutcomeReminderTask } from "./OutcomeReminderTask";
 export type { OutcomeState } from "./OutcomeState";
 export type { OutcomeTransition } from "./OutcomeTransition";
 export type { OutcomeWait } from "./OutcomeWait";

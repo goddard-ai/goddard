@@ -208,33 +208,20 @@ impl WakuBackend {
         };
         let session = self.boss_active_alias(session);
         let document = self.boss.document();
-        let lines: Vec<String> = due
+        let references: Vec<_> = due
             .iter()
             .filter_map(|id| document.outcomes.iter().find(|task| task.id == *id))
-            .map(|task| {
-                let latest = task
-                    .handoffs
-                    .last()
-                    .map(|handoff| format!("latest: {}", handoff.intent))
-                    .unwrap_or_else(|| "no work assigned yet".to_string());
-                let unattended = task
-                    .unattended_since
-                    .map(|since| {
-                        outcome_reminder_duration(
-                            now.saturating_sub(since.max(task.last_activity_at)),
-                        )
-                    })
-                    .unwrap_or_else(|| "a while".to_string());
-                format!("• {} — unattended {unattended}; {latest}", task.outcome)
+            .filter_map(|task| {
+                Some(crate::model::OutcomeReminderTask {
+                    task_id: task.id,
+                    unattended_since: task.unattended_since?,
+                    last_activity_at: task.last_activity_at,
+                })
             })
             .collect();
-        if lines.is_empty() {
+        let Some(prompt) = outcome_reminder_prompt(&document, &references, now) else {
             return Ok(());
-        }
-        let prompt = format!(
-            "These tasks have no active assignment or recorded waiting reason:\n{}",
-            lines.join("\n")
-        );
+        };
         let batch = outcome_reminder_batch(&document.outcomes, &due);
         let events = self.event_source.lock().clone();
         // A parked chip or a delivered row on any generation of this Boss
@@ -243,15 +230,10 @@ impl WakuBackend {
         let result = if self.boss_lineage_message_landed(session, batch) {
             Ok(())
         } else {
-            self.queue_agent_prompt_with_id(
-                session,
-                prompt,
-                None,
-                false,
-                Some(batch),
-                None,
-                &events,
-            )
+            let mut message = crate::model::QueuedMessage::agent(prompt, None);
+            message.id = batch;
+            message.outcome_reminder = references;
+            self.queue_agent_message(session, message, &events)
         };
         match result {
             Ok(()) => self.boss.mark_outcomes_reminded(&due, now),
@@ -2816,6 +2798,46 @@ pub(super) fn outcome_reminder_batch(
         material.extend_from_slice(&reminded_at.to_be_bytes());
     }
     Uuid::new_v5(&Uuid::NAMESPACE_URL, &material)
+}
+
+pub(super) const OUTCOME_REMINDER_HEADER: &str =
+    "These tasks have no active assignment or recorded waiting reason:\n";
+
+/// Rebuild from current state, restricted to the unattended periods this
+/// notification covers. A later period owns its own grace and reminder.
+pub(super) fn outcome_reminder_prompt(
+    document: &waku_protocol::boss::BossState,
+    references: &[crate::model::OutcomeReminderTask],
+    now: u64,
+) -> Option<String> {
+    let lines: Vec<_> = references
+        .iter()
+        .filter_map(|reference| {
+            let task = document
+                .outcomes
+                .iter()
+                .find(|task| task.id == reference.task_id)?;
+            if task.unattended_since != Some(reference.unattended_since)
+                || !task.reminder_eligible(&document.employees, now)
+                || task.last_activity_at != reference.last_activity_at
+            {
+                return None;
+            }
+            let latest = task
+                .handoffs
+                .last()
+                .map(|handoff| format!("latest: {}", handoff.intent))
+                .unwrap_or_else(|| "no work assigned yet".to_string());
+            let unattended = outcome_reminder_duration(
+                now.saturating_sub(reference.unattended_since.max(task.last_activity_at)),
+            );
+            Some(format!(
+                "• {} — unattended {unattended}; {latest}",
+                task.outcome
+            ))
+        })
+        .collect();
+    (!lines.is_empty()).then(|| format!("{OUTCOME_REMINDER_HEADER}{}", lines.join("\n")))
 }
 
 /// A compact "for 2h 5m"-style label for a reminder's unattended stretch.

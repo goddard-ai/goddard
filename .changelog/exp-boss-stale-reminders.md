@@ -1,0 +1,1 @@
+- Boss reminders now omit tasks that gained an assignment, waiting reason, or completion while the alert was queued.

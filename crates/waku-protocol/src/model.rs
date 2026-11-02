@@ -1400,6 +1400,17 @@ pub enum QueuedMessageSource {
     },
 }
 
+/// A task and the unattended period covered by a queued Boss reminder.
+/// Delivery must recheck both so a parked alert cannot describe resolved work.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct OutcomeReminderTask {
+    pub task_id: Uuid,
+    pub unattended_since: u64,
+    /// Meaningful activity since enqueue invalidates the saved alert even
+    /// when no scheduler scan observed the intervening assignment or wait.
+    pub last_activity_at: u64,
+}
+
 /// A follow-up message queued while the agent is busy. It becomes its own
 /// turn once the current turn settles successfully.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -1425,6 +1436,10 @@ pub struct QueuedMessage {
     /// restart so the resumed delivery still records the turn's trigger.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_trigger: Option<ReportTrigger>,
+    /// Structured references for delivery-time revalidation of Boss reminders.
+    /// Empty on ordinary messages and legacy reminders.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outcome_reminder: Vec<OutcomeReminderTask>,
     /// Which queue owns the entry. Absent in documents written before the
     /// field existed — those are all composer-owned, so `User` is default.
     #[serde(default, skip_serializing_if = "QueuedMessageSource::is_user")]
@@ -1448,6 +1463,7 @@ impl QueuedMessage {
             atoms: Vec::new(),
             hidden: false,
             report_trigger: None,
+            outcome_reminder: Vec::new(),
             source: QueuedMessageSource::User,
             created_at: unix_time(),
         }

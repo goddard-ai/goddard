@@ -14264,9 +14264,9 @@ fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
         .unwrap();
     assert_eq!(parked().len(), 2);
 
-    // Once a runtime exists the parked copies drain, one per turn
-    // boundary — the same batch id names the delivered message, so a
-    // redriven enqueue folds onto the row that already landed.
+    // Restart loses the memory queue; durable references must still discard
+    // the first period and deliver only the reminder for the current period.
+    backend.agent.clear_session(boss);
     let capture = Arc::new(CaptureDriver::default());
     backend.sessions.lock().insert(
         boss,
@@ -14307,10 +14307,158 @@ fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
         session.finish_active_turn(TurnStatus::Completed);
     }
     backend.deliver_pending_agent_prompts();
-    assert_eq!(reminders(), 2);
+    assert_eq!(reminders(), 1, "the obsolete period must never deliver");
     assert!(parked().is_empty());
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// Eligibility changes while the Boss is busy must reach both the durable
+/// transcript and provider boundary after restart, including mixed batches.
+#[test]
+fn outcome_reminder_revalidates_parked_batches_after_restart() {
+    use waku_protocol::boss::{EmployeeGoal, OutcomeState, OutcomeWait};
+    for keep_unattended in [false, true] {
+        let root = std::env::temp_dir().join(format!("reminder-stale-{}", Uuid::new_v4()));
+        let (backend, boss) = surface_test_backend(&root);
+        backend.boss.set_session_id(boss).unwrap();
+        backend
+            .agent
+            .note_driver_event(boss, &DriverEvent::TurnStarted);
+        let mut tasks = Vec::new();
+        for title in [
+            "Assigned meanwhile",
+            "Waiting meanwhile",
+            "Completed meanwhile",
+            "Still unattended",
+        ] {
+            tasks.push(
+                backend
+                    .boss
+                    .create_outcome(None, title, "verified")
+                    .unwrap(),
+            );
+        }
+        let now = crate::model::unix_time();
+        backend.deliver_outcome_reminders(now).unwrap();
+        backend
+            .deliver_outcome_reminders(now + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE + 1)
+            .unwrap();
+        {
+            let state = backend.task_state.lock();
+            let queued = &state
+                .sessions
+                .iter()
+                .find(|session| session.id == boss)
+                .unwrap()
+                .queued_messages;
+            assert_eq!(queued.len(), 1);
+            assert_eq!(queued[0].outcome_reminder.len(), 4);
+        }
+        let assignment = backend
+            .boss
+            .assignment_admission(Some(tasks[0].id), None, false, None, Vec::new(), None)
+            .unwrap()
+            .unwrap();
+        let persona = backend.boss.document().personas[0].id;
+        let mut employee = backend
+            .boss
+            .prepare_employee(
+                boss,
+                Some(persona),
+                "Review".into(),
+                None,
+                false,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        employee.assignment = Some(assignment);
+        backend.boss.add_employee(employee).unwrap();
+        backend
+            .boss
+            .set_outcome_waiting(
+                None,
+                tasks[1].id,
+                Some(OutcomeWait::Dependency {
+                    note: "review pending".into(),
+                }),
+                None,
+            )
+            .unwrap();
+        backend
+            .boss
+            .set_outcome_state(
+                None,
+                tasks[2].id,
+                OutcomeState::Completed,
+                Some("verified".into()),
+            )
+            .unwrap();
+        if !keep_unattended {
+            backend
+                .boss
+                .set_outcome_state(None, tasks[3].id, OutcomeState::Cancelled, None)
+                .unwrap();
+        }
+        if !keep_unattended {
+            // Legacy queued alerts have no IDs and cannot be safely replayed.
+            mirror_agent_queued_prompt(
+                &backend.task_state,
+                &backend.task_store,
+                boss,
+                Uuid::new_v4(),
+                &format!("{}• obsolete legacy task", summon::OUTCOME_REMINDER_HEADER),
+                None,
+                false,
+                None,
+            )
+            .unwrap();
+        }
+        // Do not scan again: delivery itself must detect the changed state.
+        backend.agent.clear_session(boss);
+        *backend.task_state.lock() = backend.task_store.load().unwrap();
+        let capture = Arc::new(CaptureDriver::default());
+        let driver = DriverHandle::from_control(capture.clone());
+        backend
+            .drain_agent_queue(boss, &driver, &EventSink::detached())
+            .unwrap();
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == boss)
+            .unwrap();
+        assert!(session.queued_messages.is_empty());
+        let reminders: Vec<_> = session
+            .messages
+            .iter()
+            .filter(|message| message.content.starts_with(summon::OUTCOME_REMINDER_HEADER))
+            .collect();
+        assert_eq!(reminders.len(), usize::from(keep_unattended));
+        let prompts = capture.prompts.lock();
+        assert_eq!(prompts.len(), usize::from(keep_unattended));
+        if keep_unattended {
+            let provider_reminder = prompts[0]
+                .split_once(summon::OUTCOME_REMINDER_HEADER)
+                .unwrap()
+                .1;
+            for text in [reminders[0].content.as_str(), provider_reminder] {
+                assert!(text.contains("Still unattended"));
+                for stale in [
+                    "Assigned meanwhile",
+                    "Waiting meanwhile",
+                    "Completed meanwhile",
+                ] {
+                    assert!(!text.contains(stale), "stale task reached delivery: {text}");
+                }
+            }
+        }
+        drop(prompts);
+        drop(state);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 /// A refresh must not resurrect a reminder the retired chat already held:

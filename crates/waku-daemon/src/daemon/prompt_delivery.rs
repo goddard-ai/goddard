@@ -211,6 +211,9 @@ pub(super) fn deliver_agent_prompt(
         agent.requeue_front(session_id, entry);
         return Ok(());
     }
+    if !refresh_outcome_reminder(session_id, &mut entry, sink, task_state, task_store, boss)? {
+        return Ok(());
+    }
     if !automation_prompt
         && driver.supports_steer()
         && (agent.has_parked_turn(session_id)
@@ -551,6 +554,62 @@ pub(super) fn persist_agent_prompt(
     Ok(PromptPersistence::Submitted)
 }
 
+/// Revalidate at the shared delivery boundary, including event-forwarder
+/// drains and restart recovery. Ordinary prompts never get rewritten.
+fn refresh_outcome_reminder(
+    session_id: Uuid,
+    entry: &mut crate::agent::AgentPrompt,
+    sink: &EventSink,
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    boss: &crate::boss::BossService,
+) -> anyhow::Result<bool> {
+    if !boss.is_boss(session_id) {
+        return Ok(true);
+    }
+    let Some(queued_id) = entry.queued_id else {
+        return Ok(true);
+    };
+    let references = {
+        let mut state = task_state.lock();
+        let Some(session) = state.session_mut(session_id) else {
+            return Ok(true);
+        };
+        task_store.hydrate(session)?;
+        let Some(queued) = session
+            .queued_messages
+            .iter()
+            .find(|queued| queued.id == queued_id)
+        else {
+            return Ok(true);
+        };
+        if queued.outcome_reminder.is_empty() {
+            // Older daemon alerts carry no trustworthy task references.
+            // Discard their parked snapshots rather than revive stale claims.
+            if queued.source != (crate::model::QueuedMessageSource::Agent { sent_by: None })
+                || !queued
+                    .content
+                    .starts_with(super::summon::OUTCOME_REMINDER_HEADER)
+            {
+                return Ok(true);
+            }
+        }
+        queued.outcome_reminder.clone()
+    };
+    if let Some(prompt) = super::summon::outcome_reminder_prompt(
+        &boss.document(),
+        &references,
+        crate::model::unix_time(),
+    ) {
+        entry.prompt = prompt;
+        entry.transport = None;
+        return Ok(true);
+    }
+    unmirror_agent_queued_prompt(task_state, task_store, session_id, queued_id)?;
+    send_agent_queue_changed(task_state, sink, session_id);
+    Ok(false)
+}
+
 /// Park an agent prompt in the session document's follow-up queue so every
 /// client renders the wait as a queued chip. The entry's id doubles as the
 /// eventual transcript message id — delivery removes it.
@@ -564,12 +623,21 @@ pub(super) fn mirror_agent_queued_prompt(
     hidden: bool,
     report_trigger: Option<crate::model::ReportTrigger>,
 ) -> anyhow::Result<()> {
+    let mut entry = crate::model::QueuedMessage::agent(prompt, sent_by);
+    entry.id = queued_id;
+    entry.hidden = hidden;
+    entry.report_trigger = report_trigger;
+    mirror_agent_queued_message(task_state, task_store, session_id, entry)
+}
+
+pub(super) fn mirror_agent_queued_message(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    entry: crate::model::QueuedMessage,
+) -> anyhow::Result<()> {
     let mut state = task_state.lock();
-    let Some(session) = state
-        .sessions
-        .iter_mut()
-        .find(|session| session.id == session_id)
-    else {
+    let Some(session) = state.session_mut(session_id) else {
         bail!("task {session_id} is unknown to the daemon");
     };
     task_store.hydrate(session)?;
@@ -577,14 +645,10 @@ pub(super) fn mirror_agent_queued_prompt(
     if session
         .queued_messages
         .iter()
-        .any(|queued| queued.id == queued_id)
+        .any(|queued| queued.id == entry.id)
     {
         return Ok(());
     }
-    let mut entry = crate::model::QueuedMessage::agent(prompt, sent_by);
-    entry.id = queued_id;
-    entry.hidden = hidden;
-    entry.report_trigger = report_trigger;
     session.queued_messages.push(entry);
     session.updated_at = crate::model::unix_time();
     state.mark_session_dirty(session_id);
