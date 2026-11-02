@@ -1975,9 +1975,9 @@ impl Waku {
         true
     }
 
-    /// The local supervisor's reachability stream — the banner follows the
-    /// latest announced status.
-    fn drain_daemon_status_events(&mut self, _cx: &mut Context<Self>) -> bool {
+    /// Reachability changes update the local banner and release submissions
+    /// held while a remote supervisor reconnects.
+    fn drain_daemon_status_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         while let Ok((key, status)) = self.daemon_status_events.try_recv() {
             changed |= daemon_status_change_repaints_sidebar(
@@ -1988,6 +1988,10 @@ impl Waku {
             );
             if key == waku_client::DaemonKey::Local {
                 self.local_daemon_status = status;
+            } else if let waku_client::DaemonKey::Remote(host) = key
+                && status == waku_client::DaemonStatus::Connected
+            {
+                self.resume_pending_remote_submissions(host, cx);
             }
         }
         changed
@@ -3444,14 +3448,17 @@ impl Waku {
         cx.notify();
     }
 
-    /// Whether any of the host's sessions is selected or working — the bar
-    /// the transport watcher applies before it may spawn a repair.
+    /// Pending submissions and selected or working sessions keep the host's
+    /// transport eligible for repair.
     #[cfg(unix)]
     fn remote_host_in_use(&self, host: Uuid) -> bool {
-        self.state.sessions.iter().any(|session| {
-            self.daemons.session_owner(session.id) == waku_client::DaemonKey::Remote(host)
-                && (self.state.selected_session == Some(session.id) || session.status.is_busy())
-        })
+        self.pending_remote_submissions
+            .get(&host)
+            .is_some_and(|pending| !pending.is_empty())
+            || self.state.sessions.iter().any(|session| {
+                self.daemons.session_owner(session.id) == waku_client::DaemonKey::Remote(host)
+                    && (self.state.selected_session == Some(session.id) || session.status.is_busy())
+            })
     }
 
     /// A remote supervisor answered: register it so routing, task-state sync,
@@ -3501,12 +3508,6 @@ impl Waku {
         self.remote_connect_triggers.remove(&host);
         #[cfg(unix)]
         self.ssh_repair_requests.remove(&host);
-        // Submissions held on this host's connect run through the normal
-        // path now that the supervisor routes.
-        let pending_submissions = self
-            .pending_remote_submissions
-            .remove(&host)
-            .unwrap_or_default();
         self.start_task_state_sync(waku_client::DaemonKey::Remote(host), supervisor);
         let drafts = self.composer_draft_store.clone();
         let daemons = self.daemons.clone();
@@ -3541,10 +3542,23 @@ impl Waku {
             });
         })
         .detach();
-        for (session_id, submission) in pending_submissions {
+        self.resume_pending_remote_submissions(host, cx);
+        cx.notify();
+    }
+
+    fn resume_pending_remote_submissions(&mut self, host: Uuid, cx: &mut Context<Self>) {
+        // Status notifications can lag another disconnect. Leave submissions
+        // held until the supervisor's current connection is actually usable.
+        if !self.remote_host_connected(host) {
+            return;
+        }
+        for (session_id, submission) in self
+            .pending_remote_submissions
+            .remove(&host)
+            .unwrap_or_default()
+        {
             self.submit_submission_for_session(session_id, submission, cx);
         }
-        cx.notify();
     }
 
     /// An interactive connect attempt failed — the user asked for this, so
@@ -3836,7 +3850,7 @@ impl Waku {
     pub(super) fn remote_host_connected(&self, host: Uuid) -> bool {
         self.daemons
             .supervisor(waku_client::DaemonKey::Remote(host))
-            .is_some_and(|supervisor| supervisor.status() == waku_client::DaemonStatus::Connected)
+            .is_some_and(|supervisor| supervisor.is_connected())
     }
 
     /// Whether the host's tasks belong in the sidebar: while it is
@@ -3929,6 +3943,9 @@ impl Waku {
                             let current = waku.ssh_transports.contains_key(&host_id);
                             if current {
                                 waku.remote_errors.insert(host_id, format!("{error:#}"));
+                                if interactive {
+                                    waku.fail_interactive_remote_connect(host_id, &error, cx);
+                                }
                                 cx.notify();
                             }
                             current
@@ -7777,7 +7794,7 @@ impl Waku {
         // the interactive connect, and send when the daemon lands. A failed
         // or cancelled attempt restores the composer.
         if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id)
-            && self.daemons.daemon_for_session(session_id).is_none()
+            && !self.remote_host_connected(host)
             && self
                 .state
                 .sessions

@@ -376,6 +376,12 @@ impl SshTransport {
             .arg("ControlPersist=600")
             .arg("-o")
             .arg("ConnectTimeout=15")
+            // Keep idle tunnels active and let a silent network failure
+            // retire the master instead of stranding remote commands.
+            .arg("-o")
+            .arg("ServerAliveInterval=15")
+            .arg("-o")
+            .arg("ServerAliveCountMax=3")
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
             .stdout(Stdio::piped());
@@ -662,9 +668,13 @@ impl SshTransport {
             *forward = None;
         }
         let (_, remote_port) = self.provision(auth)?;
-        // A live master still owns the old local listener, even when the
-        // daemon behind it died and now reports a new ephemeral port.
-        if master_was_alive && let Some((previous_local, previous_remote)) = *forward {
+        // Cancel only when the endpoint changed. OpenSSH accepts an identical
+        // forward request without replacing its listener; reissuing it also
+        // restores a missing forward if another client recreated the master.
+        if master_was_alive
+            && let Some((previous_local, previous_remote)) = *forward
+            && (previous_local, previous_remote) != (local_port, remote_port)
+        {
             self.forward_command(auth, "cancel", previous_local, previous_remote)?;
             *forward = None;
         }

@@ -951,13 +951,22 @@ impl DaemonSupervisor {
         *self.inner.status.lock()
     }
 
+    /// Whether the current client is available for commands. A socket can
+    /// disconnect before the monitor publishes its next status transition.
+    pub fn is_connected(&self) -> bool {
+        self.status() == DaemonStatus::Connected && !self.client().is_disconnected()
+    }
+
     /// Subscribe to daemon status transitions. The current status is sent
     /// immediately, then each change — a degraded daemon stays announced
     /// until a working connection is back.
     pub fn subscribe_status(&self) -> Receiver<DaemonStatus> {
         let (updates, receiver) = unbounded();
-        let _ = updates.send(self.status());
-        self.inner.status_updates.lock().push(updates);
+        // Match client subscriptions: registration and the initial snapshot
+        // must be atomic so recovery cannot finish between them.
+        let status = self.inner.status.lock();
+        self.inner.status_updates.lock().push(updates.clone());
+        let _ = updates.send(*status);
         receiver
     }
 
@@ -1785,6 +1794,12 @@ mod tests {
         });
         let supervisor = test_supervisor(&address);
         let clients = supervisor.subscribe_clients();
+        let statuses = supervisor.subscribe_status();
+        assert_eq!(
+            statuses.recv_timeout(Duration::from_secs(2)).unwrap(),
+            DaemonStatus::Connected
+        );
+        assert!(supervisor.is_connected());
         let original = clients.recv_timeout(Duration::from_secs(2)).unwrap();
         let events = original.subscribe(session_id, runtime_id);
         assert_eq!(
@@ -1795,6 +1810,10 @@ mod tests {
             7
         );
         original.force_disconnect();
+        // A registered supervisor and its last announced status outlive the
+        // socket. Submissions must wait even before the monitor notices.
+        assert_eq!(supervisor.status(), DaemonStatus::Connected);
+        assert!(!supervisor.is_connected());
         assert!(events.recv_timeout(Duration::from_secs(2)).is_err());
         let weak = Arc::downgrade(&supervisor.inner);
         let monitor = std::thread::spawn(move || monitor_daemon(weak, None, false));
@@ -1806,6 +1825,15 @@ mod tests {
             assert_eq!((event.epoch, event.sequence), expected);
         }
         assert!(events.is_empty());
+        assert_eq!(
+            statuses.recv_timeout(Duration::from_secs(2)).unwrap(),
+            DaemonStatus::Recovering
+        );
+        assert_eq!(
+            statuses.recv_timeout(Duration::from_secs(2)).unwrap(),
+            DaemonStatus::Connected
+        );
+        assert!(supervisor.is_connected());
         supervisor.inner.running.store(false, Ordering::Release);
         replacement.force_disconnect();
         monitor.join().unwrap();
