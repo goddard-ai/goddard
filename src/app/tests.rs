@@ -53,6 +53,7 @@ use super::{
     transcript_row_splice, transcript_rows_fingerprint, update_transcript_activity,
     widened_panel_width_for_file_editor, widened_panel_width_for_review,
 };
+
 use crate::git_branch::BranchEntry;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, AtomRefKind, Checkpoint, CheckpointFile,
@@ -61,6 +62,53 @@ use crate::model::{
     SessionWorkspace, TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus, TurnStatus,
     UserInputOption, UserInputQuestion, unix_time,
 };
+
+#[test]
+fn offline_remote_recovery_preserves_human_text_and_payloads() {
+    use crate::persistence::{ComposerDraft, ComposerDraftAnnotation};
+    let mut submission =
+        ComposerSubmission::plain("generated annotation header and provider prompt".into());
+    submission.human_content = Some(format!(
+        "Please inspect {}",
+        crate::input::INLINE_ATOM_MARKER
+    ));
+    submission.atoms.push(ComposerInlineAtom {
+        marker: "Please inspect ".len(),
+        kind: ComposerAtomKind::PastedText("pasted\npayload".into()),
+        revision: Uuid::new_v4(),
+        paste_category: None,
+    });
+    submission
+        .annotations
+        .push(super::TranscriptAnnotation::from(ComposerDraftAnnotation {
+            id: 1,
+            message_id: Uuid::new_v4(),
+            spans: Vec::new(),
+            comment: "annotation comment".into(),
+            file: None,
+            history: None,
+        }));
+    submission
+        .attachments
+        .push(crate::model::MessageAttachment {
+            path: "/remote/image.png".into(),
+            mention: "image.png".into(),
+            name: "image.png".into(),
+            is_dir: false,
+            is_image: true,
+            blob_reference: Some("blob:fixture".into()),
+            pasted_text_preview: None,
+            session_id: None,
+        });
+    let recovered: ComposerDraft =
+        serde_json::from_slice(&serde_json::to_vec(&submission.recovery_draft()).unwrap()).unwrap();
+    assert_eq!(recovered.text, "Please inspect pasted\npayload");
+    assert_eq!(recovered.annotations[0].comment, "annotation comment");
+    assert_eq!(
+        recovered.attachments,
+        submission.recovery_draft().attachments
+    );
+}
 
 #[test]
 fn structured_user_input_preserves_question_order_and_custom_answer_precedence() {

@@ -1043,7 +1043,7 @@ fn collect_composer_draft_changes(
     }
 }
 
-/// A draft the user explicitly parked out of a composer, listed on the
+/// A draft parked from a composer or recovered after an offline send, listed on the
 /// Drafts page until it is used or deleted. Unlike the automatic
 /// per-composer draft — which belongs to a session's slot and silently
 /// reappears there — a saved draft is named user data with its own
@@ -2119,10 +2119,30 @@ struct AppState {
     /// Drafts parked from a composer via "Create draft", newest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     saved_drafts: Vec<SavedDraft>,
+    /// Local recovery copies of remote submissions not yet confirmed started.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    remote_submission_drafts: Vec<SavedDraft>,
     /// Payloads a composer submitted, newest first, capped by the app — the
     /// "Restore recent prompt" menu's source.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     recent_prompts: Vec<ComposerDraft>,
+}
+
+impl AppState {
+    /// Recover each interrupted send independently. A crash may have happened
+    /// after delivery, so expose drafts for review instead of replaying them.
+    fn recover_remote_submission_drafts(&mut self) -> bool {
+        if self.remote_submission_drafts.is_empty() {
+            return false;
+        }
+        let mut known: HashSet<_> = self.saved_drafts.iter().map(|draft| draft.id).collect();
+        for draft in self.remote_submission_drafts.drain(..) {
+            if known.insert(draft.id) {
+                self.saved_drafts.insert(0, draft);
+            }
+        }
+        true
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2635,6 +2655,10 @@ pub struct PersistedState {
     /// App-local — they persist through `AppState`, not the daemon.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub saved_drafts: Vec<SavedDraft>,
+    /// Recovery copies of offline remote sends, keyed by their message id.
+    /// App-local; never shipped to the remote daemon. Incognito is excluded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remote_submission_drafts: Vec<SavedDraft>,
     /// Payloads a composer submitted, newest first — the "Restore recent
     /// prompt" menu's source. App-local like `saved_drafts`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3019,6 +3043,7 @@ impl PersistedState {
             last_visible_terminal: None,
             right_panel_terminals: HashMap::new(),
             saved_drafts: Vec::new(),
+            remote_submission_drafts: Vec::new(),
             recent_prompts: Vec::new(),
             computer_use_enabled: false,
             computer_use_experiment_enabled: default_experiment_enabled(),
@@ -3587,6 +3612,18 @@ impl PersistedState {
             right_panel_terminals: self.right_panel_terminals.clone(),
             fullscreen_surface: None,
             saved_drafts: self.saved_drafts.clone(),
+            remote_submission_drafts: self
+                .remote_submission_drafts
+                .iter()
+                .filter(|draft| match draft.target {
+                    ComposerDraftTarget::Session { session_id } => !self
+                        .sessions
+                        .iter()
+                        .any(|session| session.id == session_id && session.incognito),
+                    _ => true,
+                })
+                .cloned()
+                .collect(),
             recent_prompts: self.recent_prompts.clone(),
         }
     }
@@ -3819,7 +3856,36 @@ impl PersistedState {
                 .get_or_insert(fullscreen);
         }
         self.saved_drafts = app_state.saved_drafts;
+        self.remote_submission_drafts = app_state.remote_submission_drafts;
         self.recent_prompts = app_state.recent_prompts;
+    }
+
+    /// Retain a recovery copy until the provider has actually started its
+    /// matching message, rather than trusting a local optimistic transcript.
+    fn retire_started_remote_submission_drafts(&mut self) {
+        self.remote_submission_drafts.retain(|draft| {
+            let ComposerDraftTarget::Session { session_id } = draft.target else {
+                return true;
+            };
+            let Some(session) = self
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+            else {
+                return true;
+            };
+            let Some(message) = session
+                .messages
+                .iter()
+                .find(|message| message.id == draft.id)
+            else {
+                return true;
+            };
+            !session
+                .turns
+                .iter()
+                .any(|turn| Some(turn.id) == message.turn_id && turn.provider_turn_started)
+        });
     }
 
     fn persistable_selected_session(&self) -> Option<Uuid> {
@@ -4641,7 +4707,12 @@ impl StateStore {
         }
         let app_state = read_app_state_file(&self.app_state_path);
         let app_state_missing = app_state.is_none();
-        if let Some(app_state) = app_state {
+        if let Some(mut app_state) = app_state {
+            if app_state.recover_remote_submission_drafts() {
+                // Preserve the original UI snapshot: remote catalogs are not
+                // loaded yet, so rebuilding it from sessions can lose selection.
+                let _ = self.write_app_state(&app_state);
+            }
             state.apply_app_state(app_state);
         }
         state.migrate_loaded();
@@ -4697,12 +4768,19 @@ impl StateStore {
         Ok(Some(stored))
     }
 
+    /// Checkpoint desktop state without contacting any daemon. Offline sends
+    /// must be on local disk before the app accepts them into its waiting queue.
+    pub fn save_app_state(&self, state: &PersistedState) -> io::Result<()> {
+        self.write_app_state(&state.app_state())
+    }
+
     /// Partition the merged catalog back to its owning daemons: each receives
     /// only its own projects, live session ids, and dirty rows, so one
     /// daemon's data never lands in another's database. A daemon that rejects
     /// or is unreachable keeps its dirty ids queued for the next save while
     /// the rest still commit.
     pub fn save(&self, state: &mut PersistedState) -> io::Result<()> {
+        state.retire_started_remote_submission_drafts();
         self.write_app_settings(&state.app_settings())?;
         self.write_app_state(&state.app_state())?;
         if !self.task_state_loaded.load(Ordering::Acquire) {

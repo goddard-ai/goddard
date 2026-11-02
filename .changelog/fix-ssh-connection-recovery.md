@@ -1,1 +1,1 @@
-- SSH hosts detect unresponsive connections and preserve working tunnels during recovery; prompts submitted while a remote host reconnects wait for its connection and return to the draft if reauthentication fails.
+- SSH hosts detect unresponsive connections and preserve working tunnels during recovery. Prompts waiting for a remote are saved locally and recover to Drafts after an app restart; authentication failures restore the composer.

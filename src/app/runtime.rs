@@ -3561,6 +3561,54 @@ impl Waku {
         }
     }
 
+    fn checkpoint_remote_submission(
+        &mut self,
+        session_id: Uuid,
+        submission: &mut ComposerSubmission,
+    ) -> Result<(), (std::io::Error, crate::persistence::SavedDraft)> {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return Ok(());
+        };
+        // Incognito and internal prompts retain their in-memory lifetime.
+        if session.incognito || submission.hidden {
+            return Ok(());
+        }
+        let id = submission.queued_id.unwrap_or_else(Uuid::new_v4);
+        if self
+            .state
+            .remote_submission_drafts
+            .iter()
+            .any(|draft| draft.id == id)
+        {
+            return Ok(());
+        }
+        let recovery = crate::persistence::SavedDraft {
+            id,
+            target: crate::persistence::ComposerDraftTarget::Session { session_id },
+            project_id: session.project_id,
+            draft: submission.recovery_draft(),
+            created_at: unix_time(),
+            hidden: false,
+        };
+        self.state.remote_submission_drafts.push(recovery.clone());
+        // This one-shot checkpoint is local only: the owning host is offline.
+        if let Err(error) = self.store.save_app_state(&self.state) {
+            self.state
+                .remote_submission_drafts
+                .retain(|draft| draft.id != id);
+            return Err((error, recovery));
+        }
+        // The optimistic message and eventual provider event use this identity
+        // so an acknowledged start can retire exactly its recovery copy.
+        submission.queued_id = Some(id);
+        Ok(())
+    }
+
     /// An interactive connect attempt failed — the user asked for this, so
     /// the cause is always worth a toast, and submissions held on the host
     /// go back to their drafts.
@@ -3605,35 +3653,7 @@ impl Waku {
             if submission.hidden {
                 continue;
             }
-            // A saved draft holds payloads like an edit does: atom spans
-            // splice back, never the chip markup.
-            let source = submission.human_content.unwrap_or_else(|| {
-                submission
-                    .display_content
-                    .map(|display| {
-                        super::composer::atom_payload_content(&display, &submission.message_atoms)
-                    })
-                    .unwrap_or(submission.prompt)
-            });
-            let (text, inline_atoms) =
-                super::composer::composer_draft_content(&source, &submission.atoms);
-            let draft = crate::persistence::ComposerDraft {
-                text,
-                attachments: submission
-                    .attachments
-                    .into_iter()
-                    .map(ComposerAttachment::from)
-                    .map(|attachment| {
-                        crate::persistence::ComposerDraftAttachment::from(&attachment)
-                    })
-                    .collect(),
-                annotations: submission
-                    .annotations
-                    .iter()
-                    .map(crate::persistence::ComposerDraftAnnotation::from)
-                    .collect(),
-                inline_atoms,
-            };
+            let draft = submission.recovery_draft();
             if !draft.is_empty() {
                 self.composer_drafts.set(
                     crate::persistence::ComposerDraftKey::Session(session_id),
@@ -7768,7 +7788,7 @@ impl Waku {
     pub(super) fn submit_submission_for_session(
         &mut self,
         session_id: Uuid,
-        submission: ComposerSubmission,
+        mut submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
         let session_id = self.resolve_boss_chat_session(session_id);
@@ -7801,6 +7821,22 @@ impl Waku {
                 .iter()
                 .any(|session| session.id == session_id)
         {
+            if let Err((error, recovery)) =
+                self.checkpoint_remote_submission(session_id, &mut submission)
+            {
+                if self.state.selected_session == Some(session_id)
+                    || self.side_chat_composers.contains_key(&session_id)
+                {
+                    self.restore_composer_submission(session_id, submission, cx);
+                } else {
+                    // A background queue drain must not overwrite the current
+                    // composer's unrelated input when its checkpoint fails.
+                    self.state.saved_drafts.insert(0, recovery);
+                }
+                self.show_toast(format!("Could not save waiting prompt: {error}"));
+                cx.notify();
+                return;
+            }
             self.pending_remote_submissions
                 .entry(host)
                 .or_default()

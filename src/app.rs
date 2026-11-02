@@ -572,7 +572,7 @@ struct ComposerSubmission {
     /// Transcript annotations already folded into `prompt`'s header, kept so a
     /// failed submission can restore them alongside the draft text.
     annotations: Vec<TranscriptAnnotation>,
-    /// The follow-up chip this submission delivers out of, if any. The id
+    /// The follow-up chip or offline recovery copy this sends from. The id
     /// doubles as the sent message's id — the convention daemon agent
     /// prompts already follow — so every `adopt_submitted_prompt` consumer,
     /// the daemon's stored copy included, retires the queue entry in the
@@ -588,6 +588,34 @@ struct ComposerSubmission {
 const CONTINUE_PROMPT: &str = "Continue the current task if able.";
 
 impl ComposerSubmission {
+    /// A recovery copy uses the user's composer text, retaining attachments,
+    /// atom payloads and annotations without duplicating annotation headers.
+    fn recovery_draft(&self) -> crate::persistence::ComposerDraft {
+        let source = self.human_content.clone().unwrap_or_else(|| {
+            self.display_content
+                .as_ref()
+                .map(|display| composer::atom_payload_content(display, &self.message_atoms))
+                .unwrap_or_else(|| self.prompt.clone())
+        });
+        let (text, inline_atoms) = composer::composer_draft_content(&source, &self.atoms);
+        crate::persistence::ComposerDraft {
+            text,
+            attachments: self
+                .attachments
+                .iter()
+                .cloned()
+                .map(ComposerAttachment::from)
+                .map(|attachment| crate::persistence::ComposerDraftAttachment::from(&attachment))
+                .collect(),
+            annotations: self
+                .annotations
+                .iter()
+                .map(crate::persistence::ComposerDraftAnnotation::from)
+                .collect(),
+            inline_atoms,
+        }
+    }
+
     fn plain(prompt: String) -> Self {
         Self {
             prompt,

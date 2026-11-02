@@ -122,6 +122,126 @@ impl Drop for StoreFixture {
 }
 
 #[test]
+fn offline_remote_submissions_survive_local_checkpoint_and_restart() {
+    let local = DaemonFixture::with_handler(|command| match command {
+        Command::LoadTaskState => Some(ResponsePayload::TaskState {
+            projects: Vec::new(),
+            sessions: Vec::new(),
+            default_cwd: PathBuf::from("/fixture"),
+            projectless_root: None,
+        }),
+        _ => None,
+    });
+    let fixture = StoreFixture::new(&local);
+    let store = &fixture.store;
+    let mut state = PersistedState::empty();
+    let project = Uuid::new_v4();
+    let mut session = AgentSession::new(project, ProviderKind::Codex);
+    let make = |text: &str| SavedDraft {
+        id: Uuid::new_v4(),
+        target: ComposerDraftTarget::Session {
+            session_id: session.id,
+        },
+        project_id: project,
+        created_at: 10,
+        hidden: false,
+        draft: ComposerDraft {
+            text: text.into(),
+            ..Default::default()
+        },
+    };
+    let mut first = make("first prompt\nwith pasted payload");
+    first.draft.attachments.push(ComposerDraftAttachment {
+        path: PathBuf::from("/remote/image.png"),
+        mention: "image.png".into(),
+        name: "image.png".into(),
+        is_dir: false,
+        is_image: true,
+        blob_reference: Some("blob:fixture".into()),
+        pasted_text_preview: None,
+        session_id: None,
+    });
+    first.draft.annotations.push(ComposerDraftAnnotation {
+        id: 3,
+        message_id: Uuid::new_v4(),
+        spans: Vec::new(),
+        comment: "preserve this annotation".into(),
+        file: None,
+        history: None,
+    });
+    let second = make("second prompt");
+    state.remote_submission_drafts = vec![first.clone(), second.clone()];
+    session.begin_turn("first prompt");
+    session.messages.last_mut().unwrap().id = first.id;
+    state.selected_session = Some(session.id);
+    state.sessions.push(session.clone());
+    store.save_app_state(&state).unwrap();
+    assert!(
+        local.requests.is_empty(),
+        "offline checkpoint must not contact a daemon"
+    );
+    let disk = read_app_state_file(&store.app_state_path).unwrap();
+    assert_eq!(
+        disk.remote_submission_drafts,
+        [first.clone(), second.clone()]
+    );
+
+    // Opening a turn locally is not proof of delivery. Keep both backups.
+    state.retire_started_remote_submission_drafts();
+    assert_eq!(state.remote_submission_drafts.len(), 2);
+    // Both queued entries for the same session recover independently.
+    let restarted = store.load().unwrap();
+    assert!(restarted.remote_submission_drafts.is_empty());
+    assert_eq!(restarted.saved_drafts, [second.clone(), first.clone()]);
+    assert_eq!(
+        read_app_state_file(&store.app_state_path)
+            .unwrap()
+            .selected_session,
+        Some(session.id)
+    );
+    let restarted_again = store.load().unwrap();
+    assert_eq!(restarted_again.saved_drafts, restarted.saved_drafts);
+    assert!(restarted_again.remote_submission_drafts.is_empty());
+
+    // In a live app, only an actual matching provider start retires a backup.
+    state.sessions[0].mark_active_turn_provider_started();
+    state.retire_started_remote_submission_drafts();
+    assert_eq!(state.remote_submission_drafts, [second]);
+}
+
+#[test]
+fn offline_remote_checkpoint_rejects_write_failure_and_excludes_incognito() {
+    let local = DaemonFixture::new();
+    let mut fixture = StoreFixture::new(&local);
+    let mut state = PersistedState::empty();
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.incognito = true;
+    state.remote_submission_drafts.push(SavedDraft {
+        id: Uuid::new_v4(),
+        target: ComposerDraftTarget::Session {
+            session_id: session.id,
+        },
+        project_id: session.project_id,
+        created_at: 10,
+        hidden: false,
+        draft: ComposerDraft {
+            text: "private fixture text".into(),
+            ..Default::default()
+        },
+    });
+    state.sessions.push(session);
+    fixture.store.save_app_state(&state).unwrap();
+    let bytes = fs::read_to_string(&fixture.store.app_state_path).unwrap();
+    assert!(!bytes.contains("private fixture text"));
+    // An unwritable destination must report failure, never claim durability.
+    fixture.store.app_state_path = fixture.root.join("blocked");
+    fs::create_dir(&fixture.store.app_state_path).unwrap();
+    state.selected_project = Some(Uuid::new_v4());
+    assert!(fixture.store.save_app_state(&state).is_err());
+    assert!(local.requests.is_empty());
+}
+
+#[test]
 fn failed_remote_deletion_keeps_ownership_so_retry_cannot_reach_local() {
     let local = DaemonFixture::new();
     let fixture = StoreFixture::new(&local);
