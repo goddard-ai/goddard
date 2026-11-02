@@ -14,6 +14,9 @@ use waku_client::boss::{
     shipped_persona_prefix, shipped_persona_revision,
 };
 use waku_protocol::boss::AvatarStyle;
+use waku_protocol::chains::{
+    ChainControl, ChainOperation, ChainStatus, ChainStep, EmployeeChain, StepStatus,
+};
 use waku_protocol::custom_commands::CustomCommandIcon;
 mod instruction_pins;
 
@@ -280,6 +283,7 @@ pub(super) enum BossTab {
     Plans,
     Deliverables,
     Instructions,
+    Chains,
 }
 
 /// One original note in the unified Memory Records feed — the daemon's
@@ -752,6 +756,8 @@ pub(super) struct BossUi {
     /// The Personas section's selected role, per host — the boss's own
     /// persona id is a valid entry like any role's.
     personas_selected: HashMap<DaemonKey, Uuid>,
+    /// The Chains section's selected employee chain, per host.
+    chains_selected: HashMap<DaemonKey, Uuid>,
     /// Per-section filters, per host: the Employees view and the Plans and
     /// Deliverables library filters.
     employees_view: HashMap<DaemonKey, BossEmployeesView>,
@@ -905,6 +911,7 @@ impl Default for BossUi {
             last_section: HashMap::new(),
             plans_selected: HashMap::new(),
             personas_selected: HashMap::new(),
+            chains_selected: HashMap::new(),
             employees_view: HashMap::new(),
             plans_filter: HashMap::new(),
             deliverables_filter: HashMap::new(),
@@ -1251,6 +1258,8 @@ enum BossItem {
     Plan(Uuid),
     /// A `BossState.deliverables` record — the library rows.
     Deliverable(Uuid),
+    /// A `BossState.chains` record — the Chains tab rows.
+    Chain(Uuid),
     /// A History lookup hit — the index into the host's accumulated
     /// `BossHistorySearch::hits`.
     HistoryHit(usize),
@@ -2395,6 +2404,23 @@ impl Waku {
                     .copied()
                     .unwrap_or_default();
                 boss_deliverable_rows(state, filter)
+            }
+            BossTab::Chains => {
+                let mut chains: Vec<&EmployeeChain> = state.chains.iter().collect();
+                chains.sort_by_key(|chain| {
+                    (
+                        matches!(
+                            chain.status,
+                            ChainStatus::Completed | ChainStatus::Cancelled
+                        ),
+                        std::cmp::Reverse(chain.history.last().map(|entry| entry.at).unwrap_or(0)),
+                        chain.id,
+                    )
+                });
+                chains
+                    .into_iter()
+                    .map(|chain| BossItem::Chain(chain.id))
+                    .collect()
             }
         }
     }
@@ -6949,6 +6975,7 @@ impl Waku {
             BossTab::Plans => self.render_boss_plans_section(key, cx),
             BossTab::Deliverables => self.render_boss_deliverables_section(key, cx),
             BossTab::Instructions => self.render_instruction_pins(key, cx),
+            BossTab::Chains => self.render_boss_chains_section(key, cx),
         };
         div()
             .track_focus(&focus)
@@ -7094,6 +7121,7 @@ impl Waku {
                     "boss.deliverables",
                     "icons/file-text.svg",
                 ),
+                (BossTab::Chains, "boss.chains", "icons/link.svg"),
             ]
             .into_iter()
             .map(|(target, label, glyph)| {
@@ -10303,6 +10331,442 @@ impl Waku {
             .into_any_element()
     }
 
+    // ── Chains ───────────────────────────────────────────────────────────
+
+    /// The Chains section — every durable employee chain on this host with
+    /// its lifecycle and pause reason in the list, and the detail pane the
+    /// human-only approval flow needs: each required gate records an
+    /// explicit approve/reject here, then the owner controls (resume,
+    /// retry, cancel) carry the paused chain onward.
+    fn render_boss_chains_section(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let visible: Vec<Uuid> = self
+            .boss_ui
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                BossItem::Chain(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let selected = self
+            .boss_ui
+            .chains_selected
+            .get(&key)
+            .copied()
+            .filter(|id| visible.contains(id))
+            .or_else(|| visible.first().copied());
+        if let Some(id) = selected {
+            self.boss_ui.chains_selected.insert(key, id);
+        }
+        let list_column = div()
+            .w(px(300.0))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .border_r_1()
+            .border_color(theme.separator)
+            .child(if self.boss_ui.rows.is_empty() {
+                div()
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("boss.chains_empty"))
+                    .into_any_element()
+            } else {
+                self.boss_item_list(cx).into_any_element()
+            });
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .child(list_column)
+            .child(self.render_boss_chain_detail(key, selected, cx))
+            .into_any_element()
+    }
+
+    /// A chain list row — the outcome it serves, plus lifecycle and the
+    /// pause reason that tells the human what it is waiting on.
+    fn render_boss_chain_row(
+        &self,
+        key: DaemonKey,
+        chain_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(state) = self.boss_ui.states.get(&key) else {
+            return div().into_any_element();
+        };
+        let Some(chain) = state.chains.iter().find(|chain| chain.id == chain_id) else {
+            return div().into_any_element();
+        };
+        let title = state
+            .outcomes
+            .iter()
+            .find(|outcome| outcome.id == chain.request.outcome_id)
+            .map(|outcome| outcome.outcome.clone())
+            .unwrap_or_else(|| tr!("boss.chain_untitled"));
+        let status = chain_status_label(chain.status);
+        let detail = match &chain.reason {
+            Some(reason) if !reason.trim().is_empty() => format!("{status} · {reason}"),
+            _ => status,
+        };
+        let selected = self.boss_ui.chains_selected.get(&key) == Some(&chain_id);
+        div()
+            .id(SharedString::from(format!("boss-chain-{chain_id}")))
+            .tab_index(0)
+            .h(px(42.0))
+            .w_full()
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .cursor_pointer()
+            .when(selected, |row| row.bg(theme.overlay))
+            .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .on_activation(cx, move |this, _, cx| {
+                this.boss_ui.chains_selected.insert(key, chain_id);
+                cx.notify();
+            })
+            .child(icon("icons/link.svg", 15.0, theme.text_secondary))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .flex_1()
+                    .child(div().truncate().text_color(theme.text).child(title))
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .truncate()
+                            .child(detail),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// Every chain mutation goes through the shared contract — the daemon
+    /// keeps the human-only approval gate and owner controls authoritative.
+    fn boss_chain_operation(
+        &mut self,
+        key: DaemonKey,
+        action: ChainOperation,
+        cx: &mut Context<Self>,
+    ) {
+        self.boss_request(key, BossOperation::Chain { action }, BossReply::List, cx);
+    }
+
+    /// The chain detail — status and reason up top, then the controls the
+    /// daemon accepts for this exact state, the current step's approval
+    /// gates, and the step list. Approval decisions and controls send the
+    /// revision the detail was rendered from; a stale write rejects with a
+    /// toast and the next state refresh re-arms the buttons.
+    fn render_boss_chain_detail(
+        &mut self,
+        key: DaemonKey,
+        selected: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(chain_id) = selected else {
+            return boss_detail_placeholder(&theme, "icons/link.svg", tr!("boss.chain_select"));
+        };
+        let Some((chain, outcome)) = self.boss_ui.states.get(&key).and_then(|state| {
+            state
+                .chains
+                .iter()
+                .find(|chain| chain.id == chain_id)
+                .map(|chain| {
+                    (
+                        chain.clone(),
+                        state
+                            .outcomes
+                            .iter()
+                            .find(|outcome| outcome.id == chain.request.outcome_id)
+                            .map(|outcome| outcome.outcome.clone()),
+                    )
+                })
+        }) else {
+            return boss_detail_placeholder(&theme, "icons/link.svg", tr!("boss.chain_select"));
+        };
+        let revision = chain.revision;
+        let title = outcome.unwrap_or_else(|| tr!("boss.chain_untitled"));
+        let controls = chain_controls(&chain);
+        let mut control_button = |id: &str, label: String, control: ChainControl| {
+            boss_button(SharedString::from(id.to_owned()), label.clone(), &theme)
+                .child(label)
+                .on_activation(cx, move |this, _, cx| {
+                    this.boss_chain_operation(
+                        key,
+                        ChainOperation::Control {
+                            chain_id,
+                            expected_revision: revision,
+                            control,
+                            source_revision: None,
+                        },
+                        cx,
+                    );
+                })
+        };
+        let mut header = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(16.0))
+            .py(px(10.0))
+            .border_b_1()
+            .border_color(theme.separator)
+            .child(icon("icons/link.svg", 14.0, theme.text_secondary))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_baseline()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(format!(
+                                "{} · {}",
+                                chain_status_label(chain.status),
+                                tr!("boss.chain_revision", revision = chain.revision)
+                            )),
+                    ),
+            );
+        if controls.pause {
+            header = header.child(control_button(
+                "boss-chain-pause",
+                tr!("boss.chain_pause"),
+                ChainControl::Pause,
+            ));
+        }
+        if controls.resume {
+            header = header.child(control_button(
+                "boss-chain-resume",
+                tr!("boss.chain_resume"),
+                ChainControl::Resume,
+            ));
+        }
+        if controls.retry {
+            header = header.child(control_button(
+                "boss-chain-retry",
+                tr!("boss.chain_retry"),
+                ChainControl::Retry,
+            ));
+        }
+        if controls.accept {
+            header = header.child(control_button(
+                "boss-chain-accept",
+                tr!("boss.chain_accept"),
+                ChainControl::Accept,
+            ));
+        }
+        if controls.cancel {
+            header = header.child(control_button(
+                "boss-chain-cancel",
+                tr!("boss.chain_cancel"),
+                ChainControl::Cancel,
+            ));
+        }
+        let mut body = div()
+            .id("boss-chain-detail-scroll")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .flex()
+            .flex_col();
+        if let Some(reason) = chain
+            .reason
+            .as_ref()
+            .filter(|reason| !reason.trim().is_empty())
+        {
+            body = body.child(
+                div()
+                    .flex_none()
+                    .px(px(16.0))
+                    .py(px(10.0))
+                    .border_b_1()
+                    .border_color(theme.separator)
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(reason.clone()),
+            );
+        }
+        let step = &chain.steps[chain.current_step];
+        if !step.definition.required_approvals.is_empty() {
+            let gate_version = step
+                .attempts
+                .last()
+                .map_or(chain.definition_version, |attempt| {
+                    attempt.definition_version
+                });
+            let paused = chain.status == ChainStatus::Paused;
+            let mut gates = div()
+                .flex_none()
+                .px(px(16.0))
+                .py(px(10.0))
+                .border_b_1()
+                .border_color(theme.separator)
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(boss_section_label(&theme, tr!("boss.chain_gates"), true));
+            for gate in &step.definition.required_approvals {
+                let decision = chain_gate_decision(step, gate, gate_version);
+                let chip = match decision {
+                    Some(true) => tr!("boss.chain_gate_approved"),
+                    Some(false) => tr!("boss.chain_gate_rejected"),
+                    None => tr!("boss.chain_gate_pending"),
+                };
+                let mut row = div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text)
+                            .child(gate.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(chip),
+                    );
+                if paused && decision != Some(true) {
+                    let gate_name = gate.clone();
+                    row = row.child(
+                        boss_button(
+                            SharedString::from(format!("boss-chain-approve-{gate}")),
+                            tr!("boss.chain_approve"),
+                            &theme,
+                        )
+                        .child(tr!("boss.chain_approve"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_chain_operation(
+                                key,
+                                ChainOperation::Approve {
+                                    chain_id,
+                                    expected_revision: revision,
+                                    gate: gate_name.clone(),
+                                    approved: true,
+                                },
+                                cx,
+                            );
+                        }),
+                    );
+                }
+                if paused && decision != Some(false) {
+                    let gate_name = gate.clone();
+                    row = row.child(
+                        boss_button(
+                            SharedString::from(format!("boss-chain-reject-{gate}")),
+                            tr!("boss.chain_reject"),
+                            &theme,
+                        )
+                        .child(tr!("boss.chain_reject"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_chain_operation(
+                                key,
+                                ChainOperation::Approve {
+                                    chain_id,
+                                    expected_revision: revision,
+                                    gate: gate_name.clone(),
+                                    approved: false,
+                                },
+                                cx,
+                            );
+                        }),
+                    );
+                }
+                gates = gates.child(row);
+            }
+            body = body.child(gates);
+        }
+        let mut steps = div()
+            .flex_none()
+            .px(px(16.0))
+            .py(px(10.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(boss_section_label(&theme, tr!("boss.chain_steps"), true));
+        for (index, step) in chain.steps.iter().enumerate() {
+            let current = index == chain.current_step;
+            let mut label = div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .w(px(18.0))
+                        .child(format!("{}", index + 1)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text)
+                        .child(step.definition.title.clone()),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(step_status_label(step.status)),
+                );
+            if current {
+                label = label.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("boss.chain_current")),
+                );
+            }
+            steps = steps.child(label);
+        }
+        body = body.child(steps);
+        div()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(header)
+            .child(body)
+            .into_any_element()
+    }
+
     /// A library deliverable row — the sidebar row's name/type/age/unread
     /// cues at task-row density, opening the same preview page on click.
     /// Remote records keep their host in the detail line and offer no
@@ -10576,6 +11040,7 @@ impl Waku {
             BossItem::InstructionPin { id, .. } => self.render_instruction_pin_row(key, id, cx),
             BossItem::Employee(id) => self.render_boss_employee_page_row(id, key, cx),
             BossItem::Deliverable(id) => self.render_boss_deliverable_row(key, id, cx),
+            BossItem::Chain(id) => self.render_boss_chain_row(key, id, cx),
             BossItem::HistoryHit(index) => self.render_boss_history_hit(key, index, cx),
             BossItem::HistoryFooter => self.render_boss_history_footer(key, cx),
             BossItem::MemoryRecord(index) => self.render_boss_memory_record(key, index, cx),
@@ -11260,6 +11725,77 @@ fn boss_detail_placeholder(theme: &Theme, icon_path: &'static str, label: String
 
 fn boss_loading_label_visible(pending: bool) -> bool {
     pending
+}
+
+/// The owner controls a chain accepts from its current lifecycle — the same
+/// transitions the reducer enforces, derived here so the detail pane only
+/// offers what cannot reject on arrival.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ChainControls {
+    pause: bool,
+    resume: bool,
+    retry: bool,
+    cancel: bool,
+    accept: bool,
+}
+
+fn chain_controls(chain: &EmployeeChain) -> ChainControls {
+    if matches!(
+        chain.status,
+        ChainStatus::Completed | ChainStatus::Cancelled
+    ) {
+        return ChainControls::default();
+    }
+    let paused = chain.status == ChainStatus::Paused;
+    let attempt = chain.steps[chain.current_step].attempts.last();
+    // The reducer's released check: a bound employee must report both
+    // halves released before resume/retry/accept may run.
+    let released = attempt.is_none_or(|attempt| {
+        attempt.employee_id.is_none() || (attempt.execution_released && attempt.workspace_released)
+    });
+    ChainControls {
+        pause: !matches!(
+            chain.status,
+            ChainStatus::Paused | ChainStatus::Pausing | ChainStatus::Cancelling
+        ),
+        resume: paused && released,
+        retry: paused && released && attempt.is_some(),
+        cancel: true,
+        accept: paused
+            && attempt.is_some_and(|attempt| attempt.sealed.is_some() && !attempt.handoff_accepted),
+    }
+}
+
+/// The latest recorded decision on one approval gate at the live attempt's
+/// definition version — `gate_reason`'s read, mirrored so the detail shows
+/// exactly what the daemon will evaluate on resume.
+fn chain_gate_decision(step: &ChainStep, gate: &str, definition_version: u64) -> Option<bool> {
+    step.approvals
+        .iter()
+        .rev()
+        .find(|approval| approval.gate == gate && approval.definition_version == definition_version)
+        .map(|approval| approval.approved)
+}
+
+fn chain_status_label(status: ChainStatus) -> String {
+    match status {
+        ChainStatus::Paused => tr!("boss.chain_status_paused"),
+        ChainStatus::Pausing => tr!("boss.chain_status_pausing"),
+        ChainStatus::Cancelling => tr!("boss.chain_status_cancelling"),
+        ChainStatus::Cancelled => tr!("boss.chain_status_cancelled"),
+        ChainStatus::Completed => tr!("boss.chain_status_completed"),
+        _ => tr!("boss.chain_status_active"),
+    }
+}
+
+fn step_status_label(status: StepStatus) -> String {
+    match status {
+        StepStatus::NotStarted => tr!("boss.chain_step_pending"),
+        StepStatus::Succeeded => tr!("boss.chain_step_succeeded"),
+        StepStatus::Failed => tr!("boss.chain_step_failed"),
+        StepStatus::Cancelled => tr!("boss.chain_step_cancelled"),
+        _ => tr!("boss.chain_step_active"),
+    }
 }
 
 /// An `Open` reply lands on whatever surface the user had when the request
@@ -14421,5 +14957,153 @@ mod tests {
         assert!(document.contains("- **Inherited — Employee**"));
         assert!(document.contains("- **Shipped — Researcher**"));
         assert!(!document.contains("**Custom**"));
+    }
+
+    fn chain_attempt() -> waku_protocol::chains::ChainAttempt {
+        waku_protocol::chains::ChainAttempt {
+            id: Uuid::new_v4(),
+            dispatch_id: Uuid::new_v4(),
+            definition_version: 1,
+            employee_id: None,
+            status: StepStatus::Waiting,
+            starting_revision: None,
+            workspace: None,
+            execution_released: false,
+            workspace_released: false,
+            provisional_result: None,
+            terminal: None,
+            sealed: None,
+            handoff_accepted: false,
+            reconciled_retry_revision: None,
+            created_at: 0,
+        }
+    }
+
+    fn test_chain(status: ChainStatus) -> EmployeeChain {
+        let step = ChainStep {
+            project_metadata: None,
+            definition: waku_protocol::chains::ChainStepDefinition {
+                purpose: None,
+                title: "step".into(),
+                prompt: "work".into(),
+                project_id: Uuid::new_v4(),
+                project: None,
+                persona_id: None,
+                provider: ProviderKind::Codex,
+                model: "gpt-5".into(),
+                reasoning_effort: None,
+                permissions: PersonaPermissions::default(),
+                resources: Default::default(),
+                workspace: Default::default(),
+                base_revision: None,
+                boundary: waku_protocol::chains::HandoffBoundary::ArtifactsReady,
+                required_checks: Vec::new(),
+                required_artifacts: Vec::new(),
+                required_approvals: Vec::new(),
+                max_retries: 0,
+                plan_id: None,
+                item_id: None,
+                successor_brief: String::new(),
+            },
+            status: StepStatus::Waiting,
+            attempts: vec![chain_attempt()],
+            approvals: Vec::new(),
+        };
+        EmployeeChain {
+            schema_version: 1,
+            id: Uuid::new_v4(),
+            request_id: Uuid::new_v4(),
+            supervisor_id: None,
+            definition_version: 1,
+            revision: 0,
+            current_step: 0,
+            status,
+            reason: None,
+            finisher_reserved: false,
+            request: waku_protocol::chains::ChainDefinition {
+                outcome_id: Uuid::new_v4(),
+                finishes_outcome: false,
+                steps: Vec::new(),
+            },
+            steps: vec![step],
+            attention: None,
+            history: Vec::new(),
+        }
+    }
+
+    /// The Chains detail offers only controls the reducer accepts: pause
+    /// and cancel while live; resume, retry, and accept only on a paused,
+    /// released attempt; nothing once terminal.
+    #[test]
+    fn chain_controls_follow_lifecycle_and_release() {
+        let mut chain = test_chain(ChainStatus::Working);
+        let controls = chain_controls(&chain);
+        assert!(controls.pause && controls.cancel);
+        assert!(!controls.resume && !controls.retry && !controls.accept);
+
+        // Paused with a bound, unreleased attempt: only cancel is safe
+        // until the daemon confirms release.
+        chain.status = ChainStatus::Paused;
+        chain.steps[0].attempts[0].employee_id = Some(Uuid::new_v4());
+        let controls = chain_controls(&chain);
+        assert!(!controls.pause && !controls.resume && !controls.retry && controls.cancel);
+        assert!(!controls.accept);
+
+        // Released with a sealed, unaccepted handoff: every recovery
+        // control is offered.
+        let attempt = &mut chain.steps[0].attempts[0];
+        attempt.execution_released = true;
+        attempt.workspace_released = true;
+        attempt.sealed = Some(waku_protocol::chains::ChainHandoff {
+            producer_attempt: attempt.id,
+            definition_version: 1,
+            terminal_message: "done".into(),
+            result: waku_protocol::chains::ChainResult {
+                disposition: waku_protocol::chains::ResultDisposition::Success,
+                checks: Vec::new(),
+                artifacts: Vec::new(),
+                code: None,
+                limitations: Vec::new(),
+            },
+            successor_step: None,
+            accepted: false,
+            reason: None,
+            sealed_at: 0,
+        });
+        let controls = chain_controls(&chain);
+        assert!(controls.resume && controls.retry && controls.cancel && controls.accept);
+        assert!(!controls.pause);
+
+        chain.steps[0].attempts[0].handoff_accepted = true;
+        assert!(!chain_controls(&chain).accept);
+
+        chain.status = ChainStatus::Completed;
+        assert_eq!(chain_controls(&chain), ChainControls::default());
+        chain.status = ChainStatus::Cancelled;
+        assert_eq!(chain_controls(&chain), ChainControls::default());
+    }
+
+    /// Gate decisions key on the live attempt's definition version — a
+    /// decision under an older version never satisfies the current gate.
+    #[test]
+    fn chain_gate_decision_reads_the_latest_versioned_verdict() {
+        let chain = test_chain(ChainStatus::Paused);
+        let mut step = chain.steps[0].clone();
+        let approval = |version: u64, approved: bool| waku_protocol::chains::ChainApproval {
+            gate: "publish".into(),
+            actor: waku_protocol::chains::ChainActor::Human,
+            approved,
+            definition_version: version,
+            at: 0,
+        };
+        assert_eq!(chain_gate_decision(&step, "publish", 1), None);
+        step.approvals.push(approval(1, true));
+        assert_eq!(chain_gate_decision(&step, "publish", 1), Some(true));
+        // A later rejection wins; an older approval does not cover a
+        // revised attempt.
+        step.approvals.push(approval(1, false));
+        assert_eq!(chain_gate_decision(&step, "publish", 1), Some(false));
+        assert_eq!(chain_gate_decision(&step, "publish", 2), None);
+        assert_eq!(chain_gate_decision(&step, "other", 1), None);
     }
 }

@@ -7459,3 +7459,61 @@ boss.employee_groups_description:
   en: Group employees by purpose and queue status. Turn off for one list without group headers, with planning sessions first.
 boss.employee_search_description:
   en: How far back Search employee chats looks, including archived chats. Off hides the command.
+boss.chains:
+  en: Chains
+boss.chains_empty:
+  en: No employee chains yet.
+boss.chain_select:
+  en: Select a chain to inspect it.
+boss.chain_untitled:
+  en: Employee chain
+boss.chain_gates:
+  en: Approval gates
+boss.chain_steps:
+  en: Steps
+boss.chain_current:
+  en: Current
+boss.chain_revision:
+  en: revision %{revision}
+boss.chain_gate_pending:
+  en: Awaiting your decision
+boss.chain_gate_approved:
+  en: Approved
+boss.chain_gate_rejected:
+  en: Rejected
+boss.chain_approve:
+  en: Approve
+boss.chain_reject:
+  en: Reject
+boss.chain_resume:
+  en: Resume
+boss.chain_pause:
+  en: Pause
+boss.chain_retry:
+  en: Retry
+boss.chain_cancel:
+  en: Cancel chain
+boss.chain_accept:
+  en: Accept handoff
+boss.chain_status_active:
+  en: Active
+boss.chain_status_paused:
+  en: Paused
+boss.chain_status_pausing:
+  en: Pausing
+boss.chain_status_cancelling:
+  en: Cancelling
+boss.chain_status_cancelled:
+  en: Cancelled
+boss.chain_status_completed:
+  en: Completed
+boss.chain_step_pending:
+  en: Pending
+boss.chain_step_active:
+  en: Active
+boss.chain_step_succeeded:
+  en: Succeeded
+boss.chain_step_failed:
+  en: Failed
+boss.chain_step_cancelled:
+  en: Cancelled

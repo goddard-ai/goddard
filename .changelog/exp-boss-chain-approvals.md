@@ -1,0 +1,1 @@
+- **Boss:** employee chains paused on approval gates are now resolvable — the Boss view's new Chains section lists every chain, records an explicit approve or reject per required gate, and offers pause, resume, retry, accept handoff, and cancel for the current state.

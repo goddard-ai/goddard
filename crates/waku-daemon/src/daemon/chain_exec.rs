@@ -937,7 +937,7 @@ impl WakuBackend {
                     _ => crate::model::ReportTriggerKind::Failed,
                 },
             );
-        let prompt = format!(
+        let mut prompt = format!(
             "Employee chain {} paused at step {} \"{}\" — {}. Work and evidence are preserved. Inspect with goddard-agent boss chain --json '{{\"type\":\"show\",\"chainId\":\"{}\"}}', then resume, retry, or cancel through the chain controls.",
             chain.id,
             chain.current_step + 1,
@@ -945,6 +945,13 @@ impl WakuBackend {
             attention.reason,
             chain.id,
         );
+        if attention.reason.starts_with("approval required:") {
+            // The gate takes only a human decision — the boss's own chain
+            // controls cannot record one, so name the surface that does.
+            prompt.push_str(
+                " The approval gate accepts only a human decision — record it in the Boss view's Chains section, then resume the chain.",
+            );
+        }
         let trigger = sender
             .and_then(|id| self.boss.employee_including_retired(id))
             .map(|employee| crate::model::ReportTrigger::new(&employee, kind));
