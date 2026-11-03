@@ -7137,20 +7137,22 @@ fn archive_gate_admits_planning_sessions() {
     // the row menu and ⌘⇧A share this gate, and they set the same
     // `archived_at` the post-finalization grace sweep writes.
     let mut planning = planning_session(Uuid::new_v4());
-    assert!(session_archivable(&planning));
+    assert!(session_archivable(&planning, false));
+    // Boss chats cannot enter any archive path, even when otherwise eligible.
+    assert!(!session_archivable(&planning, true));
 
     // Archived is archived, whoever set it — the flag also keeps an
     // abandoned plan's row from resurrecting.
     planning.archived_at = Some(1);
-    assert!(!session_archivable(&planning));
+    assert!(!session_archivable(&planning, false));
     planning.archived_at = None;
 
     // The gate's other exclusions still apply: side chats are delete-only
     // and an unstarted draft has nothing to archive.
     planning.side_chat_of = Some(Uuid::new_v4());
-    assert!(!session_archivable(&planning));
+    assert!(!session_archivable(&planning, false));
     let draft = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-    assert!(!session_archivable(&draft));
+    assert!(!session_archivable(&draft, false));
 }
 
 #[test]

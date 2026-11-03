@@ -259,11 +259,15 @@ pub(super) fn starred_project_ids(projects: &[Project]) -> HashSet<Uuid> {
 }
 
 /// The gate every archive entry point applies: a started, unarchived,
-/// top-level task. A planning session passes it like any other row —
+/// top-level task other than the Boss chat. Only `/clear` resets that chat.
+/// A planning session passes it like any other row —
 /// `planning` is a kind marker, not a separate lifecycle. A side chat is
 /// delete-only: it hides in its parent's panel rather than an archive row.
-pub(super) fn session_archivable(session: &AgentSession) -> bool {
-    session.has_started() && session.archived_at.is_none() && !session.is_side_chat()
+pub(super) fn session_archivable(session: &AgentSession, is_boss_chat: bool) -> bool {
+    !is_boss_chat
+        && session.has_started()
+        && session.archived_at.is_none()
+        && !session.is_side_chat()
 }
 
 /// The sessions keyboard navigation must never land on. A dormant row can
@@ -2860,7 +2864,15 @@ impl Waku {
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .filter(|session| session_archivable(session))
+            .filter(|session| {
+                session_archivable(
+                    session,
+                    self.boss_ui
+                        .states
+                        .values()
+                        .any(|state| state.session_id == Some(session.id)),
+                )
+            })
         else {
             return;
         };
@@ -2999,7 +3011,15 @@ impl Waku {
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            .filter(|session| session_archivable(session))
+            .filter(|session| {
+                session_archivable(
+                    session,
+                    self.boss_ui
+                        .states
+                        .values()
+                        .any(|state| state.session_id == Some(session.id)),
+                )
+            })
             .map(|session| {
                 (
                     session.project_id,

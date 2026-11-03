@@ -1,0 +1,1 @@
+- Prevent archiving the Boss chat, including with the archive keyboard shortcut. Use `/clear` to reset its conversation.

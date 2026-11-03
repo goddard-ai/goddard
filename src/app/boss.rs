@@ -5859,7 +5859,14 @@ impl Waku {
         let row_focus = menu.trigger_focus_handle().clone();
         let keyboard_menu = menu.clone();
         let group_name = SharedString::from(format!("boss-planning-row-{id}"));
-        let archive_button = session_archivable(session).then(|| {
+        let archive_button = session_archivable(
+            session,
+            self.boss_ui
+                .states
+                .values()
+                .any(|state| state.session_id == Some(session.id)),
+        )
+        .then(|| {
             let archive_focus = self
                 .sidebar_session_archive_focuses
                 .borrow_mut()
