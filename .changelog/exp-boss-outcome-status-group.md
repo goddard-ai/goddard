@@ -1,0 +1,1 @@
+- Boss Tasks now moves resumed outcomes back to In progress based on their current status, even if an earlier attempt was blocked.

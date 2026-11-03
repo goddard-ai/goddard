@@ -2126,9 +2126,9 @@ fn boss_outcome_status(
         } else {
             status
         };
-        // Needs-attention work files under Blocked; genuinely running
-        // work stays In progress.
-        let bucket = if row.attention || status.attention() {
+        // The current live status decides the section. Attention retained
+        // from earlier attempts must not keep resumed work in Blocked.
+        let bucket = if status.attention() {
             BossGoalBucket::Blocked
         } else {
             BossGoalBucket::Running
@@ -4622,6 +4622,15 @@ mod tests {
         assert_eq!(
             boss_outcome_status(&row, &sessions, now),
             (BossGoalBucket::Blocked, BossGoalStatus::Attention)
+        );
+
+        // Resuming work moves the outcome back to In progress even when
+        // an earlier attempt still carries an attention flag.
+        row.attention = true;
+        row.members[0].employee.blocker = None;
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Running, BossGoalStatus::Working)
         );
 
         // Queued members with nothing running read Pending · Queued.
