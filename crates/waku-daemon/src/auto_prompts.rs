@@ -125,6 +125,9 @@ impl AutoPromptService {
             let Some(backend) = self.backend.lock().upgrade() else {
                 continue;
             };
+            let Ok(admission) = backend.idle_shutdown.enter() else {
+                continue;
+            };
             let settings = backend.auto_prompt_settings();
             let rules: Vec<_> = settings
                 .auto_prompts
@@ -140,6 +143,7 @@ impl AutoPromptService {
             let _ = std::thread::Builder::new()
                 .name(format!("goddard-auto-prompt-{}", session.id))
                 .spawn(move || {
+                    let _admission = admission;
                     if let Err(error) = service.claim(session.id, turn_id) {
                         eprintln!("could not claim auto prompt turn {turn_id}: {error:#}");
                         return;

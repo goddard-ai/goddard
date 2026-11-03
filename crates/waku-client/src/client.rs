@@ -983,6 +983,7 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send((session_id, revoked)).is_ok());
                     }
+                    ServerMessage::IdleShutdown { .. } => {}
                     ServerMessage::ShuttingDown => break,
                     ServerMessage::Hello { .. }
                     | ServerMessage::Rejected { .. }

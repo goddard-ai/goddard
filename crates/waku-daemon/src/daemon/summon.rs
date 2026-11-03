@@ -107,6 +107,9 @@ impl WakuBackend {
     }
 
     pub(super) fn deliver_pending_agent_prompts(&self) {
+        let Ok(_admission) = self.idle_shutdown.enter() else {
+            return;
+        };
         let events = self.event_source.lock().clone();
         for target in self.agent_queue_targets() {
             if self.session_quarantined(target) {
@@ -199,6 +202,7 @@ impl WakuBackend {
     /// lineage and only marks — a refresh can no longer stack a duplicate
     /// reminder on every pass.
     pub(super) fn deliver_outcome_reminders(&self, now: u64) -> anyhow::Result<()> {
+        let _admission = self.idle_shutdown.enter()?;
         let due = self.boss.scan_outcome_reminders(now)?;
         if due.is_empty() {
             return Ok(());
@@ -302,6 +306,9 @@ impl WakuBackend {
     /// Repeat while progress is made so a released slot can admit another
     /// ticket without waiting for the next wakeup.
     pub(crate) fn run_summon_scheduler(&self) {
+        let Ok(_admission) = self.idle_shutdown.enter() else {
+            return;
+        };
         if self.memory_guard.host_critical() {
             return;
         }
@@ -1344,6 +1351,7 @@ impl WakuBackend {
     /// reverts to the queue — replaying it would double-dispatch, and
     /// reporting it would mourn a job that never ran.
     pub(crate) fn recover_boss_employee(&self, session_id: Uuid) -> anyhow::Result<()> {
+        let _admission = self.idle_shutdown.enter()?;
         use waku_protocol::boss::EmployeeLifecycle;
         let Some(entry) = self.boss.employee(session_id) else {
             return Ok(());

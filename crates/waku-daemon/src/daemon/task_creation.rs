@@ -98,6 +98,7 @@ impl WakuBackend {
         planning: Option<waku_protocol::boss::BossPlan>,
         automation_run: Option<Uuid>,
     ) -> anyhow::Result<Uuid> {
+        let _admission = self.idle_shutdown.enter()?;
         if prompt.trim().is_empty() {
             bail!("agent sessions require a prompt");
         }

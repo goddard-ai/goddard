@@ -400,6 +400,16 @@ pub trait Backend: Send + Sync + 'static {
         agent: Option<Uuid>,
     ) -> anyhow::Result<ResponsePayload>;
 
+    /// Unsupported backends refuse owner-requested idle shutdown by default.
+    fn prepare_idle_shutdown(&self, _owner: Uuid, _request: Uuid) -> Option<Uuid> {
+        None
+    }
+    fn commit_idle_shutdown(&self, _owner: Uuid, _fence: Uuid, _signal: &dyn Fn()) -> bool {
+        false
+    }
+    fn release_idle_shutdown(&self, _owner: Uuid, _fence: Uuid) {}
+    fn disconnect_idle_shutdown(&self, _owner: Uuid) {}
+
     fn shutdown(&self) {}
 
     /// Where async friend/share events are delivered once the hub exists —
@@ -2114,6 +2124,17 @@ impl Drop for ConnectionSubscription<'_> {
     }
 }
 
+struct IdleShutdownConnection {
+    backend: Arc<dyn Backend>,
+    owner: Uuid,
+}
+
+impl Drop for IdleShutdownConnection {
+    fn drop(&mut self) {
+        self.backend.disconnect_idle_shutdown(self.owner);
+    }
+}
+
 fn handle_connection(
     stream: TcpStream,
     expected_token: &str,
@@ -2257,6 +2278,10 @@ fn handle_connection(
         subscriber_id,
     };
 
+    let idle_owner = IdleShutdownConnection {
+        backend: dispatcher.backend.clone(),
+        owner: Uuid::new_v4(),
+    };
     let mut read_timeout = SOCKET_POLL_INTERVAL;
     let mut navigation_burst = 0;
     'connection: while !shutdown.load(Ordering::Acquire) {
@@ -2346,6 +2371,53 @@ fn handle_connection(
                             outgoing.clone()
                         };
                         dispatcher.dispatch(request, replies, subscriber_id, agent);
+                    }
+                }
+                Ok(ClientMessage::PrepareIdleShutdown { request_id }) => {
+                    let fence = if primary && options.allow_shutdown {
+                        dispatcher
+                            .backend
+                            .prepare_idle_shutdown(idle_owner.owner, request_id)
+                    } else {
+                        None
+                    };
+                    write_json(
+                        &mut socket,
+                        &ServerMessage::IdleShutdown {
+                            request_id,
+                            fence,
+                            committed: false,
+                        },
+                    )?;
+                }
+                Ok(ClientMessage::CommitIdleShutdown { request_id, fence }) => {
+                    let committed = primary
+                        && options.allow_shutdown
+                        && dispatcher.backend.commit_idle_shutdown(
+                            idle_owner.owner,
+                            fence,
+                            &|| {
+                                server_shutdown.store(true, Ordering::Release);
+                                shutdown.store(true, Ordering::Release);
+                            },
+                        );
+                    write_json(
+                        &mut socket,
+                        &ServerMessage::IdleShutdown {
+                            request_id,
+                            fence: Some(fence),
+                            committed,
+                        },
+                    )?;
+                    if committed {
+                        break;
+                    }
+                }
+                Ok(ClientMessage::ReleaseIdleShutdown { fence }) => {
+                    if primary {
+                        dispatcher
+                            .backend
+                            .release_idle_shutdown(idle_owner.owner, fence);
                     }
                 }
                 Ok(ClientMessage::Shutdown) => {

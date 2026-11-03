@@ -760,6 +760,7 @@ mod tests {
             self.backend.sessions.lock().insert(
                 session,
                 RuntimeEntry {
+                    _admission: None,
                     plan_gate: None,
                     runtime_id: runtime,
                     driver: DriverHandle::from_control(driver.clone()),
@@ -1270,6 +1271,7 @@ mod tests {
             backend.sessions.lock().insert(
                 session,
                 RuntimeEntry {
+                    _admission: None,
                     plan_gate: None,
                     runtime_id: runtime,
                     driver: DriverHandle::from_control(driver.clone()),
@@ -1300,6 +1302,7 @@ mod tests {
             backend.sessions.lock().insert(
                 sibling_session,
                 RuntimeEntry {
+                    _admission: None,
                     plan_gate: None,
                     runtime_id: sibling_runtime,
                     driver: DriverHandle::from_control(sibling_driver.clone()),

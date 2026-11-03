@@ -2103,6 +2103,7 @@ fn computer_use_is_scoped_independently_of_task_and_settings_writes() {
     backend.sessions.lock().insert(
         task,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2195,6 +2196,7 @@ fn computer_use_through_the_built_cli_and_scoped_daemon_connection() {
     backend.sessions.lock().insert(
         task,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2467,6 +2469,7 @@ fn an_ungranted_agent_rename_parks_a_request_until_answered() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2540,6 +2543,7 @@ fn a_declined_agent_rename_leaves_the_title_alone() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2590,6 +2594,7 @@ fn an_agent_rename_unparks_when_the_runtime_dies() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2736,6 +2741,7 @@ fn an_approved_archive_proposal_archives_tasks_and_side_chats() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2844,6 +2850,7 @@ fn a_duplicate_archive_answer_is_consumed() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2941,6 +2948,7 @@ fn an_approved_archive_proposal_reports_stale_targets() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -3020,6 +3028,7 @@ fn a_declined_archive_proposal_archives_nothing() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -3083,6 +3092,7 @@ fn a_boss_archive_proposal_reaches_other_projects() {
     backend.sessions.lock().insert(
         boss_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: boss_runtime,
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -3527,6 +3537,7 @@ fn an_exited_runtime_releases_its_replay_journal() {
     let sessions = Arc::new(Mutex::new(HashMap::from([(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: driver.clone(),
@@ -3756,6 +3767,7 @@ fn runtime_generation_entry(
     cwd: &Path,
 ) -> RuntimeEntry {
     RuntimeEntry {
+        _admission: None,
         plan_gate: None,
         runtime_id,
         driver: DriverHandle::from_control(capture),
@@ -4710,6 +4722,7 @@ fn startup_runtime_events_are_forwarded_after_registration() {
         .register_runtime_forwarder(
             session_id,
             RuntimeEntry {
+                _admission: None,
                 plan_gate: None,
                 runtime_id,
                 driver: DriverHandle::from_control(capture),
@@ -4757,6 +4770,7 @@ fn streaming_deltas_do_not_enter_the_replay_journal() {
     let sessions = Arc::new(Mutex::new(HashMap::from([(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: driver.clone(),
@@ -4828,6 +4842,7 @@ fn closing_a_session_begins_driver_shutdown_while_a_handle_is_held() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: DriverHandle::from_control(capture.clone()),
@@ -5013,6 +5028,7 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
                 (
                     id,
                     RuntimeEntry {
+                        _admission: None,
                         plan_gate: None,
                         runtime_id: Uuid::new_v4(),
                         driver: driver.clone(),
@@ -5050,6 +5066,7 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
     sessions.lock().insert(
         idle_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: driver.clone(),
@@ -5102,6 +5119,7 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
     sessions.lock().insert(
         idle_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: driver.clone(),
@@ -5715,6 +5733,7 @@ fn boss_terminal_op_owes_the_prompting_client() {
     backend.sessions.lock().insert(
         supervisor,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -5825,6 +5844,7 @@ fn a_clean_employee_finish_retires_runtime_revokes_token_and_stays_silent() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
@@ -5919,6 +5939,7 @@ fn employee_finish_fixture(
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
@@ -5958,6 +5979,7 @@ fn detach_boss_session(backend: &WakuBackend, supervisor: Uuid) -> Uuid {
     backend.sessions.lock().insert(
         decoy_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -7483,6 +7505,7 @@ fn an_expiring_employee_notifies_attached_clients() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                _admission: None,
                 plan_gate: None,
                 runtime_id,
                 driver: DriverHandle::from_control(capture),
@@ -7588,6 +7611,7 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
     backend.sessions.lock().insert(
         supervisor,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(parent_capture),
@@ -7614,6 +7638,7 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -7735,6 +7760,7 @@ fn a_settle_expiry_drains_past_an_open_turn() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -8693,6 +8719,7 @@ fn summon_test_backend(root: &Path) -> (WakuBackend, Uuid) {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -9004,6 +9031,7 @@ fn summon_response_waits_for_completed_dispatch() {
         backend.sessions.lock().insert(
             employee.session_id,
             RuntimeEntry {
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture.clone()),
@@ -9532,6 +9560,7 @@ fn a_summon_at_capacity_admits_a_durable_queued_ticket() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(supervisor_capture.clone()),
@@ -11902,6 +11931,7 @@ fn setmodel_on_a_working_employee_interrupts_and_requeues() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -12041,6 +12071,7 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -12250,6 +12281,7 @@ fn setmodel_recovers_an_expired_employee_atomically() {
         backend.sessions.lock().insert(
             session_id,
             RuntimeEntry {
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture.clone()),
@@ -12452,6 +12484,7 @@ fn setmodel_requeue_relaunches_on_the_new_provider() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -12501,6 +12534,7 @@ fn setmodel_requeue_relaunches_on_the_new_provider() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -12644,6 +12678,7 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -12681,6 +12716,7 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -12936,6 +12972,7 @@ fn setmodel_retune_resets_to_the_models_default_effort() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -13147,6 +13184,7 @@ fn a_boss_prompt_reaches_a_standalone_task() {
     backend.sessions.lock().insert(
         standalone_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -14277,6 +14315,7 @@ fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -14785,6 +14824,7 @@ fn legacy_dispatch_notifications_are_retired_without_delivery() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -14852,6 +14892,7 @@ fn employee_dispatch_is_silent_and_batches_queued_resumption() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
@@ -14915,6 +14956,7 @@ fn employee_dispatch_is_silent_and_batches_queued_resumption() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(resumed_capture.clone()),
@@ -15001,6 +15043,7 @@ fn a_wave_reports_once_when_every_member_settles() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -15093,6 +15136,7 @@ fn an_all_cancelled_wave_reports_as_cancelled() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -15218,6 +15262,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(first_capture.clone()),
@@ -15344,6 +15389,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(second_capture.clone()),
@@ -16381,6 +16427,7 @@ fn finalize_plan_steers_an_open_boss_turn() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -16807,6 +16854,7 @@ fn a_queued_prompt_survives_expiry_and_drains_before_the_revive_prompt() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(child.clone()),
@@ -16865,6 +16913,7 @@ fn a_revived_employee_prompt_reaches_session_subscribers() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: employee_runtime,
             driver: DriverHandle::from_control(child.clone()),
@@ -17480,6 +17529,7 @@ fn a_steer_echo_on_a_retired_boss_chat_unmirrors_the_carried_chip() {
     backend.sessions.lock().insert(
         predecessor,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: late_runtime,
             driver: DriverHandle::from_control(capture),
@@ -17666,6 +17716,7 @@ fn archived_active_boss_recovers_on_open_send_and_reconciliation() {
     backend.sessions.lock().insert(
         active,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: DriverHandle::from_control(capture.clone()),
@@ -18400,6 +18451,7 @@ fn outcome_employee_fixture(
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
@@ -21496,6 +21548,7 @@ fn automation_runs_wait_for_their_own_delivered_turns() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: driver.clone(),
@@ -22878,4 +22931,167 @@ fn task_metadata_incognito_adoption_keeps_the_client_high_water() {
             .any(|session| session.id == id)
     );
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn idle_shutdown_public_startup_fence_and_failed_launch_release() {
+    let root = std::env::temp_dir().join(format!("idle-startup-{}", Uuid::new_v4()));
+    let (mut backend, session) = surface_test_backend(&root);
+    runtime_generation_configure_launch(&mut backend, &root);
+    let (entered, wait_entered) = crossbeam_channel::bounded(1);
+    let (release, wait_release) = crossbeam_channel::bounded(1);
+    backend.runtime_test_start = Some(Arc::new(move |_, _, _| {
+        entered.send(()).unwrap();
+        wait_release.recv().unwrap();
+        anyhow::bail!("controlled startup failure")
+    }));
+    let backend = Arc::new(backend);
+    let owner = Uuid::new_v4();
+    let starter = {
+        let backend = backend.clone();
+        std::thread::spawn(move || {
+            runtime_generation_start(
+                &backend,
+                session,
+                Uuid::new_v4(),
+                &EventSink::detached(),
+                false,
+            )
+        })
+    };
+    wait_entered
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    assert!(
+        backend.sessions.lock().is_empty(),
+        "startup is not yet published"
+    );
+    assert!(
+        backend
+            .prepare_idle_shutdown(owner, Uuid::new_v4())
+            .is_none()
+    );
+    release.send(()).unwrap();
+    assert!(starter.join().unwrap().is_err());
+    // Construction also stages packaged resources on an owned worker. A
+    // failed provider start must release its own permit, while that worker
+    // remains legitimately busy until its copy finishes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let fence = loop {
+        if let Some(fence) = backend.prepare_idle_shutdown(owner, Uuid::new_v4()) {
+            break fence;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "failed startup did not release admission; sessions={:?}",
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .map(|s| (s.status, s.active_turn_id(), s.queued_messages.len()))
+                .collect::<Vec<_>>()
+        );
+        std::thread::yield_now();
+    };
+    assert!(
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: session,
+                    runtime_id: Uuid::nil(),
+                    command: Command::GetSettings,
+                },
+                EventSink::detached(),
+                None
+            )
+            .is_err()
+    );
+    backend.disconnect_idle_shutdown(owner);
+    assert!(!backend.commit_idle_shutdown(owner, fence, &|| panic!("stale fence")));
+    assert!(
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: session,
+                    runtime_id: Uuid::nil(),
+                    command: Command::GetSettings,
+                },
+                EventSink::detached(),
+                None
+            )
+            .is_ok()
+    );
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn idle_shutdown_public_close_waits_for_detached_forwarder() {
+    let root = std::env::temp_dir().join(format!("idle-closing-{}", Uuid::new_v4()));
+    let (mut backend, session) = surface_test_backend(&root);
+    runtime_generation_configure_launch(&mut backend, &root);
+    backend.runtime_test_start = Some(Arc::new(|_, _, _| {
+        Ok(DriverHandle::from_control(Arc::new(
+            CaptureDriver::default(),
+        )))
+    }));
+    let (release, wait_release) = crossbeam_channel::bounded(1);
+    let (done, wait_done) = crossbeam_channel::bounded(1);
+    backend.runtime_test_forward = Some(Arc::new(move |name, forward| {
+        let wait_release = wait_release.clone();
+        let done = done.clone();
+        std::thread::Builder::new().name(name).spawn(move || {
+            wait_release.recv().unwrap();
+            forward();
+            done.send(()).unwrap();
+        })
+    }));
+    let runtime = runtime_generation_start(
+        &backend,
+        session,
+        Uuid::new_v4(),
+        &EventSink::detached(),
+        false,
+    )
+    .unwrap();
+    backend
+        .handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: session,
+                runtime_id: runtime,
+                command: Command::CloseSession,
+            },
+            EventSink::detached(),
+            None,
+        )
+        .unwrap();
+    assert!(backend.sessions.lock().is_empty());
+    let owner = Uuid::new_v4();
+    assert!(
+        backend
+            .prepare_idle_shutdown(owner, Uuid::new_v4())
+            .is_none()
+    );
+    release.send(()).unwrap();
+    wait_done
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let fence = loop {
+        if let Some(fence) = backend.prepare_idle_shutdown(owner, Uuid::new_v4()) {
+            break fence;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "closing runtime retained admission"
+        );
+        std::thread::yield_now();
+    };
+    backend.release_idle_shutdown(owner, fence);
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
 }

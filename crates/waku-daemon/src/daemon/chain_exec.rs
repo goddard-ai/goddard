@@ -267,6 +267,9 @@ impl WakuBackend {
     /// report per completed chain. Safe to call from any boss-affecting
     /// path; every action reconciles against stored state.
     pub(super) fn drive_chains(&self) {
+        let Ok(_admission) = self.idle_shutdown.enter() else {
+            return;
+        };
         if !self.boss.is_active() {
             return;
         }

@@ -70,7 +70,57 @@ impl WakuBackend {
     }
 }
 
+impl WakuBackend {
+    fn idle_shutdown_quiescent(&self) -> bool {
+        !self
+            .archive_detail_prune_running
+            .load(std::sync::atomic::Ordering::Acquire)
+            && self.repo_maps.0.lock().building.is_empty()
+            && self.sessions.lock().is_empty()
+            && self.terminals.lock().is_empty()
+            && !self.task_state.lock().sessions.iter().any(|session| {
+                session.status.is_busy()
+                    || session.active_turn_id().is_some()
+                    || !session.queued_messages.is_empty()
+                    || self.agent.has_open_turn(session.id)
+                    || self.agent.has_queued(session.id)
+            })
+            && !self.boss.document().employees.iter().any(|employee| {
+                matches!(
+                    employee.lifecycle(),
+                    waku_protocol::boss::EmployeeLifecycle::Dispatching
+                        | waku_protocol::boss::EmployeeLifecycle::Working
+                        | waku_protocol::boss::EmployeeLifecycle::Finishing
+                )
+            })
+            && !self
+                .automations
+                .document()
+                .runs
+                .iter()
+                .any(|run| !run.status.is_terminal())
+    }
+}
+
 impl Backend for WakuBackend {
+    fn prepare_idle_shutdown(&self, owner: Uuid, request: Uuid) -> Option<Uuid> {
+        self.idle_shutdown
+            .prepare(owner, request, || self.idle_shutdown_quiescent())
+    }
+
+    fn commit_idle_shutdown(&self, owner: Uuid, fence: Uuid, signal: &dyn Fn()) -> bool {
+        self.idle_shutdown
+            .commit(owner, fence, || self.idle_shutdown_quiescent(), signal)
+    }
+
+    fn release_idle_shutdown(&self, owner: Uuid, fence: Uuid) {
+        self.idle_shutdown.release(owner, fence);
+    }
+
+    fn disconnect_idle_shutdown(&self, owner: Uuid) {
+        self.idle_shutdown.disconnect(owner);
+    }
+
     fn authenticate_agent(&self, token: &str) -> Option<Uuid> {
         self.agent.resolve(token)
     }
@@ -296,6 +346,7 @@ impl Backend for WakuBackend {
         events: EventSink,
         agent: Option<Uuid>,
     ) -> anyhow::Result<ResponsePayload> {
+        let _admission = self.idle_shutdown.enter()?;
         let session_id = request.session_id;
         let runtime_id = request.runtime_id;
         // A scoped credential minted for a retired Boss generation carries

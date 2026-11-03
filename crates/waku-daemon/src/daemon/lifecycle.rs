@@ -66,7 +66,9 @@ impl WakuBackend {
         );
         let task_state = Arc::new(Mutex::new(task_state));
         let task_store = Arc::new(task_store);
+        let idle_shutdown = Arc::new(crate::server::idle_shutdown::IdleShutdownGate::default());
         let backend = Self {
+            idle_shutdown: idle_shutdown.clone(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_goal_claims: Mutex::new(HashMap::new()),
             repo_maps: Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
@@ -90,7 +92,10 @@ impl WakuBackend {
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
             checkout_history: checkout_history::CheckoutHistoryCache::default(),
             agent: Arc::new(crate::agent::AgentState::default()),
-            runtime_lifecycles: Arc::new(RuntimeLifecycles::default()),
+            runtime_lifecycles: Arc::new(RuntimeLifecycles {
+                admission: idle_shutdown,
+                ..RuntimeLifecycles::default()
+            }),
             #[cfg(test)]
             runtime_test_start: None,
             #[cfg(test)]
@@ -131,6 +136,9 @@ impl WakuBackend {
             #[cfg(test)]
             stable_test_root: None,
         };
+        backend
+            .share
+            .set_idle_shutdown_gate(backend.idle_shutdown.clone());
         // Sessions summoned before `boss_managed` existed carry no stamp;
         // the roster still names them, so mark them now — once an employee
         // retires its record is gone and the task would leak back into the
@@ -297,7 +305,13 @@ impl WakuBackend {
         // every executable-relative resolver then fails at once.
         if let Err(error) = std::thread::Builder::new()
             .name("goddard-runtime-stage".into())
-            .spawn(crate::computer_use::stage_runtime_resources)
+            .spawn({
+                let admission = backend.idle_shutdown.enter()?;
+                move || {
+                    let _admission = admission;
+                    crate::computer_use::stage_runtime_resources();
+                }
+            })
         {
             eprintln!("goddard-daemon: could not spawn runtime staging thread: {error:#}");
         }
@@ -350,6 +364,7 @@ impl WakuBackend {
         runtime_id: Uuid,
         settle: waku_protocol::boss::EmployeeSettle,
     ) -> anyhow::Result<()> {
+        let _admission = self.idle_shutdown.enter()?;
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let owner = lifecycle.lock();
         if owner.get() != Some(runtime_id) {
@@ -476,6 +491,7 @@ impl WakuBackend {
         events: EventSink,
         command: Option<&waku_protocol::custom_commands::CustomCommand>,
     ) -> anyhow::Result<crate::terminal::DaemonTerminal> {
+        let _admission = self.idle_shutdown.enter()?;
         #[cfg(all(test, unix))]
         if command.is_none()
             && let Some(shell) = &self.terminal_shell

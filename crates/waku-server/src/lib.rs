@@ -3,3 +3,8 @@ mod sinks;
 pub use sinks::*;
 mod server;
 pub use server::*;
+
+pub mod idle_shutdown;
+
+#[cfg(test)]
+mod idle_shutdown_tests;

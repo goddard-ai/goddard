@@ -467,6 +467,11 @@ impl AutomationService {
         automation_id: Uuid,
         key: &str,
     ) -> anyhow::Result<Option<AutomationRun>> {
+        let backend = self.backend.lock().upgrade();
+        let _admission = backend
+            .as_ref()
+            .map(|b| b.idle_shutdown.enter())
+            .transpose()?;
         let automation = {
             let document = self.document();
             document
@@ -562,6 +567,14 @@ impl AutomationService {
     /// One scheduler pass. `pub(crate)` so tests drive it with fabricated
     /// times instead of sleeping.
     pub(crate) fn evaluate(&self, now: DateTime<Utc>) {
+        let backend = self.backend.lock().upgrade();
+        let Ok(_admission) = backend
+            .as_ref()
+            .map(|b| b.idle_shutdown.enter())
+            .transpose()
+        else {
+            return;
+        };
         if self.evaluating.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -783,11 +796,19 @@ impl AutomationService {
         automation: Automation,
         run_id: Uuid,
     ) -> anyhow::Result<()> {
+        let backend = self.backend.lock().upgrade();
+        let admission = backend
+            .as_ref()
+            .map(|b| b.idle_shutdown.enter())
+            .transpose()?;
         let service = self.clone();
         let spawn = || {
             std::thread::Builder::new()
                 .name(format!("goddard-automation-{}", automation.id))
-                .spawn(move || service.dispatch(&automation, run_id))
+                .spawn(move || {
+                    let _admission = admission;
+                    service.dispatch(&automation, run_id);
+                })
         };
         #[cfg(test)]
         let result = if self.fail_worker.load(Ordering::Relaxed) {

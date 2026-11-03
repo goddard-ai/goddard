@@ -121,6 +121,17 @@ pub enum ClientMessage {
         /// Self-reported device name shown on the approval prompt.
         device_name: String,
     },
+    /// Service-owner-only conditional shutdown. A lease is connection-bound.
+    PrepareIdleShutdown {
+        request_id: Uuid,
+    },
+    CommitIdleShutdown {
+        request_id: Uuid,
+        fence: Uuid,
+    },
+    ReleaseIdleShutdown {
+        fence: Uuid,
+    },
     Shutdown,
 }
 
@@ -1153,6 +1164,11 @@ pub struct SequencedEvent {
     rename_all_fields = "camelCase"
 )]
 pub enum ServerMessage {
+    IdleShutdown {
+        request_id: Uuid,
+        fence: Option<Uuid>,
+        committed: bool,
+    },
     Hello {
         protocol_version: u32,
         daemon_version: String,

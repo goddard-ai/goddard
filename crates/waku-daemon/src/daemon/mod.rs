@@ -391,6 +391,8 @@ struct RuntimeEntry {
     computer_use_available: bool,
     provider: ProviderKind,
     cwd: PathBuf,
+    // Dropped after the driver, including on detached teardown.
+    _admission: Option<crate::server::idle_shutdown::WorkPermit>,
 }
 
 /// The provider/model selection an `agent create` request carried. Every
@@ -486,6 +488,7 @@ type RotationObserver = Arc<dyn Fn(waku_boss::rotation_oracle::RotationObservati
 
 #[derive(Default)]
 struct RuntimeLifecycles {
+    admission: Arc<crate::server::idle_shutdown::IdleShutdownGate>,
     locks: Mutex<HashMap<Uuid, Arc<ReentrantMutex<std::cell::Cell<Option<Uuid>>>>>>,
     shutting_down: std::sync::atomic::AtomicBool,
     #[cfg(test)]
@@ -503,6 +506,7 @@ impl RuntimeLifecycles {
 }
 
 pub struct WakuBackend {
+    pub(crate) idle_shutdown: Arc<crate::server::idle_shutdown::IdleShutdownGate>,
     sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
     managed_goal_claims: Mutex<HashMap<(Uuid, Uuid), HashSet<Uuid>>>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,

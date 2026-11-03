@@ -22,6 +22,7 @@ fn instruction_pins_preserve_human_provenance_and_survive_rotation() {
     };
     record_boss_event(&backend.task_state, &backend.task_store, old, &submitted).unwrap();
     super::super::instruction_pins::capture_boss_instruction_event(
+        &backend.idle_shutdown,
         &backend.boss,
         &backend.task_state,
         &backend.task_store,
@@ -216,6 +217,7 @@ fn a_hinted_boss_prompt_delivers_under_the_operation_guard() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id: runtime,
             driver: DriverHandle::from_control(capture.clone()),

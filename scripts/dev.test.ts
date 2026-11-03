@@ -154,16 +154,10 @@ while (!existsSync(join(process.env.TEST_ROOT, "release-build"))) await Bun.slee
     const child = Bun.spawn([process.execPath, devScript, "--wait"], { env, terminal });
     try {
       await waitFor(() => existsSync(join(root, "building")), 10_000, "initial build");
-      // D must remain fail-closed even during an in-flight build and on retry.
-      // No load/attach observation can establish cross-process quiescence.
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const start = output.length;
-        terminal.write("D\n");
-        await waitFor(() => output.slice(start).includes("Idle daemon activation unavailable"), 5_000, "idle activation refusal");
-        expect(output.slice(start)).not.toContain("Restarting the daemon");
-        expect(output.slice(start)).not.toContain("restart armed");
-        expect(child.exitCode).toBeNull();
-      }
+      // No completed replacement is ready during this blocked build.
+      terminal.write("D\n");
+      await waitFor(() => output.includes("No pending daemon restart"), 5_000, "unavailable idle activation");
+      expect(output).not.toContain("Restarting the daemon");
       if (announcesReady) {
         expect(output).toContain("Daemon listening on 127.0.0.1:34198");
         await writeFile(join(root, "exit-old-daemon"), "");

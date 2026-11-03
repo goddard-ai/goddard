@@ -302,6 +302,7 @@ impl WakuBackend {
         mut message: crate::model::QueuedMessage,
         events: &EventSink,
     ) -> anyhow::Result<()> {
+        let _admission = self.idle_shutdown.enter()?;
         let crate::model::QueuedMessageSource::Agent { sent_by: sender } = message.source else {
             anyhow::bail!("daemon prompt must be agent-owned");
         };

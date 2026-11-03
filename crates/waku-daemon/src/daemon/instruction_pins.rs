@@ -10,6 +10,7 @@ const FEATURE: &str = "boss-instruction-pins";
 /// Driver acknowledgements also cover human steering during an open turn.
 /// Defer the Boss lock until the forwarder releases its lifecycle lease.
 pub(super) fn capture_boss_instruction_event(
+    gate: &Arc<crate::server::idle_shutdown::IdleShutdownGate>,
     boss: &Arc<crate::boss::BossService>,
     task_state: &Arc<Mutex<PersistedState>>,
     task_store: &Arc<StateStore>,
@@ -30,11 +31,13 @@ pub(super) fn capture_boss_instruction_event(
     if !boss.is_boss(session_id) || !waku_boss::instruction_pins::candidate_hint(message) {
         return None;
     }
+    let admission = gate.enter().ok()?;
     let (boss, task_state, task_store) = (boss.clone(), task_state.clone(), task_store.clone());
     let message_id = *message_id;
     std::thread::Builder::new()
         .name("boss-instruction-steer".into())
         .spawn(move || {
+            let _admission = admission;
             let result = boss.with_operation_lock(|| {
                 let mut state = task_state.lock();
                 let Some(session) = state.session_mut(session_id) else {
@@ -164,6 +167,7 @@ impl WakuBackend {
         message_id: Uuid,
         prompt: &str,
     ) {
+        let Ok(admission) = self.idle_shutdown.enter() else { return; };
         if self
             .boss
             .document()
@@ -196,6 +200,7 @@ impl WakuBackend {
         let task_store = self.task_store.clone();
         let prompt = crate::model::truncate_chars(prompt, 4_000);
         let _ = std::thread::Builder::new().name("boss-instruction-capture".into()).spawn(move || {
+            let _admission = admission;
             let questions = std::collections::BTreeMap::from([("pin".into(), waku_protocol::eval::EvalQuestion::Noul {
                 instructions: "Does the human message directly impose an ongoing user obligation or restriction that must remain visible over multiple future turns or a session rotation? Consider temporary holds and instructions with release conditions. Ordinary one-off tasks, questions, quoted material, pasted code, and annotations quoting someone else's proposal are not obligations. Only propose a review candidate; never infer that its condition is already satisfied.".into(), criteria: None,
             })]);

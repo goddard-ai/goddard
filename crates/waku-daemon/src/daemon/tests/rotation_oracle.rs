@@ -22,6 +22,7 @@ fn boss_runtime(backend: &WakuBackend, session_id: Uuid, runtime_id: Uuid) -> Ar
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: backend.boss_driver_boundary(

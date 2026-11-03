@@ -358,6 +358,7 @@ impl WakuBackend {
     /// launch as BossOperation::Open. Every pass republishes the journal's
     /// lifecycle position so a delayed or paused refresh stays visible.
     pub(super) fn reconcile_boss_rotation(&self, now: u64) -> anyhow::Result<()> {
+        let _admission = self.idle_shutdown.enter()?;
         let settings = self.settings.get();
         if !settings.boss_experiment_enabled || !self.boss.is_active() {
             return Ok(());

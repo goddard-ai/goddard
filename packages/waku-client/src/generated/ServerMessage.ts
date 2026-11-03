@@ -6,7 +6,7 @@ import type { PairingState } from "./PairingState";
 import type { ResponseOutcome } from "./ResponseOutcome";
 import type { SequencedEvent } from "./SequencedEvent";
 
-export type ServerMessage = { "type": "hello", protocolVersion: number, daemonVersion: string,
+export type ServerMessage = { "type": "idleShutdown", requestId: string, fence: string | null, committed: boolean, } | { "type": "hello", protocolVersion: number, daemonVersion: string,
 /**
  * The commit the daemon binary was built from, when its build had a
  * git checkout to stamp. Dev builds surface it beside the app's own.

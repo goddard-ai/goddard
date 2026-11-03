@@ -55,6 +55,7 @@ impl WakuBackend {
         options: DriverStartOptions,
         events: EventSink,
     ) -> anyhow::Result<(DriverHandle, bool)> {
+        let _admission = self.idle_shutdown.enter()?;
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let owner = lifecycle.lock();
         let result = (|| {
@@ -432,6 +433,7 @@ impl WakuBackend {
         self.register_runtime_forwarder(
             session_id,
             RuntimeEntry {
+                _admission: Some(self.idle_shutdown.enter()?),
                 plan_gate,
                 runtime_id,
                 driver: handle.clone(),
@@ -538,6 +540,7 @@ impl WakuBackend {
         event_receiver: crossbeam_channel::Receiver<DriverEvent>,
         events: EventSink,
     ) -> anyhow::Result<std::thread::JoinHandle<()>> {
+        let _admission = self.idle_shutdown.enter()?;
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let owner = lifecycle.lock();
         let runtime_id = entry.runtime_id;
@@ -565,6 +568,7 @@ impl WakuBackend {
         drop_detached(previous);
         let name = format!("goddard-daemon-events-{session_id}");
         let forward = move || {
+            let _admission = _admission;
             forward_driver_events(
                 session_id,
                 runtime_id,

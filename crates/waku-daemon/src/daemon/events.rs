@@ -822,6 +822,7 @@ pub(super) fn forward_driver_events(
                 }
             } else if !stale {
                 let _ = super::instruction_pins::capture_boss_instruction_event(
+                    &lifecycles.admission,
                     &boss,
                     &task_state,
                     &task_store,

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { $ } from "bun";
+import { requestIdleShutdown } from "./dev-idle-shutdown";
 import { stripVTControlCharacters } from "node:util";
 import { parseCargoProgress, readBuildLines } from "./dev-build-output";
 import { DevTerminal } from "./dev-terminal";
@@ -1095,6 +1096,7 @@ function watchDaemonExit(child: ReturnType<typeof Bun.spawn>): void {
     daemon = undefined;
     runningDaemonLane = undefined;
     clearDaemonConnection();
+    if (idleActivationInFlight || daemonRestarting) return;
     console.error(`[goddard-dev] Daemon exited unexpectedly (${code}).`);
     if (Date.now() - lastDaemonSpawnAt > 30_000) {
       await restartDaemon("unexpected exit");
@@ -1260,7 +1262,7 @@ async function restartDaemon(
   reason: string,
   preserveProtocolDirty = false,
 ): Promise<boolean> {
-  if (daemonRestarting || stopping) return false;
+  if (daemonRestarting || stopping || idleActivationInFlight) return false;
   if (daemonBind === undefined) {
     if (daemonAddress === undefined) {
       // The daemon never came up — e.g. a serve run whose initial build
@@ -1314,14 +1316,76 @@ async function restartDaemon(
   }
 }
 
+let idleActivationArmed = false;
+let idleActivationInFlight = false;
+let idlePollRunning = false;
+let idleActivationGeneration = 0;
+
 function armDaemonRestartWhenIdle(): void {
-  // Load/attach snapshots cannot fence admissions from other connections or
-  // internal schedulers. Never infer permission to kill the daemon from them.
-  // Keep this command unavailable until the daemon owns a global admission
-  // fence and an all-work quiescence check through confirmed shutdown.
-  console.log(
-    "[goddard-dev] Idle daemon activation unavailable: daemon-wide admission fencing is not supported; the running daemon is preserved.",
-  );
+  if (!daemonRestartPending) {
+    console.log("[goddard-dev] No pending daemon restart.");
+    return;
+  }
+  idleActivationGeneration += 1;
+  if (idleActivationArmed) {
+    idleActivationArmed = false;
+    console.log("[goddard-dev] Idle activation cancelled if shutdown has not committed.");
+    return;
+  }
+  idleActivationArmed = true;
+  console.log("[goddard-dev] Idle activation armed; requires daemon-owned admission fencing and all-work quiescence.");
+  if (!idlePollRunning) void pollForDaemonIdle();
+}
+
+async function pollForDaemonIdle(): Promise<void> {
+  idlePollRunning = true;
+  try {
+    while (idleActivationArmed && daemonRestartPending && !stopping) {
+      const revision = daemonChangeRevision;
+      const generation = idleActivationGeneration;
+      const ready = () =>
+        idleActivationArmed && generation === idleActivationGeneration &&
+        !building && queuedBuild === undefined && debouncedBuild === undefined &&
+        !daemonRestarting && !stopping && daemonRestartPending &&
+        daemonChangeRevision === revision;
+      if (ready() && daemonAddress && daemon && daemonBind) {
+        const child = daemon;
+        idleActivationInFlight = true;
+        try {
+          const committed = await requestIdleShutdown(daemonAddress, daemonToken, ready);
+          if (committed || child.exitCode !== null) {
+            daemonRestarting = true;
+            // Conditional shutdown is the only stop authority. Never escalate
+            // to kill if shutdown is slow or its acknowledgement was lost.
+            await child.exited;
+            if (stopping) return;
+            runningDaemonLane = undefined;
+            clearDaemonConnection();
+            await spawnDaemon(daemonBind);
+            daemonRestartPending = false;
+            if (relaunchAfterBuild && !stopping) {
+              relaunchAfterBuild = false;
+              await relaunchApp();
+            }
+            console.log(committed
+              ? "[goddard-dev] Daemon activated after fenced idle shutdown."
+              : "[goddard-dev] Daemon exited during the idle attempt; replacement started after confirmed exit.");
+            return;
+          }
+        } finally {
+          daemonRestarting = false;
+          idleActivationInFlight = false;
+          void drainBuildQueue();
+        }
+      }
+      await Bun.sleep(2_000);
+    }
+  } catch (error) {
+    console.error("[goddard-dev] Idle activation failed; no forced shutdown:", error);
+  } finally {
+    idlePollRunning = false;
+    idleActivationArmed = false;
+  }
 }
 
 async function commandStdout(command: string[]): Promise<string | undefined> {
@@ -1392,7 +1456,7 @@ function printShortcuts(): void {
       ),
       shortcutLine("b", "restart the daemon, then relaunch the app"),
       shortcutLine("d", "restart the daemon now"),
-      shortcutLine("D", "explain why idle daemon activation is unavailable"),
+      shortcutLine("D", "activate once the daemon grants an idle shutdown fence"),
       shortcutLine("m", "show mobile daemon address and token"),
       shortcutLine("e", "expand build output (toggle live, replay after)"),
       shortcutLine("q", "quit the watcher, app, and daemon"),
@@ -1796,7 +1860,7 @@ function startWatchers(): void {
 }
 
 async function drainBuildQueue(): Promise<void> {
-  if (building || stopping) return;
+  if (building || stopping || idleActivationInFlight) return;
   building = true;
   try {
     while (queuedBuild !== undefined && !stopping) {
@@ -1837,12 +1901,11 @@ async function drainBuildQueue(): Promise<void> {
                 ? "; no live sessions"
                 : `; ${live} live session${live === 1 ? "" : "s"} would be interrupted`;
           console.log(
-            `[goddard-dev] Daemon rebuilt${detail} — press d + enter to restart, D + enter for idle activation status.`,
+            `[goddard-dev] Daemon rebuilt${detail} — press d + enter to restart, D + enter for fenced idle activation.`,
           );
-          // Non-interactive runs cannot press 'd'; keep the previous
-          // rebuild-and-swap behavior so the daemon never goes stale.
+          // Automatic replacement requires the same fence as uppercase D.
           if (!interactive) {
-            await restartDaemon("non-interactive rebuild");
+            if (!idleActivationArmed) armDaemonRestartWhenIdle();
           } else if (forceDaemonRestart) {
             await restartDaemon("requested");
           }
@@ -1862,14 +1925,15 @@ async function drainBuildQueue(): Promise<void> {
         continue;
       }
 
-      // Non-interactive runs have nobody to press 'a'/'b'; keep the previous
-      // rebuild-and-relaunch behavior so neither side goes stale.
       if (!interactive) {
-        if (forceDaemonRestart || protocolDirty) {
-          await restartDaemon(
-            forceDaemonRestart ? "requested" : "protocol changed",
-          );
+        if (forceDaemonRestart) {
+          await restartDaemon("requested");
           forceDaemonRestart = false;
+        } else if (protocolDirty) {
+          daemonRestartPending = true;
+          relaunchAfterBuild = true;
+          if (!idleActivationArmed) armDaemonRestartWhenIdle();
+          continue;
         }
         await relaunchApp();
         continue;

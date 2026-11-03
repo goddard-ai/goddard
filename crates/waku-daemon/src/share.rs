@@ -503,6 +503,7 @@ fn request_info(r: &PendingRequest) -> FriendRequestInfo {
 
 /// Sync facade the threaded daemon talks to.
 pub struct ShareService {
+    idle_shutdown: Mutex<Option<Arc<crate::server::idle_shutdown::IdleShutdownGate>>>,
     dir: PathBuf,
     our_name: String,
     cmd: Mutex<Option<Sender<ShareCommand>>>,
@@ -522,6 +523,7 @@ impl ShareService {
             store.display_name = our_name.clone();
         }
         Self {
+            idle_shutdown: Mutex::new(None),
             dir: dir.clone(),
             our_name,
             cmd: Mutex::new(None),
@@ -633,7 +635,20 @@ impl ShareService {
         });
     }
 
+    pub(crate) fn set_idle_shutdown_gate(
+        &self,
+        gate: Arc<crate::server::idle_shutdown::IdleShutdownGate>,
+    ) {
+        *self.idle_shutdown.lock() = Some(gate);
+    }
+
     fn ensure_started(&self) -> anyhow::Result<Sender<ShareCommand>> {
+        let admission = self
+            .idle_shutdown
+            .lock()
+            .as_ref()
+            .map(|gate| gate.enter())
+            .transpose()?;
         let mut guard = self.cmd.lock();
         if let Some(tx) = guard.as_ref() {
             return Ok(tx.clone());
@@ -647,6 +662,7 @@ impl ShareService {
         std::thread::Builder::new()
             .name("goddard-share".into())
             .spawn(move || {
+                let _admission = admission;
                 if let Err(e) = run_runtime(dir, our_name, state, sink, cmd_rx, ready_tx) {
                     eprintln!("goddard share runtime failed: {e:#}");
                 }

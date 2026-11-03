@@ -6,4 +6,4 @@ export type ClientMessage = { "type": "hello", protocolVersion: number, token: s
 /**
  * Self-reported device name shown on the approval prompt.
  */
-deviceName: string, } | { "type": "shutdown" };
+deviceName: string, } | { "type": "prepareIdleShutdown", requestId: string, } | { "type": "commitIdleShutdown", requestId: string, fence: string, } | { "type": "releaseIdleShutdown", fence: string, } | { "type": "shutdown" };

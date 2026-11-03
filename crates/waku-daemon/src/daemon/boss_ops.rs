@@ -72,6 +72,9 @@ impl WakuBackend {
     /// Evaluate whether a user prompt should carry the full work digest.
     /// Failed or unconfigured evaluations keep the always-on brief and header.
     pub(super) fn route_boss_prompt(&self, session_id: Uuid, prompt: &str) {
+        let Ok(admission) = self.idle_shutdown.enter() else {
+            return;
+        };
         let recent_prompts = self.boss.router_snapshot(session_id);
         self.boss.router_note_prompt(session_id, prompt);
         let work = self.boss_work_context();
@@ -91,6 +94,7 @@ impl WakuBackend {
         let _ = std::thread::Builder::new()
             .name("boss-context-router".into())
             .spawn(move || {
+                let _admission = admission;
                 let Ok(evaluation) = evaluate_with_feature(
                     &settings,
                     &secrets,
@@ -175,6 +179,7 @@ impl WakuBackend {
         operation: waku_protocol::boss::BossOperation,
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        let _admission = self.idle_shutdown.enter()?;
         self.handle_boss_operation_inner(caller, operation, events)
             .or_else(|error| {
                 if let Some(error) = error.downcast_ref::<waku_protocol::boss::PlanContractError>()
