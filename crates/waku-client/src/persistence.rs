@@ -6042,12 +6042,19 @@ mod tests {
             git::{CommitEntry, CreatedWorktree},
             workspace::{QaCheckout, QaConfig},
         };
+        let legacy: QaConfig =
+            serde_json::from_str(r#"{"devCommand":"bun dev","installCommand":"","branch":"dev"}"#)
+                .unwrap();
+        assert_eq!(legacy.provider, None);
+        assert_eq!(legacy.model, None);
         let project_id = Uuid::new_v4();
         let session_id = Uuid::new_v4();
         let config = QaConfig {
             dev_command: "pnpm dev".into(),
             install_command: "pnpm install --frozen-lockfile".into(),
             branch: "dev".into(),
+            provider: Some(ProviderKind::Claude),
+            model: Some("qa-test-model".into()),
         };
         let record = QaSessionRecord {
             project_id,

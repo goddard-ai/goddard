@@ -5,6 +5,8 @@ use waku_client::persistence::QaSessionRecord;
 use waku_client::workspace::{QaConfig, WorkspaceOperation, WorkspaceResult};
 
 pub(super) struct QaSetup {
+    pub(super) provider: ProviderKind,
+    pub(super) model: Option<String>,
     project_id: Uuid,
     start_after_save: bool,
     dev: Entity<TextInput>,
@@ -85,6 +87,8 @@ impl Waku {
         window.focus(&dev.read(cx).focus_handle(cx), cx);
         self.qa_setup = Some(QaSetup {
             project_id,
+            provider: self.state.last_provider,
+            model: self.state.last_model.clone(),
             start_after_save: !edit,
             dev,
             install,
@@ -122,6 +126,10 @@ impl Waku {
                 setup.pending = false;
                 match result {
                     Ok(config) => {
+                        if let Some(provider) = config.provider {
+                            setup.provider = provider;
+                            setup.model = config.model;
+                        }
                         setup
                             .dev
                             .update(cx, |input, cx| input.set_content(config.dev_command, cx));
@@ -148,6 +156,8 @@ impl Waku {
         let project = setup.project_id;
         let start = setup.start_after_save;
         let config = QaConfig {
+            provider: Some(setup.provider),
+            model: setup.model.clone(),
             dev_command: setup.dev.read(cx).content().trim().to_owned(),
             install_command: setup.install.read(cx).content().trim().to_owned(),
             branch: setup.branch.read(cx).content().trim().to_owned(),
@@ -169,7 +179,11 @@ impl Waku {
         }
     }
 
-    fn prepare_qa(&mut self, project_id: Uuid, config: QaConfig, cx: &mut Context<Self>) {
+    fn prepare_qa(&mut self, project_id: Uuid, mut config: QaConfig, cx: &mut Context<Self>) {
+        if config.provider.is_none() {
+            config.provider = Some(self.state.last_provider);
+            config.model.clone_from(&self.state.last_model);
+        }
         let Some(project) = self.state.projects.iter().find(|p| p.id == project_id) else {
             return;
         };
@@ -309,9 +323,12 @@ impl Waku {
             .iter()
             .any(|s| s.id == record.session_id);
         if is_new {
-            let mut session = self
-                .state
-                .new_session(record.project_id, self.state.last_provider);
+            let mut session = self.state.new_session(
+                record.project_id,
+                record.config.provider.unwrap_or(self.state.last_provider),
+            );
+            session.model.clone_from(&record.config.model);
+            session.auto_route = false;
             session.id = record.session_id;
             session.title = format!("QA: {}", record.checkout.commit.subject);
             session.environment = SessionEnvironment::Local;
@@ -633,6 +650,85 @@ impl Waku {
                 .child(div().w(px(180.0)).text_size(sp(13.0)).child(label))
                 .child(TextField::new(id, input).flex_1())
         };
+        let model_handle = {
+            let weak = cx.entity().downgrade();
+            let search = self.model_picker.search.clone();
+            let search_focus = self.model_picker.search.read(cx).focus_handle(cx);
+            let empty_focus = self.model_picker.empty_focus.clone();
+            self.menu_handle_with("qa-model-picker", cx, move |open, window, cx| {
+                let mut empty = false;
+                let _ = weak.update(cx, |this, cx| {
+                    if open {
+                        this.model_picker_target = model_picker::ModelPickerTarget::QaSetup;
+                        empty = this.model_picker_has_no_providers();
+                        for kind in ProviderKind::ALL {
+                            if model_picker::picker_lists_provider(
+                                Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
+                                &this.state.disabled_providers,
+                                None,
+                                this.daemon.is_remote(),
+                                kind,
+                            ) {
+                                this.refresh_provider_model_discovery(kind);
+                            }
+                        }
+                        this.model_picker.highlight = None;
+                        search.update(cx, |search, cx| search.clear(cx));
+                        this.reveal_selected_picker_model(cx);
+                    } else {
+                        this.model_picker_target = model_picker::ModelPickerTarget::Composer;
+                        // Same rule as the composer picker: parked
+                        // unstars hold their slot only while open.
+                        this.pinned_unfavorites.clear();
+                        if let Some(editor) = this.qa_setup.as_ref() {
+                            let focus = editor.dev.read(cx).focus_handle(cx);
+                            window.focus(&focus, cx);
+                        }
+                    }
+                    cx.notify();
+                });
+                if open {
+                    // Same two-frame wait the composer picker needs: the
+                    // deferred panel's input only joins the dispatch tree
+                    // after its first draw.
+                    let picker_focus = if empty {
+                        empty_focus.clone()
+                    } else {
+                        search_focus.clone()
+                    };
+                    let reveal_weak = weak.clone();
+                    window.on_next_frame(move |window, _| {
+                        window.on_next_frame(move |window, cx| {
+                            window.focus(&picker_focus, cx);
+                            let _ = reveal_weak.update(cx, |this, cx| {
+                                this.reveal_selected_picker_model(cx);
+                            });
+                        });
+                    });
+                }
+            })
+        };
+        let model_label = format!(
+            "{} · {}",
+            setup.provider.display_name(),
+            self.model_display_name(setup.provider, setup.model.as_deref())
+        );
+        let entity = cx.entity();
+        let model_menu = popover(
+            MenuChip::new("qa-model")
+                .label(model_label)
+                .outlined()
+                .background(theme.raised)
+                .selected(model_handle.is_open()),
+            &model_handle,
+            MenuAlign::BelowRight,
+            move |popover, _window, cx| {
+                let weak = entity.downgrade();
+                entity.read_with(cx, move |this, cx| {
+                    this.render_model_picker_panel(&weak, popover, cx)
+                })
+            },
+        );
         Some(
             div()
                 .absolute()
@@ -683,7 +779,8 @@ impl Waku {
                                     tr!("qa.install_optional"),
                                     setup.install.clone(),
                                 ))
-                                .child(field("qa-branch", tr!("qa.branch"), setup.branch.clone())),
+                                .child(field("qa-branch", tr!("qa.branch"), setup.branch.clone()))
+                                .child(model_menu),
                         )
                         .children(setup.error.as_ref().map(|error| {
                             div()

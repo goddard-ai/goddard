@@ -2128,7 +2128,7 @@ impl Waku {
                 .model_picker_session()
                 .filter(|session| session.provider_locked() && !session.detail_loaded)
                 .map(|session| session.provider),
-            ModelPickerTarget::AutomationEditor => None,
+            ModelPickerTarget::AutomationEditor | ModelPickerTarget::QaSetup => None,
         }
     }
 
@@ -2144,6 +2144,13 @@ impl Waku {
                     self.session_model_combo(session)
                         .map(|(model, effort, fast)| (session.provider, model, effort, fast))
                 })
+            }
+            ModelPickerTarget::QaSetup => {
+                let setup = self.qa_setup.as_ref()?;
+                setup
+                    .model
+                    .clone()
+                    .map(|model| (setup.provider, model, None, false))
             }
             ModelPickerTarget::AutomationEditor => {
                 let editor = self.automations_editor.as_ref()?;
@@ -2168,7 +2175,9 @@ impl Waku {
             ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_) => {
                 PickerGranularity::Combos
             }
-            ModelPickerTarget::AutomationEditor => PickerGranularity::Models,
+            ModelPickerTarget::AutomationEditor | ModelPickerTarget::QaSetup => {
+                PickerGranularity::Models
+            }
         }
     }
 
@@ -5795,7 +5804,7 @@ impl Waku {
                 .sessions
                 .iter()
                 .find(|session| session.id == session_id),
-            ModelPickerTarget::AutomationEditor => None,
+            ModelPickerTarget::AutomationEditor | ModelPickerTarget::QaSetup => None,
         }
     }
 
@@ -5804,7 +5813,7 @@ impl Waku {
         let session_id = match self.model_picker_target {
             ModelPickerTarget::Composer => return self.composer_session_mut(),
             ModelPickerTarget::SideChat(session_id) => session_id,
-            ModelPickerTarget::AutomationEditor => return None,
+            ModelPickerTarget::AutomationEditor | ModelPickerTarget::QaSetup => return None,
         };
         self.state.session_mut(session_id)
     }

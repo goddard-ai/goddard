@@ -75,6 +75,7 @@ pub fn defaults(cwd: &Path, preferred: &str) -> anyhow::Result<QaConfig> {
         } else {
             String::new()
         },
+        ..Default::default()
     })
 }
 

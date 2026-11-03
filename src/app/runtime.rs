@@ -5081,7 +5081,8 @@ impl Waku {
                 .find(|session| session.id == session_id)
                 .filter(|session| session.provider_locked())
                 .map(|session| session.provider),
-            model_picker::ModelPickerTarget::AutomationEditor => None,
+            model_picker::ModelPickerTarget::AutomationEditor
+            | model_picker::ModelPickerTarget::QaSetup => None,
         };
         let key = self.model_picker_daemon_key();
         super::model_picker::picker_has_no_providers(

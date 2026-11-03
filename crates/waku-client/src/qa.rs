@@ -47,6 +47,7 @@ mod tests {
             install_command: "printf 'installed\\n'".into(),
             dev_command: "printf '%s\\n' \"server's ready\"".into(),
             branch: "dev".into(),
+            ..Default::default()
         };
         let run = |config: &QaConfig| {
             let command = server_command(config);

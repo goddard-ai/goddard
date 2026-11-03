@@ -479,6 +479,7 @@ pub(super) enum ModelPickerTarget {
     Composer,
     SideChat(Uuid),
     AutomationEditor,
+    QaSetup,
 }
 
 /// The query after a provider rail click. The provider's token replaces any

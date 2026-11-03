@@ -20,6 +20,11 @@ pub struct QaConfig {
     pub dev_command: String,
     pub install_command: String,
     pub branch: String,
+    /// None inherits the main window's last-used provider and model at start.
+    #[serde(default)]
+    pub provider: Option<crate::model::ProviderKind>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// Immutable identity of the checkout the human is testing.

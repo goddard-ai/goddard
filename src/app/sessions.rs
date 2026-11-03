@@ -5743,6 +5743,14 @@ impl Waku {
         fast: bool,
         cx: &mut Context<Self>,
     ) {
+        if self.model_picker_target == model_picker::ModelPickerTarget::QaSetup {
+            if let Some(setup) = self.qa_setup.as_mut() {
+                setup.provider = provider;
+                setup.model = Some(model);
+                cx.notify();
+            }
+            return;
+        }
         if self.model_picker_target == model_picker::ModelPickerTarget::AutomationEditor {
             // The editor stores a bare provider/model pair — effort and tier
             // rows don't exist at its granularity.
@@ -5923,6 +5931,15 @@ impl Waku {
             return;
         }
         if self.settings_page.is_some() {
+            return;
+        }
+        if self.qa_setup.is_some() {
+            self.defer_menu_toggle(
+                "qa-model-picker",
+                crate::ui::menu::toggle_popover,
+                window,
+                cx,
+            );
             return;
         }
         if self.automations_editor.is_some() {
