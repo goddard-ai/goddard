@@ -4020,11 +4020,21 @@ impl Waku {
         {
             return;
         }
-        let Some(runtime) = self.runtimes.get(&session_id) else {
-            self.show_toast(tr!("errors.daemon_disconnected"));
-            return;
-        };
-        runtime.driver.compact();
+        if let Some(runtime) = self.runtimes.get(&session_id) {
+            runtime.driver.compact();
+        } else {
+            let operations = self
+                .pending_runtime_operations
+                .entry(session_id)
+                .or_default();
+            if !operations
+                .iter()
+                .any(|operation| matches!(operation, runtime::PendingRuntimeOperation::Compact))
+            {
+                operations.push(runtime::PendingRuntimeOperation::Compact);
+            }
+            self.start_control_runtime(session_id, cx);
+        }
         cx.notify();
     }
 

@@ -1,5 +1,10 @@
 use super::*;
 
+pub(super) enum PendingRuntimeOperation {
+    Goal(crate::model::GoalOperation),
+    Compact,
+}
+
 /// Consecutive automatic resumptions one session gets across daemon
 /// restarts. The count clears when a turn completes, so a daemon that keeps
 /// dying on the resumed prompt is what stops the loop — not steady work.
@@ -4381,7 +4386,7 @@ impl Waku {
         if !eligible
             || self.runtime_attach_pending.contains(&session_id)
             || self.submission_preparations.contains(&session_id)
-            || self.goal_runtime_starts.contains(&session_id)
+            || self.control_runtime_starts.contains(&session_id)
             || self.worktree_move_pending.contains(&session_id)
             || self.response_fork_preparations.contains_key(&session_id)
         {
@@ -6520,19 +6525,47 @@ impl Waku {
         })
     }
 
-    /// Start the session's provider runtime for a goal operation, without a
+    /// Flush operations accepted before the runtime existed. Called after
+    /// any runtime install so controls land on the thread that was started
+    /// for them, including when a submission starts it.
+    pub(super) fn drain_pending_runtime_operations(&mut self, session_id: Uuid) {
+        let Some(operations) = self.pending_runtime_operations.remove(&session_id) else {
+            return;
+        };
+        if let Some(runtime) = self.runtimes.get(&session_id) {
+            for operation in operations {
+                match operation {
+                    runtime::PendingRuntimeOperation::Goal(operation) => {
+                        runtime.driver.goal(operation)
+                    }
+                    runtime::PendingRuntimeOperation::Compact => {
+                        if self
+                            .state
+                            .sessions
+                            .iter()
+                            .any(|session| session.id == session_id && !session.is_busy())
+                        {
+                            runtime.driver.compact();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Start the session's provider runtime for a thread control, without a
     /// prompt or a turn. Goals live on the provider thread itself, so this
     /// mirrors the Codex CLI, whose thread starts at launch: prepare the
-    /// workspace, spawn the provider, and let the queued goal operations
+    /// workspace, spawn the provider, and let the queued controls
     /// drain once the runtime installs. The session stays `Idle` throughout —
     /// no turn begins and nothing lands in the transcript.
-    pub(super) fn start_goal_runtime(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn start_control_runtime(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.runtimes.contains_key(&session_id)
-            || self.goal_runtime_starts.contains(&session_id)
+            || self.control_runtime_starts.contains(&session_id)
             || self.submission_preparations.contains(&session_id)
         {
             // An installed or installing runtime picks the queue up when the
-            // install path drains pending goal operations.
+            // install path drains pending controls.
             return;
         }
         let Some(session) = self
@@ -6541,7 +6574,7 @@ impl Waku {
             .iter()
             .find(|session| session.id == session_id)
         else {
-            self.pending_goal_operations.remove(&session_id);
+            self.pending_runtime_operations.remove(&session_id);
             return;
         };
         let project_id = session.project_id;
@@ -6560,17 +6593,18 @@ impl Waku {
             .or_else(|| self.boss_ui.projects.get(&project_id))
             .cloned()
         else {
-            self.pending_goal_operations.remove(&session_id);
+            self.pending_runtime_operations.remove(&session_id);
             self.show_toast(tr!("errors.prepare_task_project_not_found"));
             cx.notify();
             return;
         };
         let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
+            self.pending_runtime_operations.remove(&session_id);
             self.show_toast(tr!("errors.daemon_disconnected"));
             cx.notify();
             return;
         };
-        self.goal_runtime_starts.insert(session_id);
+        self.control_runtime_starts.insert(session_id);
         cx.notify();
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
@@ -6595,28 +6629,28 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_goal_runtime_start(session_id, prepared, cx);
+                waku.finish_control_runtime_start(session_id, prepared, cx);
             });
         })
         .detach();
     }
 
-    fn finish_goal_runtime_start(
+    fn finish_control_runtime_start(
         &mut self,
         session_id: Uuid,
         prepared: anyhow::Result<PreparedSubmission>,
         cx: &mut Context<Self>,
     ) {
-        if !self.goal_runtime_starts.remove(&session_id) {
+        if !self.control_runtime_starts.remove(&session_id) {
             return;
         }
         let prepared = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
-                // The goal is lost but nothing else is: messages queued
+                // The control is lost but nothing else is: messages queued
                 // behind this start resubmit through the ordinary path,
                 // which starts its own runtime.
-                self.pending_goal_operations.remove(&session_id);
+                self.pending_runtime_operations.remove(&session_id);
                 self.unwind_unconfirmed_pursuit_turn(session_id);
                 self.show_toast(error.to_string());
                 self.drain_queued_message(session_id, cx);
@@ -6640,7 +6674,7 @@ impl Waku {
             .any(|session| session.id == session_id)
         {
             // The task was removed while its provider was starting.
-            self.pending_goal_operations.remove(&session_id);
+            self.pending_runtime_operations.remove(&session_id);
             if let Some(Ok(prepared)) = driver {
                 prepared.handle.close();
             }
@@ -6664,17 +6698,17 @@ impl Waku {
             Some(Ok(prepared)) => {
                 if self.runtimes.contains_key(&session_id) {
                     // Another path installed a runtime meanwhile; that thread
-                    // is the session's, so the goal routes there instead.
+                    // is the session's, so the control routes there instead.
                     prepared.handle.close();
-                    self.drain_pending_goal_operations(session_id);
+                    self.drain_pending_runtime_operations(session_id);
                 } else {
                     // Install drains the pending operations itself.
                     self.install_prepared_driver(session_id, prepared);
                 }
             }
-            None => self.drain_pending_goal_operations(session_id),
+            None => self.drain_pending_runtime_operations(session_id),
             Some(Err(error)) => {
-                self.pending_goal_operations.remove(&session_id);
+                self.pending_runtime_operations.remove(&session_id);
                 self.unwind_unconfirmed_pursuit_turn(session_id);
                 self.show_toast(error.to_string());
                 self.drain_queued_message(session_id, cx);
@@ -6737,10 +6771,10 @@ impl Waku {
         // the runtime map. Wake once after installation so those buffered
         // events cannot be stranded behind an already-consumed edge.
         signal_event_pump(&self.event_wake_tx);
-        // Goal operations accepted while no runtime existed ride the first
+        // Controls accepted while no runtime existed ride the first
         // install, whichever path performed it. The driver applies them once
         // its thread opens, before any queued prompt.
-        self.drain_pending_goal_operations(session_id);
+        self.drain_pending_runtime_operations(session_id);
         handle
     }
 
@@ -7755,9 +7789,9 @@ impl Waku {
         if session.is_busy()
             || session.queued_messages.is_empty()
             || self.ending_checkpoint_pending(session_id)
-            // Messages parked behind a goal-initiated provider start stay
+            // Messages parked behind a control-initiated provider start stay
             // queued until that runtime installs.
-            || self.goal_runtime_starts.contains(&session_id)
+            || self.control_runtime_starts.contains(&session_id)
             // Messages submitted while the session moved into a worktree
             // wait for the rebind, then start in the new directory.
             || self.worktree_move_pending.contains(&session_id)
@@ -7922,10 +7956,10 @@ impl Waku {
             self.defer_queue_drain(session_id);
             return;
         }
-        // A goal operation is already starting this session's provider.
-        // Queue the message so it lands on that thread — after the goal —
+        // A thread control is already starting this session's provider.
+        // Queue the message so it lands on that thread — after the control —
         // instead of racing a second provider process into existence.
-        if self.goal_runtime_starts.contains(&session_id) {
+        if self.control_runtime_starts.contains(&session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
             return;

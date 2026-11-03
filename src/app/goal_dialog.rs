@@ -193,11 +193,11 @@ impl Waku {
             runtime.driver.goal(operation);
             return;
         }
-        self.pending_goal_operations
+        self.pending_runtime_operations
             .entry(session_id)
             .or_default()
-            .push(operation);
-        self.start_goal_runtime(session_id, cx);
+            .push(runtime::PendingRuntimeOperation::Goal(operation));
+        self.start_control_runtime(session_id, cx);
     }
 
     fn dispatch_managed_goal_operation(
@@ -590,20 +590,6 @@ impl Waku {
             session.status = SessionStatus::Idle;
         }
         self.state.mark_session_dirty(session_id);
-    }
-
-    /// Flush operations accepted before the runtime existed. Called after
-    /// any runtime install so the goal lands on the thread that was started
-    /// for it — whether the goal path or a racing submission started it.
-    pub(super) fn drain_pending_goal_operations(&mut self, session_id: Uuid) {
-        let Some(operations) = self.pending_goal_operations.remove(&session_id) else {
-            return;
-        };
-        if let Some(runtime) = self.runtimes.get(&session_id) {
-            for operation in operations {
-                runtime.driver.goal(operation);
-            }
-        }
     }
 
     fn confirm_goal_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {

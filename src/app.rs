@@ -3133,14 +3133,15 @@ pub struct Waku {
     /// Window-modal note composer for Settings → Friends file sends, opened
     /// once the file picker returns a path.
     send_file_dialog: Option<send_file_dialog::SendFileDialogState>,
-    /// Goal operations accepted before the session's runtime exists. Goals
+    /// Thread controls accepted before the session's runtime exists. Goals
     /// attach to the provider thread, not to any turn, so `/goal` on a fresh
-    /// task starts the provider and these drain once it installs.
-    pending_goal_operations: HashMap<Uuid, Vec<crate::model::GoalOperation>>,
-    /// Sessions whose runtime is being started by a goal operation rather
+    /// task starts the provider and these drain once it installs. Compact
+    /// resumes an existing thread through the same path.
+    pending_runtime_operations: HashMap<Uuid, Vec<runtime::PendingRuntimeOperation>>,
+    /// Sessions whose runtime is being started by a thread control rather
     /// than a submission. Submissions queue behind this instead of racing a
     /// second provider process into existence.
-    goal_runtime_starts: HashSet<Uuid>,
+    control_runtime_starts: HashSet<Uuid>,
     /// When each session's goal accounting was last reported. The chip adds
     /// the wall clock since then while an active goal's turn runs, so elapsed
     /// pursuit time ticks live the way the Codex CLI shows it.
@@ -7635,8 +7636,8 @@ impl Waku {
                 goal_dialog: None,
                 goal_dialog_request: None,
                 send_file_dialog: None,
-                pending_goal_operations: HashMap::new(),
-                goal_runtime_starts: HashSet::new(),
+                pending_runtime_operations: HashMap::new(),
+                control_runtime_starts: HashSet::new(),
                 goal_observed_at: HashMap::new(),
                 commit_operation: None,
                 // Providers × workspaces; both scans are small, the cache

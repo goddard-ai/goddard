@@ -1,0 +1,1 @@
+- Fixed `/compact` showing a daemon disconnected error when a restored session needs to reopen its provider thread.

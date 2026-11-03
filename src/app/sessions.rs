@@ -2631,8 +2631,8 @@ impl Waku {
         let was_selected = self.state.selected_session == Some(session_id);
         self.submission_preparations.remove(&session_id);
         self.submission_stages.remove(&session_id);
-        self.goal_runtime_starts.remove(&session_id);
-        self.pending_goal_operations.remove(&session_id);
+        self.control_runtime_starts.remove(&session_id);
+        self.pending_runtime_operations.remove(&session_id);
         self.goal_observed_at.remove(&session_id);
         self.state.unseen_completions.remove(&session_id);
         self.drop_session_briefing(session_id);
@@ -5565,7 +5565,7 @@ impl Waku {
         pinned.extend(self.cancel_drains.keys().copied());
         pinned.extend(self.response_fork_preparations.keys().copied());
         pinned.extend(self.provider_switch_in_flight.iter().copied());
-        pinned.extend(self.goal_runtime_starts.iter().copied());
+        pinned.extend(self.control_runtime_starts.iter().copied());
         pinned.extend(self.worktree_move_pending.iter().copied());
         let released = self
             .state
@@ -6919,7 +6919,7 @@ impl Waku {
     fn abandon_submission_preparation(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         // Goal operations accepted during preparation would otherwise start
         // pursuing the moment a runtime installs; the user stopped the task.
-        self.pending_goal_operations.remove(&session_id);
+        self.pending_runtime_operations.remove(&session_id);
         self.submission_stages.remove(&session_id);
         let selected = self.state.selected_session == Some(session_id);
         if selected {
@@ -6976,7 +6976,7 @@ impl Waku {
         runtime: Option<&mut SessionRuntime>,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.pending_goal_operations.remove(&session_id);
+        self.pending_runtime_operations.remove(&session_id);
         self.pending_queue_drains.retain(|id| *id != session_id);
         let has_active_turn = self
             .state
@@ -7090,7 +7090,7 @@ impl Waku {
         // Goal operations queued behind a starting runtime would set the
         // objective after this stop and begin pursuing it; the user asked to
         // stop, so they leave with the turn.
-        self.pending_goal_operations.remove(&session_id);
+        self.pending_runtime_operations.remove(&session_id);
         // The registry marks this turn's work Stopped below, but a retained
         // runtime keeps provider-side work running unless it is told. Stop
         // each stoppable foreground item while the driver is still attached;
