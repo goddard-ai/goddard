@@ -41,6 +41,14 @@ pub enum ChainObservation {
     },
 }
 
+/// Host-verified descendant repair source, bound to the sealed attempt and old base.
+/// This is deliberately absent from employee-supplied wire evidence.
+pub struct RetryVerification {
+    pub attempt_id: Uuid,
+    pub previous_revision: String,
+    pub source_revision: String,
+}
+
 /// Facts the host checked under the successor's existing grants. Missing facts
 /// pause; these fields are not employee assertions and never widen access.
 #[derive(Default)]
@@ -434,6 +442,17 @@ impl BossService {
         bindings: Option<&[Uuid]>,
         resume: Option<(Uuid, u64, HandoffVerification)>,
     ) -> Result<EmployeeChain> {
+        self.chain_operation_with_retry_preflight(caller, action, bindings, resume, None)
+    }
+
+    pub fn chain_operation_with_retry_preflight(
+        &self,
+        caller: Option<Uuid>,
+        action: ChainOperation,
+        bindings: Option<&[Uuid]>,
+        resume: Option<(Uuid, u64, HandoffVerification)>,
+        retry: Option<RetryVerification>,
+    ) -> Result<EmployeeChain> {
         let owner = caller.is_none_or(|caller| self.has_boss_authority(caller));
         if !owner {
             ensure!(
@@ -748,6 +767,14 @@ impl BossService {
                                 && previous.starting_revision.is_none();
                             ensure!(
                                 effect_free
+                                    || retry.as_ref().is_some_and(|verified| {
+                                        verified.attempt_id == previous.id
+                                            && previous.reconciled_retry_revision.as_ref()
+                                                == Some(&verified.previous_revision)
+                                            && verified.source_revision == revision
+                                            && step.definition.boundary == HandoffBoundary::CommittedWorkspace
+                                            && step.definition.workspace == AgentWorkspace::Worktree
+                                    })
                                     || previous.reconciled_retry_revision.as_ref()
                                         == Some(&revision),
                                 "uncertain prior effects must be reconciled before retry; recorded retry base is {}",
@@ -756,6 +783,10 @@ impl BossService {
                                     .as_deref()
                                     .unwrap_or("none")
                             );
+                            if retry.is_some() {
+                                step.attempts.last_mut().unwrap().reconciled_retry_revision =
+                                    Some(revision.clone());
+                            }
                             let mut attempt = new_attempt(chain.definition_version);
                             attempt.starting_revision = Some(revision);
                             step.attempts.push(attempt);

@@ -371,7 +371,17 @@ impl WakuBackend {
                         project_bindings = steps.iter().map(|step| step.project_id).collect();
                     }
                     let is_result = matches!(action, ChainOperation::RecordResult { .. });
-                    self.boss.chain_operation_with_preflight(caller, action, Some(&project_bindings), resume)?;
+                    let retry = if let ChainOperation::Control {
+                        chain_id, expected_revision, control: ChainControl::Retry,
+                        source_revision: Some(waku_protocol::chains::ChainBaseSource::Bare(revision)),
+                    } = &action {
+                        let document = self.boss.document();
+                        let chain = document.chains.iter().find(|chain| chain.id == *chain_id)
+                            .ok_or_else(|| anyhow!("unknown chain"))?;
+                        anyhow::ensure!(chain.revision == *expected_revision, "stale chain revision");
+                        self.chain_retry_verification(*chain_id, revision)?
+                    } else { None };
+                    self.boss.chain_operation_with_retry_preflight(caller, action, Some(&project_bindings), resume, retry)?;
                     if is_result {
                         Ok(BossResult::Saved)
                     } else {

@@ -1,0 +1,1 @@
+- Dependency chains can retry from verified committed repairs in their original workspace while preserving ownership and recovery checks.

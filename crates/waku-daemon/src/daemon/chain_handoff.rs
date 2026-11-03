@@ -1000,6 +1000,102 @@ impl WakuBackend {
         resolve_base_source(&project.path, source, landed.as_deref()).map(Some)
     }
 
+    /// Reconcile only committed descendant repairs in the original released workspace.
+    /// The operation guard fences chain controls; admission repeats workspace ownership
+    /// and ancestry checks before any provider execution.
+    pub(crate) fn chain_retry_verification(
+        &self,
+        chain_id: Uuid,
+        revision: &str,
+    ) -> anyhow::Result<Option<waku_boss::chains::RetryVerification>> {
+        let document = self.boss.document();
+        let chain = chain(&document, chain_id)?;
+        let step = &chain.steps[chain.current_step];
+        let attempt = step
+            .attempts
+            .last()
+            .ok_or_else(|| anyhow!("no retry attempt"))?;
+        if (attempt.employee_id.is_none()
+            && attempt.workspace.is_none()
+            && attempt.starting_revision.is_none())
+            || attempt.reconciled_retry_revision.as_deref() == Some(revision)
+        {
+            return Ok(None);
+        }
+        ensure!(
+            chain.status == ChainStatus::Paused
+                && step.definition.boundary == HandoffBoundary::CommittedWorkspace
+                && step.definition.workspace == AgentWorkspace::Worktree,
+            "repair reconciliation requires a paused committed-workspace step"
+        );
+        ensure!(
+            attempt.execution_released
+                && attempt.workspace_released
+                && attempt
+                    .sealed
+                    .as_ref()
+                    .is_some_and(|handoff| !handoff.accepted),
+            "repair reconciliation requires sealed released unsuccessful effects"
+        );
+        let base = attempt
+            .reconciled_retry_revision
+            .as_ref()
+            .ok_or_else(|| anyhow!("prior effects have no reconciled source"))?;
+        let original = step
+            .attempts
+            .iter()
+            .find_map(|entry| entry.workspace.as_ref())
+            .ok_or_else(|| anyhow!("original retry workspace is missing"))?;
+        let workspace = dunce::canonicalize(original)?;
+        ensure!(
+            attempt
+                .workspace
+                .as_ref()
+                .is_some_and(|path| dunce::canonicalize(path).is_ok_and(|path| path == workspace)),
+            "retry attempt left the original workspace"
+        );
+        let state = self.task_state.lock();
+        let project = state
+            .projects
+            .iter()
+            .find(|project| project.id == step.definition.project_id)
+            .ok_or_else(|| anyhow!("retry project unavailable"))?;
+        ensure!(
+            project.submissions_enabled
+                && crate::worktree::is_worktree_of(&project.path, &workspace),
+            "retry workspace is not managed by the accepted project"
+        );
+        let owner = unadopted_owner(&state, &workspace)
+            .ok_or_else(|| anyhow!("original retry workspace ownership changed"))?;
+        ensure!(
+            step.attempts
+                .iter()
+                .any(|entry| entry.employee_id == Some(owner)
+                    && entry.execution_released
+                    && entry.workspace_released
+                    && entry.workspace.as_ref().is_some_and(
+                        |path| dunce::canonicalize(path).is_ok_and(|path| path == workspace)
+                    )),
+            "original retry workspace ownership changed"
+        );
+        drop(state);
+        crate::agent_merge::no_operation(&workspace)?;
+        crate::agent_merge::clean_status(&workspace, "all", "repair reconciliation")?;
+        ensure!(
+            git_revision(&workspace, "HEAD")? == revision,
+            "repaired source must equal original workspace HEAD"
+        );
+        ensure!(
+            crate::agent_merge::is_ancestor(&workspace, base, revision)?,
+            "repair source must descend from reconciled effects"
+        );
+        Ok(Some(waku_boss::chains::RetryVerification {
+            attempt_id: attempt.id,
+            previous_revision: base.clone(),
+            source_revision: revision.to_owned(),
+        }))
+    }
+
     /// A retry control's source resolved to a commit id — the same
     /// grammar as a step's declared base. Refs resolve against the
     /// retried step's project now; the durable attempt record only ever
@@ -1613,6 +1709,164 @@ mod tests {
                 && brief.contains(&format!("commit:{bogus}")),
             "brief: {brief}"
         );
+    }
+
+    #[test]
+    fn explicit_retry_reconciles_only_clean_original_descendant_repairs() {
+        let fixture = Fixture::new();
+        let base = git(&fixture.repo, &["rev-parse", "HEAD"]);
+        let workspace = fixture.managed_worktree(&base);
+        let chain = fixture.create(vec![
+            fixture.step(HandoffBoundary::CommittedWorkspace),
+            fixture.step(HandoffBoundary::Landed),
+        ]);
+        let mut result = success_result();
+        result.disposition = ResultDisposition::Failed;
+        let chain = fixture.finish_attempt(&chain, &workspace, result);
+        let employee = chain.steps[0].attempts[0].employee_id.unwrap();
+        fixture
+            .backend
+            .task_state
+            .lock()
+            .sessions
+            .iter_mut()
+            .find(|s| s.workspace.path() == Some(workspace.as_path()))
+            .unwrap()
+            .id = employee;
+        let chain = fixture.seal(&chain);
+        fixture.observe(
+            &chain,
+            ChainObservation::EffectsReconciled {
+                source_revision: base.clone(),
+            },
+        );
+        let chain = fixture.show(chain.id);
+        let repaired = fixture.commit(&workspace, "repair.txt", "repair");
+        let action = || ChainOperation::Control {
+            chain_id: chain.id,
+            expected_revision: chain.revision,
+            control: ChainControl::Retry,
+            source_revision: Some(ChainBaseSource::Bare(repaired.clone())),
+        };
+        // The reducer alone still rejects unverified effects.
+        assert!(
+            fixture
+                .backend
+                .boss
+                .chain_operation(None, action())
+                .is_err()
+        );
+        fs::write(workspace.join("dirty.txt"), "dirty").unwrap();
+        assert!(
+            fixture
+                .backend
+                .chain_retry_verification(chain.id, &repaired)
+                .is_err()
+        );
+        fs::remove_file(workspace.join("dirty.txt")).unwrap();
+        assert!(
+            fixture
+                .backend
+                .chain_retry_verification(chain.id, &base)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            fixture
+                .backend
+                .chain_retry_verification(chain.id, &"0".repeat(40))
+                .is_err()
+        );
+        git(&workspace, &["checkout", "--orphan", "unrelated"]);
+        git(&workspace, &["commit", "--allow-empty", "-m", "unrelated root"]);
+        let unrelated = git(&workspace, &["rev-parse", "HEAD"]);
+        assert!(
+            fixture.backend.chain_retry_verification(chain.id, &unrelated)
+                .err().unwrap().to_string().contains("descend")
+        );
+        git(&workspace, &["checkout", "--detach", &repaired]);
+        let proof = fixture
+            .backend
+            .chain_retry_verification(chain.id, &repaired)
+            .unwrap()
+            .unwrap();
+        // Changed ownership invalidates verification before control is admitted.
+        fixture
+            .backend
+            .task_state
+            .lock()
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == employee)
+            .unwrap()
+            .id = Uuid::new_v4();
+        assert!(
+            fixture
+                .backend
+                .chain_retry_verification(chain.id, &repaired)
+                .is_err()
+        );
+        fixture
+            .backend
+            .task_state
+            .lock()
+            .sessions
+            .iter_mut()
+            .find(|s| s.workspace.path() == Some(workspace.as_path()))
+            .unwrap()
+            .id = employee;
+        // A stale control cannot consume a previously valid proof.
+        let mut stale = action();
+        if let ChainOperation::Control {
+            expected_revision, ..
+        } = &mut stale
+        {
+            *expected_revision -= 1;
+        }
+        assert!(
+            fixture
+                .backend
+                .boss
+                .chain_operation_with_retry_preflight(None, stale, None, None, Some(proof))
+                .is_err()
+        );
+        fixture
+            .backend
+            .handle_boss_operation(
+                None,
+                waku_protocol::boss::BossOperation::Chain { action: action() },
+                &crate::EventSink::detached(),
+            )
+            .unwrap();
+        let retried = fixture.show(chain.id);
+        assert_eq!(retried.steps[0].attempts.len(), 2);
+        assert_eq!(
+            retried.steps[0].attempts[0]
+                .reconciled_retry_revision
+                .as_deref(),
+            Some(repaired.as_str())
+        );
+        assert_eq!(
+            retried.steps[0].attempts[1].starting_revision.as_deref(),
+            Some(repaired.as_str())
+        );
+        assert!(
+            fixture
+                .backend
+                .handle_boss_operation(
+                    None,
+                    waku_protocol::boss::BossOperation::Chain { action: action() },
+                    &crate::EventSink::detached()
+                )
+                .is_err()
+        );
+        assert_eq!(fixture.show(chain.id).steps[0].attempts.len(), 2);
+        let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
+        assert_eq!(
+            inputs.adopt_worktree,
+            Some(dunce::canonicalize(&workspace).unwrap())
+        );
+        assert_eq!(inputs.expected_starting_revision, Some(repaired));
     }
 
     #[test]
