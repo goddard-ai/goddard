@@ -1,0 +1,1 @@
+- Boss now stores coordination records transactionally in the task database, retaining existing JSON files as migration backups and avoiding full-file rewrites for small updates.

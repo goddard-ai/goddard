@@ -12,7 +12,7 @@
  * fetched only when a session is opened.
  */
 
-import { blob, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { blob, index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /** Independent of transcript saves: design regeneration never replaces discussion. */
 export const wireframeDiscussions = sqliteTable("wireframe_discussions", {
@@ -230,4 +230,31 @@ export const stableRuntimeReceipts = sqliteTable("stable_runtime_receipts", {
   /** JSON outcome recorded for the request before delivery was confirmed. */
   outcome: text("outcome").notNull(),
   recordedAt: integer("recorded_at").notNull(),
+});
+
+/** One committed Boss coordinator projection; collection members live in boss_records. */
+export const bossCoordinator = sqliteTable("boss_coordinator", {
+  id: integer("id").primaryKey(),
+  schemaVersion: integer("schema_version").notNull(),
+  revision: integer("revision").notNull(),
+  data: text("data").notNull(),
+});
+
+/** One Boss entity or history entry. Parent identities survive removal of session history. */
+export const bossRecords = sqliteTable("boss_records", {
+  collection: text("collection").notNull(),
+  parentId: text("parent_id").notNull(),
+  id: text("id").notNull(),
+  position: integer("position").notNull(),
+  lifecycle: text("lifecycle"),
+  data: text("data").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.collection, table.parentId, table.id] }),
+  index("boss_records_lifecycle").on(table.collection, table.lifecycle),
+]);
+
+/** Immutable content addressed request, definition and approval payloads. */
+export const bossPayloads = sqliteTable("boss_payloads", {
+  digest: text("digest").primaryKey(),
+  data: text("data").notNull(),
 });

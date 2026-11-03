@@ -3,6 +3,8 @@
 #[path = "plan_contract.rs"]
 mod plan_contract;
 
+#[path = "sqlite_storage.rs"]
+mod sqlite_storage;
 #[path = "state_storage.rs"]
 mod state_storage;
 
@@ -447,11 +449,20 @@ impl BossService {
     /// A process-local empty service used when the Boss experiment is off.
     /// It deliberately does not inspect or create the Boss data directory.
     pub fn disabled(root: PathBuf) -> Self {
+        Self::disabled_with_storage(root, Default::default())
+    }
+
+    /// A disabled coordinator that imports legacy data into the task database on activation.
+    pub fn disabled_database(root: PathBuf, database: PathBuf) -> Self {
+        Self::disabled_with_storage(root, state_storage::StateStorage::database(database))
+    }
+
+    fn disabled_with_storage(root: PathBuf, storage: state_storage::StateStorage) -> Self {
         Self {
             root,
             active: std::sync::atomic::AtomicBool::new(false),
             state: Mutex::new(disabled_state()),
-            storage: Default::default(),
+            storage,
             notifier: Mutex::new(None),
             operation_lock: Mutex::new(()),
             finish_employee: Mutex::new(None),
@@ -518,10 +529,22 @@ impl BossService {
     }
 
     pub fn open(root: PathBuf) -> anyhow::Result<Self> {
+        Self::open_with_storage(root, Default::default())
+    }
+
+    /// Open transactional Boss records in the same database as task history.
+    /// Existing JSON and employee-history files are retained as import backups.
+    pub fn open_database(root: PathBuf, database: PathBuf) -> anyhow::Result<Self> {
+        Self::open_with_storage(root, state_storage::StateStorage::database(database))
+    }
+
+    fn open_with_storage(
+        root: PathBuf,
+        storage: state_storage::StateStorage,
+    ) -> anyhow::Result<Self> {
         fs::create_dir_all(root.join("files/memory"))?;
         // Loading either the active document or referenced history fails
         // closed; missing history must never silently erase retired identities.
-        let storage = state_storage::StateStorage::default();
         let mut state = storage.load(&root)?.unwrap_or_else(fresh_state);
         for index in 0..state.employees.len() {
             if state.employees[index].job_title.is_empty() {

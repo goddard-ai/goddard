@@ -41,15 +41,33 @@ struct SavedState {
 #[derive(Default)]
 pub(super) struct StateStorage {
     saved: Mutex<Option<SavedState>>,
+    database: Option<super::sqlite_storage::SqliteStorage>,
 }
 
 impl StateStorage {
+    pub fn database(path: PathBuf) -> Self {
+        Self {
+            saved: Mutex::new(None),
+            database: Some(super::sqlite_storage::SqliteStorage::new(path)),
+        }
+    }
     pub fn clear(&self) {
         *self.saved.lock() = None;
+        if let Some(database) = &self.database {
+            database.clear();
+        }
     }
 
     pub fn load(&self, root: &Path) -> anyhow::Result<Option<BossState>> {
         self.clear();
+        if let Some(database) = &self.database {
+            if let Some(state) = database.load()? {
+                return Ok(Some(state));
+            }
+            // Legacy files remain untouched after import and are never consulted again
+            // once a database coordinator has committed.
+            return Self::default().load(root);
+        }
         let bytes = match fs::read(root.join("boss.json")) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -106,6 +124,9 @@ impl StateStorage {
     }
 
     pub fn unchanged(&self, state: &BossState) -> anyhow::Result<bool> {
+        if let Some(database) = &self.database {
+            return database.unchanged(state);
+        }
         let saved = self.saved.lock();
         let Some(saved) = saved.as_ref() else {
             return Ok(false);
@@ -117,6 +138,9 @@ impl StateStorage {
     }
 
     pub fn save(&self, root: &Path, state: &BossState) -> anyhow::Result<()> {
+        if let Some(database) = &self.database {
+            return database.save(state);
+        }
         let mut saved = self.saved.lock();
         let same_history = saved
             .as_ref()

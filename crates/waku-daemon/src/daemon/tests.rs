@@ -3312,11 +3312,16 @@ pub(crate) fn surface_test_backend(root: &Path) -> (WakuBackend, Uuid) {
     state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
     let session_id = state.sessions[0].id;
     store.save(&mut state).unwrap();
-    let backend = WakuBackend::new(
+    let mut backend = WakuBackend::new(
         DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
         store,
     )
     .unwrap();
+    // Existing file-failure fixtures explicitly exercise the standalone JSON host.
+    // Enabled daemon startup and activation use SQLite and have separate coverage.
+    if !backend.settings.get().boss_experiment_enabled {
+        backend.boss = Arc::new(crate::boss::BossService::disabled(root.join("boss")));
+    }
     backend.agent.note_surface(
         session_id,
         crate::agent::AgentSurfaceScope {
@@ -23092,6 +23097,32 @@ fn idle_shutdown_public_close_waits_for_detached_forwarder() {
         std::thread::yield_now();
     };
     backend.release_idle_shutdown(owner, fence);
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn boss_database_survives_daemon_restart_and_ignores_legacy_backups() {
+    let root = std::env::temp_dir().join(format!("boss-database-daemon-{}", Uuid::new_v4()));
+    let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+    let mut document = settings.get();
+    document.boss_experiment_enabled = true;
+    settings.replace(document).unwrap();
+    let (backend, session) = surface_test_backend(&root);
+    backend.boss.set_session_id(session).unwrap();
+    assert!(!root.join("boss/boss.json").exists());
+    drop(backend);
+    std::fs::write(root.join("boss/boss.json"), "stale backup").unwrap();
+    let backend = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        StateStore::daemon(root.join("app.db")),
+    )
+    .unwrap();
+    assert!(backend.boss.is_active());
+    assert_eq!(backend.boss.document().session_id, Some(session));
+    backend.boss.deactivate();
+    backend.boss.activate().unwrap();
+    assert_eq!(backend.boss.document().session_id, Some(session));
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
