@@ -804,7 +804,8 @@ impl WakuBackend {
             expected_starting_revision: None,
             brief: None,
         };
-        // A reconciled retry starts fresh at its recorded source revision.
+        // A reconciled retry preserves committed-workspace chains; other
+        // boundaries start fresh at the recorded source revision.
         if let Some(revision) = step
             .attempts
             .last()
@@ -814,6 +815,54 @@ impl WakuBackend {
                 matches!(definition.workspace, AgentWorkspace::Worktree),
                 "a reconciled retry requires a managed worktree"
             );
+            if definition.boundary == HandoffBoundary::CommittedWorkspace
+                && let Some((prior, path)) = step
+                    .attempts
+                    .iter()
+                    .find_map(|attempt| attempt.workspace.as_ref().map(|path| (attempt, path)))
+            {
+                // This boundary promises one workspace across employees. A
+                // retry must not silently fork away its committed or dirty work.
+                ensure!(
+                    prior.execution_released && prior.workspace_released,
+                    "original retry workspace has not been released"
+                );
+                let workspace = dunce::canonicalize(path)?;
+                let state = self.task_state.lock();
+                let project = state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == definition.project_id)
+                    .ok_or_else(|| anyhow!("retry project is unavailable"))?;
+                ensure!(
+                    crate::worktree::is_worktree_of(&project.path, &workspace),
+                    "retry workspace is not a managed worktree of the accepted project"
+                );
+                let owner = unadopted_owner(&state, &workspace)
+                    .ok_or_else(|| anyhow!("original retry workspace ownership changed"))?;
+                ensure!(
+                    step.attempts.iter().any(|attempt| {
+                        attempt.employee_id == Some(owner)
+                            && attempt.execution_released
+                            && attempt.workspace_released
+                            && attempt.workspace.as_ref().is_some_and(|path| {
+                                dunce::canonicalize(path).is_ok_and(|path| path == workspace)
+                            })
+                    }),
+                    "original retry workspace ownership changed"
+                );
+                drop(state);
+                crate::agent_merge::no_operation(&workspace)?;
+                let head = git_revision(&workspace, "HEAD")?;
+                ensure!(
+                    crate::agent_merge::is_ancestor(&workspace, &revision, &head)?,
+                    "retry workspace no longer descends from the reconciled revision"
+                );
+                inputs.workspace = AgentWorkspace::Adopt;
+                inputs.adopt_worktree = Some(workspace);
+                inputs.expected_starting_revision = Some(head);
+                return Ok(inputs);
+            }
             inputs.base_revision = Some(revision.clone());
             inputs.expected_starting_revision = Some(revision.clone());
             return Ok(inputs);
@@ -1555,6 +1604,125 @@ mod tests {
                 && brief.contains("parity report")
                 && brief.contains(&format!("commit:{bogus}")),
             "brief: {brief}"
+        );
+    }
+
+    #[test]
+    fn committed_workspace_retry_preserves_original_commits_and_dirty_work() {
+        let mut fixture = Fixture::new();
+        let base = git(&fixture.repo, &["rev-parse", "HEAD"]);
+        let workspace = fixture.managed_worktree(&base);
+        let committed = fixture.commit(&workspace, "committed.txt", "retained");
+        fs::write(workspace.join("dirty.txt"), "uncommitted").unwrap();
+        let chain = fixture.create(vec![
+            fixture.step(HandoffBoundary::CommittedWorkspace),
+            fixture.step(HandoffBoundary::Landed),
+        ]);
+        let mut result = success_result();
+        result.disposition = ResultDisposition::Failed;
+        let chain = fixture.finish_attempt(&chain, &workspace, result);
+        let employee = chain.steps[0].attempts[0].employee_id.unwrap();
+        {
+            let mut state = fixture.backend.task_state.lock();
+            state
+                .sessions
+                .iter_mut()
+                .find(|s| s.workspace.path() == Some(workspace.as_path()))
+                .unwrap()
+                .id = employee;
+        }
+        let chain = fixture.seal(&chain);
+        fixture.observe(
+            &chain,
+            ChainObservation::EffectsReconciled {
+                source_revision: base,
+            },
+        );
+        // Re-open persisted daemon state before the public retry, as after
+        // a restart; no production runtime or provider is involved.
+        {
+            let mut state = fixture.backend.task_state.lock();
+            state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == employee)
+                .unwrap()
+                .provider_cursor = Some(crate::model::ProviderResumeCursor::Codex {
+                thread_id: "fixture-thread".into(),
+            });
+            state.mark_session_dirty(employee);
+            fixture.backend.task_store.save(&mut state).unwrap();
+        }
+        crate::Backend::shutdown(&fixture.backend);
+        fixture.backend = WakuBackend::new(
+            DaemonSettingsStore::open(fixture.root.join("settings.json")).unwrap(),
+            StateStore::daemon(fixture.root.join("app.db")),
+        )
+        .unwrap();
+        let chain = fixture.show(chain.id);
+        fixture
+            .backend
+            .handle_boss_operation(
+                None,
+                waku_protocol::boss::BossOperation::Chain {
+                    action: ChainOperation::Control {
+                        chain_id: chain.id,
+                        expected_revision: chain.revision,
+                        control: ChainControl::Retry,
+                        source_revision: None,
+                    },
+                },
+                &crate::EventSink::detached(),
+            )
+            .unwrap();
+        let retry = fixture.show(chain.id);
+        assert_ne!(retry.steps[0].attempts[0].id, retry.steps[0].attempts[1].id);
+        assert!(
+            fixture
+                .backend
+                .handle_boss_operation(
+                    None,
+                    waku_protocol::boss::BossOperation::Chain {
+                        action: ChainOperation::RecordResult {
+                            chain_id: chain.id,
+                            attempt_id: chain.steps[0].attempts[0].id,
+                            definition_version: chain.definition_version,
+                            result: success_result(),
+                        }
+                    },
+                    &crate::EventSink::detached()
+                )
+                .is_err()
+        );
+        let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
+        assert_eq!(inputs.workspace, AgentWorkspace::Adopt);
+        assert_eq!(
+            inputs.adopt_worktree,
+            Some(dunce::canonicalize(&workspace).unwrap())
+        );
+        assert_eq!(inputs.expected_starting_revision, Some(committed.clone()));
+        assert_eq!(git(&workspace, &["rev-parse", "HEAD"]), committed);
+        assert_eq!(
+            fs::read_to_string(workspace.join("dirty.txt")).unwrap(),
+            "uncommitted"
+        );
+        {
+            let mut state = fixture.backend.task_state.lock();
+            state
+                .sessions
+                .iter_mut()
+                .find(|s| s.id == employee)
+                .unwrap()
+                .id = Uuid::new_v4();
+        }
+        assert!(
+            fixture
+                .backend
+                .chain_successor_inputs(chain.id)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("ownership changed")
         );
     }
 

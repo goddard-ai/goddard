@@ -716,7 +716,8 @@ impl BossService {
                                 substantive <= step.definition.max_retries as usize,
                                 "retry limit reached"
                             );
-                            // The old workspace is retained, never adopted or reset implicitly.
+                            // Workspace recovery is verified by the daemon at admission;
+                            // the reducer never resets the prior checkout.
                             // Symbolic sources resolve at the daemon before
                             // the reducer — the durable attempt base is
                             // always a commit id. An omitted source falls
