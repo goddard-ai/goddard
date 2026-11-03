@@ -18,7 +18,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
+use waku_base::persistence_metrics::WriteMeasurement;
 
 use parking_lot::Mutex;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
@@ -1512,6 +1513,55 @@ pub struct StateStore {
     desktop_files: bool,
 }
 
+struct SessionBatchCommit<'a> {
+    store: &'a StateStore,
+    batch: &'a SaveBatch,
+}
+impl waku_boss::SessionCommit for SessionBatchCommit<'_> {
+    fn database_path(&self) -> &Path {
+        self.store.path()
+    }
+    fn commit(
+        &mut self,
+        write: &mut dyn FnMut(&rusqlite::Transaction<'_>) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        self.store
+            .write_batch_joint(self.batch, None, Some(write))?;
+        Ok(())
+    }
+}
+
+// Restore the connection's normal streaming durability policy on success and rollback.
+struct FullSync<'a> {
+    connection: &'a Connection,
+    previous: i64,
+}
+impl<'a> FullSync<'a> {
+    fn new(connection: &'a Connection) -> io::Result<Self> {
+        let previous = connection
+            .pragma_query_value(None, "synchronous", |r| r.get(0))
+            .map_err(to_io_error)?;
+        connection
+            .pragma_update(None, "synchronous", "FULL")
+            .map_err(to_io_error)?;
+        Ok(Self {
+            connection,
+            previous,
+        })
+    }
+}
+impl Drop for FullSync<'_> {
+    fn drop(&mut self) {
+        if self
+            .connection
+            .pragma_update(None, "synchronous", self.previous)
+            .is_err()
+        {
+            eprintln!("could not restore SQLite synchronous policy after shared Boss commit");
+        }
+    }
+}
+
 impl StateStore {
     /// Where the database lives.
     ///
@@ -2329,7 +2379,7 @@ impl StateStore {
         let live_ids = state
             .sessions
             .iter()
-            .filter(|session| session.has_started() && !session.incognito)
+            .filter(|session| (session.has_started() || session.boss_managed) && !session.incognito)
             .map(|session| session.id)
             .collect();
         let persisted = self.persisted_session_ids();
@@ -2342,7 +2392,7 @@ impl StateStore {
             let mut versions = self.metadata_versions.lock();
             versions.retain(|id, _| known_ids.contains(id));
             for session in state.sessions.iter_mut().filter(|session| {
-                session.has_started()
+                (session.has_started() || session.boss_managed)
                     && (dirty.contains(&session.id) || !persisted.contains(&session.id))
             }) {
                 let mut metadata = waku_protocol::task_metadata::TaskMetadata::capture(session);
@@ -2365,7 +2415,7 @@ impl StateStore {
             .sessions
             .iter()
             .filter(|session| {
-                if !session.has_started() || session.incognito {
+                if (!session.has_started() && !session.boss_managed) || session.incognito {
                     return false;
                 }
                 // A skeleton's empty transcript means "not fetched", not
@@ -2404,11 +2454,34 @@ impl StateStore {
         self.write_batch_with_checkpoint(batch, None)
     }
 
+    /// Host for an atomic Boss/session save. The caller retains the task-state
+    /// lock and clears only this batch's dirty marks after a successful commit.
+    pub fn session_commit<'a>(
+        &'a self,
+        batch: &'a SaveBatch,
+    ) -> impl waku_boss::SessionCommit + 'a {
+        SessionBatchCommit { store: self, batch }
+    }
+
     fn write_batch_with_checkpoint(
         &self,
         batch: &SaveBatch,
         checkpoint: Option<(&StableLinkRow, u64)>,
     ) -> io::Result<()> {
+        self.write_batch_joint(batch, checkpoint, None)
+    }
+
+    fn write_batch_joint(
+        &self,
+        batch: &SaveBatch,
+        checkpoint: Option<(&StableLinkRow, u64)>,
+        mut boss: Option<&mut dyn FnMut(&rusqlite::Transaction<'_>) -> anyhow::Result<()>>,
+    ) -> io::Result<()> {
+        let mut measurement = WriteMeasurement::new(if boss.is_some() {
+            "sessions_boss"
+        } else {
+            "sessions"
+        });
         let mut guard = self.storage.lock();
         if guard.is_none() {
             *guard = Some(Storage {
@@ -2439,13 +2512,23 @@ impl StateStore {
             }
         }
 
-        let transaction = storage
-            .connection
-            .unchecked_transaction()
-            .map_err(to_io_error)?;
-
+        let _sync = if boss.is_some() {
+            Some(FullSync::new(&storage.connection)?)
+        } else {
+            None
+        };
         let projects = serde_json::to_string(&batch.projects).map_err(to_io_error)?;
         let projects_fingerprint = fingerprint(&projects);
+        measurement.prepared();
+        let started = Instant::now();
+        let result = rusqlite::Transaction::new_unchecked(
+            &storage.connection,
+            rusqlite::TransactionBehavior::Immediate,
+        );
+        measurement.waited(started.elapsed());
+        let transaction = result.map_err(to_io_error)?;
+        let started = Instant::now();
+        let changes_before = transaction.total_changes();
         if projects_fingerprint != storage.saved_projects {
             transaction
                 .execute("DELETE FROM projects", [])
@@ -2544,7 +2627,17 @@ impl StateStore {
         if let Some((applying, sequence)) = checkpoint {
             update_stable_link(&transaction, applying, "live", sequence)?;
         }
-        transaction.commit().map_err(to_io_error)?;
+        if let Some(write) = boss.as_mut() {
+            write(&transaction).map_err(to_io_error)?;
+        }
+        measurement.sample.rows_changed =
+            transaction.total_changes().saturating_sub(changes_before);
+        measurement.worked(started.elapsed());
+        let started = Instant::now();
+        let result = transaction.commit();
+        measurement.committed(started.elapsed());
+        result.map_err(to_io_error)?;
+        measurement.sample.success = true;
         // Now that the rows are durable, and not before.
         storage.saved_projects = projects_fingerprint;
         for session in &batch.sessions {
@@ -3884,6 +3977,67 @@ mod tests {
         TranscriptBlock, TranscriptNoticeStatus,
     };
     use base64::Engine as _;
+
+    #[test]
+    fn joint_boss_session_commit_rolls_back_both_stores_and_retries() {
+        let directory = temporary_directory();
+        std::fs::create_dir_all(&directory).unwrap();
+        let store = StateStore::daemon(directory.join("app.db"));
+        let mut state = PersistedState::fresh(directory.clone());
+        store.save(&mut state).unwrap();
+        let boss =
+            waku_boss::BossService::open_database(directory.join("boss"), store.path().to_owned())
+                .unwrap();
+        let mut session = AgentSession::new(state.projects[0].id, ProviderKind::Codex);
+        session.boss_managed = true;
+        let id = session.id;
+        state.push_session(session);
+        let batch = store.save_batch(&mut state);
+        let connection = store.open().unwrap();
+        for (table, event) in [("sessions", "INSERT"), ("boss_coordinator", "UPDATE")] {
+            connection.execute_batch(&format!("CREATE TRIGGER reject_joint BEFORE {event} ON {table} BEGIN SELECT RAISE(ABORT, 'write failure'); END;")).unwrap();
+            let mut host = store.session_commit(&batch);
+            assert!(boss.set_session_id_with(id, &mut host).is_err());
+            assert_eq!(boss.document().session_id, None);
+            assert_eq!(
+                connection
+                    .query_row(
+                        "SELECT count(*) FROM sessions WHERE id=?1",
+                        [id.to_string()],
+                        |r| r.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                0
+            );
+            connection
+                .execute_batch("DROP TRIGGER reject_joint;")
+                .unwrap();
+        }
+        let mut host = store.session_commit(&batch);
+        boss.set_session_id_with(id, &mut host).unwrap();
+        assert_eq!(boss.document().session_id, Some(id));
+        let loaded = StateStore::daemon(store.path().to_owned()).load().unwrap();
+        assert!(
+            loaded.sessions.iter().any(|session| session.id == id),
+            "unstarted managed chats must survive restart"
+        );
+        let sync: i64 = store
+            .storage
+            .lock()
+            .as_ref()
+            .unwrap()
+            .connection
+            .pragma_query_value(None, "synchronous", |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            sync, 1,
+            "shared FULL policy must not change subsequent streaming saves"
+        );
+        drop(host);
+        drop(connection);
+        drop(store);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     fn temporary_directory() -> PathBuf {
         std::env::temp_dir().join(format!("waku-state-{}", Uuid::new_v4()))
@@ -5720,19 +5874,10 @@ mod tests {
         let connection = Connection::open_in_memory().unwrap();
         apply_migrations(&connection).unwrap();
 
-        // Drop the record of the last migration without dropping its tables,
-        // as an interrupted run would leave things. The last migration with
-        // real statements — trailing no-ops replay cleanly and prove nothing.
-        let (last, _) = MIGRATIONS
-            .iter()
-            .rev()
-            .find(|(_, sql)| {
-                sql.lines().any(|line| {
-                    let line = line.trim();
-                    !line.is_empty() && !line.starts_with("--")
-                })
-            })
-            .expect("at least one migration with statements");
+        // The initial schema deliberately cannot replay over existing tables.
+        // Later migrations may be idempotent (including standalone Boss setup),
+        // so choosing the newest migration would not test failure reporting.
+        let (last, _) = &MIGRATIONS[0];
         connection
             .execute("DELETE FROM migrations WHERE tag = ?1", params![last])
             .unwrap();

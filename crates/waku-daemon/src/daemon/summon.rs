@@ -1585,27 +1585,58 @@ impl WakuBackend {
         employee.plan_id = plan_binding.as_ref().map(|binding| binding.plan_id);
         employee.item_id = item;
         employee.plan_binding = plan_binding;
-        // The task shell lands before the roster does — a client that
-        // opens the new employee immediately finds the assignment's
-        // session, still unstarted: no worktree, no runtime, no claims.
-        self.create_employee_shell(&employee, &resolved, &ticket)?;
-        let session_id = employee.session_id;
-        // Outcome validation and publication share the employee's admission
-        // transaction, including a new parent and its finishing designation.
-        let employee = match self.boss.enqueue_assignment(
-            employee,
-            ticket,
-            new_outcome,
-            finishes_outcome,
-            after_success,
-            prerequisites,
-        ) {
-            Ok(employee) => employee,
-            Err(error) => {
-                self.remove_session_shell(session_id);
-                return Err(error);
-            }
+        let employee = if self.boss.uses_database() {
+            let session_id = employee.session_id;
+            let session = self.employee_session_shell(&employee, &resolved, &ticket)?;
+            let employee = {
+                let mut state = self.task_state.lock();
+                state.push_session(session);
+                let batch = self.task_store.save_batch(&mut state);
+                let mut host = self.task_store.session_commit(&batch);
+                match self.boss.enqueue_assignment_with(
+                    employee,
+                    ticket,
+                    new_outcome,
+                    finishes_outcome,
+                    after_success,
+                    prerequisites,
+                    Some(&mut host),
+                ) {
+                    Ok(employee) => {
+                        state.unmark_sessions_dirty(&batch.dirty_ids);
+                        employee
+                    }
+                    Err(error) => {
+                        state.sessions.retain(|session| session.id != session_id);
+                        state.unmark_sessions_dirty(&std::collections::HashSet::from([session_id]));
+                        return Err(error);
+                    }
+                }
+            };
+            self.boss.notify_session_commit();
+            employee
+        } else {
+            self.create_employee_shell(&employee, &resolved, &ticket)?;
+            let session_id = employee.session_id;
+            // Outcome validation and publication share the employee's admission
+            // transaction, including a new parent and its finishing designation.
+            let employee = match self.boss.enqueue_assignment(
+                employee,
+                ticket,
+                new_outcome,
+                finishes_outcome,
+                after_success,
+                prerequisites,
+            ) {
+                Ok(employee) => employee,
+                Err(error) => {
+                    self.remove_session_shell(session_id);
+                    return Err(error);
+                }
+            };
+            employee
         };
+        let session_id = employee.session_id;
         self.post_summon_marker(supervisor, &employee, events)?;
         self.wake_summon_queue();
         Ok((session_id, true))
@@ -1803,6 +1834,19 @@ impl WakuBackend {
         resolved: &ResolvedAgentSelection,
         ticket: &waku_protocol::boss::SummonTicket,
     ) -> anyhow::Result<()> {
+        let session = self.employee_session_shell(employee, resolved, ticket)?;
+        let mut state = self.task_state.lock();
+        state.push_session(session);
+        self.task_store.save(&mut state)?;
+        Ok(())
+    }
+
+    fn employee_session_shell(
+        &self,
+        employee: &waku_protocol::boss::BossEmployee,
+        resolved: &ResolvedAgentSelection,
+        ticket: &waku_protocol::boss::SummonTicket,
+    ) -> anyhow::Result<AgentSession> {
         let project_id = match self.chain_employee_project(employee)? {
             Some((id, _)) => id,
             None => {
@@ -1825,10 +1869,7 @@ impl WakuBackend {
         session.reasoning_effort = resolved.reasoning_effort.clone();
         session.service_tier = resolved.service_tier.clone();
         session.context_window = resolved.context_window.clone();
-        let mut state = self.task_state.lock();
-        state.push_session(session);
-        self.task_store.save(&mut state)?;
-        Ok(())
+        Ok(session)
     }
 
     /// Drop a task shell whose admission never committed — best-effort

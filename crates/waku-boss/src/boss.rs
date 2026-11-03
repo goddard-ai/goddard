@@ -668,6 +668,48 @@ impl BossService {
         })
     }
 
+    pub fn uses_database(&self) -> bool {
+        self.storage.uses_database()
+    }
+
+    /// Commit the new chat identity together with the host's session rows.
+    pub fn set_session_id_with(
+        &self,
+        id: Uuid,
+        host: &mut dyn crate::SessionCommit,
+    ) -> anyhow::Result<()> {
+        self.update_with_session(
+            |state| {
+                state.session_id = Some(id);
+                Ok(())
+            },
+            host,
+        )
+    }
+
+    fn update_with_session(
+        &self,
+        change: impl FnOnce(&mut BossState) -> anyhow::Result<()>,
+        host: &mut dyn crate::SessionCommit,
+    ) -> anyhow::Result<()> {
+        let mut state = self.state.lock();
+        let mut next = state.clone();
+        change(&mut next)?;
+        crate::instruction_pins::reconcile(&mut next, waku_protocol::model::unix_time());
+        next.revision = next.revision.saturating_add(1);
+        self.storage.save_with(&next, host)?;
+        *state = next;
+        // The host holds its task-state lease until it publishes the matching
+        // session projection, then calls notify_session_commit outside that lease.
+        Ok(())
+    }
+
+    pub fn notify_session_commit(&self) {
+        if let Some(notifier) = self.notifier.lock().clone() {
+            notifier();
+        }
+    }
+
     /// Publish the Boss chat's live rotation position. The reconciler is
     /// the only writer; `update` skips the write when nothing moved.
     pub fn set_rotation_status(
@@ -3515,14 +3557,35 @@ impl BossService {
     /// partially admitted finishing assignment.
     pub fn enqueue_assignment(
         &self,
+        employee: BossEmployee,
+        ticket: SummonTicket,
+        new_outcome: Option<NewOutcome>,
+        finishes_outcome: bool,
+        after_success: Option<String>,
+        prerequisites: Vec<Uuid>,
+    ) -> anyhow::Result<BossEmployee> {
+        self.enqueue_assignment_with(
+            employee,
+            ticket,
+            new_outcome,
+            finishes_outcome,
+            after_success,
+            prerequisites,
+            None,
+        )
+    }
+
+    pub fn enqueue_assignment_with(
+        &self,
         mut employee: BossEmployee,
         mut ticket: SummonTicket,
         new_outcome: Option<NewOutcome>,
         finishes_outcome: bool,
         after_success: Option<String>,
         prerequisites: Vec<Uuid>,
+        host: Option<&mut dyn crate::SessionCommit>,
     ) -> anyhow::Result<BossEmployee> {
-        self.update(|state| {
+        let change = |state: &mut BossState| {
             employee.assignment = Self::resolve_assignment(
                 state,
                 ticket.outcome_id,
@@ -3547,7 +3610,12 @@ impl BossService {
                 outcome.completion_conflict = None;
             }
             Self::enqueue_employee(state, &mut employee, ticket)
-        })?;
+        };
+        if let Some(host) = host {
+            self.update_with_session(change, host)?;
+        } else {
+            self.update(change)?;
+        }
         Ok(employee)
     }
 

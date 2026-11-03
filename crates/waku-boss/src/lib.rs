@@ -44,3 +44,14 @@ pub type ArchiveSessions = Arc<dyn Fn(&[uuid::Uuid]) -> anyhow::Result<bool> + S
 /// The daemon's registered project list, read on demand so operations like
 /// memory-bucket resolution can turn a project name into its canonical path.
 pub type ProjectCatalog = Arc<dyn Fn() -> Vec<waku_protocol::model::Project> + Send + Sync>;
+
+/// Host-owned transaction: session persistence commits the supplied Boss write
+/// on the same connection, and returns success only after COMMIT succeeds.
+/// Implementations must invoke the write exactly once and propagate its errors.
+pub trait SessionCommit {
+    fn database_path(&self) -> &std::path::Path;
+    fn commit(
+        &mut self,
+        write: &mut dyn FnMut(&rusqlite::Transaction<'_>) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()>;
+}

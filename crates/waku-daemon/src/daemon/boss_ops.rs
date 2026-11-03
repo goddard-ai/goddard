@@ -1671,9 +1671,23 @@ impl WakuBackend {
         {
             let mut state = self.task_state.lock();
             state.push_session(session.clone());
-            self.task_store.save(&mut state)?;
+            if self.boss.uses_database() {
+                let batch = self.task_store.save_batch(&mut state);
+                let mut host = self.task_store.session_commit(&batch);
+                if let Err(error) = self.boss.set_session_id_with(id, &mut host) {
+                    state.sessions.retain(|session| session.id != id);
+                    state.unmark_sessions_dirty(&std::collections::HashSet::from([id]));
+                    return Err(error);
+                }
+                state.unmark_sessions_dirty(&batch.dirty_ids);
+            } else {
+                self.task_store.save(&mut state)?;
+                self.boss.set_session_id(id)?;
+            }
         }
-        self.boss.set_session_id(id)?;
+        if self.boss.uses_database() {
+            self.boss.notify_session_commit();
+        }
         self.wake_summon_queue();
         Ok(BossResult::Session {
             session: Box::new(session),

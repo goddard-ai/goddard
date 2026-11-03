@@ -11494,6 +11494,7 @@ dependencies = [
  "sha2 0.10.9",
  "url",
  "uuid",
+ "waku-base",
  "waku-memory-engine",
  "waku-protocol",
 ]
@@ -11839,6 +11840,7 @@ dependencies = [
 name = "waku-store"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "dirs 6.0.0",
  "dunce",

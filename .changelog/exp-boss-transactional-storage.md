@@ -1,1 +1,1 @@
-- Boss now stores coordination records transactionally in the task database, retaining existing JSON files as migration backups and avoiding full-file rewrites for small updates.
+- Boss now saves new chats and queued employees together with their session records in the task database, retaining existing JSON files as migration backups and avoiding full-file rewrites for small coordination updates.

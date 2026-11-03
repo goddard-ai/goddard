@@ -90,6 +90,8 @@ struct DaemonStatsState {
 /// winds down — its sample is that boot's final reading.
 #[derive(Deserialize, Serialize)]
 struct StatsLine {
+    #[serde(default)]
+    persistence: Vec<waku_base::persistence_metrics::PersistenceSample>,
     boot: String,
     #[serde(flatten)]
     sample: DaemonStatsSample,
@@ -140,6 +142,7 @@ fn write_sample_capped(
     append_json_line(
         path,
         &StatsLine {
+            persistence: waku_base::persistence_metrics::snapshot(),
             boot: boot.to_owned(),
             sample,
             shutdown,
@@ -769,6 +772,7 @@ mod tests {
         };
         let cap = 4 * 1024;
         let line_len = serde_json::to_string(&StatsLine {
+            persistence: Vec::new(),
             boot: "boot".into(),
             sample: sample.clone(),
             shutdown: false,

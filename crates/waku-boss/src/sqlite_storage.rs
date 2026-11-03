@@ -4,9 +4,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use waku_base::persistence_metrics::WriteMeasurement;
 
-use anyhow::{Context, bail, ensure};
+use anyhow::{Context, ensure};
 use parking_lot::Mutex;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
@@ -373,74 +374,119 @@ impl SqliteStorage {
     }
 
     pub fn save(&self, state: &BossState) -> anyhow::Result<()> {
+        self.save_with(state, None)
+    }
+
+    pub fn save_with(
+        &self,
+        state: &BossState,
+        host: Option<&mut dyn crate::SessionCommit>,
+    ) -> anyhow::Result<()> {
+        let mut measurement = WriteMeasurement::new(if host.is_some() {
+            "boss_shared_prepare"
+        } else {
+            "boss"
+        });
         let snapshot = encode(state)?;
         let mut saved = self.saved.lock();
         let previous = saved
             .as_ref()
             .context("Boss database must be loaded before saving")?;
-        let mut connection = self.open()?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let revision: Option<i64> = transaction
-            .query_row(
-                "SELECT revision FROM boss_coordinator WHERE id=1",
-                [],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if revision != previous.revision {
-            bail!("Boss database changed in another host; reload before saving");
-        }
-        for (digest, data) in &snapshot.payloads {
-            if !previous.snapshot.payloads.contains_key(digest) {
-                transaction.execute(
-                    "INSERT OR IGNORE INTO boss_payloads(digest,data) VALUES(?1,?2)",
-                    params![digest, data],
-                )?;
-            }
-        }
-        for ((collection, parent, id), (position, lifecycle, data)) in &snapshot.rows {
-            if previous
-                .snapshot
-                .rows
-                .get(&(collection.clone(), parent.clone(), id.clone()))
-                .is_some_and(|(old_position, old_lifecycle, old_data)| {
-                    old_position == position && old_lifecycle == lifecycle && old_data == data
-                })
-            {
-                continue;
-            }
-            transaction.execute("INSERT INTO boss_records(collection,parent_id,id,position,lifecycle,data) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(collection,parent_id,id) DO UPDATE SET position=excluded.position,lifecycle=excluded.lifecycle,data=excluded.data", params![collection,parent,id,position,lifecycle,data])?;
-        }
-        for (collection, parent, id) in previous
+        // Compute the entire diff before acquiring SQLite's single writer lock.
+        let payloads = snapshot
+            .payloads
+            .iter()
+            .filter(|(key, _)| !previous.snapshot.payloads.contains_key(*key))
+            .collect::<Vec<_>>();
+        let rows = snapshot
+            .rows
+            .iter()
+            .filter(|(key, value)| previous.snapshot.rows.get(*key) != Some(*value))
+            .collect::<Vec<_>>();
+        let removed = previous
             .snapshot
             .rows
             .keys()
             .filter(|key| !snapshot.rows.contains_key(*key))
-        {
-            transaction.execute(
-                "DELETE FROM boss_records WHERE collection=?1 AND parent_id=?2 AND id=?3",
-                params![collection, parent, id],
-            )?;
-        }
-        for digest in previous
+            .collect::<Vec<_>>();
+        let removed_payloads = previous
             .snapshot
             .payloads
             .keys()
-            .filter(|digest| !snapshot.payloads.contains_key(*digest))
-        {
-            transaction.execute("DELETE FROM boss_payloads WHERE digest=?1", [digest])?;
-        }
+            .filter(|key| !snapshot.payloads.contains_key(*key))
+            .collect::<Vec<_>>();
         let next_revision = previous
             .revision
             .unwrap_or(0)
             .checked_add(1)
             .context("Boss storage revision exhausted")?;
-        transaction.execute("INSERT INTO boss_coordinator(id,schema_version,revision,data) VALUES(1,?1,?2,?3) ON CONFLICT(id) DO UPDATE SET schema_version=excluded.schema_version,revision=excluded.revision,data=excluded.data",params![VERSION,next_revision,snapshot.coordinator])?;
-        transaction.commit()?;
+        let mut calls = 0;
+        let mut write = |transaction: &rusqlite::Transaction<'_>| -> anyhow::Result<()> {
+            calls += 1;
+            ensure!(calls == 1, "Boss write invoked more than once");
+            let revision: Option<i64> = transaction
+                .query_row(
+                    "SELECT revision FROM boss_coordinator WHERE id=1",
+                    [],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            ensure!(
+                revision == previous.revision,
+                "Boss database changed in another host; reload before saving"
+            );
+            for (digest, data) in &payloads {
+                transaction.execute(
+                    "INSERT OR IGNORE INTO boss_payloads(digest,data) VALUES(?1,?2)",
+                    params![digest, data],
+                )?;
+            }
+            for ((collection, parent, id), (position, lifecycle, data)) in &rows {
+                transaction.execute("INSERT INTO boss_records(collection,parent_id,id,position,lifecycle,data) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(collection,parent_id,id) DO UPDATE SET position=excluded.position,lifecycle=excluded.lifecycle,data=excluded.data", params![collection,parent,id,position,lifecycle,data])?;
+            }
+            for (collection, parent, id) in &removed {
+                transaction.execute(
+                    "DELETE FROM boss_records WHERE collection=?1 AND parent_id=?2 AND id=?3",
+                    params![collection, parent, id],
+                )?;
+            }
+            for digest in &removed_payloads {
+                transaction.execute("DELETE FROM boss_payloads WHERE digest=?1", [digest])?;
+            }
+            transaction.execute("INSERT INTO boss_coordinator(id,schema_version,revision,data) VALUES(1,?1,?2,?3) ON CONFLICT(id) DO UPDATE SET schema_version=excluded.schema_version,revision=excluded.revision,data=excluded.data",params![VERSION,next_revision,snapshot.coordinator])?;
+            Ok(())
+        };
+        measurement.sample.rows_changed =
+            (payloads.len() + rows.len() + removed.len() + removed_payloads.len() + 1) as u64;
+        measurement.prepared();
+        if let Some(host) = host {
+            ensure!(
+                host.database_path() == self.path,
+                "Boss and sessions must use the same database"
+            );
+            host.commit(&mut write)?;
+        } else {
+            let mut connection = self.open()?;
+            measurement.prepared();
+            let started = Instant::now();
+            let result = connection.transaction_with_behavior(TransactionBehavior::Immediate);
+            measurement.waited(started.elapsed());
+            let transaction = result?;
+            let started = Instant::now();
+            let result = write(&transaction);
+            measurement.worked(started.elapsed());
+            result?;
+            let started = Instant::now();
+            let result = transaction.commit();
+            measurement.committed(started.elapsed());
+            result?;
+        }
+        ensure!(calls == 1, "Host did not write Boss records");
         *saved = Some(Saved {
             revision: Some(next_revision),
             snapshot,
         });
+        measurement.sample.success = true;
         Ok(())
     }
 }

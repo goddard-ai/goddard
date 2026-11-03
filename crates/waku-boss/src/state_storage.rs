@@ -51,6 +51,19 @@ impl StateStorage {
             database: Some(super::sqlite_storage::SqliteStorage::new(path)),
         }
     }
+    pub fn uses_database(&self) -> bool {
+        self.database.is_some()
+    }
+    pub fn save_with(
+        &self,
+        state: &BossState,
+        host: &mut dyn crate::SessionCommit,
+    ) -> anyhow::Result<()> {
+        self.database
+            .as_ref()
+            .context("shared commits require SQLite Boss storage")?
+            .save_with(state, Some(host))
+    }
     pub fn clear(&self) {
         *self.saved.lock() = None;
         if let Some(database) = &self.database {

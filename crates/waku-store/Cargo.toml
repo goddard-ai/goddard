@@ -6,6 +6,7 @@ description = "Persistence, migrations, and Boss context snapshots for Goddard"
 license = "GPL-3.0-only"
 
 [dependencies]
+anyhow = "1.0"
 dirs = "6.0"
 dunce = "1"
 parking_lot = "0.12"
