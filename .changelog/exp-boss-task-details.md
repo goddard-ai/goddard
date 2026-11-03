@@ -1,0 +1,1 @@
+- Boss Tasks aligns Show more with outcome status indicators, removes trailing attempt-history and follow-up rows, and marks employees awaiting follow-up with a yellow bell.

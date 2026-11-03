@@ -1102,27 +1102,6 @@ pub(super) enum BossEmployeeAvatar {
     },
 }
 
-/// The reason a card shows on its own line — a reported blocker, an
-/// admission wait, or a recorded cause. Reasons never squeeze into the
-/// job line, where they truncated into a fragment that read as broken.
-#[derive(Clone, Debug, PartialEq)]
-pub(super) enum BossEmployeeReason {
-    /// The employee's own reported blocker, or a settled blocked flag.
-    Blocked(String),
-    /// A queued admission's recorded wait.
-    Queued(String),
-    /// A recorded cause — a settle's finer-grained expiry reason.
-    Detail(String),
-}
-
-impl BossEmployeeReason {
-    pub(super) fn text(&self) -> &str {
-        match self {
-            Self::Blocked(text) | Self::Queued(text) | Self::Detail(text) => text,
-        }
-    }
-}
-
 /// A required-plan chip's resolved state — the bound plan's open target
 /// and whether the blocked retry shows. Resolved beside the row so the
 /// shared card builds the chips from a weak handle.

@@ -1862,8 +1862,8 @@ impl BossGoalStatus {
             | Self::UsageLimited
             | Self::Blocked
             | Self::Attention
-            | Self::FollowUp
             | Self::BudgetReached => ("icons/alert.svg", BossGoalTone::Warning, false),
+            Self::FollowUp => ("icons/bell.svg", BossGoalTone::Warning, false),
             Self::Paused => ("icons/pause.svg", BossGoalTone::Secondary, false),
             Self::Failed => ("icons/x-bold.svg", BossGoalTone::Danger, false),
             Self::Cancelled => ("icons/ban.svg", BossGoalTone::Secondary, false),
@@ -2170,8 +2170,8 @@ fn hide_archived_outcome_row(
         .is_some_and(|session| session.archived_at.is_some())
 }
 
-/// One expanded assignment entry's status — the durable settle verdict
-/// when the attempt resolved, else the live roster and session evidence.
+/// One expanded assignment entry's status — an owed follow-up first,
+/// then the durable settle verdict or live roster and session evidence.
 /// An unsettled row no roster covers can only read as unavailable: it is
 /// either still in flight somewhere the snapshot cannot see, or its
 /// settle was never recorded — inventing a result would be worse.
@@ -2181,6 +2181,11 @@ fn boss_outcome_entry_status(
     sessions: &HashMap<Uuid, &AgentSession>,
 ) -> BossGoalStatus {
     use waku_protocol::boss::AssignmentVerdict;
+    if row.outcome.pending_handoffs().any(|handoff| {
+        handoff.assignment == assignment.session && handoff.attempt == assignment.generation
+    }) {
+        return BossGoalStatus::FollowUp;
+    }
     if let Some(settle) = &assignment.settled {
         return match settle.verdict {
             AssignmentVerdict::Finished => BossGoalStatus::Finished,
@@ -2202,31 +2207,6 @@ fn boss_outcome_entry_status(
         sessions.get(&member.employee.session_id).copied(),
     )
     .1
-}
-
-/// Whether a recorded prerequisite still blocks an in-flight attempt:
-/// its sibling row is unsettled or settled without success. A
-/// prerequisite that failed or was cancelled shows the dependency as
-/// blocked rather than ordinary waiting.
-fn boss_outcome_prerequisite_failed(
-    row: &boss::BossOutcomeRow,
-    assignment: &waku_protocol::boss::OutcomeAssignment,
-) -> bool {
-    assignment.prerequisites.iter().any(|prerequisite| {
-        row.outcome
-            .assignments
-            .iter()
-            .filter(|sibling| sibling.session == *prerequisite)
-            .next_back()
-            .is_some_and(|sibling| {
-                sibling.settled.as_ref().is_some_and(|settle| {
-                    !matches!(
-                        settle.verdict,
-                        waku_protocol::boss::AssignmentVerdict::Finished
-                    )
-                })
-            })
-    })
 }
 
 /// The cause a Needs-attention row names — the unresolved member's own
@@ -2353,9 +2333,8 @@ enum BossOutcomeItem {
     /// An expanded outcome's current assignment — one per session,
     /// painted with the sidebar employee row's look.
     Employee(Arc<boss::BossEmployeeRow>),
-    /// A line nested under an expanded outcome — an earlier attempt's
-    /// history, the conflict, handoff, wait, or empty marker — the
-    /// item's own height keeps the list's uniform geometry.
+    /// A line nested under an expanded outcome — a conflict, wait, or
+    /// empty marker. The item's height keeps the list's uniform geometry.
     Entry(Arc<BossOutcomeEntry>),
     HistoryToggle {
         /// The section the toggle unfolds — one toggle trails each
@@ -4748,12 +4727,10 @@ mod tests {
         }
     }
 
-    /// An expanded outcome keeps every attempt distinct and honest,
-    /// newest summoned first: the structured fields retain recorded
-    /// causes, waits, and blockers, while only employees whose
-    /// conversation the snapshot knows become navigable.
+    /// Assignment rows retain their status and newest-first ordering;
+    /// only known conversations become navigable.
     #[test]
-    fn outcome_employees_track_each_attempt_and_its_cause() {
+    fn outcome_employees_track_status_order_and_navigation() {
         use waku_protocol::boss::{
             AssignmentSettle, AssignmentVerdict, EmployeeLifecycle, ExpiryCause, OutcomeState,
         };
@@ -4797,8 +4774,6 @@ mod tests {
         let mut session = AgentSession::new(dependent, ProviderKind::Codex);
         session.id = dependent;
         let sessions: HashMap<Uuid, &AgentSession> = HashMap::from([(dependent, &session)]);
-        let queued: HashMap<Uuid, String> =
-            HashMap::from([(dependent, "Waiting for earlier work".to_owned())]);
 
         // The flagged member's blocker is also the row's named cause.
         assert_eq!(
@@ -4806,7 +4781,7 @@ mod tests {
             Some("missing credentials")
         );
 
-        let employees = boss_outcome_employee_fields(&row, &sessions, &queued);
+        let employees = boss_outcome_employee_fields(&row, &sessions);
         assert_eq!(employees.len(), 3);
 
         // Newest summon first — the member's `created_at` stamp; the
@@ -4828,49 +4803,14 @@ mod tests {
         assert_eq!(waiting_entry.name, "Nina");
         assert!(waiting_entry.detail.is_empty());
         assert!(!waiting_entry.aria.contains("Reviewer"));
-        // The wait and the failed prerequisite each get their own line.
-        assert!(
-            waiting_entry
-                .reasons
-                .contains(&boss::BossEmployeeReason::Queued(
-                    "Waiting for earlier work".to_owned()
-                )),
-            "{:?}",
-            waiting_entry.reasons
-        );
-        assert!(
-            waiting_entry
-                .reasons
-                .contains(&boss::BossEmployeeReason::Blocked(tr!(
-                    "boss.goals_prereq_failed"
-                ))),
-            "{:?}",
-            waiting_entry.reasons
-        );
         assert!(waiting_entry.navigable);
         assert!(waiting_entry.aria.starts_with("Open conversation"));
 
-        let blocked_entry = &employees[1];
-        assert!(
-            blocked_entry
-                .reasons
-                .contains(&boss::BossEmployeeReason::Blocked(
-                    "missing credentials".to_owned()
-                )),
-            "{:?}",
-            blocked_entry.reasons
-        );
+        assert_eq!(employees[1].status, BossGoalStatus::Attention);
 
         let failure = &employees[2];
         assert_eq!(failure.key, format!("{}:{}:1", row.outcome.id, failed));
         assert_eq!(failure.status, BossGoalStatus::Failed);
-        assert!(
-            failure.reasons.contains(&boss::BossEmployeeReason::Detail(
-                "provider exited mid-turn".to_owned()
-            )),
-            "{:?}",
-            failure.reasons
-        );
         assert!(!failure.navigable);
         assert!(
             !failure.aria.starts_with("Open conversation"),
@@ -4879,13 +4819,11 @@ mod tests {
     }
 
     /// A session's retries collapse to one card: the newest generation —
-    /// and anything still in flight — keeps `current`; earlier settled
-    /// generations compress into quiet history lines that carry the
-    /// verdict and stamp without the blocked or mid-turn exit reason.
+    /// and anything still in flight — keeps `current`. Earlier settled
+    /// generations are omitted from the expanded outcome.
     #[test]
-    fn outcome_attempt_history_collapses_to_lines() {
+    fn outcome_retries_keep_only_current_employee_rows() {
         use waku_protocol::boss::{AssignmentSettle, AssignmentVerdict, ExpiryCause, OutcomeState};
-        let now = 1_000u64;
         let session_id = Uuid::new_v4();
         let other = Uuid::new_v4();
 
@@ -4911,8 +4849,7 @@ mod tests {
         row.outcome.assignments = vec![first, second, running];
 
         let sessions: HashMap<Uuid, &AgentSession> = HashMap::new();
-        let queued: HashMap<Uuid, String> = HashMap::new();
-        let fields = boss_outcome_employee_fields(&row, &sessions, &queued);
+        let fields = boss_outcome_employee_fields(&row, &sessions);
         assert_eq!(fields.len(), 3);
         let by_generation = |session: Uuid, generation: u64| {
             fields
@@ -4925,36 +4862,62 @@ mod tests {
         assert!(!by_generation(session_id, 1).current);
         assert!(by_generation(session_id, 2).current);
         assert!(by_generation(other, 1).current);
+    }
 
-        let history = boss_outcome_attempt_entry(by_generation(session_id, 1), now);
-        assert_eq!(
-            history.title,
-            format!(
-                "{} — {}",
-                tr!("boss.goals_entry_unavailable"),
-                tr!("boss.goals_status_failed")
-            )
-        );
+    #[test]
+    fn outcome_follow_up_belongs_to_the_employee_attempt_until_resolved() {
+        use waku_protocol::boss::{
+            AssignmentSettle, AssignmentVerdict, HandoffDecision, HandoffResolution,
+            OutcomeHandoff, OutcomeState,
+        };
+        let session = Uuid::new_v4();
+        let mut row = outcome_row(OutcomeState::Open, Vec::new());
+        let mut first = outcome_assignment(session, 1);
+        first.settled = Some(AssignmentSettle {
+            verdict: AssignmentVerdict::Finished,
+            cause: None,
+            blocked: false,
+            at: Some(20),
+        });
+        let mut retry = first.clone();
+        retry.generation = 2;
+        row.outcome.assignments = vec![first, retry];
+        row.outcome.handoffs.push(OutcomeHandoff {
+            id: Uuid::new_v4(),
+            assignment: session,
+            attempt: 1,
+            intent: "Review the result".into(),
+            created_at: 30,
+            resolution: None,
+        });
+        let sessions = HashMap::new();
+        let fields = boss_outcome_employee_fields(&row, &sessions);
+        assert_eq!(fields[0].status, BossGoalStatus::FollowUp);
         assert!(
-            !history.detail.contains("provider exited mid-turn"),
-            "{}",
-            history.detail
+            fields[0].current,
+            "an owed follow-up remains visible after a retry"
         );
-        assert!(
-            history
-                .detail
-                .contains(&sidebar::format_time_ago(now - 940)),
-            "{}",
-            history.detail
-        );
-        assert_eq!(history.session, Some(session_id));
-        assert!(!history.destination);
-        assert_eq!(history.icon, "icons/x-bold.svg");
+        assert!(fields[0].aria.contains(&BossGoalStatus::FollowUp.label()));
+        assert_eq!(fields[1].status, BossGoalStatus::Finished);
+        let (icon, tone, spin) = fields[0].status.marker();
+        assert_eq!(icon, "icons/bell.svg");
+        assert!(matches!(tone, BossGoalTone::Warning));
+        assert!(!spin);
+        assert!(boss_outcome_note_entries(&row, 40).is_empty());
+
+        row.outcome.handoffs[0].resolution = Some(HandoffResolution {
+            decision: HandoffDecision::Dismiss,
+            at: 40,
+        });
+        let fields = boss_outcome_employee_fields(&row, &sessions);
+        assert_eq!(fields[0].status, BossGoalStatus::Finished);
+        assert!(!fields[0].current);
+        assert!(fields[1].current);
     }
 
     /// The expanded view's member joins and note lines: two running
-    /// assignments share the outcome and both appear, owed handoffs and
-    /// recorded waits get their own lines, a settled row nobody can
+    /// assignments share the outcome and both appear, recorded waits
+    /// keep their notes without duplicating follow-ups, a settled row nobody can
     /// describe reads as unavailable, and an empty outcome says so rather
     /// than inventing history.
     #[test]
@@ -4990,8 +4953,7 @@ mod tests {
         second_session.status = SessionStatus::Working;
         let sessions: HashMap<Uuid, &AgentSession> =
             HashMap::from([(first, &first_session), (second, &second_session)]);
-        let queued: HashMap<Uuid, String> = HashMap::new();
-        let employees = boss_outcome_employee_fields(&row, &sessions, &queued);
+        let employees = boss_outcome_employee_fields(&row, &sessions);
         assert_eq!(employees.len(), 3);
         for employee in &employees[..2] {
             assert_eq!(employee.status, BossGoalStatus::Working);
@@ -4999,7 +4961,7 @@ mod tests {
         assert_eq!(employees[2].status, BossGoalStatus::UnavailableHistory);
         assert_eq!(employees[2].name, tr!("boss.goals_entry_unavailable"));
 
-        // Owed decisions and recorded pauses become their own lines.
+        // Follow-ups belong on employees; recorded pauses keep their notes.
         let mut row = outcome_row(OutcomeState::Open, Vec::new());
         row.outcome.assignments = vec![outcome_assignment(first, 1)];
         row.outcome
@@ -5015,19 +4977,8 @@ mod tests {
         row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
             note: "upstream deploy".into(),
         });
-        let entries = boss_outcome_note_entries(&row, &sessions, now);
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry.title == tr!("boss.goals_handoff_pending")
-                    && entry.detail.contains("Review the result")),
-            "{}",
-            entries
-                .iter()
-                .map(|entry| entry.title.as_str())
-                .collect::<Vec<_>>()
-                .join(" | ")
-        );
+        let entries = boss_outcome_note_entries(&row, now);
+        assert_eq!(entries.len(), 1, "follow-ups belong on employee rows");
         assert!(
             entries
                 .iter()
@@ -5054,7 +5005,7 @@ mod tests {
             reason: "evidence missing".into(),
             at: now - 30,
         });
-        let entries = boss_outcome_note_entries(&row, &sessions, now);
+        let entries = boss_outcome_note_entries(&row, now);
         let conflict = entries.last().unwrap();
         assert_eq!(conflict.title, tr!("boss.goals_conflict"));
         assert_eq!(conflict.detail, "evidence missing");
@@ -5070,7 +5021,7 @@ mod tests {
             at: None,
         });
         row.outcome.assignments = vec![recovered];
-        let employees = boss_outcome_employee_fields(&row, &sessions, &queued);
+        let employees = boss_outcome_employee_fields(&row, &sessions);
         assert_eq!(employees[0].status, BossGoalStatus::UnavailableHistory);
         assert_eq!(employees[0].name, tr!("boss.goals_entry_unavailable"));
     }
@@ -5082,7 +5033,6 @@ mod tests {
     fn outcome_waits_reopen_and_snoozes_stay_honest() {
         use waku_protocol::boss::{AssignmentSettle, AssignmentVerdict, OutcomeState};
         let sessions: HashMap<Uuid, &AgentSession> = HashMap::new();
-        let queued: HashMap<Uuid, String> = HashMap::new();
         let now = 1_000u64;
 
         // A snooze is the outcome's other recorded pause — it reads as
@@ -5097,10 +5047,7 @@ mod tests {
             (BossGoalBucket::Pending, BossGoalStatus::Waiting)
         );
         assert_eq!(
-            boss_outcome_note_entries(&row, &sessions, now)
-                .last()
-                .unwrap()
-                .key,
+            boss_outcome_note_entries(&row, now).last().unwrap().key,
             format!("{}:wait", row.outcome.id)
         );
         // An elapsed snooze stops explaining the pause.
@@ -5166,18 +5113,9 @@ mod tests {
             boss_outcome_attention_cause(&row).as_deref(),
             Some("interrupted by a daemon restart")
         );
-        let employees = boss_outcome_employee_fields(&row, &sessions, &queued);
+        let employees = boss_outcome_employee_fields(&row, &sessions);
         assert_eq!(employees.len(), 2);
         assert_eq!(employees[0].status, BossGoalStatus::Failed);
-        assert!(
-            employees[0]
-                .reasons
-                .contains(&boss::BossEmployeeReason::Detail(
-                    "interrupted by a daemon restart".to_owned()
-                )),
-            "{:?}",
-            employees[0].reasons
-        );
         assert_eq!(employees[1].status, BossGoalStatus::Finished);
     }
 }
@@ -13156,21 +13094,19 @@ impl Waku {
     /// supplies the derivable parts; this adds what only the view knows:
     /// the face, project, and the status marker's color. Only each
     /// session's current attempt keeps the sidebar-styled employee row;
-    /// every earlier attempt compresses into a one-line history entry so
-    /// a retried outcome cannot fill the panel with repeating cards.
+    /// older settled attempts stay in the durable history so a retried
+    /// outcome cannot fill the panel with repeating rows.
     fn prepare_boss_outcome_assignments(
         &self,
         row: &boss::BossOutcomeRow,
         sessions: &HashMap<Uuid, &AgentSession>,
         now: u64,
         cx: &App,
-    ) -> (Vec<boss::BossEmployeeRow>, Vec<BossOutcomeEntry>) {
+    ) -> Vec<boss::BossEmployeeRow> {
         let theme = Theme::current(cx);
         let mut employees = Vec::new();
-        let mut history = Vec::new();
-        for fields in boss_outcome_employee_fields(row, sessions, &self.boss_ui.queued) {
+        for fields in boss_outcome_employee_fields(row, sessions) {
             if !fields.current {
-                history.push(boss_outcome_attempt_entry(&fields, now));
                 continue;
             }
             let member = row
@@ -13239,13 +13175,12 @@ impl Waku {
                 aria: Some(fields.aria),
             });
         }
-        (employees, history)
+        employees
     }
 }
 
 /// One expanded-outcome assignment row's derivable fields — everything
-/// the shared card or the compressed history line paints that does not
-/// need the live view. `Waku`'s `prepare_boss_outcome_assignments` adds
+/// the employee row paints without the live view. `Waku`'s `prepare_boss_outcome_assignments` adds
 /// the avatar, project, and chip data only the view can resolve.
 struct BossOutcomeEmployeeFields {
     /// The entry's stable key — `{outcome}:{session}:{generation}` — the
@@ -13263,12 +13198,8 @@ struct BossOutcomeEmployeeFields {
     /// joined with " · " after the job title on the detail line.
     detail: String,
     status: BossGoalStatus,
-    /// Recorded blocked/queued/cause text; history presentation filters
-    /// blocked reasons and the mid-turn exit cause.
-    reasons: Vec<boss::BossEmployeeReason>,
-    /// Still in flight or the session's newest recorded attempt — the
-    /// only rows painted with the full employee card. Older attempts
-    /// compress into history lines.
+    /// The newest attempt, live work, or an attempt still owed a follow-up.
+    /// Earlier settled attempts stay in the durable history.
     current: bool,
     /// The settle or assignment stamp the card shows.
     stamp: Option<u64>,
@@ -13282,18 +13213,16 @@ struct BossOutcomeEmployeeFields {
 
 /// The expanded outcome's employee rows — every recorded assignment
 /// attempt with its live status or settle verdict, newest first.
-/// Attempts never drop off: retries and failures stay visible beside the
-/// latest work. Kept free of `Waku` so the panel's tests pin the
+/// Attempts remain in the durable record; `current` selects the visible
+/// employee rows. Kept free of `Waku` so the panel's tests pin the
 /// contract without building a view.
 fn boss_outcome_employee_fields(
     row: &boss::BossOutcomeRow,
     sessions: &HashMap<Uuid, &AgentSession>,
-    queued: &HashMap<Uuid, String>,
 ) -> Vec<BossOutcomeEmployeeFields> {
     // Each session's newest recorded generation is its current attempt —
-    // the one row that keeps the full employee card. Earlier generations
-    // compress into history lines, so the live plan chips and readiness
-    // can never repeat across a session's retries.
+    // one shown on its employee row. Earlier settled generations stay
+    // out of the expanded outcome.
     let mut latest_generation: HashMap<Uuid, u64> = HashMap::new();
     for assignment in &row.outcome.assignments {
         let latest = latest_generation.entry(assignment.session).or_default();
@@ -13354,45 +13283,6 @@ fn boss_outcome_employee_fields(
                 .filter(|part| !part.is_empty())
                 .collect::<Vec<_>>()
                 .join(" · ");
-            // Retain each source reason so history rows can choose which
-            // details to present without changing the recorded status.
-            let mut reasons = Vec::new();
-            if let Some(blocker) = member
-                .and_then(|member| member.employee.blocker.as_deref())
-                .map(str::trim)
-                .filter(|text| !text.is_empty())
-            {
-                reasons.push(boss::BossEmployeeReason::Blocked(blocker.to_owned()));
-            }
-            if assignment.settled.is_none() {
-                if let Some(wait) =
-                    member.and_then(|member| queued.get(&member.employee.session_id))
-                {
-                    reasons.push(boss::BossEmployeeReason::Queued(wait.clone()));
-                }
-                if boss_outcome_prerequisite_failed(row, assignment) {
-                    reasons.push(boss::BossEmployeeReason::Blocked(tr!(
-                        "boss.goals_prereq_failed"
-                    )));
-                }
-            }
-            if let Some(cause) = assignment
-                .settled
-                .as_ref()
-                .and_then(|settle| settle.cause)
-                .and_then(boss_expiry_cause_label)
-            {
-                reasons.push(boss::BossEmployeeReason::Detail(cause));
-            } else if assignment
-                .settled
-                .as_ref()
-                .is_some_and(|settle| settle.blocked)
-                || member.is_some_and(|member| member.employee.blocker.is_some())
-            {
-                reasons.push(boss::BossEmployeeReason::Blocked(tr!(
-                    "boss.goals_status_blocked"
-                )));
-            }
             let stamp = assignment
                 .settled
                 .as_ref()
@@ -13419,8 +13309,8 @@ fn boss_outcome_employee_fields(
                 job,
                 detail,
                 status,
-                reasons,
                 current: assignment.settled.is_none()
+                    || status == BossGoalStatus::FollowUp
                     || latest_generation.get(&assignment.session) == Some(&assignment.generation),
                 stamp,
                 sort_key: member
@@ -13451,57 +13341,9 @@ fn boss_outcome_employee_fields(
     fields
 }
 
-/// An earlier attempt's history line — the status marker, name and
-/// verdict up front, then attempt context and age. Blocker text and the
-/// mid-turn exit cause stay out of Tasks rows. Only the current attempt
-/// keeps the full card, so retries read as one card plus quiet lines.
-fn boss_outcome_attempt_entry(fields: &BossOutcomeEmployeeFields, now: u64) -> BossOutcomeEntry {
-    let (icon, tone, spin) = fields.status.marker();
-    let mut detail = fields.detail.clone();
-    for reason in &fields.reasons {
-        let visible = match reason {
-            boss::BossEmployeeReason::Blocked(_) => false,
-            boss::BossEmployeeReason::Queued(_) => true,
-            boss::BossEmployeeReason::Detail(text) => {
-                text != &tr!("boss.goals_cause_exited_mid_turn")
-                    && text != &tr!("boss.goals_status_blocked")
-            }
-        };
-        if !visible {
-            continue;
-        }
-        if !detail.is_empty() {
-            detail.push_str(" · ");
-        }
-        detail.push_str(reason.text());
-    }
-    if let Some(stamp) = fields.stamp {
-        if !detail.is_empty() {
-            detail.push_str(" · ");
-        }
-        detail.push_str(&sidebar::format_time_ago(now.saturating_sub(stamp)));
-    }
-    BossOutcomeEntry {
-        focus: None,
-        key: fields.key.clone(),
-        session: Some(fields.session_id),
-        icon,
-        tone,
-        spin,
-        title: format!("{} — {}", fields.name, fields.status.label()),
-        detail,
-        aria: fields.aria.clone(),
-        destination: fields.navigable,
-    }
-}
-
-/// The expanded outcome's note lines — the owed-decision and wait
-/// records that explain the current state, below the employee rows.
-fn boss_outcome_note_entries(
-    row: &boss::BossOutcomeRow,
-    sessions: &HashMap<Uuid, &AgentSession>,
-    now: u64,
-) -> Vec<BossOutcomeEntry> {
+/// The expanded outcome's conflict and wait notes. Owed follow-ups
+/// appear as the corresponding employee's status.
+fn boss_outcome_note_entries(row: &boss::BossOutcomeRow, now: u64) -> Vec<BossOutcomeEntry> {
     let mut entries = Vec::new();
     if let Some(conflict) = &row.outcome.completion_conflict {
         entries.push(BossOutcomeEntry {
@@ -13515,53 +13357,6 @@ fn boss_outcome_note_entries(
             aria: conflict.reason.clone(),
             detail: conflict.reason.clone(),
             destination: false,
-        });
-    }
-    for handoff in row.outcome.pending_handoffs() {
-        let assignee = row
-            .outcome
-            .assignments
-            .iter()
-            .rev()
-            .find(|assignment| assignment.session == handoff.assignment)
-            .and_then(|assignment| assignment.identity.as_ref())
-            .map(|identity| identity.name.clone());
-        let title = match assignee {
-            Some(name) => format!("{} — {name}", tr!("boss.goals_handoff_pending")),
-            None => tr!("boss.goals_handoff_pending"),
-        };
-        let mut detail = handoff.intent.trim().to_owned();
-        let elapsed = now.saturating_sub(handoff.created_at);
-        if elapsed > 0 {
-            if !detail.is_empty() {
-                detail.push_str(" · ");
-            }
-            detail.push_str(&sidebar::format_time_ago(elapsed));
-        }
-        let destination = sessions.contains_key(&handoff.assignment);
-        entries.push(BossOutcomeEntry {
-            focus: None,
-            key: format!("{}:handoff:{}", row.outcome.id, handoff.id),
-            session: Some(handoff.assignment),
-            icon: "icons/bell.svg",
-            tone: BossGoalTone::Warning,
-            spin: false,
-            aria: if destination {
-                tr!(
-                    "boss.goals_open_assignment",
-                    label = title,
-                    status = detail.clone()
-                )
-            } else {
-                tr!(
-                    "boss.goals_assignment_status",
-                    label = title,
-                    status = detail.clone()
-                )
-            },
-            title,
-            detail,
-            destination,
         });
     }
     if let Some(wait) = boss_outcome_wait_label(&row.outcome, now) {
@@ -13770,12 +13565,10 @@ impl Waku {
             if prepared.expanded {
                 // Each session's current attempt paints the same card the
                 // Employees tab uses, newest summoned first, followed by
-                // the conflict/handoff notes; earlier attempts
-                // compress into quiet history lines at the end. Entries
+                // completion conflict notes. Entries
                 // that name a conversation the session snapshot knows get
                 // the list's persistent focus handle; the rest stay inert.
-                let (employees, attempt_history) =
-                    self.prepare_boss_outcome_assignments(row, &sessions, now, cx);
+                let employees = self.prepare_boss_outcome_assignments(row, &sessions, now, cx);
                 let mut detail_items: Vec<BossOutcomeItem> = employees
                     .into_iter()
                     .map(|mut employee| {
@@ -13804,12 +13597,11 @@ impl Waku {
                     BossOutcomeItem::Entry(Arc::new(entry))
                 };
                 detail_items.extend(
-                    boss_outcome_note_entries(row, &sessions, now)
+                    boss_outcome_note_entries(row, now)
                         .into_iter()
                         .filter(|entry| !entry.key.ends_with(":wait"))
                         .map(&mut entries_focus),
                 );
-                detail_items.extend(attempt_history.into_iter().map(&mut entries_focus));
                 if detail_items.is_empty() {
                     detail_items.push(BossOutcomeItem::Entry(Arc::new(boss_outcome_empty_entry(
                         row.outcome.id,
@@ -14104,7 +13896,7 @@ impl Waku {
                                         .flex_none()
                                         .h(px(28.0))
                                         .mt(px(4.0))
-                                        .pl(px(26.0))
+                                        .pl(px(8.0))
                                         .flex()
                                         .items_center()
                                         .cursor_default()
