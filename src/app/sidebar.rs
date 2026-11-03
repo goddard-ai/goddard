@@ -5396,7 +5396,7 @@ impl Waku {
                     .clone();
                 div()
                     .w(px(20.0))
-                    .h(px(22.0))
+                    .h(px(20.0))
                     .flex_none()
                     .flex()
                     .items_center()
@@ -5410,7 +5410,7 @@ impl Waku {
                             .tab_index(0)
                             .tab_stop(true)
                             .w_0()
-                            .h(px(22.0))
+                            .h(px(20.0))
                             .overflow_hidden()
                             .rounded(px(4.0))
                             .flex()
@@ -5490,6 +5490,10 @@ impl Waku {
                 .font_weight(FontWeight::NORMAL)
                 .text_size(sp(14.0))
         })
+        // Match the Boss row's brain button and trailing status spacing.
+        .when(group == SidebarGroup::Deliverables, |element| {
+            element.pr(px(8.0)).gap(px(8.0))
+        })
         // The boss-section groups' headers indent to the same column their
         // rows use — they read as nested under the boss block.
         .when(
@@ -5549,7 +5553,8 @@ impl Waku {
                             element.child(
                                 div()
                                     .flex_none()
-                                    .mb(px(1.0))
+                                    .relative()
+                                    .top(px(-1.0))
                                     .text_size(sp(12.0))
                                     .text_color(theme.text_tertiary)
                                     .child(format!("{count}")),
@@ -5676,6 +5681,9 @@ impl Waku {
                     div()
                         .flex_none()
                         .size(px(12.0))
+                        .when(group == SidebarGroup::Deliverables, |slot| {
+                            slot.w(px(20.0)).h(px(18.0))
+                        })
                         .flex()
                         .items_center()
                         .justify_center()
