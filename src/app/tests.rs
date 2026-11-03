@@ -173,6 +173,41 @@ fn attach_changed_files(session: &mut AgentSession, files: Vec<CheckpointFile>) 
 }
 
 #[test]
+fn catalog_refresh_preserves_a_first_hidden_turn_during_preparation() {
+    let mut qa = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    qa.begin_hidden_turn("Review this commit");
+    let id = qa.id;
+    let mut sessions = vec![qa];
+    let preparing = HashSet::from([id]);
+    // A startup snapshot predates the first provider registration. It must
+    // leave the selected QA session (and its workspace) available.
+    for fresh in [true, false] {
+        let removed = merge_remote_session_catalog(
+            &mut sessions,
+            Vec::new(),
+            |_| true,
+            |_| false,
+            fresh,
+            &preparing,
+        );
+        assert!(removed.is_empty());
+        assert_eq!(sessions[0].id, id);
+        assert!(sessions[0].active_turn_id().is_some());
+    }
+    // Once registered, normal catalog ownership and deletion resume.
+    let removed = merge_remote_session_catalog(
+        &mut sessions,
+        Vec::new(),
+        |_| true,
+        |_| false,
+        false,
+        &HashSet::new(),
+    );
+    assert_eq!(removed, vec![id]);
+    assert!(sessions.is_empty());
+}
+
+#[test]
 fn remote_catalog_claims_include_client_drafts_only_for_its_projects() {
     let project = Project::from_path(std::path::PathBuf::from("/remote/project"));
     let draft = AgentSession::new(project.id, ProviderKind::Codex);
@@ -189,7 +224,14 @@ fn remote_catalog_claims_include_client_drafts_only_for_its_projects() {
             super::remote_catalog_session_ids(&catalog.projects, &catalog.sessions, &sessions),
             vec![draft.id]
         );
-        merge_remote_session_catalog(&mut sessions, Vec::new(), |_| true, |_| false, true);
+        merge_remote_session_catalog(
+            &mut sessions,
+            Vec::new(),
+            |_| true,
+            |_| false,
+            true,
+            &HashSet::new(),
+        );
     }
     let reported = AgentSession::new(catalog.projects[0].id, ProviderKind::Claude);
     catalog.sessions.push(reported.clone());
@@ -235,6 +277,7 @@ fn remote_task_catalog_adds_web_tasks_without_replacing_hydrated_detail() {
         |_| false,
         |_| false,
         false,
+        &HashSet::new(),
     );
 
     assert!(removed.is_empty());
@@ -267,6 +310,7 @@ fn employee_catalog_selection_updates_hydrated_live_and_reconnected_clients() {
             |_| true,
             |_| live,
             fresh,
+            &HashSet::new(),
         );
         let reflected = &client[0];
         assert_eq!(reflected.provider, session.provider);
@@ -305,6 +349,7 @@ fn catalog_merge_carries_the_confirmed_activation_mark_forward() {
         |_| true,
         |_| false,
         true,
+        &HashSet::new(),
     );
     assert_eq!(client[0].model.as_deref(), Some("gpt-6"));
     assert_eq!(client[0].reasoning_effort.as_deref(), Some("low"));
@@ -331,6 +376,7 @@ fn catalog_merge_carries_the_confirmed_activation_mark_forward() {
         |_| true,
         |_| false,
         true,
+        &HashSet::new(),
     );
     assert_eq!(client[0].model.as_deref(), Some("gpt-6.1"));
     assert_eq!(client[0].reasoning_effort.as_deref(), Some("high"));
@@ -378,6 +424,7 @@ fn remote_task_catalog_adopts_workspace_for_skeletons_only() {
         |_| false,
         |_| false,
         false,
+        &HashSet::new(),
     );
 
     assert_eq!(
@@ -419,7 +466,14 @@ fn fresh_catalog_keeps_incognito_sessions_but_still_removes_ordinary_ones() {
     let skeleton_id = skeleton.id;
 
     let mut catalog = vec![incognito, ordinary, skeleton];
-    let removed = merge_remote_session_catalog(&mut catalog, Vec::new(), |_| true, |_| false, true);
+    let removed = merge_remote_session_catalog(
+        &mut catalog,
+        Vec::new(),
+        |_| true,
+        |_| false,
+        true,
+        &HashSet::new(),
+    );
 
     assert_eq!(removed, vec![ordinary_id, skeleton_id]);
     assert_eq!(catalog.len(), 1);
@@ -438,8 +492,14 @@ fn non_fresh_catalog_removes_incognito_sessions_like_any_other() {
     let incognito_id = incognito.id;
 
     let mut catalog = vec![incognito];
-    let removed =
-        merge_remote_session_catalog(&mut catalog, Vec::new(), |_| true, |_| false, false);
+    let removed = merge_remote_session_catalog(
+        &mut catalog,
+        Vec::new(),
+        |_| true,
+        |_| false,
+        false,
+        &HashSet::new(),
+    );
 
     assert_eq!(removed, vec![incognito_id]);
     assert!(catalog.is_empty());

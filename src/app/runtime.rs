@@ -503,6 +503,7 @@ pub(super) fn merge_remote_session_catalog(
     owns: impl Fn(Uuid) -> bool,
     has_local_runtime: impl Fn(Uuid) -> bool,
     fresh: bool,
+    preparing: &HashSet<Uuid>,
 ) -> Vec<Uuid> {
     let remote_ids = remote
         .iter()
@@ -511,6 +512,8 @@ pub(super) fn merge_remote_session_catalog(
     // Re-registration needs the transcript, so only detail-loaded copies
     // survive; an incognito skeleton learned from another client comes back
     // through the catalog when its owner re-pushes it.
+    // First turns also exist locally before provider preparation registers
+    // them with the daemon; an older snapshot cannot retire them yet.
     let survives_restart =
         |session: &AgentSession| fresh && session.incognito && session.detail_loaded;
     let removed = local
@@ -520,6 +523,7 @@ pub(super) fn merge_remote_session_catalog(
                 && owns(session.id)
                 && !remote_ids.contains(&session.id)
                 && !survives_restart(session)
+                && !preparing.contains(&session.id)
         })
         .map(|session| session.id)
         .collect::<Vec<_>>();
@@ -528,6 +532,7 @@ pub(super) fn merge_remote_session_catalog(
             || !owns(session.id)
             || remote_ids.contains(&session.id)
             || survives_restart(session)
+            || preparing.contains(&session.id)
     });
 
     for remote in remote {
@@ -2821,6 +2826,7 @@ impl Waku {
             },
             |session_id| runtime_ids.contains(&session_id),
             fresh,
+            &self.submission_preparations,
         );
         // Incognito rows the restarted daemon forgot ride the next save back:
         // SaveTaskState adopts a detail-loaded started session it does not

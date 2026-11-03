@@ -2877,6 +2877,7 @@ impl Waku {
                                         |_| false,
                                         |id| runtime_ids.contains(&id),
                                         false,
+                                        &HashSet::new(),
                                     );
                                 }
                                 let navigates = matches!(reply, BossReply::Open | BossReply::Clear)

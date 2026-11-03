@@ -329,6 +329,7 @@ mod tests {
             |_| true,
             |_| false,
             false,
+            &HashSet::new(),
         );
         assert_eq!(catalog[0].pinned_at, Some(2));
 
@@ -340,6 +341,7 @@ mod tests {
             |_| true,
             |_| false,
             false,
+            &HashSet::new(),
         );
         assert_eq!(catalog[0].pinned_at, None);
     }

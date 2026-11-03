@@ -723,6 +723,7 @@ mod tests {
             |_| false,
             |_| false,
             false,
+            &HashSet::new(),
         );
         assert!(catalog[0].detail_loaded);
         assert_eq!(

@@ -1,1 +1,1 @@
-- QA sessions keep the conversation and composer beside the commit diff, show agent permission requests, and offer a Commit button to return to the reviewed changes.
+- QA sessions keep chat beside the commit diff, show permission requests, and offer a Commit button to reopen the reviewed changes. Chat, Review, and Terminal state now survive provider startup.
