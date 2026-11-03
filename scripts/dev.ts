@@ -225,7 +225,6 @@ const daemonPortBase = 34_123;
 const daemonPortScanLimit = 20;
 const daemonReadyTimeoutMs = 15_000;
 const daemonShutdownTimeoutMs = 1_000;
-const daemonIdlePollMs = 2_000;
 const liveSessionStatuses = new Set([
   "connecting",
   "working",
@@ -261,14 +260,12 @@ let serve: DevServe | undefined;
 let daemonBind: string | undefined;
 let daemonAddress: string | undefined;
 let daemonRestartPending = false;
-let daemonRestartWhenIdle = false;
 let daemonRestarting = false;
 let protocolDirty = false;
 let forceDaemonRestart = false;
 let relaunchAfterBuild = false;
 let daemonBuildDirty = false;
 let controlClient: WakuClient | undefined;
-let lastDeferredLiveCount: number | undefined;
 let lastDaemonSpawnAt = 0;
 let commandInput: readline.Interface | undefined;
 let stopping = false;
@@ -1243,12 +1240,13 @@ async function liveSessionCount(): Promise<number | undefined> {
       liveSessionStatuses.has(session.status),
     );
     let live = 0;
-    for (const session of candidates.slice(0, 50)) {
+    for (const session of candidates) {
       const attach = await controlClient.request(
         { type: "attachSession" },
         session.id,
       );
-      if (attach.type === "sessionRuntime" && attach.runtimeId !== null) {
+      if (attach.type !== "sessionRuntime") return undefined;
+      if (attach.runtimeId !== null) {
         live += 1;
       }
     }
@@ -1301,7 +1299,6 @@ async function restartDaemon(
     try {
       await spawnDaemon(daemonBind, preserveProtocolDirty);
       daemonRestartPending = false;
-      daemonRestartWhenIdle = false;
       console.log(`[goddard-dev] Daemon restarted on ${daemonAddress}.`);
       return (
         process.env.GODDARD_DAEMON_PATH === undefined &&
@@ -1318,37 +1315,13 @@ async function restartDaemon(
 }
 
 function armDaemonRestartWhenIdle(): void {
-  if (!daemonRestartPending) {
-    console.log("[goddard-dev] No pending daemon restart.");
-    return;
-  }
-  if (daemonRestartWhenIdle) return;
-  daemonRestartWhenIdle = true;
-  lastDeferredLiveCount = undefined;
+  // Load/attach snapshots cannot fence admissions from other connections or
+  // internal schedulers. Never infer permission to kill the daemon from them.
+  // Keep this command unavailable until the daemon owns a global admission
+  // fence and an all-work quiescence check through confirmed shutdown.
   console.log(
-    "[goddard-dev] Daemon restart armed; it fires once no live sessions remain.",
+    "[goddard-dev] Idle daemon activation unavailable: daemon-wide admission fencing is not supported; the running daemon is preserved.",
   );
-  void pollForDaemonIdle();
-}
-
-async function pollForDaemonIdle(): Promise<void> {
-  while (daemonRestartWhenIdle && daemonRestartPending && !stopping) {
-    if (!building && !daemonRestarting) {
-      const live = await liveSessionCount();
-      if (live === 0) {
-        await restartDaemon("sessions idle");
-        return;
-      }
-      if (live !== undefined && live !== lastDeferredLiveCount) {
-        console.log(
-          `[goddard-dev] ${live} live session${live === 1 ? "" : "s"} still running.`,
-        );
-        lastDeferredLiveCount = live;
-      }
-    }
-    await Bun.sleep(daemonIdlePollMs);
-  }
-  daemonRestartWhenIdle = false;
 }
 
 async function commandStdout(command: string[]): Promise<string | undefined> {
@@ -1419,7 +1392,7 @@ function printShortcuts(): void {
       ),
       shortcutLine("b", "restart the daemon, then relaunch the app"),
       shortcutLine("d", "restart the daemon now"),
-      shortcutLine("D", "restart the daemon once sessions go idle"),
+      shortcutLine("D", "explain why idle daemon activation is unavailable"),
       shortcutLine("m", "show mobile daemon address and token"),
       shortcutLine("e", "expand build output (toggle live, replay after)"),
       shortcutLine("q", "quit the watcher, app, and daemon"),
@@ -1848,7 +1821,6 @@ async function drainBuildQueue(): Promise<void> {
         try {
           await ensureDaemon();
           daemonRestartPending = false;
-          daemonRestartWhenIdle = false;
         } catch (error) {
           console.error("[goddard-dev] Could not start the daemon:", error);
         }
@@ -1865,7 +1837,7 @@ async function drainBuildQueue(): Promise<void> {
                 ? "; no live sessions"
                 : `; ${live} live session${live === 1 ? "" : "s"} would be interrupted`;
           console.log(
-            `[goddard-dev] Daemon rebuilt${detail} — press d + enter to restart, D + enter once sessions go idle.`,
+            `[goddard-dev] Daemon rebuilt${detail} — press d + enter to restart, D + enter for idle activation status.`,
           );
           // Non-interactive runs cannot press 'd'; keep the previous
           // rebuild-and-swap behavior so the daemon never goes stale.
@@ -1873,8 +1845,6 @@ async function drainBuildQueue(): Promise<void> {
             await restartDaemon("non-interactive rebuild");
           } else if (forceDaemonRestart) {
             await restartDaemon("requested");
-          } else if (daemonRestartWhenIdle && live === 0) {
-            await restartDaemon("sessions idle");
           }
           forceDaemonRestart = false;
           if (relaunchAfterBuild && !stopping) await relaunchApp();
