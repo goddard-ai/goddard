@@ -409,21 +409,21 @@ fn append_sidebar_ungrouped_roster(
 }
 
 /// The member faces a collapsed employee group's header previews — up to
-/// `SIDEBAR_COLLAPSED_GROUP_AVATARS` non-expired members with a resolvable identity —
+/// `SIDEBAR_COLLAPSED_GROUP_AVATARS` members with a resolvable identity —
 /// and the member count its "+N more" tail omits. A member without an
 /// identity can't paint a face, so it falls into the omitted count.
 fn collapsed_employee_avatar_strip<'a>(
     members: &[Uuid],
     identities: &'a HashMap<Uuid, waku_client::boss::BossIdentity>,
     expired: &HashSet<Uuid>,
-) -> (Vec<&'a waku_client::boss::BossIdentity>, usize) {
+) -> (Vec<(&'a waku_client::boss::BossIdentity, bool)>, usize) {
     let mut faces = Vec::new();
     let mut omitted = 0;
-    for id in members.iter().filter(|id| !expired.contains(id)) {
+    for id in members {
         if faces.len() < SIDEBAR_COLLAPSED_GROUP_AVATARS
             && let Some(identity) = identities.get(id)
         {
-            faces.push(identity);
+            faces.push((identity, expired.contains(id)));
         } else {
             omitted += 1;
         }
@@ -5136,38 +5136,10 @@ impl Waku {
             self.sidebar_collapsed_group_members
                 .borrow()
                 .get(&group)
-                .map(|members| {
-                    collapsed_employee_avatar_strip(
-                        members,
-                        &self.boss_ui.identities,
-                        &self.boss_ui.expired,
-                    )
-                })
-                .unwrap_or_default()
+                .filter(|members| !members.is_empty())
+                .map(|members| self.render_employee_avatar_strip(members, cx))
         })
-        .filter(|(faces, omitted)| !faces.is_empty() || *omitted > 0)
-        .map(|(faces, omitted)| {
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(2.0))
-                // The letter a placeholder paints while its raster renders
-                // inherits this size to fit inside the small face box.
-                .text_size(sp(18.0))
-                .children(faces.into_iter().map(|identity| {
-                    self.boss_avatar(identity, SIDEBAR_COLLAPSED_GROUP_AVATAR_SIZE, cx)
-                }))
-                .when(omitted > 0, |strip| {
-                    strip.child(
-                        div()
-                            .flex_none()
-                            .text_size(sp(12.0))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("sidebar.collapsed_group_members", count = omitted)),
-                    )
-                })
-        });
+        .flatten();
         let group_key = group.element_key();
         let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
         let header_focus = self
@@ -5893,6 +5865,38 @@ impl Waku {
         }
     }
 
+    #[track_caller]
+    fn render_employee_avatar_strip(&self, members: &[Uuid], cx: &Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let (faces, omitted) = collapsed_employee_avatar_strip(
+            members,
+            &self.boss_ui.identities,
+            &self.boss_ui.expired,
+        );
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            // Keep letter fallbacks sized for the small avatar box.
+            .text_size(sp(18.0))
+            .children(faces.into_iter().map(|(identity, expired)| {
+                div()
+                    .flex_none()
+                    .when(expired, |avatar| avatar.opacity(0.35))
+                    .child(self.boss_avatar(identity, SIDEBAR_COLLAPSED_GROUP_AVATAR_SIZE, cx))
+            }))
+            .when(omitted > 0, |strip| {
+                strip.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("sidebar.collapsed_group_members", count = omitted)),
+                )
+            })
+    }
+
     fn render_boss_employee_show_more(
         &self,
         key: waku_client::DaemonKey,
@@ -5900,11 +5904,9 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        // The fold row names the finished employee it would reveal
-        // next — "Rhea finished 3m ago" — rather than a bare
-        // "Show more". The age is minute-granular like every
-        // sidebar time label; it never counts seconds.
-        let label = {
+        // Preview the finished employees this button will reveal, using the
+        // same capped strip and expired treatment as a collapsed group.
+        let members = {
             let visible = self
                 .sidebar_employee_reveals(group)
                 .get(&key)
@@ -5926,7 +5928,7 @@ impl Waku {
                         )
                 });
             let shown = sidebar_employee_idle_shown(visible, no_active);
-            let mut idle = self
+            let idle = self
                 .boss_ui
                 .recent
                 .get(&key)
@@ -5942,33 +5944,7 @@ impl Waku {
                         self.boss_ui.working.contains(id),
                     )
                 });
-            let next = idle.nth(shown);
-            let remaining = idle.count();
-            next.and_then(|id| {
-                let name = self.boss_ui.identities.get(&id)?.name.clone();
-                let updated = self
-                    .state
-                    .sessions
-                    .iter()
-                    .find(|session| session.id == *id)?
-                    .updated_at;
-                let elapsed = unix_time().saturating_sub(updated);
-                let label = if elapsed < 60 {
-                    tr!("boss.finished_now", name = name)
-                } else {
-                    tr!(
-                        "boss.finished_ago",
-                        name = name,
-                        ago = format_time_ago(elapsed)
-                    )
-                };
-                Some(if remaining > 0 {
-                    tr!("boss.finished_more", label = label, count = remaining)
-                } else {
-                    label
-                })
-            })
-            .unwrap_or_else(|| tr!("sidebar.show_more"))
+            idle.skip(shown).copied().collect::<Vec<_>>()
         };
         let row_id = format!("boss-show-more-{}-{key:?}", group.element_key());
         div()
@@ -5986,7 +5962,9 @@ impl Waku {
                     .text_color(theme.text_tertiary)
                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|style| style.text_color(theme.text))
-                    .child(label)
+                    .aria_label(tr!("sidebar.show_more"))
+                    .tooltip(Tooltip::text(tr!("sidebar.show_more")))
+                    .child(self.render_employee_avatar_strip(&members, cx))
                     .on_activation(cx, move |this, _, cx| {
                         let counts = match group {
                             SidebarGroup::Errands => &mut this.boss_ui.sidebar_errand_idle_visible,
@@ -8868,7 +8846,7 @@ mod tests {
             let (faces, omitted) =
                 collapsed_employee_avatar_strip(&members(count), &identities, &HashSet::new());
             assert_eq!(
-                faces.iter().map(|face| face.id).collect::<Vec<_>>(),
+                faces.iter().map(|(face, _)| face.id).collect::<Vec<_>>(),
                 members(count)
             );
             assert_eq!(omitted, 0);
@@ -8891,21 +8869,26 @@ mod tests {
         assert_eq!(faces.len(), 4);
         assert_eq!(omitted, 1);
 
-        // Expired members neither take face slots nor inflate the tail,
-        // including when their identity is missing.
+        // Expired members retain roster order, share the face limit and
+        // overflow count, and carry the faded marker even in an all-expired group.
         let expired = HashSet::from([member_ids[0], member_ids[5], Uuid::from_u128(99)]);
         let mut mixed = members(7);
         mixed.push(Uuid::from_u128(99));
         let (faces, omitted) = collapsed_employee_avatar_strip(&mixed, &identities, &expired);
         assert_eq!(
-            faces.iter().map(|face| face.id).collect::<Vec<_>>(),
-            member_ids[1..5]
+            faces.iter().map(|(face, _)| face.id).collect::<Vec<_>>(),
+            members(4)
         );
-        assert_eq!(omitted, 1);
+        assert_eq!(
+            faces.iter().map(|(_, faded)| *faded).collect::<Vec<_>>(),
+            vec![true, false, false, false]
+        );
+        assert_eq!(omitted, 4);
         let expired = member_ids.iter().copied().collect();
         let (faces, omitted) = collapsed_employee_avatar_strip(&members(7), &identities, &expired);
-        assert!(faces.is_empty());
-        assert_eq!(omitted, 0);
+        assert_eq!(faces.len(), SIDEBAR_COLLAPSED_GROUP_AVATARS);
+        assert!(faces.iter().all(|(_, faded)| *faded));
+        assert_eq!(omitted, 3);
 
         // The strip rides the header the fold already leaves behind: a
         // collapsed employee group still emits only header and spacer.
