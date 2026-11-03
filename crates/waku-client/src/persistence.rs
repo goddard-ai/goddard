@@ -1952,6 +1952,8 @@ struct AppState {
     qa_configs: HashMap<Uuid, waku_protocol::workspace::QaConfig>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     qa_sessions: HashMap<Uuid, QaSessionRecord>,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    qa_session_ids: HashSet<Uuid>,
     app_state_version: u32,
     #[serde(default = "Uuid::new_v4")]
     analytics_id: Uuid,
@@ -2151,6 +2153,10 @@ pub struct PersistedState {
     pub qa_configs: HashMap<Uuid, waku_protocol::workspace::QaConfig>,
     #[serde(default)]
     pub qa_sessions: HashMap<Uuid, QaSessionRecord>,
+    /// All QA conversations, including finished reviews whose checkout record
+    /// has been removed. Keep them out of the main window's task history.
+    #[serde(default)]
+    pub qa_session_ids: HashSet<Uuid>,
     pub version: u32,
     #[serde(default = "Uuid::new_v4")]
     pub analytics_id: Uuid,
@@ -2879,6 +2885,7 @@ impl PersistedState {
         Self {
             qa_configs: HashMap::new(),
             qa_sessions: HashMap::new(),
+            qa_session_ids: HashSet::new(),
             version: STATE_VERSION,
             analytics_id: Uuid::new_v4(),
             analytics_enabled: true,
@@ -3554,6 +3561,7 @@ impl PersistedState {
         AppState {
             qa_configs: self.qa_configs.clone(),
             qa_sessions: self.qa_sessions.clone(),
+            qa_session_ids: self.qa_session_ids.clone(),
             app_state_version: APP_STATE_VERSION,
             analytics_id: self.analytics_id,
             selected_project: self.selected_project,
@@ -3760,6 +3768,9 @@ impl PersistedState {
     fn apply_app_state(&mut self, app_state: AppState) {
         self.qa_configs = app_state.qa_configs;
         self.qa_sessions = app_state.qa_sessions;
+        self.qa_session_ids = app_state.qa_session_ids;
+        // Existing resumable reviews predate the retained identity set.
+        self.qa_session_ids.extend(self.qa_sessions.keys().copied());
         self.analytics_id = app_state.analytics_id;
         self.selected_project = app_state.selected_project;
         self.selected_session = app_state.selected_session;
@@ -6078,9 +6089,19 @@ mod tests {
         assert_eq!(restored.qa_sessions[&session_id].checkout.base_sha, "base");
         assert_eq!(restored.qa_sessions[&session_id].project_id, project_id);
         assert_eq!(restored.qa_sessions[&session_id].config, config);
+        assert!(restored.qa_session_ids.contains(&session_id));
+        // Ending a review drops the checkout record, but its conversation
+        // must stay hidden after the next app restart.
+        restored.qa_sessions.remove(&session_id);
+        let saved = serde_json::to_vec(&restored.app_state()).unwrap();
+        let mut finished = PersistedState::empty();
+        finished.apply_app_state(serde_json::from_slice(&saved).unwrap());
+        assert!(finished.qa_sessions.is_empty());
+        assert!(finished.qa_session_ids.contains(&session_id));
         let legacy: AppState = serde_json::from_str(r#"{"app_state_version":1}"#).unwrap();
         assert!(legacy.qa_configs.is_empty());
         assert!(legacy.qa_sessions.is_empty());
+        assert!(legacy.qa_session_ids.is_empty());
     }
 
     #[test]

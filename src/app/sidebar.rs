@@ -3759,6 +3759,7 @@ impl Waku {
                         session.has_started()
                             && session.archived_at.is_none()
                             && !session.is_side_chat()
+                            && !self.state.qa_session_ids.contains(&session.id)
                             && !self.friend_sessions.contains_key(&session.id)
                             && !self.session_is_boss_managed(session)
                     })
@@ -4068,6 +4069,7 @@ impl Waku {
             if !session.has_started()
                 || session.archived_at.is_some()
                 || session.is_side_chat()
+                || self.state.qa_session_ids.contains(&session.id)
                 || self.friend_sessions.contains_key(&session.id)
                 || self.session_is_boss_managed(session)
             {
@@ -4297,6 +4299,7 @@ impl Waku {
             .sessions
             .iter()
             // Side chats are panel content under their parent, never rows.
+            // QA conversations belong to their dedicated review windows.
             // Watched friend sessions aren't sidebar rows either — they
             // open from the friends panel and stay out of local history.
             // Boss-managed sessions have dedicated Boss/Employee rows in
@@ -4308,6 +4311,7 @@ impl Waku {
                     && session.archived_at.is_none()
                     && !self.pending_task_metadata.is_archiving(&session.id)
                     && !session.is_side_chat()
+                    && !self.state.qa_session_ids.contains(&session.id)
                     && !self.friend_sessions.contains_key(&session.id)
                     && session
                         .planning

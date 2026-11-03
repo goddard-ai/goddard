@@ -211,6 +211,7 @@ impl Waku {
                         this.state
                             .qa_sessions
                             .insert(record.session_id, record.clone());
+                        this.state.qa_session_ids.insert(record.session_id);
                         this.save();
                         this.qa_setup = None;
                         this.open_qa_window(record, connection, cx);

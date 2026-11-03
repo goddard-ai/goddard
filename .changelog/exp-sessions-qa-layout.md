@@ -1,1 +1,1 @@
-- QA sessions keep chat beside the commit diff, show permission requests, and offer a Commit button to reopen the reviewed changes. Chat, Review, and Terminal state now survive provider startup.
+- QA sessions keep chat beside the commit diff, show permission requests, and offer a Commit button to reopen the reviewed changes. Chat, Review, and Terminal state now survive provider startup. QA conversations stay out of the main window's sidebar, including after a review ends.
