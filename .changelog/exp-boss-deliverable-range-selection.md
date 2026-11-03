@@ -1,0 +1,1 @@
+- Cmd+Shift-clicking a sidebar item starts a range from the selected deliverable or task, including both endpoints and the items between them.

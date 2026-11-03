@@ -1643,6 +1643,23 @@ fn sidebar_selection_row_index(rows: &[SidebarRow], member: SidebarSelection) ->
         .position(|row| sidebar_row_selection(row) == Some(member))
 }
 
+fn sidebar_multi_selection_range(
+    rows: &[SidebarRow],
+    anchor: Option<SidebarSelection>,
+    selected_deliverable: Option<SidebarSelection>,
+    selected_session: Option<Uuid>,
+    member: SidebarSelection,
+) -> Option<&[SidebarRow]> {
+    let target = sidebar_selection_row_index(rows, member)?;
+    let anchor = anchor
+        .into_iter()
+        .chain(selected_deliverable)
+        .chain(selected_session.map(SidebarSelection::Session))
+        .find_map(|candidate| sidebar_selection_row_index(rows, candidate))
+        .unwrap_or(target);
+    Some(&rows[anchor.min(target)..=anchor.max(target)])
+}
+
 pub(super) fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<usize> {
     rows.iter()
         .position(|row| sidebar_row_session_id(row) == Some(session_id))
@@ -5072,24 +5089,33 @@ impl Waku {
     /// ⌘⇧-click: grow the multi-selection to cover every selectable row
     /// between the anchor and `member` in the current sidebar order — task
     /// and deliverable rows alike. The anchor is the last row a modified
-    /// click touched, then the active session, and finally the clicked row
-    /// itself.
+    /// click touched while a selection exists, then the selected deliverable
+    /// or task, and finally the clicked row itself.
     pub(super) fn extend_sidebar_multi_selection(
         &mut self,
         member: SidebarSelection,
         cx: &mut Context<Self>,
     ) {
         let rows = self.sidebar_rows_cached();
-        let Some(target) = sidebar_selection_row_index(&rows, member) else {
+        let anchor = (!self.sidebar_multi_selection.is_empty())
+            .then_some(self.sidebar_multi_selection_anchor)
+            .flatten();
+        let selected_deliverable = self
+            .boss_ui
+            .command_deliverable
+            .map(|(key, id)| SidebarSelection::Deliverable(key, id));
+        let Some(range) = sidebar_multi_selection_range(
+            &rows,
+            anchor,
+            selected_deliverable,
+            self.pending_session_activation
+                .map(|pending| pending.session_id)
+                .or(self.state.selected_session),
+            member,
+        ) else {
             return;
         };
-        let anchor = self
-            .sidebar_multi_selection_anchor
-            .or_else(|| self.state.selected_session.map(SidebarSelection::Session))
-            .and_then(|anchor| sidebar_selection_row_index(&rows, anchor))
-            .unwrap_or(target);
-        let (lo, hi) = (anchor.min(target), anchor.max(target));
-        for row in &rows[lo..=hi] {
+        for row in range {
             if let Some(member) = sidebar_row_selection(row) {
                 self.sidebar_multi_selection.insert(member);
             }
@@ -10154,6 +10180,54 @@ mod tests {
             .unwrap();
         assert_eq!(badge.number, 4);
         assert_eq!(badge.others, 1);
+    }
+
+    #[test]
+    fn sidebar_multi_selection_range_includes_selected_deliverable_and_both_endpoints() {
+        let task = Uuid::new_v4();
+        let key = waku_client::DaemonKey::Local;
+        let first_id = Uuid::new_v4();
+        let last_id = Uuid::new_v4();
+        let first = SidebarSelection::Deliverable(key, first_id);
+        let last = SidebarSelection::Deliverable(key, last_id);
+        let rows = [
+            SidebarRow::Session(task),
+            SidebarRow::Deliverable(key, first_id),
+            SidebarRow::Session(Uuid::new_v4()),
+            SidebarRow::Deliverable(key, last_id),
+        ];
+        for (selected, clicked) in [(first, last), (last, first)] {
+            let range =
+                sidebar_multi_selection_range(&rows, None, Some(selected), Some(task), clicked)
+                    .unwrap();
+            let members: Vec<_> = range.iter().filter_map(sidebar_row_selection).collect();
+            assert_eq!(
+                members,
+                rows[1..]
+                    .iter()
+                    .filter_map(sidebar_row_selection)
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn sidebar_multi_selection_range_uses_task_selection_or_existing_anchor() {
+        let ids = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
+        let rows = ids.map(SidebarRow::Session);
+        let clicked = SidebarSelection::Session(ids[2]);
+        let initial =
+            sidebar_multi_selection_range(&rows, None, None, Some(ids[0]), clicked).unwrap();
+        assert_eq!(initial.len(), 3);
+        let extended = sidebar_multi_selection_range(
+            &rows,
+            Some(SidebarSelection::Session(ids[1])),
+            None,
+            Some(ids[0]),
+            clicked,
+        )
+        .unwrap();
+        assert_eq!(extended.len(), 2);
     }
 
     #[test]
