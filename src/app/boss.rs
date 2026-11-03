@@ -6272,8 +6272,13 @@ impl Waku {
             ))
             // ⌘-click and ⌘⇧-click select like a task row; a plain click
             // opens the deliverable's task page.
-            .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 let modifiers = event.modifiers();
+                if modifiers.secondary() {
+                    // Selection owns the next keyboard action, even when a
+                    // native preview held the keyboard before this click.
+                    window.focus(&row_focus, cx);
+                }
                 if modifiers.secondary() && modifiers.shift {
                     this.extend_sidebar_multi_selection(
                         sidebar::SidebarSelection::Deliverable(key, deliverable_id),

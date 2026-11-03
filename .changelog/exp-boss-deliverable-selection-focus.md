@@ -1,0 +1,1 @@
+- Selecting sidebar deliverables with Cmd-click now moves keyboard focus to the selection so archive shortcuts work after using a browser preview.
