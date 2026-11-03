@@ -13069,7 +13069,7 @@ impl Waku {
             detail,
             reason,
             updated_label,
-            attention: row.attention || status.attention(),
+            attention: status.attention(),
             expanded,
             aria: if expanded {
                 tr!(
