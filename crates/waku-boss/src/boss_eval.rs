@@ -140,7 +140,8 @@ exist only during this script invocation; use named memory buckets for durable s
   writeFile(path, content)
   listFiles([path])                         [{path,directory}] — root when omitted
   createFolder(path)
-  publishDeliverable(path[, name])
+  publishDeliverable(path[, name])            #{deliverable, reference} — the stored record
+                                            and its deliverable:<id> artifact reference
   dismissDeliverable(id)
   speak(parts | \"whole utterance\")         client connections reached
   browse(url[, title])                     open an http(s) page in the boss chat panel

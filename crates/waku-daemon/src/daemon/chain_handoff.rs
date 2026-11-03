@@ -1315,7 +1315,7 @@ mod tests {
         // and a live source outside the successor's roots are not.
         let stored = fixture.root.join("stored-report.md");
         fs::write(&stored, "report").unwrap();
-        fixture
+        let published = fixture
             .backend
             .handle_boss_operation(
                 None,
@@ -1327,7 +1327,15 @@ mod tests {
                 &EventSink::detached(),
             )
             .unwrap();
-        let deliverable = fixture.backend.boss.document().deliverables[0].id;
+        // The publish result hands the publisher the exact reference the
+        // handoff gate accepts — the employee never reconstructs the id.
+        let waku_protocol::boss::BossResult::DeliverablePublished {
+            reference: deliverable_reference,
+            ..
+        } = published
+        else {
+            panic!("publish must return the stored deliverable record");
+        };
         let own_bucket = crate::boss::project_bucket_id(&fixture.repo);
         let head = git(&fixture.repo, &["rev-parse", "HEAD"]);
         let inside = fixture.repo.join("seed.txt").canonicalize().unwrap();
@@ -1350,7 +1358,7 @@ mod tests {
             },
             ChainArtifact {
                 name: "deliverable".into(),
-                reference: format!("deliverable:{deliverable}"),
+                reference: deliverable_reference.clone(),
             },
         ];
         let make_chain = |required: &[&str]| {
@@ -1412,7 +1420,7 @@ mod tests {
                 format!("memory:{own_bucket}"),
                 head.clone(),
                 inside.display().to_string(),
-                format!("deliverable:{deliverable}"),
+                deliverable_reference.clone(),
             ]
         );
         let chain = fixture.seal(&chain);

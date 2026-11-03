@@ -1,0 +1,1 @@
+- **Boss:** `goddard-agent boss deliverable publish` now returns the stored deliverable record and its `deliverable:<id>` reference, so employees can cite published artifacts in chain results and handoffs.

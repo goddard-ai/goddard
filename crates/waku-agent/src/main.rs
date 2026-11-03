@@ -685,7 +685,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         "boss deliverable publish" => (
             json!({"PATH":{"positional":true,"required":true,"type":"absolute file or directory path","notes":"Publishes to the human-facing Deliverables UI; use only for artifacts the human explicitly or implicitly requested. Internal reports belong in employee transcripts."},"--name":{"type":"optional descriptive title for the human"},"--reference":{"type":"flag; keep a live path instead of copying the file into the daemon's store"}}),
-            json!({"json":{"type":"saved"}}),
+            json!({"json":{"type":"deliverablePublished","deliverable":"the stored BossDeliverable record — id is durable and stable across re-publish","reference":"deliverable:<id> — the artifact-reference form chain results accept"}}),
             "goddard-agent boss deliverable publish /abs/report.md --name Report".to_owned(),
         ),
         "boss deliverable dismiss" => (

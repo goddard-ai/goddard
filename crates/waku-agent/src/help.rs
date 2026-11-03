@@ -171,7 +171,7 @@ fn purpose(path: &str) -> &str {
         "boss report-blocker" => "Interrupt your supervisor only when external action is needed.",
         "boss plan finalize" => "Freeze the human-approved plan and create its tracked work items.",
         "boss deliverable publish" => {
-            "Store a durable Boss-facing artifact or reference for review."
+            "Store a durable Boss-facing artifact or reference for review; prints the stored record and its deliverable:<id> artifact reference."
         }
         "boss open" => "Human-only: open or configure the Boss session.",
         "create" => "Create a separate task only when the human requests it.",

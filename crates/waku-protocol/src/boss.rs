@@ -3866,6 +3866,14 @@ pub enum BossResult {
         content: String,
     },
     Saved,
+    /// An accepted publish — the stored record plus the `deliverable:<id>`
+    /// artifact reference chain results and handoffs resolve. Re-publishing
+    /// a source refreshes the same record, so the id stays stable.
+    DeliverablePublished {
+        deliverable: BossDeliverable,
+        /// The `deliverable:<id>` reference form chain artifacts accept.
+        reference: String,
+    },
     Session {
         session: Box<AgentSession>,
         project: Box<Project>,

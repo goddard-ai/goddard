@@ -3,6 +3,7 @@ import type { AgentHistorySearchResult } from "./AgentHistorySearchResult";
 import type { AgentSession } from "./AgentSession";
 import type { AgentSessionTranscript } from "./AgentSessionTranscript";
 import type { AutomationsState } from "./AutomationsState";
+import type { BossDeliverable } from "./BossDeliverable";
 import type { BossFile } from "./BossFile";
 import type { BossResourcePolicy } from "./BossResourcePolicy";
 import type { BossState } from "./BossState";
@@ -18,7 +19,11 @@ import type { ProjectSelectionError } from "./ProjectSelectionError";
 import type { SummonAdmission } from "./SummonAdmission";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type BossResult = { "type": "instructionPins", pins: Array<InstructionPin>, } | { "type": "planRejected", error: PlanContractError, } | { "type": "planPreview", reviewed: PlanReview, content: string, } | { "type": "state", state: BossState, } | { "type": "roster", roster: string, } | { "type": "context", context: string, } | { "type": "projects", projects: Array<CanonicalProject>, } | { "type": "project", project: CanonicalProject, } | { "type": "projectRejected", error: ProjectSelectionError, } | { "type": "automations", state: AutomationsState, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "session", session: AgentSession, project: Project, } | { "type": "browse", sessionId: string, url: string, title: string | null, } | { "type": "planFinalized", sessionId: string, planFile: string, finalizedAt: number, } | { "type": "terminalRequested", title: string, cwd: string, } | { "type": "summoned", sessionId: string, state: EmployeeLifecycle, admission?: SummonAdmission, } | { "type": "resourcePolicySet", policy: BossResourcePolicy, } | { "type": "transcript", transcript: AgentSessionTranscript, } | { "type": "historySearch", result: AgentHistorySearchResult, } | { "type": "personaDefaults", defaults: Array<PersonaDefaultInfo>, } | { "type": "speak", delivered: number, } | { "type": "eval", value: JsonValue, output: string, } | { "type": "memory", buckets: Array<JsonValue>, overview?: JsonValue | null, notes: Array<JsonValue>, compression?: JsonValue | null, recorded?: JsonValue | null,
+export type BossResult = { "type": "instructionPins", pins: Array<InstructionPin>, } | { "type": "planRejected", error: PlanContractError, } | { "type": "planPreview", reviewed: PlanReview, content: string, } | { "type": "state", state: BossState, } | { "type": "roster", roster: string, } | { "type": "context", context: string, } | { "type": "projects", projects: Array<CanonicalProject>, } | { "type": "project", project: CanonicalProject, } | { "type": "projectRejected", error: ProjectSelectionError, } | { "type": "automations", state: AutomationsState, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "deliverablePublished", deliverable: BossDeliverable,
+/**
+ * The `deliverable:<id>` reference form chain artifacts accept.
+ */
+reference: string, } | { "type": "session", session: AgentSession, project: Project, } | { "type": "browse", sessionId: string, url: string, title: string | null, } | { "type": "planFinalized", sessionId: string, planFile: string, finalizedAt: number, } | { "type": "terminalRequested", title: string, cwd: string, } | { "type": "summoned", sessionId: string, state: EmployeeLifecycle, admission?: SummonAdmission, } | { "type": "resourcePolicySet", policy: BossResourcePolicy, } | { "type": "transcript", transcript: AgentSessionTranscript, } | { "type": "historySearch", result: AgentHistorySearchResult, } | { "type": "personaDefaults", defaults: Array<PersonaDefaultInfo>, } | { "type": "speak", delivered: number, } | { "type": "eval", value: JsonValue, output: string, } | { "type": "memory", buckets: Array<JsonValue>, overview?: JsonValue | null, notes: Array<JsonValue>, compression?: JsonValue | null, recorded?: JsonValue | null,
 /**
  * The `Retract` operation's removed note — `None` for every other
  * memory operation.

@@ -4323,6 +4323,26 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "deliverablePublished"
+            },
+            "deliverable": {
+              "protocolType": "BossDeliverable"
+            },
+            "reference": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "deliverable",
+            "reference"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "session"
             },
             "session": {

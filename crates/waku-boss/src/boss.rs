@@ -5011,7 +5011,21 @@ impl BossService {
                     fs::rename(stage, publish)?;
                     self.recover_deliverable_snapshot(id)?;
                 }
-                Ok(BossResult::Saved)
+                // The publisher needs the durable id back — a chain artifact
+                // or follow-up handoff can only cite `deliverable:<id>` when
+                // the publish response carries it.
+                let deliverable = self
+                    .state
+                    .lock()
+                    .deliverables
+                    .iter()
+                    .find(|deliverable| deliverable.id == id)
+                    .cloned()
+                    .context("the published deliverable record is missing")?;
+                Ok(BossResult::DeliverablePublished {
+                    reference: format!("deliverable:{id}"),
+                    deliverable,
+                })
             }
             BossOperation::DismissDeliverable { id } => {
                 let _operation = self.operation_lock.lock();
@@ -9814,7 +9828,7 @@ mod tests {
                 )
                 .is_err()
         );
-        service
+        let result = service
             .handle(
                 Some(employee_id),
                 BossOperation::PublishDeliverable {
@@ -9824,6 +9838,20 @@ mod tests {
                 },
             )
             .unwrap();
+        // Publish reports the stored record and the exact `deliverable:<id>`
+        // reference form handoffs accept — the publisher could not otherwise
+        // cite its artifact.
+        let BossResult::DeliverablePublished {
+            deliverable,
+            reference,
+        } = result
+        else {
+            panic!("publish must return the stored deliverable record");
+        };
+        assert_eq!(deliverable.name, "Employee Report");
+        assert_eq!(deliverable.source_path.as_deref(), Some(file_path.as_str()));
+        assert!(!deliverable.directory);
+        assert_eq!(reference, format!("deliverable:{}", deliverable.id));
         // Publishing is the only deliverable door that opens — the sidebar
         // affordances still refuse the employee.
         assert!(
@@ -9904,7 +9932,7 @@ mod tests {
         let file_created = file_deliverable.created_at;
 
         // Re-publishing refreshes the same deliverable rather than stacking rows.
-        service
+        let result = service
             .handle(
                 None,
                 BossOperation::PublishDeliverable {
@@ -9914,6 +9942,18 @@ mod tests {
                 },
             )
             .unwrap();
+        let BossResult::DeliverablePublished {
+            deliverable: republished_result,
+            reference: republished_reference,
+        } = result
+        else {
+            panic!("publish must return the stored deliverable record");
+        };
+        assert_eq!(republished_result.id, file_id);
+        assert_eq!(
+            republished_reference,
+            format!("deliverable:{file_id}")
+        );
         let state = service.document();
         assert_eq!(state.deliverables.len(), 2);
         let republished = state
