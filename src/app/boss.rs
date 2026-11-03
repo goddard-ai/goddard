@@ -5156,8 +5156,10 @@ impl Waku {
                 session_id,
                 title: SharedString::from(state.identity.name.clone()),
             });
+        let row_group = SharedString::from(format!("boss-sidebar-row-{key:?}"));
         div()
             .id(format!("boss-{key:?}"))
+            .group(row_group.clone())
             .tab_index(0)
             .h(px(42.0))
             .w_full()
@@ -5244,7 +5246,9 @@ impl Waku {
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .opacity(0.0)
+                    .group_hover(row_group, |style| style.opacity(1.0))
+                    .focus_visible(|style| style.opacity(1.0).bg(theme.focus_highlight()))
                     .hover(|style| style.bg(theme.overlay))
                     .active(|style| style.bg(theme.overlay_strong))
                     .aria_label(tr!("boss.brain_label"))
