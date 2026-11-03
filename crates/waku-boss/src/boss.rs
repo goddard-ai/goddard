@@ -1453,11 +1453,13 @@ impl BossService {
                 actor,
             });
             updated = Some(entry.clone());
-            if state != OutcomeState::Open {
-                for chain in &mut doc.chains {
-                    if chain.request.outcome_id == outcome {
-                        chain.finisher_reserved = false;
-                    }
+            // Every accepted explicit transition — close or reopen —
+            // retires the finishing authority chains reserved under the
+            // prior state. A reopen must stay meaningful: a finished
+            // chain's normalization pass never re-asserts completion.
+            for chain in &mut doc.chains {
+                if chain.request.outcome_id == outcome {
+                    chain.finisher_reserved = false;
                 }
             }
             Ok(())

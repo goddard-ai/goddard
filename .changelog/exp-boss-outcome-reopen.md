@@ -1,0 +1,1 @@
+- **Boss:** reopening a completed outcome now stays open — a finished employee chain no longer re-marks it completed on the next pass, and a reopened outcome accepts a new finishing chain.

@@ -1352,11 +1352,18 @@ impl BossService {
     /// own completion is already recorded, and the outcome closes only when
     /// its ordinary completion conditions are satisfied — otherwise it stays
     /// open and is rechecked the next time those conditions can change.
-    /// Rechecking never reruns the chain's verification.
+    /// Rechecking never reruns the chain's verification. The reservation
+    /// buys exactly one closure: once the outcome is terminal — by this
+    /// finisher or by any other path — it is spent, so a later explicit
+    /// reopen is never re-asserted as completed by this chain.
     pub fn settle_chain_finisher(&self, chain_id: Uuid) -> Result<Option<BossOutcome>> {
         let mut settled = None;
         self.update(|state| {
-            let Some(chain) = state.chains.iter().find(|chain| chain.id == chain_id) else {
+            let Some(chain) = state
+                .chains
+                .iter_mut()
+                .find(|chain| chain.id == chain_id)
+            else {
                 return Ok(());
             };
             if chain.status != ChainStatus::Completed || !chain.finisher_reserved {
@@ -1367,6 +1374,7 @@ impl BossService {
                 return Ok(());
             };
             if outcome.terminal() {
+                chain.finisher_reserved = false;
                 settled = Some(outcome.clone());
                 return Ok(());
             }
@@ -1408,6 +1416,7 @@ impl BossService {
                 actor: PlanActor::Boss,
             });
             settled = Some(outcome.clone());
+            chain.finisher_reserved = false;
             Ok(())
         })?;
         Ok(settled)
@@ -1624,7 +1633,10 @@ mod tests {
     use super::*;
     use std::{fs, path::PathBuf};
     use waku_protocol::{
-        boss::{BossOperation, BossResult, EmployeeGoal, PersonaPermissions},
+        boss::{
+            AssignmentFinish, BossOperation, BossResult, EmployeeGoal, ExpiryCause,
+            HandoffDecision, PersonaPermissions,
+        },
         model::ProviderKind,
     };
 
@@ -3039,5 +3051,201 @@ mod tests {
             vec![outcome],
             "a cancelled chain leaves the outcome unowned"
         );
+    }
+
+    #[test]
+    fn finisher_reservation_spends_once_and_reopen_survives_normalization() {
+        let mut fixture = Fixture::new();
+        fixture.definition.finishes_outcome = true;
+        let chain = fixture.create();
+        let outcome_id = chain.request.outcome_id;
+
+        // A live sibling assignment defers the closure — the reservation
+        // survives normalization passes instead of firing early.
+        let boss = Uuid::new_v4();
+        fixture.service.set_session_id(boss).unwrap();
+        let assignment = fixture
+            .service
+            .assignment_admission(Some(outcome_id), None, false, None, Vec::new(), None)
+            .unwrap()
+            .unwrap();
+        let mut sibling = fixture
+            .service
+            .prepare_employee(
+                boss,
+                None,
+                "Sibling qualification".into(),
+                None,
+                false,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        sibling.assignment = Some(assignment);
+        let sibling_id = sibling.session_id;
+        fixture
+            .service
+            .update(|state| {
+                state.employees.push(sibling);
+                Ok(())
+            })
+            .unwrap();
+
+        for _ in 0..2 {
+            let chain = fixture.read(chain.id);
+            fixture.admit(&chain);
+            fixture.packet(&chain, ResultDisposition::Success);
+            fixture.terminal(&chain, ResultDisposition::Success);
+            fixture.release(&chain);
+            fixture.seal(&chain, &verified()).unwrap();
+        }
+        let chain = fixture.read(chain.id);
+        assert_eq!(chain.status, ChainStatus::Completed);
+        assert!(chain.finisher_reserved);
+
+        let deferred = fixture
+            .service
+            .settle_chain_finisher(chain.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(deferred.state, OutcomeState::Open);
+        assert!(fixture.read(chain.id).finisher_reserved);
+
+        // The sibling's accepted success raises a handoff — still a
+        // legitimate deferral, not a fire.
+        fixture
+            .service
+            .begin_finishing(sibling_id, false, false, ExpiryCause::Finished)
+            .unwrap();
+        let completion = fixture
+            .service
+            .complete_expiry(sibling_id, None)
+            .unwrap();
+        let AssignmentFinish::Handoff { id: handoff, .. } = completion.assignment else {
+            panic!("an ordinary accepted assignment owes a handoff");
+        };
+        let deferred = fixture
+            .service
+            .settle_chain_finisher(chain.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(deferred.state, OutcomeState::Open);
+        assert!(fixture.read(chain.id).finisher_reserved);
+
+        // Once the last condition resolves, the reservation performs its
+        // one legitimate closure and is spent.
+        fixture
+            .service
+            .resolve_handoff(None, outcome_id, handoff, HandoffDecision::Dismiss)
+            .unwrap();
+        let settled = fixture
+            .service
+            .settle_chain_finisher(chain.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(settled.state, OutcomeState::Completed);
+        assert!(!fixture.read(chain.id).finisher_reserved);
+        assert!(
+            settled
+                .evidence
+                .as_deref()
+                .is_some_and(|evidence| evidence.contains("Employee chain"))
+        );
+
+        // The explicit reopen stays meaningful: every later normalization
+        // pass is a no-op — completion is never re-asserted, the recorded
+        // evidence is not overwritten, and history keeps its single
+        // legitimate transition.
+        let (reopened, _) = fixture
+            .service
+            .set_outcome_state(None, outcome_id, OutcomeState::Open, None)
+            .unwrap();
+        assert_eq!(reopened.state, OutcomeState::Open);
+        for _ in 0..3 {
+            assert!(
+                fixture
+                    .service
+                    .settle_chain_finisher(chain.id)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        let outcome = fixture
+            .service
+            .document()
+            .outcomes
+            .into_iter()
+            .find(|outcome| outcome.id == outcome_id)
+            .unwrap();
+        assert_eq!(outcome.state, OutcomeState::Open);
+        assert!(
+            outcome
+                .evidence
+                .as_deref()
+                .is_some_and(|evidence| evidence.contains("Employee chain"))
+        );
+        assert_eq!(
+            outcome
+                .history
+                .iter()
+                .filter(|transition| transition.state == OutcomeState::Completed)
+                .count(),
+            1
+        );
+
+        // The reopened state and the spent reservation both survive a
+        // reload — normalization still does not re-fire.
+        let reloaded = BossService::open(fixture.root.clone()).unwrap();
+        let document = reloaded.document();
+        let outcome = document
+            .outcomes
+            .iter()
+            .find(|outcome| outcome.id == outcome_id)
+            .unwrap();
+        assert_eq!(outcome.state, OutcomeState::Open);
+        assert_eq!(
+            outcome
+                .history
+                .iter()
+                .filter(|transition| transition.state == OutcomeState::Completed)
+                .count(),
+            1
+        );
+        assert!(!document.chains[0].finisher_reserved);
+        assert!(
+            reloaded
+                .settle_chain_finisher(chain.id)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn explicit_reopen_retires_a_live_chain_finisher_reservation() {
+        let mut fixture = Fixture::new();
+        fixture.definition.finishes_outcome = true;
+        let chain = fixture.create();
+        assert!(chain.finisher_reserved);
+        let outcome_id = chain.request.outcome_id;
+        // A terminal write that did not route through set_outcome_state —
+        // a handoff decision's completion, or pre-fix persisted state —
+        // leaves the chain's reservation in place until the reopen.
+        fixture
+            .service
+            .update(|state| {
+                let outcome = state
+                    .outcomes
+                    .iter_mut()
+                    .find(|entry| entry.id == outcome_id)
+                    .unwrap();
+                outcome.state = OutcomeState::Completed;
+                Ok(())
+            })
+            .unwrap();
+        fixture
+            .service
+            .set_outcome_state(None, outcome_id, OutcomeState::Open, None)
+            .unwrap();
+        assert!(!fixture.read(chain.id).finisher_reserved);
     }
 }
