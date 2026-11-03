@@ -374,7 +374,6 @@ pub(super) const SETTINGS_SEARCH_TITLES: &[(SettingsPage, &[&str])] = &[
             "daemon.agent_tools_title",
             "daemon.agent_settings_title",
             "daemon.new_task_environment",
-            "daemon.qa_branch_title",
         ],
     ),
     (
@@ -488,6 +487,7 @@ pub(super) const SETTINGS_SEARCH_TITLES: &[(SettingsPage, &[&str])] = &[
             "experiments.github_activity_title",
             "experiments.projects_page_title",
             "experiments.review_queue_title",
+            "daemon.qa_branch_title",
             "experiments.big_picture_title",
             "experiments.friends_title",
             "experiments.sidebar_dock_title",
@@ -2531,7 +2531,6 @@ impl Waku {
                 theme,
                 search,
             ),
-            self.qa_branch_card(theme, search),
         ]
         .into_iter()
         .flatten()
@@ -6009,7 +6008,13 @@ impl Waku {
             let cards: Vec<AnyElement> = experiments
                 .iter()
                 .filter(|experiment| experiment.group == group)
-                .filter_map(|experiment| self.experiment_card(experiment, theme, search, cx))
+                .flat_map(|experiment| {
+                    let card = self.experiment_card(experiment, theme, search, cx);
+                    let qa_branch = (experiment.id == "review-queue-experiment-toggle")
+                        .then(|| self.qa_branch_card(theme, search))
+                        .flatten();
+                    card.into_iter().chain(qa_branch)
+                })
                 .collect();
             settings_group(tr!(group.title_key()), cards, theme)
         });
