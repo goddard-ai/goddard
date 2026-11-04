@@ -25,6 +25,12 @@ jobs:
     timeout-minutes: 90
     env:
       RUSTC_WRAPPER: sccache
+      # CI runners have no incremental state to reuse. Disabling incremental
+      # compilation lets sccache cache workspace libraries as well as dependencies.
+      CARGO_INCREMENTAL: "0"
+      # Long test execution can outlast sccache's idle timeout and erase the
+      # build statistics before the action's post-job report.
+      SCCACHE_IDLE_TIMEOUT: "0"
       # sccache storage lives in the goddard-ci-cache R2 bucket: GitHub's
       # 10 GiB Actions cache cap was evicting entries between runs.
       SCCACHE_BUCKET: goddard-ci-cache
