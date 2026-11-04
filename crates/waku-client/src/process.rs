@@ -152,14 +152,20 @@ impl DaemonProcess {
         // a drain thread falls back to inherited stderr instead of leaving a
         // child blocked on a full pipe.
         let stderr_path = dirs::home_dir().map(|home| home.join(".goddard/daemon-stderr.jsonl"));
+        let recent_stderr = std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::VecDeque::<String>::new(),
+        ));
+        let (stderr_eof_tx, stderr_eof_rx) = mpsc::sync_channel::<()>(1);
         let (stderr_sender, capture_stderr) = {
             let (sender, receiver) = mpsc::sync_channel(1);
+            let recent = recent_stderr.clone();
             let reader = std::thread::Builder::new()
                 .name("goddard-daemon-stderr".into())
                 .spawn(move || {
                     if let Ok(stderr) = receiver.recv() {
-                        pump_daemon_stderr(stderr, stderr_path);
+                        pump_daemon_stderr(stderr, stderr_path, recent);
                     }
+                    let _ = stderr_eof_tx.send(());
                 });
             match reader {
                 Ok(_) => (Some(sender), true),
@@ -238,6 +244,13 @@ impl DaemonProcess {
             Ok(Err(error)) => {
                 let _ = child.kill();
                 let _ = child.wait();
+                // The pump thread reads stderr independently of the ready
+                // reader; give it a bounded moment to drain the child's last
+                // lines (e.g. a data-directory lock refusal) before reporting.
+                let _ = stderr_eof_rx.recv_timeout(Duration::from_millis(250));
+                if let Some(tail) = recent_daemon_stderr(&recent_stderr) {
+                    return Err(error.context(format!("daemon stderr: {tail}")));
+                }
                 return Err(error);
             }
             Err(error) => {
@@ -318,7 +331,27 @@ impl DaemonProcess {
     }
 }
 
-fn pump_daemon_stderr(mut stderr: ChildStderr, path: Option<PathBuf>) {
+fn recent_daemon_stderr(
+    recent: &std::sync::Mutex<std::collections::VecDeque<String>>,
+) -> Option<String> {
+    let lines = recent.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if lines.is_empty() {
+        return None;
+    }
+    Some(
+        lines
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" | "),
+    )
+}
+
+fn pump_daemon_stderr(
+    mut stderr: ChildStderr,
+    path: Option<PathBuf>,
+    recent: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
+) {
     let mut buffer = [0u8; 4096];
     let mut line = Vec::with_capacity(512);
     let mut too_long = false;
@@ -332,7 +365,7 @@ fn pump_daemon_stderr(mut stderr: ChildStderr, path: Option<PathBuf>) {
         for byte in buffer[..bytes].iter().copied() {
             if byte == b'\n' {
                 if !too_long {
-                    emit_daemon_stderr_line(&line, false, path.as_deref());
+                    emit_daemon_stderr_line(&line, false, path.as_deref(), &recent);
                 }
                 line.clear();
                 too_long = false;
@@ -341,18 +374,23 @@ fn pump_daemon_stderr(mut stderr: ChildStderr, path: Option<PathBuf>) {
             } else if line.len() < MAX_DAEMON_STDERR_LINE_BYTES {
                 line.push(byte);
             } else {
-                emit_daemon_stderr_line(&[], true, path.as_deref());
+                emit_daemon_stderr_line(&[], true, path.as_deref(), &recent);
                 line.clear();
                 too_long = true;
             }
         }
     }
     if !line.is_empty() && !too_long {
-        emit_daemon_stderr_line(&line, false, path.as_deref());
+        emit_daemon_stderr_line(&line, false, path.as_deref(), &recent);
     }
 }
 
-fn emit_daemon_stderr_line(raw: &[u8], too_long: bool, path: Option<&Path>) {
+fn emit_daemon_stderr_line(
+    raw: &[u8],
+    too_long: bool,
+    path: Option<&Path>,
+    recent: &std::sync::Mutex<std::collections::VecDeque<String>>,
+) {
     let line = if too_long {
         "[daemon stderr line omitted: exceeded the 8 KiB limit]".to_owned()
     } else {
@@ -364,6 +402,15 @@ fn emit_daemon_stderr_line(raw: &[u8], too_long: bool, path: Option<&Path>) {
         return;
     }
     let line = redact_daemon_stderr(&line);
+    {
+        let mut lines = recent
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if lines.len() == 16 {
+            lines.pop_front();
+        }
+        lines.push_back(line.clone());
+    }
     if let Some(path) = path {
         let _ = append_capped_daemon_stderr(path, &line);
     }

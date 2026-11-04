@@ -274,6 +274,31 @@ struct Saved {
     snapshot: Snapshot,
 }
 
+/// The committed revision moved past this host's baseline — another writer
+/// owns the latest state. Detectable through context layers so the service
+/// can reload instead of rejecting every later save.
+#[derive(Debug)]
+pub(super) struct RevisionConflict {
+    /// The revision this host last committed — what the write expected.
+    pub expected: Option<i64>,
+    /// The revision another host committed meanwhile.
+    pub observed: Option<i64>,
+}
+
+impl std::fmt::Display for RevisionConflict {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Boss database changed in another host; reload before saving")
+    }
+}
+
+impl std::error::Error for RevisionConflict {}
+
+pub(super) fn revision_conflict(error: &anyhow::Error) -> Option<&RevisionConflict> {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<RevisionConflict>())
+}
+
 pub(super) struct SqliteStorage {
     path: PathBuf,
     saved: Mutex<Option<Saved>>,
@@ -392,6 +417,21 @@ impl SqliteStorage {
         let previous = saved
             .as_ref()
             .context("Boss database must be loaded before saving")?;
+        // An identical snapshot must not pay a revision bump — open and
+        // activate save unconditionally, and a gratuitous commit would race
+        // other hosts on this database. A shared commit still owns its
+        // session rows, so the host transaction runs with an empty write.
+        if snapshot == previous.snapshot {
+            if let Some(host) = host {
+                ensure!(
+                    host.database_path() == self.path,
+                    "Boss and sessions must use the same database"
+                );
+                host.commit(&mut |_: &rusqlite::Transaction<'_>| Ok(()))?;
+            }
+            measurement.sample.success = true;
+            return Ok(());
+        }
         // Compute the entire diff before acquiring SQLite's single writer lock.
         let payloads = snapshot
             .payloads
@@ -431,10 +471,13 @@ impl SqliteStorage {
                     |r| r.get(0),
                 )
                 .optional()?;
-            ensure!(
-                revision == previous.revision,
-                "Boss database changed in another host; reload before saving"
-            );
+            if revision != previous.revision {
+                return Err(RevisionConflict {
+                    expected: previous.revision,
+                    observed: revision,
+                }
+                .into());
+            }
             for (digest, data) in &payloads {
                 transaction.execute(
                     "INSERT OR IGNORE INTO boss_payloads(digest,data) VALUES(?1,?2)",
@@ -530,9 +573,31 @@ mod tests {
         assert_eq!(fs::read(boss_root.join("boss.json")).unwrap(), original);
         // Once imported, damaged or stale legacy backups cannot replace DB state.
         fs::write(boss_root.join("boss.json"), "invalid backup").unwrap();
+        let coordinator_revision = || {
+            connection
+                .query_row(
+                    "SELECT revision FROM boss_coordinator WHERE id=1",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        // An idle open must not write: a gratuitous revision bump on every
+        // second host's boot would poison the live host's baseline without
+        // changing state. The same applies to deactivate + activate.
         let other = BossService::open_database(boss_root.clone(), database.clone()).unwrap();
         assert_eq!(other.document().next_sequence, 42);
+        assert_eq!(coordinator_revision(), 1);
+        other.deactivate();
+        other.activate().unwrap();
+        assert_eq!(coordinator_revision(), 1);
         // A late write from a second host must not overwrite a newer commit.
+        other
+            .update(|state| {
+                state.next_sequence = 43;
+                Ok(())
+            })
+            .unwrap();
         assert!(
             service
                 .update(|state| {
@@ -541,12 +606,31 @@ mod tests {
                 })
                 .is_err()
         );
+        // The conflicted host reloads the committed state instead of
+        // rejecting every later save; its next write lands on the new base.
+        assert_eq!(service.document().next_sequence, 43);
+        service
+            .update(|state| {
+                state.next_sequence = 44;
+                Ok(())
+            })
+            .unwrap();
+        // `other` is the stale host now — its first save reloads too.
+        assert!(
+            other
+                .update(|state| {
+                    state.next_sequence = 45;
+                    Ok(())
+                })
+                .is_err()
+        );
+        assert_eq!(other.document().next_sequence, 44);
         let before = other.document().revision;
         connection.execute_batch("CREATE TRIGGER reject_commit BEFORE UPDATE ON boss_coordinator BEGIN SELECT RAISE(ABORT, 'disk failure'); END;").unwrap();
         assert!(
             other
                 .update(|state| {
-                    state.next_sequence = 43;
+                    state.next_sequence = 45;
                     state.personas.clear();
                     Ok(())
                 })
@@ -560,12 +644,12 @@ mod tests {
         connection.execute_batch("CREATE TRIGGER reject_record_rewrite BEFORE UPDATE ON boss_records BEGIN SELECT RAISE(ABORT, 'unrelated record rewritten'); END;").unwrap();
         other
             .update(|state| {
-                state.next_sequence = 43;
+                state.next_sequence = 45;
                 Ok(())
             })
             .unwrap();
         let reopened = BossService::open_database(boss_root.clone(), database.clone()).unwrap();
-        assert_eq!(reopened.document().next_sequence, 43);
+        assert_eq!(reopened.document().next_sequence, 45);
         assert!(!reopened.document().personas.is_empty());
         drop(connection);
         fs::remove_dir_all(root).unwrap();

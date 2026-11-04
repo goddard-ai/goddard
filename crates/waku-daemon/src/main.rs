@@ -16,6 +16,11 @@ fn main() -> anyhow::Result<()> {
     waku_daemon::i18n::install();
     waku_daemon::command_env::raise_open_file_limit();
     let mut migration = waku_protocol::migration::migrate_home_directory();
+    let task_path = waku_daemon::persistence::StateStore::default_path();
+    // One daemon owns a data directory: a second host opening the same
+    // app.db advances the Boss revision and wedges the live host's saves.
+    // Take the lock before data-directory migrations touch the dir.
+    let _data_dir_lock = lock_data_directory(task_path.parent().unwrap_or(&task_path))?;
     migration.extend(waku_daemon::migration::migrate_data_directory());
     for failure in &migration.failures {
         eprintln!(
@@ -62,7 +67,6 @@ fn main() -> anyhow::Result<()> {
             })?;
     }
 
-    let task_path = waku_daemon::persistence::StateStore::default_path();
     // Request-thread panics unwind without killing the daemon — the log is
     // the only trace a wedged handler leaves.
     waku_daemon::stats::install_panic_log(task_path.parent().unwrap_or(&task_path));
@@ -106,6 +110,81 @@ fn main() -> anyhow::Result<()> {
     // kill or a hard crash, which leave no chance to write one.
     backend.mark_clean_shutdown();
     Ok(())
+}
+
+/// Hold an exclusive advisory lock for the daemon's lifetime so a second
+/// boot on this data directory cannot silently advance the shared database.
+/// A normal handoff overlaps briefly while the previous owner drains through
+/// its shutdown, so wait a bounded window — short enough to stay inside the
+/// spawner's startup budget — then refuse, naming the owner pid. The lock
+/// releases on process death; the file records the pid only to explain a wait
+/// or refusal.
+#[cfg(unix)]
+fn lock_data_directory(
+    directory: &std::path::Path,
+) -> anyhow::Result<Option<std::fs::File>> {
+    use std::os::fd::AsRawFd as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    const WAIT: Duration = Duration::from_secs(10);
+    const RETRY: Duration = Duration::from_millis(150);
+    std::fs::create_dir_all(directory)?;
+    let path = directory.join("daemon.lock");
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .custom_flags(libc::O_CLOEXEC)
+        .open(&path)
+        .context("could not open the Goddard data-directory lock")?;
+    let deadline = std::time::Instant::now() + WAIT;
+    let mut announced = false;
+    loop {
+        // SAFETY: flock on a valid fd; the returned File owns it until exit.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            break;
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::EWOULDBLOCK) {
+            return Err(error).context("could not lock the Goddard data directory");
+        }
+        let owner = std::fs::read_to_string(&path).unwrap_or_default();
+        let owner = owner.trim();
+        if std::time::Instant::now() >= deadline {
+            bail!(
+                "another Goddard daemon already owns {}{}",
+                directory.display(),
+                if owner.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (pid {owner})")
+                },
+            );
+        }
+        if !announced {
+            announced = true;
+            eprintln!(
+                "waiting for Goddard daemon{}to release {}",
+                if owner.is_empty() {
+                    " ".to_owned()
+                } else {
+                    format!(" pid {owner} ")
+                },
+                directory.display()
+            );
+        }
+        std::thread::sleep(RETRY);
+    }
+    file.set_len(0)?;
+    write!(file, "{}", std::process::id())?;
+    file.sync_all()?;
+    Ok(Some(file))
+}
+
+#[cfg(not(unix))]
+fn lock_data_directory(
+    _directory: &std::path::Path,
+) -> anyhow::Result<Option<std::fs::File>> {
+    Ok(None)
 }
 
 fn ensure_bind_allowed(address: SocketAddr, allow_non_loopback: bool) -> anyhow::Result<()> {

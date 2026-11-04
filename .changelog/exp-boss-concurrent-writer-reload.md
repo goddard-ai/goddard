@@ -1,0 +1,1 @@
+- Boss no longer wedges on "Boss database changed in another host" when a second daemon shares its data directory: the extra daemon now refuses to start on an already-owned directory, and a conflicted write reloads the committed state so the next operation succeeds.

@@ -716,8 +716,25 @@ impl BossService {
         let mut next = state.clone();
         change(&mut next)?;
         crate::instruction_pins::reconcile(&mut next, waku_protocol::model::unix_time());
-        next.revision = next.revision.saturating_add(1);
-        self.storage.save_with(&next, host)?;
+        // The revision advances only when the Boss half changed; the shared
+        // commit still owns the session rows either way.
+        if !self.storage.unchanged(&next)? {
+            next.revision = next.revision.saturating_add(1);
+        }
+        if let Err(error) = self.storage.save_with(&next, host) {
+            if let Some(conflict) = sqlite_storage::revision_conflict(&error) {
+                eprintln!(
+                    "Boss database changed under this host (expected revision {:?}, observed {:?}); reloading committed state",
+                    conflict.expected, conflict.observed
+                );
+                self.reload_state(&mut state)?;
+                drop(state);
+                if let Some(notifier) = self.notifier.lock().clone() {
+                    notifier();
+                }
+            }
+            return Err(error);
+        }
         *state = next;
         // The host holds its task-state lease until it publishes the matching
         // session projection, then calls notify_session_commit outside that lease.
@@ -5848,12 +5865,53 @@ impl BossService {
         mut next: BossState,
     ) -> anyhow::Result<()> {
         next.revision = next.revision.saturating_add(1);
-        self.save(&next)?;
+        if let Err(error) = self.save(&next) {
+            if let Some(conflict) = sqlite_storage::revision_conflict(&error) {
+                eprintln!(
+                    "Boss database changed under this host (expected revision {:?}, observed {:?}); reloading committed state",
+                    conflict.expected, conflict.observed
+                );
+                self.reload_state(&mut state)?;
+                drop(state);
+                if let Some(notifier) = self.notifier.lock().clone() {
+                    notifier();
+                }
+            }
+            return Err(error);
+        }
         *state = next;
         drop(state);
         if let Some(notifier) = self.notifier.lock().clone() {
             notifier();
         }
+        Ok(())
+    }
+
+    /// Adopt the committed state after another host wrote: the stale baseline
+    /// would reject every later save otherwise. `self.state` only advances on
+    /// a successful commit, so reloading never discards uncommitted work.
+    /// Runs the same open-time reconciliation `activate` applies so the
+    /// reloaded state's derived invariants hold — without writing, since a
+    /// live second host may still own the next commit.
+    fn reload_state(&self, state: &mut BossState) -> anyhow::Result<()> {
+        let mut fresh = self.storage.load(&self.root)?.unwrap_or_else(fresh_state);
+        let now = waku_protocol::model::unix_time();
+        reconcile_persona_defaults(&mut fresh);
+        for employee in &mut fresh.employees {
+            if employee.expired() && employee.expired_at.is_none() {
+                employee.expired_at = Some(now);
+            }
+        }
+        reconcile_waves(&mut fresh, now);
+        reconcile_outcome_assignments(&mut fresh);
+        crate::chains::reconcile(&mut fresh)?;
+        *self.interrupted.lock() = fresh
+            .employees
+            .iter()
+            .filter(|entry| restart_interrupted(entry))
+            .map(|entry| entry.session_id)
+            .collect();
+        *state = fresh;
         Ok(())
     }
 
