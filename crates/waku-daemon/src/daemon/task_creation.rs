@@ -319,23 +319,26 @@ impl WakuBackend {
         // Fields the payload omits inherit the sending task's configuration,
         // but only while it runs the resolved provider — a different
         // provider's model and trait vocabularies may not carry over.
-        let sender_config = sender.and_then(|id| {
-            self.task_state
-                .lock()
-                .sessions
-                .iter()
-                .find(|session| session.id == id)
-                .map(|session| {
-                    (
-                        session.provider,
-                        session.model.clone(),
-                        session.reasoning_effort.clone(),
-                        session.service_tier.clone(),
-                        session.context_window.clone(),
-                        (session.runtime_mode, session.environment()),
-                    )
-                })
-        });
+        let sender_config = if let Some(id) = sender {
+            let mut state = self.task_state.lock();
+            if let Some(session) = state.sessions.iter_mut().find(|session| session.id == id) {
+                // Access mode and environment live in detail, not list columns.
+                // A restored supervisor must inherit its saved posture.
+                self.task_store.hydrate(session)?;
+                Some((
+                    session.provider,
+                    session.model.clone(),
+                    session.reasoning_effort.clone(),
+                    session.service_tier.clone(),
+                    session.context_window.clone(),
+                    (session.runtime_mode, session.environment()),
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         // `"auto"` hands provider and model selection to the same routing
         // pass `RouteTask` serves an Auto draft; when the eval backend
         // cannot answer it lands on the last-used target instead of

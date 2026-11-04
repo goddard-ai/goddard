@@ -1,0 +1,1 @@
+- Boss and employee chats now retain access-mode changes before their first message; newly summoned employees inherit the supervisor’s saved access mode, including Full access after a restart.

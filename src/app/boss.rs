@@ -2019,7 +2019,7 @@ impl Waku {
                     model: session.and_then(|session| session.model.clone()),
                     mode: session
                         .map(|session| session.runtime_mode)
-                        .unwrap_or_default(),
+                        .unwrap_or(self.state.last_runtime_mode),
                 };
                 self.boss_request(key, operation, BossReply::List, cx);
             }
@@ -3822,7 +3822,7 @@ impl Waku {
             model: cached.and_then(|session| session.model.clone()),
             mode: cached
                 .map(|session| session.runtime_mode)
-                .unwrap_or_default(),
+                .unwrap_or(self.state.last_runtime_mode),
         };
         let queue_background = self.live_deliverable_page().is_some();
         let old = command.session_id;
@@ -4671,7 +4671,7 @@ impl Waku {
         let mode = self
             .selected_session()
             .map(|session| session.runtime_mode)
-            .unwrap_or_default();
+            .unwrap_or(self.state.last_runtime_mode);
         self.boss_request(
             key,
             BossOperation::Open {

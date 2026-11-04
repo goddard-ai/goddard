@@ -309,7 +309,10 @@ pub(super) fn merge_stale_session_metadata(existing: &mut AgentSession, incoming
             existing.reasoning_effort = incoming.reasoning_effort;
         }
         existing.config_activation = existing.config_activation.max(incoming.config_activation);
-        existing.runtime_mode = incoming.runtime_mode;
+        // Skeletons carry the default access mode, not an explicit edit.
+        if incoming.detail_loaded {
+            existing.runtime_mode = incoming.runtime_mode;
+        }
         existing.service_tier = incoming.service_tier;
         existing.context_window = incoming.context_window;
         existing.agent_preset = incoming.agent_preset;

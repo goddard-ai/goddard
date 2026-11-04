@@ -6854,9 +6854,11 @@ impl Waku {
             return;
         }
         if session_changed {
-            self.composer_session_mut()
-                .expect("composer session still exists")
-                .runtime_mode = mode;
+            let session = self
+                .composer_session_mut()
+                .expect("composer session still exists");
+            session.runtime_mode = mode;
+            session.updated_at = session.updated_at.max(unix_time());
             self.apply_session_options(session_id, cx);
         }
         let project_mode_changed = self.state.remember_project_runtime_mode(project_id, mode);

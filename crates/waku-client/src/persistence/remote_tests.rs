@@ -273,6 +273,27 @@ fn failed_remote_deletion_keeps_ownership_so_retry_cannot_reach_local() {
 }
 
 #[test]
+fn managed_access_edits_save_before_first_turn_without_publishing_ordinary_drafts() {
+    let local = DaemonFixture::new();
+    let fixture = StoreFixture::new(&local);
+    let mut state = PersistedState::empty();
+    for managed in [true, false] {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.boss_managed = managed;
+        session.runtime_mode = RuntimeMode::FullAccess;
+        state.push_session(session);
+    }
+    fixture.store.save(&mut state).unwrap();
+    let Command::SaveTaskState { sessions, .. } = local.next_request().command else {
+        panic!("expected save");
+    };
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].id, state.sessions[0].id);
+    assert_eq!(sessions[0].runtime_mode, RuntimeMode::FullAccess);
+    assert_eq!(state.dirty_sessions, HashSet::from([state.sessions[1].id]));
+}
+
+#[test]
 fn merged_saves_are_isolated_and_unloaded_remote_catalogs_are_never_written() {
     let local = DaemonFixture::new();
     let remote = DaemonFixture::new();

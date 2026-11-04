@@ -4919,13 +4919,12 @@ impl StateStore {
             // Drafts stay local until their first prompt: a session that has
             // not started owns no daemon row, and shipping one would
             // catalogue it as a phantom "New task" skeleton in every client's
-            // next load. Archived employee shells are daemon-owned even before
-            // their first turn, so their archive flag must still be sent.
+            // next load. Managed shells already belong to the daemon before
+            // their first turn, so picker edits must still be sent.
             let mut prepared = Vec::new();
             for session in state.sessions.iter().filter(|session| {
                 dirty_ids.contains(&session.id)
-                    && (session.has_started()
-                        || (session.boss_managed && session.archived_at.is_some()))
+                    && (session.has_started() || session.boss_managed)
                     && owned(&session.id)
             }) {
                 let cursor = self.save_cursors.lock().get(&session.id).copied();

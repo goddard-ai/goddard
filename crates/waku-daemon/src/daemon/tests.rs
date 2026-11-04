@@ -8860,6 +8860,89 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn managed_access_mode_survives_skeleton_saves_and_explicit_changes() {
+    for mode in [
+        crate::model::RuntimeMode::FullAccess,
+        crate::model::RuntimeMode::Ask,
+    ] {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.boss_managed = true;
+        session.runtime_mode = mode;
+        let mut skeleton = session.list_projection();
+        skeleton.updated_at += 1;
+        merge_stale_session_metadata(&mut session, skeleton);
+        assert_eq!(session.runtime_mode, mode);
+
+        let mut edited = session.clone();
+        edited.runtime_mode = crate::model::RuntimeMode::AutoAcceptEdits;
+        edited.updated_at += 1;
+        merge_stale_session_metadata(&mut session, edited);
+        assert_eq!(
+            session.runtime_mode,
+            crate::model::RuntimeMode::AutoAcceptEdits
+        );
+    }
+}
+
+#[test]
+fn summoned_employee_inherits_saved_supervisor_access_before_hydration() {
+    for mode in [
+        crate::model::RuntimeMode::FullAccess,
+        crate::model::RuntimeMode::Ask,
+    ] {
+        let root = std::env::temp_dir().join(format!("summon-access-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        {
+            let mut state = backend.task_state.lock();
+            let session = state.session_mut(boss).unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            session.runtime_mode = mode;
+            backend.task_store.save(&mut state).unwrap();
+            // A restart loads list columns; access posture is still in the blob.
+            *state = backend.task_store.load().unwrap();
+            assert!(
+                !state
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == boss)
+                    .unwrap()
+                    .detail_loaded
+            );
+        }
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 1);
+        let BossResult::Summoned { session_id, .. } = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "inherits access",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap()
+        else {
+            panic!("expected queued employee");
+        };
+        assert_eq!(
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap()
+                .runtime_mode,
+            mode
+        );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
 /// A backend wired for summon-queue tests: the boss session id set,
 /// the broker ledger rooted inside the temp dir (never the host's),
 /// and every provider binary pointed at a missing path so a granted
