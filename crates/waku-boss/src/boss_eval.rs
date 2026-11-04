@@ -47,7 +47,8 @@ const MAX_EVAL_OUTPUT_CHARS: usize = 64 * 1024;
 const HELP: &str = "\
 Boss script bindings — every call runs one BossOperation and returns its
 payload (compact acknowledgements, bounded data, ids); Saved operations return (). Variables
-exist only during this script invocation; use named memory buckets for durable state.
+exist only during this script invocation. Track work state in tasks and outcomes;
+memory is optional, selective recall across tasks.
 
   view()                                    state digest: revision, sessionId, counts
   roster()                                  compact employee status digest
@@ -155,7 +156,7 @@ exist only during this script invocation; use named memory buckets for durable s
   renameEmployee(sessionId, name)
   regenerateAvatar([sessionId])             omit for the boss's own face
   memory(#{type,...})                       bucket op: listBuckets/createBucket/overview/
-                                            record/submitSummary/scan/zoomBucket; every
+                                            record (propose only)/confirm/submitSummary/scan/zoomBucket; every
                                             content op names its bucket explicitly
   op(#{type,...})                           advanced escape hatch for supported
                                             Boss operations, tagged script result —

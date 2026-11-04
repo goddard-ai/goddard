@@ -1673,6 +1673,33 @@ impl crate::driver::DriverControl for CaptureDriver {
     }
 }
 
+fn confirm_memory_proposal(
+    backend: &WakuBackend,
+    session: Uuid,
+    result: waku_protocol::boss::BossResult,
+) -> waku_protocol::boss::BossResult {
+    use waku_protocol::boss::{BossOperation, BossResult, MemoryOperation};
+    let BossResult::Memory {
+        proposal: Some(proposal),
+        recorded: None,
+        ..
+    } = result
+    else {
+        panic!("expected a proposal")
+    };
+    backend
+        .handle_boss_operation(
+            Some(session),
+            BossOperation::Memory {
+                operation: MemoryOperation::Confirm {
+                    proposal_id: serde_json::from_value(proposal["id"].clone()).unwrap(),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+}
+
 /// A task agent's first context steer carries the `<project-memory>` block
 /// — the `goddard-agent memory` instructions plus the project bucket's
 /// compacted overview — once per runtime, and only for sessions whose
@@ -1711,8 +1738,8 @@ fn the_first_prompt_carries_bounded_project_memory() {
     );
 
     // Seed the project bucket the way the session's own
-    // `goddard-agent memory record` lands it.
-    backend
+    // `goddard-agent memory record` then `confirm` saves it.
+    let proposed = backend
         .handle_boss_operation(
             Some(session_id),
             waku_protocol::boss::BossOperation::Memory {
@@ -1727,6 +1754,8 @@ fn the_first_prompt_carries_bounded_project_memory() {
             &EventSink::detached(),
         )
         .unwrap();
+
+    confirm_memory_proposal(&backend, session_id, proposed);
 
     let capture = Arc::new(CaptureDriver::default());
     let driver = crate::driver::DriverHandle::from_control(capture.clone());
@@ -1806,7 +1835,8 @@ fn task_agent_memory_ops_scope_to_the_task_project() {
     // Unqualified operations land on the task's project bucket.
     let BossResult::Memory {
         bucket: Some(echoed),
-        recorded: Some(_),
+        proposal: Some(_),
+        recorded: None,
         ..
     } = memory(MemoryOperation::Record {
         bucket: None,
@@ -1878,7 +1908,7 @@ fn task_agent_memory_ops_scope_to_the_task_project() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// A successful `record` leaves a `memory_record` marker in the caller's
+/// A successful `confirm` leaves a `memory_record` marker in the caller's
 /// transcript, and a `Retract` naming that transcript settles the same
 /// marker to its removed state while the note leaves the bucket.
 #[test]
@@ -1899,10 +1929,7 @@ fn a_memory_record_posts_a_transcript_card_that_retract_settles() {
     .unwrap();
     use waku_protocol::boss::{BossOperation, BossResult, MemoryNoteKind, MemoryOperation};
 
-    let BossResult::Memory {
-        recorded: Some(note),
-        ..
-    } = backend
+    let proposed = backend
         .handle_boss_operation(
             Some(session_id),
             BossOperation::Memory {
@@ -1916,9 +1943,35 @@ fn a_memory_record_posts_a_transcript_card_that_retract_settles() {
             },
             &EventSink::detached(),
         )
-        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        &proposed,
+        BossResult::Memory {
+            proposal: Some(_),
+            recorded: None,
+            ..
+        }
+    ));
+    assert!(backend.boss.project_memory_digest(&repo).is_none());
+    assert!(
+        !backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|s| s.id == session_id)
+            .unwrap()
+            .transcript_blocks
+            .iter()
+            .flat_map(|b| &b.activities)
+            .any(|a| a.tool_name.as_deref() == Some(waku_protocol::model::MEMORY_RECORD_TOOL_NAME))
+    );
+    let BossResult::Memory {
+        recorded: Some(note),
+        ..
+    } = confirm_memory_proposal(&backend, session_id, proposed.clone())
     else {
-        panic!("record returns the note")
+        panic!("confirm returns the recorded note");
     };
     let note_id = note["id"].as_str().unwrap().to_owned();
 
@@ -1929,20 +1982,28 @@ fn a_memory_record_posts_a_transcript_card_that_retract_settles() {
             .iter()
             .find(|session| session.id == session_id)
             .unwrap();
-        let marker = session
+        let markers: Vec<_> = session
             .transcript_blocks
             .iter()
             .flat_map(|block| &block.activities)
-            .find(|activity| {
+            .filter(|activity| {
                 activity.tool_name.as_deref() == Some(waku_protocol::model::MEMORY_RECORD_TOOL_NAME)
             })
-            .expect("record posts a memory card marker");
+            .collect();
+        assert_eq!(
+            markers.len(),
+            1,
+            "confirmation posts exactly one memory card"
+        );
+        let marker = markers[0];
         waku_protocol::model::MemoryRecordCard::parse(marker.arguments.as_deref().unwrap())
             .expect("marker arguments carry the card")
     };
     let card = marker_card();
     assert_eq!(card.text, "the release freeze lands on Fridays");
     assert!(!card.retracted);
+    confirm_memory_proposal(&backend, session_id, proposed.clone());
+    assert!(!marker_card().retracted);
 
     backend
         .handle_boss_operation(
@@ -1962,6 +2023,11 @@ fn a_memory_record_posts_a_transcript_card_that_retract_settles() {
     // The persisted marker settles in place — the open transcript reads
     // removed without a reload — and the note is out of the bucket.
     assert!(marker_card().retracted);
+    confirm_memory_proposal(&backend, session_id, proposed);
+    assert!(
+        marker_card().retracted,
+        "a retry cannot undo the user's retraction"
+    );
     let BossResult::Memory {
         feed: Some(feed), ..
     } = backend
@@ -2046,6 +2112,99 @@ fn boss_prompts_carry_the_header_and_a_pending_verdict_upgrades_to_the_digest() 
 /// A session plus its side chat in the test store; returns
 /// (backend, session_id, side_chat_id). The default test settings keep
 /// `agent_tools_enabled` off, so reads exercise the scoped exemption.
+#[test]
+#[ignore = "set GODDARD_TEST_AGENT_CLI to the built goddard-agent executable"]
+fn memory_confirmation_through_the_built_cli_and_scoped_daemon_connection() {
+    let root = std::env::temp_dir().join(format!("waku-memory-cli-{}", Uuid::new_v4()));
+    let (backend, task, _) = read_scope_test_backend(&root);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    let token = backend.agent.mint(task);
+    let backend = Arc::new(backend);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let server_backend = backend.clone();
+    let server = std::thread::spawn(move || {
+        crate::server::serve(
+            listener,
+            "test-desktop-token".into(),
+            server_backend,
+            server_shutdown,
+            crate::server::ServerOptions::default(),
+        )
+        .unwrap()
+    });
+    struct Stop(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for Stop {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+    let stop = Stop(shutdown);
+    let run = |args: &[&str]| {
+        let output =
+            std::process::Command::new(std::env::var_os("GODDARD_TEST_AGENT_CLI").unwrap())
+                .env("GODDARD_DAEMON_ADDRESS", address.to_string())
+                .env("GODDARD_AGENT_TOKEN", &token)
+                .env("GODDARD_TASK_ID", task.to_string())
+                .args(args)
+                .output()
+                .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let note = r#"{"kind":"observation","text":"Dependency X checks its CRC only at EOF (reader audit, version Y).","retryKey":"cli-test"}"#;
+    let text = run(&["memory", "record", "--json", note]);
+    assert!(text.contains("Not saved to memory"));
+    assert!(text.contains(waku_protocol::boss::MEMORY_RECORDING_GUIDANCE));
+    assert!(
+        backend
+            .boss
+            .project_memory_digest(&root.join("repo"))
+            .is_none()
+    );
+    let proposed: Value = serde_json::from_str(&run(&[
+        "memory", "record", "--json", note, "--output", "json",
+    ]))
+    .unwrap();
+    assert!(proposed.get("recorded").is_none());
+    assert!(
+        proposed["proposal"]["review"]
+            .as_str()
+            .unwrap()
+            .contains("Do not confirm automatically")
+    );
+    let id = proposed["proposal"]["id"].as_str().unwrap();
+    assert!(text.contains(&format!("goddard-agent memory confirm {id}")));
+    assert!(
+        backend
+            .boss
+            .project_memory_digest(&root.join("repo"))
+            .is_none()
+    );
+    let confirmed: Value =
+        serde_json::from_str(&run(&["memory", "confirm", id, "--output", "json"])).unwrap();
+    assert_eq!(confirmed["recorded"]["text"], proposed["proposal"]["text"]);
+    assert!(
+        backend
+            .boss
+            .project_memory_digest(&root.join("repo"))
+            .unwrap()
+            .contains("CRC")
+    );
+    drop(stop);
+    server.join().unwrap();
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn read_scope_test_backend(root: &Path) -> (WakuBackend, Uuid, Uuid) {
     let repo = root.join("repo");
     std::fs::create_dir_all(&repo).unwrap();

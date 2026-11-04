@@ -192,7 +192,8 @@ fn memory_bucket_ref(
         | MemoryOperation::Retract {
             bucket, project, ..
         } => Some((bucket, project)),
-        MemoryOperation::ListBuckets
+        MemoryOperation::Confirm { .. }
+        | MemoryOperation::ListBuckets
         | MemoryOperation::CreateBucket { .. }
         | MemoryOperation::Feed
         | MemoryOperation::MigrateLegacy { .. } => None,
@@ -421,6 +422,21 @@ const MAX_BLOCKER_CHARS: usize = 1_000;
 #[derive(Default)]
 struct BossEval;
 
+// Proposals are deliberately process-local: restarting the daemon abandons
+// them. One per caller and a global bound keep abandoned drafts inexpensive.
+const MEMORY_PROPOSAL_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+const MAX_MEMORY_PROPOSALS: usize = 128;
+
+struct PendingMemory {
+    id: Uuid,
+    bucket: String,
+    kind: waku_protocol::boss::MemoryNoteKind,
+    text: String,
+    retry_key: String,
+    created: std::time::Instant,
+    recorded: Option<serde_json::Value>,
+}
+
 pub struct BossService {
     root: PathBuf,
     active: std::sync::atomic::AtomicBool,
@@ -443,6 +459,7 @@ pub struct BossService {
     /// updates touch employees, not personas, so unchanged files skip
     /// their write+fsync entirely.
     persona_writes: Mutex<std::collections::HashMap<Uuid, String>>,
+    memory_proposals: Mutex<std::collections::HashMap<Option<Uuid>, PendingMemory>>,
 }
 
 impl BossService {
@@ -477,6 +494,7 @@ impl BossService {
             evals: Mutex::new(BossEval::default()),
             project_catalog: Mutex::new(None),
             persona_writes: Mutex::new(std::collections::HashMap::new()),
+            memory_proposals: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -519,6 +537,7 @@ impl BossService {
         use std::sync::atomic::Ordering;
         *self.state.lock() = disabled_state();
         self.interrupted.lock().clear();
+        self.memory_proposals.lock().clear();
         self.projects.lock().clear();
         self.injected.lock().clear();
         *self.router.lock() = BossRouter::default();
@@ -599,6 +618,7 @@ impl BossService {
             evals: Mutex::new(BossEval::default()),
             project_catalog: Mutex::new(None),
             persona_writes: Mutex::new(std::collections::HashMap::new()),
+            memory_proposals: Mutex::new(std::collections::HashMap::new()),
         };
         service.migrate_plan_documents();
         service.sweep_deliverable_store(&service.state.lock());
@@ -5274,6 +5294,17 @@ impl BossService {
         use waku_protocol::boss::MemoryOperation;
 
         let state = self.document();
+        let mut proposals = self.memory_proposals.lock();
+        proposals.retain(|_, proposal| proposal.created.elapsed() < MEMORY_PROPOSAL_TTL);
+        let confirmation_bucket = match &operation {
+            MemoryOperation::Confirm { proposal_id } => Some(
+                proposals.get(&caller)
+                    .filter(|proposal| proposal.id == *proposal_id)
+                    .context("unknown or expired memory proposal; propose the note again and reconsider it")?
+                    .bucket.clone(),
+            ),
+            _ => None,
+        };
         let boss_principal = caller.is_none_or(|id| self.has_boss_authority(id));
         let principal = if boss_principal {
             "boss".to_owned()
@@ -5316,7 +5347,7 @@ impl BossService {
                     resolve_memory_bucket(bucket, project, own_project_path.as_deref(), &catalog)?;
                 (Some(id), path)
             }
-            None => (None, None),
+            None => (confirmation_bucket, None),
         };
         // Project buckets materialize on first touch: the caller's own
         // always, an explicitly named one only for the boss — an
@@ -5340,7 +5371,7 @@ impl BossService {
             let bucket = waku_memory_engine::buckets::Bucket {
                 id: bucket_id.clone(),
                 name,
-                purpose: "Shared project memory".into(),
+                purpose: "Selective project recall: concise, sourced context costly to rediscover; not documentation, work status, or operating rules".into(),
                 project_id: Some(bucket_id),
             };
             buckets.create_bucket(&bucket)?;
@@ -5384,6 +5415,7 @@ impl BossService {
         let mut compression = None;
         let mut bucket = None;
         let mut recorded = None;
+        let mut proposal = None;
         let mut retracted = None;
         let mut migration = None;
         let mut feed = None;
@@ -5432,31 +5464,90 @@ impl BossService {
                 retry_key,
                 ..
             } => {
-                let bucket_id = resolved_bucket
-                    .clone()
-                    .expect("bucket-addressed ops resolve a target");
-                bucket = Some(bucket_id.clone());
-                let kind = match kind {
-                    waku_protocol::boss::MemoryNoteKind::Fact => {
-                        waku_memory_engine::buckets::NoteKind::Fact
-                    }
-                    waku_protocol::boss::MemoryNoteKind::Observation => {
-                        waku_memory_engine::buckets::NoteKind::Observation
-                    }
-                    waku_protocol::boss::MemoryNoteKind::Question => {
-                        waku_memory_engine::buckets::NoteKind::Question
-                    }
-                };
-                let result = buckets.insert(
+                let bucket_id = resolved_bucket.clone().expect("record resolves a bucket");
+                buckets.validate_insert(
                     &bucket_access,
                     &principal,
                     &bucket_id,
-                    kind,
                     &text,
                     &retry_key,
                 )?;
-                recorded = Some(serde_json::to_value(result.note)?);
-                compression = result.compression.map(serde_json::to_value).transpose()?;
+                anyhow::ensure!(
+                    proposals.contains_key(&caller) || proposals.len() < MAX_MEMORY_PROPOSALS,
+                    "too many pending memory proposals; try again after they expire"
+                );
+                let same = proposals.get(&caller).is_some_and(|pending| {
+                    pending.recorded.is_none()
+                        && pending.bucket == bucket_id
+                        && pending.kind == kind
+                        && pending.text == text
+                        && pending.retry_key == retry_key
+                });
+                if !same {
+                    proposals.insert(
+                        caller,
+                        PendingMemory {
+                            id: Uuid::new_v4(),
+                            bucket: bucket_id.clone(),
+                            kind,
+                            text,
+                            retry_key,
+                            created: std::time::Instant::now(),
+                            recorded: None,
+                        },
+                    );
+                }
+                let pending = proposals.get(&caller).expect("proposal was inserted");
+                proposal = Some(serde_json::json!({
+                    "id": pending.id,
+                    "kind": pending.kind,
+                    "text": pending.text,
+                    "review": format!("Not saved to memory. Reconsider this exact proposed note. {}", waku_protocol::boss::MEMORY_RECORDING_GUIDANCE),
+                    "confirmCommand": format!("goddard-agent memory confirm {}", pending.id),
+                    "expiresInSeconds": MEMORY_PROPOSAL_TTL.saturating_sub(pending.created.elapsed()).as_secs(),
+                }));
+                bucket = Some(bucket_id);
+            }
+            MemoryOperation::Confirm { .. } => {
+                let pending = proposals
+                    .get_mut(&caller)
+                    .expect("confirmation was resolved");
+                buckets.validate_insert(
+                    &bucket_access,
+                    &principal,
+                    &pending.bucket,
+                    &pending.text,
+                    &pending.retry_key,
+                )?;
+                bucket = Some(pending.bucket.clone());
+                if let Some(note) = &pending.recorded {
+                    // A lost-response retry returns its receipt without inserting
+                    // again, even if the original note was subsequently retracted.
+                    recorded = Some(note.clone());
+                } else {
+                    let kind = match pending.kind {
+                        waku_protocol::boss::MemoryNoteKind::Fact => {
+                            waku_memory_engine::buckets::NoteKind::Fact
+                        }
+                        waku_protocol::boss::MemoryNoteKind::Observation => {
+                            waku_memory_engine::buckets::NoteKind::Observation
+                        }
+                        waku_protocol::boss::MemoryNoteKind::Question => {
+                            waku_memory_engine::buckets::NoteKind::Question
+                        }
+                    };
+                    let result = buckets.insert(
+                        &bucket_access,
+                        &principal,
+                        &pending.bucket,
+                        kind,
+                        &pending.text,
+                        &pending.retry_key,
+                    )?;
+                    recorded = Some(serde_json::to_value(result.note)?);
+                    pending.recorded = recorded.clone();
+                    compression = result.compression.map(serde_json::to_value).transpose()?;
+                }
             }
             MemoryOperation::Retract { note_id, .. } => {
                 let bucket_id = resolved_bucket
@@ -5595,6 +5686,10 @@ impl BossService {
                     "unknown memory bucket {bucket_id}"
                 );
                 let candidates = legacy_memory_candidates(&self.root, &source)?;
+                anyhow::ensure!(
+                    dry_run || caller.is_none(),
+                    "agents must propose and confirm individual memories; direct legacy import is human-only"
+                );
                 if !dry_run {
                     for candidate in &candidates {
                         let text =
@@ -5639,6 +5734,7 @@ impl BossService {
             notes,
             compression,
             recorded,
+            proposal,
             retracted,
             bucket,
             bucket_name,
@@ -10859,6 +10955,216 @@ mod memory_op_tests {
     use super::*;
     use waku_protocol::boss::{MemoryOperation, PersonaInstructionLayer};
 
+    fn confirm_proposal(
+        service: &BossService,
+        caller: Option<Uuid>,
+        project: Option<PathBuf>,
+        result: BossResult,
+    ) -> BossResult {
+        let BossResult::Memory {
+            proposal: Some(proposal),
+            recorded: None,
+            ..
+        } = result
+        else {
+            panic!("record must propose without saving");
+        };
+        let proposal_id = serde_json::from_value(proposal["id"].clone()).unwrap();
+        service
+            .memory(caller, project, MemoryOperation::Confirm { proposal_id })
+            .unwrap()
+    }
+
+    #[test]
+    fn memory_proposals_are_invisible_until_confirmed_and_retries_do_not_reinsert() {
+        let root = std::env::temp_dir().join(format!("boss-memory-proposal-{}", Uuid::new_v4()));
+        let project = root.join("repo");
+        fs::create_dir_all(&project).unwrap();
+        let service = BossService::open(root.clone()).unwrap();
+        let caller = Some(Uuid::new_v4());
+        let run = |operation| {
+            service
+                .memory(caller, Some(project.clone()), operation)
+                .unwrap()
+        };
+        let propose = || {
+            run(MemoryOperation::Record {
+                bucket: None,
+                project: None,
+                kind: waku_protocol::boss::MemoryNoteKind::Observation,
+                text: "Pinned dependency X validates CRC only when its reader reaches EOF.".into(),
+                retry_key: "crc-observation".into(),
+            })
+        };
+        let BossResult::Memory {
+            proposal: Some(proposal),
+            recorded: None,
+            compression: None,
+            ..
+        } = propose()
+        else {
+            panic!("a proposal is not a recorded note");
+        };
+        assert!(
+            proposal["review"]
+                .as_str()
+                .unwrap()
+                .contains("Not saved to memory")
+        );
+        assert!(
+            proposal["review"]
+                .as_str()
+                .unwrap()
+                .contains("standing instructions")
+        );
+        let id: Uuid = serde_json::from_value(proposal["id"].clone()).unwrap();
+        let BossResult::Memory {
+            proposal: Some(retry),
+            ..
+        } = propose()
+        else {
+            panic!()
+        };
+        assert_eq!(retry["id"], proposal["id"]);
+        assert!(service.project_memory_digest(&project).is_none());
+        let BossResult::Memory { notes, .. } = run(MemoryOperation::Scan {
+            bucket: None,
+            project: None,
+            query: "CRC".into(),
+        }) else {
+            panic!()
+        };
+        assert!(notes.is_empty());
+        let BossResult::Memory {
+            feed: Some(feed), ..
+        } = run(MemoryOperation::Feed)
+        else {
+            panic!()
+        };
+        assert!(feed["records"].as_array().unwrap().is_empty());
+        assert!(
+            service
+                .memory(
+                    Some(Uuid::new_v4()),
+                    Some(project.clone()),
+                    MemoryOperation::Confirm { proposal_id: id }
+                )
+                .is_err()
+        );
+        let BossResult::Memory {
+            recorded: Some(note),
+            ..
+        } = run(MemoryOperation::Confirm { proposal_id: id })
+        else {
+            panic!()
+        };
+        assert_eq!(note["text"], proposal["text"]);
+        assert_eq!(note["kind"], proposal["kind"]);
+        let BossResult::Memory {
+            recorded: Some(retried),
+            ..
+        } = run(MemoryOperation::Confirm { proposal_id: id })
+        else {
+            panic!()
+        };
+        assert_eq!(retried["id"], note["id"]);
+        run(MemoryOperation::Retract {
+            bucket: None,
+            project: None,
+            note_id: note["id"].as_str().unwrap().into(),
+            session: None,
+        });
+        run(MemoryOperation::Confirm { proposal_id: id });
+        assert!(
+            service.project_memory_digest(&project).is_none(),
+            "confirm retry must not undo a retraction"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn memory_confirmation_rechecks_access_and_rejects_replaced_expired_or_restarted_proposals() {
+        let root = std::env::temp_dir().join(format!("boss-memory-confirm-{}", Uuid::new_v4()));
+        let project = root.join("repo");
+        let other = root.join("other");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let service = BossService::open(root.clone()).unwrap();
+        let caller = Some(Uuid::new_v4());
+        let propose = |text: &str| {
+            let BossResult::Memory {
+                proposal: Some(proposal),
+                ..
+            } = service
+                .memory(
+                    caller,
+                    Some(project.clone()),
+                    MemoryOperation::Record {
+                        bucket: None,
+                        project: None,
+                        kind: waku_protocol::boss::MemoryNoteKind::Fact,
+                        text: text.into(),
+                        retry_key: text.into(),
+                    },
+                )
+                .unwrap()
+            else {
+                panic!()
+            };
+            serde_json::from_value::<Uuid>(proposal["id"].clone()).unwrap()
+        };
+        let old = propose("first candidate");
+        let id = propose("revised candidate");
+        assert!(
+            service
+                .memory(
+                    caller,
+                    Some(project.clone()),
+                    MemoryOperation::Confirm { proposal_id: old }
+                )
+                .is_err()
+        );
+        assert!(
+            service
+                .memory(
+                    caller,
+                    Some(other),
+                    MemoryOperation::Confirm { proposal_id: id }
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("access denied")
+        );
+        service
+            .memory_proposals
+            .lock()
+            .get_mut(&caller)
+            .unwrap()
+            .created -= MEMORY_PROPOSAL_TTL;
+        assert!(
+            service
+                .memory(
+                    caller,
+                    Some(project.clone()),
+                    MemoryOperation::Confirm { proposal_id: id }
+                )
+                .is_err()
+        );
+        let id = propose("restart candidate");
+        let restarted = BossService::open(root.clone()).unwrap();
+        assert!(
+            restarted
+                .memory(
+                    caller,
+                    Some(project.clone()),
+                    MemoryOperation::Confirm { proposal_id: id }
+                )
+                .is_err()
+        );
+        assert!(restarted.project_memory_digest(&project).is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn project_bucket_is_automatic_and_other_buckets_require_an_explicit_grant() {
         let root = std::env::temp_dir().join(format!("boss-buckets-{}", Uuid::new_v4()));
@@ -10937,7 +11243,7 @@ mod memory_op_tests {
             .unwrap()
             .to_owned();
         let BossResult::Memory {
-            recorded: Some(note),
+            proposal: Some(note),
             ..
         } = service
             .handle(
@@ -11223,7 +11529,7 @@ mod memory_op_tests {
         // daemon-resolved path stands in for `set_project_context`.
         let BossResult::Memory {
             bucket: Some(echoed),
-            recorded: Some(note),
+            proposal: Some(note),
             ..
         } = service
             .memory(
@@ -11333,7 +11639,7 @@ mod memory_op_tests {
         .iter()
         .enumerate()
         {
-            service
+            let result = service
                 .handle(
                     Some(boss),
                     BossOperation::Memory {
@@ -11347,6 +11653,7 @@ mod memory_op_tests {
                     },
                 )
                 .unwrap();
+            confirm_proposal(&service, Some(boss), None, result);
         }
 
         let digest = service.project_memory_digest(&project).unwrap();
@@ -11403,7 +11710,7 @@ mod memory_op_tests {
 
         let migrate = |dry_run| {
             service.handle(
-                Some(boss),
+                None,
                 BossOperation::Memory {
                     operation: MemoryOperation::MigrateLegacy {
                         bucket: bucket.clone(),
@@ -11434,6 +11741,10 @@ mod memory_op_tests {
                 .unwrap()
                 .contains("Release branch is dev")
         );
+
+        assert!(service.handle(Some(boss), BossOperation::Memory {
+            operation: MemoryOperation::MigrateLegacy { bucket: bucket.clone(), source: "boss".into(), dry_run: false },
+        }).unwrap_err().to_string().contains("human-only"));
 
         let BossResult::Memory {
             migration: Some(imported),

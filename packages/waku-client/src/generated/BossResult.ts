@@ -25,6 +25,11 @@ export type BossResult = { "type": "instructionPins", pins: Array<InstructionPin
  */
 reference: string, } | { "type": "session", session: AgentSession, project: Project, } | { "type": "browse", sessionId: string, url: string, title: string | null, } | { "type": "planFinalized", sessionId: string, planFile: string, finalizedAt: number, } | { "type": "terminalRequested", title: string, cwd: string, } | { "type": "summoned", sessionId: string, state: EmployeeLifecycle, admission?: SummonAdmission, } | { "type": "resourcePolicySet", policy: BossResourcePolicy, } | { "type": "transcript", transcript: AgentSessionTranscript, } | { "type": "historySearch", result: AgentHistorySearchResult, } | { "type": "personaDefaults", defaults: Array<PersonaDefaultInfo>, } | { "type": "speak", delivered: number, } | { "type": "eval", value: JsonValue, output: string, } | { "type": "memory", buckets: Array<JsonValue>, overview?: JsonValue | null, notes: Array<JsonValue>, compression?: JsonValue | null, recorded?: JsonValue | null,
 /**
+ * A temporary proposal and its reconsideration instructions. No
+ * note or transcript memory card exists until confirmation succeeds.
+ */
+proposal?: JsonValue | null,
+/**
  * The `Retract` operation's removed note — `None` for every other
  * memory operation.
  */

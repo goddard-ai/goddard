@@ -1708,6 +1708,23 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "confirm"
+            },
+            "proposalId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "proposalId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "submitSummary"
             },
             "bucket": {
@@ -4599,6 +4616,16 @@
               ]
             },
             "recorded": {
+              "anyOf": [
+                {
+                  "protocolType": "JsonValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "proposal": {
               "anyOf": [
                 {
                   "protocolType": "JsonValue"

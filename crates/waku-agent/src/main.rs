@@ -586,7 +586,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         "boss memory create" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"name":{"required":true},"purpose":{"optional":true}}}}),
             json!({"json":{"type":"memory","buckets":"created bucket metadata"}}),
-            "goddard-agent boss memory create --json '{\"name\":\"Operating rules\",\"purpose\":\"Boss-owned guidance\"}'".to_owned(),
+            "goddard-agent boss memory create --json '{\"name\":\"Decision context\",\"purpose\":\"Concise rationale costly to rediscover\"}'".to_owned(),
         ),
         "boss memory overview" => (
             json!({"BUCKET":{"positional":true,"required":"optional — omit with --project or to use the caller's project bucket","type":"named bucket ID"},"--project":{"optional":true,"type":"registered project name/id or absolute project root; resolves to the project's shared bucket"}}),
@@ -595,8 +595,13 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         "boss memory record" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use the caller's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"kind":{"required":true,"enum":["fact","observation","question"]},"text":{"required":true,"notes":waku_protocol::boss::MEMORY_RECORDING_GUIDANCE},"retryKey":{"required":true}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
-            json!({"json":{"type":"memory","recorded":"original note","compression":"optional agent-written summary request"}}),
+            json!({"json":{"type":"memory","proposal":"not saved: exact proposed text, reconsideration instructions, proposal id and confirm command; expires after ten minutes or daemon restart"}}),
             "goddard-agent boss memory record --project octane --json-file note.json".to_owned(),
+        ),
+        "boss memory confirm" => (
+            json!({"PROPOSAL_ID":{"positional":true,"required":true,"type":"UUID returned by record to this caller; fixes exact text and bucket"}}),
+            json!({"json":{"type":"memory","recorded":"confirmed original note","compression":"optional agent-written summary request"}}),
+            "goddard-agent boss memory confirm PROPOSAL_ID".to_owned(),
         ),
         "boss memory summary" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use the caller's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"start":{"required":true,"type":"integer note index"},"end":{"required":true,"type":"integer note index"},"text":{"required":true,"type":"agent-written summary"}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
@@ -619,7 +624,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss memory retract --project octane 3-a1b2c3".to_owned(),
         ),
         "boss memory migrate" => (
-            json!({"BUCKET":{"positional":true,"required":true,"type":"existing named bucket ID"},"SOURCE":{"positional":true,"required":true,"type":"'boss' or absolute project root"},"--dry-run":{"type":"boolean","default":true,"notes":"false appends candidates; source files are never modified"}}),
+            json!({"BUCKET":{"positional":true,"required":true,"type":"existing named bucket ID"},"SOURCE":{"positional":true,"required":true,"type":"'boss' or absolute project root"},"--dry-run":{"type":"boolean","default":true,"notes":"false is human-only; agents must propose and confirm individual notes; source files are never modified"}}),
             json!({"json":{"type":"memory","migration":{"dryRun":"candidate list when true; imported count when false","candidates":"inspectable source paths and original note text"}}}),
             "goddard-agent boss memory migrate project-abc boss".to_owned(),
         ),
@@ -635,8 +640,13 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         "memory record" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use this session's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"kind":{"required":true,"enum":["fact","observation","question"]},"text":{"required":true,"notes":waku_protocol::boss::MEMORY_RECORDING_GUIDANCE},"retryKey":{"required":true}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
-            json!({"json":{"type":"memory","recorded":"original note","compression":"optional agent-written summary request"}}),
+            json!({"json":{"type":"memory","proposal":"not saved: exact proposed text, reconsideration instructions, proposal id and confirm command; expires after ten minutes or daemon restart"}}),
             "goddard-agent memory record --json-file note.json".to_owned(),
+        ),
+        "memory confirm" => (
+            json!({"PROPOSAL_ID":{"positional":true,"required":true,"type":"UUID returned by record to this caller; fixes exact text and bucket"}}),
+            json!({"json":{"type":"memory","recorded":"confirmed original note","compression":"optional agent-written summary request"}}),
+            "goddard-agent memory confirm PROPOSAL_ID".to_owned(),
         ),
         "memory summary" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use this session's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"start":{"required":true,"type":"integer note index"},"end":{"required":true,"type":"integer note index"},"text":{"required":true,"type":"agent-written summary"}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
@@ -945,6 +955,7 @@ fn schema() -> serde_json::Value {
         "boss memory create",
         "boss memory overview",
         "boss memory record",
+        "boss memory confirm",
         "boss memory summary",
         "boss memory scan",
         "boss memory zoom",
@@ -953,6 +964,7 @@ fn schema() -> serde_json::Value {
         "memory buckets",
         "memory overview",
         "memory record",
+        "memory confirm",
         "memory summary",
         "memory scan",
         "memory zoom",
@@ -1956,7 +1968,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
         }
         (
             "memory",
-            "buckets" | "create" | "overview" | "record" | "summary" | "scan" | "zoom" | "retract",
+            "buckets" | "create" | "overview" | "record" | "confirm" | "summary" | "scan" | "zoom" | "retract",
         ) => {
             let memory = memory_leaf("boss memory", &operation, args)?;
             print_boss(boss_request(Op::Memory { operation: memory })?)
@@ -2316,6 +2328,12 @@ fn memory_leaf(
         let project = opts.get("project");
         let value = match operation {
             "buckets" if pos.is_empty() && project.is_none() => json!({"type":kind}),
+            "confirm" => {
+                if pos.len() != 1 || project.is_some() {
+                    bail!("usage: {command} confirm PROPOSAL_ID");
+                }
+                json!({"type":kind,"proposalId":pos[0].parse::<Uuid>().context("invalid memory proposal id")?})
+            }
             "overview" => match (pos.len(), project) {
                 (0, Some(project)) => json!({"type":kind,"project":project}),
                 (0, None) => json!({"type":kind}),
@@ -2981,13 +2999,13 @@ fn task_memory(args: Vec<String>) -> anyhow::Result<()> {
     use waku_protocol::boss::BossOperation;
     let operation = args.first().cloned().unwrap_or_default();
     match operation.as_str() {
-        "buckets" | "overview" | "record" | "summary" | "scan" | "zoom" | "retract" => {
+        "buckets" | "overview" | "record" | "confirm" | "summary" | "scan" | "zoom" | "retract" => {
             let memory = memory_leaf("memory", &operation, args[1..].to_vec())?;
             print_boss(boss_request(BossOperation::Memory { operation: memory })?)
         }
         "create" | "migrate" => bail!("`memory {operation}` is a Boss-only operation"),
         _ => bail!(
-            "usage: goddard-agent memory buckets|overview|record|summary|scan|zoom|retract; each leaf documents its flags under --help"
+            "usage: goddard-agent memory buckets|overview|record|confirm|summary|scan|zoom|retract; each leaf documents its flags under --help"
         ),
     }
 }
@@ -3041,7 +3059,24 @@ fn project_selector(
 }
 
 fn print_boss(result: waku_protocol::boss::BossResult) -> anyhow::Result<()> {
-    println!("{}", serde_json::to_string_pretty(&result)?);
+    if !JSON_OUTPUT.load(Ordering::Relaxed)
+        && let waku_protocol::boss::BossResult::Memory {
+            proposal: Some(proposal),
+            bucket_name,
+            ..
+        } = &result
+    {
+        println!(
+            "Proposed note for {}:\n\n{}\n\n{}\n\nTo confirm after reconsidering: {}\nExpires in {} seconds; proposing a different note replaces this proposal.",
+            bucket_name.as_deref().unwrap_or("this bucket"),
+            proposal["text"].as_str().unwrap_or_default(),
+            proposal["review"].as_str().unwrap_or_default(),
+            proposal["confirmCommand"].as_str().unwrap_or_default(),
+            proposal["expiresInSeconds"],
+        );
+    } else {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    }
     Ok(())
 }
 
@@ -4139,6 +4174,31 @@ mod tests {
             let document = waku_protocol::wireframe_html::HtmlWireframe::parse(html).unwrap();
             assert!(document.anchor("tasks", "sidebar").is_some());
         }
+    }
+
+    #[test]
+    fn memory_confirmation_requires_only_the_returned_proposal_id() {
+        let id = Uuid::new_v4();
+        for command in ["memory", "boss memory"] {
+            assert!(
+                matches!(memory_leaf(command, "confirm", vec![id.to_string()]).unwrap(),
+                waku_protocol::boss::MemoryOperation::Confirm { proposal_id } if proposal_id == id)
+            );
+            for args in [
+                vec![id.to_string(), "--yes".into()],
+                vec![id.to_string(), "--project".into(), "other".into()],
+                vec!["invented".into()],
+            ] {
+                assert!(memory_leaf(command, "confirm", args).is_err());
+            }
+            assert!(!leaf_schema(&format!("{command} confirm")).is_null());
+        }
+        assert!(
+            serde_json::from_value::<waku_protocol::boss::MemoryOperation>(
+                json!({"type":"confirm","proposalId":id,"text":"replacement"})
+            )
+            .is_err()
+        );
     }
 
     #[test]

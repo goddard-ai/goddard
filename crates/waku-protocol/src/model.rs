@@ -3732,7 +3732,7 @@ impl BossSummonCard {
 }
 
 /// The `tool_name` the daemon stamps on the transcript activity it records
-/// into a session when a `MemoryOperation::Record` succeeds. `arguments`
+/// into a session when a `MemoryOperation::Confirm` succeeds. `arguments`
 /// carries the note's [`MemoryRecordCard`] as JSON — the desktop renders
 /// that activity as the compact memory card with its undo affordance
 /// instead of a tool row.

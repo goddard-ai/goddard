@@ -687,11 +687,12 @@ fn project_memory_block(digest: Option<&str>, granted_buckets: usize) -> String 
          survive across sessions. Reach it through `goddard-agent memory`: \
          `overview` returns a bucket's compacted view, `scan QUERY` matches \
          note text, `zoom START END` expands a note range, `record \
-         --json|--json-file` appends a note, `summary` answers a pending \
+         --json|--json-file` proposes a note, `confirm PROPOSAL_ID` saves it \
+         only after reconsideration, `summary` answers a pending \
          compression request, and `buckets` lists every bucket you can use. \
          Memory is append-only — corrections are new notes and a repeated \
-         retry key never duplicates one; bucket creation and legacy import \
-         are Boss-only. {access} {} A rejected operation reports its reason and persists \
+         retry key never duplicates one; bucket creation and legacy inspection \
+         are Boss-only and direct import is human-only. {access} {} A rejected operation reports its reason and persists \
          nothing; a failed `record` is not saved anywhere else.",
         waku_protocol::boss::MEMORY_RECORDING_GUIDANCE,
     );

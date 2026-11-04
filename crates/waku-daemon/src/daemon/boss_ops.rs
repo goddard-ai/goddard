@@ -1348,7 +1348,7 @@ impl WakuBackend {
                     _ => None,
                 };
                 let result = self.boss.memory(caller, caller_project, operation)?;
-                // Every successful record leaves a durable card in the
+                // Every confirmed note leaves a durable card in the
                 // recording session's transcript — the row the user's undo
                 // hangs off. The note already persisted, so a failed
                 // marker logs rather than reporting the record as failed.
@@ -1514,6 +1514,23 @@ impl WakuBackend {
         }
         let note: RecordedNote =
             serde_json::from_value(note.clone()).context("invalid recorded memory note")?;
+        let source_id = format!("memory-record-{}", note.id);
+        {
+            let mut state = self.task_state.lock();
+            if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id) {
+                self.task_store.hydrate(session)?;
+                if session
+                    .transcript_blocks
+                    .iter()
+                    .flat_map(|block| &block.activities)
+                    .any(|activity| activity.source_id.as_deref() == Some(source_id.as_str()))
+                {
+                    // A confirmation retry must preserve the original card,
+                    // including its removed state after the user undoes it.
+                    return Ok(());
+                }
+            }
+        }
         let document = self.boss.document();
         let recorded_by = if document.session_id == Some(session_id) {
             Some(document.identity.name.clone())
@@ -1535,11 +1552,8 @@ impl WakuBackend {
             recorded_by,
             retracted: false,
         };
-        // The marker keys on the note id: a `record` retry deduped to the
-        // same note refreshes its existing card in place rather than
-        // stacking a duplicate row.
         let mut marker = crate::model::ActivityItem::new(
-            Some(format!("memory-record-{}", card.note_id)),
+            Some(source_id),
             crate::model::ActivityKind::Tool,
             "Recorded a memory".to_owned(),
             None,

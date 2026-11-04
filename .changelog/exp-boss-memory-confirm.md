@@ -1,0 +1,1 @@
+- Agents now receive a reminder of the memory guidelines and must explicitly confirm proposed notes before they enter shared memory. Unconfirmed proposals expire.

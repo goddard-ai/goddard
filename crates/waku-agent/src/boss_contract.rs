@@ -243,6 +243,7 @@ pub(super) fn aggregate() -> Value {
                 "boss memory create",
                 "boss memory overview",
                 "boss memory record",
+                "boss memory confirm",
                 "boss memory summary",
                 "boss memory scan",
                 "boss memory zoom",

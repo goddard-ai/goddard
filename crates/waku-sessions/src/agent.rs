@@ -1001,7 +1001,7 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
         instruction.push_str(&format!(
             "\n- `memory` — the project's shared memory bucket, recorded \
              notes that outlive this session: `{command} memory overview` \
-             shows the compacted overview, `scan`/`zoom`/`record`/`summary`/`buckets` \
+             shows the compacted overview, `scan`/`zoom`/`record`/`confirm`/`summary`/`buckets` \
              read and write it. {}",
             waku_protocol::boss::MEMORY_RECORDING_GUIDANCE
         ));
