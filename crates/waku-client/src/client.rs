@@ -83,6 +83,8 @@ struct ClientInner {
     /// Whether the daemon can place `goddard-agent` on a session's PATH —
     /// the scoped read surface's reachability, reported in the handshake.
     agent_cli_available: bool,
+    task_views_available: bool,
+    task_view_generation: std::sync::atomic::AtomicU64,
     pending: Mutex<HashMap<Uuid, Sender<Result<ResponsePayload, RpcError>>>>,
     sessions: Mutex<HashMap<(Uuid, Uuid), Sender<SequencedEvent>>>,
     /// Friend-session watchers: deliver every event for the session
@@ -279,6 +281,34 @@ pub struct DaemonClient {
 }
 
 impl DaemonClient {
+    pub fn set_task_view(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        detail: bool,
+    ) -> anyhow::Result<()> {
+        if !self.task_views_available() {
+            return Ok(());
+        }
+        let generation = self
+            .inner
+            .task_view_generation
+            .fetch_add(1, Ordering::AcqRel)
+            + 1;
+        match self.request(
+            session_id,
+            runtime_id,
+            Command::SetTaskView { detail, generation },
+        )? {
+            ResponsePayload::Ack => Ok(()),
+            _ => bail!("invalid task-view acknowledgement"),
+        }
+    }
+
+    pub fn task_views_available(&self) -> bool {
+        self.inner.task_views_available
+    }
+
     pub fn connect(address: &str, token: String) -> anyhow::Result<Self> {
         Self::connect_with_resume(address, token, Vec::new())
     }
@@ -333,15 +363,20 @@ impl DaemonClient {
             },
         )?;
         let hello = read_server_message(&mut socket)?;
-        let (daemon_version, daemon_commit, agent_cli_available) = match hello {
+        let (daemon_version, daemon_commit, agent_cli_available, task_views_available) = match hello
+        {
             ServerMessage::Hello {
                 protocol_version,
                 daemon_version,
                 daemon_commit,
                 agent_cli_available,
-            } if protocol_version == PROTOCOL_VERSION => {
-                (daemon_version, daemon_commit, agent_cli_available)
-            }
+                task_views_available,
+            } if protocol_version == PROTOCOL_VERSION => (
+                daemon_version,
+                daemon_commit,
+                agent_cli_available,
+                task_views_available,
+            ),
             ServerMessage::Hello {
                 protocol_version, ..
             } => bail!(
@@ -362,6 +397,8 @@ impl DaemonClient {
             daemon_version,
             daemon_commit,
             agent_cli_available,
+            task_views_available,
+            task_view_generation: std::sync::atomic::AtomicU64::new(0),
             pending: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             session_watchers: Mutex::new(HashMap::new()),
@@ -1226,6 +1263,7 @@ mod tests {
                                     daemon_version: "test".into(),
                                     daemon_commit: None,
                                     agent_cli_available: false,
+                                    task_views_available: false,
                                 },
                             )
                             .unwrap();
@@ -1331,6 +1369,7 @@ mod tests {
                         daemon_version: "test".into(),
                         daemon_commit: None,
                         agent_cli_available: false,
+                        task_views_available: false,
                     })
                     .unwrap()
                     .into(),

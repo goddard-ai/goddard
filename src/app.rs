@@ -1745,6 +1745,8 @@ struct SessionRuntime {
     /// Unsent steers waiting for a safe phase of their original turn.
     deferred_steers: VecDeque<runtime::DeferredSteer>,
     stream_phase: Option<StreamPhase>,
+    /// Last server-confirmed detail mode. None denotes legacy/friend streams.
+    detail_visible: Option<bool>,
     /// Newline-only reasoning deltas buffered while a reasoning block streams.
     /// Some providers (e.g. GLM via OpenRouter) emit every text chunk followed
     /// by a newline-only chunk; joined verbatim that renders one token per
@@ -3374,6 +3376,8 @@ pub struct Waku {
         Result<waku_protocol::eval::Evaluation, String>,
     )>,
     runtimes: HashMap<Uuid, SessionRuntime>,
+    /// Cached detail missed output while only lifecycle events were observed.
+    stale_task_details: HashSet<Uuid>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
     /// Automatic turn resumptions after a daemon restart, per session.
@@ -7182,6 +7186,11 @@ impl Waku {
             )
             .detach();
 
+            // Record navigation interests without waking the pump: waking
+            // from every notification can feed its own update cycle. Driver
+            // controls only queue changes; their workers own the RPC.
+            cx.observe_self(|this, _| this.sync_task_views()).detach();
+
             // Like T3 Code's adapter subscriptions feeding its ingestion
             // worker, provider threads push an edge into this bounded wake
             // channel. The UI does no standing scan: the short follow-up tick
@@ -7716,6 +7725,7 @@ impl Waku {
                 inbox_suggestion_tx,
                 inbox_suggestion_events,
                 runtimes: HashMap::new(),
+                stale_task_details: HashSet::new(),
                 runtime_attach_pending: HashSet::new(),
                 runtime_attach_misses: HashMap::new(),
                 runtime_auto_resumes: HashMap::new(),

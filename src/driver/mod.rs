@@ -100,23 +100,34 @@ fn connect_remote(
 ) -> anyhow::Result<DriverHandle> {
     let client_updates = daemon.subscribe_clients();
     let active_client = Arc::new(Mutex::new(initial_client.clone()));
+    let detail_visible = Arc::new(AtomicBool::new(false));
+    let forwarding_detail_visible = detail_visible.clone();
     let forwarding_client = active_client.clone();
     let closed = Arc::new(AtomicBool::new(false));
     let forwarding_closed = closed.clone();
     let (shutdown, forwarding_shutdown) = bounded(1);
     let forwarding_events = events.clone();
     let thread_initial_client = initial_client.clone();
+    let (view_wake, view_changes) = bounded(1);
     let spawn = std::thread::Builder::new()
         .name(format!("goddard-daemon-session-{session_id}"))
         .spawn(move || {
             let mut client = thread_initial_client;
             let mut remote_events = client.subscribe(session_id, runtime_id);
+            if let Err(error) = client.set_task_view(session_id, runtime_id, forwarding_detail_visible.load(Ordering::Acquire)) {
+                let _ = forwarding_events.send(DriverEvent::Error(format!("Could not load task view: {error:#}")));
+            }
             loop {
                 let disconnected = loop {
                     select! {
                         recv(forwarding_shutdown) -> _ => return,
+                        recv(view_changes) -> _ => {
+                            if let Err(error) = client.set_task_view(session_id, runtime_id, forwarding_detail_visible.load(Ordering::Acquire)) {
+                                let _ = forwarding_events.send(DriverEvent::Error(format!("Could not load task view: {error:#}")));
+                            }
+                        },
                         recv(remote_events) -> sequenced => {
-                            let Ok(sequenced) = sequenced else {
+                            let Ok(mut sequenced) = sequenced else {
                                 break true;
                             };
                             if replay_cursor.is_some_and(|cursor| {
@@ -141,7 +152,17 @@ fn connect_remote(
                                 }
                                 continue;
                             }
-                            let event = match waku_client::event_from_wire(sequenced.event) {
+                            if let Some(snapshot) = sequenced.event.payload.as_object_mut().and_then(|payload| payload.remove("taskSnapshot")) {
+                                match serde_json::from_value(snapshot) {
+                                    Ok(session) => { let _ = forwarding_events.send(DriverEvent::TaskViewSnapshot { session: Box::new(session), detail: false, settle: false }); }
+                                    Err(error) => { let _ = forwarding_events.send(DriverEvent::Error(format!("Could not restore completed task: {error}"))); }
+                                }
+                            }
+                            let decoded = if sequenced.event.kind == "turnStarted" && sequenced.event.payload.get("turn").is_some() {
+                                serde_json::from_value(sequenced.event.payload["turn"].clone())
+                                    .map(DriverEvent::TaskTurnStarted).map_err(anyhow::Error::from)
+                            } else { waku_client::event_from_wire(sequenced.event) };
+                            let event = match decoded {
                                 Ok(event) => event,
                                 Err(error) => DriverEvent::Error(format!(
                                     "Goddard daemon sent an invalid event: {error}"
@@ -192,6 +213,11 @@ fn connect_remote(
                         *forwarding_client.lock() = replacement.clone();
                         client = replacement;
                         remote_events = client.subscribe(session_id, runtime_id);
+                        let _ = client.set_task_view(
+                            session_id,
+                            runtime_id,
+                            forwarding_detail_visible.load(Ordering::Acquire),
+                        );
                     }
                     Ok(waku_client::ResponsePayload::SessionRuntime { .. }) => {
                         // The runtime is gone, but the daemon answering is
@@ -224,6 +250,8 @@ fn connect_remote(
     }
     Ok(DriverHandle::from_control(Arc::new(RemoteDriverControl {
         client: active_client,
+        detail_visible,
+        view_wake,
         session_id,
         runtime_id,
         supports_steer,
@@ -235,6 +263,8 @@ fn connect_remote(
 }
 
 struct RemoteDriverControl {
+    detail_visible: Arc<AtomicBool>,
+    view_wake: Sender<()>,
     client: Arc<Mutex<waku_client::DaemonClient>>,
     session_id: uuid::Uuid,
     runtime_id: uuid::Uuid,
@@ -493,6 +523,12 @@ impl DriverControl for RemoteDriverControl {
                 cursor: Some(cursor),
             } => serde_json::from_value(cursor).map_err(Into::into),
             _ => anyhow::bail!("Goddard daemon returned an invalid fork response"),
+        }
+    }
+
+    fn set_detail_visible(&self, visible: bool) {
+        if self.detail_visible.swap(visible, Ordering::AcqRel) != visible {
+            let _ = self.view_wake.try_send(());
         }
     }
 

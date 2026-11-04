@@ -1771,6 +1771,7 @@ mod tests {
                     daemon_version: "test".into(),
                     daemon_commit: None,
                     agent_cli_available: false,
+                    task_views_available: false,
                 })
                 .chain(events.into_iter().map(|(epoch, sequence)| {
                     ServerMessage::Event(SequencedEvent {
@@ -1936,6 +1937,7 @@ mod tests {
                             daemon_version: "test".into(),
                             daemon_commit: None,
                             agent_cli_available: false,
+                            task_views_available: false,
                         })
                         .unwrap();
                         if socket
@@ -2095,6 +2097,7 @@ mod tests {
                                     daemon_version: "test".into(),
                                     daemon_commit: None,
                                     agent_cli_available: false,
+                                    task_views_available: false,
                                 })
                                 .unwrap();
                             if socket

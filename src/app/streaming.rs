@@ -45,7 +45,9 @@ impl Waku {
         }
         let continuing = previous_phase == Some(StreamPhase::Text);
         append_text_delta_to_session(&mut self.state.sessions, session_id, continuing, delta);
-        self.state.mark_session_dirty(session_id);
+        if runtime.detail_visible.is_none() {
+            self.state.mark_session_dirty(session_id);
+        }
         runtime.stream_phase = Some(StreamPhase::Text);
     }
 
@@ -296,6 +298,111 @@ impl Waku {
         // gets one labeled continuation on a fresh runtime first.
         let runtime_lost = matches!(event, DriverEvent::RuntimeLost);
         match event {
+            DriverEvent::TaskViewSnapshot {
+                session,
+                detail,
+                settle,
+            } => {
+                if session.id != session_id {
+                    return true;
+                }
+                let settlement = settle
+                    .then(|| {
+                        self.state
+                            .sessions
+                            .iter()
+                            .find(|existing| existing.id == session_id)
+                            .and_then(|existing| existing.active_turn_id())
+                            .and_then(|id| {
+                                session
+                                    .turns
+                                    .iter()
+                                    .find(|turn| {
+                                        turn.id == id && turn.status != TurnStatus::Running
+                                    })
+                                    .cloned()
+                            })
+                    })
+                    .flatten();
+                runtime.detail_visible = Some(detail);
+                if detail {
+                    self.stale_task_details.remove(&session_id);
+                } else {
+                    self.stale_task_details.insert(session_id);
+                }
+                if detail || session.detail_loaded {
+                    if let Some(existing) = self.state.session_mut(session_id) {
+                        let mut snapshot = *session;
+                        waku_protocol::streaming::merge_task_view_snapshot(
+                            existing,
+                            &mut snapshot,
+                            !detail || settle,
+                        );
+                        runtime.pending_reasoning_newlines = 0;
+                        runtime.stream_phase = if !snapshot.status.is_busy() {
+                            None
+                        } else if snapshot.messages.last().is_some_and(|m| m.streaming) {
+                            Some(StreamPhase::Text)
+                        } else if snapshot
+                            .transcript_blocks
+                            .last()
+                            .and_then(|b| b.activities.last())
+                            .is_some_and(|a| a.reasoning.is_some() && !a.complete)
+                        {
+                            Some(StreamPhase::Reasoning)
+                        } else if snapshot
+                            .transcript_blocks
+                            .last()
+                            .is_some_and(|block| !block.activities.is_empty())
+                        {
+                            Some(StreamPhase::Activity)
+                        } else {
+                            None
+                        };
+                        let retained: HashSet<_> =
+                            snapshot.messages.iter().map(|message| message.id).collect();
+                        let mut markdown = self.message_markdown.borrow_mut();
+                        for message in &existing.messages {
+                            if !retained.contains(&message.id) {
+                                markdown.remove(&message.id);
+                            }
+                        }
+                        *existing = snapshot;
+                    }
+                    if self.state.selected_session == Some(session_id) {
+                        self.reset_visible_state();
+                        self.reset_transcript_rows(self.transcript_row_count());
+                        self.reapply_transcript_landing(session_id, cx);
+                    }
+                } else {
+                    self.stale_task_details.insert(session_id);
+                    if let Some(existing) = self.state.session_mut(session_id) {
+                        // A cold control attachment needs the active turn identity
+                        // for settlement and queue advancement, not its transcript.
+                        if existing.turns.is_empty() {
+                            existing.turns = session.turns.clone();
+                        }
+                    }
+                }
+                if let Some(turn) = settlement {
+                    let event = match turn.status {
+                        TurnStatus::Completed | TurnStatus::Failed => DriverEvent::TurnFinished {
+                            success: turn.status == TurnStatus::Completed,
+                            summary: None,
+                            summary_i18n: None,
+                        },
+                        TurnStatus::Interrupted => DriverEvent::TurnCancelled,
+                        TurnStatus::Running => unreachable!(),
+                    };
+                    return self.handle_driver_event(
+                        session_id,
+                        runtime,
+                        event,
+                        allow_queue_drain,
+                        cx,
+                    );
+                }
+            }
             DriverEvent::BossTerminalIntent {
                 title,
                 cwd,
@@ -436,7 +543,39 @@ impl Waku {
                     self.state.mark_session_dirty(session_id);
                 }
             }
+            DriverEvent::TaskTurnStarted(turn) => {
+                if let Some(session) = self.state.session_mut(session_id)
+                    && !session.turns.iter().any(|known| known.id == turn.id)
+                {
+                    let optimistic = session
+                        .turns
+                        .last()
+                        .filter(|previous| {
+                            previous.status == TurnStatus::Running
+                                && !previous.provider_turn_started
+                                && !session.messages.iter().any(|message| {
+                                    message.turn_id == Some(previous.id)
+                                        && message.role == MessageRole::User
+                                })
+                        })
+                        .map(|previous| previous.id);
+                    if optimistic.is_some() {
+                        session.turns.pop();
+                    }
+                    session.turns.push(turn);
+                }
+                return self.handle_driver_event(
+                    session_id,
+                    runtime,
+                    DriverEvent::TurnStarted,
+                    allow_queue_drain,
+                    cx,
+                );
+            }
             DriverEvent::TurnStarted => {
+                if runtime.detail_visible == Some(false) {
+                    self.stale_task_details.insert(session_id);
+                }
                 // A start already in flight when another client pressed
                 // Stop belongs to the cancelled turn until its settle lands.
                 if self.session_is_draining_cancel(session_id) {
@@ -1073,7 +1212,8 @@ impl Waku {
                 self.finish_streaming_assistant(session_id);
                 self.complete_turn_blocks(session_id);
                 runtime.stream_phase = None;
-                let needs_fallback = !self.turn_has_assistant_message(session_id);
+                let needs_fallback = runtime.detail_visible != Some(false)
+                    && !self.turn_has_assistant_message(session_id);
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.status = if success {
                         SessionStatus::Idle
@@ -1709,36 +1849,8 @@ pub(super) fn pop_stream_batch(
     }
 }
 
-/// Newline count when a reasoning delta is nothing but line breaks, e.g. the
-/// `"\n"` chunks GLM via OpenRouter interleaves between every text chunk.
-/// Mixed deltas keep their interior newlines untouched.
-fn reasoning_delta_newlines(delta: &str) -> Option<usize> {
-    delta
-        .bytes()
-        .all(|byte| matches!(byte, b'\n' | b'\r'))
-        .then(|| delta.bytes().filter(|byte| *byte == b'\n').count())
-}
-
-/// Fold one reasoning delta into a batch's chunk. Newline-only deltas are
-/// buffered rather than appended — a lone one is dropped and a run collapses
-/// to a single paragraph break once real text resumes — so providers that
-/// emit line-delimited reasoning don't render one token per line. A run left
-/// pending when the batch ends carries into the next one.
-pub(super) fn push_reasoning_delta(
-    content: &mut String,
-    pending_newlines: &mut usize,
-    delta: &str,
-) {
-    if let Some(newlines) = reasoning_delta_newlines(delta) {
-        *pending_newlines += newlines;
-        return;
-    }
-    if *pending_newlines >= 2 {
-        content.push_str("\n\n");
-    }
-    *pending_newlines = 0;
-    content.push_str(delta);
-}
+pub(super) use waku_protocol::streaming::push_reasoning_delta;
+use waku_protocol::streaming::text_delta_rejoins;
 
 pub(super) fn append_text_delta_to_session(
     sessions: &mut [AgentSession],
@@ -1790,22 +1902,6 @@ pub(super) fn append_text_delta_to_session(
         session.messages.push(message);
     }
     session.updated_at = unix_time();
-}
-
-/// Whether a text delta resumes a message a mid-stream boundary cut off.
-/// Providers emit token-granular chunks and dispatch tool calls wherever a
-/// sentence happens to be, so a split lands mid-thought while their own
-/// transcript keeps the text as one message. `previous` must read as
-/// unfinished — no terminal punctuation — and `delta` must not open a fresh
-/// sentence.
-fn text_delta_rejoins(previous: &str, delta: &str) -> bool {
-    let ends_mid_thought = previous
-        .trim_end()
-        .chars()
-        .next_back()
-        .is_some_and(|c| !matches!(c, '.' | '!' | '?' | ':' | '…'));
-    let opens_fresh = delta.chars().next().is_some_and(char::is_uppercase);
-    ends_mid_thought && !opens_fresh
 }
 
 #[cfg(test)]

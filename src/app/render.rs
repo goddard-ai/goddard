@@ -30,7 +30,7 @@ pub(super) enum MainScreen {
 }
 
 impl Waku {
-    fn main_screen(&self, deliverable_available: bool) -> MainScreen {
+    pub(super) fn main_screen(&self, deliverable_available: bool) -> MainScreen {
         if let Some(id) = self
             .selected_terminal
             .filter(|id| self.right_panel_terminals.contains_key(id))

@@ -621,6 +621,10 @@ impl Waku {
             .or_else(|| self.selected_project().map(|project| project.id))
     }
 
+    pub(super) fn big_picture_open(&self) -> bool {
+        self.big_picture.open
+    }
+
     /// Is `session_id` mounted on the grid right now — so a command like ⌘D
     /// can arm its card instead of exiting to select it.
     pub(super) fn big_picture_card_visible(&self, session_id: Uuid) -> bool {

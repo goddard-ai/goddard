@@ -26,6 +26,14 @@ pub fn encode_enum<T: Serialize>(value: T) -> anyhow::Result<String> {
 
 pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
     let (kind, payload) = match event {
+        DriverEvent::TaskViewSnapshot {
+            session,
+            detail,
+            settle,
+        } => (
+            "taskViewSnapshot",
+            json!({ "session": session, "detail": detail, "settle": settle }),
+        ),
         DriverEvent::BossTerminalIntent {
             title,
             cwd,
@@ -49,6 +57,9 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::AutoTitleUpdated(title) => ("autoTitleUpdated", serde_json::to_value(title)?),
         DriverEvent::AvailableCommands(commands) => {
             ("availableCommands", serde_json::to_value(commands)?)
+        }
+        DriverEvent::TaskTurnStarted(_) => {
+            bail!("client-only turn identities cannot be sent by a provider")
         }
         DriverEvent::TurnStarted => ("turnStarted", Value::Null),
         DriverEvent::TurnCancelled => ("turnCancelled", Value::Null),
@@ -244,6 +255,14 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         "turnStarted" => DriverEvent::TurnStarted,
         "turnCancelled" => DriverEvent::TurnCancelled,
         "turnParked" => DriverEvent::TurnParked,
+        "taskViewSnapshot" => DriverEvent::TaskViewSnapshot {
+            session: Box::new(serde_json::from_value(payload["session"].clone())?),
+            detail: serde_json::from_value(payload["detail"].clone())?,
+            settle: payload
+                .get("settle")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
         "textDelta" => DriverEvent::TextDelta(serde_json::from_value(payload)?),
         "reasoningDelta" => DriverEvent::ReasoningDelta(serde_json::from_value(payload)?),
         "activity" => {

@@ -4631,6 +4631,15 @@ pub enum SandboxSetupStatus {
 
 #[derive(Clone, Debug)]
 pub enum DriverEvent {
+    /// Daemon-assigned identity for an autonomous provider turn.
+    TaskTurnStarted(AgentTurn),
+    /// Connection-local canonical projection at a task-view handoff. Providers
+    /// never produce this event; subsequent deltas extend this exact snapshot.
+    TaskViewSnapshot {
+        session: Box<AgentSession>,
+        detail: bool,
+        settle: bool,
+    },
     /// A boss request for the receiving desktop app to create a pinned
     /// standalone terminal. The daemon cannot own this app-local entity.
     BossTerminalIntent {

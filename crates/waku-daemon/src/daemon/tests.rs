@@ -23438,3 +23438,99 @@ fn boss_database_survives_daemon_restart_and_ignores_legacy_backups() {
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn task_views_ordinary_runtime_records_output_without_a_desktop_observer() {
+    let root = std::env::temp_dir().join(format!("task-unobserved-{}", Uuid::new_v4()));
+    let (backend, session_id) = surface_test_backend(&root);
+    let runtime_id = Uuid::new_v4();
+    let driver = DriverHandle::from_control(Arc::new(IdleDriver));
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            _admission: None,
+            plan_gate: None,
+            runtime_id,
+            driver: driver.clone(),
+            stable: None,
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Claude,
+            cwd: root.clone(),
+        },
+    );
+    let turn_id = Uuid::new_v4();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    for event in [
+        DriverEvent::PromptSubmitted {
+            message: "hidden prompt".into(),
+            turn_id,
+            message_id: Uuid::new_v4(),
+            sent_by_task: None,
+            hidden: false,
+            report_trigger: None,
+            reference_context: None,
+        },
+        DriverEvent::TurnStarted,
+        DriverEvent::ReasoningDelta("hidden reasoning".into()),
+        DriverEvent::TextDelta("hidden ".into()),
+        DriverEvent::TextDelta("answer".into()),
+        DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    ] {
+        tx.send(event).unwrap();
+    }
+    drop(tx);
+    forward_driver_events(
+        session_id,
+        runtime_id,
+        rx,
+        EventSink::detached().begin_session_runtime(session_id, runtime_id),
+        driver,
+        backend.agent.clone(),
+        backend.task_state.clone(),
+        backend.task_store.clone(),
+        backend.sessions.clone(),
+        backend.runtime_lifecycles.clone(),
+        backend.automations.clone(),
+        backend.boss.clone(),
+        backend.auto_prompts.clone(),
+        backend.repo_maps.clone(),
+        root.clone(),
+    );
+    let mut restored = backend.task_store.load().unwrap();
+    let session = restored
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == session_id)
+        .unwrap();
+    backend.task_store.hydrate(session).unwrap();
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m.content == "hidden answer")
+    );
+    assert!(
+        session
+            .transcript_blocks
+            .iter()
+            .flat_map(|b| &b.activities)
+            .any(|a| a
+                .reasoning
+                .as_ref()
+                .is_some_and(|r| r.content == "hidden reasoning"))
+    );
+    assert_eq!(session.turns.last().unwrap().id, turn_id);
+    assert_eq!(session.turns.last().unwrap().status, TurnStatus::Completed);
+    assert!(session.messages.iter().all(|m| !m.streaming));
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[path = "tests/task_views.rs"]
+mod task_views;

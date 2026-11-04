@@ -178,6 +178,10 @@ impl DriverHandle {
         self.inner.fork(turns_to_remove)
     }
 
+    pub fn set_detail_visible(&self, visible: bool) {
+        self.inner.set_detail_visible(visible);
+    }
+
     pub fn close(&self) {
         self.inner.close();
     }
@@ -224,6 +228,7 @@ pub trait DriverControl: Send + Sync {
     fn fork(&self, _turns_to_remove: usize) -> anyhow::Result<ProviderResumeCursor> {
         anyhow::bail!("conversation forking is not supported by this provider transport")
     }
+    fn set_detail_visible(&self, _visible: bool) {}
     fn close(&self) {}
 }
 

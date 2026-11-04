@@ -17,8 +17,14 @@ const MAX_RUNTIME_AUTO_RESUMES: u8 = 3;
 /// mailbox) otherwise leaves the persisted turn `Running` forever.
 const UNSTARTED_TURN_TIMEOUT: Duration = Duration::from_secs(60);
 
-fn interrupted_planning_turn_has_no_file_changes(session: &AgentSession, turn_id: Uuid) -> bool {
-    session.phase == Some(waku_protocol::routing::SessionPhase::Planning)
+fn interrupted_planning_turn_has_no_file_changes(
+    session: &AgentSession,
+    turn_id: Uuid,
+    detail_current: bool,
+) -> bool {
+    detail_current
+        && session.detail_loaded
+        && session.phase == Some(waku_protocol::routing::SessionPhase::Planning)
         && !session.transcript_blocks.iter().any(|block| {
             block.turn_id == Some(turn_id)
                 && block
@@ -332,7 +338,8 @@ fn attach_driver(
     hydrate: bool,
     event_wake: smol::channel::Sender<()>,
 ) -> anyhow::Result<Option<PreparedDriver>> {
-    let hydrated_session = if hydrate {
+    let client = daemon.client();
+    let hydrated_session = if hydrate || !client.task_views_available() {
         waku_client::persistence::hydrate_session(&daemon, session_id)?
     } else {
         None
@@ -343,7 +350,6 @@ fn attach_driver(
         .as_ref()
         .and_then(|session| session.runtime_event_cursor)
         .or(replay_cursor);
-    let client = daemon.client();
     let response = client.request(session_id, Uuid::nil(), waku_client::Command::AttachSession)?;
     let waku_client::ResponsePayload::SessionRuntime {
         runtime_id,
@@ -1726,6 +1732,9 @@ impl Waku {
                     while let Ok(newer) = clients.try_recv() {
                         client = newer;
                     }
+                    if client.task_views_available() {
+                        let _ = client.set_task_view(Uuid::nil(), Uuid::nil(), false);
+                    }
                     let revisions = client.subscribe_task_state();
                     let settings = client.subscribe_settings();
                     let friends = client.subscribe_friends();
@@ -2625,6 +2634,7 @@ impl Waku {
                 pending_steers: VecDeque::new(),
                 deferred_steers: VecDeque::new(),
                 stream_phase: None,
+                detail_visible: None,
                 pending_reasoning_newlines: 0,
                 stream_remeasure_pending: false,
                 pending_permission: None,
@@ -3004,11 +3014,10 @@ impl Waku {
             }
             return;
         }
-        if self
-            .state
-            .sessions
-            .iter()
-            .any(|session| session.id == session_id && !session.detail_loaded && !session.incognito)
+        if self.task_detail_visible(session_id)
+            && self.state.sessions.iter().any(|session| {
+                session.id == session_id && !session.detail_loaded && !session.incognito
+            })
         {
             self.ensure_session_loaded(session_id, cx);
             return;
@@ -3044,7 +3053,9 @@ impl Waku {
                     session.runtime_event_cursor,
                     // An incognito row owns no stored detail to fetch — its
                     // transcript lives in this process only.
-                    !session.detail_loaded && !session.incognito,
+                    !session.detail_loaded
+                        && !session.incognito
+                        && self.task_detail_visible(session_id),
                 )
             })
             .unwrap_or((None, false));
@@ -4221,6 +4232,7 @@ impl Waku {
             .iter()
             .map(|project| (project.id, project.path.clone()))
             .collect::<HashMap<_, _>>();
+        let detail_current = !self.stale_task_details.contains(&session_id);
         let mut checkpoint = None;
         if let Some(session) = self.state.session_mut(session_id) {
             if !session.status.is_busy() {
@@ -4239,7 +4251,7 @@ impl Waku {
                 });
             if let Some(turn_count) = interrupted_turn_count {
                 let skip_checkpoint = session.turns.last().is_some_and(|turn| {
-                    interrupted_planning_turn_has_no_file_changes(session, turn.id)
+                    interrupted_planning_turn_has_no_file_changes(session, turn.id, detail_current)
                 });
                 if !skip_checkpoint {
                     let project_path = session
@@ -5324,7 +5336,11 @@ impl Waku {
         let turn_count = turn.turn_count;
         // Read-only planning turns have nothing for Git to capture.
         if turn.status == TurnStatus::Interrupted
-            && interrupted_planning_turn_has_no_file_changes(session, turn.id)
+            && interrupted_planning_turn_has_no_file_changes(
+                session,
+                turn.id,
+                !self.stale_task_details.contains(&session_id),
+            )
         {
             return;
         }
@@ -5347,7 +5363,9 @@ impl Waku {
                 session_id,
                 turn_count,
                 project_path,
-                untouched: turn.status == TurnStatus::Interrupted
+                untouched: session.detail_loaded
+                    && !self.stale_task_details.contains(&session_id)
+                    && turn.status == TurnStatus::Interrupted
                     && !session.transcript_blocks.iter().any(|block| {
                         block.turn_id == Some(turn.id)
                             && block.activities.iter().any(|activity| {
@@ -6758,6 +6776,7 @@ impl Waku {
                 pending_steers: VecDeque::new(),
                 deferred_steers: VecDeque::new(),
                 stream_phase: None,
+                detail_visible: None,
                 pending_reasoning_newlines: 0,
                 stream_remeasure_pending: false,
                 pending_permission: None,
@@ -8762,7 +8781,30 @@ impl Waku {
         }
     }
 
+    pub(super) fn task_detail_visible(&self, session_id: Uuid) -> bool {
+        if self.big_picture_open() {
+            return self.big_picture_card_visible(session_id);
+        }
+        if self.settings_page.is_some() {
+            return false;
+        }
+        self.visible_side_chat_id() == Some(session_id)
+            || (self.main_screen(self.live_deliverable_page().is_some())
+                == render::MainScreen::Session
+                && (self.state.selected_session == Some(session_id)
+                    || self.summon_card_employees().contains(&session_id)))
+    }
+
+    pub(super) fn sync_task_views(&self) {
+        for (id, runtime) in &self.runtimes {
+            runtime
+                .driver
+                .set_detail_visible(self.task_detail_visible(*id));
+        }
+    }
+
     pub(super) fn drain_event_pump(&mut self, cx: &mut Context<Self>) -> EventPumpSchedule {
+        self.sync_task_views();
         // `|` on purpose: a busy provider must not starve the other result
         // queues just because its own drain reported a change first.
         // Recovery reports drain first: they are the cause of the RuntimeLost
@@ -9247,6 +9289,7 @@ mod computer_use_launch_tests {
                                 daemon_version: "test".into(),
                                 daemon_commit: None,
                                 agent_cli_available: false,
+                                task_views_available: false,
                             },
                             None,
                         ),
@@ -9317,5 +9360,27 @@ mod computer_use_launch_tests {
             assert!(error.to_string().contains("invalid start response"));
             assert_eq!(server.join().unwrap(), expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod task_view_checkpoint_tests {
+    use super::*;
+
+    #[test]
+    fn hidden_task_view_cannot_prove_a_planning_turn_left_the_worktree_untouched() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.phase = Some(waku_protocol::routing::SessionPhase::Planning);
+        let turn = session.begin_turn("plan");
+        assert!(interrupted_planning_turn_has_no_file_changes(
+            &session, turn, true
+        ));
+        assert!(!interrupted_planning_turn_has_no_file_changes(
+            &session, turn, false
+        ));
+        session.detail_loaded = false;
+        assert!(!interrupted_planning_turn_has_no_file_changes(
+            &session, turn, true
+        ));
     }
 }

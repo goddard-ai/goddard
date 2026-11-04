@@ -1,11 +1,12 @@
 use super::*;
 
 impl WakuBackend {
-    fn persist_boss_steer_submission(
+    fn persist_user_steer_submission(
         &self,
         session_id: Uuid,
         prompt: &str,
         queued_message: Option<crate::model::QueuedMessage>,
+        require_boss: bool,
     ) -> anyhow::Result<(Uuid, bool)> {
         let queued = queued_message.unwrap_or_else(|| crate::model::QueuedMessage::new(prompt));
         anyhow::ensure!(
@@ -13,7 +14,7 @@ impl WakuBackend {
                 && !queued.hidden
                 && !queued.id.is_nil()
                 && queued.content == prompt,
-            "a Boss steer must carry a visible user submission"
+            "a steer must carry a visible user submission"
         );
 
         let mut state = self.task_state.lock();
@@ -21,15 +22,15 @@ impl WakuBackend {
             .sessions
             .iter_mut()
             .find(|session| session.id == session_id)
-            .ok_or_else(|| anyhow!("Boss chat {session_id} is unknown to the daemon"))?;
+            .ok_or_else(|| anyhow!("task {session_id} is unknown to the daemon"))?;
         self.task_store.hydrate(session)?;
         anyhow::ensure!(
-            session.boss_managed && session.planning.is_none(),
+            !require_boss || (session.boss_managed && session.planning.is_none()),
             "steer submission target is not a Boss chat"
         );
         anyhow::ensure!(
             session.archived_at.is_none(),
-            "Boss chat is archived; reopen the active Boss chat"
+            "task is archived; reopen it before steering"
         );
 
         if let Some(existing) = session
@@ -40,7 +41,7 @@ impl WakuBackend {
             anyhow::ensure!(
                 existing.role == crate::model::MessageRole::User
                     && existing.content == queued.content,
-                "Boss steer submission id was reused with different content"
+                "steer submission id was reused with different content"
             );
             return Ok((queued.id, false));
         }
@@ -54,7 +55,7 @@ impl WakuBackend {
                     && existing.display_content == queued.display_content
                     && existing.attachments == queued.attachments
                     && existing.atoms == queued.atoms,
-                "Boss steer submission id was reused with different content"
+                "steer submission id was reused with different content"
             );
             return Ok((queued.id, true));
         }
@@ -464,7 +465,7 @@ impl Backend for WakuBackend {
                     self.task_state.lock().sessions.iter().any(|session| {
                         session.id == session_id && session.archived_at.is_none()
                     }),
-                    "Boss chat is archived; reopen the active Boss chat"
+                    "task is archived; reopen it before steering"
                 );
             }
         }
@@ -500,6 +501,59 @@ impl Backend for WakuBackend {
                 let mut claims = self.managed_goal_claims.lock();
                 let claimed = claim_managed_goal_turn(&mut claims, session_id, goal_id, turn_id);
                 Ok(ResponsePayload::ManagedGoalTurnClaimed { claimed })
+            }
+            Command::SetTaskView { detail, generation } => {
+                if session_id.is_nil() {
+                    events.set_task_view(false, generation);
+                    return Ok(ResponsePayload::Ack);
+                }
+                // Event forwarding holds this same gate through projection
+                // and publication. The targeted snapshot precedes every delta
+                // produced after the observation changes.
+                let lifecycle = self.runtime_lifecycles.session(session_id);
+                let _owner = lifecycle.lock();
+                if !self
+                    .sessions
+                    .lock()
+                    .get(&session_id)
+                    .is_some_and(|entry| entry.runtime_id == runtime_id)
+                {
+                    return Ok(ResponsePayload::Ack);
+                }
+                let mut state = self.task_state.lock();
+                let session = state
+                    .sessions
+                    .iter_mut()
+                    .find(|s| s.id == session_id)
+                    .ok_or_else(|| anyhow!("task no longer exists"))?;
+                self.task_store.hydrate(session)?;
+                let settle = !session.status.is_busy();
+                let mut snapshot = if detail || settle {
+                    session.clone()
+                } else {
+                    let mut summary = session.list_projection();
+                    summary.turns = session.turns.last().cloned().into_iter().collect();
+                    summary.queued_messages = session.queued_messages.clone();
+                    summary
+                };
+                snapshot.runtime_event_cursor = None;
+                drop(state);
+                if !events.set_task_view(detail, generation) {
+                    return Ok(ResponsePayload::Ack);
+                }
+                events.send_to(
+                    events.source_subscriber_id(),
+                    event_to_wire(DriverEvent::TaskViewSnapshot {
+                        session: Box::new(snapshot),
+                        detail,
+                        settle,
+                    })?,
+                );
+                events.restore_task_attention();
+                if detail {
+                    events.restore_task_output()?;
+                }
+                Ok(ResponsePayload::Ack)
             }
             Command::AttachSession => {
                 // A runtime-ended event can immediately trigger a client's
@@ -1298,6 +1352,15 @@ impl Backend for WakuBackend {
                                 .reasoning_effort
                                 .clone_from(&existing.reasoning_effort);
                         }
+                        if events.task_views_enabled()
+                            && session.detail_loaded
+                            && !existing.boss_managed
+                            && employee.is_none()
+                            && !stable_sessions.contains(&session_id)
+                        {
+                            self.task_store.hydrate(existing)?;
+                            preserve_task_view_projection(existing, &mut session);
+                        }
                         // The `boss_managed` stamp outlives document
                         // membership: a rotated-out Boss chat is in no
                         // roster and owns no pointer, yet its archival stays
@@ -1558,15 +1621,22 @@ impl Backend for WakuBackend {
                     baseline.thread_id(),
                     usize::MAX,
                 )?;
-                let state = self.task_state.lock();
-                let current = state
-                    .sessions
-                    .iter()
-                    .find(|s| s.id == session_id)
+                let mut state = self.task_state.lock();
+                let session = state.sessions.iter_mut().find(|s| s.id == session_id);
+                let current = session
+                    .as_ref()
                     .is_some_and(|session| baseline.still_current(session));
-                // The client checks its own baseline before merging and saving.
-                // Persisting here would race a client prompt that starts while
-                // this reply is in flight and could overwrite the new suffix.
+                // Filtered clients cannot own transcript replacement. Import
+                // the native suffix under the same baseline fence here.
+                if current
+                    && events.task_views_enabled()
+                    && let Some(session) = session
+                    && waku_protocol::provider_session::append_codex_history(session, &history)
+                {
+                    state.mark_session_dirty(session_id);
+                    self.task_store.save(&mut state)?;
+                }
+                // Legacy clients keep their existing merge-and-save contract.
                 Ok(ResponsePayload::ProviderSessionHistory {
                     history: if current { history } else { Default::default() },
                     resolved_cwd: None,
@@ -2439,10 +2509,11 @@ impl Backend for WakuBackend {
                         .1
                         .ok_or_else(|| anyhow!("there is no active Boss chat"))?;
                     let target_session = active_session;
-                    let (submission_id, pending) = self.persist_boss_steer_submission(
+                    let (submission_id, pending) = self.persist_user_steer_submission(
                         target_session,
                         prompt,
                         queued_message.clone(),
+                        true,
                     )?;
                     self.notify_task_state();
 
@@ -2514,7 +2585,7 @@ impl Backend for WakuBackend {
                 // automations) out until the user trusts the transfer.
                 let lifecycle = self.runtime_lifecycles.session(session_id);
                 let _cancel_owner = matches!(command, Command::Cancel).then(|| lifecycle.lock());
-                let (driver, stable) = {
+                let driver = {
                     let mut sessions = self.sessions.lock();
                     let entry = sessions
                         .get_mut(&session_id)
@@ -2531,7 +2602,7 @@ impl Backend for WakuBackend {
                     if let Some(link) = &entry.stable {
                         link.require_available()?;
                     }
-                    (entry.driver.clone(), entry.stable.is_some())
+                    entry.driver.clone()
                 };
                 if matches!(command, Command::Cancel) {
                     self.agent.cancel_resources(session_id);
@@ -2554,6 +2625,41 @@ impl Backend for WakuBackend {
                     events.send(event_to_wire(cancelled)?)?;
                     recorded?;
                     return Ok(ResponsePayload::Ack);
+                }
+                // Ordinary tasks need the same durable submission identity
+                // as Boss chats: a filtered desktop cannot save the accepted
+                // steer back into a transcript it no longer receives.
+                if !boss_chat_command
+                    && let Command::Steer {
+                        prompt,
+                        hidden: false,
+                        queued_message,
+                    } = &command
+                {
+                    let (submission_id, pending) = self.persist_user_steer_submission(
+                        session_id,
+                        prompt,
+                        queued_message.clone(),
+                        false,
+                    )?;
+                    self.notify_task_state();
+                    if !pending
+                        || !self.agent.record_pending_steer(
+                            session_id,
+                            crate::agent::AgentPrompt {
+                                prompt: prompt.clone(),
+                                transport: None,
+                                sender: None,
+                                queued_id: None,
+                                submission_id: Some(submission_id),
+                                context: None,
+                                hidden: false,
+                                report_trigger: None,
+                            },
+                        )
+                    {
+                        return Ok(ResponsePayload::Ack);
+                    }
                 }
                 if let Command::Prompt {
                     prompt,
@@ -2589,14 +2695,7 @@ impl Backend for WakuBackend {
                         report_trigger: None,
                         reference_context: None,
                     };
-                    if self.boss.is_managed(session_id) || stable {
-                        record_boss_event(
-                            &self.task_state,
-                            &self.task_store,
-                            session_id,
-                            &submitted,
-                        )?;
-                    }
+                    record_boss_event(&self.task_state, &self.task_store, session_id, &submitted)?;
                     events.send(event_to_wire(submitted)?)?;
                     if !*hidden && self.boss.is_boss_principal(session_id) {
                         // A boss op reaching back to the user — a `terminal`

@@ -75,6 +75,40 @@ When unsure whether a callsite is deferred: if the closure is *stored* on the
 element (`on_*`, `MenuItem::new`, `set_context_items` builders) it's safe; if
 it executes while the element is *constructed*, it's under the lease.
 
+## Background task delivery
+
+Desktop connections negotiate `task_views_available` and use `SetTaskView`
+for connection-scoped transcript interests. Primary transcripts, visible side
+chats, Big Picture cards, and live summon cards receive detail. Hidden tasks
+keep control attachments for permissions, notifications, and existing follow-up
+orchestration, but text, reasoning, tool detail, usage deltas, and process log
+chunks are filtered before delivery. Local `unsubscribe` alone does not filter
+WebSocket traffic. Legacy daemons retain the previous full-stream behavior.
+Navigation observers queue interest changes directly to the transport worker;
+they must not wake the pump after every root notification, which can feed an
+unbounded update/notification cycle even when no task is streaming.
+
+The daemon records ordinary provider output as well as managed tasks. Stream
+checkpoints share a one-second daemon-wide cadence; semantic boundaries save
+immediately. Filtered client saves preserve that canonical output, including
+after a runtime exits. Task switches receive an ordered snapshot under the
+same lifecycle gate as event application. Snapshot reconciliation preserves
+composer state and keeps a running turn settleable until its settlement event
+runs notifications, checkpointing, and queue advancement.
+
+An explicitly attached hidden task receives one final snapshot when its turn
+settles, because those completion handlers still inspect the transcript. This
+is a one-shot transfer, excluded from the replay journal and stripped for
+visible and legacy clients. Process output is retained separately in a bounded
+live-runtime cache (32 items, at most 64 KiB each); reopening a view restores its
+retained tail. Friend watches and terminal ownership keep their separate
+routing contracts.
+
+A hidden or unloaded transcript is not evidence that a stopped planning turn
+left the worktree untouched. Checkpoint capture bypasses the read-only/untouched
+shortcuts until detail is current, preserving undo at the cost of a background
+capture for that interruption.
+
 ## The two cadences
 
 Everything during a stream happens at one of two rates, and every change to

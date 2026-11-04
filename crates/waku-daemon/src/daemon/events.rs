@@ -7,7 +7,7 @@ use super::*;
 /// queue in submission order, a `steerAccepted` echo is annotated with the
 /// sending task, and a dead runtime drops its credential and registry entry
 /// with it.
-/// Managed chats must remain readable without a connected UI. Streaming deltas
+/// Every task must remain readable without a connected UI. Streaming deltas
 /// update the resident projection; durable writes occur at semantic boundaries.
 pub(super) fn record_boss_event(
     task_state: &Mutex<PersistedState>,
@@ -134,20 +134,47 @@ pub(super) fn record_boss_event(
         }
         DriverEvent::TextDelta(text) => {
             let turn = session.active_turn_id();
+            if let Some(item) = session
+                .transcript_blocks
+                .last_mut()
+                .and_then(|block| block.activities.last_mut())
+                && item.reasoning.is_some()
+                && !item.complete
+            {
+                item.complete = true;
+                if let Some(reasoning) = &mut item.reasoning {
+                    reasoning.finished_at_ms = crate::model::unix_time_millis();
+                }
+            }
             let boundary = session.transcript_blocks.last().is_some_and(|block| {
                 block.turn_id == turn && block.after_message == session.messages.len()
             });
-            if !boundary
-                && session.messages.last().is_some_and(|message| {
-                    message.role == MessageRole::Assistant && message.turn_id == turn
-                })
-            {
-                session.messages.last_mut().unwrap().content.push_str(text);
+            if session.messages.last().is_some_and(|message| {
+                message.role == MessageRole::Assistant
+                    && message.turn_id == turn
+                    && (!boundary
+                        || waku_protocol::streaming::text_delta_rejoins(&message.content, text))
+            }) {
+                let message = session
+                    .messages
+                    .last_mut()
+                    .expect("checked last assistant message");
+                message.content.push_str(text);
+                message.streaming = true;
             } else {
                 session.push_message(MessageRole::Assistant, text);
+                if let Some(message) = session.messages.last_mut() {
+                    message.streaming = true;
+                }
             }
         }
         DriverEvent::ReasoningDelta(text) => {
+            if text.is_empty() {
+                return Ok(());
+            }
+            if let Some(message) = session.messages.last_mut() {
+                message.streaming = false;
+            }
             let turn = session.active_turn_id();
             let reasoning = session
                 .transcript_blocks
@@ -159,6 +186,7 @@ pub(super) fn record_boss_event(
                 .and_then(|item| item.reasoning.as_mut());
             if let Some(reasoning) = reasoning {
                 reasoning.content.push_str(text);
+                reasoning.finished_at_ms = crate::model::unix_time_millis();
             } else {
                 activity = Some(ActivityItem::from_reasoning(
                     ReasoningBlock {
@@ -177,6 +205,9 @@ pub(super) fn record_boss_event(
             detail,
             complete,
         } => {
+            if let Some(message) = session.messages.last_mut() {
+                message.streaming = false;
+            }
             activity = Some(ActivityItem::new(
                 id.clone(),
                 *kind,
@@ -185,7 +216,21 @@ pub(super) fn record_boss_event(
                 *complete,
             ));
         }
-        DriverEvent::RichActivity(item) => activity = Some(item.clone()),
+        DriverEvent::RichActivity(item) => {
+            if let Some(message) = session.messages.last_mut() {
+                message.streaming = false;
+            }
+            activity = Some(item.clone());
+        }
+        DriverEvent::GoalUpdated(goal) => {
+            if !session
+                .thread_goal
+                .as_ref()
+                .is_some_and(|goal| goal.managed_id.is_some())
+            {
+                session.thread_goal = goal.clone();
+            }
+        }
         DriverEvent::UsageUpdated {
             context_tokens,
             context_window,
@@ -204,6 +249,10 @@ pub(super) fn record_boss_event(
         DriverEvent::TurnFinished {
             success, summary, ..
         } => {
+            for message in &mut session.messages {
+                message.streaming = false;
+            }
+            session.last_reply_at = Some(crate::model::unix_time());
             session.finish_active_turn(if *success {
                 TurnStatus::Completed
             } else {
@@ -273,16 +322,26 @@ pub(super) fn record_boss_event(
     }
     session.updated_at = crate::model::unix_time();
     state.mark_session_dirty(session_id);
-    if !matches!(
-        event,
-        DriverEvent::TextDelta(_) | DriverEvent::ReasoningDelta(_)
-    ) {
+    if !stream_projection_event(event) {
         task_store.save(&mut state)?;
     }
     Ok(())
 }
 
-/// Settle a durable Boss steer into the active turn under the same message id
+fn stream_projection_event(event: &DriverEvent) -> bool {
+    matches!(
+        event,
+        DriverEvent::TextDelta(_)
+            | DriverEvent::ReasoningDelta(_)
+            | DriverEvent::UsageUpdated { .. }
+            | DriverEvent::Activity {
+                complete: false,
+                ..
+            }
+    ) || matches!(event, DriverEvent::RichActivity(item) if !item.complete)
+}
+
+/// Settle a durable user steer into the active turn under the same message id
 /// that identified its queued submission. A rotation that happens before the
 /// provider acknowledgement therefore carries the queue row; one that happens
 /// after acceptance carries the transcript message instead.
@@ -599,6 +658,7 @@ pub(super) fn forward_driver_events(
 ) {
     let lifecycle = lifecycles.session(session_id);
     let mut page_owner = None;
+    let mut pending_reasoning_newlines = 0;
     let mut pending = std::collections::VecDeque::new();
     let mut checkpoint: Option<(
         crate::stable_runtime::StableLink,
@@ -701,6 +761,30 @@ pub(super) fn forward_driver_events(
             continue;
         }
 
+        let event = match event {
+            DriverEvent::ReasoningDelta(delta) => {
+                let mut text = String::new();
+                waku_protocol::streaming::push_reasoning_delta(
+                    &mut text,
+                    &mut pending_reasoning_newlines,
+                    &delta,
+                );
+                DriverEvent::ReasoningDelta(text)
+            }
+            event => {
+                if matches!(
+                    &event,
+                    DriverEvent::TextDelta(_)
+                        | DriverEvent::TurnStarted
+                        | DriverEvent::TurnFinished { .. }
+                        | DriverEvent::Activity { .. }
+                        | DriverEvent::RichActivity(_)
+                ) {
+                    pending_reasoning_newlines = 0;
+                }
+                event
+            }
+        };
         #[cfg(test)]
         if let Some(applying) = lifecycles.event_applying.lock().clone() {
             applying(session_id, runtime_id);
@@ -804,7 +888,7 @@ pub(super) fn forward_driver_events(
         } else {
             None
         };
-        if (managed && !stale) || automation_settle || stable.is_some() {
+        if !stale || automation_settle || stable.is_some() {
             // A genuinely-completed turn keeps its verdict; only a
             // cancel-issued settle writes the intentional interruption.
             let interrupted =
@@ -821,6 +905,15 @@ pub(super) fn forward_driver_events(
                     break;
                 }
             } else if !stale {
+                if stable.is_none() && stream_projection_event(&event) {
+                    let mut last = lifecycles.stream_checkpoint.lock();
+                    if last.is_none_or(|last| last.elapsed() >= std::time::Duration::from_secs(1)) {
+                        *last = Some(std::time::Instant::now());
+                        if let Err(error) = task_store.save(&mut task_state.lock()) {
+                            eprintln!("could not checkpoint task streams: {error:#}");
+                        }
+                    }
+                }
                 let _ = super::instruction_pins::capture_boss_instruction_event(
                     &lifecycles.admission,
                     &boss,
@@ -1068,12 +1161,37 @@ pub(super) fn forward_driver_events(
         } else {
             None
         };
-        let wire = event_to_wire(event).unwrap_or_else(|error| {
+        let mut wire = event_to_wire(event).unwrap_or_else(|error| {
             WireDriverEvent::new(
                 "error",
                 Value::String(format!("could not encode daemon event: {error}")),
             )
         });
+        if wire.kind == "turnStarted" {
+            let state = task_state.lock();
+            if let Some(turn) = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| session.turns.last())
+            {
+                wire.payload = serde_json::json!({ "turn": turn });
+            }
+        }
+        if settled && events.needs_settlement_snapshot() {
+            let state = task_state.lock();
+            if let Some(session) = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+            {
+                if !wire.payload.is_object() {
+                    wire.payload = serde_json::json!({});
+                }
+                wire.payload["taskSnapshot"] =
+                    serde_json::to_value(session).expect("task snapshots are serializable");
+            }
+        }
         let delivered = if ephemeral {
             events.send_ephemeral(wire)
         } else {

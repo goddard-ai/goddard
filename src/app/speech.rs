@@ -1264,6 +1264,7 @@ pub(super) mod tests {
                         daemon_version: "test".into(),
                         daemon_commit: None,
                         agent_cli_available: false,
+                        task_views_available: false,
                     },
                     ClientMessage::Request(request) => {
                         let waku_client::Command::Transcribe { pcm, .. } = request.command else {

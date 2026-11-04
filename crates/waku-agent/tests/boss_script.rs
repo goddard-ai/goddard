@@ -51,6 +51,7 @@ fn boss_script_cli_returns_small_acknowledgements_for_multiple_committed_ops() {
                     daemon_version: "test".into(),
                     daemon_commit: None,
                     agent_cli_available: true,
+                    task_views_available: false,
                 })
                 .unwrap()
                 .into(),

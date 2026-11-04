@@ -927,6 +927,13 @@ impl Waku {
     /// Queue detail reads off the UI thread. The selected task overtakes
     /// background warmup and the queue bounds concurrent transcript loads.
     pub(super) fn ensure_session_loaded(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if self.stale_task_details.contains(&session_id)
+            && !self.session_hydrations.iter().any(|id| *id == session_id)
+            && let Some(session) = self.state.session_mut(session_id)
+        {
+            session.detail_loaded = false;
+        }
+
         if self
             .state
             .sessions
@@ -994,6 +1001,13 @@ impl Waku {
                             } else {
                                 false
                             };
+                            if applied
+                                && waku.state.sessions.iter().any(|session| {
+                                    session.id == session_id && !session.status.is_busy()
+                                })
+                            {
+                                waku.stale_task_details.remove(&session_id);
+                            }
                             if applied
                                 && let Some(turn_count) = interrupted_turn
                                 && let Some(project_path) = waku
@@ -2559,6 +2573,7 @@ impl Waku {
         select_fallback: bool,
         cx: &mut Context<Self>,
     ) {
+        self.stale_task_details.remove(&session_id);
         // "Remove" on a watched friend session just closes our view —
         // the friend's own task list is untouched.
         if self.is_friend_session(session_id) {
@@ -5569,15 +5584,22 @@ impl Waku {
     /// cold open. The released ids also drop their `message_markdown` views,
     /// the one transcript cache that deliberately survives session switches.
     pub(super) fn trim_resident_transcripts(&mut self) {
-        let mut pinned: HashSet<Uuid> = self.runtimes.keys().copied().collect();
+        let mut pinned: HashSet<Uuid> = self
+            .runtimes
+            .iter()
+            .filter(|(_, runtime)| runtime.detail_visible != Some(false))
+            .map(|(id, _)| *id)
+            .collect();
         if let Some(id) = self.state.selected_session {
             pinned.insert(id);
         }
         if let Some(pending) = &self.pending_session_activation {
             pinned.insert(pending.session_id);
         }
-        pinned.extend(self.side_chat_views.keys().copied());
-        pinned.extend(self.big_picture.slot_session_ids());
+        pinned.extend(self.visible_side_chat_id());
+        if self.big_picture_open() {
+            pinned.extend(self.big_picture.slot_session_ids());
+        }
         pinned.extend(self.summon_card_employees());
         pinned.extend(self.session_hydrations.iter().copied());
         pinned.extend(self.submission_preparations.iter().copied());

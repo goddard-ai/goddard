@@ -41,7 +41,7 @@ import type { WireframeCommentOperation } from "./WireframeCommentOperation";
 import type { WorkspaceOperation } from "./WorkspaceOperation";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type Command = { "type": "transcribe", pcm: Array<number>, language?: string | null, keywords?: string | null, } | { "type": "getWhistleStatus" } | { "type": "downloadWhistleModel" } | { "type": "boss", operation: BossOperation, } | { "type": "employeeComposerPrompt", viewedEmployeeId: string, submissionId: string, prompt: string, delivery: AgentPromptDelivery, } | { "type": "attachSession" } | { "type": "start", options: WireDriverStartOptions, } | { "type": "prompt", prompt: string,
+export type Command = { "type": "transcribe", pcm: Array<number>, language?: string | null, keywords?: string | null, } | { "type": "getWhistleStatus" } | { "type": "downloadWhistleModel" } | { "type": "boss", operation: BossOperation, } | { "type": "employeeComposerPrompt", viewedEmployeeId: string, submissionId: string, prompt: string, delivery: AgentPromptDelivery, } | { "type": "attachSession" } | { "type": "setTaskView", detail: boolean, generation: number, } | { "type": "start", options: WireDriverStartOptions, } | { "type": "prompt", prompt: string,
 /**
  * The ids the submitting client already gave this turn and its user
  * message. The daemon republishes them with the submission so every

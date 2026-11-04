@@ -1,5 +1,115 @@
 use super::*;
 
+/// A filtered client's transcript can be intentionally incomplete. Keep the
+/// daemon's provider projection while accepting ordinary client-owned fields
+/// through the existing save/metadata rules.
+pub(super) fn preserve_task_view_projection(existing: &AgentSession, incoming: &mut AgentSession) {
+    use crate::model::MessageRole;
+    let presentations: HashMap<_, _> = incoming
+        .messages
+        .iter()
+        .map(|message| (message.id, message))
+        .collect();
+    let mut messages = existing.messages.clone();
+    for message in &mut messages {
+        if message.role == MessageRole::User
+            && let Some(presentation) = presentations.get(&message.id)
+            && presentation.role == message.role
+            && presentation.content == message.content
+        {
+            message
+                .display_content
+                .clone_from(&presentation.display_content);
+            message.attachments.clone_from(&presentation.attachments);
+            message.atoms.clone_from(&presentation.atoms);
+        }
+    }
+    let mut turns = existing.turns.clone();
+    let mut preparation_failures = HashSet::new();
+    for turn in &mut turns {
+        if turn.status == TurnStatus::Running
+            && !turn.provider_turn_started
+            && let Some(failed) = incoming.turns.iter().find(|candidate| {
+                candidate.id == turn.id
+                    && !candidate.provider_turn_started
+                    && candidate.status != TurnStatus::Running
+            })
+        {
+            preparation_failures.insert(turn.id);
+            turn.status = failed.status;
+            turn.interruption = failed.interruption;
+            turn.completed_at = failed.completed_at;
+        }
+    }
+    messages.extend(
+        incoming
+            .messages
+            .iter()
+            .filter(|message| {
+                message.notice.is_some()
+                    && message
+                        .turn_id
+                        .is_some_and(|id| preparation_failures.contains(&id))
+                    && !messages.iter().any(|known| known.id == message.id)
+            })
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+    // Preparing a prompt captures its starting checkpoint before dispatch.
+    // Keep that new human intent, but never resurrect an already known turn.
+    if existing.active_turn_id().is_none()
+        && let Some(turn) = incoming.turns.last().filter(|turn| {
+            turn.status == TurnStatus::Running
+                && !turn.provider_turn_started
+                && !existing.turns.iter().any(|known| known.id == turn.id)
+        })
+        && let Some(prompt) = incoming
+            .messages
+            .iter()
+            .find(|message| message.turn_id == Some(turn.id) && message.role == MessageRole::User)
+    {
+        turns.push(turn.clone());
+        messages.push(prompt.clone());
+    }
+    let known: HashSet<_> = messages.iter().map(|message| message.id).collect();
+    // Workspace/provider changes and other client-authored notices are
+    // append-only presentation. They cannot replace provider output.
+    messages.extend(
+        incoming
+            .messages
+            .iter()
+            .filter(|message| message.role == MessageRole::System && !known.contains(&message.id))
+            .cloned(),
+    );
+    incoming.messages = messages;
+    incoming.turns = turns;
+    incoming
+        .transcript_blocks
+        .clone_from(&existing.transcript_blocks);
+    incoming.runtime_event_cursor = existing.runtime_event_cursor;
+    if incoming.provider == existing.provider {
+        incoming
+            .provider_cursor
+            .clone_from(&existing.provider_cursor);
+        incoming.context_usage.clone_from(&existing.context_usage);
+        incoming
+            .available_commands
+            .clone_from(&existing.available_commands);
+    }
+    if !incoming
+        .thread_goal
+        .as_ref()
+        .is_some_and(|goal| goal.managed_id.is_some())
+    {
+        incoming.thread_goal.clone_from(&existing.thread_goal);
+    }
+    if preparation_failures.is_empty() {
+        incoming.status = existing.status;
+    }
+    incoming.last_reply_at = existing.last_reply_at;
+    incoming.updated_at = incoming.updated_at.max(existing.updated_at);
+}
+
 /// Queued tickets carry the requested selection before dispatch moves provider
 /// cursors. Project it to clients without changing the runtime's stored pair.
 pub(super) fn project_employee_selection(

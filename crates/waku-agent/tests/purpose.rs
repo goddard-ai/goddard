@@ -107,6 +107,7 @@ fn purpose_cli_preserves_explicit_intent_and_classifies_existing_work() {
                             daemon_version: "test".into(),
                             daemon_commit: None,
                             agent_cli_available: true,
+                            task_views_available: false,
                         })
                         .unwrap()
                         .into(),

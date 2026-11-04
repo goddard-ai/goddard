@@ -480,6 +480,85 @@ impl waku_exec::terminal::TerminalEventSink for EventSink {
 }
 
 impl EventSink {
+    /// Change only the requesting connection's observation, never the runtime.
+    pub fn set_task_view(&self, detail: bool, generation: u64) -> bool {
+        let mut state = self.hub.state.lock();
+        if let Some(subscriber) = state.subscribers.get_mut(&self.source_subscriber_id) {
+            let views = subscriber.task_views.get_or_insert_with(Default::default);
+            if !self.session_id.is_nil() {
+                if views
+                    .get(&self.session_id)
+                    .is_some_and(|(current, _)| *current >= generation)
+                {
+                    return false;
+                }
+                views.insert(self.session_id, (generation, detail));
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Existing desktop completion orchestration needs one coherent final
+    /// projection. Only explicit control attachments need that one-shot copy.
+    pub fn needs_settlement_snapshot(&self) -> bool {
+        self.hub
+            .state
+            .lock()
+            .subscribers
+            .values()
+            .any(|subscriber| {
+                subscriber
+                    .task_views
+                    .as_ref()
+                    .and_then(|views| views.get(&self.session_id))
+                    .is_some_and(|(_, detail)| !detail)
+            })
+    }
+
+    pub fn restore_task_attention(&self) {
+        let events = self
+            .hub
+            .state
+            .lock()
+            .task_attention
+            .get(&self.session_id)
+            .map(|attention| attention.snapshot())
+            .unwrap_or_default();
+        for event in events {
+            self.send_to(self.source_subscriber_id, event);
+        }
+    }
+
+    pub fn restore_task_output(&self) -> anyhow::Result<()> {
+        let items = self
+            .hub
+            .state
+            .lock()
+            .task_output
+            .get(&self.session_id)
+            .map(|output| output.snapshot())
+            .unwrap_or_default();
+        for item in items {
+            self.send_to(
+                self.source_subscriber_id,
+                waku_protocol::event_to_wire(waku_protocol::model::DriverEvent::BackgroundWork(
+                    waku_protocol::model::BackgroundWorkEvent::Upsert(item),
+                ))?,
+            );
+        }
+        Ok(())
+    }
+
+    pub fn task_views_enabled(&self) -> bool {
+        self.hub
+            .state
+            .lock()
+            .subscribers
+            .get(&self.source_subscriber_id)
+            .is_some_and(|subscriber| subscriber.task_views.is_some())
+    }
+
     pub fn send(&self, event: WireDriverEvent) -> anyhow::Result<()> {
         self.hub.emit(self.session_id, self.runtime_id, event, true);
         Ok(())
@@ -645,9 +724,15 @@ impl EventSink {
     /// does, so a teardown path can assert what it broadcast.
     #[cfg(any(test, feature = "test-support"))]
     pub fn tapped_events(&self) -> Receiver<ServerMessage> {
+        self.tapped_connection().1
+    }
+
+    /// An authenticated client attribution for transport-boundary tests.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn tapped_connection(&self) -> (Self, Receiver<ServerMessage>) {
         let (messages, events) = unbounded();
-        self.hub.subscribe(&[], Subscriber::new(messages).0);
-        events
+        let id = self.hub.subscribe(&[], Subscriber::new(messages).0);
+        (self.clone().with_source_subscriber(id), events)
     }
 
     /// Replay depth retained for `session_id` — tests assert a dead
@@ -675,6 +760,9 @@ struct Subscriber {
     /// When set, only `Event`s for this session reach the subscriber —
     /// friend session feeds subscribe to one session, not the journal.
     session_filter: Option<Uuid>,
+    /// None preserves legacy broadcast delivery. Some opts this connection
+    /// into explicit transcript interests; control events remain global.
+    task_views: Option<HashMap<Uuid, (u64, bool)>>,
 }
 
 impl Subscriber {
@@ -685,6 +773,7 @@ impl Subscriber {
                 messages,
                 kicked,
                 session_filter: None,
+                task_views: None,
             },
             kicked_rx,
         )
@@ -702,13 +791,26 @@ impl Subscriber {
             Some(session_id) => {
                 matches!(message, ServerMessage::Event(event) if event.session_id == session_id)
             }
-            None => true,
+            None => match message {
+                ServerMessage::Event(event) if event.event.is_task_detail() => {
+                    self.task_views.as_ref().is_none_or(|views| {
+                        views
+                            .get(&event.session_id)
+                            .is_some_and(|(_, detail)| *detail)
+                    })
+                }
+                _ => true,
+            },
         }
     }
 }
 
 #[derive(Default)]
 struct HubState {
+    /// Borrowed friend feeds have their own watch lifecycle and snapshots.
+    external_sessions: std::collections::HashSet<Uuid>,
+    task_attention: HashMap<Uuid, crate::task_views::TaskAttention>,
+    task_output: HashMap<Uuid, crate::task_views::TaskOutput>,
     next_subscriber_id: u64,
     task_state_revision: u64,
     subscribers: HashMap<u64, Subscriber>,
@@ -899,6 +1001,9 @@ impl Hub {
             );
         }
         state.active_runtimes.insert(session_id, runtime_id);
+        state.external_sessions.remove(&session_id);
+        state.task_output.remove(&session_id);
+        state.task_attention.remove(&session_id);
         state
             .next_sequences
             .retain(|(candidate, _), _| *candidate != session_id);
@@ -915,6 +1020,14 @@ impl Hub {
             return;
         }
         state.active_runtimes.remove(&session_id);
+        for subscriber in state.subscribers.values_mut() {
+            if let Some(views) = &mut subscriber.task_views {
+                views.remove(&session_id);
+            }
+        }
+        state.external_sessions.remove(&session_id);
+        state.task_output.remove(&session_id);
+        state.task_attention.remove(&session_id);
         state
             .next_sequences
             .retain(|(candidate, _), _| *candidate != session_id);
@@ -939,6 +1052,18 @@ impl Hub {
         if state.active_runtimes.get(&session_id) != Some(&runtime_id) {
             return;
         }
+        state
+            .task_attention
+            .entry(session_id)
+            .or_default()
+            .apply(&event);
+        if event.kind == "backgroundWork" {
+            state
+                .task_output
+                .entry(session_id)
+                .or_default()
+                .apply(&event);
+        }
         let sequence = state
             .next_sequences
             .entry((session_id, runtime_id))
@@ -953,7 +1078,13 @@ impl Hub {
         };
         if replayable {
             let journal = state.journal.entry((session_id, runtime_id)).or_default();
-            journal.push_back(event.clone());
+            journal.push_back(SequencedEvent {
+                session_id: event.session_id,
+                runtime_id: event.runtime_id,
+                epoch: event.epoch,
+                sequence: event.sequence,
+                event: crate::task_views::without_settlement_snapshot(&event.event),
+            });
             while journal.len() > MAX_REPLAY_EVENTS_PER_SESSION {
                 journal.pop_front();
             }
@@ -1119,12 +1250,48 @@ impl Hub {
     /// replay cursors, so no event stream is lost permanently.
     fn broadcast(state: &mut HubState, message: &ServerMessage, skip: Option<u64>) {
         let mut overwhelmed = Vec::new();
+        let external = matches!(message, ServerMessage::Event(event) if state.external_sessions.contains(&event.session_id));
         for (&subscriber_id, subscriber) in &state.subscribers {
-            if Some(subscriber_id) == skip || !subscriber.accepts(message) {
+            if Some(subscriber_id) == skip
+                || (!subscriber.accepts(message)
+                    && !(external && subscriber.session_filter.is_none()))
+            {
                 continue;
             }
+            let message = match message {
+                ServerMessage::Event(event)
+                    if !external
+                        && event.event.kind == "backgroundWork"
+                        && subscriber.task_views.as_ref().is_some_and(|views| {
+                            !views
+                                .get(&event.session_id)
+                                .is_some_and(|(_, detail)| *detail)
+                        }) =>
+                {
+                    let mut event = event.clone();
+                    event.event = crate::task_views::without_output(event.event);
+                    ServerMessage::Event(event)
+                }
+                ServerMessage::Event(event)
+                    if event.event.payload.get("taskSnapshot").is_some()
+                        && !subscriber
+                            .task_views
+                            .as_ref()
+                            .and_then(|views| views.get(&event.session_id))
+                            .is_some_and(|(_, detail)| !detail) =>
+                {
+                    ServerMessage::Event(SequencedEvent {
+                        session_id: event.session_id,
+                        runtime_id: event.runtime_id,
+                        epoch: event.epoch,
+                        sequence: event.sequence,
+                        event: crate::task_views::without_settlement_snapshot(&event.event),
+                    })
+                }
+                _ => message.clone(),
+            };
             if subscriber.messages.len() >= MAX_QUEUED_MESSAGES_PER_SUBSCRIBER
-                || subscriber.messages.try_send(message.clone()).is_err()
+                || subscriber.messages.try_send(message).is_err()
             {
                 overwhelmed.push((subscriber_id, subscriber.kicked.clone()));
             }
@@ -1332,6 +1499,7 @@ impl Hub {
     /// after a reconnect passes a cursor the sharer's journal understands.
     fn emit_external(&self, event: SequencedEvent) {
         let mut state = self.state.lock();
+        state.external_sessions.insert(event.session_id);
         if state.active_runtimes.get(&event.session_id) != Some(&event.runtime_id) {
             // A runtime boundary on the sharer's side starts a fresh
             // journal here, same as `begin_runtime` for local runtimes.
@@ -2246,6 +2414,7 @@ fn handle_connection(
             daemon_version: env!("CARGO_PKG_VERSION").into(),
             daemon_commit: options.build_commit.clone(),
             agent_cli_available: waku_exec::agent_cli_path().is_ok(),
+            task_views_available: true,
         },
     )?;
     socket.set_config(|config| {
@@ -2871,6 +3040,13 @@ fn handle_request(
     let session_id = request.session_id;
     let runtime_id = request.runtime_id;
     let task_catalog_action = task_catalog_action(&request.command);
+    let resolved_attention = match &request.command {
+        Command::Respond { request_id, .. }
+        | Command::RespondUserInput { request_id, .. }
+        | Command::ClarifyUserInput { request_id, .. }
+        | Command::CancelUserInput { request_id } => Some(request_id.clone()),
+        _ => None,
+    };
     // A fire-and-forget command gets no response, so a rejection must be
     // named before the request moves into the backend for the log line
     // below to know what failed.
@@ -2912,6 +3088,13 @@ fn handle_request(
         }
         (outcome, true)
     };
+    if executed
+        && matches!(&outcome, ResponseOutcome::Ok { .. })
+        && let Some(request_id) = resolved_attention
+        && let Some(attention) = hub.state.lock().task_attention.get_mut(&session_id)
+    {
+        attention.resolve(&request_id);
+    }
     if executed && starts_runtime && matches!(&outcome, ResponseOutcome::Error { .. }) {
         hub.end_runtime(session_id, Some(runtime_id));
     }
@@ -2966,6 +3149,7 @@ fn command_kind(command: &Command) -> &'static str {
     match command {
         Command::Boss { .. } => "boss",
         Command::EmployeeComposerPrompt { .. } => "employeeComposerPrompt",
+        Command::SetTaskView { .. } => "setTaskView",
         Command::AttachSession => "attachSession",
         Command::Start { .. } => "start",
         Command::Prompt { .. } => "prompt",
@@ -4396,6 +4580,198 @@ mod tests {
             None,
             "dead transport still owns the terminal"
         );
+    }
+
+    #[test]
+    fn task_views_filter_hidden_transcripts_without_filtering_controls_or_other_clients() {
+        let hub = Arc::new(Hub::default());
+        let session = Uuid::new_v4();
+        let runtime = Uuid::new_v4();
+        hub.begin_runtime(session, runtime);
+        let (tx, filtered) = bounded(128);
+        let filtered_id = hub.subscribe(&[], Subscriber::new(tx).0);
+        let (tx, legacy) = bounded(128);
+        hub.subscribe(&[], Subscriber::new(tx).0);
+        let sink = hub
+            .event_sink(session, runtime)
+            .with_source_subscriber(filtered_id);
+        assert!(sink.set_task_view(false, 1));
+        for _ in 0..50 {
+            sink.send_ephemeral(WireDriverEvent::new("textDelta", "hidden".into()))
+                .unwrap();
+        }
+        sink.send(WireDriverEvent::new(
+            "permission",
+            serde_json::json!({"requestId":"ask"}),
+        ))
+        .unwrap();
+        assert!(
+            matches!(filtered.try_recv().unwrap(), ServerMessage::Event(e) if e.event.kind == "permission")
+        );
+        assert!(filtered.try_recv().is_err());
+        assert_eq!(legacy.try_iter().count(), 51);
+
+        assert!(sink.set_task_view(true, 3));
+        // A delayed hide from rapid navigation cannot cancel the newer view.
+        assert!(!sink.set_task_view(false, 2));
+        sink.send_ephemeral(WireDriverEvent::new("textDelta", "visible".into()))
+            .unwrap();
+        assert!(
+            matches!(filtered.try_recv().unwrap(), ServerMessage::Event(e) if e.event.payload == "visible")
+        );
+        assert!(sink.set_task_view(false, 4));
+        sink.send_ephemeral(WireDriverEvent::new("reasoningDelta", "hidden".into()))
+            .unwrap();
+        sink.send(WireDriverEvent::new(
+            "turnFinished",
+            serde_json::Value::Null,
+        ))
+        .unwrap();
+        assert!(
+            matches!(filtered.try_recv().unwrap(), ServerMessage::Event(e) if e.event.kind == "turnFinished")
+        );
+        assert!(filtered.try_recv().is_err());
+        assert_eq!(
+            hub.state.lock().active_runtimes.get(&session),
+            Some(&runtime)
+        );
+        // Producer count and token volume do not consume the hidden viewer's
+        // queue; only their semantic completion edges are delivered.
+        for _ in 0..50 {
+            let session = Uuid::new_v4();
+            let runtime = Uuid::new_v4();
+            hub.begin_runtime(session, runtime);
+            let producer = hub.event_sink(session, runtime);
+            for _ in 0..20 {
+                producer
+                    .send_ephemeral(WireDriverEvent::new("textDelta", "hidden".into()))
+                    .unwrap();
+            }
+            producer
+                .send(WireDriverEvent::new(
+                    "turnFinished",
+                    serde_json::Value::Null,
+                ))
+                .unwrap();
+        }
+        let messages: Vec<_> = filtered.try_iter().collect();
+        assert_eq!(messages.len(), 50);
+        assert!(messages.iter().all(|message| matches!(message, ServerMessage::Event(event) if event.event.kind == "turnFinished")));
+        hub.emit_external(SequencedEvent {
+            session_id: Uuid::new_v4(),
+            runtime_id: Uuid::new_v4(),
+            epoch: Uuid::new_v4(),
+            sequence: 1,
+            event: WireDriverEvent::new("textDelta", "friend feed".into()),
+        });
+        assert!(
+            matches!(filtered.try_recv().unwrap(), ServerMessage::Event(event) if event.event.payload == "friend feed")
+        );
+    }
+
+    #[test]
+    fn task_views_settlement_snapshots_are_live_only_and_only_for_hidden_observers() {
+        let hub = Arc::new(Hub::default());
+        let session = Uuid::new_v4();
+        let runtime = Uuid::new_v4();
+        hub.begin_runtime(session, runtime);
+        let (tx, hidden) = bounded(8);
+        let subscriber = hub.subscribe(&[], Subscriber::new(tx).0);
+        let (tx, legacy) = bounded(8);
+        hub.subscribe(&[], Subscriber::new(tx).0);
+        let sink = hub
+            .event_sink(session, runtime)
+            .with_source_subscriber(subscriber);
+        sink.set_task_view(false, 1);
+        assert!(sink.needs_settlement_snapshot());
+        sink.send(WireDriverEvent::new(
+            "turnFinished",
+            serde_json::json!({"success":true,"taskSnapshot":{"messages":["one-shot output"]}}),
+        ))
+        .unwrap();
+        let ServerMessage::Event(event) = hidden.try_recv().unwrap() else {
+            panic!("expected settlement")
+        };
+        assert!(event.event.payload.get("taskSnapshot").is_some());
+        let ServerMessage::Event(event) = legacy.try_recv().unwrap() else {
+            panic!("expected legacy settlement")
+        };
+        assert!(event.event.payload.get("taskSnapshot").is_none());
+        assert!(
+            hub.state
+                .lock()
+                .journal
+                .get(&(session, runtime))
+                .unwrap()
+                .back()
+                .unwrap()
+                .event
+                .payload
+                .get("taskSnapshot")
+                .is_none()
+        );
+        sink.set_task_view(true, 2);
+        assert!(!sink.needs_settlement_snapshot());
+    }
+
+    #[test]
+    fn task_views_restore_bounded_hidden_process_output_without_streaming_it() {
+        use waku_protocol::model::{
+            BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKind, BackgroundWorkStatus,
+        };
+        let hub = Arc::new(Hub::default());
+        let session = Uuid::new_v4();
+        let runtime = Uuid::new_v4();
+        hub.begin_runtime(session, runtime);
+        let (tx, messages) = bounded(128);
+        let subscriber = hub.subscribe(&[], Subscriber::new(tx).0);
+        let sink = hub
+            .event_sink(session, runtime)
+            .with_source_subscriber(subscriber);
+        sink.set_task_view(false, 1);
+        let mut item = BackgroundWorkItem::new(
+            BackgroundWorkKind::Process,
+            "process",
+            "shell",
+            BackgroundWorkStatus::Running,
+        );
+        item.output = Some("initial log".into());
+        let key = item.key.clone();
+        sink.send(
+            event_to_wire(DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(
+                item,
+            )))
+            .unwrap(),
+        )
+        .unwrap();
+        let ServerMessage::Event(metadata) = messages.try_recv().unwrap() else {
+            panic!("expected metadata")
+        };
+        assert!(metadata.event.payload["output"].is_null());
+        sink.send_ephemeral(
+            event_to_wire(DriverEvent::BackgroundWork(
+                BackgroundWorkEvent::OutputDelta {
+                    key,
+                    delta: "界".repeat(100_000),
+                },
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(messages.try_recv().is_err());
+        sink.set_task_view(true, 2);
+        sink.restore_task_output().unwrap();
+        let ServerMessage::Event(restored) = messages.try_recv().unwrap() else {
+            panic!("expected output snapshot")
+        };
+        let DriverEvent::BackgroundWork(BackgroundWorkEvent::Upsert(item)) =
+            waku_protocol::event_from_wire(restored.event).unwrap()
+        else {
+            panic!("expected process")
+        };
+        assert!(item.output_truncated);
+        assert!(item.output.as_ref().unwrap().len() <= 64 * 1024);
+        assert!(item.output.unwrap().ends_with('界'));
     }
 
     #[test]

@@ -28,6 +28,7 @@ fn steer_supervisor_sends_an_unaddressed_prompt_with_the_employee_credential() {
                     daemon_version: "test".into(),
                     daemon_commit: None,
                     agent_cli_available: true,
+                    task_views_available: false,
                 })
                 .unwrap()
                 .into(),

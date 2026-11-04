@@ -210,6 +210,13 @@ pub enum Command {
     /// second app. It observes the session actor without starting, replacing,
     /// or otherwise mutating the provider process.
     AttachSession,
+    /// Select transcript detail for this connection. A nil session enables
+    /// summary-only delivery by default; real sessions receive an ordered
+    /// snapshot before their new delivery mode takes effect.
+    SetTaskView {
+        detail: bool,
+        generation: u64,
+    },
     Start {
         options: WireDriverStartOptions,
     },
@@ -1137,6 +1144,22 @@ pub struct WireDriverEvent {
 }
 
 impl WireDriverEvent {
+    /// High-volume transcript content; lifecycle and attention stay deliverable
+    /// without an open transcript. Terminal and friend routing is independent.
+    pub fn is_task_detail(&self) -> bool {
+        match self.kind.as_str() {
+            "textDelta" | "reasoningDelta" | "activity" | "usageUpdated" => true,
+            "richActivity" => !matches!(
+                self.payload.get("tool_name").and_then(Value::as_str),
+                Some(crate::model::BOSS_SUMMON_TOOL_NAME | crate::model::MEMORY_RECORD_TOOL_NAME)
+            ),
+            "backgroundWork" => {
+                self.payload.get("type").and_then(Value::as_str) == Some("outputDelta")
+            }
+            _ => false,
+        }
+    }
+
     pub fn new(kind: impl Into<String>, payload: Value) -> Self {
         Self {
             kind: kind.into(),
@@ -1181,6 +1204,9 @@ pub enum ServerMessage {
         /// to retrieve through.
         #[serde(default)]
         agent_cli_available: bool,
+        /// Supports connection-scoped task detail with snapshot handoff.
+        #[serde(default)]
+        task_views_available: bool,
     },
     Rejected {
         message: String,
@@ -1866,6 +1892,22 @@ pub(crate) mod base64_bytes {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn task_detail_filter_preserves_serialized_memory_and_summon_cards() {
+        use crate::model::{ActivityItem, ActivityKind, DriverEvent};
+        for (tool, filtered) in [
+            (crate::model::BOSS_SUMMON_TOOL_NAME, false),
+            (crate::model::MEMORY_RECORD_TOOL_NAME, false),
+            ("read_file", true),
+        ] {
+            let activity = ActivityItem::new(None, ActivityKind::Tool, "tool", None, true)
+                .with_tool_name(Some(tool));
+            let wire =
+                crate::driver_wire::event_to_wire(DriverEvent::RichActivity(activity)).unwrap();
+            assert_eq!(wire.is_task_detail(), filtered, "{tool}");
+        }
+    }
+
     use super::*;
 
     #[test]

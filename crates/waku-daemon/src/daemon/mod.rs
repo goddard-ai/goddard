@@ -488,6 +488,8 @@ type RotationObserver = Arc<dyn Fn(waku_boss::rotation_oracle::RotationObservati
 
 #[derive(Default)]
 struct RuntimeLifecycles {
+    /// One daemon-wide cadence, so concurrent hidden streams share a write.
+    stream_checkpoint: Mutex<Option<std::time::Instant>>,
     admission: Arc<crate::server::idle_shutdown::IdleShutdownGate>,
     locks: Mutex<HashMap<Uuid, Arc<ReentrantMutex<std::cell::Cell<Option<Uuid>>>>>>,
     shutting_down: std::sync::atomic::AtomicBool,

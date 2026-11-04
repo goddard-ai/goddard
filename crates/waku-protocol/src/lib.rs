@@ -64,6 +64,7 @@ pub mod resources;
 pub mod routing;
 pub mod settings;
 pub mod skills;
+pub mod streaming;
 pub mod task_metadata;
 pub mod terminal_command;
 pub mod theme;

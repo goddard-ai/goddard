@@ -76,7 +76,8 @@ pub(super) fn handle_driver_command(
             let cursor = Some(serde_json::to_value(driver.fork(turns_to_remove)?)?);
             return Ok(ResponsePayload::Cursor { cursor });
         }
-        Command::AttachSession
+        Command::SetTaskView { .. }
+        | Command::AttachSession
         | Command::ClaimManagedGoalTurn { .. }
         | Command::Start { .. }
         | Command::GetSettings
