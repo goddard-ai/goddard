@@ -7,12 +7,21 @@ fn failed_backend_initialization_does_not_announce_readiness() {
     std::fs::create_dir_all(&root).unwrap();
     // This file loads inside WakuBackend::new, after the listener is bound.
     std::fs::create_dir(root.join("auto-prompts.json")).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_goddard-daemon"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_goddard-daemon"));
+    command
         .env_clear()
         .env("HOME", &root)
         .env("GODDARD_DATA_DIR", &root)
         .env("GODDARD_DEV_DATA_DIR", &root)
-        .env("GODDARD_DAEMON_TOKEN", "readiness-test-token")
+        .env("GODDARD_DAEMON_TOKEN", "readiness-test-token");
+    // Winsock needs SystemRoot to load its providers even when application
+    // configuration is isolated from the parent environment.
+    #[cfg(windows)]
+    command.env(
+        "SystemRoot",
+        std::env::var_os("SystemRoot").expect("Windows test host must define SystemRoot"),
+    );
+    let mut child = command
         .args(["--bind", "127.0.0.1:0"])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
