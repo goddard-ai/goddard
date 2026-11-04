@@ -1,0 +1,103 @@
+name: Fast CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fast-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Fast checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+      # sccache storage lives in the goddard-ci-cache R2 bucket: GitHub's
+      # 10 GiB Actions cache cap was evicting entries between runs.
+      SCCACHE_BUCKET: goddard-ci-cache
+      SCCACHE_REGION: auto
+      SCCACHE_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      SCCACHE_S3_USE_SSL: "true"
+      AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_R2_SECRET_ACCESS_KEY }}
+      # Runs without secrets (forked PRs) fall back to the GHA cache backend.
+      SCCACHE_GHA_ENABLED: ${{ secrets.SCCACHE_R2_ACCESS_KEY_ID == '' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup default 1.96.0
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            clang \
+            cmake \
+            libfontconfig-dev \
+            libvulkan1 \
+            libwayland-dev \
+            libx11-xcb-dev \
+            libxi-dev \
+            libxtst-dev \
+            libxkbcommon-x11-dev \
+            mold \
+            pkg-config \
+            python3 \
+            xdg-desktop-portal
+
+      # sccache caches per-crate compilation units, so it keeps hitting across
+      # Cargo.lock churn — the raw target/ cache missed on every dependency
+      # bump and cost multiple GiB of restore I/O on Windows besides.
+      - name: Configure sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-rust-1.96.0-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-rust-1.96.0-cargo-
+
+      - name: Check Rust
+        env:
+          RUSTFLAGS: ${{ (runner.os == 'Linux' && '-C linker=clang -C link-arg=-fuse-ld=mold') || (runner.os == 'Windows' && '-C linker=rust-lld') || '' }}
+        run: cargo check --workspace --locked
+
+      # The generated protocol and TypeScript suites are platform-independent, so
+      # one runner is enough to catch a drifted checked-in artifact.
+      - name: Install JavaScript dependencies
+        if: runner.os == 'Linux'
+        run: bun install --frozen-lockfile
+
+      - name: Check generated protocol and TypeScript suites
+        if: runner.os == 'Linux'
+        run: |
+          bun run protocol:check
+          bun run --filter @waku/client check
+          bun test ./packages/waku-client ./apps/web ./apps/mobile
+
+      - name: Check release automation
+        run: |
+          bun test ./.github/scripts

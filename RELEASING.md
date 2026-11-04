@@ -8,11 +8,14 @@ verify artifacts with the same EdDSA key. The final transition release is
 copied once to Cloudflare R2 so older installed clients can take one last
 update; new builds read GitHub's stable feeds directly.
 
-Once set up, cutting a release is the checklist in
-[Cutting a release](#cutting-a-release): prep on `dev`, fast-forward `main` to
-it, push a `v*` tag (or run the Release workflow manually), and stop at the
-draft GitHub release for human review. `bun run release` only ever builds
-local artifacts; publishing is CI's job.
+`main` is the protected default branch for validated code; it may be ahead of
+what is published. `dev` is a rough checkpoint branch and may be broken or
+unfinished. Published release tags identify exactly what shipped.
+
+Fast CI on `dev` prepares one draft release PR. Mark it ready to freeze the
+candidate and run the full test matrix. Merging that PR builds a draft GitHub
+release for human inspection. Publication remains a human action.
+`bun run release` only builds local artifacts.
 
 - Updater code: [`src/updater.rs`](src/updater.rs) — loads the embedded
   Sparkle.framework on macOS and owns the signed native flows on Linux and
@@ -30,8 +33,8 @@ local artifacts; publishing is CI's job.
   [`scripts/changelog.ts`](scripts/changelog.ts).
 - GitHub Actions: [`.github/workflows/release.yml`](.github/workflows/release.yml)
   builds Linux (x86_64, arm64), Windows (x86_64, arm64), and macOS archives on
-  a `v*` tag — or on a manual **Run workflow**, which takes the version from
-  `Cargo.toml` — and opens a draft GitHub release;
+  merging the release PR, a `v*` tag, or a manual **Run workflow**, and opens
+  a draft GitHub release;
   [`.github/workflows/sync-release.yml`](.github/workflows/sync-release.yml)
   is run manually once to publish the final R2 compatibility bridge.
 
@@ -110,130 +113,76 @@ secrets; no local rclone configuration is required.
 
 ## Cutting a release
 
-All release prep lands on `dev`; `main` only ever fast-forwards to it, so it
-never carries a commit `dev` lacks. The one exception is publishing the draft
-GitHub release at the end — that stays a human's click.
+1. **Wait for Fast CI on `dev`.** A successful push run creates or updates
+   the draft `release/next` PR into `main`. Failed checkpoints are not promoted.
+   Fast CI runs a Linux workspace check, protocol generation checks, TypeScript
+   checks and tests, and release-automation tests.
+2. **Review the entire candidate.** Passing CI does not mean all included
+   features are finished. The PR preserves the source commits, merges current
+   `main`, proposes the next minor version before 1.0 or patch version after
+   1.0 (or uses a deliberately higher
+   version from `dev`), updates `Cargo.lock`, and folds desktop and mobile
+   changelog fragments. Inspect the version, notes, and complete diff. Until
+   1.0, patch releases are reserved for deliberate hotfix version bumps.
+3. **Mark ready for review.** Automatic updates stop. The macOS, Linux, and
+   Windows workspace test matrix runs. New `dev` checkpoints do not change
+   this candidate. Deliberate fixes pushed to `release/next` rerun checks;
+   check both the code and release notes again before merging. Making the PR
+   a draft again permits automatic updates only while its head is still an
+   automation-generated commit. Manual commits are never overwritten.
+4. **Merge after checks and human review.** Use **Create a merge commit**;
+   do not squash or rebase the release PR. This preserves checkpoint ancestry
+   and QA notes tied to original commit SHAs. `Fast checks` and `Release checks`
+   must pass against current `main`. Direct pushes to `main` are blocked;
+   Goddard's older direct QA promotion path cannot bypass this PR gate.
+5. **Inspect the draft GitHub release.** The Release workflow builds and signs
+   the exact merged revision for every supported platform. Check the attached
+   packages, release notes, and download filenames, and test the packaged
+   application. Draft download links become public after publication.
+6. **Publish manually.** Publishing identifies the shipped version and lets
+   automation prepare the next candidate from the latest passing checkpoint.
+   No second candidate is prepared while a GitHub release remains a draft.
+   Run the final R2 compatibility bridge only for the transition release.
 
-1. **Check the branch relationship** before preparing the release:
-   ```sh
-   git fetch origin
-   git merge-base --is-ancestor origin/main dev
-   ```
-   A zero exit status means `dev` contains the current published branch.
-   If it fails, reconcile the branches before continuing. Keep `dev` in its
-   own worktree, and preserve every commit through the newest QA approval:
-   approvals under `refs/notes/qa` bind to commit SHAs and are lost if those
-   commits are rewritten.
-2. **Audit the changelog** — review the feature and fix commits since the last
-   release tag:
-   ```sh
-   git log --oneline "$(git describe --tags --abbrev=0)"..dev
-   git rev-parse dev   # the audited tip — saved for the delta check in step 7
-   ```
-   Give any changelog-worthy commit missing a `.changelog/` fragment one of its
-   own, and check every pending fragment's filename: the category prefix
-   (`highlight-`/`feat-`/`exp-`/`fix-`) picks the `###` section; Boss, VoicePad, voice briefing,
-   and Git panel entries always fold into Experiments, including employee, deliverable,
-   persona, and planning-session changes and fixes. Use `exp-` for new Boss
-   and other experimental fragments. Boss entries nest under a permanent
-   `- **Boss**` subgroup, even with one entry. Omit per-bullet `[Experimental]`
-   tags: the Experiments heading identifies them. Descriptions longer than 40 words need a brief bold
-   title with its colon inside the bold span, such as `**Voicepad:** `. The fold
-   adds a missing title from the fragment slug; review these defaults for clarity.
-   An optional
-   second segment — `<prefix>-<group>-<slug>.md`, with `group` one of
-   `boss`, `sessions`, `sidebar`, `composer`, `providers`, `git`, `transcript`,
-   `panels`, `terminals`, `keyboard`, `navigation`, `appearance`,
-   `permissions`, `settings`, `friends`, `ssh`, `platform` — files it under a
-   `- **Group**` subsection. A fragment that only concerns the mobile app
-   goes in `.changelog/mobile/` instead — same naming rules — and folds into
-   `CHANGELOG.mobile.md`, keeping mobile-only notes out of the desktop
-   changelog that feeds the in-app updater prompt. Rename mis-tagged
-   fragments, then preview the fold:
-   ```sh
-   bun ./scripts/changelog.ts check
-   ```
-   An unrecognized group token lands the bullet in the flat tail, so check is
-   how a mistyped group gets caught.
-3. **Format the Rust code**:
-   ```sh
-   cargo fmt
-   ```
-   If it changes anything, commit the diff as `chore: format`. The TypeScript
-   workspaces have no formatter — typecheck, below, is their gate.
-4. **Run the tests** — everything CI runs, plus the mobile and web apps:
-   ```sh
-   bun install --frozen-lockfile
-   cargo test --locked
-   bun run protocol:check
-   bun run --filter @waku/client check
-   bun run --filter @waku/client test
-   bun run --filter @waku/mobile typecheck
-   bun run --filter @waku/mobile test
-   bun run --filter @waku/web typecheck
-   bun run --filter @waku/web test
-   ```
-   Land fixes for failing tests as their own `fix:` commits on `dev` — not
-   folded into the release commit.
-5. **Bump `version` in `Cargo.toml`** — the single source of truth.
-   Until v1.0, always bump the **minor** version for a release (patch versions
-   are reserved for hotfixes), so after `v0.2.x` the next release is `v0.3.0`.
-   `CFBundleShortVersionString` is the version, and `CFBundleVersion` is
-   derived from it (`major*1e6 + minor*1e3 + patch`, so `0.2.0` → `2000`),
-   which keeps Sparkle's build-number comparison monotonic without a manual
-   counter. Prerelease versions (`-beta.1`) become GitHub prereleases through
-   CI. GitHub's `/releases/latest/download/` links continue to resolve to the
-   latest stable release.
-6. **Write the release notes** — changes accumulate as fragments in
-   `.changelog/` (one `.md` file per change, one bullet each, named
-   `highlight-`/`feat-`/`exp-`/`fix-<slug>.md` to pick the `###` section, or
-   `<prefix>-<group>-<slug>.md` to also file under a `- **Group**`
-   subsection; highlights
-   must also commit a screenshot or recording at `.changelog/media/<slug>`
-   and embed it via `![](media/<slug>.<ext>)`; mobile-only changes use
-   `.changelog/mobile/` and fold into `CHANGELOG.mobile.md`). Fold them:
-   ```sh
-   bun run changelog
-   ```
-   This creates the `## [<version>]` section for the Cargo version in each
-   changelog that has fragments and deletes the consumed ones. Before committing
-   or tagging, review the new desktop and mobile sections as complete release
-   notes. Describe what users can do or which problem is fixed, name the
-   relevant screen, and include opt-in requirements or limits. Remove
-   unexplained jargon, combine related entries, and check each claim against
-   what actually ships. Commit the reviewed notes with the version bump
-   (`chore: release v<version>`).
-7. **Promote `dev` to `main`** — `dev` is a shared branch, so commits can land
-   after the audit. Re-check the delta first, and give any new arrival the same
-   fragment audit (a missed fragment just means a missing release-notes bullet —
-   fix it in the draft). A final `cargo fmt --check` catches drift in code the
-   earlier `cargo fmt` predates:
-   ```sh
-   git log --oneline <audited-tip>..dev
-   cargo fmt --check
-   ```
-   Then fast-forward and push:
-   ```sh
-   git checkout main && git merge --ff-only dev && git push
-   ```
-   If CI fails after this, the fix lands on `dev` and `main` fast-forwards
-   again — never commit to `main` directly.
-8. **Release it through CI** — push a `v<version>` tag on the release commit
-   (explicit SHA, not the `dev` ref, so the tag can't drift if `dev` moves
-   again), or Actions → Release →
-   Run workflow (see below). `bun run release` stays local-only: it builds,
-   signs, notarizes, and writes the DMG + zip + appcast into `dist/`, which is
-   what the workflow uploads as the GitHub release's assets. To validate a
-   release build by hand:
-   ```sh
-   bun run release --local
-   ```
-   The workflow opens a **draft** GitHub release — stop there. The notes open
-   with a `### Downloads` section the `draft-release` job writes itself; its
-   links point to the draft's GitHub assets and become public when the release
-   is published, so verify them against the attached files during review. After
-   publishing the final transition release, run **Sync final R2 compatibility
-   bridge** once with its tag so pre-migration clients can update.
+If candidate preparation conflicts with `main`, the workflow fails without
+changing the existing candidate. Reconcile `main` into `dev` without rewriting
+QA-approved history, then push and let Fast CI run again. If a candidate has
+manual fixes, finish it manually or close it and preserve its work before
+removing `release/next`; automation refuses to reuse an unmerged closed branch.
+A merged candidate branch can be reused automatically.
+
+For a retry without a new checkpoint, use **Actions → Prepare release PR →
+Run workflow**, selecting `main`. It selects the latest successful Fast CI push
+run whose commit is still on `dev`; an older CI completion cannot rewind an
+existing candidate. If `main` moves during preparation, retry the workflow.
+
+### Repository setup
+
+The default branch must be `main`. Protect it with required pull requests,
+`Fast checks` and `Release checks`, strict status checks (current base required),
+conversation resolution, and enforcement for administrators. Keep merge commits
+enabled and linear-history enforcement disabled. No extra approving reviewer is
+required: the maintainer reviews the bot-authored release PR and merges it.
+
+Allow GitHub Actions to create pull requests in **Settings → Actions → General**.
+The controller uses `GITHUB_TOKEN` and explicitly dispatches candidate CI, so
+normal releases require no additional credentials or bot-created PR workflow
+approval. If a pending automatic PR-event run asks for approval, the explicitly
+dispatched Fast CI still runs; marking ready starts full CI through your action.
+
+For candidates that change `.github/workflows/`, configure a GitHub App installed
+on this repository with Contents, Pull requests, Actions, and Workflows write
+permissions. Set repository variable `RELEASE_APP_ID` and secret
+`RELEASE_APP_PRIVATE_KEY`. Without these optional credentials, GitHub may reject
+an automatic branch update containing workflow changes; merge those workflow
+changes through a maintainer-created PR instead. Never store a maintainer's
+personal login token in the repository.
+
+For initial installation, land the workflow and script changes on `main` through
+a maintainer-created PR, run the pre-merge checks, and then dispatch **Prepare
+release PR** on `main`. Thereafter it reacts to successful Fast CI push runs on
+`dev` and manually published releases. Merely adding these files to `dev` does
+not activate the default-branch controller.
 
 The script builds and signs the app via `scripts/bundle.sh release`, verifies
 the bundled JS REPL and computer-use helper, builds the styled DMG, notarizes
@@ -246,7 +195,8 @@ Test by keeping an older build around, launching it, and choosing
 
 ### GitHub release and final R2 compatibility bridge
 
-The Release workflow runs two ways:
+The Release workflow runs on merging `release/next` into `main`, building the
+exact merge commit. Two recovery paths remain available:
 
 - **Push a `v*` tag** — the tag must match the `version` in `Cargo.toml`, or the
   run fails before anything builds. A prerelease tag like `v0.2.0-beta.1`

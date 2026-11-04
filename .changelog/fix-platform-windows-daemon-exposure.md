@@ -1,0 +1,1 @@
+- Fixed remote daemon access settings hanging on Windows when changing credentials or turning access off.

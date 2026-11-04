@@ -1,9 +1,10 @@
 name: Tests
 
 on:
-  push:
-    branches:
-      - main
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,6 +15,7 @@ concurrency:
 
 jobs:
   test:
+    if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
     name: Rust (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -23,6 +25,12 @@ jobs:
     timeout-minutes: 90
     env:
       RUSTC_WRAPPER: sccache
+      # CI runners have no incremental state to reuse. Disabling incremental
+      # compilation lets sccache cache workspace libraries as well as dependencies.
+      CARGO_INCREMENTAL: "0"
+      # Long test execution can outlast sccache's idle timeout and erase the
+      # build statistics before the action's post-job report.
+      SCCACHE_IDLE_TIMEOUT: "0"
       # sccache storage lives in the goddard-ci-cache R2 bucket: GitHub's
       # 10 GiB Actions cache cap was evicting entries between runs.
       SCCACHE_BUCKET: goddard-ci-cache
@@ -100,3 +108,52 @@ jobs:
           bun run protocol:check
           bun run --filter @waku/client check
           bun test ./packages/waku-client ./apps/web ./apps/mobile
+
+      - name: Check release automation
+        if: runner.os == 'Linux'
+        run: bun test ./.github/scripts
+
+  release-metadata:
+    name: Release metadata
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/next') ||
+      (github.event.pull_request.head.ref == 'release/next' && !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require an unused version and folded changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          test -n "$version"
+          # Query the tag list successfully before checking absence: an API
+          # outage or auth error must fail rather than look like an unused tag.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$version" > tags.json
+          VERSION="$version" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          tag = "refs/tags/v" + os.environ["VERSION"]
+          assert not any(item["ref"] == tag for item in json.loads(Path("tags.json").read_text())), "Version tag already exists"
+          assert not any(Path(".changelog").glob("*.md")), "Fold desktop changelog fragments before merging"
+          assert not any(Path(".changelog/mobile").glob("*.md")), "Fold mobile changelog fragments before merging"
+          PY
+
+  release-checks:
+    name: Release checks
+    if: always()
+    needs: [test, release-metadata]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the complete test matrix
+        env:
+          RESULT: ${{ needs.test.result }}
+          METADATA: ${{ needs.release-metadata.result }}
+          IS_RELEASE: ${{ github.event.pull_request.head.ref == 'release/next' || github.ref == 'refs/heads/release/next' }}
+        run: |
+          test "$RESULT" = success
+          if [ "$IS_RELEASE" = true ]; then
+            test "$METADATA" = success
+          fi

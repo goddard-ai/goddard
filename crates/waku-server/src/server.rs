@@ -1813,7 +1813,7 @@ pub fn serve(
         active: Mutex::new(None),
     }));
     accept_loop(
-        listener,
+        Arc::new(listener),
         token,
         dispatcher,
         hub,
@@ -1846,7 +1846,7 @@ struct ExposureControl {
 struct ExposedListener {
     config: DaemonExposure,
     port: u16,
-    listener: TcpListener,
+    listener: Arc<TcpListener>,
     shutdown: Arc<AtomicBool>,
     _advert: Option<waku_base::lan::LanAdvert>,
     thread: std::thread::JoinHandle<()>,
@@ -1891,17 +1891,13 @@ impl ExposureControl {
             .as_ref()
             .filter(|current| current.port == config.port)
         {
-            Some(current) => (
-                current
-                    .listener
-                    .try_clone()
-                    .context("could not reuse the exposed listener")?,
-                true,
-            ),
+            Some(current) => (Arc::clone(&current.listener), true),
             None => (
-                TcpListener::bind(("0.0.0.0", config.port)).with_context(|| {
-                    format!("could not expose the daemon on port {}", config.port)
-                })?,
+                Arc::new(
+                    TcpListener::bind(("0.0.0.0", config.port)).with_context(|| {
+                        format!("could not expose the daemon on port {}", config.port)
+                    })?,
+                ),
                 false,
             ),
         };
@@ -1909,9 +1905,10 @@ impl ExposureControl {
             .set_nonblocking(true)
             .context("could not configure the exposed listener")?;
         let port = listener.local_addr()?.port();
-        let accept_listener = listener
-            .try_clone()
-            .context("could not clone the exposed listener")?;
+        // Share the socket between threads instead of duplicating Winsock
+        // handles. Stopping an old generation must not interfere with the
+        // socket still used by its replacement's nonblocking accept loop.
+        let accept_listener = Arc::clone(&listener);
         let shutdown = Arc::new(AtomicBool::new(false));
         // Reachable is exactly when LAN discovery matters: wake the share
         // endpoint and register `_waku._tcp` just like a startup bind.
@@ -1992,7 +1989,7 @@ impl ExposureControl {
 /// exposed socket gets a flag of its own so unexposing does not bounce the
 /// daemon — while `server_shutdown` ends everything.
 fn accept_loop(
-    listener: TcpListener,
+    listener: Arc<TcpListener>,
     token: String,
     dispatcher: Arc<RequestDispatcher>,
     hub: Arc<Hub>,

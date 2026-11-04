@@ -1311,7 +1311,11 @@ mod tests {
             let unknown_id = id(&h.acquire(b, unknown));
             for (owner, id) in [(a, stopped_id), (b, unknown_id)] {
                 h.broker
-                    .operate(owner, ResourceOperation::Release { id })
+                    .transaction(
+                        owner,
+                        ResourceOperation::Release { id },
+                        Observation::unprobed(),
+                    )
                     .unwrap();
             }
             let observation = || Observation {
