@@ -7519,3 +7519,10 @@ boss.chain_step_failed:
   en: Failed
 boss.chain_step_cancelled:
   en: Cancelled
+
+terminal.actions:
+  en: Terminal actions
+terminal.move_pane_out:
+  en: Move Pane Out of Group
+terminal.unsplit_group:
+  en: Unsplit Group

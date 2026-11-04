@@ -1,0 +1,1 @@
+- Use each terminal’s actions menu to split panes, move a pane out, or unsplit the whole group while keeping shells and running commands alive.

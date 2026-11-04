@@ -4699,10 +4699,7 @@ pub use shortcuts_dialog::DismissShortcutsDialog;
 pub use sidebar::CancelSessionRename;
 use streaming::*;
 pub use terminal_close_dialog::{ConfirmTerminalClose, DismissTerminalClose};
-use terminals::{
-    RIGHT_PANEL_TERMINAL_MAX_PANES, STANDALONE_TERMINAL_MAX_PANES, TerminalGroupLayout,
-    TerminalRecord,
-};
+use terminals::{RIGHT_PANEL_TERMINAL_MAX_PANES, TerminalGroupLayout, TerminalRecord};
 use transcript::*;
 use transcript_view::ConversationNavigationRail;
 

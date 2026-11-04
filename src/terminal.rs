@@ -3275,7 +3275,7 @@ impl Render for TerminalView {
                 .h(px(TERMINAL_TOOLBAR_HEIGHT))
                 .flex_none()
                 .pl(px(10.0))
-                .pr(px(34.0))
+                .pr(px(if self.pane { 62.0 } else { 34.0 }))
                 .flex()
                 .items_center()
                 .gap(px(7.0))

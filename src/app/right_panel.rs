@@ -6978,7 +6978,11 @@ impl Waku {
                             div()
                                 .px(px(8.0))
                                 .py(px(4.0))
-                                .child(self.render_terminal_location_for_id(terminal_id, cx)),
+                                .flex()
+                                .items_center()
+                                .child(self.render_terminal_location_for_id(terminal_id, cx))
+                                .child(div().flex_1())
+                                .child(self.render_terminal_actions(terminal_id, cx)),
                         )
                         .child(terminal),
                     terminal_id,
@@ -8856,18 +8860,6 @@ impl Waku {
                     .text_color(theme.text_secondary)
                     .child(self.qa_server_status(cx)),
             );
-        }
-
-        if let Some(terminal_id) = self
-            .active_right_panel_surface()
-            .and_then(RightPanelSurface::terminal_id)
-        {
-            header = header.child(self.render_terminal_split_button(
-                "right-panel-terminal-split",
-                terminal_id,
-                RIGHT_PANEL_TERMINAL_MAX_PANES,
-                cx,
-            ));
         }
 
         if self.active_right_panel_surface().is_some() {

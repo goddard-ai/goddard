@@ -138,6 +138,32 @@ fn terminal_pane_layout(
     layout
 }
 
+/// Remove group membership without touching shell identity or launch metadata.
+fn ungroup_terminal_records(
+    records: &mut HashMap<Uuid, TerminalRecord>,
+    anchor_id: Uuid,
+    detached: &[Uuid],
+) {
+    for id in detached {
+        if let Some(record) = records.get_mut(id) {
+            record.pane_of = None;
+            record.panes.clear();
+            record.pane_layout = None;
+        }
+    }
+    if let Some(record) = records.get_mut(&anchor_id) {
+        record.panes.retain(|id| !detached.contains(id));
+        let remaining = std::iter::once(anchor_id)
+            .chain(record.panes.iter().copied())
+            .collect::<Vec<_>>();
+        record.pane_layout = if record.panes.is_empty() {
+            None
+        } else {
+            terminal_pane_layout(record.pane_layout.as_ref(), &remaining, false)
+        };
+    }
+}
+
 fn terminal_group_layout(
     records: &HashMap<Uuid, TerminalRecord>,
     anchor_id: Uuid,
@@ -2215,6 +2241,10 @@ impl Waku {
         {
             view.update(cx, |view, _| view.set_pane(false));
         }
+        self.retarget_terminal_surface(anchor_id, new_anchor);
+    }
+
+    fn retarget_terminal_surface(&mut self, anchor_id: Uuid, new_anchor: Uuid) {
         let retarget = |surface: &mut RightPanelSurface| {
             if *surface == RightPanelSurface::Terminal(anchor_id) {
                 *surface = RightPanelSurface::Terminal(new_anchor);
@@ -2278,6 +2308,87 @@ impl Waku {
         {
             dialog.terminal_id = new_anchor;
         }
+    }
+
+    /// Separate live shells by changing membership only; PTYs and metadata stay put.
+    fn unsplit_terminal_group(
+        &mut self,
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let anchor_id = self.terminal_group_anchor(terminal_id);
+        let panes = self.terminal_group_panes(anchor_id);
+        if panes.len() < 2 {
+            return;
+        }
+        ungroup_terminal_records(&mut self.terminal_records, anchor_id, &panes);
+        if terminal_id != anchor_id {
+            self.retarget_terminal_surface(anchor_id, terminal_id);
+        }
+        // Keep the former panes adjacent in their displayed order.
+        let index = self
+            .terminal_order
+            .iter()
+            .take_while(|id| **id != anchor_id)
+            .filter(|id| !panes.contains(id))
+            .count();
+        self.terminal_order.retain(|id| !panes.contains(id));
+        self.terminal_order.splice(index..index, panes.iter().copied());
+        self.finish_terminal_ungroup(&panes, terminal_id, window, cx);
+    }
+
+    fn move_terminal_pane_out(
+        &mut self,
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let anchor_id = self.terminal_group_anchor(terminal_id);
+        let panes = self.terminal_group_panes(anchor_id);
+        if panes.len() < 2 {
+            return;
+        }
+        let remaining_anchor = if terminal_id == anchor_id {
+            self.promote_terminal_pane(anchor_id, cx);
+            panes[1]
+        } else {
+            anchor_id
+        };
+        ungroup_terminal_records(&mut self.terminal_records, remaining_anchor, &[terminal_id]);
+        self.finish_terminal_ungroup(&panes, terminal_id, window, cx);
+        self.activate_terminal(terminal_id, true, window, cx);
+    }
+
+    fn finish_terminal_ungroup(
+        &mut self,
+        panes: &[Uuid],
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .maximized_terminal_pane
+            .is_some_and(|id| panes.contains(&id))
+        {
+            self.maximized_terminal_pane = None;
+        }
+        for id in panes {
+            let grouped = self
+                .terminal_records
+                .get(id)
+                .is_some_and(|record| record.pane_of.is_some() || !record.panes.is_empty());
+            if let Some(view) = self.right_panel_terminals.get(id) {
+                view.update(cx, |view, _| view.set_pane(grouped));
+            }
+        }
+        if let Some(view) = self.right_panel_terminals.get(&terminal_id) {
+            window.focus(&view.read(cx).focus_handle(cx), cx);
+        }
+        self.sidebar_rows_fingerprint.set(None);
+        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
+        self.save();
+        cx.notify();
     }
 
     /// Hover uses the same floating-card selection as a normal sidebar open.
@@ -3422,6 +3533,9 @@ impl Waku {
                     .items_center()
                     .child(self.render_terminal_location_for_id(terminal_id, cx))
                     .child(div().flex_1())
+                    .when(panes.len() == 1, |header| {
+                        header.child(self.render_terminal_actions(terminal_id, cx))
+                    })
                     .children(maximize_button)
                     .child(minimize_button),
             )
@@ -3616,12 +3730,12 @@ impl Waku {
                             )
                             .child(location)
                             .child(div().flex_1())
-                            .child(self.render_terminal_split_button(
-                                "docked-terminal-split",
-                                terminal_id,
-                                STANDALONE_TERMINAL_MAX_PANES,
-                                cx,
-                            ))
+                            .when(
+                                self.terminal_group_panes(terminal_id).len() == 1,
+                                |header| {
+                                    header.child(self.render_terminal_actions(terminal_id, cx))
+                                },
+                            )
                             .child(expand_button)
                             .child(close_button),
                     )
@@ -3798,122 +3912,172 @@ impl Waku {
             .border_color(if focused { theme.accent } else { theme.border })
             .child(view)
             .child(
-                div().absolute().top(px(6.0)).right(px(6.0)).child(
-                    icon_button(
-                        SharedString::from(format!("terminal-pane-close-{terminal_id}")),
-                        "icons/x.svg",
-                        theme,
-                    )
-                    .track_focus(&close_focus)
-                    .tab_index(0)
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .tooltip(Tooltip::text(tr!("common.close")))
-                    .on_activation(cx, move |this, window, cx| {
-                        // The same running-command guard a surface close
-                        // gets: a busy pane's shell dies with the cell,
-                        // so it asks first.
-                        if busy {
-                            let focus = this.open_terminal_pane_close_dialog(terminal_id, cx);
-                            // The deferred dialog must draw before it can receive key actions.
-                            window.on_next_frame(move |window, _| {
-                                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
-                            });
-                        } else {
-                            this.close_terminal_pane(terminal_id, cx);
-                        }
-                    }),
-                ),
+                div()
+                    .absolute()
+                    .top(px(6.0))
+                    .right(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(2.0))
+                    .child(self.render_terminal_actions(terminal_id, cx))
+                    .child(
+                        icon_button(
+                            SharedString::from(format!("terminal-pane-close-{terminal_id}")),
+                            "icons/x.svg",
+                            theme,
+                        )
+                        .track_focus(&close_focus)
+                        .tab_index(0)
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .tooltip(Tooltip::text(tr!("common.close")))
+                        .on_activation(cx, move |this, window, cx| {
+                            // The same running-command guard a surface close
+                            // gets: a busy pane's shell dies with the cell,
+                            // so it asks first.
+                            if busy {
+                                let focus = this.open_terminal_pane_close_dialog(terminal_id, cx);
+                                // The deferred dialog must draw before it can receive key actions.
+                                window.on_next_frame(move |window, _| {
+                                    window
+                                        .on_next_frame(move |window, cx| window.focus(&focus, cx));
+                                });
+                            } else {
+                                this.close_terminal_pane(terminal_id, cx);
+                            }
+                        }),
+                    ),
             )
             .into_any_element()
     }
 
-    /// The split control shared by the right-panel header's terminal tab
-    /// and the window header in terminal mode. At the surface's cap it
-    /// dims and stops answering — the history buttons' disabled
-    /// convention.
-    pub(super) fn render_terminal_split_button(
+    /// Pane-local actions use explicit ids because opening a menu moves keyboard focus.
+    pub(super) fn render_terminal_actions(
         &self,
-        id: &'static str,
-        anchor_id: Uuid,
-        max_panes: usize,
+        terminal_id: Uuid,
         cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    ) -> AnyElement {
         let theme = Theme::current(cx);
-        let down = self.sidebar_alt_modifier_down;
-        let at_cap = self.terminal_group_panes(anchor_id).len() >= max_panes;
-        let label = if at_cap {
-            tr!("terminal.split_at_max", max = max_panes)
-        } else {
-            tr!(if down {
-                "terminal.split_down"
-            } else {
-                "terminal.split_right"
-            })
-        };
-        let focus = self.transcript_control_focus(id, cx);
-        div()
-            .id(id)
-            .track_focus(&focus)
-            .when(!at_cap, |element| element.tab_index(0))
-            .size(px(26.0))
-            .rounded(px(8.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .tooltip(move |window, cx| {
-                if down {
-                    Tooltip::new(label.clone())
-                        .action(&SplitTerminalDown)
-                        .build(window, cx)
-                } else {
-                    Tooltip::new(label.clone())
-                        .action(&SplitTerminal)
-                        .build(window, cx)
+        let menu = self.menu_handle(format!("terminal-actions-{terminal_id}"), cx);
+        let trigger = icon_button(
+            SharedString::from(format!("terminal-actions-trigger-{terminal_id}")),
+            "icons/ellipsis-vertical.svg",
+            theme,
+        )
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
+        .tooltip(Tooltip::text(tr!("terminal.actions")));
+        let waku = cx.entity().downgrade();
+        dropdown_menu(
+            trigger,
+            SharedString::from(format!("terminal-actions-menu-{terminal_id}")),
+            &menu,
+            MenuAlign::BelowRight,
+            move |cx| {
+                let Some(waku) = waku.upgrade() else {
+                    return Vec::new();
+                };
+                let (grouped, at_cap, maximized, standalone) = {
+                    let this = waku.read(cx);
+                    let anchor = this.terminal_group_anchor(terminal_id);
+                    let limit = if this.selected_terminal == Some(anchor)
+                        || this.docked_terminal == Some(anchor)
+                    {
+                        STANDALONE_TERMINAL_MAX_PANES
+                    } else {
+                        RIGHT_PANEL_TERMINAL_MAX_PANES
+                    };
+                    (
+                        this.terminal_group_panes(anchor).len() > 1,
+                        this.terminal_group_panes(anchor).len() >= limit,
+                        this.maximized_terminal_pane == Some(terminal_id),
+                        this.selected_terminal == Some(anchor),
+                    )
+                };
+                let mut items = Vec::new();
+                for (down, label, icon_path) in [
+                    (false, tr!("terminal.split_right"), "icons/split.svg"),
+                    (true, tr!("terminal.split_down"), "icons/split-down.svg"),
+                ] {
+                    let waku = waku.clone();
+                    items.push(
+                        MenuItem::new(label, move |window, cx| {
+                            waku.update(cx, |this, cx| {
+                                let anchor = this.terminal_group_anchor(terminal_id);
+                                let limit = if this.selected_terminal == Some(anchor)
+                                    || this.docked_terminal == Some(anchor)
+                                {
+                                    STANDALONE_TERMINAL_MAX_PANES
+                                } else {
+                                    RIGHT_PANEL_TERMINAL_MAX_PANES
+                                };
+                                if let Some(view) = this.right_panel_terminals.get(&terminal_id) {
+                                    window.focus(&view.read(cx).focus_handle(cx), cx);
+                                }
+                                this.split_terminal_in_direction(anchor, limit, down, window, cx);
+                            })
+                        })
+                        .icon(icon_path)
+                        .disabled(at_cap),
+                    );
                 }
-            })
-            .when(at_cap, |element| element.opacity(0.35))
-            .when(!at_cap, |element| {
-                element
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .hover(|element| element.bg(theme.overlay))
-                    .active(|element| element.bg(theme.overlay_strong))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.split_terminal_in_direction(
-                            anchor_id,
-                            max_panes,
-                            window.modifiers().alt,
-                            window,
-                            cx,
-                        );
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.split_terminal_in_direction(
-                                anchor_id,
-                                max_panes,
-                                window.modifiers().alt,
-                                window,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(icon(
-                if down {
-                    "icons/split-down.svg"
-                } else {
-                    "icons/split.svg"
-                },
-                13.0,
-                theme.text_tertiary,
-            ))
+                let maximize_waku = waku.clone();
+                items.push(
+                    MenuItem::new(
+                        if !grouped && standalone {
+                            tr!("terminal.minimize")
+                        } else if maximized {
+                            tr!("terminal.restore")
+                        } else {
+                            tr!("terminal.maximize")
+                        },
+                        move |window, cx| {
+                            maximize_waku.update(cx, |this, cx| {
+                                let anchor = this.terminal_group_anchor(terminal_id);
+                                if this.selected_terminal != Some(anchor) {
+                                    this.activate_terminal(anchor, true, window, cx);
+                                    if !grouped {
+                                        return;
+                                    }
+                                }
+                                if let Some(view) = this.right_panel_terminals.get(&terminal_id) {
+                                    window.focus(&view.read(cx).focus_handle(cx), cx);
+                                }
+                                this.toggle_terminal_maximize_action(
+                                    &ToggleTerminalMaximize,
+                                    window,
+                                    cx,
+                                );
+                            })
+                        },
+                    )
+                    .icon(if maximized || (!grouped && standalone) {
+                        "icons/minimize.svg"
+                    } else {
+                        "icons/maximize.svg"
+                    }),
+                );
+                if grouped {
+                    items.push(MenuItem::Separator);
+                    let extract_waku = waku.clone();
+                    items.push(
+                        MenuItem::new(tr!("terminal.move_pane_out"), move |window, cx| {
+                            extract_waku.update(cx, |this, cx| {
+                                this.move_terminal_pane_out(terminal_id, window, cx)
+                            })
+                        })
+                        .icon("icons/external-link.svg"),
+                    );
+                    items.push(
+                        MenuItem::new(tr!("terminal.unsplit_group"), move |window, cx| {
+                            waku.update(cx, |this, cx| {
+                                this.unsplit_terminal_group(terminal_id, window, cx)
+                            })
+                        })
+                        .icon("icons/ungroup.svg"),
+                    );
+                }
+                items
+            },
+        )
     }
 
     /// One terminal row in the Terminals group — also what a pinned
@@ -4610,6 +4774,51 @@ mod tests {
             pane_of: None,
             panes: Vec::new(),
             pane_layout: None,
+        }
+    }
+
+    #[test]
+    fn ungrouping_preserves_shell_records_and_remaining_split_geometry() {
+        let ids = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
+        let mut records = ids
+            .into_iter()
+            .map(|id| (id, split_record(id)))
+            .collect::<HashMap<_, _>>();
+        records.get_mut(&ids[0]).unwrap().panes = ids[1..].to_vec();
+        for id in &ids[1..] {
+            records.get_mut(id).unwrap().pane_of = Some(ids[0]);
+        }
+        records.get_mut(&ids[0]).unwrap().pane_layout = Some(terminal_layout_pair(
+            TerminalPaneLayout::Pane(ids[0]),
+            terminal_layout_pair(
+                TerminalPaneLayout::Pane(ids[1]),
+                TerminalPaneLayout::Pane(ids[2]),
+                true,
+            ),
+            false,
+        ));
+        ungroup_terminal_records(&mut records, ids[0], &[ids[1]]);
+        assert_eq!(terminal_group_ids(&records, ids[0]), [ids[0], ids[2]]);
+        assert_eq!(records[&ids[1]].pane_of, None);
+        assert_eq!(
+            records[&ids[0]].pane_layout,
+            Some(terminal_layout_pair(
+                TerminalPaneLayout::Pane(ids[0]),
+                TerminalPaneLayout::Pane(ids[2]),
+                false
+            ))
+        );
+        ungroup_terminal_records(&mut records, ids[0], &[ids[0], ids[2]]);
+        assert_eq!(records.len(), 3);
+        for id in ids {
+            let record = &records[&id];
+            assert!(
+                record.pane_of.is_none() && record.panes.is_empty() && record.pane_layout.is_none()
+            );
+            assert_eq!(record.session, Some(id));
+            assert_eq!(record.custom_title, Some(id.to_string()));
+            assert_eq!(record.working_directory, Some(PathBuf::from("/tmp")));
+            assert_eq!(record.opened_at, 42);
         }
     }
 
