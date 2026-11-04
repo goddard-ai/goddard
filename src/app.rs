@@ -5589,6 +5589,11 @@ impl Waku {
             );
         }
         state.apply_daemon_settings(daemon_settings);
+        if state.sync_auto_favorite() {
+            if let Err(error) = store.save_app_settings(&state) {
+                eprintln!("could not save Auto favorite state: {error}");
+            }
+        }
         // The briefing key predates the inference section: hand it to the
         // daemon's secret store as the Vercel credential through the same
         // write-only slot the settings pane uses, then drop the file copy.

@@ -6854,7 +6854,9 @@ fn route_class_rows_lead_with_no_override_then_providers_then_models() {
             PickerRow::Policy(PolicyRowId::NoOverride) => "no-override".to_owned(),
             PickerRow::ProviderDefault(provider) => provider.id().to_owned(),
             PickerRow::Combo(row) => format!("{}:{}", row.provider.id(), row.model.id),
-            PickerRow::Policy(PolicyRowId::Auto) => unreachable!("the class spec offers no auto"),
+            PickerRow::Policy(PolicyRowId::Auto | PolicyRowId::AutoFavorite(_)) => {
+                unreachable!("the class spec offers no auto")
+            }
         })
         .collect::<Vec<_>>()
     };
@@ -7725,7 +7727,7 @@ fn picker_rows_preserve_favorite_slots_across_catalog_changes() {
             assert_eq!(row.favorite_index, Some(index));
             assert_eq!(
                 row.favorite_index.and_then(favorite_chord_index),
-                Some(index + 1)
+                Some(index)
             );
             assert_eq!(
                 rows.iter()
@@ -7774,6 +7776,7 @@ fn picker_rows_preserve_favorite_slots_across_catalog_changes() {
     let pinned = [PinnedUnfavorite {
         favorite: favorites[0].clone(),
         position: 0,
+        before_auto: false,
     }];
     let rows = visible_picker_rows_with_pins(
         &probes,
@@ -7897,6 +7900,7 @@ fn picker_rows_park_unstarred_selections_in_their_favorites_slot() {
     let pinned = [PinnedUnfavorite {
         favorite: favorite("claude-b"),
         position: 1,
+        before_auto: false,
     }];
 
     let rows = visible_picker_rows_with_pins(
@@ -7935,10 +7939,12 @@ fn picker_rows_park_unstarred_selections_in_their_favorites_slot() {
         PinnedUnfavorite {
             favorite: favorite("claude-a"),
             position: 0,
+            before_auto: false,
         },
         PinnedUnfavorite {
             favorite: favorite("claude-c"),
             position: 2,
+            before_auto: false,
         },
     ];
     let rows = visible_picker_rows_with_pins(
@@ -7965,19 +7971,79 @@ fn picker_rows_park_unstarred_selections_in_their_favorites_slot() {
 }
 
 #[test]
-fn favorite_chords_leave_slot_one_to_auto() {
-    use super::model_picker::{favorite_chord_index, favorite_chord_target};
+fn auto_favorite_joins_the_saved_order_and_keeps_search_shortcuts() {
+    use super::model_picker::{
+        ModelPickerRow, PickerSection, picker_row_section, picker_selected_row_index,
+        place_auto_favorite,
+    };
+    use crate::model::FavoriteModel;
+    let favorite = |id: &str, index| {
+        PickerRow::Combo(ModelPickerRow {
+            provider: ProviderKind::Codex,
+            model: crate::model::ProviderModel::new(id, id),
+            effort: None,
+            fast: false,
+            favorite_index: Some(index),
+            favorite_rank: Some(index),
+            recent_rank: None,
+        })
+    };
+    let mut rows = vec![
+        PickerRow::Policy(PolicyRowId::Auto),
+        favorite("a", 0),
+        favorite("b", 1),
+    ];
+    place_auto_favorite(&mut rows, Some(1), &[]);
+    assert!(matches!(
+        rows[1],
+        PickerRow::Policy(PolicyRowId::AutoFavorite(1))
+    ));
+    assert_eq!(picker_selected_row_index(None, true, &rows), Some(1));
+    assert!(picker_row_section(&rows[1]) == PickerSection::Favorites);
+    assert!(matches!(&rows[2], PickerRow::Combo(row) if row.favorite_index == Some(2)));
+    // Filtering Auto out must leave each concrete favorite's shortcut stable.
+    let mut filtered = vec![favorite("b", 1)];
+    place_auto_favorite(&mut filtered, Some(1), &[]);
+    assert_eq!(filtered.len(), 1);
+    assert!(matches!(&filtered[0], PickerRow::Combo(row) if row.favorite_index == Some(2)));
+    // Temporarily unstarred rows keep their side of Auto until the picker closes.
+    let mut parked_row = favorite("b", 1);
+    if let PickerRow::Combo(row) = &mut parked_row {
+        row.favorite_index = None;
+    }
+    let mut parked = vec![
+        PickerRow::Policy(PolicyRowId::Auto),
+        favorite("a", 0),
+        parked_row,
+    ];
+    let pins = [super::model_picker::PinnedUnfavorite {
+        favorite: FavoriteModel {
+            provider: ProviderKind::Codex,
+            model: "b".into(),
+            effort: None,
+            fast: false,
+        },
+        position: 1,
+        before_auto: true,
+    }];
+    place_auto_favorite(&mut parked, Some(1), &pins);
+    assert!(matches!(
+        parked[2],
+        PickerRow::Policy(PolicyRowId::AutoFavorite(1))
+    ));
+    let mut unstarred = vec![PickerRow::Policy(PolicyRowId::Auto), favorite("a", 0)];
+    place_auto_favorite(&mut unstarred, None, &[]);
+    assert!(matches!(unstarred[0], PickerRow::Policy(PolicyRowId::Auto)));
+}
 
-    // ⌘⌥1 is Auto: the first eight stars claim ⌘⌥2–⌘⌥9, the ninth gets
-    // no chord.
-    assert_eq!(favorite_chord_index(0), Some(1));
-    assert_eq!(favorite_chord_index(7), Some(8));
-    assert_eq!(favorite_chord_index(8), None);
-    // Action index 0 routes Auto; 1–8 select the first eight stars in
-    // order.
-    assert_eq!(favorite_chord_target(0), None);
-    assert_eq!(favorite_chord_target(1), Some(0));
-    assert_eq!(favorite_chord_target(8), Some(7));
+#[test]
+fn favorite_chords_follow_all_nine_favorites() {
+    use super::model_picker::{favorite_chord_index, favorite_chord_target};
+    for index in 0..9 {
+        assert_eq!(favorite_chord_index(index), Some(index));
+        assert_eq!(favorite_chord_target(index), Some(index));
+    }
+    assert_eq!(favorite_chord_index(9), None);
     assert_eq!(favorite_chord_target(9), None);
 }
 

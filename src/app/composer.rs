@@ -1524,7 +1524,8 @@ impl Waku {
         let search = self.model_picker.search.clone();
         let search_focus = search.read(cx).focus_handle(cx);
         let empty_focus = self.model_picker.empty_focus.clone();
-        let no_providers = self.model_picker_has_no_providers();
+        let no_providers =
+            self.model_picker_has_no_providers() && !self.model_picker_offers_auto_route();
 
         let menu_id = controls.model_menu_id(MODEL_PICKER_MENU_ID);
         let pick_target = controls.model_pick_target();
@@ -1546,7 +1547,8 @@ impl Waku {
                             this.dismiss_keyboard_options(false, window, cx);
                         }
                         this.model_picker_target = pick_target;
-                        empty = this.model_picker_has_no_providers();
+                        empty = this.model_picker_has_no_providers()
+                            && !this.model_picker_offers_auto_route();
                         let locked_provider = this.model_picker_locked_provider();
                         let picker_key = this.model_picker_daemon_key();
                         // Opening re-runs catalog discovery for every provider
@@ -1649,7 +1651,7 @@ impl Waku {
         let theme = Theme::current(cx);
         let weak = weak.clone();
         let popover = popover.clone();
-        if self.model_picker_has_no_providers() {
+        if self.model_picker_has_no_providers() && !self.model_picker_offers_auto_route() {
             let empty_focus = self.model_picker.empty_focus.clone();
             return model_picker_empty_state(&theme, &empty_focus, popover, weak);
         }
@@ -1764,7 +1766,9 @@ impl Waku {
         let render_row = Rc::new({
             let weak = weak.clone();
             let session_selection = session_selection.clone();
-            let jev_credential_missing = self.jev_credential_missing();
+            let auto_available = self.auto_route_available() && !self.jev_credential_missing();
+            let jev_credential_missing = !auto_available;
+            let auto_favorite_position = self.state.auto_favorite_position;
             let render = move |_row_index: usize,
                                row: &PickerRow,
                                is_highlighted: bool,
@@ -1774,18 +1778,16 @@ impl Waku {
                   -> AnyElement {
                 let theme = Theme::current(cx);
                 if let PickerRow::Policy(policy) = row {
-                    // The router row: same hit target and highlight
-                    // treatment as a model row, but where a model
-                    // row carries its star this one carries a
-                    // shortcut to the Jev settings page — there is
-                    // no concrete model to favorite.
+                    // Auto keeps its Jev settings gear alongside its favorite controls.
                     let select_weak = weak.clone();
                     let select_popover = popover.clone();
                     let settings_weak = weak.clone();
                     let settings_popover = popover.clone();
-                    let auto = matches!(policy, PolicyRowId::Auto);
+                    let auto = matches!(policy, PolicyRowId::Auto | PolicyRowId::AutoFavorite(_));
                     let (mark, title, subtitle) = policy_row_parts(*policy, &theme);
-                    let element = model_picker_row_shell(
+                    let favorite_weak = weak.clone();
+                    let drop_weak = weak.clone();
+                    let mut element = model_picker_row_shell(
                         SharedString::from(format!("model-row-policy-{policy:?}")),
                         auto && auto_route,
                         is_highlighted,
@@ -1818,7 +1820,7 @@ impl Waku {
                                 .items_center()
                                 .justify_center()
                                 .focus_visible(|style| style.bg(theme.focus_highlight()))
-                                .tooltip(Tooltip::text(tr!("models.auto_missing_credential")))
+                                .tooltip(Tooltip::text(tr!("models.auto_unavailable")))
                                 .child(icon("icons/alert.svg", 13.0, theme.warning)),
                         )
                     })
@@ -1848,10 +1850,64 @@ impl Waku {
                     )
                     .on_click(move |_, window, cx| {
                         let _ = select_weak.update(cx, |this, cx| {
-                            this.choose_auto_route(cx);
+                            if auto_available {
+                                this.choose_auto_route(cx);
+                            }
                         });
-                        select_popover.close(window, cx);
+                        if auto_available {
+                            select_popover.close(window, cx);
+                        }
                     });
+                    if auto_available {
+                        element = element.child(model_picker::auto_favorite_star(
+                            auto_favorite_position.is_some(),
+                            favorite_weak,
+                            theme,
+                        ));
+                    }
+                    if let PolicyRowId::AutoFavorite(index) = policy {
+                        if let Some(chord) = favorite_chord_index(*index) {
+                            let hint =
+                                crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel {
+                                    index: chord,
+                                })
+                                .resolve(window, cx)
+                                .unwrap_or_else(|| {
+                                    crate::ui::shortcut::sequence_label(&format!(
+                                        "secondary-alt-{}",
+                                        chord + 1
+                                    ))
+                                });
+                            element = element.child(
+                                div()
+                                    .flex_none()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_ghost)
+                                    .child(SharedString::from(hint)),
+                            );
+                        }
+                        let target = *index;
+                        element = element
+                            .on_drag(
+                                FavoriteModelDrag {
+                                    index: target,
+                                    label: tr!("models.auto").into(),
+                                },
+                                |drag, _, _, cx| {
+                                    cx.new(|_| FavoriteModelDragView {
+                                        label: drag.label.clone(),
+                                    })
+                                },
+                            )
+                            .drag_over::<FavoriteModelDrag>(move |style, _, _, _| {
+                                style.bg(theme.overlay_strong)
+                            })
+                            .on_drop(move |drag: &FavoriteModelDrag, _, cx| {
+                                let _ = drop_weak.update(cx, |this, cx| {
+                                    this.move_favorite_model(drag.index, target, cx)
+                                });
+                            });
+                    }
                     return element.into_any_element();
                 }
                 if let PickerRow::ProviderDefault(provider) = row {
@@ -1920,8 +1976,7 @@ impl Waku {
                     .map(str::trim)
                     .filter(|name| !name.is_empty());
                 let detail = model_picker_subtitle(kind, sub_provider);
-                // ⌘⌥1 is reserved for Auto; ⌘⌥2–⌘⌥9 ride on the first
-                // eight starred rows.
+                // Shortcuts follow the first nine favorites in order.
                 // Resolve against the live keymap so a remapped chord
                 // still advertises itself; fall back to the default's
                 // label when the picker's own context path cannot see the
@@ -2166,7 +2221,7 @@ impl Waku {
         matches!(
             self.model_picker_target,
             ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_)
-        ) && self.auto_route_available()
+        )
     }
 
     /// Composer picks carry effort and tier; the editor's bare pair cannot.
@@ -2181,13 +2236,13 @@ impl Waku {
         }
     }
 
-    /// The composer's row list: the Auto stance while the draft may route,
-    /// then favorites, recents, and provider blocks — combos for the
+    /// The composer's row list: Auto, favorites, recents, and provider blocks.
+    /// A starred Auto joins the favorites in their saved order — combos for the
     /// composer, bare models for the automation editor's provider/model
     /// pair.
     pub(super) fn composer_picker_rows(&self, normalized_query: &str) -> Vec<PickerRow> {
         let picker_key = self.model_picker_daemon_key();
-        picker_rows(
+        let mut rows = picker_rows(
             Self::probes_on(&self.probes, picker_key),
             &PickerRowSpec {
                 leading: if self.model_picker_offers_auto_route() {
@@ -2204,7 +2259,15 @@ impl Waku {
                 locked_provider: self.model_picker_locked_provider(),
                 normalized_query,
             },
-        )
+        );
+        if self.model_picker_offers_auto_route() {
+            model_picker::place_auto_favorite(
+                &mut rows,
+                self.state.auto_favorite_position,
+                &self.pinned_unfavorites,
+            );
+        }
+        rows
     }
 
     /// Whether the composer session is routed — the picker's selection and
@@ -2282,7 +2345,9 @@ impl Waku {
             return;
         };
         match row {
-            PickerRow::Policy(PolicyRowId::Auto) => self.choose_auto_route(cx),
+            PickerRow::Policy(PolicyRowId::Auto | PolicyRowId::AutoFavorite(_)) => {
+                self.choose_auto_route(cx)
+            }
             PickerRow::Combo(row) => {
                 let (kind, model_id, effort, fast) = (
                     row.provider,

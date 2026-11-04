@@ -429,7 +429,8 @@ impl Waku {
         let list_state = self.keyboard_options.list.clone();
         let weak = cx.entity().downgrade();
         let row_theme = theme.clone();
-        let jev_credential_missing = self.jev_credential_missing();
+        let jev_credential_missing = !self.auto_route_available() || self.jev_credential_missing();
+        let auto_is_favorite = self.state.auto_favorite_position.is_some();
         let show_favorite_stars =
             self.keyboard_options.chord != Some(KeyboardOptionsChord::Favorites);
 
@@ -591,6 +592,7 @@ impl Waku {
                             enabled,
                             highlighted == Some(index),
                             jev_credential_missing,
+                            auto_is_favorite,
                             show_favorite_stars,
                             &weak,
                             window,
@@ -981,9 +983,10 @@ impl Waku {
             KeyboardOptionItem::Choice(choice) => (choice.action, choice.enabled),
             KeyboardOptionItem::Model { row, enabled, .. } => {
                 let action = match row {
-                    model_picker::PickerRow::Policy(model_picker::PolicyRowId::Auto) => {
-                        KeyboardOptionAction::AutoRoute
-                    }
+                    model_picker::PickerRow::Policy(
+                        model_picker::PolicyRowId::Auto
+                        | model_picker::PolicyRowId::AutoFavorite(_),
+                    ) => KeyboardOptionAction::AutoRoute,
                     model_picker::PickerRow::Combo(row) => KeyboardOptionAction::Model {
                         provider: row.provider,
                         model: row.model.id,
@@ -1109,6 +1112,7 @@ fn model_option_row(
     enabled: bool,
     is_highlighted: bool,
     jev_credential_missing: bool,
+    auto_is_favorite: bool,
     show_favorite_stars: bool,
     weak: &WeakEntity<Waku>,
     window: &mut Window,
@@ -1140,11 +1144,17 @@ fn model_option_row(
             })
     };
     if let model_picker::PickerRow::Policy(policy) = row {
-        // The router row carries no star — the settings shortcut that
-        // configures the backend sits where a model row's star would.
-        let auto = matches!(policy, model_picker::PolicyRowId::Auto);
+        // Auto keeps the settings gear as well as its favorite controls.
+        let auto = matches!(
+            policy,
+            model_picker::PolicyRowId::Auto | model_picker::PolicyRowId::AutoFavorite(_)
+        );
         let (mark, title, subtitle) = model_picker::policy_row_parts(*policy, &theme);
         let settings_weak = weak.clone();
+        let favorite_index = match policy {
+            model_picker::PolicyRowId::AutoFavorite(index) => Some(*index),
+            _ => None,
+        };
         return shell(SharedString::from(format!("model-row-policy-{policy:?}")))
             .child(model_picker::model_picker_row_body(
                 title,
@@ -1161,6 +1171,37 @@ fn model_option_row(
                 subtitle,
                 &theme,
             ))
+            .when(
+                auto && !jev_credential_missing && show_favorite_stars,
+                |element| {
+                    element.child(model_picker::auto_favorite_star(
+                        auto_is_favorite,
+                        weak.clone(),
+                        theme,
+                    ))
+                },
+            )
+            .when_some(
+                favorite_index.and_then(model_picker::favorite_chord_index),
+                |element, index| {
+                    let hint =
+                        crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel { index })
+                            .resolve(window, cx)
+                            .unwrap_or_else(|| {
+                                crate::ui::shortcut::sequence_label(&format!(
+                                    "secondary-alt-{}",
+                                    index + 1
+                                ))
+                            });
+                    element.child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_ghost)
+                            .child(SharedString::from(hint)),
+                    )
+                },
+            )
             .when(jev_credential_missing && auto, |element| {
                 element.child(
                     div()
@@ -1170,7 +1211,7 @@ fn model_option_row(
                         .items_center()
                         .justify_center()
                         .focus_visible(|style| style.bg(theme.focus_highlight()))
-                        .tooltip(Tooltip::text(tr!("models.auto_missing_credential")))
+                        .tooltip(Tooltip::text(tr!("models.auto_unavailable")))
                         .child(icon("icons/alert.svg", 13.0, theme.warning)),
                 )
             })
@@ -1227,8 +1268,7 @@ fn model_option_row(
         .map(str::trim)
         .filter(|name| !name.is_empty());
     let detail = model_picker::model_picker_subtitle(kind, sub_provider);
-    // ⌘⌥1 is reserved for Auto; ⌘⌥2–⌘⌥9 ride on the first eight starred
-    // rows — the same hint the anchored panel draws.
+    // The first nine favorites claim shortcuts in their stored order.
     let shortcut_hint = row
         .favorite_index
         .and_then(model_picker::favorite_chord_index)

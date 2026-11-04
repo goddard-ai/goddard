@@ -2753,6 +2753,11 @@ impl Waku {
             .collect();
         self.daemon.note_remote_settings(settings.clone());
         self.state.apply_daemon_settings(settings);
+        if self.state.sync_auto_favorite() {
+            if let Err(error) = self.store.save_app_settings(&self.state) {
+                eprintln!("could not save Auto favorite state: {error}");
+            }
+        }
         if self.state.boss_experiment_enabled {
             // The settings write only queued with the daemon — this
             // broadcast is the first moment its Boss document is fetchable.
@@ -5181,6 +5186,7 @@ impl Waku {
     }
 
     pub(super) fn save(&mut self) -> bool {
+        self.state.sync_auto_favorite();
         self.capture_ui_state();
         self.last_stream_save = Instant::now();
         let daemon_error = if self.store.is_auxiliary() {

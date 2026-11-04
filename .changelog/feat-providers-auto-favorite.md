@@ -1,0 +1,1 @@
+- Auto (Jev) stays visible in the model picker and joins the end of favorites when configured and enabled. Favorite shortcuts now follow the first nine favorites in order, with no slot reserved for Auto.

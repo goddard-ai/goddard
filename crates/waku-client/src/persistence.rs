@@ -1371,6 +1371,12 @@ impl GitHubFeatures {
 pub struct AppSettings {
     pub analytics_enabled: bool,
     pub favorite_models: Vec<FavoriteModel>,
+    /// Auto routing occupies this slot in the combined favorite order.
+    #[serde(default)]
+    pub auto_favorite_position: Option<usize>,
+    /// Last configured/enabled state; preserves an explicit unstar across restarts.
+    #[serde(default)]
+    pub auto_favorite_eligible: bool,
     pub theme: ThemeSettings,
     pub language: AppLanguage,
     /// Base text size for the interface, in pixels: chrome and prose are
@@ -1721,6 +1727,8 @@ impl Default for AppSettings {
         Self {
             analytics_enabled: default_analytics_enabled(),
             favorite_models: Vec::new(),
+            auto_favorite_position: None,
+            auto_favorite_eligible: false,
             theme: ThemeSettings::default(),
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
@@ -2243,6 +2251,12 @@ pub struct PersistedState {
     pub project_worktree_bases: HashMap<Uuid, String>,
     #[serde(default)]
     pub favorite_models: Vec<FavoriteModel>,
+    /// Auto routing occupies this slot in the combined favorite order.
+    #[serde(default)]
+    pub auto_favorite_position: Option<usize>,
+    /// Last configured/enabled state; preserves an explicit unstar across restarts.
+    #[serde(default)]
+    pub auto_favorite_eligible: bool,
     #[serde(default)]
     pub theme: ThemeSettings,
     #[serde(default)]
@@ -2917,6 +2931,8 @@ impl PersistedState {
             project_workspaces: HashMap::new(),
             project_worktree_bases: HashMap::new(),
             favorite_models: Vec::new(),
+            auto_favorite_position: None,
+            auto_favorite_eligible: false,
             theme: ThemeSettings::default(),
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
@@ -3103,6 +3119,67 @@ impl PersistedState {
     /// `last_sandboxed` flag — read this instead of the field.
     pub fn last_environment(&self) -> SessionEnvironment {
         resolve_last_environment(self.last_environment, self.last_sandboxed)
+    }
+
+    /// Add Auto only on a transition into configured, enabled routing.
+    pub fn sync_auto_favorite(&mut self) -> bool {
+        let previous = (self.auto_favorite_position, self.auto_favorite_eligible);
+        let eligible = self.auto_model_routing() != AutoModelRouting::Disabled
+            && self
+                .eval
+                .as_ref()
+                .is_some_and(|eval| eval.ready(&self.inference));
+        if eligible && !self.auto_favorite_eligible && self.auto_favorite_position.is_none() {
+            self.auto_favorite_position = Some(self.favorite_models.len());
+        }
+        self.auto_favorite_eligible = eligible;
+        self.auto_favorite_position = self
+            .auto_favorite_position
+            .map(|p| p.min(self.favorite_models.len()));
+        previous != (self.auto_favorite_position, self.auto_favorite_eligible)
+    }
+
+    pub fn favorite_display_index(&self, concrete_index: usize) -> usize {
+        concrete_index
+            + usize::from(
+                self.auto_favorite_position
+                    .is_some_and(|p| p <= concrete_index),
+            )
+    }
+
+    pub fn favorite_concrete_index(&self, display_index: usize) -> Option<usize> {
+        match self.auto_favorite_position {
+            Some(p) if p == display_index => None,
+            Some(p) if p < display_index => Some(display_index - 1),
+            _ => Some(display_index),
+        }
+    }
+
+    /// Reorder the combined list without manufacturing a provider/model for Auto.
+    pub fn move_model_favorite(&mut self, from: usize, to: usize) {
+        let total = self.favorite_models.len() + usize::from(self.auto_favorite_position.is_some());
+        if from == to || from >= total || to >= total {
+            return;
+        }
+        if self.auto_favorite_position == Some(from) {
+            self.auto_favorite_position = Some(to);
+        } else {
+            let Some(index) = self.favorite_concrete_index(from) else {
+                return;
+            };
+            let favorite = self.favorite_models.remove(index);
+            if let Some(position) = self.auto_favorite_position.as_mut() {
+                if from < *position {
+                    *position -= 1;
+                }
+                if to <= *position {
+                    *position += 1;
+                }
+            }
+            let index = self.favorite_concrete_index(to).unwrap_or(to);
+            self.favorite_models
+                .insert(index.min(self.favorite_models.len()), favorite);
+        }
     }
 
     /// The effective Auto-routing mode — read this instead of the fields.
@@ -3449,6 +3526,8 @@ impl PersistedState {
         AppSettings {
             analytics_enabled: self.analytics_enabled,
             favorite_models: self.favorite_models.clone(),
+            auto_favorite_position: self.auto_favorite_position,
+            auto_favorite_eligible: self.auto_favorite_eligible,
             theme: self.theme,
             language: self.language,
             ui_font_size: self.ui_font_size,
@@ -3639,6 +3718,8 @@ impl PersistedState {
     fn apply_app_settings(&mut self, settings: AppSettings) {
         self.analytics_enabled = settings.analytics_enabled;
         self.favorite_models = settings.favorite_models;
+        self.auto_favorite_position = settings.auto_favorite_position;
+        self.auto_favorite_eligible = settings.auto_favorite_eligible;
         self.theme = settings.theme;
         self.language = settings.language;
         self.ui_font_size = sanitized_ui_font_size(settings.ui_font_size);
@@ -4777,6 +4858,11 @@ impl StateStore {
                 .any(|message| message.id == queued.id)
         });
         Ok(Some(stored))
+    }
+
+    /// Persist desktop preferences without writing session state to a daemon.
+    pub fn save_app_settings(&self, state: &PersistedState) -> io::Result<()> {
+        self.write_app_settings(&state.app_settings())
     }
 
     /// Checkpoint desktop state without contacting any daemon. Offline sends
@@ -6814,6 +6900,79 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_state(serde_json::from_value(app_state).unwrap());
         assert_eq!(restored.git_panel_width, 320.0);
+    }
+
+    #[test]
+    fn auto_favorite_preserves_unstar_until_routing_is_enabled_again() {
+        let mut state = PersistedState::empty();
+        state.favorite_models.push(FavoriteModel {
+            provider: ProviderKind::Codex,
+            model: "test-model".into(),
+            effort: None,
+            fast: false,
+        });
+        state.auto_model_routing = Some(AutoModelRouting::ShowInModelPicker);
+        state.sync_auto_favorite();
+        assert_eq!(state.auto_favorite_position, None);
+        state.eval = Some(waku_protocol::eval::EvalSettings::default());
+        state
+            .inference
+            .entry(waku_protocol::inference::InferenceProvider::TypeSafe)
+            .or_default()
+            .credential_configured = true;
+        state.sync_auto_favorite();
+        assert_eq!(state.auto_favorite_position, Some(1));
+        state.sync_auto_favorite();
+        assert_eq!(state.auto_favorite_position, Some(1));
+        state.auto_favorite_position = None;
+        let settings =
+            serde_json::from_value(serde_json::to_value(state.app_settings()).unwrap()).unwrap();
+        state.apply_app_settings(settings);
+        state.sync_auto_favorite();
+        assert_eq!(state.auto_favorite_position, None);
+        state.auto_model_routing = Some(AutoModelRouting::Disabled);
+        state.sync_auto_favorite();
+        state.auto_model_routing = Some(AutoModelRouting::ShowInModelPicker);
+        state.sync_auto_favorite();
+        assert_eq!(state.auto_favorite_position, Some(1));
+    }
+
+    #[test]
+    fn auto_favorite_reorders_with_concrete_models() {
+        let mut state = PersistedState::empty();
+        state.favorite_models = ["a", "b", "c"]
+            .map(|model| FavoriteModel {
+                provider: ProviderKind::Codex,
+                model: model.into(),
+                effort: None,
+                fast: false,
+            })
+            .to_vec();
+        state.auto_favorite_position = Some(3);
+        state.move_model_favorite(3, 1);
+        assert_eq!(state.auto_favorite_position, Some(1));
+        assert_eq!(state.favorite_display_index(1), 2);
+        assert_eq!(state.favorite_concrete_index(1), None);
+        state.move_model_favorite(3, 0);
+        assert_eq!(state.auto_favorite_position, Some(2));
+        assert_eq!(
+            state
+                .favorite_models
+                .iter()
+                .map(|m| m.model.as_str())
+                .collect::<Vec<_>>(),
+            ["c", "a", "b"]
+        );
+        state.move_model_favorite(0, 3);
+        assert_eq!(state.auto_favorite_position, Some(1));
+        assert_eq!(
+            state
+                .favorite_models
+                .iter()
+                .map(|m| m.model.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
     }
 
     #[test]

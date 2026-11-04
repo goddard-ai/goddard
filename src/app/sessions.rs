@@ -5914,6 +5914,7 @@ impl Waku {
     pub(super) fn choose_auto_route(&mut self, cx: &mut Context<Self>) {
         if self.model_picker_target == model_picker::ModelPickerTarget::AutomationEditor
             || !self.auto_route_available()
+            || self.jev_credential_missing()
         {
             return;
         }
@@ -6029,9 +6030,13 @@ impl Waku {
             .into_iter()
             .filter_map(|row| {
                 let (selected, row_enabled) = match &row {
-                    model_picker::PickerRow::Policy(model_picker::PolicyRowId::Auto) => {
-                        (auto_route, enabled)
-                    }
+                    model_picker::PickerRow::Policy(
+                        model_picker::PolicyRowId::Auto
+                        | model_picker::PolicyRowId::AutoFavorite(_),
+                    ) => (
+                        auto_route,
+                        enabled && self.auto_route_available() && !self.jev_credential_missing(),
+                    ),
                     model_picker::PickerRow::Combo(combo) => {
                         let selected =
                             selection
@@ -6358,13 +6363,16 @@ impl Waku {
         // leaving it stacked over the choice it just applied.
         self.dismiss_keyboard_options(false, window, cx);
         self.model_picker_target = self.last_focused_composer_target();
-        // ⌘⌥1 is the stable shortcut for Auto routing. Favorites begin at
-        // ⌘⌥2 so this chord never depends on the user's starred models.
-        if action.index == 0 {
+        let Some(index) = model_picker::favorite_chord_target(action.index) else {
+            return;
+        };
+        if self.state.auto_favorite_position == Some(index) {
             self.choose_auto_route(cx);
             return;
         }
-        let Some(favorite) = model_picker::favorite_chord_target(action.index)
+        let Some(favorite) = self
+            .state
+            .favorite_concrete_index(index)
             .and_then(|index| self.state.favorite_models.get(index))
             .cloned()
         else {
@@ -6504,7 +6512,9 @@ impl Waku {
         if let Some(recent) = recent {
             combos.push(recent);
         }
-        let auto_available = self.auto_route_available();
+        let auto_available = self.auto_route_available()
+            && !self.jev_credential_missing()
+            && self.state.auto_favorite_position.is_some();
         if combos.is_empty() && !auto_available {
             return;
         }
@@ -6512,13 +6522,6 @@ impl Waku {
             .session_model_combo(session)
             .map(|(model, effort, fast)| (session.provider, model, effort, fast));
         let mut items = Vec::with_capacity(combos.len() + if auto_available { 1 } else { 0 });
-        if auto_available {
-            items.push(keyboard_options::KeyboardOptionItem::Model {
-                row: model_picker::PickerRow::Policy(model_picker::PolicyRowId::Auto),
-                selected: session.auto_route,
-                enabled: true,
-            });
-        }
         items.extend(combos.iter().map(|(provider, model, effort, fast)| {
             let catalog_model = self
                 .provider_probe_on(session_key, *provider)
@@ -6544,7 +6547,7 @@ impl Waku {
                     model: catalog_model,
                     effort: effort.clone(),
                     fast: *fast,
-                    favorite_index,
+                    favorite_index: favorite_index.map(|i| self.state.favorite_display_index(i)),
                     favorite_rank: None,
                     recent_rank: None,
                 }),
@@ -6552,6 +6555,29 @@ impl Waku {
                 enabled: true,
             }
         }));
+        if auto_available {
+            let position = self.state.auto_favorite_position.unwrap_or(0);
+            let index = items
+                .iter()
+                .position(|item| match item {
+                    keyboard_options::KeyboardOptionItem::Model {
+                        row: model_picker::PickerRow::Combo(row),
+                        ..
+                    } => row.favorite_index.is_none_or(|i| i > position),
+                    _ => false,
+                })
+                .unwrap_or(items.len());
+            items.insert(
+                index,
+                keyboard_options::KeyboardOptionItem::Model {
+                    row: model_picker::PickerRow::Policy(model_picker::PolicyRowId::AutoFavorite(
+                        position,
+                    )),
+                    selected: session.auto_route,
+                    enabled: true,
+                },
+            );
+        }
         let highlighted = items
             .iter()
             .position(keyboard_options::KeyboardOptionItem::selected);
@@ -6701,6 +6727,12 @@ impl Waku {
             // the entry leaves `favorite_models` — the star empties and the
             // ⌘⌥ chords compact — but pins its block slot so a re-star can
             // restore it whole instead of digging it back up.
+            let before_auto = self.state.auto_favorite_position.is_some_and(|p| index < p);
+            if let Some(position) = self.state.auto_favorite_position.as_mut() {
+                if index < *position {
+                    *position -= 1;
+                }
+            }
             let favorite = self.state.favorite_models.remove(index);
             let mut position = index;
             for pinned in &self.pinned_unfavorites {
@@ -6709,7 +6741,11 @@ impl Waku {
                 }
             }
             self.pinned_unfavorites
-                .push(model_picker::PinnedUnfavorite { favorite, position });
+                .push(model_picker::PinnedUnfavorite {
+                    favorite,
+                    position,
+                    before_auto,
+                });
             self.pinned_unfavorites
                 .sort_by_key(|pinned| pinned.position);
         } else if let Some(parked) = self
@@ -6726,6 +6762,11 @@ impl Waku {
                     .iter()
                     .filter(|other| other.position < pinned.position)
                     .count();
+            if let Some(position) = self.state.auto_favorite_position.as_mut() {
+                if pinned.before_auto {
+                    *position += 1;
+                }
+            }
             self.state
                 .favorite_models
                 .insert(index.min(self.state.favorite_models.len()), pinned.favorite);
@@ -6741,16 +6782,21 @@ impl Waku {
         cx.notify();
     }
 
+    pub(super) fn toggle_auto_favorite(&mut self, cx: &mut Context<Self>) {
+        self.state.auto_favorite_position = if self.state.auto_favorite_position.is_some() {
+            None
+        } else {
+            Some(self.state.favorite_models.len())
+        };
+        self.save();
+        self.refilter_model_keyboard_options(None, cx);
+        cx.notify();
+    }
+
     /// Drag-reorder inside the picker's favorites section: the dropped entry
     /// takes the target row's slot.
     pub(super) fn move_favorite_model(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
-        if from == to || from >= self.state.favorite_models.len() {
-            return;
-        }
-        let favorite = self.state.favorite_models.remove(from);
-        self.state
-            .favorite_models
-            .insert(to.min(self.state.favorite_models.len()), favorite);
+        self.state.move_model_favorite(from, to);
         self.save();
         cx.notify();
     }

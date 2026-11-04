@@ -10690,7 +10690,7 @@ impl Waku {
                 }
             }
             // The class spec never lists the route row.
-            PickerRow::Policy(PolicyRowId::Auto) => {}
+            PickerRow::Policy(PolicyRowId::Auto | PolicyRowId::AutoFavorite(_)) => {}
         }
         self.save();
         cx.notify();

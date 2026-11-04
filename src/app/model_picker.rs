@@ -7,6 +7,7 @@
 //! contract all live here.
 
 use super::*;
+use crate::ui::ActivationExt;
 
 /// Where the picker's keyboard cursor lands, wrapping at both ends.
 ///
@@ -39,9 +40,12 @@ pub(super) fn picker_selected_row_index(
     rows: &[PickerRow],
 ) -> Option<usize> {
     if auto_route {
-        return rows
-            .iter()
-            .position(|row| matches!(row, PickerRow::Policy(PolicyRowId::Auto)));
+        return rows.iter().position(|row| {
+            matches!(
+                row,
+                PickerRow::Policy(PolicyRowId::Auto | PolicyRowId::AutoFavorite(_))
+            )
+        });
     }
     let (provider, model_id, effort, fast) = selection?;
     rows.iter().position(|row| match row {
@@ -262,6 +266,7 @@ pub(super) enum PickerSection {
 /// head of its own provider's block.
 pub(super) fn picker_row_section(row: &PickerRow) -> PickerSection {
     match row {
+        PickerRow::Policy(PolicyRowId::AutoFavorite(_)) => PickerSection::Favorites,
         PickerRow::Policy(_) => PickerSection::Policies,
         PickerRow::ProviderDefault(provider) => PickerSection::Provider(*provider),
         PickerRow::Combo(row) => {
@@ -287,6 +292,8 @@ pub(super) struct PinnedUnfavorite {
     /// earlier parked entries — so several parked rows keep their relative
     /// order when more than one star comes off in a session.
     pub position: usize,
+    /// Preserve which side of Auto an unstarred row occupied.
+    pub before_auto: bool,
 }
 
 /// One selectable combo in a model picker: a model pinned to a concrete
@@ -350,6 +357,7 @@ pub(super) enum PickerRow {
 pub(super) enum PolicyRowId {
     /// Route the first prompt through the eval backend — composer drafts.
     Auto,
+    AutoFavorite(usize),
     /// Leave the class unmapped: the route keeps whatever was last used.
     NoOverride,
 }
@@ -360,7 +368,7 @@ impl PolicyRowId {
     /// `provider:` never appear in it, so token filters drop policy rows.
     fn searchable(self) -> String {
         match self {
-            PolicyRowId::Auto => "auto jev".to_owned(),
+            PolicyRowId::Auto | PolicyRowId::AutoFavorite(_) => "auto jev".to_owned(),
             PolicyRowId::NoOverride => tr!("routing.no_override").to_lowercase(),
         }
     }
@@ -435,23 +443,15 @@ pub(super) fn favorite_matches_row(
     }
 }
 
-/// Starred selections that claim a ⌘⌥n chord: ⌘⌥1 is the stable
-/// Auto-routing chord, so ⌘⌥2–⌘⌥9 ride on the first eight stars.
-pub(super) const FAVORITE_CHORD_SLOTS: usize = 8;
+/// The first nine favorites claim ⌘⌥1 through ⌘⌥9 in order.
+pub(super) const FAVORITE_CHORD_SLOTS: usize = 9;
 
-/// The `SelectFavoriteModel` index a star at `favorite_index` claims —
-/// one past the favorite's slot to leave index 0 (⌘⌥1) to Auto, `None`
-/// past the eighth star.
 pub(super) fn favorite_chord_index(favorite_index: usize) -> Option<usize> {
-    (favorite_index < FAVORITE_CHORD_SLOTS).then_some(favorite_index + 1)
+    (favorite_index < FAVORITE_CHORD_SLOTS).then_some(favorite_index)
 }
 
-/// The `favorite_models` position a `SelectFavoriteModel` index selects —
-/// `None` for index 0 (⌘⌥1, Auto routing) and slots past ⌘⌥9.
 pub(super) fn favorite_chord_target(index: usize) -> Option<usize> {
-    index
-        .checked_sub(1)
-        .filter(|favorite_index| *favorite_index < FAVORITE_CHORD_SLOTS)
+    (index < FAVORITE_CHORD_SLOTS).then_some(index)
 }
 
 /// How much of a model each combo row names: the composer's full
@@ -1133,7 +1133,7 @@ pub(super) fn picker_search_edited(
 /// rows draw, so the stance rows read alike on every surface.
 pub(super) fn policy_row_parts(id: PolicyRowId, theme: &Theme) -> (AnyElement, String, String) {
     match id {
-        PolicyRowId::Auto => (
+        PolicyRowId::Auto | PolicyRowId::AutoFavorite(_) => (
             icon("icons/provider-typesafe.svg", 12.0, theme.text_tertiary).into_any_element(),
             tr!("models.auto"),
             "Jev".to_owned(),
@@ -1616,4 +1616,80 @@ impl gpui::Render for FavoriteModelDragView {
             .child(icon("icons/star-filled.svg", 11.0, theme.favorite))
             .child(self.label.clone())
     }
+}
+
+/// Merge the policy favorite into the concrete favorites without duplicating Auto.
+pub(super) fn place_auto_favorite(
+    rows: &mut Vec<PickerRow>,
+    position: Option<usize>,
+    pinned: &[PinnedUnfavorite],
+) {
+    let Some(position) = position else {
+        return;
+    };
+    let rank = position + pinned.iter().filter(|p| p.before_auto).count();
+    for row in rows.iter_mut() {
+        if let PickerRow::Combo(row) = row {
+            row.favorite_rank = row.favorite_rank.map(|r| r + usize::from(r >= rank));
+            row.favorite_index = row.favorite_index.map(|i| i + usize::from(i >= position));
+        }
+    }
+    if let Some(index) = rows
+        .iter()
+        .position(|row| matches!(row, PickerRow::Policy(PolicyRowId::Auto)))
+    {
+        rows.remove(index);
+        let index = rows
+            .iter()
+            .position(|row| match row {
+                PickerRow::Combo(row) => row.favorite_rank.is_none_or(|r| r > rank),
+                _ => true,
+            })
+            .unwrap_or(rows.len());
+        rows.insert(
+            index,
+            PickerRow::Policy(PolicyRowId::AutoFavorite(position)),
+        );
+    }
+}
+
+/// Auto keeps its settings gear and uses the same star behavior as concrete favorites.
+#[track_caller]
+pub(super) fn auto_favorite_star(
+    is_favorite: bool,
+    weak: WeakEntity<Waku>,
+    theme: Theme,
+) -> impl IntoElement {
+    div()
+        .id("auto-favorite-star")
+        .tooltip(Tooltip::text(if is_favorite {
+            tr!("models.remove_favorite")
+        } else {
+            tr!("models.add_favorite")
+        }))
+        .tab_index(0)
+        .w(px(28.0))
+        .h(px(28.0))
+        .rounded(px(8.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .hover(|style| style.bg(theme.overlay_strong))
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
+        .child(icon(
+            if is_favorite {
+                "icons/star-filled.svg"
+            } else {
+                "icons/star.svg"
+            },
+            14.0,
+            if is_favorite {
+                theme.favorite
+            } else {
+                theme.text_ghost
+            },
+        ))
+        .on_activation_app(move |_, cx| {
+            let _ = weak.update(cx, |this, cx| this.toggle_auto_favorite(cx));
+        })
 }
