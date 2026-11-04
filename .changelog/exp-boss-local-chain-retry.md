@@ -1,0 +1,1 @@
+- **Boss:** retry failed artifact handoffs in the existing local checkout at its current committed source, preserving unrelated work and the original completion gates.

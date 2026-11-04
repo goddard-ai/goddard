@@ -41,7 +41,7 @@ pub enum ChainObservation {
     },
 }
 
-/// Host-verified descendant repair source, bound to the sealed attempt and old base.
+/// Host-verified descendant retry source, bound to the sealed attempt and old base.
 /// This is deliberately absent from employee-supplied wire evidence.
 pub struct RetryVerification {
     pub attempt_id: Uuid,
@@ -774,8 +774,11 @@ impl BossService {
                                             && previous.reconciled_retry_revision.as_ref()
                                                 == Some(&verified.previous_revision)
                                             && verified.source_revision == revision
-                                            && step.definition.boundary == HandoffBoundary::CommittedWorkspace
-                                            && step.definition.workspace == AgentWorkspace::Worktree
+                                            && ((step.definition.boundary == HandoffBoundary::CommittedWorkspace
+                                                && step.definition.workspace == AgentWorkspace::Worktree)
+                                                || (step.definition.boundary == HandoffBoundary::ArtifactsReady
+                                                    && step.definition.workspace == AgentWorkspace::Local
+                                                    && verified.workspace_lineage.is_none()))
                                     })
                                     || previous.reconciled_retry_revision.as_ref()
                                         == Some(&revision),

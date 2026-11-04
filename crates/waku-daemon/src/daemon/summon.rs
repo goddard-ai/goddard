@@ -838,6 +838,7 @@ impl WakuBackend {
         ticket: &waku_protocol::boss::SummonTicket,
     ) -> anyhow::Result<bool> {
         let session_id = employee.session_id;
+        self.verify_local_retry_dispatch(session_id)?;
         self.consume_transferred_prompts(session_id)?;
         let current = self
             .boss

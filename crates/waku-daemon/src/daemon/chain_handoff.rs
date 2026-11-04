@@ -813,6 +813,19 @@ impl WakuBackend {
             .last()
             .and_then(|attempt| attempt.starting_revision.clone())
         {
+            if definition.workspace == AgentWorkspace::Local
+                && definition.boundary == HandoffBoundary::ArtifactsReady
+            {
+                self.verify_local_retry_source(
+                    step,
+                    &step.attempts[..step.attempts.len() - 1],
+                    &revision,
+                )?;
+                // Local execution uses the existing checkout; never pass a
+                // checkout/reset base to the workspace machinery.
+                inputs.expected_starting_revision = Some(revision);
+                return Ok(inputs);
+            }
             ensure!(
                 matches!(definition.workspace, AgentWorkspace::Worktree),
                 "a reconciled retry requires a managed worktree"
@@ -1185,7 +1198,73 @@ impl WakuBackend {
         Ok(())
     }
 
-    /// Reconcile only committed descendant repairs in the original released workspace.
+    /// Local artifact retries retain the shared checkout, including dirty work.
+    /// Releases fence prior attempts; HEAD must still match the captured source.
+    fn verify_local_retry_source(
+        &self,
+        step: &ChainStep,
+        prior: &[ChainAttempt],
+        revision: &str,
+    ) -> anyhow::Result<PathBuf> {
+        let project = self
+            .task_state
+            .lock()
+            .projects
+            .iter()
+            .find(|project| project.id == step.definition.project_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("retry project unavailable"))?;
+        let workspace = dunce::canonicalize(&project.path)?;
+        for attempt in prior {
+            ensure!(
+                attempt.execution_released && attempt.workspace_released,
+                "original local retry execution or workspace has not been released"
+            );
+            if let Some(path) = &attempt.workspace {
+                ensure!(
+                    dunce::canonicalize(path)? == workspace,
+                    "local retry workspace differs from the accepted project checkout"
+                );
+            }
+        }
+        crate::agent_merge::no_operation(&workspace)?;
+        ensure!(
+            git_revision(&workspace, "HEAD")? == revision,
+            "local retry source must equal current project HEAD; retry explicitly at the current source"
+        );
+        Ok(workspace)
+    }
+
+    /// A queued local retry must not launch at a different source after waiting
+    /// for capacity or recovering from restart.
+    pub(super) fn verify_local_retry_dispatch(&self, employee_id: Uuid) -> anyhow::Result<()> {
+        let document = self.boss.document();
+        for chain in &document.chains {
+            let step = &chain.steps[chain.current_step];
+            let Some((attempt, prior)) = step.attempts.split_last() else {
+                continue;
+            };
+            if step.definition.workspace != AgentWorkspace::Local
+                || step.definition.boundary != HandoffBoundary::ArtifactsReady
+                || prior.is_empty()
+            {
+                continue;
+            }
+            if attempt.employee_id == Some(employee_id) {
+                self.verify_local_retry_source(
+                    step,
+                    prior,
+                    attempt
+                        .starting_revision
+                        .as_deref()
+                        .ok_or_else(|| anyhow!("local retry source is missing"))?,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Reconcile committed descendant repairs in the original released workspace.
     /// The operation guard fences chain controls; admission repeats workspace ownership
     /// and ancestry checks before any provider execution.
     pub(crate) fn chain_retry_verification(
@@ -1208,10 +1287,8 @@ impl WakuBackend {
             return Ok(None);
         }
         ensure!(
-            chain.status == ChainStatus::Paused
-                && step.definition.boundary == HandoffBoundary::CommittedWorkspace
-                && step.definition.workspace == AgentWorkspace::Worktree,
-            "repair reconciliation requires a paused committed-workspace step"
+            chain.status == ChainStatus::Paused,
+            "repair reconciliation requires a paused step"
         );
         ensure!(
             attempt.execution_released
@@ -1225,7 +1302,27 @@ impl WakuBackend {
         let base = attempt
             .reconciled_retry_revision
             .as_ref()
-            .ok_or_else(|| anyhow!("prior effects have no reconciled source"))?;
+            .ok_or_else(|| anyhow!("uncertain prior effects must be reconciled before retry; prior effects have no reconciled source"))?;
+        if step.definition.workspace == AgentWorkspace::Local
+            && step.definition.boundary == HandoffBoundary::ArtifactsReady
+        {
+            let workspace = self.verify_local_retry_source(step, &step.attempts, revision)?;
+            ensure!(
+                crate::agent_merge::is_ancestor(&workspace, base, revision)?,
+                "local retry source must descend from reconciled effects"
+            );
+            return Ok(Some(waku_boss::chains::RetryVerification {
+                attempt_id: attempt.id,
+                previous_revision: base.clone(),
+                source_revision: revision.to_owned(),
+                workspace_lineage: None,
+            }));
+        }
+        ensure!(
+            step.definition.boundary == HandoffBoundary::CommittedWorkspace
+                && step.definition.workspace == AgentWorkspace::Worktree,
+            "repair reconciliation requires a paused committed-workspace step"
+        );
         let original = step
             .attempts
             .iter()
@@ -2239,6 +2336,151 @@ mod tests {
             before
         );
         assert_eq!(git(&workspace, &["status", "--porcelain"]), "");
+    }
+
+    #[test]
+    fn local_artifact_retry_reconciles_current_source_without_resetting_checkout() {
+        for explicit in [false, true] {
+            let fixture = Fixture::new();
+            let base = git(&fixture.repo, &["rev-parse", "HEAD"]);
+            let mut step = fixture.step(HandoffBoundary::ArtifactsReady);
+            step.workspace = AgentWorkspace::Local;
+            step.required_checks = vec!["P4 plan exit criteria".into()];
+            step.required_artifacts = vec!["P4 phase evidence and successor handoff".into()];
+            let chain = fixture.create(vec![step]);
+            let mut result = success_result();
+            result.disposition = ResultDisposition::Failed;
+            let chain = fixture.finish_attempt(&chain, &fixture.repo, result);
+            let chain = fixture.seal(&chain);
+            fixture.observe(
+                &chain,
+                ChainObservation::EffectsReconciled {
+                    source_revision: base.clone(),
+                },
+            );
+            let mut chain = fixture.show(chain.id);
+            if explicit {
+                // Reproduce recovery after the old dispatcher failed before
+                // binding an employee. Earlier workspace effects still matter.
+                chain = fixture
+                    .backend
+                    .boss
+                    .chain_operation(
+                        None,
+                        ChainOperation::Control {
+                            chain_id: chain.id,
+                            expected_revision: chain.revision,
+                            control: ChainControl::Retry,
+                            source_revision: None,
+                        },
+                    )
+                    .unwrap();
+                fixture.observe(
+                    &chain,
+                    ChainObservation::LaunchError {
+                        reason: "old local retry admission failed".into(),
+                    },
+                );
+                fixture.observe(
+                    &chain,
+                    ChainObservation::Released {
+                        execution: true,
+                        workspace: true,
+                    },
+                );
+                chain = fixture.seal(&fixture.show(chain.id));
+                fixture.observe(
+                    &chain,
+                    ChainObservation::EffectsReconciled {
+                        source_revision: base.clone(),
+                    },
+                );
+                chain = fixture.show(chain.id);
+                assert!(
+                    chain.steps[0]
+                        .attempts
+                        .last()
+                        .unwrap()
+                        .employee_id
+                        .is_none()
+                );
+            }
+            let source = if explicit {
+                fixture.commit(&fixture.repo, "repair.txt", "repair")
+            } else {
+                base.clone()
+            };
+            fs::write(fixture.repo.join("unrelated.txt"), "preserve me").unwrap();
+            let status = git(&fixture.repo, &["status", "--porcelain"]);
+            let mut unreleased = chain.steps[0].attempts.clone();
+            unreleased[0].execution_released = false;
+            assert!(
+                fixture
+                    .backend
+                    .verify_local_retry_source(&chain.steps[0], &unreleased, &source)
+                    .is_err()
+            );
+            let mut foreign = chain.steps[0].attempts.clone();
+            foreign[0].workspace = Some(fixture.root.display().to_string());
+            assert!(
+                fixture
+                    .backend
+                    .verify_local_retry_source(&chain.steps[0], &foreign, &source)
+                    .is_err()
+            );
+            let proof = if explicit {
+                Some(
+                    fixture
+                        .backend
+                        .chain_retry_verification(chain.id, &source)
+                        .unwrap()
+                        .unwrap(),
+                )
+            } else {
+                None
+            };
+            let retry = fixture
+                .backend
+                .boss
+                .chain_operation_with_retry_preflight(
+                    None,
+                    ChainOperation::Control {
+                        chain_id: chain.id,
+                        expected_revision: chain.revision,
+                        control: ChainControl::Retry,
+                        source_revision: explicit.then(|| ChainBaseSource::Bare(source.clone())),
+                    },
+                    None,
+                    None,
+                    proof,
+                )
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(&retry.steps[0].definition).unwrap(),
+                serde_json::to_value(&chain.steps[0].definition).unwrap()
+            );
+            assert_eq!(
+                retry.steps[0].attempts.len(),
+                chain.steps[0].attempts.len() + 1
+            );
+            assert_ne!(
+                retry.steps[0].attempts[0].dispatch_id,
+                retry.steps[0].attempts[1].dispatch_id
+            );
+            let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
+            assert_eq!(inputs.workspace, AgentWorkspace::Local);
+            assert!(inputs.adopt_worktree.is_none());
+            assert!(inputs.base_revision.is_none());
+            assert_eq!(inputs.expected_starting_revision, Some(source.clone()));
+            assert_eq!(git(&fixture.repo, &["rev-parse", "HEAD"]), source);
+            assert_eq!(git(&fixture.repo, &["status", "--porcelain"]), status);
+            assert_eq!(
+                fs::read_to_string(fixture.repo.join("unrelated.txt")).unwrap(),
+                "preserve me"
+            );
+            fixture.commit(&fixture.repo, "drift.txt", "drift");
+            assert!(fixture.backend.chain_successor_inputs(chain.id).is_err());
+        }
     }
 
     #[test]

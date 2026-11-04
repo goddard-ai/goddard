@@ -20771,6 +20771,159 @@ fn chain_successor_launch_error_reconciles_only_effect_free_attempts() {
 }
 
 #[test]
+fn chain_local_artifact_retry_binds_and_dispatches_at_current_source() {
+    use waku_protocol::chains::ChainBaseSource;
+    for drift in [false, true] {
+        let root = std::env::temp_dir().join(format!("waku-chain-local-retry-{}", Uuid::new_v4()));
+        let (backend, boss, head) = chain_backend(&root);
+        let project = backend.task_state.lock().projects[0].clone();
+        let outcome = backend
+            .boss
+            .create_outcome(Some(boss), "Local retry", "Evidence verified")
+            .unwrap();
+        let mut definition = chain_test_definition(
+            project.id,
+            outcome.id,
+            backend.boss.document().personas[0].id,
+            1,
+            head,
+        );
+        definition.steps[0].workspace = waku_protocol::AgentWorkspace::Local;
+        definition.steps[0].base_revision = Some(ChainBaseSource::Bare("main".into()));
+        let checks = vec![
+            "P4 plan exit criteria",
+            "P4 scoped verification and evidence limits",
+            "Completed implementation units committed",
+            "checkout and unrelated work preserved",
+        ];
+        definition.steps[0].required_checks = checks.iter().map(|s| (*s).into()).collect();
+        definition.steps[0].required_artifacts =
+            vec!["P4 phase evidence and successor handoff".into()];
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Chain {
+                    action: ChainOperation::Create {
+                        request_id: Uuid::new_v4(),
+                        definition: definition.clone(),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        backend.run_summon_scheduler();
+        let first = backend.boss.document().chains[0].steps[0].attempts[0]
+            .employee_id
+            .unwrap();
+        backend
+            .finish_boss_employee(
+                first,
+                false,
+                waku_protocol::boss::EmployeeSettle::ProcessExited { mid_turn: true },
+            )
+            .unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&project.path)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        std::fs::write(project.path.join("repair.txt"), "repair").unwrap();
+        git(&["add", "repair.txt"]);
+        git(&["commit", "-m", "repair"]);
+        let repaired = git(&["rev-parse", "HEAD"]);
+        std::fs::write(project.path.join("foreign.txt"), "keep").unwrap();
+        let chain = backend.boss.document().chains[0].clone();
+        let prior = chain.steps[0].attempts[0].clone();
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                chain_control_op(
+                    chain.id,
+                    chain.revision,
+                    ChainControl::Retry,
+                    Some(ChainBaseSource::Bare(repaired.clone())),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let chain = backend.boss.document().chains[0].clone();
+        let retry = chain.steps[0].attempts[1].clone();
+        let employee = retry.employee_id.expect("real retry binding");
+        assert_ne!(employee, first);
+        assert_ne!(retry.dispatch_id, prior.dispatch_id);
+        if drift {
+            std::fs::write(project.path.join("drift.txt"), "drift").unwrap();
+            git(&["add", "drift.txt"]);
+            git(&["commit", "-m", "source drift while queued"]);
+            backend.run_summon_scheduler();
+            let chain = backend.boss.document().chains[0].clone();
+            assert_eq!(chain.status, ChainStatus::Paused);
+            assert!(chain.steps[0].attempts[1].workspace.is_none());
+            assert!(!backend.sessions.lock().contains_key(&employee));
+            assert!(
+                chain.steps[0].attempts[1]
+                    .terminal
+                    .as_ref()
+                    .unwrap()
+                    .message
+                    .contains("current project HEAD")
+            );
+            remove_tree(root);
+            continue;
+        }
+        backend.run_summon_scheduler();
+        let chain = backend.boss.document().chains[0].clone();
+        assert_eq!(chain.steps[0].attempts[1].status, StepStatus::Working);
+        assert_eq!(
+            chain.steps[0].attempts[1].starting_revision,
+            Some(repaired.clone())
+        );
+        assert_eq!(
+            chain.steps[0].attempts[1].workspace.as_deref(),
+            Some(project.path.to_str().unwrap())
+        );
+        assert_eq!(
+            serde_json::to_value(&chain.steps[0].definition).unwrap(),
+            serde_json::to_value(&definition.steps[0]).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&chain.steps[0].attempts[0].sealed).unwrap(),
+            serde_json::to_value(&prior.sealed).unwrap()
+        );
+        assert_eq!(git(&["rev-parse", "HEAD"]), repaired);
+        assert_eq!(
+            std::fs::read_to_string(project.path.join("foreign.txt")).unwrap(),
+            "keep"
+        );
+        // Missing original checks and artifact still fail; retry never accepts old evidence.
+        backend
+            .handle_boss_operation(
+                Some(employee),
+                chain_result_op(chain.id, &retry, ResultDisposition::Success),
+                &EventSink::detached(),
+            )
+            .unwrap();
+        write_employee_final(&backend, employee, "retry evidence is incomplete");
+        backend
+            .finish_boss_employee(
+                employee,
+                false,
+                waku_protocol::boss::EmployeeSettle::TurnFinished,
+            )
+            .unwrap();
+        let chain = backend.boss.document().chains[0].clone();
+        assert_eq!(chain.status, ChainStatus::Paused);
+        assert_eq!(chain.current_step, 0);
+        assert!(!chain.steps[0].attempts[1].handoff_accepted);
+        remove_tree(root);
+    }
+}
+
+#[test]
 fn chain_terminal_failure_pauses_once_and_retry_continues() {
     let root = std::env::temp_dir().join(format!("waku-chain-fail-{}", Uuid::new_v4()));
     let (backend, boss, head) = chain_backend(&root);
