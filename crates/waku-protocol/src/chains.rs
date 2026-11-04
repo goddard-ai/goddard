@@ -276,7 +276,17 @@ pub struct ChainAttempt {
     pub sealed: Option<ChainHandoff>,
     pub handoff_accepted: bool,
     pub reconciled_retry_revision: Option<String>,
+    /// Host-verified repair adoption lineage captured when this retry was accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub retry_workspace_lineage: Option<RetryWorkspaceLineage>,
     pub created_at: u64,
+}
+/// Ordered managed adoption owners, from a released step attempt through prerequisite repairs.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RetryWorkspaceLineage {
+    pub owners: Vec<Uuid>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

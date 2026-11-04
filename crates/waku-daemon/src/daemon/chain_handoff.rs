@@ -301,10 +301,10 @@ fn artifact_unreachable(
 /// The session still owning `workspace`, when it is an unadopted daemon
 /// worktree — the exclusive-adoption precondition.
 fn unadopted_owner(state: &PersistedState, workspace: &Path) -> Option<Uuid> {
-    state
+    let mut owners = state
         .sessions
         .iter()
-        .find(|session| {
+        .filter(|session| {
             matches!(
                 &session.workspace,
                 SessionWorkspace::Worktree { path, adopted_by, .. }
@@ -312,7 +312,9 @@ fn unadopted_owner(state: &PersistedState, workspace: &Path) -> Option<Uuid> {
                         && dunce::canonicalize(path).is_ok_and(|path| path == workspace)
             )
         })
-        .map(|session| session.id)
+        .map(|session| session.id);
+    let owner = owners.next()?;
+    owners.next().is_none().then_some(owner)
 }
 
 fn git_revision(cwd: &Path, reference: &str) -> anyhow::Result<String> {
@@ -840,17 +842,35 @@ impl WakuBackend {
                 );
                 let owner = unadopted_owner(&state, &workspace)
                     .ok_or_else(|| anyhow!("original retry workspace ownership changed"))?;
-                ensure!(
-                    step.attempts.iter().any(|attempt| {
-                        attempt.employee_id == Some(owner)
-                            && attempt.execution_released
-                            && attempt.workspace_released
-                            && attempt.workspace.as_ref().is_some_and(|path| {
-                                dunce::canonicalize(path).is_ok_and(|path| path == workspace)
-                            })
-                    }),
-                    "original retry workspace ownership changed"
-                );
+                if let Some(expected) = step
+                    .attempts
+                    .last()
+                    .and_then(|attempt| attempt.retry_workspace_lineage.as_ref())
+                {
+                    ensure!(
+                        expected.owners.last() == Some(&owner)
+                            && self.retry_repair_lineage(chain, &state, &workspace, owner)?
+                                == *expected,
+                        "repair ownership lineage changed since retry"
+                    );
+                    crate::agent_merge::clean_status(&workspace, "all", "repair retry admission")?;
+                    ensure!(
+                        git_revision(&workspace, "HEAD")? == revision,
+                        "repaired source changed since retry"
+                    );
+                } else {
+                    ensure!(
+                        step.attempts.iter().any(|attempt| {
+                            attempt.employee_id == Some(owner)
+                                && attempt.execution_released
+                                && attempt.workspace_released
+                                && attempt.workspace.as_ref().is_some_and(|path| {
+                                    dunce::canonicalize(path).is_ok_and(|path| path == workspace)
+                                })
+                        }),
+                        "original retry workspace ownership changed"
+                    );
+                }
                 drop(state);
                 crate::agent_merge::no_operation(&workspace)?;
                 let head = git_revision(&workspace, "HEAD")?;
@@ -1000,6 +1020,171 @@ impl WakuBackend {
         resolve_base_source(&project.path, source, landed.as_deref()).map(Some)
     }
 
+    /// Follow only persisted managed-adoption edges rooted in a released attempt.
+    /// Repairs must serve this outcome, have no chain binding, and retain neither
+    /// execution nor admission claims. No employee-supplied result proves ownership.
+    fn retry_repair_lineage(
+        &self,
+        chain: &EmployeeChain,
+        state: &PersistedState,
+        workspace: &Path,
+        owner: Uuid,
+    ) -> anyhow::Result<RetryWorkspaceLineage> {
+        use waku_protocol::boss::EmployeeLifecycle;
+        let step = &chain.steps[chain.current_step];
+        let root = step
+            .attempts
+            .iter()
+            .rev()
+            .find(|attempt| {
+                attempt.employee_id.is_some()
+                    && attempt.execution_released
+                    && attempt.workspace_released
+                    && attempt.workspace.as_ref().is_some_and(|path| {
+                        dunce::canonicalize(path).is_ok_and(|path| path == workspace)
+                    })
+            })
+            .and_then(|attempt| attempt.employee_id)
+            .ok_or_else(|| anyhow!("repair lineage has no released attempt root"))?;
+        let project = state
+            .projects
+            .iter()
+            .find(|project| project.id == step.definition.project_id)
+            .ok_or_else(|| anyhow!("repair project is missing"))?;
+        let supervisor = self
+            .boss
+            .employee_including_retired(root)
+            .ok_or_else(|| anyhow!("repair root ticket is missing"))?
+            .supervisor_id;
+        ensure!(
+            state
+                .sessions
+                .iter()
+                .filter(|session| matches!(&session.workspace,
+            SessionWorkspace::Worktree { path, adopted_by: None, .. }
+                if dunce::canonicalize(path).is_ok_and(|path| path == workspace)))
+                .count()
+                <= 1,
+            "repair workspace has concurrent ownership claims"
+        );
+        let mut owners = Vec::new();
+        let mut current = root;
+        loop {
+            ensure!(
+                !owners.contains(&current),
+                "repair ownership lineage contains a cycle"
+            );
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == current)
+                .ok_or_else(|| anyhow!("repair ownership session is missing"))?;
+            ensure!(
+                session.project_id == step.definition.project_id,
+                "repair ownership belongs to a foreign project"
+            );
+            let next = match &session.workspace {
+                SessionWorkspace::Worktree {
+                    path,
+                    adopted_by,
+                    borrowed: false,
+                    ..
+                } if dunce::canonicalize(path).is_ok_and(|path| path == workspace) => *adopted_by,
+                _ => anyhow::bail!("repair ownership left the original managed workspace"),
+            };
+            let employee = self
+                .boss
+                .employee_including_retired(current)
+                .ok_or_else(|| anyhow!("repair ownership ticket is missing"))?;
+            let ticket = employee
+                .ticket
+                .as_ref()
+                .ok_or_else(|| anyhow!("repair ownership admission is missing"))?;
+            ensure!(
+                employee.lifecycle() == EmployeeLifecycle::Expired
+                    && !employee.workspace_transition
+                    && ticket.reservation.is_none()
+                    && ticket.pending_reservation.is_none()
+                    && !self.agent.has_open_turn(current)
+                    && !self.sessions.lock().contains_key(&current),
+                "repair owner still has execution or admission claims"
+            );
+            if current != root {
+                ensure!(
+                    employee
+                        .assignment
+                        .as_ref()
+                        .is_some_and(|assignment| assignment.outcome_id == chain.request.outcome_id)
+                        && employee.supervisor_id == supervisor
+                        && dunce::canonicalize(&ticket.project)
+                            .is_ok_and(|path| dunce::canonicalize(&project.path)
+                                .is_ok_and(|project| path == project))
+                        && ticket.outcome_id == Some(chain.request.outcome_id)
+                        && ticket.workspace == Some(AgentWorkspace::Adopt)
+                        && ticket
+                            .adopt_worktree
+                            .as_ref()
+                            .is_some_and(|path| dunce::canonicalize(path)
+                                .is_ok_and(|path| path == workspace))
+                        && self.chain_binding(current).is_none(),
+                    "repair owner is unrelated to this chain outcome"
+                );
+            }
+            owners.push(current);
+            if current == owner {
+                break;
+            }
+            current = next.ok_or_else(|| anyhow!("original retry workspace ownership changed"))?;
+        }
+        ensure!(owners.len() > 1, "repair lineage has no repair owner");
+        Ok(RetryWorkspaceLineage { owners })
+    }
+
+    /// Check a captured repair lineage again under the adoption's task-state lock,
+    /// immediately before its first ownership write. Partial adoption replay may
+    /// already credit this exact adopter; any different owner remains an error.
+    pub(super) fn verify_retry_repair_adoption(
+        &self,
+        state: &PersistedState,
+        workspace: &Path,
+        owner: Uuid,
+        adopter: Uuid,
+    ) -> anyhow::Result<()> {
+        let document = self.boss.document();
+        let employee = self.boss.employee_including_retired(adopter);
+        for chain in &document.chains {
+            let step = &chain.steps[chain.current_step];
+            let Some(attempt) = step.attempts.last().filter(|attempt| {
+                attempt.employee_id == Some(adopter)
+                    || employee
+                        .as_ref()
+                        .is_some_and(|employee| employee.request_id == Some(attempt.dispatch_id))
+            }) else {
+                continue;
+            };
+            let Some(expected) = &attempt.retry_workspace_lineage else {
+                return Ok(());
+            };
+            ensure!(
+                expected.owners.last() == Some(&owner),
+                "repair workspace owner changed since retry"
+            );
+            ensure!(
+                self.retry_repair_lineage(chain, state, workspace, owner)? == *expected,
+                "repair ownership lineage changed since retry"
+            );
+            crate::agent_merge::no_operation(workspace)?;
+            crate::agent_merge::clean_status(workspace, "all", "repair retry adoption")?;
+            ensure!(
+                Some(git_revision(workspace, "HEAD")?).as_ref()
+                    == attempt.starting_revision.as_ref(),
+                "repaired source changed since retry"
+            );
+            return Ok(());
+        }
+        Ok(())
+    }
+
     /// Reconcile only committed descendant repairs in the original released workspace.
     /// The operation guard fences chain controls; admission repeats workspace ownership
     /// and ancestry checks before any provider execution.
@@ -1067,17 +1252,18 @@ impl WakuBackend {
         );
         let owner = unadopted_owner(&state, &workspace)
             .ok_or_else(|| anyhow!("original retry workspace ownership changed"))?;
-        ensure!(
-            step.attempts
-                .iter()
-                .any(|entry| entry.employee_id == Some(owner)
-                    && entry.execution_released
-                    && entry.workspace_released
-                    && entry.workspace.as_ref().is_some_and(
-                        |path| dunce::canonicalize(path).is_ok_and(|path| path == workspace)
-                    )),
-            "original retry workspace ownership changed"
-        );
+        let workspace_lineage = if step.attempts.iter().any(|entry| {
+            entry.employee_id == Some(owner)
+                && entry.execution_released
+                && entry.workspace_released
+                && entry.workspace.as_ref().is_some_and(|path| {
+                    dunce::canonicalize(path).is_ok_and(|path| path == workspace)
+                })
+        }) {
+            None
+        } else {
+            Some(self.retry_repair_lineage(chain, &state, &workspace, owner)?)
+        };
         drop(state);
         crate::agent_merge::no_operation(&workspace)?;
         crate::agent_merge::clean_status(&workspace, "all", "repair reconciliation")?;
@@ -1093,6 +1279,7 @@ impl WakuBackend {
             attempt_id: attempt.id,
             previous_revision: base.clone(),
             source_revision: revision.to_owned(),
+            workspace_lineage,
         }))
     }
 
@@ -1709,6 +1896,349 @@ mod tests {
                 && brief.contains(&format!("commit:{bogus}")),
             "brief: {brief}"
         );
+    }
+
+    /// Build real managed adoption edges without starting a provider. Tickets and
+    /// expired employee records use the same persistence APIs as normal admission.
+    fn repair_fixture() -> (Fixture, EmployeeChain, PathBuf, String, Vec<Uuid>) {
+        use waku_protocol::boss::{Assignment, EmployeeGoal, EmployeeLifecycle, SummonTicket};
+        let fixture = Fixture::new();
+        let base = git(&fixture.repo, &["rev-parse", "HEAD"]);
+        let workspace = fixture.managed_worktree(&base);
+        let chain = fixture.create(vec![
+            fixture.step(HandoffBoundary::CommittedWorkspace),
+            fixture.step(HandoffBoundary::Landed),
+        ]);
+        let mut result = success_result();
+        result.disposition = ResultDisposition::Blocked;
+        let chain = fixture.finish_attempt(&chain, &workspace, result);
+        let root = chain.steps[0].attempts[0].employee_id.unwrap();
+        fixture
+            .backend
+            .task_state
+            .lock()
+            .sessions
+            .iter_mut()
+            .find(|session| session.workspace.path() == Some(workspace.as_path()))
+            .unwrap()
+            .id = root;
+        let chain = fixture.seal(&chain);
+        fixture.observe(
+            &chain,
+            ChainObservation::EffectsReconciled {
+                source_revision: base,
+            },
+        );
+        let supervisor = Uuid::new_v4();
+        fixture.backend.boss.set_session_id(supervisor).unwrap();
+        let mut owners = vec![root];
+        for index in 0..3 {
+            let mut employee = fixture
+                .backend
+                .boss
+                .prepare_employee(
+                    supervisor,
+                    Some(fixture.backend.boss.document().personas[0].id),
+                    "prerequisite repair".into(),
+                    None,
+                    false,
+                    EmployeeGoal::Errand,
+                    None,
+                )
+                .unwrap();
+            if index == 0 {
+                employee.session_id = root;
+                employee.identity.id = root;
+            }
+            employee.set_lifecycle(EmployeeLifecycle::Expired, 1);
+            employee.ticket = Some(
+                serde_json::from_value::<SummonTicket>(serde_json::json!({
+                    "sequence": index, "generation": 1, "provider": "codex", "model": "gpt-6.1-sol",
+                    "prompt": "repair prerequisite", "project": fixture.repo,
+                    "workspace": "adopt", "adoptWorktree": workspace,
+                    "outcomeId": fixture.outcome_id
+                }))
+                .unwrap(),
+            );
+            if index > 0 {
+                employee.assignment = Some(Assignment {
+                    outcome_id: fixture.outcome_id,
+                    after_success: "retry original chain".into(),
+                    finishes_outcome: false,
+                    prerequisites: vec![],
+                });
+            }
+            let id = employee.session_id;
+            fixture.backend.boss.add_employee(employee).unwrap();
+            if index > 0 {
+                let adoption = fixture
+                    .backend
+                    .resolve_worktree_adoption(&fixture.repo, &workspace, Some(id))
+                    .unwrap();
+                let mut session =
+                    crate::model::AgentSession::new(fixture.project_id, ProviderKind::Codex);
+                session.id = id;
+                session.workspace = adoption.workspace;
+                fixture.backend.task_state.lock().sessions.push(session);
+                owners.push(id);
+            }
+        }
+        let repaired = fixture.commit(&workspace, "prerequisite.txt", "repair");
+        let chain = fixture.show(chain.id);
+        (fixture, chain, workspace, repaired, owners)
+    }
+
+    #[test]
+    fn retry_repair_lineage_admits_released_out_of_chain_repairs_and_fences_adoption() {
+        let (fixture, chain, workspace, repaired, owners) = repair_fixture();
+        let original = serde_json::to_value(&chain.steps[0].attempts[0]).unwrap();
+        let proof = fixture
+            .backend
+            .chain_retry_verification(chain.id, &repaired)
+            .unwrap()
+            .unwrap();
+        assert_eq!(proof.workspace_lineage.as_ref().unwrap().owners, owners);
+        let retry = fixture
+            .backend
+            .boss
+            .chain_operation_with_retry_preflight(
+                None,
+                ChainOperation::Control {
+                    chain_id: chain.id,
+                    expected_revision: chain.revision,
+                    control: ChainControl::Retry,
+                    source_revision: Some(ChainBaseSource::Bare(repaired.clone())),
+                },
+                None,
+                None,
+                Some(proof),
+            )
+            .unwrap();
+        let mut expected_original = original;
+        expected_original["reconciledRetryRevision"] = repaired.clone().into();
+        assert_eq!(
+            serde_json::to_value(&retry.steps[0].attempts[0]).unwrap(),
+            expected_original
+        );
+        let inputs = fixture.backend.chain_successor_inputs(chain.id).unwrap();
+        assert_eq!(
+            inputs.adopt_worktree,
+            Some(dunce::canonicalize(&workspace).unwrap())
+        );
+        assert_eq!(inputs.expected_starting_revision, Some(repaired.clone()));
+        // Restart-safe proof and immutable starting/source/result facts.
+        let persisted: EmployeeChain =
+            serde_json::from_value(serde_json::to_value(&retry).unwrap()).unwrap();
+        assert_eq!(
+            persisted.steps[0].attempts[1]
+                .retry_workspace_lineage
+                .as_ref()
+                .unwrap()
+                .owners,
+            owners
+        );
+        let adopter = Uuid::new_v4();
+        fixture.observe(
+            &retry,
+            ChainObservation::Admitted {
+                employee_id: adopter,
+            },
+        );
+        // Clean descendant drift still cannot replace an explicitly captured source.
+        let moved = fixture.commit(&workspace, "later.txt", "later");
+        assert_ne!(moved, repaired);
+        assert!(fixture.backend.chain_successor_inputs(chain.id).is_err());
+        assert!(
+            fixture
+                .backend
+                .resolve_worktree_adoption(&fixture.repo, &workspace, Some(adopter))
+                .is_err()
+        );
+        git(&workspace, &["checkout", "--detach", &repaired]);
+        // A new, fully released repair is nevertheless a concurrent owner change.
+        let last = *owners.last().unwrap();
+        if let SessionWorkspace::Worktree { adopted_by, .. } = &mut fixture
+            .backend
+            .task_state
+            .lock()
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == last)
+            .unwrap()
+            .workspace
+        {
+            *adopted_by = Some(Uuid::new_v4());
+        }
+        assert!(
+            fixture
+                .backend
+                .resolve_worktree_adoption(&fixture.repo, &workspace, Some(adopter))
+                .is_err()
+        );
+        if let SessionWorkspace::Worktree { adopted_by, .. } = &mut fixture
+            .backend
+            .task_state
+            .lock()
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == last)
+            .unwrap()
+            .workspace
+        {
+            *adopted_by = None;
+        }
+        let adopted = fixture
+            .backend
+            .resolve_worktree_adoption(&fixture.repo, &workspace, Some(adopter))
+            .unwrap();
+        assert_eq!(adopted.workspace.path(), Some(workspace.as_path()));
+        // Crash replay between adopted_by and the adopter's workspace write.
+        fixture
+            .backend
+            .resolve_worktree_adoption(&fixture.repo, &workspace, Some(adopter))
+            .unwrap();
+    }
+
+    #[test]
+    fn retry_repair_lineage_refuses_unrelated_active_foreign_and_stale_owners() {
+        let (fixture, chain, workspace, repaired, owners) = repair_fixture();
+        let owner = *owners.last().unwrap();
+        let before = serde_json::to_value(fixture.show(chain.id)).unwrap();
+        // Ticket claims, outcome, adoption source, and lifecycle are independent guards.
+        for fault in ["lease", "pending lease", "outcome", "workspace"] {
+            let old = fixture
+                .backend
+                .boss
+                .employee(owner)
+                .unwrap()
+                .ticket
+                .unwrap();
+            fixture
+                .backend
+                .boss
+                .update_employee_ticket(owner, |ticket| match fault {
+                    "lease" => ticket.reservation = Some(Uuid::new_v4()),
+                    "pending lease" => ticket.pending_reservation = Some(Uuid::new_v4()),
+                    "outcome" => ticket.outcome_id = Some(Uuid::new_v4()),
+                    _ => ticket.adopt_worktree = Some(fixture.repo.clone()),
+                })
+                .unwrap();
+            assert!(
+                fixture
+                    .backend
+                    .chain_retry_verification(chain.id, &repaired)
+                    .is_err(),
+                "{fault}"
+            );
+            fixture
+                .backend
+                .boss
+                .update_employee_ticket(owner, |ticket| *ticket = old)
+                .unwrap();
+        }
+        // A live intermediate owner also blocks an otherwise released endpoint.
+        fixture
+            .backend
+            .boss
+            .requeue_employee(
+                owners[1],
+                fixture
+                    .backend
+                    .boss
+                    .employee(owners[1])
+                    .unwrap()
+                    .ticket
+                    .unwrap(),
+                |_| {},
+            )
+            .unwrap();
+        assert!(
+            fixture
+                .backend
+                .chain_retry_verification(chain.id, &repaired)
+                .is_err()
+        );
+        fixture.backend.boss.expire(owners[1]).unwrap();
+        // Project and graph changes cannot be justified by matching Git ancestry.
+        let original_project = fixture.project_id;
+        fixture
+            .backend
+            .task_state
+            .lock()
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == owner)
+            .unwrap()
+            .project_id = Uuid::new_v4();
+        assert!(
+            fixture
+                .backend
+                .chain_retry_verification(chain.id, &repaired)
+                .is_err()
+        );
+        fixture
+            .backend
+            .task_state
+            .lock()
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == owner)
+            .unwrap()
+            .project_id = original_project;
+        let mut state = fixture.backend.task_state.lock();
+        let middle = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == owners[1])
+            .unwrap();
+        let original_workspace = middle.workspace.clone();
+        if let SessionWorkspace::Worktree { adopted_by, .. } = &mut middle.workspace {
+            *adopted_by = None;
+        }
+        drop(state);
+        assert!(
+            fixture
+                .backend
+                .chain_retry_verification(chain.id, &repaired)
+                .is_err()
+        );
+        fixture
+            .backend
+            .task_state
+            .lock()
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == owners[1])
+            .unwrap()
+            .workspace = original_workspace;
+        let proof = fixture
+            .backend
+            .chain_retry_verification(chain.id, &repaired)
+            .unwrap()
+            .unwrap();
+        assert!(
+            fixture
+                .backend
+                .boss
+                .chain_operation_with_retry_preflight(
+                    None,
+                    ChainOperation::Control {
+                        chain_id: chain.id,
+                        expected_revision: chain.revision - 1,
+                        control: ChainControl::Retry,
+                        source_revision: Some(ChainBaseSource::Bare(repaired))
+                    },
+                    None,
+                    None,
+                    Some(proof)
+                )
+                .is_err()
+        );
+        assert_eq!(
+            serde_json::to_value(fixture.show(chain.id)).unwrap(),
+            before
+        );
+        assert_eq!(git(&workspace, &["status", "--porcelain"]), "");
     }
 
     #[test]

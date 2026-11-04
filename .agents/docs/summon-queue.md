@@ -242,3 +242,20 @@ or dispatch notifications; pending Goals rows survive restart and become running
 on dispatch. Verify launch failures, lowered caps, missing projects/refs, nested
 permissions, and queued prompt/steer/stop behavior. Add executable Test-Plan
 trailers to implementation commits; this design-only commit changes no runtime.
+
+## Released prerequisite repairs before a chain retry
+
+An explicit committed-workspace retry can reconcile a clean descendant repair
+in the original managed checkout after out-of-chain prerequisite repairs.
+The host follows persisted `adopted_by` edges from a released step attempt;
+every repair owner must be expired, free of runtime/admission claims, and
+linked to the same outcome and supervisor. Every session and adoption ticket
+must retain the accepted project and exact workspace. Missing records,
+foreign owners, cycles, duplicate claims, and uncertain effects refuse recovery.
+
+The retry stores a typed `retryWorkspaceLineage` on its new attempt. Dispatch
+and the adoption's first ownership write recheck that captured lineage and
+require the clean exact requested HEAD. A subsequent released repair owner or
+new descendant commit pauses admission; an old proof cannot follow it.
+Original attempt starting revisions, results, and source evidence remain intact.
+No manual transfer, extra repair summon, or database edit is needed.

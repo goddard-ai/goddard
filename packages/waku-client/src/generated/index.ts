@@ -307,6 +307,7 @@ export type { ResourceStatus } from "./ResourceStatus";
 export type { ResponseOutcome } from "./ResponseOutcome";
 export type { ResponsePayload } from "./ResponsePayload";
 export type { ResultDisposition } from "./ResultDisposition";
+export type { RetryWorkspaceLineage } from "./RetryWorkspaceLineage";
 export type { ReviewDecision } from "./ReviewDecision";
 export type { ReviewDiffData } from "./ReviewDiffData";
 export type { ReviewDiffSource } from "./ReviewDiffSource";

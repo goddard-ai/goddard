@@ -1160,6 +1160,9 @@ impl WakuBackend {
                 format!("{:?}", employee.lifecycle()).to_lowercase()
             );
         }
+        if let Some(adopter) = adopter {
+            self.verify_retry_repair_adoption(&state, &adopt, owner_id, adopter)?;
+        }
         if let Some(adopter) = adopter
             && let SessionWorkspace::Worktree { adopted_by, .. } =
                 &mut state.sessions[index].workspace

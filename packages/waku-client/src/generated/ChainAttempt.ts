@@ -2,10 +2,15 @@
 import type { ChainHandoff } from "./ChainHandoff";
 import type { ChainResult } from "./ChainResult";
 import type { ChainTerminal } from "./ChainTerminal";
+import type { RetryWorkspaceLineage } from "./RetryWorkspaceLineage";
 import type { StepStatus } from "./StepStatus";
 
 export type ChainAttempt = { id: string,
 /**
  * Stable external admission key. Persist before contacting the scheduler.
  */
-dispatchId: string, definitionVersion: number, employeeId: string | null, status: StepStatus, startingRevision: string | null, workspace: string | null, executionReleased: boolean, workspaceReleased: boolean, provisionalResult: ChainResult | null, terminal: ChainTerminal | null, sealed: ChainHandoff | null, handoffAccepted: boolean, reconciledRetryRevision: string | null, createdAt: number, };
+dispatchId: string, definitionVersion: number, employeeId: string | null, status: StepStatus, startingRevision: string | null, workspace: string | null, executionReleased: boolean, workspaceReleased: boolean, provisionalResult: ChainResult | null, terminal: ChainTerminal | null, sealed: ChainHandoff | null, handoffAccepted: boolean, reconciledRetryRevision: string | null,
+/**
+ * Host-verified repair adoption lineage captured when this retry was accepted.
+ */
+retryWorkspaceLineage?: RetryWorkspaceLineage, createdAt: number, };

@@ -47,6 +47,7 @@ pub struct RetryVerification {
     pub attempt_id: Uuid,
     pub previous_revision: String,
     pub source_revision: String,
+    pub workspace_lineage: Option<RetryWorkspaceLineage>,
 }
 
 /// Facts the host checked under the successor's existing grants. Missing facts
@@ -155,6 +156,7 @@ fn new_attempt(version: u64) -> ChainAttempt {
         sealed: None,
         handoff_accepted: false,
         reconciled_retry_revision: None,
+        retry_workspace_lineage: None,
         created_at: waku_protocol::model::unix_time(),
     }
 }
@@ -789,6 +791,8 @@ impl BossService {
                             }
                             let mut attempt = new_attempt(chain.definition_version);
                             attempt.starting_revision = Some(revision);
+                            attempt.retry_workspace_lineage =
+                                retry.and_then(|proof| proof.workspace_lineage);
                             step.attempts.push(attempt);
                             step.status = StepStatus::Waiting;
                             chain.status = ChainStatus::Waiting;
