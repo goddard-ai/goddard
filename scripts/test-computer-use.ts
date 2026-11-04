@@ -2,7 +2,7 @@
 // Usage: bun scripts/test-computer-use.ts <goddard_js_repl> <computer-use-helper>
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
@@ -56,7 +56,9 @@ const approvalTimer = setInterval(() => {
       const response = name
         .replace("approval-request-", "approval-response-")
         .replace(/\.json$/, ".txt");
-      writeFileSync(join(directory, response), "task");
+      const temporary = join(directory, response.replace(/\.txt$/, ".tmp"));
+      writeFileSync(temporary, "task");
+      renameSync(temporary, join(directory, response));
       answeredApprovals.add(name);
     }
   } catch (error) {

@@ -1,0 +1,1 @@
+- Fixed intermittent Computer Use denials immediately after allowing access.

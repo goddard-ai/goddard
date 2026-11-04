@@ -1895,11 +1895,10 @@ mod tests {
             .expect("approval request was never written");
         let approval: ComputerApprovalId =
             serde_json::from_slice(&fs::read(request).unwrap()).unwrap();
-        fs::write(
-            directory.join(format!("approval-response-{}.txt", approval.nonce)),
-            "task",
-        )
-        .unwrap();
+        let response = directory.join(format!("approval-response-{}.txt", approval.nonce));
+        let temporary = response.with_extension("tmp");
+        fs::write(&temporary, "task").unwrap();
+        fs::rename(&temporary, &response).unwrap();
         let (result, mut client) = worker.join().unwrap();
         result.unwrap();
         assert!(client.grants.contains("clipboard"));
@@ -2054,11 +2053,10 @@ for line in sys.stdin:
             serde_json::from_slice(&fs::read(request).unwrap()).unwrap();
         assert_eq!(approval.scope, EXISTING_PROFILE_SCOPE);
         assert!(approval.app_grant().is_none());
-        fs::write(
-            directory.join(format!("approval-response-{}.txt", approval.nonce)),
-            "task",
-        )
-        .unwrap();
+        let response = directory.join(format!("approval-response-{}.txt", approval.nonce));
+        let temporary = response.with_extension("tmp");
+        fs::write(&temporary, "task").unwrap();
+        fs::rename(&temporary, &response).unwrap();
         let (result, mut client) = worker.join().unwrap();
         result.unwrap();
         assert!(client.grants.contains(EXISTING_PROFILE_SCOPE));

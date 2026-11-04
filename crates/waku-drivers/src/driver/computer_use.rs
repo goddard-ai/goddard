@@ -197,7 +197,15 @@ pub(super) fn respond_approval(request_id: &str, decision: &str) -> bool {
         return false;
     }
     if let Some(path) = pending_approvals().lock().remove(request_id) {
-        let _ = fs::write(path, decision);
+        // The REPL polls the response concurrently. Publish only the complete
+        // decision so an empty file cannot be interpreted as a denial.
+        let temporary = path.with_extension("tmp");
+        if let Err(error) =
+            fs::write(&temporary, decision).and_then(|()| fs::rename(&temporary, &path))
+        {
+            let _ = fs::remove_file(&temporary);
+            eprintln!("Failed to publish Computer Use approval response: {error}");
+        }
     }
     true
 }
