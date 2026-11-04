@@ -1922,6 +1922,7 @@ impl Waku {
             }
         };
 
+        let header = self.render_projects_header(project_id, tab, github_available, cx);
         div()
             .key_context("ProjectsPage")
             .flex_1()
@@ -1932,7 +1933,7 @@ impl Waku {
             .on_action(cx.listener(Self::select_all_projects_rows_action))
             .on_action(cx.listener(Self::focus_projects_filter_action))
             .on_action(cx.listener(Self::dismiss_projects_layer_action))
-            .child(self.render_projects_header(project_id, tab, github_available, cx))
+            .child(self.render_header_frame(header, window, cx))
             .child(
                 div()
                     .flex_1()

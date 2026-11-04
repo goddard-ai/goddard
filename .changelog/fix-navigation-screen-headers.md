@@ -1,0 +1,1 @@
+- Inbox, Drafts, Automations, Projects, and Brain now show their own top bars instead of the last selected task’s details, with navigation available when the sidebar is collapsed.

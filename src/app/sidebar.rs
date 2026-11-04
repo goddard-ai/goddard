@@ -7523,95 +7523,14 @@ impl Waku {
 
     // ── Header ─────────────────────────────────────────────────────────────
 
-    pub(super) fn render_header(
+    /// Shared window chrome. Page headers supply only their own identity/actions;
+    /// navigation and native window controls always have exactly one owner.
+    pub(super) fn render_header_frame(
         &self,
-        deliverable_header: Option<AnyElement>,
+        content: AnyElement,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let theme = Theme::current(cx);
-        let brain_page = self.boss_ui.page.is_some();
-        let session = self.selected_session().filter(|_| !brain_page);
-        // A deliverable's preview page swaps the session's title and chips
-        // for the file's own chrome — the header is the page's top bar.
-        let deliverable_page = deliverable_header.is_some();
-        // The header's pull-request chip reads the same scan the sidebar
-        // badge does; the sidebar's own ensure never runs while it is hidden.
-        self.ensure_sidebar_pull_requests(cx);
-        let title = if brain_page {
-            String::new()
-        } else if let Some(terminal_id) = self.selected_terminal {
-            self.terminal_records
-                .get(&terminal_id)
-                .and_then(|record| record.custom_title.clone())
-                .or_else(|| {
-                    self.right_panel_terminals
-                        .get(&terminal_id)
-                        .map(|terminal| single_line_label(terminal.read(cx).title()))
-                        .filter(|title| !title.is_empty())
-                })
-                .unwrap_or_else(|| tr!("right_panel.terminal"))
-        } else if self.projects_page.is_some() {
-            tr!("projects.title")
-        } else {
-            session
-                .map(|session| {
-                    if session.display_title() == AgentSession::DEFAULT_TITLE && session.incognito {
-                        tr!("session.new_incognito_task")
-                    } else {
-                        localized_session_title(session)
-                    }
-                })
-                .unwrap_or_else(|| tr!("session.new_task"))
-        };
-        let employee_job_title = session.and_then(|session| {
-            self.boss_ui
-                .job_titles
-                .get(&session.id)
-                .filter(|title| !title.is_empty())
-        });
-        let agent_preset_label = (!deliverable_page)
-            .then(|| {
-                session
-                    .filter(|session| {
-                        session.provider == ProviderKind::DeepSeek && session.has_started()
-                    })
-                    .and_then(|session| self.agent_preset_label_for_session(session))
-            })
-            .flatten();
-        // The badge belongs to the session surface — the new-task composer or
-        // a selected session's transcript. When another page owns the main
-        // column the title still names that session, but the badge is not
-        // its to wear.
-        let session_surface = self.selected_terminal.is_none()
-            && !self.drafts_page
-            && !self.automations_page
-            && self.boss_ui.page.is_none()
-            && self.projects_page.is_none()
-            && !self.notifications.open
-            && !deliverable_page;
-        // A managed session's header leads with its Boss identity —
-        // avatar, name, and job title — in place of the session title the
-        // daemon keeps in sync with it.
-        let managed_identity = session_surface
-            .then(|| {
-                session.and_then(|session| {
-                    self.managed_session_meta(session.id)
-                        .map(|(_, identity, job_title)| (session.id, identity, job_title))
-                })
-            })
-            .flatten();
-        let environment = if session_surface && self.state.sandbox_experiment_enabled {
-            session.map(AgentSession::environment)
-        } else {
-            None
-        }
-        .unwrap_or_default();
-        // The chip reads durable state — `archived_at` plus the
-        // `boss_managed` stamp — so it still answers after the employee's
-        // roster record retires.
-        let archived_chip = session_surface
-            && session.is_some_and(|session| self.session_is_archived_employee(session));
         let left_window_controls = (!self.sidebar_visible)
             .then(|| {
                 self.render_client_window_controls(
@@ -7705,6 +7624,97 @@ impl Waku {
                             ),
                     )
             })
+            .child(div().flex_1().min_w_0().h_full().child(content))
+            .children(right_window_controls)
+    }
+
+    pub(super) fn render_header(
+        &self,
+        screen: super::render::MainScreen,
+        deliverable_header: Option<AnyElement>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let theme = Theme::current(cx);
+        use super::render::MainScreen;
+        let deliverable_page = deliverable_header.is_some();
+        let session_surface = !deliverable_page
+            && matches!(screen, MainScreen::Session | MainScreen::VoiceScratchpad);
+        let session = session_surface.then(|| self.selected_session()).flatten();
+        self.ensure_sidebar_pull_requests(cx);
+        let title = match screen {
+            MainScreen::Terminal(terminal_id) => self
+                .terminal_records
+                .get(&terminal_id)
+                .and_then(|record| record.custom_title.clone())
+                .or_else(|| {
+                    self.right_panel_terminals
+                        .get(&terminal_id)
+                        .map(|terminal| single_line_label(terminal.read(cx).title()))
+                        .filter(|title| !title.is_empty())
+                })
+                .unwrap_or_else(|| tr!("right_panel.terminal")),
+            MainScreen::Session | MainScreen::VoiceScratchpad => session
+                .map(|session| {
+                    if session.display_title() == AgentSession::DEFAULT_TITLE && session.incognito {
+                        tr!("session.new_incognito_task")
+                    } else {
+                        localized_session_title(session)
+                    }
+                })
+                .unwrap_or_else(|| tr!("session.new_task")),
+            // These screens supply their own header content through render_header_frame.
+            MainScreen::Brain
+            | MainScreen::Drafts
+            | MainScreen::Automations
+            | MainScreen::Projects
+            | MainScreen::Inbox
+            | MainScreen::Deliverable => String::new(),
+        };
+        let employee_job_title = session.and_then(|session| {
+            self.boss_ui
+                .job_titles
+                .get(&session.id)
+                .filter(|title| !title.is_empty())
+        });
+        let agent_preset_label = (!deliverable_page)
+            .then(|| {
+                session
+                    .filter(|session| {
+                        session.provider == ProviderKind::DeepSeek && session.has_started()
+                    })
+                    .and_then(|session| self.agent_preset_label_for_session(session))
+            })
+            .flatten();
+        // A managed session's header leads with its Boss identity —
+        // avatar, name, and job title — in place of the session title the
+        // daemon keeps in sync with it.
+        let managed_identity = session_surface
+            .then(|| {
+                session.and_then(|session| {
+                    self.managed_session_meta(session.id)
+                        .map(|(_, identity, job_title)| (session.id, identity, job_title))
+                })
+            })
+            .flatten();
+        let environment = if session_surface && self.state.sandbox_experiment_enabled {
+            session.map(AgentSession::environment)
+        } else {
+            None
+        }
+        .unwrap_or_default();
+        // The chip reads durable state — `archived_at` plus the
+        // `boss_managed` stamp — so it still answers after the employee's
+        // roster record retires.
+        let archived_chip = session_surface
+            && session.is_some_and(|session| self.session_is_archived_employee(session));
+        let content = div()
+            .w_full()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .items_center()
+            .gap(px(7.0))
             .child(
                 self.window_drag_region(
                     div()
@@ -7861,9 +7871,7 @@ impl Waku {
                     cx,
                 ),
             )
-            .when(!brain_page, |element| {
-                element.child(self.render_background_work_summary(cx))
-            })
+            .child(self.render_background_work_summary(cx))
             .children(self.render_reclaim_indicator(window, cx))
             .when(!self.right_panel_slot_visible(), |element| {
                 element
@@ -7872,7 +7880,8 @@ impl Waku {
                     })
                     .child(self.render_panel_toggles(cx))
             })
-            .children(right_window_controls)
+            .into_any_element();
+        self.render_header_frame(content, window, cx)
     }
 
     // ── Empty states ───────────────────────────────────────────────────────

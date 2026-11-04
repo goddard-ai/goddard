@@ -14,12 +14,55 @@ fn should_render_empty_state(session: Option<&AgentSession>) -> bool {
         .unwrap_or(true)
 }
 
-fn main_header_navigation_visible(sidebar_visible: bool, boss_brain_page: bool) -> bool {
-    // With the sidebar open, its title bar already owns these controls. The
-    // Brain page suppresses the main header, except when the sidebar is
-    // hidden and the header is their only remaining home. A deliverable's
-    // page always keeps it — its file chrome rides the header's title slot.
-    !sidebar_visible || !boss_brain_page
+/// The main column's owner. Add new screens here and handle both header and
+/// body explicitly; a remembered selection never determines another page's chrome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MainScreen {
+    Session,
+    Terminal(Uuid),
+    Brain,
+    VoiceScratchpad,
+    Deliverable,
+    Drafts,
+    Automations,
+    Projects,
+    Inbox,
+}
+
+impl Waku {
+    fn main_screen(&self, deliverable_available: bool) -> MainScreen {
+        if let Some(id) = self
+            .selected_terminal
+            .filter(|id| self.right_panel_terminals.contains_key(id))
+        {
+            MainScreen::Terminal(id)
+        } else if self.state.boss_experiment_enabled && self.boss_ui.page.is_some() {
+            MainScreen::Brain
+        } else if self.voice_scratchpad_visible() {
+            MainScreen::VoiceScratchpad
+        } else if deliverable_available {
+            MainScreen::Deliverable
+        } else if self.drafts_page {
+            MainScreen::Drafts
+        } else if self.automations_page {
+            MainScreen::Automations
+        } else if self.projects_page.is_some() {
+            MainScreen::Projects
+        } else if self.notifications.open {
+            MainScreen::Inbox
+        } else {
+            MainScreen::Session
+        }
+    }
+}
+
+impl MainScreen {
+    fn uses_session_header(self) -> bool {
+        match self {
+            Self::Session | Self::Terminal(_) | Self::VoiceScratchpad | Self::Deliverable => true,
+            Self::Brain | Self::Drafts | Self::Automations | Self::Projects | Self::Inbox => false,
+        }
+    }
 }
 
 // Floats normally borrow the transcript's bottom padding. An approval card
@@ -717,7 +760,6 @@ impl Render for Waku {
 
         let theme = Theme::current(cx);
         let empty = should_render_empty_state(self.selected_session());
-        let projects_page = self.projects_page;
         let permission = self.render_permission(cx);
         let approval_visible = permission.is_some();
         // A started Antigravity session shows its TUI terminal as the whole
@@ -730,6 +772,7 @@ impl Render for Waku {
             .render_deliverable_preview_page(window, cx)
             .map(|(header, page)| (Some(header), Some(page)))
             .unwrap_or((None, None));
+        let screen = self.main_screen(deliverable_page.is_some());
         let computer_use = self.render_computer_use_overlay(window, cx);
         let speed_reader = self.render_speed_reader_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
@@ -989,25 +1032,21 @@ impl Render for Waku {
                                 },
                             ))
                     })
-                    .when(
-                        main_header_navigation_visible(
-                            self.sidebar_visible,
-                            self.boss_ui.page.is_some(),
-                        ) && (!self.drafts_page
-                            || self
-                                .selected_terminal
-                                .is_some_and(|id| self.right_panel_terminals.contains_key(&id))),
-                        |element| {
-                            element.child(self.render_header(
-                                // A Brain page covers the deliverable's
-                                // surface — its own page header owns the
-                                // column while it is open.
-                                deliverable_header.filter(|_| self.boss_ui.page.is_none()),
-                                window,
-                                cx,
-                            ))
-                        },
-                    )
+                    .when(screen.uses_session_header(), |element| {
+                        element.child(self.render_header(
+                            screen,
+                            if matches!(
+                                screen,
+                                MainScreen::Deliverable | MainScreen::VoiceScratchpad
+                            ) {
+                                deliverable_header
+                            } else {
+                                None
+                            },
+                            window,
+                            cx,
+                        ))
+                    })
                     .children(self.friend_watch_banner(cx))
                     .children(self.daemon_degraded_banner(cx))
                     // The docked terminal card sits in flow at the top of
@@ -1027,57 +1066,46 @@ impl Render for Waku {
                     )
                     // A selected terminal takes the column in place of the
                     // transcript, the Projects page, or the new-task prompt.
-                    .child(
-                        if let Some(terminal_id) = self
-                            .selected_terminal
-                            .filter(|id| self.right_panel_terminals.contains_key(id))
-                        {
-                            self.render_main_terminal(
-                                terminal_id,
-                                self.chat_viewport_width(window),
-                                window,
-                                cx,
-                            )
-                        } else if self.state.boss_experiment_enabled && self.boss_ui.page.is_some()
-                        {
-                            self.render_boss_page(window, cx)
-                        } else if self.voice_scratchpad_visible() {
-                            // The scratchpad takes the transcript slot —
-                            // empty or not — while the composer lane stays
-                            // mounted below it. On a deliverable page the
-                            // deliverable's own pad owns the same slot: the
-                            // preview waits underneath like a transcript.
-                            self.render_voice_scratchpad(window, cx)
-                        } else if let Some(deliverable_page) = deliverable_page {
-                            deliverable_page
-                        } else if self.drafts_page {
-                            self.render_drafts_page(cx)
-                        } else if self.automations_page {
-                            self.render_automations_page(cx)
-                        } else if projects_page.is_some() {
-                            self.render_projects_page(window, cx)
-                        } else if self.notifications.open {
-                            self.render_inbox_page(window, cx)
-                        } else if agy_surface {
-                            self.render_agy_surface(self.chat_viewport_width(window), cx)
-                        } else if empty && self.boss_chat_key().is_some() {
-                            self.render_boss_chat_empty_state(cx).into_any_element()
-                        // A queued or dispatching employee's shell hydrates
-                        // empty — the transcript surface carries its brief
-                        // and wait state, not the new-task hero.
-                        } else if empty
-                            && !self
-                                .selected_session()
-                                .is_some_and(|session| self.session_is_employee(session))
-                        {
-                            self.render_empty_state(cx).into_any_element()
-                        } else {
-                            self.transcript_pane
-                                .clone()
-                                .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
-                                .into_any_element()
-                        },
-                    )
+                    .child(match screen {
+                        MainScreen::Terminal(terminal_id) => self.render_main_terminal(
+                            terminal_id,
+                            self.chat_viewport_width(window),
+                            window,
+                            cx,
+                        ),
+                        MainScreen::Brain => self.render_boss_page(window, cx),
+                        MainScreen::VoiceScratchpad => self.render_voice_scratchpad(window, cx),
+                        MainScreen::Deliverable => {
+                            deliverable_page.unwrap_or_else(|| div().into_any_element())
+                        }
+                        MainScreen::Drafts => self.render_drafts_page(window, cx),
+                        MainScreen::Automations => self.render_automations_page(window, cx),
+                        MainScreen::Projects => self.render_projects_page(window, cx),
+                        MainScreen::Inbox => self.render_inbox_page(window, cx),
+                        MainScreen::Session => {
+                            if agy_surface {
+                                self.render_agy_surface(self.chat_viewport_width(window), cx)
+                            } else if empty && self.boss_chat_key().is_some() {
+                                self.render_boss_chat_empty_state(cx).into_any_element()
+                            // A queued or dispatching employee's shell hydrates
+                            // empty — the transcript surface carries its brief
+                            // and wait state, not the new-task hero.
+                            } else if empty
+                                && !self
+                                    .selected_session()
+                                    .is_some_and(|session| self.session_is_employee(session))
+                            {
+                                self.render_empty_state(cx).into_any_element()
+                            } else {
+                                self.transcript_pane
+                                    .clone()
+                                    .cached(
+                                        StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
+                                    )
+                                    .into_any_element()
+                            }
+                        }
+                    })
                     .children(permission.map(|card| div().flex_none().child(card)))
                     // Big Picture remounts the one composer entity inside its
                     // own layer; mounting it here too would collide. The
@@ -1374,16 +1402,22 @@ mod tests {
     }
 
     #[test]
-    fn deliverable_page_keeps_the_header_for_its_file_chrome() {
-        assert!(main_header_navigation_visible(false, false));
-        assert!(main_header_navigation_visible(true, false));
-    }
-
-    #[test]
-    fn boss_brain_page_keeps_navigation_header_when_sidebar_is_hidden() {
-        assert!(main_header_navigation_visible(false, true));
-        assert!(!main_header_navigation_visible(true, true));
-        assert!(main_header_navigation_visible(false, false));
+    fn unrelated_pages_own_their_headers() {
+        for screen in [
+            MainScreen::Brain,
+            MainScreen::Drafts,
+            MainScreen::Automations,
+            MainScreen::Projects,
+            MainScreen::Inbox,
+        ] {
+            assert!(
+                !screen.uses_session_header(),
+                "{screen:?} must supply its own header"
+            );
+        }
+        assert!(MainScreen::Deliverable.uses_session_header());
+        assert!(MainScreen::Terminal(Uuid::nil()).uses_session_header());
+        assert!(MainScreen::Session.uses_session_header());
     }
 }
 

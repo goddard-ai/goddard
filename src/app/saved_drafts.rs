@@ -697,7 +697,11 @@ impl Waku {
         )
     }
 
-    pub(super) fn render_drafts_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_drafts_page(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let query = self.drafts_search.read(cx).content().trim().to_lowercase();
         let show_hidden = self.drafts_show_hidden;
@@ -742,6 +746,7 @@ impl Waku {
                 .into_any_element()
         };
 
+        let header = self.render_drafts_header(&theme, cx);
         div()
             .key_context(DRAFTS_PAGE_CONTEXT)
             .flex_1()
@@ -750,7 +755,7 @@ impl Waku {
             .flex()
             .flex_col()
             .on_action(cx.listener(Self::dismiss_drafts_layer_action))
-            .child(self.render_drafts_header(&theme, cx))
+            .child(self.render_header_frame(header, window, cx))
             .child(
                 div()
                     .flex_1()
@@ -837,17 +842,8 @@ impl Waku {
         div()
             .flex_none()
             .w_full()
-            // The page can reach the window's left edge while the sidebar is
-            // hidden. Keep its title clear of the macOS traffic lights, and
-            // ease that inset as the sidebar takes over during its animation.
-            .pl(px(if self.sidebar_visible {
-                24.0 + (TRAFFIC_LIGHT_CLEARANCE - self.sidebar_rendered_width).max(0.0)
-            } else {
-                TRAFFIC_LIGHT_CLEARANCE
-            }))
-            .pr(px(24.0))
-            .pt(px(16.0))
-            .pb(px(10.0))
+            .h(px(HEADER_HEIGHT))
+            .px(px(10.0))
             .flex()
             .items_center()
             .gap(px(10.0))

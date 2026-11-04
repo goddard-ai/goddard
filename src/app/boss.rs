@@ -6968,51 +6968,64 @@ impl Waku {
             BossTab::Instructions => self.render_instruction_pins(key, cx),
             BossTab::Chains => self.render_boss_chains_section(key, cx),
         };
+        let header = self.render_boss_page_header(key, tab, cx);
         div()
             .track_focus(&focus)
             .flex_1()
             .min_h_0()
             .min_w_0()
             .flex()
-            .child(
-                div()
-                    .w(px(220.0))
-                    .flex_none()
-                    .flex()
-                    .flex_col()
-                    .bg(theme.sidebar)
-                    .border_r_1()
-                    .border_color(theme.separator)
-                    .child(self.render_boss_page_header(key, cx))
-                    .child(self.render_boss_section_navigation(key, tab, &theme, cx)),
-            )
+            .flex_col()
+            .child(self.render_header_frame(header, window, cx))
             .child(
                 div()
                     .flex_1()
-                    .min_w_0()
                     .min_h_0()
                     .flex()
-                    .flex_col()
-                    .when(
-                        boss_loading_label_visible(self.boss_ui.pending),
-                        |element| {
-                            element.child(
-                                div()
-                                    .px(px(20.0))
-                                    .py(px(4.0))
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_tertiary)
-                                    .child(tr!("boss.loading")),
-                            )
-                        },
+                    .child(
+                        div()
+                            .w(px(220.0))
+                            .flex_none()
+                            .flex()
+                            .flex_col()
+                            .bg(theme.sidebar)
+                            .border_r_1()
+                            .border_color(theme.separator)
+                            .child(self.render_boss_section_navigation(key, tab, &theme, cx)),
                     )
-                    .child(content),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .when(
+                                boss_loading_label_visible(self.boss_ui.pending),
+                                |element| {
+                                    element.child(
+                                        div()
+                                            .px(px(20.0))
+                                            .py(px(4.0))
+                                            .text_size(sp(12.0))
+                                            .text_color(theme.text_tertiary)
+                                            .child(tr!("boss.loading")),
+                                    )
+                                },
+                            )
+                            .child(content),
+                    ),
             )
             .into_any_element()
     }
 
-    /// The Boss identity at the top of the Brain navigation sidebar.
-    fn render_boss_page_header(&self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+    /// The Boss identity in the Brain screen's top bar.
+    fn render_boss_page_header(
+        &self,
+        key: DaemonKey,
+        tab: BossTab,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let state = self.boss_ui.states.get(&key);
         let name = state
@@ -7059,12 +7072,21 @@ impl Waku {
                 .child(name)
                 .into_any_element()
         };
+        let section = match tab {
+            BossTab::Memory => tr!("boss.memory"),
+            BossTab::Personas => tr!("boss.personas"),
+            BossTab::Employees => tr!("boss.history"),
+            BossTab::Plans => tr!("boss.plans"),
+            BossTab::Deliverables => tr!("boss.deliverables"),
+            BossTab::Instructions => tr!("boss.pinned_instructions"),
+            BossTab::Chains => tr!("boss.chains"),
+        };
         div()
+            .h(px(HEADER_HEIGHT))
             .flex()
             .items_center()
             .gap(px(10.0))
             .px(px(16.0))
-            .py(px(12.0))
             .border_b_1()
             .border_color(theme.border)
             .when_some(
@@ -7073,7 +7095,7 @@ impl Waku {
             )
             .child(
                 div()
-                    .flex_1()
+                    .max_w(px(240.0))
                     .min_w_0()
                     .flex()
                     .flex_col()
@@ -7084,6 +7106,13 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .child(host),
                     ),
+            )
+            .child(icon("icons/chevron-right.svg", 12.0, theme.text_tertiary))
+            .child(
+                div()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text_secondary)
+                    .child(section),
             )
             .into_any_element()
     }

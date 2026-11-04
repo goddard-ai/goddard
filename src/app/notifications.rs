@@ -901,7 +901,7 @@ impl Waku {
 
     pub(super) fn render_inbox_page(
         &mut self,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -951,6 +951,7 @@ impl Waku {
             _ => self.render_inbox_list(rows, &owned_pull_requests, cx),
         };
 
+        let header = self.render_inbox_header(cx);
         div()
             .key_context("InboxPage")
             .flex_1()
@@ -959,7 +960,7 @@ impl Waku {
             .flex()
             .flex_col()
             .on_action(cx.listener(Self::dismiss_inbox_action))
-            .child(self.render_inbox_header(cx))
+            .child(self.render_header_frame(header, window, cx))
             .child(
                 div()
                     .flex_1()
