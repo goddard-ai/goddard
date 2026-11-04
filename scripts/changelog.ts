@@ -59,7 +59,11 @@ export function extractReleaseNotes(
   return body || null;
 }
 
-const projectRoot = resolve(import.meta.dir, "..");
+// Release automation runs this trusted script against a separate candidate
+// worktree, without executing any scripts from the candidate itself.
+const projectRoot = resolve(
+  process.env.GODDARD_CHANGELOG_ROOT ?? resolve(import.meta.dir, ".."),
+);
 const fragmentsDir = join(projectRoot, ".changelog");
 const changelogPath = join(projectRoot, "CHANGELOG.md");
 /** Fragments under `.changelog/mobile/` cover the mobile app and fold into

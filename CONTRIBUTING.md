@@ -109,6 +109,11 @@ without those the script packages unsigned binaries and says so.
 
 ## Making changes
 
+Use `main` as the base for contributions. It contains validated code, while
+`dev` is a rough checkpoint branch that may contain broken or unfinished work.
+Published release tags identify exactly what shipped. Maintainers promote
+release candidates through the [release PR process](RELEASING.md#cutting-a-release).
+
 - Before starting work on anything larger than a bug fix, open an issue and
   discuss the proposal first.
 - Keep changes focused and follow the existing Rust and GPUI conventions.

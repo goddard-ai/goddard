@@ -130,8 +130,13 @@ results through the normal turn-end/final report.
 
 ## QA branch workflow
 
-- `dev` is the QA branch — there is no `qa` branch. Proposed work lands
-  on `dev` unreviewed and is promoted to `main` in order once approved.
+- `dev` is the QA/checkpoint branch — there is no `qa` branch. It may be
+  broken or unfinished. `main` is the protected default branch for validated
+  code; published release tags identify shipped code. Passing fast CI updates
+  a draft `release/next` PR into `main`. Marking it ready freezes automatic
+  updates and runs full CI; merge with a merge commit after human review.
+  See `RELEASING.md`. Direct QA promotion pushes to `main` are superseded by
+  this PR gate; do not bypass protection or squash/rebase release promotions.
   History is immutable up to and including the newest `dev` commit
   carrying an approval — approvals are git notes under `refs/notes/qa`
   and bind to commit SHAs, so rewriting them orphans the approvals. The

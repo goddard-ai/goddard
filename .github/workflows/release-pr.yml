@@ -1,0 +1,54 @@
+name: Prepare release PR
+
+on:
+  workflow_run:
+    workflows: [Fast CI]
+    types: [completed]
+    branches: [dev]
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-pr
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.event_name == 'workflow_dispatch' || github.event_name == 'release' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      # Optional app credentials allow candidates that change workflow files.
+      # Normal releases need only GITHUB_TOKEN and explicit CI dispatches.
+      - uses: actions/create-github-app-token@v2
+        if: vars.RELEASE_APP_ID != ''
+        id: app-token
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      # workflow_run is privileged: load only the trusted default branch's
+      # controller. Passing dev code is merged as data, never executed here.
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || github.token }}
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const update = require('./.github/scripts/release-pr.cjs');
+            await update({ github, context, core });
