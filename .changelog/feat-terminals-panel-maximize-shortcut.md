@@ -1,0 +1,1 @@
+- Press Cmd+Shift+Enter while a right-panel terminal has focus to maximize the panel or restore its previous size.

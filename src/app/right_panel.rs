@@ -7041,6 +7041,9 @@ impl Waku {
             .flex_col()
             .min_w_0()
             .key_context("RightPanel")
+            .on_action(cx.listener(|this, _: &ToggleTerminalMaximize, _, cx| {
+                this.toggle_panel_fullscreen(cx);
+            }))
             .track_focus(&self.right_panel_focus)
             .border_l(hairline())
             .border_color(theme.separator)

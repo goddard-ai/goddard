@@ -3074,13 +3074,13 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "terminal.maximize_restore",
         All,
         "secondary-shift-enter",
-        StandaloneTerminal,
+        TerminalMaximizeScope,
     ),
     e(
         "workspace.push_base",
         All,
         "secondary-shift-enter",
-        WorkspaceNotStandaloneTerminal,
+        WorkspaceNotTerminalMaximize,
     ),
     e("workspace.pin_task", All, "secondary-alt-p", Workspace),
     e("workspace.copy_selection", All, "secondary-c", Workspace),
@@ -3192,7 +3192,7 @@ mod ctx {
     /// The floating terminal card — Escape hides it, but an open command
     /// bar or context menu inside keeps its own dismiss first.
     pub const DockedTerminalNotCommandBar: &str = "DockedTerminal && !TerminalCommandBar && !Menu";
-    pub const StandaloneTerminal: &str = "StandaloneTerminal";
+    pub const TerminalMaximizeScope: &str = "StandaloneTerminal || (RightPanel > Terminal)";
     pub const NotTerminal: &str = "!Terminal";
     /// The ⌘⌥←/⌘⌥→ session sweep — the experiment flag keeps a disabled Big
     /// Picture from eating the chords; !Terminal and !Menu spare their input.
@@ -3206,7 +3206,8 @@ mod ctx {
     pub const InboxPage: &str = "InboxPage";
     pub const DraftsPage: &str = "DraftsPage";
     pub const WorkspaceNotTerminal: &str = "Workspace && !Terminal";
-    pub const WorkspaceNotStandaloneTerminal: &str = "Workspace && !StandaloneTerminal";
+    pub const WorkspaceNotTerminalMaximize: &str =
+        "Workspace && !StandaloneTerminal && !(RightPanel > Terminal)";
     /// Where the composer exists — the session surface mounts its lane, and
     /// Big Picture remounts it. Pages and terminal views never carry the
     /// context, so their own chords (tab switching, pty input) can't lose to
