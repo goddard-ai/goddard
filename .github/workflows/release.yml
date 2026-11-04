@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  pull_request:
+    branches: [main]
+    types: [closed]
   push:
     tags:
       - "v*"
@@ -14,6 +17,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
   CARGO_TERM_COLOR: always
   RUSTC_WRAPPER: sccache
   # sccache storage lives in the goddard-ci-cache R2 bucket: GitHub's
@@ -27,6 +31,11 @@ env:
 
 jobs:
   version:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.ref == 'release/next' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     name: Resolve version
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -36,6 +45,8 @@ jobs:
       published: ${{ steps.published.outputs.published }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_SHA }}
 
       - name: Resolve version from Cargo.toml
         id: resolve
@@ -90,6 +101,8 @@ jobs:
       RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_SHA }}
 
       - uses: oven-sh/setup-bun@v2
 
@@ -164,6 +177,8 @@ jobs:
       RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_SHA }}
 
       - uses: oven-sh/setup-bun@v2
 
@@ -235,6 +250,8 @@ jobs:
       RUSTFLAGS: "-C linker=rust-lld"
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_SHA }}
 
       - name: Install Rust
         run: |
@@ -286,6 +303,8 @@ jobs:
       RUSTFLAGS: "-C linker=rust-lld"
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_SHA }}
 
       - name: Install Rust
         run: |
@@ -335,6 +354,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_SHA }}
 
       - name: Install Rust
         run: |
@@ -365,7 +386,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
-          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
@@ -429,6 +450,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_SHA }}
 
       - uses: oven-sh/setup-bun@v2
 
@@ -477,6 +500,7 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
+          # shellcheck disable=SC2016
           bun -e '
             import { extractReleaseNotes } from "./scripts/changelog.ts";
             const version = process.env.VERSION;
@@ -528,7 +552,7 @@ jobs:
           # A manual run has no tag yet; publishing the draft creates this one
           # at the commit that was built.
           tag_name: ${{ needs.version.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ env.RELEASE_SHA }}
           name: ${{ needs.version.outputs.tag }}
           body_path: release-notes.md
 

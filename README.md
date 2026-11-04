@@ -7,6 +7,10 @@ interface, using your existing accounts and subscriptions. Free and open source.
 Written in Rust with [GPUI](https://gpui.rs/), Goddard's desktop interface is
 GPU-rendered, not WebView-based.
 
+`main` is the default branch and contains validated code that may be awaiting
+release. `dev` is a checkpoint branch and may be broken or unfinished. For
+shipped builds, use [published releases](https://github.com/goddard-ai/goddard/releases).
+
 ![Goddard's light and dark themes shown in one screenshot with a diagonal split](docs/images/light-dark-themes.png)
 
 ## Why Goddard?
