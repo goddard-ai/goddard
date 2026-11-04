@@ -1449,25 +1449,35 @@ fn latest_occurrence(
     }
 }
 
-/// `cron` iterates forward only, so "latest at-or-before" walks from a
-/// lookback anchor and keeps the last occurrence not past `now`. A short
-/// window first — dense schedules hit their fire within a few thousand
-/// steps — and when that comes up empty the schedule is sparse enough
-/// that a year of occurrences is still a small walk.
+/// Search backward directly: forward iteration can cycle through the repeated
+/// hour at a daylight-saving rollback. The extra second makes `now` inclusive.
 fn latest_occurrence_in<Z: TimeZone>(schedule: &Schedule, now: &DateTime<Z>) -> Option<u64> {
-    for lookback in [chrono::Duration::days(3), chrono::Duration::days(400)] {
-        let mut latest = None;
-        for occurrence in schedule.after(&(now.clone() - lookback)) {
-            if occurrence > *now {
-                break;
-            }
-            latest = Some(occurrence.timestamp().max(0) as u64);
-        }
-        if latest.is_some() {
-            return latest;
+    let before = now
+        .clone()
+        .checked_add_signed(chrono::Duration::seconds(1))?;
+    let previous = |before: &DateTime<Z>| {
+        schedule
+            .after(before)
+            .rev()
+            // The library emits both offsets for an ambiguous local time;
+            // its later occurrence can still be in the future.
+            .find(|occurrence| occurrence <= now)
+            .map(|occurrence| occurrence.timestamp().max(0) as u64)
+    };
+    let mut latest = previous(&before);
+    if let chrono::LocalResult::Ambiguous(earlier, later) =
+        now.timezone().from_local_datetime(&now.naive_local())
+        && *now >= later
+    {
+        // During the second copy of an hour, a later wall-clock time in the
+        // first copy is also in the past (01:59 EDT precedes 01:01 EST).
+        // Search that remaining overlap too, then compare absolute instants.
+        let overlap = later.signed_duration_since(earlier);
+        if let Some(overlap_end) = before.checked_add_signed(overlap) {
+            latest = latest.max(previous(&overlap_end));
         }
     }
-    None
+    latest
 }
 
 /// The first occurrence strictly after `after`.
@@ -1711,6 +1721,63 @@ mod tests {
             latest_occurrence(&schedule, &zone, now),
             Some(utc(2024, 1, 2, 9, 0, 0).timestamp() as u64)
         );
+    }
+
+    #[test]
+    fn latest_occurrence_handles_daylight_saving_transitions() {
+        let zone = AutomationZone::Named(chrono_tz::America::New_York);
+        for (expression, now, expected) in [
+            // The three-day lookback formerly cycled over the rollback.
+            (
+                "* * * * *",
+                utc(2026, 11, 4, 0, 0, 30),
+                utc(2026, 11, 4, 0, 0, 0),
+            ),
+            // Both copies of the repeated hour keep their own latest minute.
+            (
+                "* * * * *",
+                utc(2026, 11, 1, 5, 30, 30),
+                utc(2026, 11, 1, 5, 30, 0),
+            ),
+            (
+                "* * * * *",
+                utc(2026, 11, 1, 6, 30, 30),
+                utc(2026, 11, 1, 6, 30, 0),
+            ),
+            // The second 01:59 is future; the first is past at 01:01 EST.
+            (
+                "59 1 * * *",
+                utc(2026, 11, 1, 6, 1, 0),
+                utc(2026, 11, 1, 5, 59, 0),
+            ),
+            // Before the first 01:59, neither copy is eligible yet.
+            (
+                "59 1 * * *",
+                utc(2026, 11, 1, 5, 1, 0),
+                utc(2026, 10, 31, 5, 59, 0),
+            ),
+            // Exactly on a repeated occurrence remains inclusive.
+            (
+                "59 1 * * *",
+                utc(2026, 11, 1, 6, 59, 0),
+                utc(2026, 11, 1, 6, 59, 0),
+            ),
+            // The missing spring-forward hour has no occurrence that day.
+            (
+                "30 2 * * *",
+                utc(2026, 3, 8, 8, 0, 0),
+                utc(2026, 3, 7, 7, 30, 0),
+            ),
+        ] {
+            let schedule = compile(&AutomationSchedule::Cron {
+                expression: expression.to_owned(),
+            });
+            assert_eq!(
+                latest_occurrence(&schedule, &zone, now),
+                Some(expected.timestamp() as u64),
+                "{expression} at {now}"
+            );
+        }
     }
 
     #[test]

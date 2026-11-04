@@ -1,0 +1,1 @@
+- Fixed daemon startup hanging when a scheduled automation's recent history crosses a daylight-saving clock rollback.
