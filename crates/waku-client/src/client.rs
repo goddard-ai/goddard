@@ -84,6 +84,9 @@ struct ClientInner {
     /// the scoped read surface's reachability, reported in the handshake.
     agent_cli_available: bool,
     task_views_available: bool,
+    /// Bounded transcript reads (`readTranscriptWindow`/`Payload`/`find`)
+    /// and compact task-view payloads, reported in the handshake.
+    transcript_windows_available: bool,
     task_view_generation: std::sync::atomic::AtomicU64,
     pending: Mutex<HashMap<Uuid, Sender<Result<ResponsePayload, RpcError>>>>,
     sessions: Mutex<HashMap<(Uuid, Uuid), Sender<SequencedEvent>>>,
@@ -287,6 +290,24 @@ impl DaemonClient {
         runtime_id: Uuid,
         detail: bool,
     ) -> anyhow::Result<()> {
+        self.set_task_view_payloads(
+            session_id,
+            runtime_id,
+            detail,
+            waku_protocol::transcript::TaskViewPayloadInterest::All,
+        )
+    }
+
+    /// `Compact` asks the daemon to strip bulk activity fields from detail
+    /// events; the caller range-reads expanded payloads instead. Ignored by
+    /// daemons predating transcript windows — they see the legacy shape.
+    pub fn set_task_view_payloads(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        detail: bool,
+        payloads: waku_protocol::transcript::TaskViewPayloadInterest,
+    ) -> anyhow::Result<()> {
         if !self.task_views_available() {
             return Ok(());
         }
@@ -298,7 +319,11 @@ impl DaemonClient {
         match self.request(
             session_id,
             runtime_id,
-            Command::SetTaskView { detail, generation },
+            Command::SetTaskView {
+                detail,
+                generation,
+                payloads,
+            },
         )? {
             ResponsePayload::Ack => Ok(()),
             _ => bail!("invalid task-view acknowledgement"),
@@ -307,6 +332,12 @@ impl DaemonClient {
 
     pub fn task_views_available(&self) -> bool {
         self.inner.task_views_available
+    }
+
+    /// Whether the connected daemon serves bounded transcript windows,
+    /// payload ranges, and daemon-side find (`readTranscriptWindow` et al.).
+    pub fn transcript_windows_available(&self) -> bool {
+        self.inner.transcript_windows_available
     }
 
     pub fn connect(address: &str, token: String) -> anyhow::Result<Self> {
@@ -363,19 +394,26 @@ impl DaemonClient {
             },
         )?;
         let hello = read_server_message(&mut socket)?;
-        let (daemon_version, daemon_commit, agent_cli_available, task_views_available) = match hello
-        {
+        let (
+            daemon_version,
+            daemon_commit,
+            agent_cli_available,
+            task_views_available,
+            transcript_windows_available,
+        ) = match hello {
             ServerMessage::Hello {
                 protocol_version,
                 daemon_version,
                 daemon_commit,
                 agent_cli_available,
                 task_views_available,
+                transcript_windows_available,
             } if protocol_version == PROTOCOL_VERSION => (
                 daemon_version,
                 daemon_commit,
                 agent_cli_available,
                 task_views_available,
+                transcript_windows_available,
             ),
             ServerMessage::Hello {
                 protocol_version, ..
@@ -398,6 +436,7 @@ impl DaemonClient {
             daemon_commit,
             agent_cli_available,
             task_views_available,
+            transcript_windows_available,
             task_view_generation: std::sync::atomic::AtomicU64::new(0),
             pending: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
@@ -1264,6 +1303,7 @@ mod tests {
                                     daemon_commit: None,
                                     agent_cli_available: false,
                                     task_views_available: false,
+                                    transcript_windows_available: false,
                                 },
                             )
                             .unwrap();
@@ -1370,6 +1410,7 @@ mod tests {
                         daemon_commit: None,
                         agent_cli_available: false,
                         task_views_available: false,
+                        transcript_windows_available: false,
                     })
                     .unwrap()
                     .into(),

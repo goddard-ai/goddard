@@ -334,17 +334,13 @@ impl DaemonProcess {
 fn recent_daemon_stderr(
     recent: &std::sync::Mutex<std::collections::VecDeque<String>>,
 ) -> Option<String> {
-    let lines = recent.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let lines = recent
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if lines.is_empty() {
         return None;
     }
-    Some(
-        lines
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(" | "),
-    )
+    Some(lines.iter().cloned().collect::<Vec<_>>().join(" | "))
 }
 
 fn pump_daemon_stderr(
@@ -1819,6 +1815,7 @@ mod tests {
                     daemon_commit: None,
                     agent_cli_available: false,
                     task_views_available: false,
+                    transcript_windows_available: false,
                 })
                 .chain(events.into_iter().map(|(epoch, sequence)| {
                     ServerMessage::Event(SequencedEvent {
@@ -1985,6 +1982,7 @@ mod tests {
                             daemon_commit: None,
                             agent_cli_available: false,
                             task_views_available: false,
+                            transcript_windows_available: false,
                         })
                         .unwrap();
                         if socket
@@ -2145,6 +2143,7 @@ mod tests {
                                     daemon_commit: None,
                                     agent_cli_available: false,
                                     task_views_available: false,
+                                    transcript_windows_available: false,
                                 })
                                 .unwrap();
                             if socket

@@ -42,6 +42,7 @@ fn startup_catalog_load_does_not_request_selected_transcript() {
                     daemon_commit: None,
                     agent_cli_available: false,
                     task_views_available: false,
+                    transcript_windows_available: false,
                 },
                 ClientMessage::Request(request) => {
                     let payload = match request.command {

@@ -42,6 +42,10 @@ pub use waku_protocol::persistence::{
     ComposerDraftTarget, ComposerDrafts, HistoryMessageMatch, SessionMessageMatch,
     SessionMessageSearchScope,
 };
+use waku_protocol::transcript::{
+    TranscriptFindRequest, TranscriptFindResult, TranscriptPayload, TranscriptPayloadField,
+    TranscriptWindow, TranscriptWindowTarget,
+};
 
 const STATE_VERSION: u32 = 5;
 const APP_STATE_VERSION: u32 = 1;
@@ -963,7 +967,7 @@ fn collect_references(data: &str, scheme: &str, references: &mut HashSet<String>
     }
 }
 
-fn fingerprint(value: &str) -> u64 {
+pub(crate) fn fingerprint(value: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in value.as_bytes() {
         hash ^= u64::from(*byte);
@@ -972,7 +976,7 @@ fn fingerprint(value: &str) -> u64 {
     hash
 }
 
-fn to_io_error(error: impl std::fmt::Display) -> io::Error {
+pub(crate) fn to_io_error(error: impl std::fmt::Display) -> io::Error {
     io::Error::other(error.to_string())
 }
 
@@ -2008,57 +2012,128 @@ impl StateStore {
     /// callers merge with [`apply_session_detail`] instead of adopting it.
     pub fn load_session_detail(&self, session_id: Uuid) -> io::Result<Option<AgentSession>> {
         let connection = self.open()?;
-        let id = session_id.to_string();
+        read_session_detail(&connection, session_id)
+    }
 
-        let data: Option<String> = connection
+    /// One bounded read of the flattened transcript index. `None` means the
+    /// session has no head row — it predates the index and needs a one-time
+    /// [`StateStore::convert_transcript`] before bounded reads work.
+    pub fn read_transcript_window(
+        &self,
+        session_id: Uuid,
+        target: &TranscriptWindowTarget,
+        max_entries: u32,
+        max_bytes: u32,
+        known_revision: Option<u64>,
+    ) -> io::Result<Option<TranscriptWindow>> {
+        let connection = self.open()?;
+        crate::transcript_index::read_transcript_window(
+            &connection,
+            session_id,
+            target,
+            max_entries,
+            max_bytes,
+            known_revision,
+        )
+    }
+
+    /// Range-read one stored payload field — a message body's continuation
+    /// or an activity's out-of-line bulk field.
+    pub fn read_transcript_payload(
+        &self,
+        session_id: Uuid,
+        entry_id: Uuid,
+        field: TranscriptPayloadField,
+        expected_revision: Option<u64>,
+        offset: u64,
+        limit: u64,
+    ) -> io::Result<Option<TranscriptPayload>> {
+        let connection = self.open()?;
+        crate::transcript_index::read_transcript_payload(
+            &connection,
+            session_id,
+            entry_id,
+            field,
+            expected_revision,
+            offset,
+            limit,
+        )
+    }
+
+    /// Literal search across the whole retained transcript — conversation
+    /// bodies and lazy tool fields — without shipping history to the client.
+    pub fn find_transcript(
+        &self,
+        session_id: Uuid,
+        request: &TranscriptFindRequest,
+    ) -> io::Result<TranscriptFindResult> {
+        let connection = self.open()?;
+        crate::transcript_index::find_transcript(&connection, session_id, request)
+    }
+
+    /// Head revision for cheap "did anything change" checks; `None` when the
+    /// session is unconverted.
+    pub fn transcript_revision(&self, session_id: Uuid) -> io::Result<Option<u64>> {
+        let connection = self.open()?;
+        connection
             .query_row(
-                "SELECT data FROM session_details WHERE session_id = ?1",
-                params![id],
-                |row| row.get(0),
+                "SELECT revision FROM transcript_heads WHERE session_id = ?1",
+                params![session_id.to_string()],
+                |row| row.get::<_, i64>(0),
             )
             .optional()
-            .map_err(to_io_error)?;
-        let Some(data) = data else {
-            return Ok(None);
-        };
-        let mut stored = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
-        // Detail rows predate worktree names; the list row's migration is
-        // overwritten when the stored workspace is copied over it.
-        stored.workspace.backfill_worktree_name();
+            .map(|revision| revision.map(|revision| revision as u64))
+            .map_err(to_io_error)
+    }
 
+    /// Builds the flattened index for a session saved before the index
+    /// existed. Reads the legacy detail + messages inside one write
+    /// transaction and leaves the head row that marks the session converted.
+    /// Returns false when the session has no detail row at all.
+    pub fn convert_transcript(&self, session_id: Uuid) -> io::Result<bool> {
+        let mut guard = self.storage.lock();
+        let Some(storage) = guard.as_mut() else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "state store is not open",
+            ));
+        };
+        let transaction = storage
+            .connection
+            .unchecked_transaction()
+            .map_err(to_io_error)?;
+        if crate::transcript_index::has_head(&transaction, &session_id.to_string())? {
+            return Ok(true);
+        }
+        let Some(session) = read_session_detail(&transaction, session_id)? else {
+            return Ok(false);
+        };
+        crate::transcript_index::write_transcript_index(&transaction, &session)?;
+        transaction.commit().map_err(to_io_error)?;
+        Ok(true)
+    }
+
+    /// Sessions with a detail row but no index head — the pre-index backlog —
+    /// newest first, so a background sweep converts warm history first.
+    pub fn unconverted_transcripts(&self, limit: usize) -> io::Result<Vec<Uuid>> {
+        let connection = self.open()?;
         let mut statement = connection
             .prepare(
-                "SELECT id, turn_id, role, content, display_content, attachments, atoms,
-                        created_at, streaming, sent_by_task, hidden, notice, context_mark,
-                        report_trigger, reference_context
-                 FROM messages WHERE session_id = ?1 ORDER BY position",
+                "SELECT d.session_id FROM session_details d
+                 LEFT JOIN transcript_heads h ON h.session_id = d.session_id
+                 INNER JOIN sessions s ON s.id = d.session_id
+                 WHERE h.session_id IS NULL
+                 ORDER BY s.updated_at DESC
+                 LIMIT ?1",
             )
             .map_err(to_io_error)?;
-        stored.messages = statement
-            .query_map(params![id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, i64>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, i64>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
-                    row.get::<_, Option<String>>(13)?,
-                    row.get::<_, Option<String>>(14)?,
-                ))
-            })
+        let ids = statement
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
             .map_err(to_io_error)?
-            .filter_map(Result::ok)
-            .filter_map(message_from_row)
+            .filter_map(|row| row.ok())
+            .filter_map(|id| Uuid::parse_str(&id).ok())
             .collect();
-        Ok(Some(stored))
+        Ok(ids)
     }
 
     /// Reads a turn checkpoint from the session detail row without loading
@@ -2296,7 +2371,7 @@ impl StateStore {
             let data = session_data(&session)?;
             // The EXISTS re-check keeps a session unarchived between the
             // scan and this write from losing payloads it is using again.
-            pruned += transaction
+            let updated = transaction
                 .execute(
                     "UPDATE session_details SET data = ?2
                      WHERE session_id = ?1
@@ -2307,6 +2382,10 @@ impl StateStore {
                     params![session_id, data, archived_before as i64],
                 )
                 .map_err(to_io_error)?;
+            if updated > 0 {
+                pruned += updated;
+                crate::transcript_index::prune_transcript_index(&transaction, &session_id)?;
+            }
         }
         transaction.commit().map_err(to_io_error)?;
         Ok(pruned)
@@ -2600,6 +2679,9 @@ impl StateStore {
                 )?,
             ));
             persisted_checkpoints.push((session.id, checkpoint_cache));
+            // The flattened index lives in the same transaction so it can
+            // never disagree with the detail/messages it derives from.
+            crate::transcript_index::write_transcript_index(&transaction, session)?;
         }
 
         let removed = storage
@@ -2622,6 +2704,7 @@ impl StateStore {
             transaction
                 .execute("DELETE FROM messages WHERE session_id = ?1", params![key])
                 .map_err(to_io_error)?;
+            crate::transcript_index::delete_transcript_index(&transaction, &key)?;
         }
 
         if let Some((applying, sequence)) = checkpoint {
@@ -2929,7 +3012,67 @@ pub struct SaveBatch {
     pub dirty_ids: HashSet<Uuid>,
 }
 
-type MessageColumns = (
+/// Detail row + message rows for one session, read on a caller-owned
+/// connection — the body of [`StateStore::load_session_detail`] so
+/// conversion can run inside a write transaction on the same snapshot.
+pub(crate) fn read_session_detail(
+    connection: &Connection,
+    session_id: Uuid,
+) -> io::Result<Option<AgentSession>> {
+    let id = session_id.to_string();
+
+    let data: Option<String> = connection
+        .query_row(
+            "SELECT data FROM session_details WHERE session_id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(to_io_error)?;
+    let Some(data) = data else {
+        return Ok(None);
+    };
+    let mut stored = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
+    // Detail rows predate worktree names; the list row's migration is
+    // overwritten when the stored workspace is copied over it.
+    stored.workspace.backfill_worktree_name();
+
+    let mut statement = connection
+        .prepare(
+            "SELECT id, turn_id, role, content, display_content, attachments, atoms,
+                    created_at, streaming, sent_by_task, hidden, notice, context_mark,
+                    report_trigger, reference_context
+             FROM messages WHERE session_id = ?1 ORDER BY position",
+        )
+        .map_err(to_io_error)?;
+    stored.messages = statement
+        .query_map(params![id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, i64>(10)?,
+                row.get::<_, Option<String>>(11)?,
+                row.get::<_, Option<String>>(12)?,
+                row.get::<_, Option<String>>(13)?,
+                row.get::<_, Option<String>>(14)?,
+            ))
+        })
+        .map_err(to_io_error)?
+        .filter_map(Result::ok)
+        .filter_map(message_from_row)
+        .collect();
+    Ok(Some(stored))
+}
+
+pub(crate) type MessageColumns = (
     String,
     Option<String>,
     String,
@@ -2947,7 +3090,7 @@ type MessageColumns = (
     Option<String>,
 );
 
-fn message_from_row(row: MessageColumns) -> Option<Message> {
+pub(crate) fn message_from_row(row: MessageColumns) -> Option<Message> {
     let (
         id,
         turn_id,
@@ -3400,7 +3543,7 @@ fn write_messages(
 /// Stand-in for "this connection has written nothing for that session yet".
 static EMPTY: std::sync::LazyLock<HashMap<Uuid, u64>> = std::sync::LazyLock::new(HashMap::new);
 
-fn message_fingerprint(message: &Message, position: usize) -> u64 {
+pub(crate) fn message_fingerprint(message: &Message, position: usize) -> u64 {
     const PRIME: u64 = 0x0000_0100_0000_01b3;
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut fold = |value: u64| {
@@ -5157,8 +5300,9 @@ mod tests {
         store.save(&mut state).unwrap();
         assert_eq!(
             rows_written(&store) - before,
-            floor + 1,
-            "a new message costs one row, not the whole transcript"
+            floor + 4,
+            "a new message costs its message row plus transcript-index \
+             entry, turn, and head rows — constant, not the whole transcript"
         );
 
         // Length is not enough to tell rows apart: a typo fix keeps it.
@@ -5172,8 +5316,9 @@ mod tests {
         store.save(&mut state).unwrap();
         assert_eq!(
             rows_written(&store) - before,
-            floor + 1,
-            "an edit that preserves length is still written"
+            floor + 4,
+            "an edit that preserves length is still written — message row \
+             plus index entry, turn, and head rows"
         );
 
         let reopened = store_in(&directory);

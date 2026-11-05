@@ -198,6 +198,29 @@ pub(crate) fn without_output(mut event: WireDriverEvent) -> WireDriverEvent {
     event
 }
 
+/// Compact task views subscribe to detail events without the heavyweight
+/// activity fields — the viewer range-reads `output`/`arguments`/`detail`/
+/// `reasoning`/`fileChanges`/`imageUrls` lazily instead. `activity` and
+/// `richActivity` payloads are `ActivityItem` JSON; stripping the bulk keys
+/// leaves the compact row (kind, title, status) intact for live merge.
+pub(crate) fn without_activity_payloads(mut event: WireDriverEvent) -> WireDriverEvent {
+    if matches!(event.kind.as_str(), "activity" | "richActivity")
+        && let Some(payload) = event.payload.as_object_mut()
+    {
+        for key in [
+            "output",
+            "arguments",
+            "detail",
+            "reasoning",
+            "fileChanges",
+            "imageUrls",
+        ] {
+            payload.remove(key);
+        }
+    }
+    event
+}
+
 /// Completion snapshots are a one-shot delivery, never replay-journal data.
 pub(crate) fn without_settlement_snapshot(event: &WireDriverEvent) -> WireDriverEvent {
     let payload = match event.payload.as_object() {

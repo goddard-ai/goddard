@@ -68,6 +68,7 @@ pub mod streaming;
 pub mod task_metadata;
 pub mod terminal_command;
 pub mod theme;
+pub mod transcript;
 pub mod usage;
 pub mod usage_history;
 pub mod wireframe;

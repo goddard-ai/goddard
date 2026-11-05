@@ -77,6 +77,7 @@ fn chain_guide_create_and_revise_preserve_selectors_and_actionable_errors() {
                         daemon_commit: None,
                         agent_cli_available: true,
                         task_views_available: false,
+                        transcript_windows_available: false,
                     })
                     .unwrap()
                     .into(),

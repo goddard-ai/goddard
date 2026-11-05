@@ -40,6 +40,7 @@ impl DaemonFixture {
                         daemon_commit: None,
                         agent_cli_available: false,
                         task_views_available: false,
+                        transcript_windows_available: false,
                     },
                     ClientMessage::Request(request) => {
                         let payload = match &request.command {

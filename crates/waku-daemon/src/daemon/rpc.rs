@@ -502,9 +502,13 @@ impl Backend for WakuBackend {
                 let claimed = claim_managed_goal_turn(&mut claims, session_id, goal_id, turn_id);
                 Ok(ResponsePayload::ManagedGoalTurnClaimed { claimed })
             }
-            Command::SetTaskView { detail, generation } => {
+            Command::SetTaskView {
+                detail,
+                generation,
+                payloads,
+            } => {
                 if session_id.is_nil() {
-                    events.set_task_view(false, generation);
+                    events.set_task_view(false, generation, payloads);
                     return Ok(ResponsePayload::Ack);
                 }
                 // Event forwarding holds this same gate through projection
@@ -526,9 +530,17 @@ impl Backend for WakuBackend {
                     .iter_mut()
                     .find(|s| s.id == session_id)
                     .ok_or_else(|| anyhow!("task no longer exists"))?;
-                self.task_store.hydrate(session)?;
+                // A compact viewer never receives a transcript-bearing
+                // snapshot — it materializes through `readTranscriptWindow`,
+                // so subscribing must not hydrate. Its snapshot stays the
+                // summary shape; turns and queue arrive inside the window.
+                let compact = detail
+                    && payloads == waku_protocol::transcript::TaskViewPayloadInterest::Compact;
+                if !compact {
+                    self.task_store.hydrate(session)?;
+                }
                 let settle = !session.status.is_busy();
-                let mut snapshot = if detail || settle {
+                let mut snapshot = if (detail || settle) && !compact {
                     session.clone()
                 } else {
                     let mut summary = session.list_projection();
@@ -538,7 +550,7 @@ impl Backend for WakuBackend {
                 };
                 snapshot.runtime_event_cursor = None;
                 drop(state);
-                if !events.set_task_view(detail, generation) {
+                if !events.set_task_view(detail, generation, payloads) {
                     return Ok(ResponsePayload::Ack);
                 }
                 events.send_to(

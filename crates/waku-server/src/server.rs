@@ -481,18 +481,23 @@ impl waku_exec::terminal::TerminalEventSink for EventSink {
 
 impl EventSink {
     /// Change only the requesting connection's observation, never the runtime.
-    pub fn set_task_view(&self, detail: bool, generation: u64) -> bool {
+    pub fn set_task_view(
+        &self,
+        detail: bool,
+        generation: u64,
+        payloads: waku_protocol::transcript::TaskViewPayloadInterest,
+    ) -> bool {
         let mut state = self.hub.state.lock();
         if let Some(subscriber) = state.subscribers.get_mut(&self.source_subscriber_id) {
             let views = subscriber.task_views.get_or_insert_with(Default::default);
             if !self.session_id.is_nil() {
                 if views
                     .get(&self.session_id)
-                    .is_some_and(|(current, _)| *current >= generation)
+                    .is_some_and(|(current, ..)| *current >= generation)
                 {
                     return false;
                 }
-                views.insert(self.session_id, (generation, detail));
+                views.insert(self.session_id, (generation, detail, payloads));
             }
             return true;
         }
@@ -512,7 +517,7 @@ impl EventSink {
                     .task_views
                     .as_ref()
                     .and_then(|views| views.get(&self.session_id))
-                    .is_some_and(|(_, detail)| !detail)
+                    .is_some_and(|(_, detail, _)| !detail)
             })
     }
 
@@ -762,7 +767,17 @@ struct Subscriber {
     session_filter: Option<Uuid>,
     /// None preserves legacy broadcast delivery. Some opts this connection
     /// into explicit transcript interests; control events remain global.
-    task_views: Option<HashMap<Uuid, (u64, bool)>>,
+    /// Each entry is (interest generation, detail, payload interest).
+    task_views: Option<
+        HashMap<
+            Uuid,
+            (
+                u64,
+                bool,
+                waku_protocol::transcript::TaskViewPayloadInterest,
+            ),
+        >,
+    >,
 }
 
 impl Subscriber {
@@ -796,7 +811,7 @@ impl Subscriber {
                     self.task_views.as_ref().is_none_or(|views| {
                         views
                             .get(&event.session_id)
-                            .is_some_and(|(_, detail)| *detail)
+                            .is_some_and(|(_, detail, _)| *detail)
                     })
                 }
                 _ => true,
@@ -1265,11 +1280,30 @@ impl Hub {
                         && subscriber.task_views.as_ref().is_some_and(|views| {
                             !views
                                 .get(&event.session_id)
-                                .is_some_and(|(_, detail)| *detail)
+                                .is_some_and(|(_, detail, _)| *detail)
                         }) =>
                 {
                     let mut event = event.clone();
                     event.event = crate::task_views::without_output(event.event);
+                    ServerMessage::Event(event)
+                }
+                // Compact views receive the compact row live; the viewer
+                // range-reads any field it expands from the daemon.
+                ServerMessage::Event(event)
+                    if !external
+                        && matches!(event.event.kind.as_str(), "activity" | "richActivity")
+                        && subscriber.task_views.as_ref().is_some_and(|views| {
+                            views
+                                .get(&event.session_id)
+                                .is_some_and(|(_, detail, payloads)| {
+                                    *detail
+                                        && *payloads
+                                            == waku_protocol::transcript::TaskViewPayloadInterest::Compact
+                                })
+                        }) =>
+                {
+                    let mut event = event.clone();
+                    event.event = crate::task_views::without_activity_payloads(event.event);
                     ServerMessage::Event(event)
                 }
                 ServerMessage::Event(event)
@@ -1278,7 +1312,7 @@ impl Hub {
                             .task_views
                             .as_ref()
                             .and_then(|views| views.get(&event.session_id))
-                            .is_some_and(|(_, detail)| !detail) =>
+                            .is_some_and(|(_, detail, _)| !detail) =>
                 {
                     ServerMessage::Event(SequencedEvent {
                         session_id: event.session_id,
@@ -2415,6 +2449,7 @@ fn handle_connection(
             daemon_commit: options.build_commit.clone(),
             agent_cli_available: waku_exec::agent_cli_path().is_ok(),
             task_views_available: true,
+            transcript_windows_available: true,
         },
     )?;
     socket.set_config(|config| {
@@ -3197,6 +3232,9 @@ fn command_kind(command: &Command) -> &'static str {
         Command::RemoveProject { .. } => "removeProject",
         Command::RefreshSessionHistory => "refreshSessionHistory",
         Command::HydrateSession { .. } => "hydrateSession",
+        Command::ReadTranscriptWindow { .. } => "readTranscriptWindow",
+        Command::ReadTranscriptPayload { .. } => "readTranscriptPayload",
+        Command::FindTranscript { .. } => "findTranscript",
         Command::IndexSession => "indexSession",
         Command::SearchSessionMessages { .. } => "searchSessionMessages",
         Command::ListProviderSessions { .. } => "listProviderSessions",

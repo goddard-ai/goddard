@@ -35,6 +35,7 @@ fn computer_js_bounds_a_request_even_when_the_daemon_never_answers() {
                     daemon_commit: None,
                     agent_cli_available: true,
                     task_views_available: false,
+                    transcript_windows_available: false,
                 })
                 .unwrap()
                 .into(),
@@ -103,6 +104,7 @@ fn cli_closes_cleanly_after_success_and_failure_without_waiting_for_a_stalled_pe
                         daemon_commit: None,
                         agent_cli_available: true,
                         task_views_available: false,
+                        transcript_windows_available: false,
                     })
                     .unwrap()
                     .into(),

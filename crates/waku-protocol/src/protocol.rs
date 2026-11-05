@@ -216,6 +216,11 @@ pub enum Command {
     SetTaskView {
         detail: bool,
         generation: u64,
+        /// `Compact` strips bulk fields from detail events — the viewer
+        /// range-reads expanded payloads instead. Absent (`All`) preserves
+        /// full delivery for older clients.
+        #[serde(default)]
+        payloads: crate::transcript::TaskViewPayloadInterest,
     },
     Start {
         options: WireDriverStartOptions,
@@ -434,6 +439,25 @@ pub enum Command {
     RefreshSessionHistory,
     HydrateSession {
         session_id: Uuid,
+    },
+    /// Read one bounded slice of the flattened transcript — the task-open,
+    /// history-page, and search-reveal shape. `request.session_id` must match
+    /// the request envelope's session.
+    ReadTranscriptWindow {
+        request: crate::transcript::TranscriptWindowRequest,
+    },
+    /// Range-read one lazy transcript field — a message body or activity
+    /// payload. `request.session_id` must match the request envelope's
+    /// session.
+    ReadTranscriptPayload {
+        request: crate::transcript::TranscriptPayloadRequest,
+    },
+    /// Occurrence-level find over the whole retained transcript — message
+    /// bodies and lazy tool fields alike — without paging history to the
+    /// client first. `request.session_id` must match the request envelope's
+    /// session.
+    FindTranscript {
+        request: crate::transcript::TranscriptFindRequest,
     },
     /// Insert the request session's rendered transcript index into the
     /// daemon-owned memory store — the canonical record provider switches,
@@ -1207,6 +1231,12 @@ pub enum ServerMessage {
         /// Supports connection-scoped task detail with snapshot handoff.
         #[serde(default)]
         task_views_available: bool,
+        /// Supports bounded transcript reads — `readTranscriptWindow`,
+        /// `readTranscriptPayload`, `findTranscript`, and compact task-view
+        /// payloads. Older daemons omit it; clients keep using
+        /// `hydrateSession`.
+        #[serde(default)]
+        transcript_windows_available: bool,
     },
     Rejected {
         message: String,
@@ -1654,6 +1684,18 @@ pub enum ResponsePayload {
     },
     Session {
         session: Option<AgentSession>,
+    },
+    /// One bounded transcript slice, as read for `readTranscriptWindow`.
+    TranscriptWindow {
+        window: crate::transcript::TranscriptWindow,
+    },
+    /// One payload byte range, as read for `readTranscriptPayload`.
+    TranscriptPayload {
+        payload: crate::transcript::TranscriptPayload,
+    },
+    /// Occurrence results for `findTranscript`.
+    TranscriptFind {
+        result: crate::transcript::TranscriptFindResult,
     },
     SessionMessageMatches {
         matches: Vec<SessionMessageMatch>,
