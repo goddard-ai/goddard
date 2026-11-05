@@ -328,7 +328,7 @@ fn employee_composer_keeps_hardware_wait_and_durable_receipt_on_restart() {
         submit(&restored, employee, submission, "Do this now").unwrap();
         assert_eq!(capture.prompts.lock().len(), 1);
         // A later autonomous requeue must lose the exemption.
-        restored.requeue_employee(employee, |_, _| {}).unwrap();
+        restored.requeue_employee(employee, None, |_, _| {}).unwrap();
         assert!(
             !restored
                 .boss

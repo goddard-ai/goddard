@@ -2573,6 +2573,7 @@ fn boss_state(
     deliverables: Vec<waku_client::boss::BossDeliverable>,
 ) -> waku_client::boss::BossState {
     waku_client::boss::BossState {
+        employee_prompt_controls: Default::default(),
         identity: waku_client::boss::BossIdentity {
             id: Uuid::new_v4(),
             name: "Boss".into(),

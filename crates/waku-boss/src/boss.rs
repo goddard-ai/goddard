@@ -627,7 +627,9 @@ impl BossService {
     }
 
     pub fn document(&self) -> BossState {
-        self.state.lock().clone()
+        let mut state = self.state.lock().clone();
+        state.refresh_employee_prompt_controls();
+        state
     }
 
     /// Whether any outcome records exist — the scheduler's cheap check
@@ -4011,6 +4013,10 @@ impl BossService {
         let now = waku_protocol::model::unix_time();
         let mut outcome = None;
         self.update(|state| {
+            if let Some(reason) = state.employee_prompt_control(session).reason {
+                bail!("{reason}");
+            }
+            crate::chains::requeue_employee_attempt(state, session)?;
             let previous = state
                 .employees
                 .iter()
@@ -8040,6 +8046,7 @@ fn fresh_state() -> BossState {
         *persona_defaults.get_mut(role) = current_persona_default_state(role);
     }
     BossState {
+        employee_prompt_controls: Default::default(),
         identity: BossIdentity {
             id,
             name: names[id.as_bytes()[0] as usize % names.len()].into(),
@@ -8076,6 +8083,7 @@ fn fresh_state() -> BossState {
 
 fn disabled_state() -> BossState {
     BossState {
+        employee_prompt_controls: Default::default(),
         identity: BossIdentity {
             id: Uuid::nil(),
             name: String::new(),

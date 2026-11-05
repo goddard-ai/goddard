@@ -6347,13 +6347,20 @@ impl Waku {
             // A scratchpad holding speech counts as draft — its send is
             // the same one Enter performs while the panel is up.
             || (interactive && self.voice_scratchpad_sendable());
+        let employee_control = interactive
+            .then(|| self.direct_employee_prompt_control())
+            .flatten();
+        let prompt_blocked = employee_control
+            .as_ref()
+            .is_some_and(|control| control.reason.is_some());
         // A typed draft always means Send — the continue affordance exists
         // only while the composer is completely empty.
-        let submit_action = if interactive && self.live_deliverable_page().is_some() {
-            ComposerSubmitAction::Send
-        } else {
-            self.composer_submit_action_for(session, preparing, has_draft)
-        };
+        let submit_action =
+            if prompt_blocked || (interactive && self.live_deliverable_page().is_some()) {
+                ComposerSubmitAction::Send
+            } else {
+                self.composer_submit_action_for(session, preparing, has_draft)
+            };
         let escape_stop_armed = session.is_some_and(|session| {
             self.escape_stop_confirmation
                 .is_armed_for(EscapeStopTarget::for_session(session), Instant::now())
@@ -6363,15 +6370,18 @@ impl Waku {
         // `enter` cannot slip past a disabled control.
         let no_providers = self.model_picker_has_no_providers();
         let detail_ready = session.is_none_or(|session| session.detail_loaded);
-        let can_send = has_draft && !no_providers && detail_ready;
+        let can_send = has_draft && !no_providers && detail_ready && !prompt_blocked;
         // Continue needs no draft — an interrupted session is exactly what
         // makes it available — but it still needs a provider to run.
-        let can_continue = !no_providers && detail_ready;
-        let (autocomplete, autocomplete_actionable) =
+        let can_continue = !no_providers && detail_ready && !prompt_blocked;
+        let (autocomplete, autocomplete_actionable) = if prompt_blocked {
+            (None, false)
+        } else {
             match self.render_composer_autocomplete_for(surface, window, cx) {
                 Some((element, actionable)) => (Some(element), actionable),
                 None => (None, false),
-            };
+            }
+        };
         let autocomplete_loading = autocomplete.is_some() && !autocomplete_actionable;
         // Files dragged in from the OS light the card up as a drop target and
         // stage as attachment chips. The wash arrives pre-blended because a
@@ -6522,7 +6532,59 @@ impl Waku {
             .when(interactive, |card| {
                 card.children(self.render_composer_float_chips(window, &theme, cx))
             })
-            .child(div().pt(px(2.0)).child(composer))
+            .child(
+                div()
+                    .pt(px(2.0))
+                    .when(prompt_blocked, |field| field.opacity(0.55))
+                    .child(composer),
+            )
+            .when_some(employee_control, |card, control| {
+                let message = control
+                    .reason
+                    .or_else(|| control.resumes.then(|| tr!("boss.direct_prompt_resumes")));
+                card.when_some(message, |card, message| {
+                    card.child(
+                        div()
+                            .px(px(14.0))
+                            .pt(px(6.0))
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_secondary)
+                            .child(message),
+                    )
+                })
+                .when_some(control.successor_id, |card, successor| {
+                    let key = self
+                        .composer_boss_command()
+                        .and_then(|command| self.composer_command_daemon(&command));
+                    card.child(
+                        div().px(px(14.0)).pt(px(4.0)).child(
+                            div()
+                                .id("message-current-employee")
+                                .track_focus(
+                                    &self.transcript_control_focus("message-current-employee", cx),
+                                )
+                                .tab_index(0)
+                                .rounded(px(8.0))
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                .child(
+                                    MenuChip::new("message-current-employee-label")
+                                        .label(tr!("boss.message_current_employee"))
+                                        .caret(false),
+                                )
+                                .on_activation(cx, move |this, _, cx| {
+                                    this.request_session_activation(
+                                        successor,
+                                        SessionActivationTransition::Inspect,
+                                        cx,
+                                    );
+                                    if let Some(key) = key {
+                                        this.set_composer_target(key, Some(successor), cx);
+                                    }
+                                }),
+                        ),
+                    )
+                })
+            })
             // The paste chip's floating editor, anchored below the
             // atom's painted label.
             .when(interactive, |card| {

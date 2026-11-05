@@ -7359,6 +7359,15 @@ impl Waku {
             // Both callers only hand employee-targeted sends here.
             boss::ComposerTarget::Boss => return,
         };
+        if let Some(reason) = self
+            .direct_employee_prompt_control()
+            .and_then(|control| control.reason)
+        {
+            self.restore_composer_submission(restore_session, submission, cx);
+            self.show_toast(reason);
+            cx.notify();
+            return;
+        }
         let interaction = boss::employee_composer_interaction(
             &command.context,
             self.state.selected_session,

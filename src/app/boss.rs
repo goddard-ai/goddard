@@ -3656,6 +3656,13 @@ impl Waku {
         ) {
             ComposerTargetPick::Unpicked => ComposerTarget::Boss,
             ComposerTargetPick::Live(employee) => ComposerTarget::Employee(employee),
+            ComposerTargetPick::Stale(employee)
+                if self.boss_ui.states.get(&key).is_some_and(|state| {
+                    state.employee_prompt_controls.contains_key(&employee)
+                }) =>
+            {
+                ComposerTarget::Employee(employee)
+            }
             ComposerTargetPick::Stale(employee) => ComposerTarget::Stale {
                 employee,
                 name: self.employee_target_name(employee),
@@ -3704,7 +3711,7 @@ impl Waku {
 
     /// Record the destination chip's pick for one boss daemon — `None`
     /// restores the boss chat as the landing.
-    fn set_composer_target(
+    pub(super) fn set_composer_target(
         &mut self,
         key: DaemonKey,
         target: Option<Uuid>,
@@ -3996,7 +4003,46 @@ impl Waku {
     /// boss command goes to the boss chat — the employee on screen or the
     /// armed deliverable riding along as its attachment — everything else to
     /// the selected task.
+    pub(super) fn direct_employee_prompt_control(
+        &self,
+    ) -> Option<waku_client::boss::EmployeePromptControl> {
+        let command = self.composer_boss_command()?;
+        let target = self.composer_target(&command);
+        let employee = match target {
+            ComposerTarget::Employee(employee) | ComposerTarget::Stale { employee, .. } => employee,
+            ComposerTarget::Boss => return None,
+        };
+        let key = self.composer_command_daemon(&command)?;
+        let state = self.boss_ui.states.get(&key)?;
+        let mut control = state
+            .employee_prompt_controls
+            .get(&employee)
+            .cloned()
+            .unwrap_or_else(|| state.employee_prompt_control(employee));
+        if let Some(adopter) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == employee)
+            .and_then(|session| match &session.workspace {
+                SessionWorkspace::Worktree { adopted_by, .. } => *adopted_by,
+                _ => None,
+            })
+        {
+            control.reason.get_or_insert_with(|| {
+                "This employee's workspace has been taken over by another employee.".into()
+            });
+            control.successor_id.get_or_insert(adopter);
+        }
+        Some(control)
+    }
+
     pub(super) fn sync_composer_placeholder(&self, cx: &mut Context<Self>) {
+        let blocked = self
+            .direct_employee_prompt_control()
+            .is_some_and(|control| control.reason.is_some());
+        self.composer
+            .update(cx, |composer, cx| composer.set_read_only(blocked, cx));
         // Big Picture writes its own hint while it holds the composer.
         if self.big_picture.is_open() {
             return;
@@ -12812,6 +12858,7 @@ mod tests {
 
     fn deliverable_state(updated_at: u64, viewed_at: Option<u64>) -> BossState {
         BossState {
+            employee_prompt_controls: Default::default(),
             identity: BossIdentity {
                 id: Uuid::new_v4(),
                 name: "Boss".into(),
@@ -14535,6 +14582,7 @@ mod tests {
 
     fn boss_state_for_queue_test() -> BossState {
         BossState {
+            employee_prompt_controls: Default::default(),
             identity: BossIdentity {
                 id: Uuid::from_u128(u128::MAX - 2),
                 name: "Boss".into(),

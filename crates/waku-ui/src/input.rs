@@ -4536,6 +4536,7 @@ pub struct ComposerSplice(pub ContentSplice);
 /// owns only the prompt policy on top.
 pub struct ComposerInput {
     input: Entity<TextInput>,
+    read_only: bool,
     /// Clone of the embedded field's handle, so `focus()` needs no `cx`.
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -4562,6 +4563,9 @@ impl ComposerInput {
         let _subscriptions = vec![
             cx.subscribe(&input, |composer, _, event: &InputEvent, cx| match event {
                 InputEvent::Submit(raw) => {
+                    if composer.read_only {
+                        return;
+                    }
                     // Whether Enter has something to send — text, staged
                     // attachments, transcript annotations — is the owner's
                     // call; the field just reports the keystroke and clears
@@ -4594,6 +4598,7 @@ impl ComposerInput {
         ];
         Self {
             input,
+            read_only: false,
             focus_handle,
             _subscriptions,
         }
@@ -4605,6 +4610,19 @@ impl ComposerInput {
         self.input
             .update(cx, |input, _| input.set_padding_x(padding));
         self
+    }
+
+    /// Keep the draft selectable while preventing editing and submission.
+    pub fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
+        if self.read_only == read_only {
+            return;
+        }
+        self.read_only = read_only;
+        self.input.update(cx, |input, cx| {
+            input.set_read_only(read_only);
+            cx.notify();
+        });
+        cx.notify();
     }
 
     /// Opt the embedded field into [`CollapsedPaste`] and re-emit it as

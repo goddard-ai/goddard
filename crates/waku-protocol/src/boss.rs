@@ -2230,6 +2230,9 @@ pub struct BossRotationStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossState {
+    /// Daemon-computed direct-prompt controls, refreshed with each snapshot.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub employee_prompt_controls: BTreeMap<Uuid, EmployeePromptControl>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub completion_reports: Vec<EmployeeCompletionReport>,
     /// Temporary user obligations and their retirement evidence, independent
@@ -2346,7 +2349,112 @@ pub struct PlanGroup<'a> {
     pub last_activity_at: u64,
 }
 
+/// Whether a human can address an employee, independent of Boss routing.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EmployeePromptControl {
+    /// A visible blocking explanation; None means direct prompts are allowed.
+    pub reason: Option<String>,
+    /// The latest admitted successor, when it is a useful alternative target.
+    pub successor_id: Option<Uuid>,
+    /// An allowed send will re-admit an expired employee.
+    pub resumes: bool,
+}
+
 impl BossState {
+    /// Compute from authoritative state, never from a previously projected control.
+    pub fn employee_prompt_control(&self, session: Uuid) -> EmployeePromptControl {
+        let employee = self
+            .employees
+            .iter()
+            .chain(self.retired_employees.iter())
+            .find(|employee| employee.session_id == session);
+        let mut control = EmployeePromptControl::default();
+        let Some(employee) = employee else {
+            control.reason = Some("This employee is no longer available.".into());
+            return control;
+        };
+        self.prompt_control_for(employee)
+    }
+
+    /// Project controls once per daemon snapshot; rendering only reads this map.
+    pub fn refresh_employee_prompt_controls(&mut self) {
+        self.employee_prompt_controls = self
+            .employees
+            .iter()
+            .chain(self.retired_employees.iter())
+            .map(|employee| (employee.session_id, self.prompt_control_for(employee)))
+            .collect();
+    }
+
+    fn prompt_control_for(&self, employee: &BossEmployee) -> EmployeePromptControl {
+        let session = employee.session_id;
+        let mut control = EmployeePromptControl::default();
+        control.resumes = employee.expired();
+        if employee.lifecycle() == EmployeeLifecycle::Finishing {
+            control.reason = Some(
+                "This employee is finishing. Wait for it to settle before sending a message."
+                    .into(),
+            );
+            return control;
+        }
+        for chain in &self.chains {
+            let attempts: Vec<_> = chain.steps.iter().flat_map(|step| &step.attempts).collect();
+            let Some(index) = attempts
+                .iter()
+                .rposition(|attempt| attempt.employee_id == Some(session))
+            else {
+                continue;
+            };
+            control.successor_id = attempts[index + 1..]
+                .iter()
+                .rev()
+                .find_map(|attempt| attempt.employee_id);
+            if control.successor_id.is_some() {
+                control.reason =
+                    Some("This employee has been replaced by a later chain attempt.".into());
+                return control;
+            }
+            if employee.expired()
+                && !(attempts[index].execution_released && attempts[index].workspace_released)
+            {
+                control.reason = Some("This employee is still releasing its execution or workspace. Wait before resuming it.".into());
+                return control;
+            }
+            if matches!(
+                chain.status,
+                crate::chains::ChainStatus::Pausing | crate::chains::ChainStatus::Cancelling
+            ) {
+                control.reason = Some(
+                    "The chain is stopping this employee. Wait before sending a message.".into(),
+                );
+                return control;
+            }
+        }
+        if employee.expired()
+            && self.employees.iter().any(|other| {
+                other.session_id != session && other.identity.name == employee.identity.name
+            })
+        {
+            control.reason = Some(
+                "This employee's name has been reused. Message the new employee instead.".into(),
+            );
+        }
+        if control.reason.is_none() && employee.expired() {
+            if self.employee_persona_id.is_none() {
+                control.reason = Some("Choose the Employee base persona in Settings → Boss → Personas before resuming this employee.".into());
+            } else if employee.persona_id == self.persona_id
+                || !self
+                    .personas
+                    .iter()
+                    .any(|persona| persona.id == employee.persona_id)
+            {
+                control.reason = Some("This employee's assigned persona is unavailable. Choose an employee persona before resuming it.".into());
+            }
+        }
+        control
+    }
+
     /// Admission snapshots this value; persona edits do not reclassify assignments.
     pub fn employee_purpose(
         &self,

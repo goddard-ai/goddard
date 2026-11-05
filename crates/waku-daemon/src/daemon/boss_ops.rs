@@ -768,6 +768,11 @@ impl WakuBackend {
                 }
                 self.boss.with_operation_lock(|| {
                     self.boss.require_control(caller, session_id)?;
+                    if matches!(&action, EmployeeControl::Prompt { .. } | EmployeeControl::Steer { .. })
+                        && let Some(reason) = self.boss.document().employee_prompt_control(session_id).reason
+                    {
+                        bail!("{reason}");
+                    }
                     if let EmployeeControl::SetPurpose { purpose } = &action {
                         self.boss.set_employee_purpose(session_id, *purpose)?;
                         return Ok(BossResult::Saved);
@@ -948,7 +953,7 @@ impl WakuBackend {
                                     self.boss.set_employee_job_title(session_id, job_title)?;
                                 }
                                 let prompt = prompt.clone();
-                                self.requeue_employee(session_id, |ticket, started| {
+                                self.requeue_employee(session_id, caller, |ticket, started| {
                                     // A session that already ran replays the
                                     // prompt as a new turn behind its parked
                                     // backlog — the transcript owns the
@@ -1056,7 +1061,7 @@ impl WakuBackend {
                     if caller.is_none() {
                         self.memory_guard.user_resume(session_id)?;
                     }
-                    self.resume_employee(session_id)?;
+                    self.resume_employee(session_id, caller)?;
                     Ok(BossResult::Saved)
                 })
             }
@@ -1067,10 +1072,10 @@ impl WakuBackend {
                     anyhow::ensure!(employee.plan_readiness.as_ref().is_some_and(|r|
                         r.phase == waku_protocol::boss::PlanReadinessPhase::Blocked), "required-plan attempt is not blocked");
                     if employee.expired() {
-                        self.resume_employee(session_id)?;
+                        self.resume_employee(session_id, caller)?;
                     } else {
                         self.retire_plan_runtime(session_id, events)?;
-                        self.requeue_employee(session_id, |ticket, _| {
+                        self.requeue_employee(session_id, caller, |ticket, _| {
                             ticket.pending_prompts.push("Retry the same required-plan binding. Preserve existing work; the daemon redelivers the complete approved revision before implementation.".into());
                         })?;
                     }

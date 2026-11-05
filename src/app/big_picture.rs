@@ -603,6 +603,7 @@ impl Waku {
             None => tr!("big_picture.new_task_placeholder"),
         };
         self.composer.update(cx, |composer, cx| {
+            composer.set_read_only(false, cx);
             composer.set_placeholder(placeholder, cx);
         });
     }

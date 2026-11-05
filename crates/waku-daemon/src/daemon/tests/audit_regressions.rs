@@ -61,7 +61,7 @@ fn audit_failed_resume_preserves_parked_prompts() {
         state.mark_session_dirty(session_id);
         backend.task_store.save(&mut state).unwrap();
     }
-    assert!(backend.resume_employee(session_id).is_err());
+    assert!(backend.resume_employee(session_id, None).is_err());
     let state = backend.task_state.lock();
     assert!(
         state

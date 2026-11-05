@@ -1,1 +1,1 @@
-- **Boss:** Sending a message to an expired employee from its page now resumes it even when the assignment's outcome already closed, instead of parking the chat on an "assignment outcome is closed" wait.
+- **Boss:** Direct messages resume expired employees, including the latest employee in a chain and assignments whose outcome already closed. When an employee cannot resume, the composer disables direct input and Send, explains why, and offers the current employee when available.

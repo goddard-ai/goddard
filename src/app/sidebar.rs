@@ -8226,6 +8226,7 @@ mod tests {
 
     fn boss_state_with_deliverables(deliverables: Vec<BossDeliverable>) -> BossState {
         BossState {
+            employee_prompt_controls: Default::default(),
             identity: BossIdentity {
                 id: Uuid::new_v4(),
                 name: "Boss".into(),

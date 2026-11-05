@@ -20542,6 +20542,25 @@ fn chains_execute_in_order_sealing_handoffs_quietly() {
         .clone();
     let attempt1 = chain.steps[1].attempts[0].clone();
     assert_eq!(Some(second.session_id), attempt1.employee_id);
+    let control = &document.employee_prompt_controls[&first.session_id];
+    assert!(control.reason.as_deref().unwrap().contains("replaced"));
+    assert_eq!(control.successor_id, Some(second.session_id));
+    let before = serde_json::to_value(&document.chains[0]).unwrap();
+    let error = backend
+        .employee_composer_prompt(
+            first.session_id,
+            Uuid::new_v4(),
+            "do more work".into(),
+            AgentPromptDelivery::Queue,
+            &EventSink::detached(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("replaced"));
+    assert!(backend.resume_employee(first.session_id, None).is_err());
+    assert_eq!(
+        serde_json::to_value(&backend.boss.document().chains[0]).unwrap(),
+        before
+    );
     let prompt = &second.ticket.as_ref().unwrap().prompt;
     assert!(prompt.contains("root cause found — fix lands next"));
     assert!(prompt.contains("the root cause you found"));
@@ -21828,7 +21847,7 @@ fn chain_controls_win_the_finish_race() {
 }
 
 #[test]
-fn chain_employees_skip_ordinary_reporting_and_resume() {
+fn chain_employees_keep_reports_quiet_and_allow_direct_resume() {
     let root = std::env::temp_dir().join(format!("waku-chain-quiet-{}", Uuid::new_v4()));
     let (backend, boss, head) = chain_backend(&root);
     let project = backend.task_state.lock().projects[0].id;
@@ -21885,7 +21904,7 @@ fn chain_employees_skip_ordinary_reporting_and_resume() {
         "no report-blocker wake for chain employees"
     );
     drop(task_state);
-    // Chain-owned resume/retry paths refuse the generic employee revive.
+    // A direct human prompt can revive the latest released chain employee.
     backend
         .finish_boss_employee(
             employee.session_id,
@@ -21893,10 +21912,80 @@ fn chain_employees_skip_ordinary_reporting_and_resume() {
             waku_protocol::boss::EmployeeSettle::TurnFinished,
         )
         .unwrap();
-    assert!(
-        backend.resume_employee(employee.session_id).is_err(),
-        "chain attempts resume through chain controls"
+    let prior = backend.boss.document().chains[0].steps[0].attempts[0].clone();
+    let submission_id = Uuid::new_v4();
+    let send = |backend: &WakuBackend| {
+        backend.employee_composer_prompt(
+            employee.session_id,
+            submission_id,
+            "continue with the supplied credentials".into(),
+            AgentPromptDelivery::Queue,
+            &EventSink::detached(),
+        )
+    };
+    let control = backend.boss.document().employee_prompt_controls[&employee.session_id].clone();
+    assert!(control.reason.is_none());
+    assert!(control.resumes);
+    let error = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id: employee.session_id,
+                action: waku_protocol::boss::EmployeeControl::Prompt {
+                    prompt: "autonomous retry".into(),
+                    delivery: None,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("chain controls"));
+    send(&backend).unwrap();
+    send(&backend).unwrap(); // The same accepted submission cannot create another attempt.
+    let document = backend.boss.document();
+    let chain = &document.chains[0];
+    assert_eq!(chain.status, ChainStatus::Working);
+    assert_eq!(chain.steps[0].attempts.len(), 2);
+    assert_eq!(
+        serde_json::to_value(&chain.steps[0].attempts[0]).unwrap(),
+        serde_json::to_value(&prior).unwrap()
     );
+    let next = chain.steps[0].attempts[1].clone();
+    assert_eq!(next.employee_id, Some(employee.session_id));
+    assert_ne!(next.id, prior.id);
+    assert_ne!(next.dispatch_id, prior.dispatch_id);
+    assert!(next.provisional_result.is_none());
+    assert!(next.sealed.is_none());
+    backend.run_summon_scheduler();
+    let document = backend.boss.document();
+    assert_eq!(document.chains[0].steps[0].attempts.len(), 2);
+    assert_eq!(
+        document.chains[0].steps[0].attempts[1].status,
+        StepStatus::Working
+    );
+    // The resumed execution records fresh evidence and advances normally.
+    backend
+        .handle_boss_operation(
+            Some(employee.session_id),
+            chain_result_op(document.chains[0].id, &next, ResultDisposition::Success),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    write_employee_final(&backend, employee.session_id, "credentials worked");
+    backend
+        .finish_boss_employee(
+            employee.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::TurnFinished,
+        )
+        .unwrap();
+    assert_eq!(backend.boss.document().chains[0].current_step, 1);
+    drop(backend);
+    let backend = reopen_backend(&root);
+    send(&backend).unwrap(); // Accepted receipts survive restart, even after a successor owns the chain.
+    let document = backend.boss.document();
+    assert_eq!(document.chains[0].current_step, 1);
+    assert_eq!(document.chains[0].steps[0].attempts.len(), 2);
     remove_tree(root);
 }
 

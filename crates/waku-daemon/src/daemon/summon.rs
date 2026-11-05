@@ -874,6 +874,13 @@ impl WakuBackend {
             state.sessions[index].has_started()
         };
         if started {
+            let document = self.boss.document();
+            let chain_context = document.chains.iter().find_map(|chain| {
+                let step = &chain.steps[chain.current_step];
+                let attempt = step.attempts.last()?;
+                (attempt.employee_id == Some(session_id) && step.attempts.len() > 1)
+                    .then(|| self.compose_chain_prompt(chain, chain.current_step, attempt, None))
+            });
             // A requeue (a setModel reticket, a prompt-parked revival) can
             // carry a selection the session record predates — the ticket is
             // the committed target, so provider/model/effort sync here and
@@ -965,6 +972,12 @@ impl WakuBackend {
                 session.provider = ticket.provider;
                 session.model = Some(ticket.model.clone());
                 session.reasoning_effort = ticket.reasoning_effort.clone();
+                if let Some(context) = chain_context {
+                    let previous = session.pending_provider_context.take().unwrap_or_default();
+                    session.pending_provider_context = Some(format!(
+                        "{previous}\n\nThe user resumed this employee. This is a new chain attempt; use the following attempt identity instead of earlier instructions.\n{context}"
+                    ));
+                }
                 // The shell keeps its last admission's terminal status past
                 // requeue — a failed verdict would ride the sidebar row
                 // through dispatch until the next prompt lands, so the
@@ -1971,6 +1984,14 @@ impl WakuBackend {
                 );
                 return Ok(false);
             }
+            if let Some(reason) = self
+                .boss
+                .document()
+                .employee_prompt_control(session_id)
+                .reason
+            {
+                bail!("{reason}");
+            }
             anyhow::ensure!(
                 employee.lifecycle() != EmployeeLifecycle::Finishing,
                 "employee is finishing; try again once it has settled"
@@ -1991,7 +2012,7 @@ impl WakuBackend {
                     Ok(true)
                 }
                 EmployeeLifecycle::Expired => {
-                    self.requeue_employee(session_id, |ticket, started| {
+                    self.requeue_employee(session_id, None, |ticket, started| {
                         if started {
                             ticket.prompt.clear();
                             ticket.pending_prompts.push(prompt.clone());
@@ -2273,7 +2294,7 @@ impl WakuBackend {
                 .employee_including_retired(session_id)
                 .and_then(|employee| employee.expiry.map(|expiry| expiry.cause))
                 .unwrap_or(waku_protocol::boss::ExpiryCause::Finished);
-            self.requeue_employee(session_id, |ticket, started| {
+            self.requeue_employee(session_id, caller, |ticket, started| {
                 ticket.provider = provider;
                 ticket.model = model_id.clone();
                 ticket.reasoning_effort = effort.clone();
@@ -2409,7 +2430,7 @@ impl WakuBackend {
         }
         let removed = self.remove_runtime(session_id, None, false);
         drop_detached(removed);
-        self.requeue_employee(session_id, |ticket, started| {
+        self.requeue_employee(session_id, caller, |ticket, started| {
             ticket.provider = provider;
             ticket.model = model_id.clone();
             ticket.reasoning_effort = effort.clone();
@@ -2434,15 +2455,26 @@ impl WakuBackend {
     pub(super) fn requeue_employee(
         &self,
         session_id: Uuid,
+        caller: Option<Uuid>,
         adjust: impl FnOnce(&mut waku_protocol::boss::SummonTicket, bool),
     ) -> anyhow::Result<()> {
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let _owner = lifecycle.lock();
         // Role validation precedes the parked-prompt move so a rejected
         // resume leaves the queue mirror untouched.
+        // Human intervention may reopen the latest attempt; autonomous senders
+        // retain chain retry limits and reconciliation requirements.
+        if caller.is_some() && chain_exec::chain_binding(&self.boss, session_id).is_some() {
+            bail!("chain attempts requeue through chain controls; direct resume requires a human");
+        }
         self.boss.ensure_employee_role(session_id)?;
-        if chain_exec::chain_binding(&self.boss, session_id).is_some() {
-            bail!("chain attempts requeue through chain controls");
+        if let Some(reason) = self
+            .boss
+            .document()
+            .employee_prompt_control(session_id)
+            .reason
+        {
+            bail!("{reason}");
         }
         let (base, started) = self.ticket_base_for(session_id)?;
         let already_transferred = self
@@ -2541,18 +2573,17 @@ impl WakuBackend {
     /// partial work before any parked instruction runs, and the parked
     /// set drains behind it in order. A live record refuses: prompts
     /// reach it directly.
-    pub(super) fn resume_employee(&self, session_id: Uuid) -> anyhow::Result<()> {
+    pub(super) fn resume_employee(
+        &self,
+        session_id: Uuid,
+        caller: Option<Uuid>,
+    ) -> anyhow::Result<()> {
         let employee = self
             .boss
             .employee_including_retired(session_id)
             .ok_or_else(|| anyhow!("{session_id} is not a Boss employee"))?;
         if !employee.expired() {
             bail!("employee {session_id} is still live — prompt it instead of resuming");
-        }
-        if chain_exec::chain_binding(&self.boss, session_id).is_some() {
-            bail!(
-                "chain attempts resume through chain controls — boss chain control resume or retry"
-            );
         }
         let expiry = employee.expiry.as_ref();
         let cause = expiry
@@ -2565,7 +2596,7 @@ impl WakuBackend {
         if let Some(question) = expiry.and_then(|expiry| expiry.pending_question.as_deref()) {
             prompt.push_str(&format!(" Your unanswered question was: \"{question}\""));
         }
-        self.requeue_employee(session_id, |ticket, _started| {
+        self.requeue_employee(session_id, caller, |ticket, _started| {
             ticket.pending_prompts.insert(0, prompt.clone());
             ticket.resume_count = ticket.resume_count.saturating_add(1);
             ticket.last_resumed_cause = Some(cause);

@@ -133,6 +133,7 @@ export type { EmployeeControl } from "./EmployeeControl";
 export type { EmployeeExpiry } from "./EmployeeExpiry";
 export type { EmployeeGoal } from "./EmployeeGoal";
 export type { EmployeeLifecycle } from "./EmployeeLifecycle";
+export type { EmployeePromptControl } from "./EmployeePromptControl";
 export type { EmployeePurpose } from "./EmployeePurpose";
 export type { EmployeeSettle } from "./EmployeeSettle";
 export type { EvalAnswer } from "./EvalAnswer";

@@ -520,7 +520,7 @@ impl WakuBackend {
     /// The assignment text a step's employee receives — its own prompt,
     /// the handoff brief the seam composed from the predecessor's sealed
     /// evidence, and the identities its structured-result write needs.
-    fn compose_chain_prompt(
+    pub(super) fn compose_chain_prompt(
         &self,
         chain: &EmployeeChain,
         step_index: usize,

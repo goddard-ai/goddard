@@ -160,6 +160,73 @@ fn new_attempt(version: u64) -> ChainAttempt {
         created_at: waku_protocol::model::unix_time(),
     }
 }
+
+/// Re-admit the latest employee without rewriting its sealed evidence. Called
+/// in the same transaction as the employee ticket; stale successor admissions
+/// subsequently fail their attempt/revision checks.
+pub(crate) fn requeue_employee_attempt(state: &mut BossState, session: Uuid) -> Result<()> {
+    for chain in &mut state.chains {
+        let Some((step_index, attempt_index)) =
+            chain
+                .steps
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(step_index, step)| {
+                    step.attempts
+                        .iter()
+                        .rposition(|attempt| attempt.employee_id == Some(session))
+                        .map(|attempt_index| (step_index, attempt_index))
+                })
+        else {
+            continue;
+        };
+        let previous = &chain.steps[step_index].attempts[attempt_index];
+        ensure!(
+            previous.execution_released && previous.workspace_released,
+            "employee must release execution and workspace before resuming"
+        );
+        // No successor was admitted. Fence any still-unbound admission before
+        // reopening this step; an in-flight host enqueue will fail its identity check.
+        for (index, step) in chain.steps.iter_mut().enumerate().skip(step_index) {
+            for pending in step.attempts.iter_mut().skip(if index == step_index {
+                attempt_index + 1
+            } else {
+                0
+            }) {
+                ensure!(
+                    pending.employee_id.is_none(),
+                    "a successor already owns this chain"
+                );
+                pending.status = StepStatus::Cancelled;
+                pending.execution_released = true;
+                pending.workspace_released = true;
+            }
+            if index > step_index {
+                step.status = StepStatus::NotStarted;
+            }
+        }
+        chain.current_step = step_index;
+        let step = &mut chain.steps[step_index];
+        let mut attempt = new_attempt(chain.definition_version);
+        attempt.employee_id = Some(session);
+        attempt.status = StepStatus::Queued;
+        step.attempts.push(attempt);
+        step.status = StepStatus::Queued;
+        chain.status = ChainStatus::Queued;
+        chain.reason = Some("employee resumed by direct prompt".into());
+        if let Some(attention) = &mut chain.attention {
+            attention.handled_at = Some(waku_protocol::model::unix_time());
+        }
+        audit(
+            chain,
+            ChainActor::Human,
+            Uuid::new_v4(),
+            "employee re-admitted by direct prompt",
+        )?;
+    }
+    Ok(())
+}
 fn unique_names(names: &[String], kind: &str) -> Result<()> {
     let mut seen = std::collections::HashSet::new();
     for name in names {
@@ -1935,6 +2002,37 @@ mod tests {
             successor_access: true,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn direct_resume_fences_an_unadmitted_successor_without_rewriting_evidence() {
+        let fixture = Fixture::new();
+        let chain = fixture.create();
+        fixture.admit(&chain);
+        fixture.packet(&chain, ResultDisposition::Success);
+        fixture.terminal(&chain, ResultDisposition::Success);
+        fixture.release(&chain);
+        fixture.seal(&chain, &verified()).unwrap();
+        let mut state = fixture.service.document();
+        let before = state.chains[0].steps[0].attempts[0].clone();
+        let pending = state.chains[0].steps[1].attempts[0].id;
+        assert_eq!(state.chains[0].current_step, 1);
+        let employee = before.employee_id.unwrap();
+        requeue_employee_attempt(&mut state, employee).unwrap();
+        let chain = &state.chains[0];
+        assert_eq!(chain.current_step, 0);
+        assert_eq!(chain.status, ChainStatus::Queued);
+        assert_eq!(chain.steps[1].attempts[0].status, StepStatus::Cancelled);
+        assert_eq!(chain.steps[0].attempts.len(), 2);
+        assert_eq!(
+            serde_json::to_value(&chain.steps[0].attempts[0]).unwrap(),
+            serde_json::to_value(before).unwrap()
+        );
+        // A host already preparing the successor cannot bind its stale admission.
+        let mut state = state.clone();
+        let chain = &mut state.chains[0];
+        let version = chain.definition_version;
+        assert!(current_attempt(chain, pending, version).is_err());
     }
 
     #[test]

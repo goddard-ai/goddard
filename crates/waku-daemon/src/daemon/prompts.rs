@@ -193,7 +193,7 @@ impl WakuBackend {
                     .iter()
                     .any(|employee| employee.session_id == target);
             if was_expired {
-                self.requeue_employee(target, |ticket, started| {
+                self.requeue_employee(target, sender, |ticket, started| {
                     if started {
                         ticket.prompt.clear();
                         ticket.pending_prompts.push(prompt.clone());

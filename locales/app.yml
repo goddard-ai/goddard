@@ -7526,3 +7526,8 @@ terminal.move_pane_out:
   en: Move Pane Out of Group
 terminal.unsplit_group:
   en: Unsplit Group
+
+boss.message_current_employee:
+  en: Message current employee
+boss.direct_prompt_resumes:
+  en: Sending a message will resume this employee.
