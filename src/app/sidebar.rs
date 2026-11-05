@@ -338,6 +338,39 @@ fn sidebar_group_header_status(
     }
 }
 
+#[derive(Default)]
+pub(super) struct SidebarEmployeeFolds {
+    expired_groups: HashSet<SidebarGroup>,
+    collapsed: HashSet<SidebarGroup>,
+}
+
+impl SidebarEmployeeFolds {
+    fn refresh(&mut self, employees: impl IntoIterator<Item = (SidebarGroup, bool)>) {
+        let mut groups = HashMap::new();
+        for (group, expired) in employees {
+            groups
+                .entry(group)
+                .and_modify(|all_expired| *all_expired &= expired)
+                .or_insert(expired);
+        }
+        let expired_groups: HashSet<_> = groups
+            .into_iter()
+            .filter_map(|(group, expired)| expired.then_some(group))
+            .collect();
+        self.collapsed
+            .retain(|group| expired_groups.contains(group));
+        // Fold only on entry into the all-expired state, so a deliberate
+        // expansion stays open until the group has live employees again.
+        self.collapsed
+            .extend(expired_groups.difference(&self.expired_groups).copied());
+        self.expired_groups = expired_groups;
+    }
+
+    fn is_collapsed(&self, group: SidebarGroup, manual: &HashSet<SidebarGroup>) -> bool {
+        manual.contains(&group) || self.collapsed.contains(&group)
+    }
+}
+
 /// One boss-employee section — Building, Helping, Waiting, or Employees — nested under its boss
 /// row: the header, the working members, then the finished tail capped by a
 /// "name finished ago" fold row. A collapsed group renders just its header —
@@ -4277,6 +4310,30 @@ impl Waku {
             fingerprint = mix_uuid(fingerprint, terminal_id);
         }
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
+            // Resolve before avatar gating: an arriving live employee must
+            // reopen its group even while its face is still being prepared.
+            self.sidebar_employee_folds.borrow_mut().refresh(
+                self.boss_ui
+                    .active
+                    .values()
+                    .flatten()
+                    .chain(self.boss_ui.recent.values().flatten())
+                    .filter(|id| {
+                        !self.pending_task_metadata.is_archiving(id)
+                            && sidebar_employee_shown(
+                                id,
+                                &self.state.sessions,
+                                &self.state.sidebar_archived_employees,
+                                self.boss_ui.working.contains(id),
+                            )
+                    })
+                    .map(|id| {
+                        (
+                            self.sidebar_employee_group(*id),
+                            self.boss_ui.expired.contains(id),
+                        )
+                    }),
+            );
             let (rows, collapsed_members, deliverables_unread) = self.sidebar_rows(dates);
             *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(rows);
             *self.sidebar_collapsed_group_members.borrow_mut() = Rc::new(collapsed_members);
@@ -4555,7 +4612,7 @@ impl Waku {
                             .or_default()
                             .extend(active.iter().chain(idle.iter()).copied());
                     }
-                    let group_collapsed = self.sidebar_collapsed_groups.contains(&group);
+                    let group_collapsed = self.sidebar_group_collapsed(group);
                     // Member rows paint only while the group is expanded —
                     // a folded roster keeps its header aggregates while a
                     // face renders. An expanded member holds its row out
@@ -5011,7 +5068,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
-        let collapsed = self.sidebar_collapsed_groups.contains(&group);
+        let collapsed = self.sidebar_group_collapsed(group);
         // A folded group keeps its hidden rows' unread signal: the same dot a
         // session or terminal row earns for an unseen completion surfaces on
         // the header. Pinned terminals stay visible through the fold, so they
@@ -6066,8 +6123,14 @@ impl Waku {
             }
             return;
         }
-        let collapsed = !self.sidebar_collapsed_groups.contains(&group);
+        let collapsed = !self.sidebar_group_collapsed(group);
         self.set_sidebar_group_collapsed(group, collapsed, cx);
+    }
+
+    fn sidebar_group_collapsed(&self, group: SidebarGroup) -> bool {
+        self.sidebar_employee_folds
+            .borrow()
+            .is_collapsed(group, &self.sidebar_collapsed_groups)
     }
 
     pub(super) fn collapse_all_sidebar_groups(&mut self, cx: &mut Context<Self>) {
@@ -6101,6 +6164,12 @@ impl Waku {
         collapsed: bool,
         cx: &mut Context<Self>,
     ) {
+        let auto_expanded = !collapsed
+            && self
+                .sidebar_employee_folds
+                .borrow_mut()
+                .collapsed
+                .remove(&group);
         let collapse_changed = if collapsed {
             self.sidebar_collapsed_groups.insert(group)
         } else {
@@ -6117,7 +6186,7 @@ impl Waku {
                     .sidebar_project_dormant_reveals
                     .remove(&group)
                     .is_some());
-        if collapse_changed || reveal_reset {
+        if collapse_changed || auto_expanded || reveal_reset {
             self.sidebar_rows_fingerprint.set(None);
             cx.notify();
         }
@@ -8732,6 +8801,56 @@ mod tests {
             assert!(rows.contains(&SidebarRow::Header(group)));
             assert!(!rows.contains(&SidebarRow::Employee(employee)));
         }
+    }
+
+    #[test]
+    fn expired_employee_groups_fold_without_overwriting_manual_choices() {
+        let group = SidebarGroup::Outcomes;
+        let mut folds = SidebarEmployeeFolds::default();
+        let mut manual = HashSet::new();
+        folds.refresh([]);
+        assert!(!folds.is_collapsed(group, &manual));
+
+        // The last live employee expires: member rows fold behind the header.
+        folds.refresh([(group, true)]);
+        let mut rows = Vec::new();
+        append_sidebar_employee_group(
+            &mut rows,
+            group,
+            waku_client::DaemonKey::Local,
+            &[],
+            &[Uuid::from_u128(1)],
+            folds.is_collapsed(group, &manual),
+            0,
+        );
+        assert_eq!(
+            rows,
+            vec![
+                SidebarRow::Header(group),
+                SidebarRow::CollapsibleGroupSpacer { collapsed: true },
+            ]
+        );
+
+        // A live arrival clears only the automatic fold.
+        folds.refresh([(group, true), (group, false)]);
+        assert!(!folds.is_collapsed(group, &manual));
+        folds.refresh([(group, true)]);
+        manual.insert(group);
+        folds.refresh([(group, true), (group, false)]);
+        assert!(folds.is_collapsed(group, &manual));
+        manual.clear();
+
+        // Opening an expired group survives unrelated snapshot refreshes.
+        folds.refresh([(group, true)]);
+        folds.collapsed.remove(&group);
+        folds.refresh([(group, true), (SidebarGroup::Employees, true)]);
+        assert!(!folds.is_collapsed(group, &manual));
+        assert!(folds.is_collapsed(SidebarGroup::Employees, &manual));
+
+        // A new live-to-expired transition folds it again.
+        folds.refresh([]);
+        folds.refresh([(group, true)]);
+        assert!(folds.is_collapsed(group, &manual));
     }
 
     #[test]

@@ -3499,6 +3499,8 @@ pub struct Waku {
     /// Groups the user has folded in either sidebar view. This is
     /// intentionally runtime-only, like transcript disclosure state.
     sidebar_collapsed_groups: HashSet<SidebarGroup>,
+    /// Automatic employee folds never become persisted manual choices.
+    sidebar_employee_folds: RefCell<sidebar::SidebarEmployeeFolds>,
     /// The Terminals group was opened by a deliberate gesture — its sidebar
     /// row or the Terminals chord — rather than unfolding to reveal a
     /// terminal selection. While held, picking a chat or a page leaves the
@@ -7775,6 +7777,7 @@ impl Waku {
                     SidebarGroup::Dormant,
                     SidebarGroup::Errands,
                 ]),
+                sidebar_employee_folds: RefCell::default(),
                 terminals_group_held_open: false,
                 focused_project: None,
                 sidebar_alt_held: false,

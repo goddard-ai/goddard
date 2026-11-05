@@ -1,0 +1,1 @@
+- Boss employee groups automatically collapse when all their employees have expired, and reopen when a live employee joins unless you collapsed the group yourself.
