@@ -1,0 +1,1 @@
+- The Git panel now shows a single base lane after landing, without leaving HEAD orange or offset from the rest of the shared history.

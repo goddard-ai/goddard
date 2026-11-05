@@ -416,6 +416,8 @@ enum CommitLane {
     /// the row's top edge.
     Head,
     Worktree,
+    /// Shared history starts at HEAD, without a worktree-lane connector.
+    BaseHead,
     /// The merge-base row: the worktree lane curves off onto the base lane's
     /// dot, which the base lane continues down from.
     FirstBase,
@@ -459,7 +461,9 @@ fn commit_graph_cell(lane: CommitLane, theme: &Theme) -> Div {
     let line = theme.border_strong;
     let (circle_x, circle_color) = match lane {
         CommitLane::Head | CommitLane::Worktree => (COMMIT_LANE_WORKTREE, theme.accent),
-        CommitLane::FirstBase | CommitLane::Base => (COMMIT_LANE_BASE, theme.text_ghost),
+        CommitLane::BaseHead | CommitLane::FirstBase | CommitLane::Base => {
+            (COMMIT_LANE_BASE, theme.text_ghost)
+        }
     };
     let mid = GIT_PANEL_COMMIT_ROW_HEIGHT / 2.0;
     let mut cell = div()
@@ -482,6 +486,9 @@ fn commit_graph_cell(lane: CommitLane, theme: &Theme) -> Div {
         }
         CommitLane::Worktree => {
             cell = cell.child(vertical(COMMIT_LANE_WORKTREE, 0.0, 0.0));
+        }
+        CommitLane::BaseHead => {
+            cell = cell.child(vertical(COMMIT_LANE_BASE, mid, 0.0));
         }
         CommitLane::FirstBase => {
             cell = cell
@@ -4944,12 +4951,13 @@ impl Waku {
             let unpushed = !panel.commits_from_base && index < ahead as usize;
             let lane = if panel.commits_from_base {
                 if index == 0 {
-                    CommitLane::Head
+                    CommitLane::BaseHead
                 } else {
                     CommitLane::Base
                 }
             } else {
                 match merge_base_index {
+                    Some(0) if index == 0 => CommitLane::BaseHead,
                     Some(base_index) if index > base_index => CommitLane::Base,
                     Some(base_index) if index == base_index && index > 0 => CommitLane::FirstBase,
                     _ if index == 0 => CommitLane::Head,
