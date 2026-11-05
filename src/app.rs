@@ -81,8 +81,8 @@ use crate::theme::{Theme, ThemeMode, hairline, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_noun, activity_row_icon, column_resize, contain_scroll,
-    file_icon, goddard_logo, icon, icon_button, icon_button_tinted, motion, progress_ring,
-    provider_color, provider_mark, rem_scale, status_color, thinking, toggle_switch,
+    file_icon, goddard_logo, goddard_logo_tinted, icon, icon_button, icon_button_tinted, motion,
+    progress_ring, provider_color, provider_mark, rem_scale, status_color, thinking, toggle_switch,
 };
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CheckForUpdates,
@@ -2613,6 +2613,9 @@ pub struct Waku {
     /// Session details currently being fetched from the daemon. Sidebar rows
     /// stay usable while the selected transcript hydrates asynchronously.
     session_hydrations: sessions::SessionHydrations,
+    /// The session+load pass whose delayed muted-logo reveal timer was
+    /// already armed — a hydration retry re-arms under its fresh stamp.
+    task_loading_reveal: Option<(Uuid, Instant)>,
     /// Unvisited runtimes in this drain round. Retained across yields so a
     /// busy selected task cannot starve background completions and approvals.
     driver_event_round: VecDeque<Uuid>,
@@ -7406,6 +7409,7 @@ impl Waku {
                 daemon_hostname,
                 daemon_lan_ip,
                 session_hydrations: sessions::SessionHydrations::default(),
+                task_loading_reveal: None,
                 driver_event_round: VecDeque::new(),
                 pending_session_cancels: HashSet::new(),
                 summon_card_cache: RefCell::new(None),

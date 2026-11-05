@@ -6,6 +6,10 @@ use super::*;
 pub(super) struct SessionHydrations {
     queued: VecDeque<Uuid>,
     running: HashSet<Uuid>,
+    /// When each pending or running hydration was enqueued — the loading
+    /// placeholder's reveal delay measures from this, so a long-running
+    /// hydration selected late shows its mark immediately.
+    started: HashMap<Uuid, Instant>,
     provider_refreshes: HashSet<Uuid>,
 }
 
@@ -14,16 +18,29 @@ impl SessionHydrations {
         self.running.contains(&session_id) || self.queued.contains(&session_id)
     }
 
+    /// When `session_id` entered the hydration set; `None` if it is not
+    /// hydrating. Queue time counts toward it — a wait is still loading.
+    pub(super) fn since(&self, session_id: Uuid) -> Option<Instant> {
+        self.started.get(&session_id).copied()
+    }
+
     fn enqueue(&mut self, session_id: Uuid, visible: bool) {
         if self.running.contains(&session_id) {
             return;
         }
+        self.started.entry(session_id).or_insert_with(Instant::now);
         if visible {
             self.queued.retain(|id| *id != session_id);
             self.queued.push_front(session_id);
         } else if !self.queued.contains(&session_id) {
             self.queued.push_back(session_id);
         }
+    }
+
+    /// A hydration attempt ended — next enqueue restarts its clock.
+    fn complete(&mut self, session_id: Uuid) {
+        self.running.remove(&session_id);
+        self.started.remove(&session_id);
     }
 
     fn next(&mut self) -> Option<Uuid> {
@@ -954,11 +971,11 @@ impl Waku {
                 .iter()
                 .any(|session| session.id == session_id && !session.detail_loaded)
             {
-                self.session_hydrations.running.remove(&session_id);
+                self.session_hydrations.complete(session_id);
                 continue;
             }
             if self.daemon_for_session(session_id).is_none() {
-                self.session_hydrations.running.remove(&session_id);
+                self.session_hydrations.complete(session_id);
                 if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id)
                 {
                     self.use_remote_host(host, cx);
@@ -983,7 +1000,7 @@ impl Waku {
                     })
                     .await;
                 let _ = waku.update(cx, |waku, cx| {
-                    waku.session_hydrations.running.remove(&session_id);
+                    waku.session_hydrations.complete(session_id);
                     match result {
                         Ok((mut session, interrupted_turn)) => {
                             waku.pending_task_metadata.observe(&mut session);

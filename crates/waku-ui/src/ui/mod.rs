@@ -120,12 +120,19 @@ pub fn file_icon(path: &'static str, size: f32) -> Img {
 /// accent — frozen in every scheme.
 #[track_caller]
 pub fn goddard_logo(theme: &Theme) -> Svg {
+    goddard_logo_tinted(theme.accent)
+}
+
+/// `goddard_logo` in an explicit tint — the task-loading placeholder flashes
+/// the mark in a muted text color rather than the accent.
+#[track_caller]
+pub fn goddard_logo_tinted(color: Hsla) -> Svg {
     svg()
         .path("icons/goddard-logo.svg")
         .w(sp(54.0))
         .h(sp(42.3))
         .flex_none()
-        .text_color(theme.accent)
+        .text_color(color)
 }
 
 /// A compact ghost icon button: the only button shape outside the composer's

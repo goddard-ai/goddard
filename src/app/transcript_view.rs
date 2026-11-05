@@ -66,6 +66,11 @@ const NEW_CONTENT_DOT_FADE: Duration = Duration::from_millis(150);
 /// jump button above them when status markers or suggestions are visible.
 /// Reserved whether or not a chip is showing so the transcript never shifts.
 pub(super) const TRANSCRIPT_SUGGESTION_CLEARANCE: f32 = 40.0;
+/// The task-loading placeholder's muted logo stays hidden this long — a
+/// hydration that finishes inside the delay never flashes the mark at all.
+const LOADING_LOGO_DELAY: Duration = Duration::from_secs(1);
+/// The revealed logo's breathing period — the other pulse loaders' cadence.
+const LOADING_LOGO_FLASH_PERIOD: Duration = Duration::from_millis(1600);
 
 #[derive(Clone, Debug)]
 struct ConversationNavigationRailSnapshot {
@@ -206,6 +211,46 @@ impl ConversationNavigationRail {
 impl Waku {
     // ── Transcript ─────────────────────────────────────────────────────────
 
+    /// The muted mark standing in while a task's detail hydrates. The pane
+    /// stays blank for [`LOADING_LOGO_DELAY`] past the hydration's start — a
+    /// load that finishes faster never flashes chrome, and a long-running
+    /// hydration selected late shows the mark on its first frame — then the
+    /// logo breathes on the shared pulse clock; the parked clock under
+    /// reduce-motion holds the pulse's midpoint, and the armed reveal timer
+    /// still unhides it on schedule.
+    fn render_loading_task_mark(
+        &mut self,
+        session_id: Uuid,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let started = self
+            .session_hydrations
+            .since(session_id)
+            .unwrap_or_else(Instant::now);
+        if self.task_loading_reveal != Some((session_id, started)) {
+            self.task_loading_reveal = Some((session_id, started));
+            if let Some(delay) = LOADING_LOGO_DELAY.checked_sub(started.elapsed()) {
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(delay).await;
+                    let _ = this.update(cx, |_, cx| cx.notify());
+                })
+                .detach();
+            }
+        }
+        let color = theme.text_tertiary;
+        motion::pulse(LOADING_LOGO_FLASH_PERIOD, move |phase| {
+            if started.elapsed() < LOADING_LOGO_DELAY {
+                div().into_any_element()
+            } else {
+                goddard_logo_tinted(color)
+                    .opacity(pulsating_between(0.3, 1.0)(phase))
+                    .into_any_element()
+            }
+        })
+        .into_any_element()
+    }
+
     pub(super) fn transcript_control_focus(
         &self,
         key: impl Into<String>,
@@ -242,9 +287,9 @@ impl Waku {
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
                 .child(if loading {
-                    tr!("sessions.loading")
+                    self.render_loading_task_mark(session_id, &theme, cx)
                 } else {
-                    tr!("sessions.load_failed")
+                    div().child(tr!("sessions.load_failed")).into_any_element()
                 })
                 .when(!loading, |view| {
                     view.child(
@@ -268,6 +313,7 @@ impl Waku {
                 })
                 .into_any_element();
         }
+        self.task_loading_reveal = None;
         self.begin_transcript_frame();
         self.prefetch_checkpoint_refs(cx);
         self.resolve_transcript_commit_refs(cx);
