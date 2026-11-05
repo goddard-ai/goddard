@@ -2670,15 +2670,13 @@ impl Waku {
         &self,
         controls: &ComposerControls,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
+        let session = controls.session?;
+        let selected_mode = session.runtime_mode;
         let theme = Theme::current(cx);
-        let session = controls.session;
-        let selected_mode = session
-            .map(|session| session.runtime_mode)
-            .unwrap_or_default();
-        let environment = session.map(AgentSession::environment).unwrap_or_default();
+        let environment = session.environment();
         let sandbox_enabled = self.state.sandbox_experiment_enabled;
-        let provider = session.map(|session| session.provider).unwrap_or_default();
+        let provider = session.provider;
         let provider_sandboxable = provider.supports_sandbox();
         let provider_cloud = provider.supports_cloud();
         let trigger = MenuChip::new(controls.chip_id("runtime-mode"))
@@ -2698,14 +2696,14 @@ impl Waku {
             .label(selected_mode.label())
             .caret(false);
         if !controls.interactive {
-            return trigger.disabled(true).into_any_element();
+            return Some(trigger.disabled(true).into_any_element());
         }
         // The environment is provisioned when the session boots — a started
         // task's section still shows where it runs, but no longer changes it.
-        let started = session.is_some_and(AgentSession::has_started);
+        let started = session.has_started();
         // Switching access posture restarts the driver, so the mode rows read
         // but don't pick while a turn is live — same gate as the model picker.
-        let busy = session.is_some_and(AgentSession::is_busy);
+        let busy = session.is_busy();
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle(RUNTIME_MODE_MENU_ID, cx);
         // One row shape for both sections: leading icon, label over a
@@ -2762,7 +2760,7 @@ impl Waku {
                     .into_any_element()
             },
         );
-        dropdown_menu(
+        Some(dropdown_menu(
             trigger
                 .selected(handle.is_open())
                 .tooltip(tr!("mode.choose"))
@@ -2864,7 +2862,7 @@ impl Waku {
                 }
                 items
             },
-        )
+        ))
     }
 
     pub(super) fn render_agent_preset_control(
@@ -6616,7 +6614,7 @@ impl Waku {
                     .child(self.render_provider_model_control(&controls, cx))
                     .children(self.render_model_traits_control(&controls, cx))
                     .children(self.render_agent_preset_control(&controls, cx))
-                    .child(self.render_access_control(&controls, cx))
+                    .children(self.render_access_control(&controls, cx))
                     .children(self.render_composer_incognito_chip(&controls, cx))
                     .children(self.render_drafts_count_button(&controls, has_draft, cx))
                     .children(self.render_goal_control(&controls, cx))
