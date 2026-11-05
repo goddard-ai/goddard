@@ -143,6 +143,7 @@ impl Waku {
                         workspace,
                         None,
                         None,
+                        None,
                         session_id,
                         next_turn_count,
                         sync_default_branch,

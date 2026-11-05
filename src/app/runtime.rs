@@ -152,6 +152,7 @@ const PROVIDER_BINARY_WAIT_POLL: Duration = Duration::from_millis(250);
 pub(super) fn start_driver(
     request: DriverStartRequest,
     cwd: PathBuf,
+    task_registration: Option<(Project, AgentSession)>,
 ) -> anyhow::Result<PreparedDriver> {
     let DriverStartRequest {
         session_id,
@@ -175,6 +176,34 @@ pub(super) fn start_driver(
         settings.computer_use_enabled,
         settings.computer_use_experiment_enabled,
     );
+    // A first prompt has only an optimistic desktop row. Register its real
+    // workspace before starting the runtime: connect_remote immediately asks
+    // for a task-view snapshot, which requires a daemon-owned row. Await the
+    // save response here; the ordinary queued UI save cannot order this.
+    if let Some((project, mut session)) = task_registration {
+        session.provider = provider;
+        session.model.clone_from(&options.model);
+        session
+            .reasoning_effort
+            .clone_from(&options.reasoning_effort);
+        session.service_tier.clone_from(&options.service_tier);
+        session.context_window.clone_from(&options.context_window);
+        match daemon.client().request(
+            Uuid::nil(),
+            Uuid::nil(),
+            waku_client::Command::SaveTaskState {
+                projects: vec![project],
+                live_session_ids: vec![session.id],
+                sessions: vec![session],
+                session_tails: Vec::new(),
+            },
+        )? {
+            waku_client::ResponsePayload::TaskStateSaved { sessions }
+                if sessions.iter().any(|session| session.id == session_id) => {}
+            _ => anyhow::bail!("the daemon did not register the task before startup"),
+        }
+    }
+
     let (event_tx, events) = driver::event_channel(event_wake);
     let handle = driver::start_remote(daemon, session_id, provider, options, event_tx)?;
     Ok(PreparedDriver {
@@ -653,6 +682,7 @@ pub(super) fn prepare_submission(
     workspace: SessionWorkspace,
     driver_start: Option<routing::SessionStartPlan>,
     turn_route: Option<routing::TurnRoutePlan>,
+    task_registration: Option<AgentSession>,
     session_id: Uuid,
     turn_count: usize,
     sync_default_branch: bool,
@@ -775,6 +805,11 @@ pub(super) fn prepare_submission(
     };
     let project_path = workspace.path().unwrap_or(&project.path);
 
+    let task_registration = task_registration.map(|mut session| {
+        session.workspace = workspace.clone();
+        (project.clone(), session)
+    });
+
     SubmissionStage::Checkpoint.report(&stage);
     // Every turn gets its own immutable starting snapshot. Reusing the prior
     // response's ending ref would attribute branch switches or terminal edits
@@ -812,11 +847,13 @@ pub(super) fn prepare_submission(
         match start {
             routing::SessionStartPlan::Direct(request) => {
                 SubmissionStage::Starting.report(&stage);
-                request.and_then(|request| start_driver(request, project_path.to_path_buf()))
+                request.and_then(|request| {
+                    start_driver(request, project_path.to_path_buf(), task_registration)
+                })
             }
             routing::SessionStartPlan::Routed(plan) => {
                 let (decision, driver) =
-                    plan.route_and_start(project_path.to_path_buf(), &stage)?;
+                    plan.route_and_start(project_path.to_path_buf(), &stage, task_registration)?;
                 route_decision = decision;
                 Ok(driver)
             }
@@ -1209,7 +1246,7 @@ fn perform_provider_rewind(
                         provider = provider.display_name()
                     ))
                 })?;
-                let prepared = start_driver(start, request.project_path.clone())?;
+                let prepared = start_driver(start, request.project_path.clone(), None)?;
                 let driver = prepared.handle.clone();
                 prepared_driver = Some(prepared);
                 driver
@@ -1340,7 +1377,7 @@ fn fork_response_with_driver(
                 provider = provider.display_name()
             ))
         })?;
-        let prepared = start_driver(start, request.source_workspace_path.clone())?;
+        let prepared = start_driver(start, request.source_workspace_path.clone(), None)?;
         let driver = prepared.handle.clone();
         prepared_driver = Some(prepared);
         driver
@@ -6644,6 +6681,7 @@ impl Waku {
                         workspace,
                         Some(routing::SessionStartPlan::Direct(driver_start)),
                         None,
+                        None,
                         session_id,
                         next_turn_count,
                         sync_default_branch,
@@ -8291,6 +8329,17 @@ impl Waku {
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
         let incognito = self.session_incognito(session_id);
+        // Incognito transcripts have no durable row after a daemon restart.
+        // Existing persisted tasks already have a view baseline; only first
+        // turns and incognito restarts need this startup registration.
+        let task_registration = session_start.as_ref().and_then(|_| {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .filter(|session| session.turns.len() == 1 || session.incognito)
+                .cloned()
+        });
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()
@@ -8301,6 +8350,7 @@ impl Waku {
                         workspace,
                         session_start,
                         turn_route,
+                        task_registration,
                         session_id,
                         next_turn_count,
                         sync_default_branch,
@@ -9354,7 +9404,7 @@ mod computer_use_launch_tests {
                 event_wake,
                 daemon,
             };
-            let error = start_driver(request, PathBuf::from("controlled-workspace"))
+            let error = start_driver(request, PathBuf::from("controlled-workspace"), None)
                 .err()
                 .expect("the controlled peer does not start a provider");
             assert!(error.to_string().contains("invalid start response"));
@@ -9382,5 +9432,141 @@ mod task_view_checkpoint_tests {
         assert!(!interrupted_planning_turn_has_no_file_changes(
             &session, turn, true
         ));
+    }
+}
+
+#[cfg(test)]
+mod task_registration_tests {
+    use super::*;
+    use waku_protocol::{ClientMessage, Command, ResponseOutcome, ResponsePayload, ServerMessage};
+
+    #[test]
+    fn first_task_view_follows_acknowledged_registration() {
+        for (provider, incognito, accept) in [
+            (ProviderKind::Codex, false, true),
+            (ProviderKind::Claude, true, true),
+            (ProviderKind::Codex, false, false),
+        ] {
+            let project = Project::from_path(PathBuf::from("controlled-workspace"));
+            let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+            session.incognito = incognito;
+            session.begin_turn("First prompt");
+            let session_id = session.id;
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap().to_string();
+            let server = std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut socket = tungstenite::accept(stream).unwrap();
+                let mut registered = false;
+                loop {
+                    let tungstenite::Message::Text(text) = socket.read().unwrap() else {
+                        continue;
+                    };
+                    let mut viewed = false;
+                    let reply = match serde_json::from_str(&text).unwrap() {
+                        ClientMessage::Hello {
+                            protocol_version, ..
+                        } => ServerMessage::Hello {
+                            protocol_version,
+                            daemon_version: "test".into(),
+                            daemon_commit: None,
+                            agent_cli_available: false,
+                            task_views_available: true,
+                        },
+                        ClientMessage::Request(request) => {
+                            let payload = match request.command {
+                                Command::GetSettings => ResponsePayload::Settings {
+                                    settings: Default::default(),
+                                },
+                                Command::SaveTaskState { sessions, .. } => {
+                                    assert_eq!(sessions.len(), 1);
+                                    assert_eq!(sessions[0].id, session_id);
+                                    assert!(sessions[0].has_started());
+                                    assert_eq!(sessions[0].provider, provider);
+                                    assert_eq!(sessions[0].incognito, incognito);
+                                    assert_eq!(
+                                        sessions[0].model.as_deref(),
+                                        Some("controlled-model")
+                                    );
+                                    registered = accept;
+                                    if accept {
+                                        ResponsePayload::TaskStateSaved { sessions }
+                                    } else {
+                                        viewed = true;
+                                        ResponsePayload::TaskStateSaved {
+                                            sessions: Vec::new(),
+                                        }
+                                    }
+                                }
+                                Command::Start { .. } => {
+                                    assert!(
+                                        registered,
+                                        "provider started before task registration"
+                                    );
+                                    ResponsePayload::Started {
+                                        supports_steer: false,
+                                        supports_user_input_actions: false,
+                                    }
+                                }
+                                Command::SetTaskView { .. } => {
+                                    assert!(registered, "task view has no registered task");
+                                    viewed = true;
+                                    ResponsePayload::Ack
+                                }
+                                other => panic!("unexpected command: {other:?}"),
+                            };
+                            ServerMessage::Response {
+                                request_id: request.request_id,
+                                outcome: ResponseOutcome::Ok { payload },
+                            }
+                        }
+                        other => panic!("unexpected client message: {other:?}"),
+                    };
+                    socket
+                        .send(tungstenite::Message::Text(
+                            serde_json::to_string(&reply).unwrap().into(),
+                        ))
+                        .unwrap();
+                    if viewed {
+                        return;
+                    }
+                }
+            });
+            let daemon = waku_client::DaemonSupervisor::connect(&address, "test".into()).unwrap();
+            let (event_wake, _) = smol::channel::bounded(1);
+            let request = DriverStartRequest {
+                session_id,
+                provider,
+                binary: ProviderBinary::Resolved("controlled-provider".into()),
+                options: DriverStartOptions {
+                    binary: PathBuf::new(),
+                    cwd: PathBuf::new(),
+                    mode: RuntimeMode::FullAccess,
+                    model: Some("controlled-model".into()),
+                    reasoning_effort: None,
+                    service_tier: None,
+                    context_window: None,
+                    agent_preset: None,
+                    computer_use_enabled: false,
+                    read_own_transcript: false,
+                    provider_cursor: None,
+                },
+                event_wake,
+                daemon,
+            };
+            let result = start_driver(request, project.path.clone(), Some((project, session)));
+            server.join().unwrap();
+            if accept {
+                result.unwrap().handle.close();
+            } else {
+                let error = result
+                    .err()
+                    .expect("a refused registration must prevent startup");
+                assert!(error.to_string().contains("did not register the task"));
+            }
+        }
     }
 }

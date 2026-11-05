@@ -87,6 +87,7 @@ impl RouteStartPlan {
         self,
         cwd: PathBuf,
         stage: &StageReporter,
+        task_registration: Option<(Project, AgentSession)>,
     ) -> anyhow::Result<(Option<RouteDecision>, PreparedDriver)> {
         SubmissionStage::Routing.report(stage);
         let routed = self.route().map(|decision| {
@@ -100,8 +101,18 @@ impl RouteStartPlan {
             // provider stands in, the way an unrouted submission would start.
             Ok(Err(_)) | Err(_) => (None, self.fallback?),
         };
+        let task_registration = task_registration.map(|(project, mut session)| {
+            if let Some(decision) = &decision {
+                session.route_decision = Some(decision.clone());
+                session.auto_route = false;
+                if session.provider != decision.target.provider {
+                    session.agent_preset = None;
+                }
+            }
+            (project, session)
+        });
         SubmissionStage::Starting.report(stage);
-        start_driver(request, cwd).map(|driver| (decision, driver))
+        start_driver(request, cwd, task_registration).map(|driver| (decision, driver))
     }
 
     fn route(&self) -> anyhow::Result<RouteDecision> {

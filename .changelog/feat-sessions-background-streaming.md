@@ -1,1 +1,1 @@
-- Reduced desktop work while tasks run out of view; opening a task loads its latest transcript while permissions, status, and completion notifications remain available in the background.
+- Reduced desktop work while tasks run out of view; opening a task loads its latest transcript while permissions, status, and completion notifications remain available. New tasks no longer show a false “task no longer exists” startup error.
