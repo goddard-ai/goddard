@@ -1,0 +1,1 @@
+- Tasks move to Today in the sidebar’s Date grouping when a reply is accepted into a running turn.

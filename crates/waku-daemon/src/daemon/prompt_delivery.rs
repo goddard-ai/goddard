@@ -814,6 +814,10 @@ pub(super) fn record_agent_steer(
         stored.hidden = hidden;
         stored.report_trigger = report_trigger;
     }
+    if !hidden {
+        session.updated_at = crate::model::unix_time();
+        session.last_reply_at = Some(session.updated_at);
+    }
     state.mark_session_dirty(session_id);
     if let Err(error) = task_store.save(&mut state) {
         eprintln!(

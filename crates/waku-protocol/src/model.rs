@@ -2993,6 +2993,9 @@ impl AgentSession {
                 prompt.report_trigger = Some(trigger);
                 self.messages.push(prompt);
                 self.updated_at = now;
+                if !hidden {
+                    self.last_reply_at = Some(now);
+                }
                 return true;
             }
             let mut prompt = Message::new_for_turn(MessageRole::User, message, active);
@@ -3008,6 +3011,9 @@ impl AgentSession {
             });
             self.messages.push(prompt);
             self.updated_at = now;
+            if !hidden {
+                self.last_reply_at = Some(now);
+            }
             return true;
         }
         if !hidden {
@@ -8872,6 +8878,7 @@ mod tests {
         let provider_turn = session.begin_provider_turn();
         session.mark_active_turn_provider_started();
         session.status = SessionStatus::Working;
+        session.last_reply_at = Some(1);
         let message_id = Uuid::new_v4();
 
         assert!(session.adopt_submitted_prompt(
@@ -8889,6 +8896,7 @@ mod tests {
         assert_eq!(prompt.turn_id, Some(provider_turn));
         assert_eq!(prompt.role, MessageRole::User);
         assert_eq!(session.status, SessionStatus::Working);
+        assert!(session.last_reply_at.unwrap() > 1);
     }
 
     fn report_trigger(employee: Uuid, kind: ReportTriggerKind) -> ReportTrigger {

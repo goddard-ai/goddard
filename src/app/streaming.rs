@@ -983,6 +983,9 @@ impl Waku {
                             .retain(|queued| queued.id != queued_id);
                     }
                     session.updated_at = unix_time();
+                    // Accepted replies refresh Date grouping even when they
+                    // join the current turn or replace a queued preview.
+                    session.last_reply_at = Some(session.updated_at);
                     Some(message_id)
                 } else {
                     None

@@ -419,9 +419,51 @@ fn record_accepted_boss_steer(
         }
     }
     session.updated_at = crate::model::unix_time();
+    session.last_reply_at = Some(session.updated_at);
     state.mark_session_dirty(session_id);
     task_store.save(&mut state)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod recency_tests {
+    use super::*;
+
+    #[test]
+    fn accepted_steer_refreshes_persisted_recency_with_or_without_a_preview() {
+        for preview in [false, true] {
+            let root = std::env::temp_dir().join(format!("steer-recency-{}", Uuid::new_v4()));
+            let store = StateStore::daemon(root.join("app.db"));
+            let mut state = PersistedState::fresh(root.join("repo"));
+            let session = &mut state.sessions[0];
+            let turn_id = session.begin_turn("first");
+            session.last_reply_at = Some(1);
+            let queued = crate::model::QueuedMessage::new("follow-up");
+            let submission_id = queued.id;
+            session.queued_messages.push(queued);
+            if preview {
+                let mut message =
+                    crate::model::Message::new(crate::model::MessageRole::User, "follow-up");
+                message.id = submission_id;
+                session.messages.push(message);
+            }
+            let session_id = session.id;
+            store.save(&mut state).unwrap();
+            let state = Mutex::new(state);
+
+            record_accepted_boss_steer(&state, &store, session_id, submission_id, "follow-up")
+                .unwrap();
+
+            let restored = store.load_session_detail(session_id).unwrap().unwrap();
+            assert!(restored.last_reply_at.unwrap() > 1);
+            assert_eq!(restored.active_turn_id(), Some(turn_id));
+            assert!(restored.queued_messages.is_empty());
+            assert_eq!(restored.messages.len(), 2);
+            assert_eq!(restored.messages[1].id, submission_id);
+            assert_eq!(restored.messages[1].turn_id, Some(turn_id));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
 }
 
 /// The generation the rotation journal currently assigns a session, for
