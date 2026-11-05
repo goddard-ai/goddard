@@ -110,6 +110,10 @@ carry the information the judgment actually needs.
   a turn, 256 KiB / ~90k chars for bulk extraction batches. Keep raw tool
   `arguments` out of state — display subjects only; arguments can carry
   file contents or secrets into a third-party request.
+- Title review and its writer share bounded original-request, current-goal,
+  and chronological recent-request context. Judge changes in product purpose,
+  not routine rebasing, merging, testing, or delivery progress; preserve the
+  recognizable subject unless the goal has genuinely changed.
 - Calibrate before shipping UI. The established pattern is shadow mode:
   log predictions and resolve them against a local journal
   (`~/.goddard/actions.jsonl` vs `~/.goddard/action-predictions.jsonl`)

@@ -1,1 +1,1 @@
-- Jev-based task title rewrites are now off by default; enable Automatic title rewrites in Settings → Jev. Provider title updates continue, and custom titles are preserved.
+- Jev title rewrites are now opt-in in Settings → Jev. When enabled, rewrites use broader task context and keep titles focused on the product goal. Provider updates continue to preserve custom titles.

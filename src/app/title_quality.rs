@@ -1,5 +1,5 @@
-//! One Jev judgment after each successful turn, then an isolated provider
-//! request to rewrite only automatic titles that are clearly confusing or noisy.
+//! Opt-in Jev review after successful turns, then an isolated provider
+//! request to keep automatic titles aligned with the task's product goal.
 
 use std::collections::BTreeMap;
 
@@ -76,23 +76,40 @@ impl Waku {
         };
         let mut state = status_markers::turn_eval_state(session, turn_id, summary.as_deref());
         state["title"] = json!(title);
-        let user_request = state["prompt"]
-            .as_str()
-            .into_iter()
-            .chain(
-                state["priorPrompts"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(serde_json::Value::as_str),
-            )
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        // Keep the product goal available after it falls out of the turn
+        // evaluator's short prior-prompt window. The writer gets this same
+        // bounded, chronological context rather than just the latest work.
+        let visible_requests = session
+            .messages
+            .iter()
+            .filter(|message| message.role == MessageRole::User && !message.hidden);
+        let request_text = |message: &Message, limit: usize| {
+            waku_protocol::model::strip_injected_prompt_blocks(&composer::atom_payload_content(
+                message.visible_content(),
+                &message.atoms,
+            ))
+            .chars()
+            .take(limit)
+            .collect::<String>()
+        };
+        let original_request = visible_requests
+            .clone()
+            .next()
+            .map(|message| request_text(message, 4_000));
+        let mut recent_requests = visible_requests.rev().take(6).collect::<Vec<_>>();
+        recent_requests.reverse();
+        let task_context = json!({
+            "originalRequest": original_request,
+            "currentGoal": session.thread_goal.as_ref().map(|goal| goal.objective.chars().take(2_000).collect::<String>()),
+            "recentRequests": recent_requests.into_iter().map(|message| request_text(message, 1_000)).collect::<Vec<_>>(),
+        });
+        let user_request = task_context.to_string();
+        state["taskContext"] = task_context;
         let completion = state["response"].as_str().unwrap_or_default().to_owned();
         let questions = BTreeMap::from([(
             QUESTION.to_owned(),
             EvalQuestion::Noul {
-                instructions: "Is the current task title confusing, misleading, generic, or noisy for the user's request and completed work? Answer true only when a clearer short title would materially help identify the task. A specific, readable title should remain unchanged.".to_owned(),
+                instructions: "Has the current title become materially misleading about the task's product goal? Use taskContext.originalRequest, currentGoal, and chronological recentRequests to distinguish a genuine change in purpose from routine progress. Preserve the title's recognizable subject when it still identifies the intended capability, fix, or user outcome. Rebasing, merging, committing, pushing, testing, cleanup, and other routine implementation or delivery steps do not justify a rename. A title centered on such steps instead of the product goal should be rewritten toward that goal. When uncertain, keep the current title.".to_owned(),
                 criteria: None,
             },
         )]);

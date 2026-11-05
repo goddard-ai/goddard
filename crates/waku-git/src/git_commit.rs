@@ -307,9 +307,9 @@ pub fn generate_session_title(
     invocation: &AgentInvocation,
 ) -> anyhow::Result<String> {
     let prompt = format!(
-        "Write a clear, specific title for this completed task. Return exactly one line, at most 80 characters, without quotes, Markdown, or a trailing period. Do not call tools.\n\nCurrent title: {}\nUser request: {}\nOutcome: {}",
+        "Write a clear, specific title for this task's product goal. Name the capability, fix, or user outcome, preserving the current title's recognizable subject unless the user's goal has genuinely changed. Do not name routine implementation or delivery steps such as rebasing, merging, committing, pushing, running tests, or cleanup. Use the original request, current goal, and chronological recent requests as the primary context; the latest outcome is supporting evidence, not the task's identity. Return exactly one line, at most 80 characters, without quotes, Markdown, or a trailing period. Do not call tools.\n\nCurrent title: {}\nTask context: {}\nLatest outcome: {}",
         current_title.chars().take(160).collect::<String>(),
-        user_request.chars().take(2_000).collect::<String>(),
+        user_request.chars().take(30_000).collect::<String>(),
         completion.chars().take(2_000).collect::<String>(),
     );
     let output = agent_oneshot_with_model(cwd, &prompt, invocation, "a task title", true)?;
