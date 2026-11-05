@@ -2758,6 +2758,15 @@ fn handle_codex_message(
         }
         method if value.get("id").is_some() && method.contains("requestApproval") => {
             let request_id = rpc_id_string(value.get("id").unwrap());
+            if method == "item/commandExecution/requestApproval"
+                && crate::agent_readonly::readonly_agent_input(&params)
+            {
+                let _ = commands.send(CommandMessage::Respond {
+                    request_id,
+                    option_id: "accept".into(),
+                });
+                return;
+            }
             let (title, detail) = approval_copy(method, &params);
             let _ = events.send(DriverEvent::Permission {
                 request_id,
@@ -3715,6 +3724,26 @@ mod tests {
                 &mut stream_state,
             );
         }
+    }
+
+    #[test]
+    fn readonly_agent_approval_bypasses_the_user() {
+        let harness = GoalHarness::new();
+        harness.handle(
+            json!({"id": "read-1", "method": "item/commandExecution/requestApproval",
+            "params": {"command": "goddard-agent history search --text 'earlier work'"}}),
+        );
+        assert!(
+            matches!(harness.command_rx.try_recv(), Ok(CommandMessage::Respond { option_id, .. }) if option_id == "accept")
+        );
+        assert!(harness.received.try_recv().is_err());
+        harness.handle(json!({"id": "write-1", "method": "item/commandExecution/requestApproval",
+            "params": {"command": "goddard-agent archive task", "reason": "goddard-agent read task"}}));
+        assert!(matches!(
+            harness.received.try_recv(),
+            Ok(DriverEvent::Permission { .. })
+        ));
+        assert!(harness.command_rx.try_recv().is_err());
     }
 
     fn goal_json() -> Value {

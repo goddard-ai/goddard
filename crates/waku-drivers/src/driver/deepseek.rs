@@ -1011,6 +1011,21 @@ fn handle_approval_request(
         .get("reason")
         .and_then(Value::as_str)
         .unwrap_or("DeepSeek Harness is asking for permission to continue");
+    if matches!(tool_name, "bash" | "shell" | "execute")
+        && crate::agent_readonly::readonly_agent_input(payload)
+    {
+        if let Err(error) = server.respond(
+            rpc_id,
+            json!({
+                "sessionId": session_id, "approvalId": approval_id, "outcome": "allowed-once",
+            }),
+        ) {
+            let _ = events.send(DriverEvent::Error(format!(
+                "DeepSeek Harness rejected a read-only approval: {error}"
+            )));
+        }
+        return;
+    }
     let event = DriverEvent::Permission {
         request_id: rpc_id.to_owned(),
         title: format!("Allow {tool_name}?"),

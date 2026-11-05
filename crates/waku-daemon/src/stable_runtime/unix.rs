@@ -1686,6 +1686,48 @@ fn project_request(
     else {
         return None;
     };
+    let readonly_agent = *class == RequestClass::Approval
+        && match shared.provider {
+            ProviderKind::Codex => {
+                subject.get("method").and_then(Value::as_str)
+                    == Some("item/commandExecution/requestApproval")
+                    && subject
+                        .get("params")
+                        .is_some_and(waku_drivers::agent_readonly::readonly_agent_input)
+            }
+            ProviderKind::Devin => {
+                subject.pointer("/toolCall/kind").and_then(Value::as_str) == Some("execute")
+                    && subject
+                        .pointer("/toolCall/rawInput")
+                        .is_some_and(waku_drivers::agent_readonly::readonly_agent_input)
+            }
+            _ => false,
+        };
+    if readonly_agent {
+        let resolution = match shared.provider {
+            ProviderKind::Codex => Some(json!({"decision": "accept"})),
+            _ => subject
+                .get("options")
+                .and_then(Value::as_array)
+                .and_then(|options| {
+                    options.iter().find(|option| {
+                        option.get("kind").and_then(Value::as_str) == Some("allow_once")
+                    })
+                })
+                .and_then(|option| option.get("optionId"))
+                .map(|id| json!({"optionId": id})),
+        };
+        if let Some(resolution) = resolution {
+            shared.command(
+                Uuid::new_v4(),
+                CanonicalAction::ResolveRequest {
+                    request_id: request_id.clone(),
+                    resolution,
+                },
+            );
+            return None;
+        }
+    }
     if *class == RequestClass::Input
         && shared.provider == ProviderKind::Devin
         && let Some(schema) = subject.get("requestedSchema")
@@ -3483,6 +3525,9 @@ for line in sys.stdin:
         emit({'method':'turn/started','params':{'threadId':'owned-thread','turn':{'id':'owned-turn'}}})
         emit({'method':'item/agentMessage/delta','params':{'threadId':'owned-thread','turnId':'owned-turn','itemId':'message-1','delta':'native text'}})
         emit({'method':'item/reasoning/textDelta','params':{'threadId':'owned-thread','turnId':'owned-turn','itemId':'reasoning-1','delta':'native reasoning'}})
+        emit({'id':'native-readonly','method':'item/commandExecution/requestApproval','params':{'threadId':'owned-thread','turnId':'owned-turn','command':'goddard-agent read task'}})
+    elif v.get('id')=='native-readonly':
+        assert v['result']=={'decision':'accept'}
         emit({'id':'native-approval','method':'item/commandExecution/requestApproval','params':{'threadId':'owned-thread','turnId':'owned-turn','command':'controlled command'}})
     elif v.get('id')=='native-approval':
         assert v['result']=={'decision':'decline'}
@@ -3841,6 +3886,29 @@ for line in sys.stdin:
                 ),
                 ("elic-2".to_string(), json!({"action":"cancel"})),
             ]
+        );
+    }
+
+    #[test]
+    fn stable_readonly_agent_approval_bypasses_ask_mode() {
+        let rig = rig(&["codex"]);
+        let (_handle, link, rx) = link(&rig, Uuid::new_v4(), None);
+        let adapter = rig.factory.for_session(link.sref().session_id).unwrap();
+        adapter.emit(ProviderEvent::RequestOpened {
+            request_id: "readonly-approval".into(),
+            class: RequestClass::Approval,
+            subject: json!({"id":"native-read", "method":"item/commandExecution/requestApproval",
+                "params":{"command":"goddard-agent read task"}}),
+            deadline_ms: None,
+        });
+        wait_until(|| !adapter.dispatched().is_empty());
+        assert!(
+            matches!(adapter.dispatched().as_slice(), [CanonicalAction::ResolveRequest { request_id, resolution }]
+            if request_id == "readonly-approval" && resolution == &json!({"decision":"accept"}))
+        );
+        assert!(
+            rx.try_iter()
+                .all(|event| !matches!(event, DriverEvent::Permission { .. }))
         );
     }
 

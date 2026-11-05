@@ -1847,6 +1847,17 @@ fn request_permission(
     }
 
     let request = value.get("request").unwrap_or(&Value::Null);
+    if request.get("tool_name").and_then(Value::as_str) == Some("Bash")
+        && request
+            .get("input")
+            .is_some_and(crate::agent_readonly::readonly_agent_input)
+    {
+        let _ = commands.send(CommandMessage::Respond {
+            request_id: request_id.to_owned(),
+            option_id: "allow".into(),
+        });
+        return;
+    }
     let tool = request
         .get("display_name")
         .or_else(|| request.get("tool_name"))
@@ -2714,6 +2725,23 @@ mod tests {
             panic!("auto modes must answer without the user");
         };
         assert_eq!(option_id, "allow");
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn readonly_agent_approval_bypasses_supervised_mode() {
+        let (events, event_rx, commands, command_rx, _, _) = harness();
+        request_permission(
+            &json!({"request_id":"read-1", "request": {
+                "tool_name":"Bash", "input":{"command":"goddard-agent boss roster"}
+            }}),
+            &events,
+            &commands,
+            false,
+        );
+        assert!(
+            matches!(command_rx.try_recv(), Ok(CommandMessage::Respond { option_id, .. }) if option_id == "allow")
+        );
         assert!(event_rx.try_recv().is_err());
     }
 

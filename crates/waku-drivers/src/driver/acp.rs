@@ -3172,6 +3172,22 @@ fn handle_permission_request(
         })
         .collect::<Vec<_>>();
 
+    if params.pointer("/toolCall/kind").and_then(Value::as_str) == Some("execute")
+        && params
+            .pointer("/toolCall/rawInput")
+            .is_some_and(crate::agent_readonly::readonly_agent_input)
+        && let Some(choice) = request
+            .options
+            .iter()
+            .find(|option| option.kind == PermissionOptionKind::AllowOnce)
+    {
+        return responder.respond(RequestPermissionResponse::new(
+            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                choice.option_id.clone(),
+            )),
+        ));
+    }
+
     if let PermissionDisposition::AutoApprove = disposition {
         let choice = request
             .options

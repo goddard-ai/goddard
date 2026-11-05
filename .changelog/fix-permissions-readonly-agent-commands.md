@@ -1,0 +1,1 @@
+- Read-only `goddard-agent` commands, including task reads, searches, and help, run without human approval prompts.

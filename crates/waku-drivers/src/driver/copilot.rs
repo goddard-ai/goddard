@@ -947,6 +947,13 @@ impl PermissionHandler for CopilotHandler {
         if data.managed_settings_enabled {
             return PermissionResult::user_not_available();
         }
+        if matches!(data.kind, Some(PermissionRequestKind::Shell))
+            && permission_string(&data, "command")
+                .as_deref()
+                .is_some_and(crate::agent_readonly::readonly_agent_command)
+        {
+            return PermissionResult::approve_once();
+        }
         let (mode, eval) = {
             let shared = self.shared.lock();
             (
