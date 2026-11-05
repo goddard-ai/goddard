@@ -2566,9 +2566,37 @@ fn agent_rename_consumes_own_task_grant_and_persists_title() {
         .unwrap()
         .title
         .clone();
+    let stale_grant = backend
+        .task_state
+        .lock()
+        .session_mut(session_id)
+        .unwrap()
+        .clone();
     backend
         .agent_rename_self(Some(session_id), &current_title, &events)
         .unwrap();
+    // A delayed client checkpoint must not restore the consumed grant,
+    // even if its wall-clock timestamp is newer and the title was unchanged.
+    for mut stale in [stale_grant.clone(), stale_grant.list_projection()] {
+        stale.updated_at += 100;
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::SaveTaskState {
+                        projects: Vec::new(),
+                        live_session_ids: vec![session_id],
+                        sessions: vec![stale],
+                        session_tails: Vec::new(),
+                    },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+    }
     assert!(
         backend
             .agent_rename_self(Some(session_id), "Unapproved title", &events)
@@ -2642,6 +2670,12 @@ fn an_ungranted_agent_rename_parks_a_request_until_answered() {
     );
     let events = EventSink::detached();
     for (title, option) in [("Fresh title", "always"), ("Next title", "once")] {
+        let stale = backend
+            .task_state
+            .lock()
+            .session_mut(session_id)
+            .unwrap()
+            .clone();
         std::thread::scope(|scope| {
             let rename =
                 scope.spawn(|| backend.agent_rename_self(Some(session_id), title, &events));
@@ -2681,6 +2715,30 @@ fn an_ungranted_agent_rename_parks_a_request_until_answered() {
             );
             assert!(matches!(rename.join().unwrap(), Ok(ResponsePayload::Ack)));
         });
+        for mut checkpoint in [stale.clone(), stale.list_projection()] {
+            checkpoint.updated_at += 100;
+            backend
+                .handle(
+                    Request {
+                        request_id: Uuid::new_v4(),
+                        session_id: Uuid::nil(),
+                        runtime_id: Uuid::nil(),
+                        command: Command::SaveTaskState {
+                            projects: Vec::new(),
+                            live_session_ids: vec![session_id],
+                            sessions: vec![checkpoint],
+                            session_tails: Vec::new(),
+                        },
+                    },
+                    EventSink::detached(),
+                    None,
+                )
+                .unwrap();
+            let mut state = backend.task_state.lock();
+            let session = state.session_mut(session_id).unwrap();
+            assert_eq!(session.title, title);
+            assert!(!session.agent_rename_allowed);
+        }
     }
     let state = backend.task_state.lock();
     let session = state

@@ -1018,7 +1018,10 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
              rename permission in its transcript, rename this task only if it has \
              substantially changed or pivoted since the current title was set. Keep \
              the title recognizable by its unique subject; describe the task's \
-             purpose, not recent steps or progress."
+             purpose, not recent steps or progress. Every rename requires human \
+             approval; without a single-use pre-approval from the user's bare \
+             `/rename` command, `rename` waits for the user to approve the proposed \
+             title. A previous approval never authorizes another rename."
     ));
     if scope.task_tools {
         instruction.push_str(&format!(
