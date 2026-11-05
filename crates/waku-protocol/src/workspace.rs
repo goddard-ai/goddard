@@ -17,6 +17,12 @@ use crate::model::{Checkpoint, ProviderKind};
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct QaConfig {
+    #[serde(default)]
+    pub primary_checkout: bool,
+    #[serde(default)]
+    pub dependencies_ready: bool,
+    #[serde(default)]
+    pub server_url: String,
     pub dev_command: String,
     pub install_command: String,
     pub branch: String,
@@ -31,6 +37,12 @@ pub struct QaConfig {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct QaCheckout {
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
+    #[serde(default)]
+    pub original_head: Option<String>,
+    #[serde(default)]
+    pub original_branch: Option<String>,
     pub base_branch: String,
     pub base_sha: String,
     pub qa_branch: String,
@@ -656,9 +668,16 @@ pub enum WorkspaceOperation {
         preferred_branch: String,
     },
     QaStart {
+        #[serde(default)]
+        primary_checkout: bool,
         #[ts(type = "string")]
         cwd: PathBuf,
         branch: String,
+    },
+    QaFinish {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        checkout: QaCheckout,
     },
     QaCheck {
         #[ts(type = "string")]

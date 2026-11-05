@@ -115,6 +115,24 @@ fn sole_parent(cwd: &Path, sha: &str, expected: &str) -> anyhow::Result<()> {
 }
 
 pub fn start(cwd: &Path, branch: &str) -> anyhow::Result<QaCheckout> {
+    start_in(cwd, branch, false)
+}
+
+pub fn start_in(cwd: &Path, branch: &str, primary: bool) -> anyhow::Result<QaCheckout> {
+    let primary_path;
+    let cwd = if primary {
+        let entries = git_stdout(cwd, &["worktree", "list", "--porcelain", "-z"])?;
+        primary_path = std::path::PathBuf::from(
+            entries
+                .split('\0')
+                .next()
+                .and_then(|line| line.strip_prefix("worktree "))
+                .context("primary checkout unavailable")?,
+        );
+        primary_path.as_path()
+    } else {
+        cwd
+    };
     ensure!(!branch.trim().is_empty(), "choose a QA branch");
     let branch = crate::review::qa_branch_checked(branch)?;
     let (base_branch, base_sha) = fetched_base(cwd)?;
@@ -148,14 +166,146 @@ pub fn start(cwd: &Path, branch: &str) -> anyhow::Result<QaCheckout> {
         .context("there are no commits waiting for QA")?;
     sole_parent(cwd, sha, &base_sha)?;
     let commit = crate::git_panel::commit(cwd, sha)?;
-    let worktree = waku_git::worktree::create(cwd, None, Some(sha), false, &[])?;
+    let session_id = Some(uuid::Uuid::new_v4());
+    let mut original_head = None;
+    let mut original_branch = None;
+    let worktree = if primary {
+        let journal = journal_path(cwd)?;
+        if journal.exists() {
+            let saved: QaCheckout = serde_json::from_slice(&std::fs::read(&journal)?)?;
+            unchanged(cwd, &saved)?;
+            ensure!(
+                saved.qa_branch == branch && saved.commit.sha == sha,
+                "finish the existing QA session before testing another commit"
+            );
+            return Ok(saved);
+        }
+        ensure!(
+            git_stdout(cwd, &["status", "--porcelain", "--untracked-files=all"])?
+                .trim()
+                .is_empty(),
+            "commit or move local changes before using this checkout for QA"
+        );
+        original_head = Some(git_stdout(cwd, &["rev-parse", "HEAD"])?.trim().to_owned());
+        original_branch = git_optional_stdout(cwd, &["symbolic-ref", "--quiet", "HEAD"])?
+            .map(|s| s.trim().to_owned());
+        let path = std::fs::canonicalize(cwd)?;
+        let checkout = QaCheckout {
+            session_id,
+            original_head: original_head.clone(),
+            original_branch: original_branch.clone(),
+            base_branch: base_branch.clone(),
+            base_sha: base_sha.clone(),
+            qa_branch: branch.clone(),
+            commit: commit.clone(),
+            worktree: waku_protocol::git::CreatedWorktree {
+                path: path.clone(),
+                name: "Primary checkout".into(),
+                lfs_skipped: false,
+            },
+        };
+        // create_new is the cross-client exclusion; persist before moving HEAD.
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&journal)?;
+        file.write_all(&serde_json::to_vec(&checkout)?)?;
+        file.sync_all()?;
+        if let Err(error) =
+            git_success(cwd, &["checkout", "--no-overwrite-ignore", "--detach", sha])
+        {
+            std::fs::remove_file(journal)?;
+            return Err(error);
+        }
+        checkout.worktree
+    } else {
+        waku_git::worktree::create(cwd, None, Some(sha), false, &[])?
+    };
     Ok(QaCheckout {
+        session_id,
+        original_head,
+        original_branch,
         base_branch,
         base_sha,
         qa_branch: branch,
         commit,
         worktree,
     })
+}
+
+fn journal_path(cwd: &Path) -> anyhow::Result<std::path::PathBuf> {
+    let path = git_stdout(cwd, &["rev-parse", "--absolute-git-dir"])?;
+    Ok(std::path::PathBuf::from(path.trim()).join("goddard-qa-checkout.json"))
+}
+
+/// Return a borrowed checkout only when its tested identity is still intact.
+pub fn finish(cwd: &Path, checkout: &QaCheckout) -> anyhow::Result<()> {
+    if let Some(head) = &checkout.original_head {
+        let journal = journal_path(cwd)?;
+        let saved = if journal.exists() {
+            Some(serde_json::from_slice::<QaCheckout>(&std::fs::read(
+                &journal,
+            )?)?)
+        } else {
+            None
+        };
+        if let Some(saved) = &saved {
+            ensure!(
+                saved.commit.sha == checkout.commit.sha
+                    && saved.original_head == checkout.original_head
+                    && saved.original_branch == checkout.original_branch
+                    && saved.session_id == checkout.session_id,
+                "QA recovery identity changed"
+            );
+        }
+        ensure!(
+            std::fs::canonicalize(cwd)? == std::fs::canonicalize(&checkout.worktree.path)?,
+            "QA checkout identity changed"
+        );
+        // A crash after restoring HEAD but before clearing the journal is retryable.
+        let current_branch = git_optional_stdout(cwd, &["symbolic-ref", "--quiet", "HEAD"])?
+            .map(|s| s.trim().to_owned());
+        if git_stdout(cwd, &["rev-parse", "HEAD"])?.trim() == head
+            && current_branch == checkout.original_branch
+        {
+            ensure!(
+                git_stdout(cwd, &["status", "--porcelain", "--untracked-files=all"])?
+                    .trim()
+                    .is_empty(),
+                "restored checkout has changes; preserve it for recovery"
+            );
+            if saved.is_some() {
+                std::fs::remove_file(journal)?;
+            }
+            return Ok(());
+        }
+        ensure!(
+            saved.is_some(),
+            "QA recovery record missing; checkout preserved"
+        );
+        unchanged(cwd, checkout)?;
+        if let Some(branch) = &checkout.original_branch {
+            ensure!(
+                git_stdout(cwd, &["rev-parse", branch])?.trim() == head,
+                "original branch moved; checkout preserved for recovery"
+            );
+            let name = branch
+                .strip_prefix("refs/heads/")
+                .context("invalid original branch")?;
+            git_success(cwd, &["checkout", "--no-overwrite-ignore", name])?;
+        } else {
+            git_success(
+                cwd,
+                &["checkout", "--no-overwrite-ignore", "--detach", head],
+            )?;
+        }
+        std::fs::remove_file(journal)?;
+    } else {
+        unchanged(cwd, checkout)?;
+        waku_git::worktree::remove(cwd, false)?;
+    }
+    Ok(())
 }
 
 /// Check the tested worktree, not another checkout of the project.
@@ -265,6 +415,49 @@ mod tests {
         );
         git(&repo, &["checkout", "-b", "dev"]);
         Fixture { root, repo, remote }
+    }
+    #[test]
+    fn borrowed_checkout_restores_and_preserves_local_work() {
+        let f = fixture();
+        let first = commit(&f.repo, "first");
+        let original = commit(&f.repo, "later");
+        fs::write(f.repo.join("local-change"), "keep").unwrap();
+        assert!(start_in(&f.repo, "dev", true).is_err());
+        fs::remove_file(f.repo.join("local-change")).unwrap();
+        let secondary = f.root.join("secondary");
+        git(
+            &f.repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                secondary.to_str().unwrap(),
+                "dev",
+            ],
+        );
+        fs::write(f.repo.join(".git/info/exclude"), ".qa-cache\n").unwrap();
+        fs::write(f.repo.join(".qa-cache"), "reused build output").unwrap();
+        let q = start_in(&secondary, "dev", true).unwrap();
+        assert_eq!(q.worktree.path, fs::canonicalize(&f.repo).unwrap());
+        assert_eq!(
+            fs::read_to_string(f.repo.join(".qa-cache")).unwrap(),
+            "reused build output"
+        );
+        assert_eq!(q.commit.sha, first);
+        assert_eq!(q.original_head.as_deref(), Some(original.as_str()));
+        assert_eq!(
+            start_in(&f.repo, "dev", true).unwrap().original_head,
+            q.original_head
+        );
+        fs::write(f.repo.join("correction"), "keep").unwrap();
+        assert!(finish(&f.repo, &q).is_err());
+        assert!(journal_path(&f.repo).unwrap().exists());
+        fs::remove_file(f.repo.join("correction")).unwrap();
+        finish(&f.repo, &q).unwrap();
+        finish(&f.repo, &q).unwrap(); // Retrying after the journal was cleared is safe.
+        assert_eq!(git(&f.repo, &["branch", "--show-current"]).trim(), "dev");
+        assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]).trim(), original);
+        assert!(!journal_path(&f.repo).unwrap().exists());
     }
     #[test]
     fn local_queue_promotes_only_the_tested_commit_and_retries_safely() {

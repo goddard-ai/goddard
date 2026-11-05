@@ -79,9 +79,17 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
         } => WorkspaceResult::QaDefaults {
             config: waku_vcs::qa::defaults(&cwd, &preferred_branch)?,
         },
-        WorkspaceOperation::QaStart { cwd, branch } => WorkspaceResult::QaStarted {
-            checkout: waku_vcs::qa::start(&cwd, &branch)?,
+        WorkspaceOperation::QaStart {
+            cwd,
+            branch,
+            primary_checkout,
+        } => WorkspaceResult::QaStarted {
+            checkout: waku_vcs::qa::start_in(&cwd, &branch, primary_checkout)?,
         },
+        WorkspaceOperation::QaFinish { cwd, checkout } => {
+            waku_vcs::qa::finish(&cwd, &checkout)?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::QaCheck { cwd, checkout } => {
             waku_vcs::qa::unchanged(&cwd, &checkout)?;
             WorkspaceResult::Ack

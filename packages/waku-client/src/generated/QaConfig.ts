@@ -4,7 +4,7 @@ import type { ProviderKind } from "./ProviderKind";
 /**
  * Confirmed commands for a project's local QA sessions.
  */
-export type QaConfig = { devCommand: string, installCommand: string, branch: string,
+export type QaConfig = { primaryCheckout: boolean, dependenciesReady: boolean, serverUrl: string, devCommand: string, installCommand: string, branch: string,
 /**
  * None inherits the main window's last-used provider and model at start.
  */

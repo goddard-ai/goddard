@@ -6164,12 +6164,18 @@ mod tests {
             branch: "dev".into(),
             provider: Some(ProviderKind::Claude),
             model: Some("qa-test-model".into()),
+            primary_checkout: true,
+            dependencies_ready: true,
+            server_url: "http://localhost:3000".into(),
         };
         let record = QaSessionRecord {
             project_id,
             session_id,
             config: config.clone(),
             checkout: QaCheckout {
+                session_id: Some(session_id),
+                original_head: Some("original".into()),
+                original_branch: Some("refs/heads/dev".into()),
                 base_branch: "trunk".into(),
                 base_sha: "base".into(),
                 qa_branch: "dev".into(),
@@ -6203,6 +6209,17 @@ mod tests {
             "reviewed"
         );
         assert_eq!(restored.qa_sessions[&session_id].checkout.base_sha, "base");
+        assert_eq!(
+            restored.qa_sessions[&session_id]
+                .checkout
+                .original_head
+                .as_deref(),
+            Some("original")
+        );
+        assert_eq!(
+            restored.qa_sessions[&session_id].checkout.session_id,
+            Some(session_id)
+        );
         assert_eq!(restored.qa_sessions[&session_id].project_id, project_id);
         assert_eq!(restored.qa_sessions[&session_id].config, config);
         assert!(restored.qa_session_ids.contains(&session_id));

@@ -3363,6 +3363,7 @@ fn workspace_operation_kind(operation: &WorkspaceOperation) -> &'static str {
         WorkspaceOperation::ResolveReferenceFile { .. } => "resolveReferenceFile",
         WorkspaceOperation::QaDefaults { .. } => "qaDefaults",
         WorkspaceOperation::QaStart { .. } => "qaStart",
+        WorkspaceOperation::QaFinish { .. } => "qaFinish",
         WorkspaceOperation::QaCheck { .. } => "qaCheck",
         WorkspaceOperation::QaPromote { .. } => "qaPromote",
         WorkspaceOperation::ReviewQueue { .. } => "reviewQueue",
