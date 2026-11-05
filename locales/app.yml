@@ -4454,6 +4454,8 @@ background.description:
   en: Inspect agent-started processes and subagents
 background.processes:
   en: Background processes
+background.exited_processes:
+  en: Exited processes
 background.agents:
   en: Subagents
 background.process:

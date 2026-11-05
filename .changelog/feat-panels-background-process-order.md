@@ -1,0 +1,1 @@
+- Background processes now show active processes first and at most five exited processes in the dropdown and tab, with an “Exited processes” heading in the tab.

@@ -3,6 +3,7 @@ use crate::app::sessions::CANCEL_DRAIN_TIMEOUT;
 
 const MAX_BACKGROUND_OUTPUT_BYTES: usize = 512 * 1024;
 const MAX_SETTLED_BACKGROUND_ITEMS: usize = 24;
+const MAX_VISIBLE_EXITED_PROCESSES: usize = 5;
 const OUTPUT_CACHE_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 /// How long a parked session keeps waiting for its provider's wake after the
 /// last detached work settled. Claude re-enters the model a few seconds after
@@ -395,10 +396,24 @@ impl BackgroundWorkRegistry {
     }
 
     fn ordered_items(&self) -> Vec<&BackgroundWorkItem> {
-        self.order
-            .iter()
-            .rev()
-            .filter_map(|key| self.items.get(key))
+        let items = || {
+            self.order
+                .iter()
+                .rev()
+                .filter_map(|key| self.items.get(key))
+        };
+        // Keep subagents in their existing order, and retain older process
+        // output in the registry even when it is hidden from both surfaces.
+        let is_exited_process = |item: &&BackgroundWorkItem| {
+            item.key.kind != BackgroundWorkKind::Subagent && !item.status.is_live()
+        };
+        items()
+            .filter(|item| !is_exited_process(item))
+            .chain(
+                items()
+                    .filter(is_exited_process)
+                    .take(MAX_VISIBLE_EXITED_PROCESSES),
+            )
             .collect()
     }
 
@@ -1489,8 +1504,8 @@ impl Waku {
         let items = registry
             .map(BackgroundWorkRegistry::ordered_items)
             .unwrap_or_default();
-        // The keyed item expands; if it left the registry, the newest
-        // remaining one stands in rather than leaving an empty pane.
+        // The keyed item expands; if it is no longer visible, the first
+        // visible one stands in rather than leaving an empty pane.
         let expanded = items.iter().position(|item| item.key == *key).unwrap_or(0);
         let Some(item) = items.get(expanded).copied() else {
             return div()
@@ -1521,7 +1536,21 @@ impl Waku {
             .unwrap_or_default();
         let accordion = items.len() > 1;
         let mut stack = div().w_full().flex().flex_col().gap(px(8.0));
+        let mut exited_heading_shown = false;
         for entry in items {
+            if !exited_heading_shown
+                && entry.key.kind != BackgroundWorkKind::Subagent
+                && !entry.status.is_live()
+            {
+                stack = stack.child(
+                    div()
+                        .mt(px(4.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("background.exited_processes")),
+                );
+                exited_heading_shown = true;
+            }
             if entry.key == item.key {
                 let output = registry
                     .and_then(|registry| registry.rendered_output.get(&entry.key))
@@ -2492,6 +2521,65 @@ mod tests {
         );
         item.background = background;
         item
+    }
+
+    #[test]
+    fn visible_processes_keep_all_active_before_five_newest_exited() {
+        use BackgroundWorkStatus::*;
+
+        let mut registry = BackgroundWorkRegistry::default();
+        assert!(registry.ordered_items().is_empty());
+        for (id, status) in [
+            ("starting", Starting),
+            ("running", Running),
+            ("monitoring", Monitoring),
+            ("stopping", Stopping),
+            ("running-2", Running),
+            ("running-3", Running),
+            ("exit-0", Completed),
+            ("exit-1", Failed),
+            ("exit-2", Stopped),
+            ("exit-3", Lost),
+            ("exit-4", Completed),
+            ("exit-5", Failed),
+            ("exit-6", Stopped),
+        ] {
+            registry.upsert(item(id, status, true));
+        }
+        let mut agent = item("agent", Completed, true);
+        agent.key.kind = BackgroundWorkKind::Subagent;
+        registry.upsert(agent);
+
+        let visible_ids = |registry: &BackgroundWorkRegistry| {
+            registry
+                .ordered_items()
+                .iter()
+                .map(|item| item.key.provider_id.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            visible_ids(&registry),
+            [
+                "agent",
+                "running-3",
+                "running-2",
+                "stopping",
+                "monitoring",
+                "running",
+                "starting",
+                "exit-6",
+                "exit-5",
+                "exit-4",
+                "exit-3",
+                "exit-2",
+            ]
+        );
+        // Hiding older exits does not discard their output or prevent a
+        // provider update from making one visible again as active work.
+        assert_eq!(registry.items.len(), 14);
+        registry.upsert(item("exit-0", Running, true));
+        assert_eq!(visible_ids(&registry)[7], "exit-0");
+        assert_eq!(registry.counts(), (7, 0));
     }
 
     #[test]
