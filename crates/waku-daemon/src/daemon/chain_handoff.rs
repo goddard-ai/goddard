@@ -1069,6 +1069,19 @@ impl WakuBackend {
             .employee_including_retired(root)
             .ok_or_else(|| anyhow!("repair root ticket is missing"))?
             .supervisor_id;
+        // The supervisor is a principal, not a session id: a rotated Boss
+        // generation and its planning sessions admit repairs under new ids
+        // that answer to the same supervisor. Employee-supervised repairs
+        // keep exact identity.
+        let supervisor_lineage = self.boss_lineage_sessions(supervisor);
+        let boss_supervised =
+            supervisor_lineage.len() > 1 || self.boss.is_boss_principal(supervisor);
+        let same_supervisor = |candidate: Uuid| {
+            candidate == supervisor
+                || (boss_supervised
+                    && (supervisor_lineage.contains(&candidate)
+                        || self.boss.is_boss_principal(candidate)))
+        };
         ensure!(
             state
                 .sessions
@@ -1128,19 +1141,28 @@ impl WakuBackend {
                         .assignment
                         .as_ref()
                         .is_some_and(|assignment| assignment.outcome_id == chain.request.outcome_id)
-                        && employee.supervisor_id == supervisor
-                        && dunce::canonicalize(&ticket.project)
-                            .is_ok_and(|path| dunce::canonicalize(&project.path)
-                                .is_ok_and(|project| path == project))
-                        && ticket.outcome_id == Some(chain.request.outcome_id)
+                        && ticket.outcome_id == Some(chain.request.outcome_id),
+                    "repair owner is not assigned to this chain outcome"
+                );
+                ensure!(
+                    same_supervisor(employee.supervisor_id),
+                    "repair owner answers to a different supervisor"
+                );
+                ensure!(
+                    dunce::canonicalize(&ticket.project)
+                        .is_ok_and(|path| dunce::canonicalize(&project.path)
+                            .is_ok_and(|project| path == project))
                         && ticket.workspace == Some(AgentWorkspace::Adopt)
                         && ticket
                             .adopt_worktree
                             .as_ref()
                             .is_some_and(|path| dunce::canonicalize(path)
-                                .is_ok_and(|path| path == workspace))
-                        && self.chain_binding(current).is_none(),
-                    "repair owner is unrelated to this chain outcome"
+                                .is_ok_and(|path| path == workspace)),
+                    "repair owner ticket did not adopt this chain workspace"
+                );
+                ensure!(
+                    self.chain_binding(current).is_none(),
+                    "repair owner is bound to a chain attempt"
                 );
             }
             owners.push(current);
@@ -1998,6 +2020,15 @@ mod tests {
     /// Build real managed adoption edges without starting a provider. Tickets and
     /// expired employee records use the same persistence APIs as normal admission.
     fn repair_fixture() -> (Fixture, EmployeeChain, PathBuf, String, Vec<Uuid>) {
+        repair_fixture_with(|_| None)
+    }
+
+    /// `repair_supervisor` overrides each non-root owner's recorded
+    /// supervisor — Boss principal sessions legitimately differ from the
+    /// failed attempt's across rotations and planning sessions.
+    fn repair_fixture_with(
+        repair_supervisor: impl Fn(usize) -> Option<Uuid>,
+    ) -> (Fixture, EmployeeChain, PathBuf, String, Vec<Uuid>) {
         use waku_protocol::boss::{Assignment, EmployeeGoal, EmployeeLifecycle, SummonTicket};
         let fixture = Fixture::new();
         let base = git(&fixture.repo, &["rev-parse", "HEAD"]);
@@ -2046,6 +2077,8 @@ mod tests {
             if index == 0 {
                 employee.session_id = root;
                 employee.identity.id = root;
+            } else if let Some(override_supervisor) = repair_supervisor(index) {
+                employee.supervisor_id = override_supervisor;
             }
             employee.set_lifecycle(EmployeeLifecycle::Expired, 1);
             employee.ticket = Some(
@@ -2336,6 +2369,72 @@ mod tests {
             before
         );
         assert_eq!(git(&workspace, &["status", "--porcelain"]), "");
+    }
+
+    /// A repair admitted by a later Boss generation or a planning session
+    /// still answers to the step's supervisor — the recorded supervisor id a
+    /// rotation stranded cannot stand in for the principal. Supervisors
+    /// outside the Boss principal still refuse.
+    #[test]
+    fn retry_repair_lineage_admits_repairs_across_boss_principal_sessions() {
+        let rotated = Uuid::new_v4();
+        let planning = Uuid::new_v4();
+        let (fixture, chain, _workspace, repaired, owners) =
+            repair_fixture_with(|index| match index {
+                1 => Some(rotated),
+                _ => Some(planning),
+            });
+        let root_supervisor = fixture
+            .backend
+            .boss
+            .employee(owners[0])
+            .unwrap()
+            .supervisor_id;
+        let mut journal = waku_boss::boss_rotation::RotationJournal {
+            active_session_id: Some(root_supervisor),
+            ..Default::default()
+        };
+        journal
+            .begin(Uuid::new_v4(), root_supervisor, rotated, 1)
+            .unwrap();
+        journal.commit(2).unwrap();
+        journal
+            .persist(&fixture.backend.boss_journal_path())
+            .unwrap();
+        fixture
+            .backend
+            .boss
+            .add_plan(waku_protocol::boss::BossPlan {
+                id: Uuid::new_v4(),
+                session_id: planning,
+                plan_file: "plans/repair.md".into(),
+                idea: "repair plan".into(),
+                finalized_at: None,
+                approved_revisions: Vec::new(),
+                items: Vec::new(),
+                outcome: None,
+                history: Vec::new(),
+            })
+            .unwrap();
+        let proof = fixture
+            .backend
+            .chain_retry_verification(chain.id, &repaired)
+            .unwrap()
+            .unwrap();
+        assert_eq!(proof.workspace_lineage.as_ref().unwrap().owners, owners);
+
+        // A supervisor outside the Boss principal still refuses.
+        let (fixture, chain, _workspace, repaired, _owners) =
+            repair_fixture_with(|index| (index == 1).then(Uuid::new_v4));
+        let error = fixture
+            .backend
+            .chain_retry_verification(chain.id, &repaired)
+            .err()
+            .unwrap();
+        assert!(
+            error.to_string().contains("different supervisor"),
+            "error: {error:#}"
+        );
     }
 
     #[test]

@@ -249,8 +249,10 @@ An explicit committed-workspace retry can reconcile a clean descendant repair
 in the original managed checkout after out-of-chain prerequisite repairs.
 The host follows persisted `adopted_by` edges from a released step attempt;
 every repair owner must be expired, free of runtime/admission claims, and
-linked to the same outcome and supervisor. Every session and adoption ticket
-must retain the accepted project and exact workspace. Missing records,
+linked to the same outcome and supervising principal — a rotated Boss
+generation or one of its planning sessions counts as the failed attempt's
+supervisor, while any other supervisor refuses. Every session and adoption
+ticket must retain the accepted project and exact workspace. Missing records,
 foreign owners, cycles, duplicate claims, and uncertain effects refuse recovery.
 
 The retry stores a typed `retryWorkspaceLineage` on its new attempt. Dispatch

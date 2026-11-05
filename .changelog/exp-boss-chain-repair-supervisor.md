@@ -1,0 +1,1 @@
+- **Boss:** retrying a paused dependency chain after released prerequisite repairs no longer rejects repairs the Boss admitted under a rotated chat generation or a planning session — the recovery check compares the supervising principal, not the stranded session id, and now names which ownership fact blocked the retry.
