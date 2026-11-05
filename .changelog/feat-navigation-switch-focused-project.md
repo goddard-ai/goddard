@@ -1,0 +1,1 @@
+- Switch focused projects directly with “Focus project…” in the command palette while “Unfocus project” remains available.

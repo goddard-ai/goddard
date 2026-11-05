@@ -3226,24 +3226,26 @@ impl Waku {
             .iter()
             .any(|project| !project.is_projectless())
         {
-            let focused = self.focused_project_id().is_some();
             commands.push(CommandPaletteItem::command(
                 PaletteSection::Commands,
-                if focused {
-                    tr!("command_palette.unfocus_project")
-                } else {
-                    tr!("command_palette.focus_project")
-                },
+                tr!("command_palette.focus_project"),
                 "icons/target.svg",
                 None,
-                if focused {
-                    PaletteAction::UnfocusProject
-                } else {
-                    PaletteAction::OpenFocusProject
-                },
-                "focus project filter sidebar only tasks unfocus show all projects",
+                PaletteAction::OpenFocusProject,
+                "focus project filter sidebar only tasks switch",
                 next(),
             ));
+            if self.focused_project_id().is_some() {
+                commands.push(CommandPaletteItem::command(
+                    PaletteSection::Commands,
+                    tr!("command_palette.unfocus_project"),
+                    "icons/target.svg",
+                    None,
+                    PaletteAction::UnfocusProject,
+                    "unfocus project filter sidebar tasks show all projects",
+                    next(),
+                ));
+            }
         }
         if self.state.github.inbox_enabled {
             commands.push(CommandPaletteItem::command(
