@@ -2582,7 +2582,7 @@ impl Waku {
         turn_id: Uuid,
         message_index: usize,
         theme: &Theme,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let session = self.transcript_display_session();
@@ -2612,7 +2612,7 @@ impl Waku {
         let force_visible = self
             .hovered_response_row
             .is_some_and(|(hovered_turn_id, _)| hovered_turn_id == turn_id);
-        if let Some(markers) = self.render_status_marker_row(turn_id, theme) {
+        if let Some(markers) = self.render_status_marker_row(turn_id, theme, window, cx) {
             column = column.child(div().w_full().mb(px(3.0)).child(markers));
         }
         column

@@ -961,6 +961,71 @@ fn status_marker_chip(marker: &StatusMarker, probability: f64, theme: &Theme) ->
         )
 }
 
+/// Reserve the same line before and after Jev answers. Overflow scrolls
+/// horizontally so neither narrow windows nor late verdicts move the reply.
+fn status_marker_slot(
+    turn_id: Uuid,
+    evaluation: Option<&Evaluation>,
+    theme: &Theme,
+    scroll: &ScrollHandle,
+    focus: &FocusHandle,
+) -> Div {
+    let mut cleared = evaluation.map(cleared_markers).unwrap_or_default();
+    cleared.sort_by(|(_, left), (_, right)| right.total_cmp(left));
+    let has_markers = !cleared.is_empty();
+    let keyboard_scroll = scroll.clone();
+    div()
+        .w_full()
+        .min_w_0()
+        .h(px(18.0))
+        .flex_none()
+        .relative()
+        .when(has_markers, |slot| {
+            slot.child(
+                div()
+                    .id(SharedString::from(format!("turn-status-markers-{turn_id}")))
+                    .size_full()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .track_focus(focus)
+                    .tab_index(0)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .restrict_scroll_to_axis()
+                    .overflow_x_scroll()
+                    .track_scroll(scroll)
+                    .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                        if event.keystroke.modifiers.modified() {
+                            return;
+                        }
+                        let max = keyboard_scroll.max_offset().x;
+                        let offset = keyboard_scroll.offset();
+                        let x = match event.keystroke.key.as_str() {
+                            "left" => offset.x + px(80.0),
+                            "right" => offset.x - px(80.0),
+                            "home" => Pixels::ZERO,
+                            "end" => -max,
+                            _ => return,
+                        };
+                        keyboard_scroll.set_offset(point(x.clamp(-max, Pixels::ZERO), offset.y));
+                        cx.stop_propagation();
+                        window.refresh();
+                    })
+                    .children(cleared.into_iter().map(|(marker, probability)| {
+                        status_marker_chip(marker, probability, theme)
+                            .flex_none()
+                            .whitespace_nowrap()
+                    })),
+            )
+            .child(scrollbar::edge_fade(
+                scroll.clone(),
+                scrollbar::FadeEdge::Right,
+                theme.surface,
+            ))
+        })
+}
+
 /// The actionable turn marker shown in the sidebar, using the same icon,
 /// label, and tone as its transcript chip.
 pub(super) struct SidebarStatusMarker {
@@ -1334,6 +1399,7 @@ impl Waku {
     /// footer simply never gains chips, matching every other eval fallback.
     pub(super) fn drain_status_marker_events(&mut self) -> bool {
         let mut changed = false;
+        let mut changed_turns = BTreeSet::new();
         while let Ok((turn_id, result)) = self.status_marker_events.try_recv() {
             self.status_marker_in_flight.remove(&turn_id);
             match result {
@@ -1350,6 +1416,9 @@ impl Waku {
                             continue;
                         }
                         let session_id = session.id;
+                        if self.state.selected_session == Some(session_id) {
+                            changed_turns.insert(turn_id);
+                        }
                         let actions = suggested_actions(&evaluation).into_iter().filter(|action| {
                             !self.state.suggested_prompt_conditions.contains_key(action.canned_id())
                                 || matches!(evaluation.answers.get(&format!("suggest-prompt-{}", action.canned_id())),
@@ -1375,6 +1444,28 @@ impl Waku {
                 Err(error) => {
                     eprintln!("Goddard: status marker evaluation failed: {error}");
                 }
+            }
+        }
+        if !changed_turns.is_empty() {
+            // Verdicts change existing footer content, not row structure.
+            // Remeasure once per affected row without replaying the landing.
+            self.sync_transcript_rows();
+            let footers = self
+                .transcript_row_kinds
+                .borrow()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, kind)| match kind {
+                    TranscriptRowKind::ResponseFooter(turn_id, _)
+                        if changed_turns.contains(turn_id) =>
+                    {
+                        Some(index)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            for index in footers {
+                self.remeasure_transcript_rows(index..index + 1);
             }
         }
         changed
@@ -1489,31 +1580,31 @@ impl Waku {
         &self,
         turn_id: Uuid,
         theme: &Theme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self
-            .selected_session()
-            .is_some_and(|session| self.session_is_boss_owned(session))
+        if !self.state.status_markers_enabled
+            || self.selected_session().is_some_and(|session| {
+                self.session_is_boss_owned(session) || self.session_is_employee(session)
+            })
         {
             return None;
         }
-        let mut cleared = cleared_markers(self.turn_status_markers.get(&turn_id)?);
-        // Keep equal scores in their existing order; sidebar priority is independent.
-        cleared.sort_by(|(_, left), (_, right)| right.total_cmp(left));
-        if cleared.is_empty() {
-            return None;
-        }
+        let state = window.use_keyed_state(
+            SharedString::from(format!("turn-status-marker-scroll-{turn_id}")),
+            cx,
+            |_, cx| (ScrollHandle::new(), cx.focus_handle()),
+        );
+        let (scroll, focus) = state.read(cx);
         Some(
-            div()
-                .w_full()
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .children(
-                    cleared.into_iter().map(|(marker, probability)| {
-                        status_marker_chip(marker, probability, theme)
-                    }),
-                )
-                .into_any_element(),
+            status_marker_slot(
+                turn_id,
+                self.turn_status_markers.get(&turn_id),
+                theme,
+                scroll,
+                focus,
+            )
+            .into_any_element(),
         )
     }
 
@@ -1720,6 +1811,131 @@ mod tests {
             usage: Default::default(),
             latency_ms: 0,
             provider_metadata: None,
+        }
+    }
+
+    struct MarkerLayoutHarness {
+        evaluation: Option<Evaluation>,
+        width: f32,
+        list: ListState,
+        markers: Vec<(ScrollHandle, FocusHandle)>,
+    }
+
+    impl Render for MarkerLayoutHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let entity = cx.entity();
+            div().w(px(self.width)).h(px(300.0)).child(
+                list(self.list.clone(), move |index, _, cx| {
+                    entity.update(cx, |this, cx| {
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .child(div().h(px(70.0)).child(format!("Response {index}")))
+                            .child(status_marker_slot(
+                                Uuid::from_u128(index as u128),
+                                this.evaluation.as_ref(),
+                                &Theme::current(cx),
+                                &this.markers[index].0,
+                                &this.markers[index].1,
+                            ))
+                            .child(div().h(px(27.0)))
+                            .into_any_element()
+                    })
+                })
+                .size_full(),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn late_markers_preserve_transcript_position_and_footer_height(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| MarkerLayoutHarness {
+            evaluation: None,
+            width: 220.0,
+            list: ListState::new(40, ListAlignment::Top, px(1000.0)),
+            markers: (0..40)
+                .map(|_| (ScrollHandle::new(), cx.focus_handle()))
+                .collect(),
+        });
+        let markers = evaluation(BTreeMap::from([
+            ("failed".to_owned(), EvalAnswer::Noul { noul: 0.9 }),
+            ("blocked".to_owned(), EvalAnswer::Noul { noul: 0.9 }),
+            ("unverified".to_owned(), EvalAnswer::Noul { noul: 0.9 }),
+        ]));
+        for width in [220.0, 800.0] {
+            for at_tail in [false, true] {
+                view.update(cx, |this, cx| {
+                    this.width = width;
+                    this.evaluation = None;
+                    this.list.remeasure_items(0..40);
+                    if at_tail {
+                        this.list.scroll_to_end();
+                    } else {
+                        this.list.scroll_to(ListOffset {
+                            item_ix: 20,
+                            offset_in_item: px(11.0),
+                        });
+                    }
+                    cx.notify();
+                });
+                cx.run_until_parked();
+                let (before, height) = cx.read(|cx| {
+                    let list = &view.read(cx).list;
+                    (
+                        list.logical_scroll_top(),
+                        list.bounds_for_item(list.logical_scroll_top().item_ix)
+                            .unwrap()
+                            .size
+                            .height,
+                    )
+                });
+                for verdict in [
+                    Some(markers.clone()),
+                    Some(evaluation(BTreeMap::new())),
+                    None,
+                ] {
+                    view.update(cx, |this, cx| {
+                        this.evaluation = verdict;
+                        this.list.remeasure_items(0..40);
+                        cx.notify();
+                    });
+                    cx.run_until_parked();
+                    if width == 220.0 {
+                        let (scroll, focus, has_markers) = cx.read(|cx| {
+                            let this = view.read(cx);
+                            let (scroll, focus) = &this.markers[before.item_ix];
+                            (
+                                scroll.clone(),
+                                focus.clone(),
+                                this.evaluation
+                                    .as_ref()
+                                    .is_some_and(|eval| !cleared_markers(eval).is_empty()),
+                            )
+                        });
+                        if has_markers {
+                            assert!(scroll.max_offset().x > Pixels::ZERO);
+                            cx.update(|window, cx| focus.focus(window, cx));
+                            cx.simulate_keystrokes("end");
+                            cx.run_until_parked();
+                            assert_eq!(scroll.offset().x, -scroll.max_offset().x);
+                            cx.simulate_keystrokes("home");
+                            cx.run_until_parked();
+                            assert_eq!(scroll.offset().x, Pixels::ZERO);
+                        }
+                    }
+                    cx.read(|cx| {
+                        let list = &view.read(cx).list;
+                        let after = list.logical_scroll_top();
+                        assert_eq!(after.item_ix, before.item_ix);
+                        assert!((after.offset_in_item - before.offset_in_item).abs() <= px(1.0));
+                        assert_eq!(
+                            list.bounds_for_item(before.item_ix).unwrap().size.height,
+                            height
+                        );
+                    });
+                }
+            }
         }
     }
 
