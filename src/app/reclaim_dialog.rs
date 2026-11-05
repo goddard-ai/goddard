@@ -147,9 +147,22 @@ impl Waku {
         if let Some(dialog) = self.reclaim_dialog.as_mut() {
             dialog.pending_scans = pending.len();
         }
-        for (session_id, title, cwd, client) in pending {
-            let row_cwd = cwd.clone();
-            cx.spawn(async move |waku, cx| {
+        // Each RPC blocks a background worker until the daemon answers.
+        // Keep one in flight so large worktree sets cannot occupy the entire
+        // executor or flood the daemon's shared heavy-request pool.
+        cx.spawn(async move |waku, cx| {
+            for (session_id, title, cwd, client) in pending {
+                if !waku
+                    .read_with(cx, |waku, _| {
+                        waku.reclaim_dialog
+                            .as_ref()
+                            .is_some_and(|dialog| dialog.generation == generation)
+                    })
+                    .is_ok_and(|current| current)
+                {
+                    break;
+                }
+                let row_cwd = cwd.clone();
                 let entries = cx
                     .background_executor()
                     .spawn(async move {
@@ -161,42 +174,48 @@ impl Waku {
                         }
                     })
                     .await;
-                let _ = waku.update(cx, |waku, cx| {
-                    let Some(dialog) = waku.reclaim_dialog.as_mut() else {
-                        return;
-                    };
-                    if dialog.generation != generation {
-                        return;
-                    }
-                    dialog.pending_scans = dialog.pending_scans.saturating_sub(1);
-                    let bytes = entries.iter().map(|entry| entry.bytes).sum::<u64>();
-                    if bytes > 0 {
-                        dialog.rows.push(ReclaimDialogRow {
-                            session_id,
-                            title,
-                            cwd: row_cwd,
-                            names: reclaim_names(
-                                &entries
-                                    .iter()
-                                    .map(|entry| entry.path.clone())
-                                    .collect::<Vec<_>>(),
-                            ),
-                            paths: entries.into_iter().map(|entry| entry.path).collect(),
-                            bytes,
-                            selected: true,
-                            focus: cx.focus_handle(),
-                        });
-                    }
-                    if dialog.pending_scans == 0 {
-                        dialog
-                            .rows
-                            .sort_by(|left, right| right.bytes.cmp(&left.bytes));
-                    }
-                    cx.notify();
-                });
-            })
-            .detach();
-        }
+                if !waku
+                    .update(cx, |waku, cx| {
+                        let Some(dialog) = waku.reclaim_dialog.as_mut() else {
+                            return false;
+                        };
+                        if dialog.generation != generation {
+                            return false;
+                        }
+                        dialog.pending_scans = dialog.pending_scans.saturating_sub(1);
+                        let bytes = entries.iter().map(|entry| entry.bytes).sum::<u64>();
+                        if bytes > 0 {
+                            dialog.rows.push(ReclaimDialogRow {
+                                session_id,
+                                title,
+                                cwd: row_cwd,
+                                names: reclaim_names(
+                                    &entries
+                                        .iter()
+                                        .map(|entry| entry.path.clone())
+                                        .collect::<Vec<_>>(),
+                                ),
+                                paths: entries.into_iter().map(|entry| entry.path).collect(),
+                                bytes,
+                                selected: true,
+                                focus: cx.focus_handle(),
+                            });
+                        }
+                        if dialog.pending_scans == 0 {
+                            dialog
+                                .rows
+                                .sort_by(|left, right| right.bytes.cmp(&left.bytes));
+                        }
+                        cx.notify();
+                        true
+                    })
+                    .is_ok_and(|current| current)
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
         // Like the other deferred surfaces, focus lands two frames after
         // the card joins the dispatch tree.
         window.on_next_frame(move |window, _| {
@@ -234,82 +253,99 @@ impl Waku {
             return;
         }
         let generation = self.reclaim_dialog_generation;
-        let mut batch = ReclaimBatch {
+        let pending = dialog
+            .rows
+            .into_iter()
+            .filter(|row| row.selected)
+            .collect::<Vec<_>>();
+        let total = pending.len();
+        self.reclaim_result = None;
+        self.reclaim_batch = Some(ReclaimBatch {
             generation,
+            pending: total,
+            total,
             ..Default::default()
-        };
-        for row in dialog.rows.iter().filter(|row| row.selected) {
-            // Re-verify at execute time: a session that woke since the
-            // scan is left alone rather than purged mid-install.
-            let still_safe = self
-                .state
-                .sessions
-                .iter()
-                .find(|session| session.id == row.session_id)
-                .is_some_and(|session| {
-                    !session.is_busy()
-                        && matches!(
-                            &session.workspace,
-                            SessionWorkspace::Worktree { path, .. } if *path == row.cwd
-                        )
-                });
-            let client = still_safe
-                .then(|| self.workspace_client_for_session(row.session_id))
-                .flatten();
-            let Some(client) = client else {
-                continue;
-            };
-            batch.pending += 1;
-            let cwd = row.cwd.clone();
-            let paths = row.paths.clone();
-            cx.spawn(async move |waku, cx| {
-                let (reclaimed_bytes, failures) = cx
-                    .background_executor()
-                    .spawn(async move {
-                        match client
-                            .request(waku_client::WorkspaceOperation::ReclaimPaths { cwd, paths })
-                        {
-                            Ok(waku_client::WorkspaceResult::Reclaim {
-                                reclaimed_bytes,
-                                failures,
-                            }) => (reclaimed_bytes, failures.len()),
-                            // The request itself failed — one failure for
-                            // the batch, nothing freed.
-                            _ => (0, 1),
-                        }
-                    })
-                    .await;
-                let _ = waku.update(cx, |waku, cx| {
-                    let Some(batch) = waku.reclaim_batch.as_mut() else {
-                        return;
-                    };
-                    if batch.generation != generation {
-                        return;
+        });
+        // Serialize deletions as well as scans. Resolve the client and safety
+        // check just before dispatch: a queued session may have woken up.
+        cx.spawn(async move |waku, cx| {
+            for row in pending {
+                let Ok(Some(client)) = waku.read_with(cx, |waku, _| {
+                    if !waku
+                        .reclaim_batch
+                        .as_ref()
+                        .is_some_and(|batch| batch.generation == generation)
+                    {
+                        return None;
                     }
-                    batch.reclaimed_bytes += reclaimed_bytes;
-                    batch.failures += failures;
-                    batch.pending -= 1;
-                    if batch.pending == 0 {
-                        let result = ReclaimResult {
-                            reclaimed_bytes: batch.reclaimed_bytes,
-                            failures: batch.failures,
-                            reveal: true,
+                    let still_safe = waku.state.sessions.iter().any(|session| {
+                        session.id == row.session_id
+                            && !session.is_busy()
+                            && Some(session.id) != waku.state.selected_session
+                            && matches!(
+                                &session.workspace,
+                                SessionWorkspace::Worktree { path, .. } if *path == row.cwd
+                            )
+                    });
+                    Some(
+                        still_safe
+                            .then(|| waku.workspace_client_for_session(row.session_id))
+                            .flatten(),
+                    )
+                }) else {
+                    break;
+                };
+                let (reclaimed_bytes, failures) = if let Some(client) = client {
+                    cx.background_executor()
+                        .spawn(async move {
+                            match client.request(waku_client::WorkspaceOperation::ReclaimPaths {
+                                cwd: row.cwd,
+                                paths: row.paths,
+                            }) {
+                                Ok(waku_client::WorkspaceResult::Reclaim {
+                                    reclaimed_bytes,
+                                    failures,
+                                }) => (reclaimed_bytes, failures.len()),
+                                // The request itself failed — one failure for
+                                // the batch, nothing freed.
+                                _ => (0, 1),
+                            }
+                        })
+                        .await
+                } else {
+                    // Unsafe or offline worktrees still complete their slot.
+                    (0, 1)
+                };
+                if !waku
+                    .update(cx, |waku, cx| {
+                        let Some(batch) = waku.reclaim_batch.as_mut() else {
+                            return false;
                         };
-                        waku.reclaim_batch = None;
-                        waku.reclaim_result = Some(result);
-                    }
-                    cx.notify();
-                });
-            })
-            .detach();
-        }
-        if batch.pending > 0 {
-            batch.total = batch.pending;
-            // A new confirm retires any result still awaiting
-            // acknowledgment — the indicator reads from the batch again.
-            self.reclaim_result = None;
-            self.reclaim_batch = Some(batch);
-        }
+                        if batch.generation != generation {
+                            return false;
+                        }
+                        batch.reclaimed_bytes += reclaimed_bytes;
+                        batch.failures += failures;
+                        batch.pending -= 1;
+                        if batch.pending == 0 {
+                            let result = ReclaimResult {
+                                reclaimed_bytes: batch.reclaimed_bytes,
+                                failures: batch.failures,
+                                reveal: true,
+                            };
+                            waku.reclaim_batch = None;
+                            waku.reclaim_result = Some(result);
+                        }
+                        cx.notify();
+                        true
+                    })
+                    .is_ok_and(|current| current)
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
         cx.notify();
