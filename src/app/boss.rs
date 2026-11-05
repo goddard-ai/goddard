@@ -15043,6 +15043,7 @@ mod tests {
             sealed: None,
             handoff_accepted: false,
             reconciled_retry_revision: None,
+            retry_workspace_lineage: None,
             created_at: 0,
         }
     }

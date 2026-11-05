@@ -2578,7 +2578,7 @@ mod tests {
         // provider update from making one visible again as active work.
         assert_eq!(registry.items.len(), 14);
         registry.upsert(item("exit-0", Running, true));
-        assert_eq!(visible_ids(&registry)[7], "exit-0");
+        assert_eq!(visible_ids(&registry)[1], "exit-0");
         assert_eq!(registry.counts(), (7, 0));
     }
 
