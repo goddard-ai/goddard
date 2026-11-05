@@ -22,6 +22,9 @@ impl Waku {
         summary: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        if !self.state.title_rewrites_enabled {
+            return;
+        }
         let Some(turn_id) = turn_id else { return };
         let Some(daemon) = self.daemon_for_session(session_id) else {
             return;
@@ -155,6 +158,10 @@ impl Waku {
         let mut changed = false;
         while let Ok((session_id, old_title, next_title)) = self.title_quality_events.try_recv() {
             self.title_quality_in_flight.remove(&session_id);
+            // Disabling the opt-in also discards rewrites already in flight.
+            if !self.state.title_rewrites_enabled {
+                continue;
+            }
             if let Some(next_title) = next_title
                 && let Some(session) = self.state.session_mut(session_id)
                 && session.title == AgentSession::DEFAULT_TITLE

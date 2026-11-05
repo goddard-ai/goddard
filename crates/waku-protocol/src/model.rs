@@ -7547,6 +7547,9 @@ mod tests {
         assert!(session.set_auto_title(Some("Fix provider title events".into())));
         assert_eq!(session.display_title(), "Fix provider title events");
 
+        assert!(session.set_auto_title(Some("Handle updated provider titles".into())));
+        assert_eq!(session.display_title(), "Handle updated provider titles");
+
         assert!(session.set_title("  My title  "));
         assert!(session.set_auto_title(Some("A newer provider title".into())));
         assert_eq!(session.display_title(), "My title");

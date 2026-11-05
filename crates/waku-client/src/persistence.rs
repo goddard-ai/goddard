@@ -1598,6 +1598,9 @@ pub struct AppSettings {
     /// distinct approved models on the same provider. Off by default,
     /// including debug builds.
     pub phase_routing_enabled: bool,
+    /// Allow Jev to rewrite automatic task titles. Off by default.
+    #[serde(default)]
+    pub title_rewrites_enabled: bool,
     /// Desktop-owned overrides for the fixed suggested-prompt actions.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub suggested_prompts: BTreeMap<String, String>,
@@ -1794,6 +1797,7 @@ impl Default for AppSettings {
             action_predictions_enabled: true,
             move_fast_break_things: false,
             phase_routing_enabled: false,
+            title_rewrites_enabled: false,
             suggested_prompts: BTreeMap::new(),
             suggested_prompt_labels: BTreeMap::new(),
             suggested_prompt_conditions: BTreeMap::new(),
@@ -2488,6 +2492,9 @@ pub struct PersistedState {
     pub disabled_suggested_actions: BTreeSet<String>,
     #[serde(default)]
     pub phase_routing_enabled: bool,
+    /// Allow Jev to rewrite automatic task titles. Off by default.
+    #[serde(default)]
+    pub title_rewrites_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub automations_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
@@ -2998,6 +3005,7 @@ impl PersistedState {
             action_predictions_enabled: true,
             move_fast_break_things: false,
             phase_routing_enabled: false,
+            title_rewrites_enabled: false,
             suggested_prompts: BTreeMap::new(),
             suggested_prompt_labels: BTreeMap::new(),
             suggested_prompt_conditions: BTreeMap::new(),
@@ -3595,6 +3603,7 @@ impl PersistedState {
             action_predictions_enabled: self.action_predictions_enabled,
             move_fast_break_things: self.move_fast_break_things,
             phase_routing_enabled: self.phase_routing_enabled,
+            title_rewrites_enabled: self.title_rewrites_enabled,
             suggested_prompts: self.suggested_prompts.clone(),
             suggested_prompt_labels: self.suggested_prompt_labels.clone(),
             suggested_prompt_conditions: self.suggested_prompt_conditions.clone(),
@@ -3792,6 +3801,7 @@ impl PersistedState {
         self.action_predictions_enabled = settings.action_predictions_enabled;
         self.move_fast_break_things = settings.move_fast_break_things;
         self.phase_routing_enabled = settings.phase_routing_enabled;
+        self.title_rewrites_enabled = settings.title_rewrites_enabled;
         self.suggested_prompts = settings.suggested_prompts;
         self.suggested_prompt_labels = settings.suggested_prompt_labels;
         self.suggested_prompt_conditions = settings.suggested_prompt_conditions;
@@ -5964,6 +5974,20 @@ mod tests {
         let settings = restored.app_settings();
         state.apply_app_settings(settings);
         assert!(!state.composer_dictation_experiment_enabled);
+    }
+
+    #[test]
+    fn title_rewrites_default_off_and_persist_as_a_setting() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.title_rewrites_enabled);
+        let mut state = PersistedState::empty();
+        assert!(!state.title_rewrites_enabled);
+        state.title_rewrites_enabled = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["title_rewrites_enabled"], true);
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.title_rewrites_enabled);
     }
 
     #[test]

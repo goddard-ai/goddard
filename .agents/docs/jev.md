@@ -65,7 +65,7 @@ carry the information the judgment actually needs.
 | `route-handoff` | `src/app/routing.rs`, `crates/waku-client/src/routing.rs` | Before a follow-up prompt on an eligible Hard-started Auto task → `remaining_work` Choice between approved same-provider Medium/Hard models, batched with effort |
 | `route-class-suggest` | `src/app/settings.rs` | Jev page "suggest defaults" for the class map |
 | `turn-status` | `src/app/status_markers.rs` | Settled turn → ending Choice + flag Nouls (unverified, drifted, needs-review, thrash, assumed, failed, blocked) |
-| `title-quality` | `src/app/title_quality.rs` | Settled turn → Noul judging whether its automatic title needs a rewrite |
+| `title-quality` | `src/app/title_quality.rs` | Opt-in (`title_rewrites_enabled`, default off): settled turn → Noul judging whether its automatic title needs a rewrite. Provider title updates are independent; explicit titles are never rewritten. |
 | `boss-instruction-pins` | `crates/waku-daemon/src/daemon/instruction_pins.rs` | Visible main Boss human prompt → nonbinding ongoing-instruction review candidate at Noul ≥ 0.85; conservative wording checks run without a backend. No generated text or automatic activation. |
 | `next-action` | `src/app/action_predictions.rs` | Settled turn → `taskType` + `nextAction` over a feasibility-gated candidate set |
 | `paste-classification` | `src/app/composer/paste_classification.rs` | Pasted composer text → content-category Choice for the block's label |

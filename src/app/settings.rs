@@ -8327,6 +8327,16 @@ impl Waku {
         cx.notify();
     }
 
+    fn set_title_rewrites_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.title_rewrites_enabled = enabled;
+        self.close_jev_page_if_unused();
+        if enabled {
+            self.seed_inference_inputs(cx);
+        }
+        self.save();
+        cx.notify();
+    }
+
     fn set_phase_routing_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.state.phase_routing_enabled = enabled;
         self.close_jev_page_if_unused();
@@ -10066,9 +10076,11 @@ impl Waku {
         let needs_credential = credential_missing
             && (mode != AutoModelRouting::Disabled
                 || self.state.status_markers_enabled
-                || self.state.action_predictions_enabled);
+                || self.state.action_predictions_enabled
+                || self.state.title_rewrites_enabled);
         let markers_enabled = self.state.status_markers_enabled;
         let actions_enabled = self.state.action_predictions_enabled;
+        let title_rewrites_enabled = self.state.title_rewrites_enabled;
         let rows = vec![
             settings_row(
                 "icons/fork.svg",
@@ -10116,6 +10128,27 @@ impl Waku {
                     theme,
                     cx,
                     move |this, _, cx| this.set_action_predictions_enabled(!actions_enabled, cx),
+                ),
+                theme,
+                search,
+            ),
+            settings_row(
+                "icons/file-text.svg",
+                tr!("jev.title_rewrites_title"),
+                tr!("jev.title_rewrites_description"),
+                settings_button(
+                    "title-rewrites-toggle",
+                    if title_rewrites_enabled {
+                        tr!("auto_prompts.disable")
+                    } else {
+                        tr!("auto_prompts.enable")
+                    },
+                    true,
+                    false,
+                    true,
+                    theme,
+                    cx,
+                    move |this, _, cx| this.set_title_rewrites_enabled(!title_rewrites_enabled, cx),
                 ),
                 theme,
                 search,

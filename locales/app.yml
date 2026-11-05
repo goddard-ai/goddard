@@ -1438,6 +1438,10 @@ jev.auto_routing_default:
   en: Force as default model
 jev.auto_routing_disabled:
   en: Disabled
+jev.title_rewrites_title:
+  en: Automatic title rewrites
+jev.title_rewrites_description:
+  en: Let Jev review automatic task titles after completed turns and request clearer titles when needed. Custom titles are preserved. Provider title updates work independently of this setting.
 jev.status_markers_title:
   en: Turn status markers
 jev.status_markers_description:
