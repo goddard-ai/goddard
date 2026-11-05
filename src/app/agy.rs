@@ -105,9 +105,7 @@ impl Waku {
         // the same rule the driver path follows; a failed preparation
         // unwinds them together.
         let prompt = submission.prompt.clone();
-        let mut incognito = false;
         let message_id = if let Some(session) = self.state.session_mut(session_id) {
-            incognito = session.incognito;
             if !submission.hidden {
                 session.set_title_from_prompt(&submission.human_prompt());
             }
@@ -131,6 +129,7 @@ impl Waku {
         };
         self.submission_preparations.insert(session_id);
         let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let capture_checkpoints = self.session_captures_git_checkpoints(session_id);
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
         cx.spawn(async move |waku, cx| {
@@ -148,7 +147,7 @@ impl Waku {
                         next_turn_count,
                         sync_default_branch,
                         sync_branches,
-                        incognito,
+                        capture_checkpoints,
                         None,
                     )
                 })

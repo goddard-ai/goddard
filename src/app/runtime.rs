@@ -687,7 +687,7 @@ pub(super) fn prepare_submission(
     turn_count: usize,
     sync_default_branch: bool,
     sync_branches: Vec<String>,
-    incognito: bool,
+    capture_checkpoints: bool,
     stage: StageReporter,
 ) -> anyhow::Result<PreparedSubmission> {
     let mut worktree_restored = false;
@@ -810,14 +810,12 @@ pub(super) fn prepare_submission(
         (project.clone(), session)
     });
 
-    SubmissionStage::Checkpoint.report(&stage);
     // Every turn gets its own immutable starting snapshot. Reusing the prior
     // response's ending ref would attribute branch switches or terminal edits
-    // made between turns to the next response. Incognito sessions skip the
-    // capture — a checkpoint ref outlives a session that must leave no trace.
-    let checkpoint_warning = if incognito {
-        None
-    } else {
+    // made between turns to the next response. Boss chat and incognito
+    // sessions skip Git checkpoints entirely.
+    let checkpoint_warning = if capture_checkpoints {
+        SubmissionStage::Checkpoint.report(&stage);
         workspace_ack(
             &workspace_client,
             waku_client::WorkspaceOperation::CaptureTurnStart {
@@ -828,6 +826,8 @@ pub(super) fn prepare_submission(
         )
         .err()
         .map(|error| tr!("errors.capture_pre_turn_checkpoint", error = error))
+    } else {
+        None
     };
 
     // Batch Auto effort and optional model handoff judgments in one bounded
@@ -4270,6 +4270,7 @@ impl Waku {
             .map(|project| (project.id, project.path.clone()))
             .collect::<HashMap<_, _>>();
         let detail_current = !self.stale_task_details.contains(&session_id);
+        let capture_checkpoints = self.session_captures_git_checkpoints(session_id);
         let mut checkpoint = None;
         if let Some(session) = self.state.session_mut(session_id) {
             if !session.status.is_busy() {
@@ -4290,7 +4291,7 @@ impl Waku {
                 let skip_checkpoint = session.turns.last().is_some_and(|turn| {
                     interrupted_planning_turn_has_no_file_changes(session, turn.id, detail_current)
                 });
-                if !skip_checkpoint {
+                if capture_checkpoints && !skip_checkpoint {
                     let project_path = session
                         .workspace
                         .path()
@@ -5277,6 +5278,12 @@ impl Waku {
         app_saved
     }
 
+    /// Boss chat has no task worktree to rewind; incognito sessions leave no refs.
+    pub(super) fn session_captures_git_checkpoints(&self, session_id: Uuid) -> bool {
+        !self.session_incognito(session_id)
+            && !self.managed_session_is_boss(self.daemons.session_owner(session_id), session_id)
+    }
+
     fn checkpoint_capture_pending(&self, session_id: Uuid, turn_count: usize) -> bool {
         self.checkpoint_captures_in_flight
             .contains(&(session_id, turn_count))
@@ -5289,6 +5296,9 @@ impl Waku {
     /// The settled last turn whose checkpoint capture is still queued or in
     /// flight.
     pub(super) fn pending_checkpoint_turn(&self, session_id: Uuid) -> Option<Uuid> {
+        if !self.session_captures_git_checkpoints(session_id) {
+            return None;
+        }
         self.state
             .sessions
             .iter()
@@ -5355,6 +5365,9 @@ impl Waku {
     /// [`Self::start_pending_checkpoint_captures`], which every caller that
     /// holds a `Context` runs straight after queueing.
     pub(super) fn capture_latest_turn_checkpoint_for(&mut self, session_id: Uuid) {
+        if !self.session_captures_git_checkpoints(session_id) {
+            return;
+        }
         let Some((session, turn)) = self
             .state
             .sessions
@@ -5379,11 +5392,6 @@ impl Waku {
                 !self.stale_task_details.contains(&session_id),
             )
         {
-            return;
-        }
-        // Incognito sessions leave no artifacts behind — a checkpoint is a
-        // git ref that outlives the session.
-        if session.incognito {
             return;
         }
         if self.checkpoint_capture_pending(session_id, turn_count) {
@@ -5433,6 +5441,9 @@ impl Waku {
                 project_path,
                 untouched,
             } = request;
+            if !self.session_captures_git_checkpoints(session_id) {
+                continue;
+            }
             let Some(workspace) = self.workspace_client_for_session(session_id) else {
                 continue;
             };
@@ -6670,7 +6681,7 @@ impl Waku {
         cx.notify();
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
-        let incognito = self.session_incognito(session_id);
+        let capture_checkpoints = self.session_captures_git_checkpoints(session_id);
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()
@@ -6686,7 +6697,7 @@ impl Waku {
                         next_turn_count,
                         sync_default_branch,
                         sync_branches,
-                        incognito,
+                        capture_checkpoints,
                         None,
                     )
                 })
@@ -8328,7 +8339,7 @@ impl Waku {
         };
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
-        let incognito = self.session_incognito(session_id);
+        let capture_checkpoints = self.session_captures_git_checkpoints(session_id);
         // Incognito transcripts have no durable row after a daemon restart.
         // Existing persisted tasks already have a view baseline; only first
         // turns and incognito restarts need this startup registration.
@@ -8355,7 +8366,7 @@ impl Waku {
                         next_turn_count,
                         sync_default_branch,
                         sync_branches,
-                        incognito,
+                        capture_checkpoints,
                         Some(stage_slot),
                     )
                 })

@@ -1,0 +1,1 @@
+- Boss chat no longer captures Git checkpoints or delays follow-up messages with “Checking for changes”.
