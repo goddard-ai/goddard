@@ -1,0 +1,1 @@
+- Use “Search worktrees…” in the desktop command palette to find a project's worktree, open a recent task, or create a task in that worktree.

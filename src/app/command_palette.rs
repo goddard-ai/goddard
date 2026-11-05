@@ -12,8 +12,11 @@ use nucleo_matcher::{Matcher, Utf32Str};
 use waku_protocol::workspace::{GitHubAvailability, GitHubRepoRef, RepoWorktree};
 
 use super::*;
+
+mod worktree_search;
 use crate::git_branch::BranchUpstreamSnapshot;
 use crate::ui::shortcut::ShortcutHint;
+use worktree_search::WorktreeSearch;
 
 actions!(
     waku_command_palette,
@@ -306,6 +309,12 @@ enum PaletteAction {
     InspectElements,
     InspectColors,
     ToggleAutoRestart,
+    SearchWorktrees,
+    SearchWorktreeProject(Uuid),
+    SearchWorktree(PathBuf),
+    WorktreeNewTask,
+    WorktreeToggleArchived,
+    WorktreeChangeProject,
     OpenRunScript,
     ChooseRunScriptProject(Uuid),
     /// Script picked — advance to the where-to-run step, or run straight
@@ -342,6 +351,9 @@ enum CommandPaletteView {
     Commands,
     Resume,
     ResumeProviders,
+    WorktreeProjects,
+    WorktreeSearch,
+    WorktreeTasks,
     RunScriptProjects,
     RunScripts,
     /// The run-script flow's where-to-run step: the task's workspace, the
@@ -777,6 +789,7 @@ pub(super) struct CommandPaletteUi {
     provider_session_error: Option<String>,
     provider_session_status: ProviderSessionCatalogStatus,
     provider_session_generation: u64,
+    worktree_search: WorktreeSearch,
     /// The project the run-script drill-in scoped to, and the scan it
     /// produced.
     run_script_project: Option<Uuid>,
@@ -865,6 +878,7 @@ impl CommandPaletteUi {
             provider_session_error: None,
             provider_session_status: ProviderSessionCatalogStatus::Ready,
             provider_session_generation: 0,
+            worktree_search: WorktreeSearch::default(),
             run_script_project: None,
             run_scripts: Vec::new(),
             run_scripts_pending: false,
@@ -1107,6 +1121,11 @@ impl Waku {
             return;
         }
         self.command_palette.open = false;
+        self.command_palette.worktree_search.generation = self
+            .command_palette
+            .worktree_search
+            .generation
+            .wrapping_add(1);
         self.command_palette.opened_at = None;
         self.command_palette.focus_generation =
             self.command_palette.focus_generation.wrapping_add(1);
@@ -2364,6 +2383,9 @@ impl Waku {
 
     pub(super) fn dismiss_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.command_palette.view {
+            CommandPaletteView::WorktreeProjects
+            | CommandPaletteView::WorktreeSearch
+            | CommandPaletteView::WorktreeTasks => self.back_worktree_search(cx),
             CommandPaletteView::Commands => self.close_command_palette(window, cx),
             CommandPaletteView::Resume => self.leave_command_palette_resume_view(cx),
             CommandPaletteView::ResumeProviders => {
@@ -2407,6 +2429,9 @@ impl Waku {
 
     pub(super) fn refresh_command_palette_localized_text(&mut self, cx: &mut Context<Self>) {
         let placeholder = match self.command_palette.view {
+            CommandPaletteView::WorktreeProjects
+            | CommandPaletteView::WorktreeSearch
+            | CommandPaletteView::WorktreeTasks => self.worktree_search_placeholder(),
             CommandPaletteView::Commands => tr!("command_palette.placeholder"),
             CommandPaletteView::Resume => tr!("command_palette.resume_placeholder"),
             CommandPaletteView::ResumeProviders => {
@@ -2488,7 +2513,10 @@ impl Waku {
         }
         if matches!(
             self.command_palette.view,
-            CommandPaletteView::Resume
+            CommandPaletteView::WorktreeProjects
+                | CommandPaletteView::WorktreeSearch
+                | CommandPaletteView::WorktreeTasks
+                | CommandPaletteView::Resume
                 | CommandPaletteView::ResumeProviders
                 | CommandPaletteView::RunScriptProjects
                 | CommandPaletteView::RunScripts
@@ -2758,6 +2786,15 @@ impl Waku {
                 Some(ShortcutHint::action(&NewProject)),
                 PaletteAction::OpenProject,
                 "open add folder project workspace repository repo",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.search_worktrees"),
+                "icons/folder.svg",
+                None,
+                PaletteAction::SearchWorktrees,
+                "search find browse worktrees branches checkout task",
                 next(),
             ),
             CommandPaletteItem::command(
@@ -5188,6 +5225,13 @@ impl Waku {
 
     fn refresh_command_palette_results(&mut self, query: &str, preserve_selection: bool, cx: &App) {
         match self.command_palette.view {
+            CommandPaletteView::WorktreeProjects
+            | CommandPaletteView::WorktreeSearch
+            | CommandPaletteView::WorktreeTasks => {
+                self.refresh_worktree_search(query, preserve_selection);
+                return;
+            }
+
             CommandPaletteView::Resume => {
                 self.refresh_command_palette_resume_results(query, preserve_selection);
                 return;
@@ -5741,6 +5785,37 @@ impl Waku {
         };
 
         match action {
+            PaletteAction::SearchWorktrees => {
+                self.start_worktree_search(cx);
+                return;
+            }
+            PaletteAction::SearchWorktreeProject(project) => {
+                self.remember_worktree_search(cx);
+                self.load_search_worktrees(project, cx);
+                return;
+            }
+            PaletteAction::SearchWorktree(path) => {
+                self.remember_worktree_search(cx);
+                self.command_palette.worktree_search.path = Some(path);
+                self.set_worktree_search_view(CommandPaletteView::WorktreeTasks, cx);
+                return;
+            }
+            PaletteAction::WorktreeToggleArchived => {
+                self.command_palette.worktree_search.archived =
+                    !self.command_palette.worktree_search.archived;
+                let query = self.command_palette.search.read(cx).content().to_owned();
+                self.refresh_worktree_search(&query, true);
+                cx.notify();
+                return;
+            }
+            PaletteAction::WorktreeChangeProject => {
+                self.back_worktree_search(cx);
+                return;
+            }
+            PaletteAction::WorktreeNewTask => {
+                self.create_task_in_search_worktree(window, cx);
+                return;
+            }
             PaletteAction::StartQa | PaletteAction::EditQaSetup => {
                 if !self.state.qa_sessions_enabled {
                     return;
@@ -6238,6 +6313,12 @@ impl Waku {
             | PaletteAction::StartQa
             | PaletteAction::EditQaSetup
             | PaletteAction::ChooseQaProject(_)
+            | PaletteAction::SearchWorktrees
+            | PaletteAction::SearchWorktreeProject(_)
+            | PaletteAction::SearchWorktree(_)
+            | PaletteAction::WorktreeToggleArchived
+            | PaletteAction::WorktreeChangeProject
+            | PaletteAction::WorktreeNewTask
             | PaletteAction::OpenRunScript
             | PaletteAction::ChooseRunScriptProject(_)
             | PaletteAction::ChooseRunScriptLocation { .. }
@@ -6314,6 +6395,8 @@ impl Waku {
             .filter(|item| matches!(&item.action, PaletteAction::ResumeProviderSession(..)))
             .count();
         let results_pending = match view {
+            CommandPaletteView::WorktreeSearch => self.command_palette.worktree_search.pending,
+            CommandPaletteView::WorktreeProjects | CommandPaletteView::WorktreeTasks => false,
             CommandPaletteView::Resume => self.command_palette.provider_sessions_pending,
             CommandPaletteView::Commands => self.command_palette.message_search_pending,
             CommandPaletteView::RunScripts => self.command_palette.run_scripts_pending,
@@ -6341,9 +6424,13 @@ impl Waku {
             | CommandPaletteView::SavePrompt => false,
             CommandPaletteView::RecentPrompts => false,
         };
-        let search_error = (view == CommandPaletteView::Commands)
-            .then(|| self.command_palette.message_search_error.as_ref())
-            .flatten();
+        let search_error = if view == CommandPaletteView::WorktreeSearch {
+            self.command_palette.worktree_search.error.as_ref()
+        } else {
+            (view == CommandPaletteView::Commands)
+                .then(|| self.command_palette.message_search_error.as_ref())
+                .flatten()
+        };
         let search_status_height = if search_error.is_some() { 40.0 } else { 0.0 };
         let show_empty_state = search_error.is_none()
             && should_show_command_palette_empty_state(
@@ -6354,9 +6441,10 @@ impl Waku {
                 },
                 results_pending,
             );
-        let show_loading_state = (resume_view
-            && resume_session_count == 0
-            && self.command_palette.provider_sessions_pending)
+        let show_loading_state = (view == CommandPaletteView::WorktreeSearch && results_pending)
+            || (resume_view
+                && resume_session_count == 0
+                && self.command_palette.provider_sessions_pending)
             || (run_scripts_view
                 && self.command_palette.results.is_empty()
                 && self.command_palette.run_scripts_pending)
@@ -6406,7 +6494,10 @@ impl Waku {
                     "icons/loader-circle.svg",
                     if run_scripts_view {
                         tr!("command_palette.loading_scripts")
-                    } else if view == CommandPaletteView::RunScriptWorktrees {
+                    } else if matches!(
+                        view,
+                        CommandPaletteView::RunScriptWorktrees | CommandPaletteView::WorktreeSearch
+                    ) {
                         tr!("command_palette.loading_worktrees")
                     } else if view == CommandPaletteView::NewTaskIn {
                         tr!("command_palette.loading_directories")

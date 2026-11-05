@@ -1455,7 +1455,7 @@ impl Waku {
     }
 }
 
-fn existing_worktree_name(path: &Path) -> String {
+pub(super) fn existing_worktree_name(path: &Path) -> String {
     // Goddard checkouts repeat the repository leaf: worktrees/repo/name/repo.
     let parent = path.parent();
     let namespaced = path.ancestors().nth(3).and_then(Path::file_name)

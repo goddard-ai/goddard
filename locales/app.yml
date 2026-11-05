@@ -7537,3 +7537,24 @@ boss.message_current_employee:
   en: Message current employee
 boss.direct_prompt_resumes:
   en: Sending a message will resume this employee.
+
+command_palette.search_worktrees:
+  en: Search worktrees…
+command_palette.worktree_task_placeholder:
+  en: Select a task…
+command_palette.main_checkout:
+  en: Main checkout
+command_palette.worktree_task_count:
+  en: "%{count} tasks"
+command_palette.new_task_in_worktree:
+  en: New task in this worktree…
+command_palette.show_archived_tasks:
+  en: Show archived tasks
+command_palette.hide_archived_tasks:
+  en: Hide archived tasks
+command_palette.archived_task:
+  en: Archived
+command_palette.idle_task:
+  en: Idle
+command_palette.worktree_change_project:
+  en: Change project…
