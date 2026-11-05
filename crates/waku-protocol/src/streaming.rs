@@ -8,7 +8,7 @@ pub fn merge_task_view_snapshot(
     snapshot: &mut crate::model::AgentSession,
     preserve_active: bool,
 ) {
-    use crate::model::{MessageRole, TurnStatus};
+    use crate::model::{MessageRole, SessionWorkspace, TurnStatus};
     if preserve_active
         && let Some(active) = existing
             .turns
@@ -61,6 +61,14 @@ pub fn merge_task_view_snapshot(
             message.atoms.clone_from(&presentation.atoms);
             message.attachments.clone_from(&presentation.attachments);
         }
+    }
+    // Preparation may have assigned a checkout after this startup snapshot
+    // was captured. Replaying its draft intent must not create a second
+    // worktree on the next prompt while the provider stays in the first.
+    if matches!(snapshot.workspace, SessionWorkspace::NewWorktree { .. })
+        && matches!(existing.workspace, SessionWorkspace::Worktree { .. })
+    {
+        snapshot.workspace.clone_from(&existing.workspace);
     }
     if existing.metadata_revision > snapshot.metadata_revision {
         crate::task_metadata::TaskMetadata::capture(existing).apply(snapshot);
@@ -143,6 +151,38 @@ mod tests {
         );
         completed.finish_active_turn(TurnStatus::Completed);
         assert_eq!(completed.active_turn_id(), None);
+    }
+
+    #[test]
+    fn delayed_startup_snapshot_cannot_recreate_an_assigned_worktree() {
+        use crate::model::SessionWorkspace;
+
+        let mut local = AgentSession::new(uuid::Uuid::new_v4(), ProviderKind::Codex);
+        local.workspace = SessionWorkspace::NewWorktree {
+            base_branch: Some("dev".into()),
+        };
+        local.begin_turn("first prompt");
+        let baseline = local.clone();
+        local.workspace = SessionWorkspace::Worktree {
+            path: "/workspace/assigned".into(),
+            name: "assigned".into(),
+            branch: None,
+            base_branch: Some("dev".into()),
+            adopted_by: None,
+            borrowed: false,
+        };
+        for preserve_active in [false, true] {
+            let mut delayed = baseline.clone();
+            merge_task_view_snapshot(&local, &mut delayed, preserve_active);
+            delayed.begin_turn("follow up");
+            assert_eq!(delayed.workspace, local.workspace);
+        }
+
+        // A concrete daemon-side move is still authoritative.
+        let mut moved = baseline;
+        moved.workspace = SessionWorkspace::Local;
+        merge_task_view_snapshot(&local, &mut moved, false);
+        assert_eq!(moved.workspace, SessionWorkspace::Local);
     }
 
     #[test]

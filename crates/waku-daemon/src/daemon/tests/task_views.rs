@@ -299,3 +299,61 @@ fn task_views_handoff_recovers_hidden_output_and_fences_stale_saves() {
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn delayed_startup_save_cannot_recreate_an_assigned_worktree() {
+    let root = std::env::temp_dir().join(format!("task-view-workspace-{}", Uuid::new_v4()));
+    let (backend, session_id) = surface_test_backend(&root);
+    let (sink, _events) = EventSink::detached().tapped_connection();
+    sink.set_task_view(false, 1);
+    assert!(sink.task_views_enabled());
+    let mut draft = backend
+        .task_store
+        .load_session_detail(session_id)
+        .unwrap()
+        .unwrap();
+    draft.workspace = SessionWorkspace::NewWorktree {
+        base_branch: Some("dev".into()),
+    };
+    let save = |session| {
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id: Uuid::nil(),
+                    command: Command::SaveTaskState {
+                        projects: Vec::new(),
+                        live_session_ids: vec![session_id],
+                        sessions: vec![session],
+                        session_tails: Vec::new(),
+                    },
+                },
+                sink.clone(),
+                None,
+            )
+            .unwrap()
+    };
+    save(draft.clone());
+    let mut assigned = draft.clone();
+    assigned.workspace = SessionWorkspace::Worktree {
+        path: root.join("assigned"),
+        name: "assigned".into(),
+        branch: None,
+        base_branch: Some("dev".into()),
+        adopted_by: None,
+        borrowed: false,
+    };
+    save(assigned.clone());
+    // A UI save captured while preparation was running arrives after registration.
+    // Equal timestamps are realistic: submission and registration share a second.
+    save(draft);
+    let stored = backend
+        .task_store
+        .load_session_detail(session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.workspace, assigned.workspace);
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}

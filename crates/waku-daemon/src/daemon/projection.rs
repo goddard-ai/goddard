@@ -4,7 +4,15 @@ use super::*;
 /// daemon's provider projection while accepting ordinary client-owned fields
 /// through the existing save/metadata rules.
 pub(super) fn preserve_task_view_projection(existing: &AgentSession, incoming: &mut AgentSession) {
-    use crate::model::MessageRole;
+    use crate::model::{MessageRole, SessionWorkspace};
+    // A UI save captured during preparation may arrive after the worker
+    // registered its checkout. NewWorktree is draft intent, never a move
+    // away from an assigned workspace, even if the transcript cursor is current.
+    if matches!(incoming.workspace, SessionWorkspace::NewWorktree { .. })
+        && matches!(existing.workspace, SessionWorkspace::Worktree { .. })
+    {
+        incoming.workspace.clone_from(&existing.workspace);
+    }
     let presentations: HashMap<_, _> = incoming
         .messages
         .iter()
