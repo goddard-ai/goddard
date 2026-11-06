@@ -371,6 +371,7 @@ export type { TranscriptFindMatch } from "./TranscriptFindMatch";
 export type { TranscriptFindRequest } from "./TranscriptFindRequest";
 export type { TranscriptFindResult } from "./TranscriptFindResult";
 export type { TranscriptFindScope } from "./TranscriptFindScope";
+export type { TranscriptNavigationEntry } from "./TranscriptNavigationEntry";
 export type { TranscriptNotice } from "./TranscriptNotice";
 export type { TranscriptNoticeStatus } from "./TranscriptNoticeStatus";
 export type { TranscriptPayload } from "./TranscriptPayload";

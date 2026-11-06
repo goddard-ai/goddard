@@ -4976,6 +4976,8 @@ attachments.preview_unavailable:
 common.copy_named:
   en: Copy %{name}
 
+transcript.navigation_load_failed:
+  en: Could not load that turn. Select it to try again.
 transcript.history_loading:
   en: Loading earlier messages…
 transcript.history_retry:

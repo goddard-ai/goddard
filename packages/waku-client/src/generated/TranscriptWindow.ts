@@ -4,6 +4,7 @@ import type { QueuedMessage } from "./QueuedMessage";
 import type { RuntimeEventCursor } from "./RuntimeEventCursor";
 import type { TranscriptCursor } from "./TranscriptCursor";
 import type { TranscriptEntry } from "./TranscriptEntry";
+import type { TranscriptNavigationEntry } from "./TranscriptNavigationEntry";
 
 /**
  * A bounded slice of the flattened transcript plus the anchors a view needs
@@ -54,6 +55,12 @@ converted: boolean, legacyRead: boolean,
  * builders read status/timing from these.
  */
 turns: Array<AgentTurn>,
+/**
+ * Complete visible-prompt index on Latest/Around snapshots. History pages
+ * omit it and retain the client's index; labels are bounded separately
+ * from transcript content. Absent on older daemons.
+ */
+navigation?: Array<TranscriptNavigationEntry> | null,
 /**
  * Live control surface: queued submissions the view renders above the
  * composer without hydrating the session.

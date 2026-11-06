@@ -89,10 +89,13 @@ impl Waku {
             .selected_session
             .and_then(|id| self.transcript_views.get(&id))
             .map_or(0, |view| {
-                (view.has_more_before as u64) << 1
-                    | view.loading_before as u64
-                    | (view.has_more_after as u64) << 2
-                    | (view.loading_after as u64) << 3
+                mix(
+                    view.revision,
+                    (view.has_more_before as u64) << 1
+                        | view.loading_before as u64
+                        | (view.has_more_after as u64) << 2
+                        | (view.loading_after as u64) << 3,
+                )
             });
         mix(
             mix(
@@ -293,24 +296,55 @@ impl Waku {
         let fingerprint = self.transcript_row_kinds_fingerprint.get();
         if self.transcript_navigation_turns_fingerprint.get() != fingerprint {
             let kinds = self.transcript_row_kinds.borrow();
-            let turns = self
-                .selected_session()
-                .map(|session| {
-                    if let Some(history) = self
-                        .boss_chat_key()
-                        .and_then(|key| self.boss_ui.chat_history.get(&key))
-                    {
-                        history.navigation_turns(session, &kinds)
-                    } else {
-                        transcript_navigation_turns(session, &kinds)
-                    }
-                })
-                .unwrap_or_default();
+            let turns =
+                self.selected_session()
+                    .map(|session| {
+                        if let Some(history) = self
+                            .boss_chat_key()
+                            .and_then(|key| self.boss_ui.chat_history.get(&key))
+                        {
+                            let mut turns = history.navigation_turns(session, &kinds);
+                            if let Some(view) = self.transcript_views.get(&session.id) {
+                                turns.retain(|turn| {
+                                    turn.row_index.and_then(|row| kinds.get(row)).is_some_and(
+                                        |kind| matches!(kind, TranscriptRowKind::BossHistory(..)),
+                                    )
+                                });
+                                turns.extend(super::transcript_window::window_navigation_turns(
+                                    session, &kinds, view,
+                                ));
+                            }
+                            turns
+                        } else if let Some(view) = self.transcript_views.get(&session.id) {
+                            super::transcript_window::window_navigation_turns(session, &kinds, view)
+                        } else {
+                            transcript_navigation_turns(session, &kinds)
+                        }
+                    })
+                    .unwrap_or_default();
+            let view = self
+                .state
+                .selected_session
+                .and_then(|id| self.transcript_views.get(&id));
+            let base = view.map_or(0, |view| view.message_base as usize);
+            let window_start = kinds
+                .iter()
+                .position(|kind| *kind == TranscriptRowKind::HistoryBoundary)
+                .unwrap_or(0);
+            *self.transcript_navigation_positions.borrow_mut() =
+                TranscriptNavigationPositions::new(&turns, base, window_start);
             *self.transcript_navigation_turns.borrow_mut() = Rc::new(turns);
             self.transcript_navigation_turns_fingerprint
                 .set(fingerprint);
         }
         self.transcript_navigation_turns.borrow().clone()
+    }
+
+    pub(super) fn active_navigation_turn(&self, scroll_top: usize, at_end: bool) -> Option<usize> {
+        self.navigation_turns();
+        self.transcript_navigation_positions
+            .borrow()
+            .active(scroll_top, at_end)
     }
 
     pub(super) fn active_transcript_rows(&self) -> &ListState {
@@ -1077,7 +1111,8 @@ pub(super) struct QueuedCardFade {
 pub(super) struct TranscriptNavigationTurn {
     pub message_id: Uuid,
     pub message_index: usize,
-    pub row_index: usize,
+    /// Absent until this prompt's content window is materialized.
+    pub row_index: Option<usize>,
     pub prompt: String,
     pub response: String,
 }
@@ -1157,7 +1192,7 @@ pub(super) fn transcript_navigation_turns(
         turns.push(TranscriptNavigationTurn {
             message_id: message.id,
             message_index,
-            row_index,
+            row_index: Some(row_index),
             prompt: if message.visible_content().trim().is_empty() {
                 message
                     .attachments
@@ -1175,6 +1210,55 @@ pub(super) fn transcript_navigation_turns(
         });
     }
     turns
+}
+
+/// Cached row-to-tick projection. Unloaded prompts before the content window
+/// share its top boundary; selecting one still fetches its own entry.
+#[derive(Default)]
+pub(super) struct TranscriptNavigationPositions {
+    rows: Vec<usize>,
+    indexes: Vec<usize>,
+    turn_count: usize,
+}
+
+impl TranscriptNavigationPositions {
+    pub(super) fn new(
+        turns: &[TranscriptNavigationTurn],
+        message_base: usize,
+        window_start: usize,
+    ) -> Self {
+        let mut positions = Self {
+            turn_count: turns.len(),
+            ..Self::default()
+        };
+        for (index, turn) in turns.iter().enumerate() {
+            let row = turn
+                .row_index
+                .or_else(|| (turn.message_index < message_base).then_some(window_start));
+            if let Some(row) = row {
+                if positions.rows.last() == Some(&row) {
+                    // Only the most recent prompt at the window boundary
+                    // can be active; keep this projection bounded by the
+                    // materialized rows rather than the full history.
+                    if let Some(last) = positions.indexes.last_mut() {
+                        *last = index;
+                    }
+                } else {
+                    positions.rows.push(row);
+                    positions.indexes.push(index);
+                }
+            }
+        }
+        positions
+    }
+
+    pub(super) fn active(&self, scroll_top_row: usize, at_end: bool) -> Option<usize> {
+        if at_end {
+            return self.turn_count.checked_sub(1);
+        }
+        active_navigation_turn_index(&self.rows, scroll_top_row, false)
+            .map(|index| self.indexes[index])
+    }
 }
 
 pub(super) fn navigation_preview_snippet(content: &str, max_graphemes: usize) -> String {

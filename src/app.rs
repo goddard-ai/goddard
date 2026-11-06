@@ -4299,6 +4299,7 @@ pub struct Waku {
     /// rail a pointer instead of re-extracting every turn's snippets. Rebuilt
     /// by `navigation_turns` when the row-kinds fingerprint moves.
     transcript_navigation_turns: RefCell<Rc<Vec<TranscriptNavigationTurn>>>,
+    transcript_navigation_positions: RefCell<transcript::TranscriptNavigationPositions>,
     /// The row-kinds fingerprint `transcript_navigation_turns` was built from.
     transcript_navigation_turns_fingerprint: Cell<Option<u64>>,
     /// Response-footer copy content and completion time per message index,
@@ -8158,6 +8159,7 @@ impl Waku {
                 queued_card_session: Cell::new(None),
                 queued_card_fade: Cell::new(None),
                 transcript_navigation_turns: RefCell::new(Rc::new(Vec::new())),
+                transcript_navigation_positions: RefCell::new(Default::default()),
                 transcript_navigation_turns_fingerprint: Cell::new(None),
                 assistant_footer_cache: RefCell::new(HashMap::new()),
                 assistant_footer_fingerprint: Cell::new(None),

@@ -154,13 +154,14 @@ impl ConversationNavigationRail {
             return;
         }
         let reset = self.snapshot.reset_generation != snapshot.reset_generation;
-        let turn_identity_changed = self.snapshot.turns.len() != snapshot.turns.len()
-            || self
-                .snapshot
-                .turns
-                .iter()
-                .zip(snapshot.turns.iter())
-                .any(|(previous, next)| previous.message_id != next.message_id);
+        let turn_identity_changed = !Rc::ptr_eq(&self.snapshot.turns, &snapshot.turns)
+            && (self.snapshot.turns.len() != snapshot.turns.len()
+                || self
+                    .snapshot
+                    .turns
+                    .iter()
+                    .zip(snapshot.turns.iter())
+                    .any(|(previous, next)| previous.message_id != next.message_id));
         let active_turn_changed = self.snapshot.active_turn != snapshot.active_turn;
         if reset {
             self.hovered_turn = None;
@@ -433,21 +434,24 @@ impl Waku {
             let viewport_size = viewport_bounds.size;
             let navigation_turns = self.navigation_turns();
             let navigation_rail_visible = should_show_navigation_rail(
-                transcript_scrollable,
+                transcript_scrollable
+                    || self
+                        .state
+                        .selected_session
+                        .is_some_and(|id| self.session_transcript_is_partial(id)),
                 navigation_turns.len(),
                 chat_viewport_width,
             );
             let scroll_top_row = transcript_rows.logical_scroll_top().item_ix;
-            let turn_rows = navigation_turns
-                .iter()
-                .map(|turn| turn.row_index)
-                .collect::<Vec<_>>();
-            let active_turn = active_navigation_turn_index(
-                &turn_rows,
-                scroll_top_row,
-                !self.transcript_is_scrolled.get(),
-            )
-            .map(|index| navigation_turns[index].message_id);
+            let at_full_tail = !self.transcript_is_scrolled.get()
+                && self
+                    .state
+                    .selected_session
+                    .and_then(|id| self.transcript_views.get(&id))
+                    .is_none_or(|view| !view.has_more_after);
+            let active_turn = self
+                .active_navigation_turn(scroll_top_row, at_full_tail)
+                .map(|index| navigation_turns[index].message_id);
             let navigation_rail_snapshot = ConversationNavigationRailSnapshot {
                 visible: navigation_rail_visible,
                 turns: navigation_turns,
@@ -1369,22 +1373,47 @@ impl ConversationNavigationRail {
 
 impl Waku {
     pub(super) fn scroll_to_navigation_turn(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
-        let row_index = self
+        let target = self
             .navigation_turns()
             .iter()
             .find(|turn| turn.message_id == message_id)
-            .map(|turn| turn.row_index);
-        let Some(row_index) = row_index else {
-            return;
-        };
-
-        self.transcript_anchor_following.set(false);
-        self.active_transcript_rows().scroll_to(ListOffset {
-            item_ix: row_index,
-            offset_in_item: Pixels::ZERO,
-        });
-        self.transcript_is_scrolled.set(true);
-        cx.notify();
+            .cloned();
+        let Some(target) = target else { return };
+        if let Some(id) = self.state.selected_session
+            && let Some(view) = self.transcript_views.get_mut(&id)
+        {
+            view.navigation_request = None;
+        }
+        if let Some(row_index) = target.row_index {
+            self.transcript_anchor_following.set(false);
+            self.active_transcript_rows().scroll_to(ListOffset {
+                item_ix: row_index,
+                offset_in_item: Pixels::ZERO,
+            });
+            self.transcript_is_scrolled.set(true);
+            cx.notify();
+        } else if let Some(session_id) = self
+            .selected_session()
+            .filter(|session| {
+                session
+                    .messages
+                    .iter()
+                    .any(|message| message.id == message_id)
+            })
+            .map(|session| session.id)
+        {
+            self.reveal_transcript_match(
+                &PendingTranscriptMatch {
+                    session_id,
+                    message_id,
+                    query: String::new(),
+                },
+                cx,
+            );
+            cx.notify();
+        } else {
+            self.load_navigation_turn(message_id, cx);
+        }
     }
 
     /// ⌘⌥↑: land on the turn boundary above the scroll top.
@@ -1399,17 +1428,28 @@ impl Waku {
         }
         self.sync_transcript_rows();
         let turns = self.navigation_turns();
-        let turn_rows = turns.iter().map(|turn| turn.row_index).collect::<Vec<_>>();
-        let scroll_top = self.active_transcript_rows().logical_scroll_top();
-        let Some(target) = previous_navigation_turn_index(
-            &turn_rows,
-            scroll_top.item_ix,
-            scroll_top.offset_in_item == Pixels::ZERO,
-        ) else {
+        let scroll = self.active_transcript_rows().logical_scroll_top();
+        let Some(active) = self.active_navigation_turn(scroll.item_ix, false) else {
             return;
         };
-        let message_id = turns[target].message_id;
-        self.scroll_to_navigation_turn(message_id, cx);
+        let target = if turns.iter().all(|turn| turn.row_index.is_some()) {
+            previous_navigation_turn_index(
+                &turns
+                    .iter()
+                    .filter_map(|turn| turn.row_index)
+                    .collect::<Vec<_>>(),
+                scroll.item_ix,
+                scroll.offset_in_item == Pixels::ZERO,
+            )
+            .unwrap_or(active)
+        } else if turns[active].row_index == Some(scroll.item_ix)
+            && scroll.offset_in_item == Pixels::ZERO
+        {
+            active.saturating_sub(1)
+        } else {
+            active
+        };
+        self.scroll_to_navigation_turn(turns[target].message_id, cx);
     }
 
     /// ⌘⌥↓: the first turn boundary below the scroll top, or the pinned
@@ -1425,17 +1465,32 @@ impl Waku {
         }
         self.sync_transcript_rows();
         let turns = self.navigation_turns();
-        let scroll_top_row = self.active_transcript_rows().logical_scroll_top().item_ix;
-        let target = next_navigation_turn_index(
-            &turns.iter().map(|turn| turn.row_index).collect::<Vec<_>>(),
-            scroll_top_row,
-        );
-        match target {
-            Some(index) => {
-                let message_id = turns[index].message_id;
-                self.scroll_to_navigation_turn(message_id, cx);
-            }
-            None => self.scroll_transcript_to_bottom(cx),
+        let scroll = self.active_transcript_rows().logical_scroll_top();
+        let target = if turns.iter().all(|turn| turn.row_index.is_some()) {
+            next_navigation_turn_index(
+                &turns
+                    .iter()
+                    .filter_map(|turn| turn.row_index)
+                    .collect::<Vec<_>>(),
+                scroll.item_ix,
+            )
+        } else {
+            self.active_navigation_turn(scroll.item_ix, false)
+                .map(|active| {
+                    if turns[active]
+                        .row_index
+                        .is_some_and(|row| row > scroll.item_ix)
+                    {
+                        active
+                    } else {
+                        active + 1
+                    }
+                })
+        };
+        if let Some(turn) = target.and_then(|index| turns.get(index)) {
+            self.scroll_to_navigation_turn(turn.message_id, cx);
+        } else {
+            self.scroll_transcript_to_bottom(cx);
         }
     }
 
@@ -5979,7 +6034,7 @@ mod navigation_rail_scroll_tests {
                 .map(|index| TranscriptNavigationTurn {
                     message_id: Uuid::new_v4(),
                     message_index: index,
-                    row_index: index,
+                    row_index: Some(index),
                     prompt: format!("Prompt {index}"),
                     response: String::new(),
                 })

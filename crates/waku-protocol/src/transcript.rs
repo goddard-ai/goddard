@@ -197,6 +197,16 @@ pub enum TranscriptEntryData {
     },
 }
 
+/// A visible user prompt in the complete retained transcript. Navigation needs
+/// identities and short labels, independently of the materialized content page.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptNavigationEntry {
+    pub message_id: Uuid,
+    pub message_index: u32,
+    pub prompt: String,
+}
+
 /// A bounded slice of the flattened transcript plus the anchors a view needs
 /// to merge it into what it already holds.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -244,6 +254,11 @@ pub struct TranscriptWindow {
     /// builders read status/timing from these.
     #[serde(default)]
     pub turns: Vec<AgentTurn>,
+    /// Complete visible-prompt index on Latest/Around snapshots. History pages
+    /// omit it and retain the client's index; labels are bounded separately
+    /// from transcript content. Absent on older daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation: Option<Vec<TranscriptNavigationEntry>>,
     /// Live control surface: queued submissions the view renders above the
     /// composer without hydrating the session.
     #[serde(default)]

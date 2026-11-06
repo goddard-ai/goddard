@@ -1104,6 +1104,7 @@ impl WakuBackend {
                 converted: false,
                 legacy_read: false,
                 turns: Vec::new(),
+                navigation: None,
                 queued_messages: Vec::new(),
                 event_cursor: None,
             });

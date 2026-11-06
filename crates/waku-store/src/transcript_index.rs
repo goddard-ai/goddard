@@ -974,6 +974,7 @@ pub(crate) fn read_transcript_window(
         converted: true,
         legacy_read: false,
         turns: Vec::new(),
+        navigation: None,
         queued_messages,
         event_cursor: None,
     };
@@ -1206,6 +1207,41 @@ pub(crate) fn read_transcript_window(
             .filter_map(|row| row.ok())
             .filter_map(|data| serde_json::from_str::<AgentTurn>(&data).ok())
             .collect();
+    }
+    if matches!(
+        target,
+        TranscriptWindowTarget::Latest | TranscriptWindowTarget::Around { .. }
+    ) {
+        // Read only a compact prompt index, never historical message bodies or
+        // tool payloads. Ordinary history pages reuse this snapshot client-side.
+        let mut statement = connection
+            .prepare(
+                "SELECT id, position, substr(COALESCE(display_content, content), 1, 400)
+             FROM messages WHERE session_id = ?1 AND role = 'user' AND hidden = 0
+             ORDER BY position",
+            )
+            .map_err(to_io_error)?;
+        let rows = statement
+            .query_map(params![sid], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u32>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(to_io_error)?;
+        let mut navigation = Vec::new();
+        for row in rows {
+            let (id, message_index, prompt) = row.map_err(to_io_error)?;
+            let message_id = Uuid::parse_str(&id)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            navigation.push(waku_protocol::transcript::TranscriptNavigationEntry {
+                message_id,
+                message_index,
+                prompt,
+            });
+        }
+        window.navigation = Some(navigation);
     }
     Ok(Some(window))
 }
@@ -1905,6 +1941,99 @@ mod tests {
             .expect("indexed session");
         assert!(unchanged.unchanged);
         std::fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn navigation_indexes_all_visible_prompts_and_reveals_an_unloaded_turn() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let mut session = session_with_transcript();
+        session.messages[0].content = "large prompt ".repeat(10_000);
+        session.begin_hidden_turn("Internal continuation");
+        session.finish_active_turn(TurnStatus::Completed);
+        let id = session.id;
+        let expected: Vec<_> = session
+            .messages
+            .iter()
+            .filter(|message| message.role == MessageRole::User && !message.hidden)
+            .map(|message| message.id)
+            .collect();
+        state.push_session(session);
+        store.save(&mut state).unwrap();
+        let latest = store
+            .read_transcript_window(id, &TranscriptWindowTarget::Latest, 1, 4096, None)
+            .unwrap()
+            .unwrap();
+        let navigation = latest.navigation.as_ref().unwrap();
+        assert_eq!(
+            navigation
+                .iter()
+                .map(|turn| turn.message_id)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert!(
+            navigation
+                .iter()
+                .all(|turn| turn.prompt.chars().count() <= 400)
+        );
+        assert!(
+            latest.entries.len() <= 1,
+            "the index must not hydrate transcript bodies"
+        );
+        let target = navigation[1].message_id;
+        assert!(
+            latest
+                .entries
+                .iter()
+                .all(|entry| entry.entry_id() != target)
+        );
+        let around = store
+            .read_transcript_window(
+                id,
+                &TranscriptWindowTarget::Around { entry_id: target },
+                4,
+                4096,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(
+            around
+                .entries
+                .iter()
+                .any(|entry| entry.entry_id() == target)
+        );
+        assert_eq!(
+            around
+                .navigation
+                .unwrap()
+                .iter()
+                .map(|turn| turn.message_id)
+                .collect::<Vec<_>>(),
+            expected
+        );
+        let before = store
+            .read_transcript_window(
+                id,
+                &TranscriptWindowTarget::Before {
+                    cursor: TranscriptCursor {
+                        seq: latest.entries[0].seq,
+                        entry_id: latest.entries[0].entry_id(),
+                    },
+                },
+                4,
+                4096,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(
+            before.navigation.is_none(),
+            "ordinary pages reuse the existing index"
+        );
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]

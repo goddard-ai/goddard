@@ -61,6 +61,8 @@ pub(super) struct TranscriptViewState {
     pub message_base: u32,
     /// Total messages in the authoritative transcript (not the slice).
     pub message_count: u32,
+    pub navigation: Option<Vec<waku_protocol::transcript::TranscriptNavigationEntry>>,
+    pub navigation_request: Option<Uuid>,
     pub has_more_before: bool,
     pub has_more_after: bool,
     /// Edge cursors for the next `Before`/`After` page.
@@ -102,6 +104,8 @@ pub(super) fn materialize_session(
         entry_count: window.entry_count,
         message_base: window.message_base,
         message_count: window.message_count,
+        navigation: window.navigation.clone(),
+        navigation_request: None,
         has_more_before: window.has_more_before,
         has_more_after: window.has_more_after,
         previous: window.previous,
@@ -147,6 +151,9 @@ pub(super) fn splice_window(
     view.revision = window.revision;
     view.entry_count = window.entry_count;
     view.message_count = window.message_count;
+    if let Some(navigation) = &window.navigation {
+        view.navigation = Some(navigation.clone());
+    }
     match direction {
         WindowMerge::Before => {
             view.has_more_before = window.has_more_before;
@@ -191,6 +198,8 @@ pub(super) fn splice_window(
         entry_count: view.entry_count,
         message_base: 0,
         message_count: view.message_count,
+        navigation: None,
+        navigation_request: None,
         has_more_before: false,
         has_more_after: false,
         previous: None,
@@ -556,6 +565,65 @@ fn transcript_history_edge_is_near(rows: &ListState, future: bool) -> bool {
     distance <= height
 }
 
+/// Merge the complete prompt index with current row positions and previews.
+/// Loading a content page changes availability, never the tick identities.
+pub(super) fn window_navigation_turns(
+    session: &AgentSession,
+    kinds: &[TranscriptRowKind],
+    view: &TranscriptViewState,
+) -> Vec<super::transcript::TranscriptNavigationTurn> {
+    use super::transcript::{
+        TranscriptNavigationTurn, navigation_preview_snippet, transcript_navigation_turns,
+    };
+    let mut loaded = transcript_navigation_turns(session, kinds);
+    let Some(index) = &view.navigation else {
+        // An older daemon cannot tell us the complete count. Hide the partial
+        // rail rather than present the materialized slice as the whole task.
+        return if view.is_complete() {
+            loaded
+        } else {
+            Vec::new()
+        };
+    };
+    for turn in &mut loaded {
+        turn.message_index += view.message_base as usize;
+    }
+    let mut loaded: HashMap<_, _> = loaded
+        .into_iter()
+        .map(|turn| (turn.message_id, turn))
+        .collect();
+    let hidden: HashSet<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.hidden)
+        .map(|message| message.id)
+        .collect();
+    let mut turns = Vec::with_capacity(index.len() + loaded.len());
+    for entry in index {
+        if let Some(turn) = loaded.remove(&entry.message_id) {
+            turns.push(turn);
+        } else if (view.has_more_after
+            || (entry.message_index as usize) < view.message_base as usize + session.messages.len())
+            && !hidden.contains(&entry.message_id)
+        {
+            turns.push(TranscriptNavigationTurn {
+                message_id: entry.message_id,
+                message_index: entry.message_index as usize,
+                row_index: None,
+                prompt: navigation_preview_snippet(
+                    &waku_protocol::model::atom_visible_text(&entry.prompt),
+                    100,
+                ),
+                response: String::new(),
+            });
+        }
+    }
+    // New live prompts may have arrived since the indexed snapshot.
+    turns.extend(loaded.into_values());
+    turns.sort_by_key(|turn| turn.message_index);
+    turns
+}
+
 /// Vector indices change when a page is prepended. Diff pages by the content
 /// they identify so the retained suffix keeps its measurements and position.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -634,6 +702,87 @@ fn splice_history_page_rows(
 }
 
 impl Waku {
+    /// A rail target outside the slice is an entry reveal, never a reason to
+    /// hydrate every intervening transcript page. Only the latest click wins.
+    pub(super) fn load_navigation_turn(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        let Some(daemon) = self.daemon_for_session(session_id) else {
+            return;
+        };
+        let client = daemon.client();
+        if !client.transcript_windows_available() {
+            return;
+        }
+        let Some(view) = self.transcript_views.get_mut(&session_id) else {
+            return;
+        };
+        let request = Uuid::new_v4();
+        view.navigation_request = Some(request);
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.read_transcript_window(
+                        waku_protocol::transcript::TranscriptWindowRequest {
+                            session_id,
+                            target: waku_protocol::transcript::TranscriptWindowTarget::Around {
+                                entry_id: message_id,
+                            },
+                            max_entries: None,
+                            max_bytes: None,
+                            known_revision: None,
+                        },
+                    )
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                let Some(view) = waku.transcript_views.get_mut(&session_id) else {
+                    return;
+                };
+                if view.navigation_request != Some(request) {
+                    return;
+                }
+                view.navigation_request = None;
+                if waku.state.selected_session != Some(session_id) {
+                    return;
+                }
+                let window = match result {
+                    Ok(window)
+                        if !window.invalid_cursor
+                            && window.revision >= view.revision
+                            && window
+                                .entries
+                                .iter()
+                                .any(|entry| entry.entry_id() == message_id) =>
+                    {
+                        window
+                    }
+                    _ => {
+                        waku.show_toast(tr!("transcript.navigation_load_failed"));
+                        cx.notify();
+                        return;
+                    }
+                };
+                let Some(session) = waku.state.session_mut(session_id) else {
+                    return;
+                };
+                let view = materialize_session(session, &window);
+                waku.transcript_views.insert(session_id, view);
+                waku.transcript_navigation_turns_fingerprint.set(None);
+                waku.sync_transcript_rows();
+                // Replacing a window can preserve its row count while changing
+                // every row. Discard those old measurements before revealing.
+                let count = waku.transcript_row_kinds.borrow().len();
+                waku.reset_transcript_rows(count);
+                waku.scroll_to_navigation_turn(message_id, cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn snapshot_history_page_rows(&self, session_id: Uuid) -> Option<Vec<HistoryPageRow>> {
         if self.state.selected_session != Some(session_id) {
             return None;
@@ -753,6 +902,13 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
+                if waku
+                    .transcript_views
+                    .get(&session_id)
+                    .is_none_or(|view| view.previous != Some(cursor))
+                {
+                    return;
+                }
                 let previous = waku.snapshot_history_page_rows(session_id);
                 if let Some(view) = waku.transcript_views.get_mut(&session_id) {
                     view.loading_before = false;
@@ -823,6 +979,13 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
+                if waku
+                    .transcript_views
+                    .get(&session_id)
+                    .is_none_or(|view| view.next != Some(cursor))
+                {
+                    return;
+                }
                 let previous = waku.snapshot_history_page_rows(session_id);
                 if let Some(view) = waku.transcript_views.get_mut(&session_id) {
                     view.loading_after = false;
@@ -1294,6 +1457,7 @@ mod tests {
             converted: true,
             legacy_read: false,
             turns: Vec::new(),
+            navigation: None,
             queued_messages: Vec::new(),
             event_cursor: None,
         }
@@ -1301,6 +1465,110 @@ mod tests {
 
     fn session() -> AgentSession {
         AgentSession::new(Uuid::new_v4(), ProviderKind::Codex)
+    }
+
+    #[test]
+    fn navigation_ticks_stay_complete_as_content_pages_change() {
+        use super::super::transcript::TranscriptNavigationPositions;
+        use waku_protocol::transcript::TranscriptNavigationEntry;
+        let mut session = session();
+        let entries: Vec<_> = (0..6)
+            .map(|index| {
+                let mut entry = message_entry(index, &format!("Message {index}"), index as u32);
+                if index % 2 == 0 {
+                    let TranscriptEntryData::Message { message, .. } = &mut entry.data else {
+                        unreachable!()
+                    };
+                    message.role = MessageRole::User;
+                }
+                entry
+            })
+            .collect();
+        let index: Vec<_> = entries
+            .iter()
+            .step_by(2)
+            .map(|entry| TranscriptNavigationEntry {
+                message_id: entry.entry_id(),
+                message_index: entry.after_message,
+                prompt: format!("Prompt {}", entry.after_message),
+            })
+            .collect();
+        let ids = index
+            .iter()
+            .map(|entry| entry.message_id)
+            .collect::<Vec<_>>();
+        let mut latest = window(session.id, entries[4..].to_vec(), 4, true, false);
+        latest.navigation = Some(index);
+        let mut view = materialize_session(&mut session, &latest);
+        let kinds = [
+            TranscriptRowKind::HistoryBoundary,
+            TranscriptRowKind::Message(0),
+            TranscriptRowKind::Message(1),
+        ];
+        let before = window_navigation_turns(&session, &kinds, &view);
+        assert_eq!(
+            before
+                .iter()
+                .map(|turn| turn.message_id)
+                .collect::<Vec<_>>(),
+            ids
+        );
+        assert_eq!(
+            before.iter().map(|turn| turn.row_index).collect::<Vec<_>>(),
+            [None, None, Some(1)]
+        );
+        assert_eq!(
+            TranscriptNavigationPositions::new(&before, 4, 0).active(1, false),
+            Some(2)
+        );
+        assert_eq!(
+            TranscriptNavigationPositions::new(&before, 4, 0).active(0, false),
+            Some(1)
+        );
+        // The visible slice can start inside a turn whose prompt is unloaded.
+        let mut response_only = window(session.id, entries[5..].to_vec(), 5, true, false);
+        response_only.navigation = latest.navigation.clone();
+        let mut tail_session = session.clone();
+        let tail_view = materialize_session(&mut tail_session, &response_only);
+        let tail_turns = window_navigation_turns(
+            &tail_session,
+            &[
+                TranscriptRowKind::HistoryBoundary,
+                TranscriptRowKind::Message(0),
+            ],
+            &tail_view,
+        );
+        assert_eq!(
+            TranscriptNavigationPositions::new(&tail_turns, 5, 0).active(1, false),
+            Some(2)
+        );
+        let page = window(session.id, entries[..4].to_vec(), 0, false, false);
+        splice_window(&mut session, &mut view, &page, WindowMerge::Before);
+        let kinds: Vec<_> = (0..6).map(TranscriptRowKind::Message).collect();
+        let after = window_navigation_turns(&session, &kinds, &view);
+        assert_eq!(
+            after.iter().map(|turn| turn.message_id).collect::<Vec<_>>(),
+            ids
+        );
+        assert_eq!(
+            after.iter().map(|turn| turn.row_index).collect::<Vec<_>>(),
+            [Some(0), Some(2), Some(4)]
+        );
+        assert_eq!(
+            TranscriptNavigationPositions::new(&after, 0, 0).active(4, false),
+            Some(2)
+        );
+        let live = Message::new(MessageRole::User, "New live prompt");
+        let live_id = live.id;
+        session.messages.push(live);
+        let kinds: Vec<_> = (0..7).map(TranscriptRowKind::Message).collect();
+        let with_live = window_navigation_turns(&session, &kinds, &view);
+        assert_eq!(with_live.len(), 4);
+        assert_eq!(with_live.last().unwrap().message_id, live_id);
+        // Older daemons cannot supply a full index: never show a partial count.
+        view.navigation = None;
+        view.has_more_before = true;
+        assert!(window_navigation_turns(&session, &kinds, &view).is_empty());
     }
 
     #[test]

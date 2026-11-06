@@ -332,7 +332,7 @@ impl BossChatHistory {
                 TranscriptNavigationTurn {
                     message_id: turn.message_id,
                     message_index: turn.message_index,
-                    row_index: turn.row_index + offset,
+                    row_index: turn.row_index.map(|row| row + offset),
                     prompt: turn.prompt.clone(),
                     response: turn.response.clone(),
                 }
@@ -913,34 +913,34 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["First", "Second", "Third", "Fourth"]
         );
-        let turn_rows = turns.iter().map(|turn| turn.row_index).collect::<Vec<_>>();
+        let turn_rows = turns.iter().map(|turn| turn.row_index.unwrap()).collect::<Vec<_>>();
         assert!(turn_rows.windows(2).all(|pair| pair[0] < pair[1]));
         assert_eq!(
-            previous_navigation_turn_index(&turn_rows, turns[3].row_index, true),
+            previous_navigation_turn_index(&turn_rows, turns[3].row_index.unwrap(), true),
             Some(2)
         );
         assert_eq!(
-            next_navigation_turn_index(&turn_rows, turns[1].row_index),
+            next_navigation_turn_index(&turn_rows, turns[1].row_index.unwrap()),
             Some(2)
         );
         assert_eq!(
-            next_navigation_turn_index(&turn_rows, turns[2].row_index),
+            next_navigation_turn_index(&turn_rows, turns[2].row_index.unwrap()),
             Some(3)
         );
         // The existing next-turn action pins the shared list to its tail on None.
         assert_eq!(
-            next_navigation_turn_index(&turn_rows, turns[3].row_index),
+            next_navigation_turn_index(&turn_rows, turns[3].row_index.unwrap()),
             None
         );
         assert_eq!(
-            rows[turns[0].row_index],
+            rows[turns[0].row_index.unwrap()],
             TranscriptRowKind::BossHistory(first.id, BossHistoryRow::Message(0))
         );
         assert_eq!(
-            rows[turns[2].row_index],
+            rows[turns[2].row_index.unwrap()],
             TranscriptRowKind::BossHistory(second.id, BossHistoryRow::Message(2))
         );
-        assert_eq!(rows[turns[3].row_index], TranscriptRowKind::Message(2));
+        assert_eq!(rows[turns[3].row_index.unwrap()], TranscriptRowKind::Message(2));
         assert_eq!(turns[2].response, "Answer to Third");
         assert_eq!(turns[3].response, "Answer to Fourth");
     }

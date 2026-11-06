@@ -3982,10 +3982,10 @@ fn conversation_navigation_preview_uses_each_prompt_and_latest_response() {
     let turns = transcript_navigation_turns(&session, &rows);
     assert_eq!(turns.len(), 2);
     assert_eq!(turns[0].message_index, 0);
-    assert_eq!(turns[0].row_index, 0);
+    assert_eq!(turns[0].row_index, Some(0));
     assert_eq!(turns[0].prompt, "First prompt");
     assert_eq!(turns[0].response, "Final answer");
-    assert_eq!(turns[1].row_index, 3);
+    assert_eq!(turns[1].row_index, Some(3));
     assert!(turns[1].response.is_empty());
     assert_eq!(
         navigation_preview_snippet("one   two\nthree", 20),
