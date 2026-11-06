@@ -739,6 +739,7 @@ mod sidebar_intents;
 mod summon;
 mod task_creation;
 mod transfer;
+mod workspace_recovery;
 
 use driver_commands::*;
 use events::*;

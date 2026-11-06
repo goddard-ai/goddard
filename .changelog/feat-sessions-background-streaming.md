@@ -1,1 +1,1 @@
-- Reduced desktop work while tasks run out of view; reopening loads the latest transcript while permissions and completion notifications remain available. New tasks keep their assigned worktree and a loading view that automatically retries until their contents are available.
+- Tasks running out of view use less desktop work while retaining permissions and completion notifications. Transcripts retry loading automatically. Follow-ups keep their worktree, with recovery offering an existing checkout or saved snapshot when needed.

@@ -73,6 +73,9 @@ fn reference_file(context: &waku_protocol::model::ReferenceContext, path: &Path)
 /// `Review*` operations read it.
 pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result<WorkspaceResult> {
     Ok(match operation {
+        WorkspaceOperation::RecoverTaskWorkspace { .. } => {
+            bail!("task workspace recovery requires the session daemon")
+        }
         WorkspaceOperation::QaDefaults {
             cwd,
             preferred_branch,

@@ -362,3 +362,143 @@ fn delayed_startup_save_cannot_recreate_an_assigned_worktree() {
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn workspace_recovery_reuses_runtime_and_restores_only_after_explicit_choice() {
+    let root = std::env::temp_dir().join(format!("workspace-recovery-{}", Uuid::new_v4()));
+    let (backend, session_id) = surface_test_backend(&root);
+    let repo = root.join("repo");
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "--quiet"]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "seed",
+        "--quiet",
+    ]);
+    let original = root.join("original");
+    git(&["worktree", "add", "--detach", original.to_str().unwrap()]);
+    let draft = SessionWorkspace::NewWorktree { base_branch: None };
+    backend.task_state.lock().sessions[0].workspace = draft.clone();
+    let runtime_id = Uuid::new_v4();
+    backend.sessions.lock().insert(
+        session_id,
+        runtime_generation_entry(runtime_id, Arc::new(CaptureDriver::default()), &original),
+    );
+    let recovered = backend
+        .recover_task_workspace(session_id, None, false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(recovered.path(), Some(original.as_path()));
+    assert_eq!(
+        backend
+            .task_store
+            .load_session_detail(session_id)
+            .unwrap()
+            .unwrap()
+            .workspace,
+        recovered
+    );
+    backend.sessions.lock().remove(&session_id);
+    backend.task_state.lock().sessions[0].workspace = draft.clone();
+    // No assignment or snapshot: an ordinary follow-up never creates a checkout.
+    let before = crate::repo::list_worktrees(&repo, false).unwrap().unwrap();
+    assert!(
+        backend
+            .recover_task_workspace(session_id, None, false)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        backend
+            .recover_task_workspace(session_id, None, true)
+            .is_err()
+    );
+    assert_eq!(
+        crate::repo::list_worktrees(&repo, false)
+            .unwrap()
+            .unwrap()
+            .len(),
+        before.len()
+    );
+    assert!(
+        backend
+            .recover_task_workspace(session_id, Some(root.clone()), false)
+            .is_err()
+    );
+    assert_eq!(backend.task_state.lock().sessions[0].workspace, draft);
+    // Selecting an existing checkout recovers its uncommitted files unchanged.
+    std::fs::write(original.join("unsaved.txt"), "keep me").unwrap();
+    let selected = backend
+        .recover_task_workspace(session_id, Some(original.clone()), false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        selected.path(),
+        Some(dunce::canonicalize(&original).unwrap().as_path())
+    );
+    assert_eq!(
+        std::fs::read_to_string(original.join("unsaved.txt")).unwrap(),
+        "keep me"
+    );
+    backend.task_state.lock().sessions[0].workspace = draft;
+    std::fs::write(repo.join("saved.txt"), "checkpoint contents").unwrap();
+    crate::checkpoint::capture_turn(&repo, session_id, 1).unwrap();
+    // A legacy snapshot without a recorded base must not detach the task onto
+    // unrelated synthetic history. The existing-checkout action remains usable.
+    assert!(
+        backend
+            .recover_task_workspace(session_id, None, true)
+            .is_err()
+    );
+    crate::checkpoint::capture_turn_start(&repo, session_id, 2).unwrap();
+    crate::checkpoint::capture_turn(&repo, session_id, 2).unwrap();
+    let restored = backend
+        .recover_task_workspace(session_id, None, true)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(restored.path().unwrap().join("saved.txt")).unwrap(),
+        "checkpoint contents"
+    );
+    assert!(!restored.is_borrowed());
+    let head = |cwd: &Path| {
+        std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(cwd)
+            .output()
+            .unwrap()
+            .stdout
+    };
+    assert_eq!(
+        head(restored.path().unwrap()),
+        head(&repo),
+        "restoration retains the real commit history"
+    );
+    assert_eq!(
+        backend
+            .recover_task_workspace(session_id, None, true)
+            .unwrap(),
+        Some(restored.clone())
+    );
+    // Remove only the checkout created by this explicit repair; the fixture owns both.
+    crate::worktree::remove(restored.path().unwrap(), true).unwrap();
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}

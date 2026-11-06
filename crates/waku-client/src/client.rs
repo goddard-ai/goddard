@@ -39,7 +39,8 @@ const MAX_BUFFERED_EVENTS_PER_RUNTIME: usize = 4096;
 fn request_timeout(command: &Command) -> Duration {
     match command {
         Command::Workspace { operation } => match operation {
-            WorkspaceOperation::CaptureTurn { .. }
+            WorkspaceOperation::RecoverTaskWorkspace { .. }
+            | WorkspaceOperation::CaptureTurn { .. }
             | WorkspaceOperation::CaptureTurnStart { .. }
             | WorkspaceOperation::CreateWorktree { .. }
             | WorkspaceOperation::CreateWorktreeFromCheckout { .. }
@@ -1250,6 +1251,11 @@ mod tests {
         let session_id = Uuid::new_v4();
 
         for operation in [
+            WorkspaceOperation::RecoverTaskWorkspace {
+                session_id,
+                path: None,
+                restore: true,
+            },
             WorkspaceOperation::CaptureTurnStart {
                 cwd: cwd.clone(),
                 session_id,

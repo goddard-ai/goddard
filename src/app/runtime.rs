@@ -683,13 +683,24 @@ fn merge_session_catalog_row(
     }
 }
 
-/// Perform every blocking operation between accepting a submission and
-/// starting its provider. This function is called only from the background
-/// executor; the UI thread owns applying the returned workspace afterward.
+#[derive(Debug)]
+pub(super) struct WorkspaceRecoveryRequired;
+
+impl std::fmt::Display for WorkspaceRecoveryRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&tr!("session.workspace_recovery_needed"))
+    }
+}
+
+impl std::error::Error for WorkspaceRecoveryRequired {}
+
+/// Perform blocking submission preparation on the background executor.
+/// Creation eligibility is captured before the optimistic turn begins.
 pub(super) fn prepare_submission(
     workspace_client: waku_client::WorkspaceClient,
     project: Project,
     workspace: SessionWorkspace,
+    allow_worktree_creation: bool,
     driver_start: Option<routing::SessionStartPlan>,
     turn_route: Option<routing::TurnRoutePlan>,
     task_registration: Option<AgentSession>,
@@ -702,6 +713,26 @@ pub(super) fn prepare_submission(
 ) -> anyhow::Result<PreparedSubmission> {
     let mut worktree_restored = false;
     let mut lfs_warning = None;
+    // Draft intent is only permission to create a checkout for a fresh task.
+    // Recover the daemon's assignment before any checkpoint or provider work.
+    let workspace =
+        if matches!(workspace, SessionWorkspace::NewWorktree { .. }) && !allow_worktree_creation {
+            match workspace_client
+                .request(waku_client::WorkspaceOperation::RecoverTaskWorkspace {
+                    session_id,
+                    path: None,
+                    restore: false,
+                })
+                .map_err(|error| error.context(WorkspaceRecoveryRequired))?
+            {
+                waku_client::WorkspaceResult::TaskWorkspace {
+                    workspace: Some(recovered),
+                } if !matches!(recovered, SessionWorkspace::NewWorktree { .. }) => recovered,
+                _ => return Err(WorkspaceRecoveryRequired.into()),
+            }
+        } else {
+            workspace
+        };
     let workspace = match workspace {
         SessionWorkspace::NewWorktree { base_branch } => {
             if project.is_projectless() {
@@ -6711,6 +6742,7 @@ impl Waku {
         };
         let project_id = session.project_id;
         let workspace = session.workspace.clone();
+        let allow_worktree_creation = !session.has_started();
         let next_turn_count = session.turns.len() + 1;
         let provisional_cwd = self
             .workspace_path_for_session(session)
@@ -6749,6 +6781,7 @@ impl Waku {
                         workspace_client,
                         project,
                         workspace,
+                        allow_worktree_creation,
                         Some(routing::SessionStartPlan::Direct(driver_start)),
                         None,
                         None,
@@ -6785,8 +6818,12 @@ impl Waku {
                 // which starts its own runtime.
                 self.pending_runtime_operations.remove(&session_id);
                 self.unwind_unconfirmed_pursuit_turn(session_id);
-                self.show_toast(error.to_string());
-                self.drain_queued_message(session_id, cx);
+                if error.downcast_ref::<WorkspaceRecoveryRequired>().is_some() {
+                    self.show_workspace_recovery_notice(session_id);
+                } else {
+                    self.show_toast(error.to_string());
+                    self.drain_queued_message(session_id, cx);
+                }
                 cx.notify();
                 return;
             }
@@ -8166,6 +8203,8 @@ impl Waku {
         let attachment_count = submission.attachments.len();
         let project_id = session.project_id;
         let workspace = session.workspace.clone();
+        let allow_worktree_creation =
+            !session.has_started() && !self.runtimes.contains_key(&session_id);
         let Some(project) = self
             .state
             .projects
@@ -8435,6 +8474,7 @@ impl Waku {
                         workspace_client,
                         project,
                         workspace,
+                        allow_worktree_creation,
                         session_start,
                         turn_route,
                         task_registration,
@@ -8539,9 +8579,18 @@ impl Waku {
                     }
                     self.splice_transcript_rows_after_visibility_change(&previous_kinds);
                 }
-                if selected || boss_send {
-                    self.restore_composer_submission(session_id, submission, cx);
-                    self.show_toast(tr!("errors.create_worktree", error = error));
+                let needs_recovery = error.downcast_ref::<WorkspaceRecoveryRequired>().is_some();
+                if selected || boss_send || needs_recovery {
+                    if needs_recovery && !selected && !boss_send {
+                        self.enqueue_follow_up_submission(session_id, submission, cx);
+                    } else {
+                        self.restore_composer_submission(session_id, submission, cx);
+                    }
+                    if needs_recovery {
+                        self.show_workspace_recovery_notice(session_id);
+                    } else {
+                        self.show_toast(tr!("errors.create_worktree", error = error));
+                    }
                 }
                 cx.notify();
                 return;
@@ -9747,5 +9796,99 @@ mod task_registration_tests {
                 assert!(error.to_string().contains("did not register the task"));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod workspace_recovery_tests {
+    use super::*;
+    use waku_protocol::{ClientMessage, ResponseOutcome, ResponsePayload, ServerMessage};
+
+    #[test]
+    fn follow_up_without_an_assignment_never_requests_a_new_checkout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let session_id = Uuid::new_v4();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut socket = tungstenite::accept(stream).unwrap();
+            loop {
+                let tungstenite::Message::Text(text) = socket.read().unwrap() else {
+                    continue;
+                };
+                let mut done = false;
+                let response = match serde_json::from_str::<ClientMessage>(&text).unwrap() {
+                    ClientMessage::Hello {
+                        protocol_version, ..
+                    } => ServerMessage::Hello {
+                        protocol_version,
+                        daemon_version: "test".into(),
+                        daemon_commit: None,
+                        agent_cli_available: false,
+                        task_views_available: true,
+                        transcript_windows_available: false,
+                    },
+                    ClientMessage::Request(request) => {
+                        assert!(
+                            matches!(request.command,
+                            waku_client::Command::Workspace {
+                                operation: waku_client::WorkspaceOperation::RecoverTaskWorkspace {
+                                    session_id: id, path: None, restore: false,
+                                }
+                            } if id == session_id),
+                            "unexpected side effect: {:?}",
+                            request.command
+                        );
+                        done = true;
+                        ServerMessage::Response {
+                            request_id: request.request_id,
+                            outcome: ResponseOutcome::Ok {
+                                payload: ResponsePayload::Workspace {
+                                    result: waku_client::WorkspaceResult::TaskWorkspace {
+                                        workspace: None,
+                                    },
+                                },
+                            },
+                        }
+                    }
+                    other => panic!("unexpected message: {other:?}"),
+                };
+                socket
+                    .send(tungstenite::Message::Text(
+                        serde_json::to_string(&response).unwrap().into(),
+                    ))
+                    .unwrap();
+                if done {
+                    return;
+                }
+            }
+        });
+        let client = waku_client::DaemonClient::connect(&address, "test".into()).unwrap();
+        let result = prepare_submission(
+            waku_client::WorkspaceClient::new(client),
+            Project::from_path("/repo".into()),
+            SessionWorkspace::NewWorktree { base_branch: None },
+            false,
+            None,
+            None,
+            None,
+            session_id,
+            2,
+            false,
+            Vec::new(),
+            false,
+            None,
+        );
+        server.join().unwrap();
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .downcast_ref::<WorkspaceRecoveryRequired>()
+                .is_some()
+        );
     }
 }

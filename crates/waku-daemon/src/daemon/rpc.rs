@@ -2062,6 +2062,18 @@ impl Backend for WakuBackend {
                 })
             }
             Command::Workspace {
+                operation:
+                    WorkspaceOperation::RecoverTaskWorkspace {
+                        session_id,
+                        path,
+                        restore,
+                    },
+            } => Ok(ResponsePayload::Workspace {
+                result: WorkspaceResult::TaskWorkspace {
+                    workspace: self.recover_task_workspace(session_id, path, restore)?,
+                },
+            }),
+            Command::Workspace {
                 operation: WorkspaceOperation::InspectCheckoutStatus { cwd, base },
             } => Ok(ResponsePayload::Workspace {
                 result: WorkspaceResult::CheckoutStatus {

@@ -446,6 +446,7 @@ enum ToastActionKind {
     LocalhostUrl,
     /// A missing project folder's "Locate Folder…" picker.
     RelocateProject(Uuid),
+    RecoverWorkspace(Uuid),
     /// Open the created issue — the in-app GitHub browser when its project
     /// and number are known, the URL otherwise. `project` keys the browser.
     GitHubIssue {

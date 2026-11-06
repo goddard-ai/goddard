@@ -662,6 +662,13 @@ impl ProjectFilesListing {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceOperation {
+    /// Recover a task's assigned checkout; new checkouts require explicit repair.
+    RecoverTaskWorkspace {
+        session_id: Uuid,
+        #[ts(type = "string | null")]
+        path: Option<PathBuf>,
+        restore: bool,
+    },
     QaDefaults {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -1426,6 +1433,9 @@ pub enum WorkspaceOperation {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceResult {
+    TaskWorkspace {
+        workspace: Option<crate::model::SessionWorkspace>,
+    },
     QaDefaults {
         config: QaConfig,
     },

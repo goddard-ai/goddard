@@ -3338,6 +3338,7 @@ fn pool_job_label(command: &Command) -> String {
 /// pool label comes from [`command_kind`].
 fn workspace_operation_kind(operation: &WorkspaceOperation) -> &'static str {
     match operation {
+        WorkspaceOperation::RecoverTaskWorkspace { .. } => "recoverTaskWorkspace",
         WorkspaceOperation::ListTree { .. } => "listTree",
         WorkspaceOperation::BrowseDirectory { .. } => "browseDirectory",
         WorkspaceOperation::ReadTextFile { .. } => "readTextFile",

@@ -248,7 +248,46 @@ fn resolve_repository(project_path: &Path) -> anyhow::Result<(PathBuf, PathBuf, 
     Ok((project_path, repository, project_relative))
 }
 
-/// The name-allocation and checkout loop both creation entry points share.
+/// Restore a saved task snapshot into a new checkout after an explicit repair.
+/// Keep its recorded HEAD and replay saved edits as uncommitted files.
+pub fn create_from_snapshot(
+    project_path: &Path,
+    snapshot: &str,
+    recorded_base: Option<&str>,
+) -> anyhow::Result<CreatedWorktree> {
+    let (_, repository, project_relative) = resolve_repository(project_path)?;
+    let commit = git_stdout(
+        &repository,
+        &["rev-parse", "--verify", &format!("{snapshot}^{{commit}}")],
+    )?;
+    let parent = git_stdout(&repository, &["rev-list", "--parents", "-n", "1", &commit])?
+        .split_whitespace()
+        .nth(1)
+        .map(str::to_owned);
+    let base = match parent {
+        Some(parent) => parent,
+        None => {
+            let recorded_base = recorded_base.context("the saved snapshot has no recorded commit history; choose an existing worktree instead")?;
+            git_stdout(
+                &repository,
+                &[
+                    "rev-parse",
+                    "--verify",
+                    &format!("{recorded_base}^{{commit}}"),
+                ],
+            )?
+        }
+    };
+    add_named(
+        &repository,
+        &project_relative,
+        None,
+        base.trim(),
+        Some(commit.trim()),
+    )
+}
+
+/// The name-allocation and checkout loop shared by creation entry points.
 /// `carried_state`, when set, is a commit whose difference from `base_ref` is
 /// replayed into the new checkout as unstaged work.
 fn add_named(

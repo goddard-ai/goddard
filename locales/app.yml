@@ -7595,3 +7595,20 @@ sidebar.changes_local_host:
   en: This computer
 sidebar.changes_removed_host:
   en: Removed host
+
+session.workspace_recovery_needed:
+  en: This task's workspace needs to be recovered. Your prompt has been kept.
+session.recover_workspace:
+  en: Recover workspace…
+session.workspace_recovery_detail:
+  en: Choose the existing checkout to keep all its files, or restore a workspace from this task's latest saved snapshot. Restoration cannot recover changes made after that snapshot. Pending prompts are kept until you continue.
+session.locate_worktree:
+  en: Choose existing worktree…
+session.restore_task_workspace:
+  en: Restore saved workspace
+session.more_recovery_worktrees:
+  en: More worktrees…
+session.workspace_recovered:
+  en: Workspace recovered. You can send your prompt again.
+session.workspace_recovery_failed:
+  en: "Workspace recovery failed: %{error}"

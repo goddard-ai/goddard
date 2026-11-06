@@ -1611,6 +1611,9 @@ impl Waku {
                                 window,
                                 cx,
                             ),
+                            ToastActionKind::RecoverWorkspace(session_id) => {
+                                this.recover_workspace_dialog(*session_id, cx);
+                            }
                             ToastActionKind::RelocateProject(project_id) => {
                                 this.hide_toast();
                                 this.relocate_project(*project_id, cx);
@@ -1644,6 +1647,9 @@ impl Waku {
                                 window,
                                 cx,
                             ),
+                            ToastActionKind::RecoverWorkspace(session_id) => {
+                                this.recover_workspace_dialog(*session_id, cx);
+                            }
                             ToastActionKind::RelocateProject(project_id) => {
                                 this.hide_toast();
                                 this.relocate_project(*project_id, cx);

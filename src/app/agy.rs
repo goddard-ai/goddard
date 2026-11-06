@@ -140,6 +140,7 @@ impl Waku {
                         workspace_client,
                         project,
                         workspace,
+                        true,
                         None,
                         None,
                         None,
