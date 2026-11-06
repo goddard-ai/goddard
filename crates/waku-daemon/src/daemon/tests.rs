@@ -1092,6 +1092,12 @@ fn incoming_transfer_materializes_a_quarantined_session() {
     reload_store.hydrate(&mut reloaded.sessions[index]).unwrap();
     assert!(reloaded.sessions[index].quarantined);
     assert!(reloaded.sessions[index].environment().is_sandbox());
+    let context = reloaded.sessions[index]
+        .take_provider_context()
+        .expect("received transfer context");
+    assert!(context.contains("here's the new mockups"));
+    assert!(context.contains("transfers/x"));
+    assert!(context.contains("design.pdf"));
 
     std::fs::remove_dir_all(root).ok();
 }
@@ -1155,7 +1161,21 @@ fn incoming_chat_materializes_a_session() {
         session.messages[0].content,
         "shipping the update tonight — changelog attached"
     );
+    assert!(session.provider_cursor.is_none());
     drop(state);
+
+    // The first local provider has no native history. Its context must survive
+    // a restart and reach the first prompt without changing the visible text.
+    let reload_store = StateStore::daemon(root.join("app.db"));
+    let mut reloaded = reload_store.load().unwrap();
+    let session = reloaded.session_mut(session_id).unwrap();
+    reload_store.hydrate(session).unwrap();
+    let context = session.take_provider_context().expect("received context");
+    assert!(context.contains("maya"));
+    assert!(context.contains("shipping the update tonight — changelog attached"));
+    assert!(context.contains("third-party reference material"));
+    assert!(session.take_provider_context().is_none());
+    assert_eq!(session.messages.len(), 1);
 
     // A second message reuses the same friend project; a different
     // sender still lands in the same Friends project.

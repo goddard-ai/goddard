@@ -1,0 +1,1 @@
+- Agents now receive the shared message, or file-transfer note and receipt, when you first reply to a task received from a friend.

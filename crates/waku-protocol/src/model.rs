@@ -1975,10 +1975,10 @@ pub struct AgentSession {
     /// `provider`/`provider_cursor`, not here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub suspended_provider_sessions: Vec<SuspendedProviderSession>,
-    /// Compacted context staged by a provider switch, prepended to the next
-    /// outbound prompt and then cleared — the same one-shot delivery
-    /// `workspace_moved_from` uses. Persisted so a quit between the switch
-    /// and the next prompt does not lose it.
+    /// Context staged by a provider switch or incoming friend delivery,
+    /// prepended to the next outbound prompt and then cleared — the same
+    /// one-shot delivery `workspace_moved_from` uses. Persisted so a quit
+    /// before the next prompt does not lose it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_provider_context: Option<String>,
     /// Slash commands the provider reported for this session's live process,

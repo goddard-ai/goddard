@@ -2959,6 +2959,7 @@ pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
     session.workspace = stored.workspace;
     session.side_chat_of = stored.side_chat_of;
     session.provider_cursor = stored.provider_cursor;
+    session.pending_provider_context = stored.pending_provider_context;
     session.runtime_mode = stored.runtime_mode;
     // Effort is a list column; a column-only save may be ahead of the blob.
     session.service_tier = stored.service_tier;
