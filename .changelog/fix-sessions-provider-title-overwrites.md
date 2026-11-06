@@ -1,0 +1,1 @@
+- Provider-generated titles now replace only the default task name, preserving titles inferred from prompts, generated earlier, or chosen by you.

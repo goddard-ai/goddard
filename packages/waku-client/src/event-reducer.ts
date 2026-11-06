@@ -190,6 +190,10 @@ export function reduceRuntimeEvent(
       session.agent_preset = typeof payload === 'string' ? payload : null
       break
     case 'autoTitleUpdated': {
+      // Match AgentSession::set_provider_title: existing automatic and
+      // explicit names both take precedence over provider metadata.
+      if (session.title.trim() && session.title !== 'New task') break
+      if (session.auto_title?.trim() && session.auto_title !== 'New task') break
       const title = typeof payload === 'string' ? stripInjectedPromptBlocks(payload) : ''
       session.auto_title = title || null
       break

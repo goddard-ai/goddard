@@ -477,7 +477,7 @@ impl Waku {
             }
             DriverEvent::AutoTitleUpdated(title) => {
                 let finished_turn = self.state.session_mut(session_id).and_then(|session| {
-                    if !session.set_auto_title(title) || session.active_turn_id().is_some() {
+                    if !session.set_provider_title(title) || session.active_turn_id().is_some() {
                         return None;
                     }
                     session

@@ -2672,8 +2672,18 @@ impl AgentSession {
         }
     }
 
-    /// Replaces the provider-owned title without disturbing an explicit user
-    /// title. Returns whether the stored fallback changed.
+    /// Accepts a provider title only while the task still displays its default
+    /// name. Prompt-derived, generated, and explicit titles all take precedence.
+    pub fn set_provider_title(&mut self, title: Option<String>) -> bool {
+        if self.display_title() != Self::DEFAULT_TITLE {
+            return false;
+        }
+        self.set_auto_title(title)
+    }
+
+    /// Replaces the automatic title without disturbing an explicit user title.
+    /// Opt-in title rewrites may use this directly; provider events must use
+    /// [`Self::set_provider_title`]. Returns whether the stored fallback changed.
     pub fn set_auto_title(&mut self, title: Option<String>) -> bool {
         let title = title.and_then(|title| {
             let title = strip_injected_prompt_blocks(&title);
@@ -4682,8 +4692,8 @@ pub enum DriverEvent {
     /// fresh Harness session may resolve its deployment default when Goddard did
     /// not name one explicitly, so the driver reports the resolved value.
     AgentPresetSelected(Option<String>),
-    /// A provider-owned, automatically generated session title. `None`
-    /// clears that fallback but never overwrites a user-owned title.
+    /// A provider-owned, automatically generated session title. Accepted only
+    /// while the task displays its default name; later updates are ignored.
     AutoTitleUpdated(Option<String>),
     /// The slash commands the live process itself reports — Claude's
     /// stream-json init handshake and ACP's `available_commands_update`.
@@ -7556,22 +7566,44 @@ mod tests {
     }
 
     #[test]
-    fn provider_title_replaces_prompt_fallback_but_not_an_explicit_title() {
+    fn provider_titles_only_replace_the_default_display_title() {
         let project = Project::from_path(PathBuf::from("/tmp/waku"));
         let mut session = AgentSession::new(project.id, ProviderKind::OpenCode);
-        session.set_title_from_prompt("investigate the broken provider event");
+        assert_eq!(session.display_title(), AgentSession::DEFAULT_TITLE);
 
-        assert!(session.set_auto_title(Some("Fix provider title events".into())));
+        assert!(!session.set_provider_title(None));
+        assert!(!session.set_provider_title(Some("   ".into())));
+        assert_eq!(session.display_title(), AgentSession::DEFAULT_TITLE);
+        assert!(session.set_provider_title(Some("Fix provider title events".into())));
         assert_eq!(session.display_title(), "Fix provider title events");
 
-        assert!(session.set_auto_title(Some("Handle updated provider titles".into())));
-        assert_eq!(session.display_title(), "Handle updated provider titles");
+        let updated_at = session.updated_at;
+        assert!(!session.set_provider_title(Some("Proceed With Current Task".into())));
+        assert!(!session.set_provider_title(None));
+        assert_eq!(session.display_title(), "Fix provider title events");
+        assert_eq!(session.updated_at, updated_at);
+    }
 
-        assert!(session.set_title("  My title  "));
-        assert!(session.set_auto_title(Some("A newer provider title".into())));
-        assert_eq!(session.display_title(), "My title");
-        assert!(!session.set_title("   "));
-        assert_eq!(session.display_title(), "My title");
+    #[test]
+    fn provider_titles_preserve_prompt_inferred_and_explicit_titles() {
+        let project = Project::from_path(PathBuf::from("/tmp/waku"));
+        for explicit in [false, true] {
+            let mut session = AgentSession::new(project.id, ProviderKind::OpenCode);
+            session.set_title_from_prompt("investigate the broken provider event");
+            if explicit {
+                assert!(session.set_title_from_user("  My title  "));
+                assert!(!session.set_title("   "));
+                assert_eq!(session.display_title(), "My title");
+            }
+            let title = session.display_title().to_owned();
+            let fallback = session.auto_title.clone();
+            let updated_at = session.updated_at;
+            assert!(!session.set_provider_title(Some("Proceed With Current Task".into())));
+            assert!(!session.set_provider_title(None));
+            assert_eq!(session.display_title(), title);
+            assert_eq!(session.auto_title, fallback);
+            assert_eq!(session.updated_at, updated_at);
+        }
     }
 
     #[test]

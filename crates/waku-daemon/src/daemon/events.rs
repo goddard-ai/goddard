@@ -72,7 +72,7 @@ pub(super) fn record_event_with_attachments(
     match event {
         DriverEvent::AgentPresetSelected(preset) => session.agent_preset.clone_from(preset),
         DriverEvent::AutoTitleUpdated(title) => {
-            session.set_auto_title(title.clone());
+            session.set_provider_title(title.clone());
         }
         DriverEvent::AvailableCommands(commands) => session.available_commands.clone_from(commands),
         DriverEvent::PromptSubmitted {

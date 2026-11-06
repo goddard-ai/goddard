@@ -178,6 +178,25 @@ describe('promptSubmitted', () => {
     expect(truncated.session.auto_title).toBeNull()
   })
 
+  test('provider updates preserve the first generated, prompt-derived, or explicit title', () => {
+    const generated = reduceRuntimeEvent(
+      idleSession(), event('autoTitleUpdated', 'Fix image attachment paths'), clock,
+    ).session
+    const inferred = reduceRuntimeEvent(
+      { ...idleSession(), messages: [], turns: [] },
+      event('promptSubmitted', { ...SUBMISSION, message: 'Fix image attachment paths' }),
+      clock,
+    ).session
+    const explicit = { ...idleSession(), title: 'My title' }
+    for (const session of [generated, inferred, explicit]) {
+      for (const update of ['Proceed With Current Task', null]) {
+        const result = reduceRuntimeEvent(session, event('autoTitleUpdated', update), clock)
+        expect(result.session.title).toBe(session.title)
+        expect(result.session.auto_title).toBe(session.auto_title)
+      }
+    }
+  })
+
   test('a delivered agent prompt drops its chip and carries provenance', () => {
     const queuedId = '30000000-0000-4000-8000-000000000003'
     const session: AgentSession = {
