@@ -4978,12 +4978,10 @@ common.copy_named:
 
 transcript.history_loading:
   en: Loading earlier messages…
-transcript.history_load:
-  en: Load earlier messages
 transcript.history_retry:
   en: Retry loading earlier messages
-transcript.future_load:
-  en: Load newer messages
+transcript.future_loading:
+  en: Loading newer messages…
 transcript.worked:
   en: Worked
 transcript.worked_for:

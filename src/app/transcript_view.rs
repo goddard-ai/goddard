@@ -319,7 +319,12 @@ impl Waku {
         self.resolve_transcript_commit_refs(cx);
         self.sync_transcript_rows();
         self.load_boss_history_at_top(cx);
-        self.load_transcript_history_at_top(cx);
+        // Use this frame's completed layout, including the first open and
+        // resizes, so short windows fill without waiting for a scroll gesture.
+        let entity = cx.entity().downgrade();
+        window.on_next_frame(move |_, cx| {
+            let _ = entity.update(cx, |this, cx| this.load_transcript_history_at_top(cx));
+        });
         self.retire_fading_working_indicator(cx);
         self.retire_fading_queued_card(cx);
         self.sync_transcript_layout_width(window);

@@ -525,63 +525,67 @@ fn merge_turns(turns: &mut Vec<AgentTurn>, arriving: &[AgentTurn]) {
 use super::*;
 use crate::ui::ActivationExt;
 
-/// How far below the sentinel row the scroll top may sit before the previous
-/// page prefetches — far enough to hide the read, close enough that a user
-/// sprinting to the top still waits briefly.
-const HISTORY_PROBE_ROWS: usize = 4;
+/// Keep one viewport ahead of the reader. At the live tail this also fills
+/// short initial windows to two screens, independent of collapsed row count.
+fn transcript_history_edge_is_near(rows: &ListState, future: bool) -> bool {
+    let height = rows.viewport_bounds().size.height;
+    if height <= Pixels::ZERO {
+        return false;
+    }
+    // Unmeasured rows contribute no height. Require the content next to the
+    // sentinel to be measured before trusting that distance, or a viewport
+    // taller than the list's overdraw could drain the entire transcript.
+    let edge = if future {
+        rows.item_count().saturating_sub(2)
+    } else {
+        1.min(rows.item_count().saturating_sub(1))
+    };
+    if !rows
+        .measured_heights(edge..edge + 1)
+        .first()
+        .is_some_and(Option::is_some)
+    {
+        return false;
+    }
+    let before = -rows.scroll_px_offset_for_scrollbar().y;
+    let distance = if future {
+        rows.max_offset_for_scrollbar().y - before
+    } else {
+        before
+    };
+    distance <= height
+}
 
 impl Waku {
-    /// The bounded-window counterpart of `load_boss_history_at_top`: when the
-    /// reader's scroll top reaches the sentinel row, fetch the previous page
-    /// from the owning daemon. A tail-pinned fresh open never reaches it.
+    /// Prefetch from measured layout, including on a tail-pinned fresh open.
+    /// Failed reads wait for an explicit retry instead of looping every frame.
     pub(super) fn load_transcript_history_at_top(&mut self, cx: &mut Context<Self>) {
         let Some(session_id) = self.state.selected_session else {
             return;
         };
         self.load_transcript_history_at_bottom(session_id, cx);
-        if !self.transcript_is_scrolled.get() {
-            return;
-        }
         let Some(view) = self.transcript_views.get(&session_id) else {
             return;
         };
-        if !view.has_more_before || view.loading_before {
+        if !view.has_more_before || view.loading_before || view.before_error.is_some() {
             return;
         }
-        let boundary = self
-            .transcript_row_kinds
-            .borrow()
-            .iter()
-            .position(|kind| *kind == TranscriptRowKind::HistoryBoundary);
-        let Some(boundary) = boundary else {
-            return;
-        };
-        if self.active_transcript_rows().logical_scroll_top().item_ix
-            > boundary + HISTORY_PROBE_ROWS
-        {
-            return;
+        if transcript_history_edge_is_near(self.active_transcript_rows(), false) {
+            self.load_transcript_history_before(session_id, cx);
         }
-        self.load_transcript_history_before(session_id, cx);
     }
 
-    /// The bottom-edge counterpart: a mid-transcript window (find reveal)
-    /// fills toward the live tail as the reader reaches the future
-    /// sentinel — a tail-pinned view is already there.
+    /// A mid-transcript window (find reveal) also prefetches toward the tail.
     fn load_transcript_history_at_bottom(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         let Some(view) = self.transcript_views.get(&session_id) else {
             return;
         };
-        if !view.has_more_after || view.loading_after {
+        if !view.has_more_after || view.loading_after || view.after_error.is_some() {
             return;
         }
-        let row_count = self.transcript_row_kinds.borrow().len();
-        let at_tail = !self.transcript_is_scrolled.get()
-            || self.active_transcript_rows().logical_scroll_top().item_ix + HISTORY_PROBE_ROWS
-                >= row_count.saturating_sub(1);
-        if !at_tail {
-            return;
+        if transcript_history_edge_is_near(self.active_transcript_rows(), true) {
+            self.load_transcript_history_after(session_id, cx);
         }
-        self.load_transcript_history_after(session_id, cx);
     }
 
     /// Fetch the page ending at the window's `previous` cursor and splice it
@@ -737,9 +741,7 @@ impl Waku {
         .detach();
     }
 
-    /// The `HistoryBoundary`/`FutureBoundary` row — a quiet button at a
-    /// window edge. Clicking (or reaching it by scroll) pages the next
-    /// window on that side.
+    /// Window edges load automatically; only a failed read needs a control.
     pub(super) fn render_transcript_history_boundary(
         &self,
         session_id: Uuid,
@@ -757,14 +759,12 @@ impl Waku {
                 }
             })
             .unwrap_or_default();
-        let label = if loading {
-            tr!("transcript.history_loading")
-        } else if error.is_some() {
+        let label = if error.is_some() {
             tr!("transcript.history_retry")
         } else if future {
-            tr!("transcript.future_load")
+            tr!("transcript.future_loading")
         } else {
-            tr!("transcript.history_load")
+            tr!("transcript.history_loading")
         };
         let theme = Theme::current(cx);
         let element_id = if future {
@@ -780,30 +780,40 @@ impl Waku {
             .flex_col()
             .items_center()
             .gap(px(4.0))
-            .child(
-                div()
-                    .id(element_id)
-                    .track_focus(&focus)
-                    .tab_index(0)
-                    .rounded(px(6.0))
-                    .px(px(12.0))
-                    .py(px(6.0))
-                    .text_size(sp(12.5))
-                    .text_color(theme.text_secondary)
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .hover(|style| style.bg(theme.overlay))
-                    .child(label)
-                    .on_activation(cx, move |this, _, cx| {
-                        if loading {
-                            return;
-                        }
-                        if future {
-                            this.load_transcript_history_after(session_id, cx);
-                        } else {
-                            this.load_transcript_history_before(session_id, cx);
-                        }
-                    }),
-            )
+            .when(error.is_none(), |view| {
+                view.child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(label.clone()),
+                )
+            })
+            .when(error.is_some(), |view| {
+                view.child(
+                    div()
+                        .id(element_id)
+                        .track_focus(&focus)
+                        .tab_index(0)
+                        .rounded(px(6.0))
+                        .px(px(12.0))
+                        .py(px(6.0))
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .hover(|style| style.bg(theme.overlay))
+                        .child(label)
+                        .on_activation(cx, move |this, _, cx| {
+                            if loading {
+                                return;
+                            }
+                            if future {
+                                this.load_transcript_history_after(session_id, cx);
+                            } else {
+                                this.load_transcript_history_before(session_id, cx);
+                            }
+                        }),
+                )
+            })
             .children(error.map(|error| {
                 div()
                     .text_size(sp(12.0))
@@ -936,6 +946,83 @@ mod tests {
     use super::*;
     use waku_protocol::model::{ActivityKind, MessageRole, ProviderKind};
     use waku_protocol::transcript::{TranscriptCursor, TranscriptEntry};
+
+    struct HistoryViewportHarness {
+        rows: ListState,
+        height: Pixels,
+    }
+
+    impl Render for HistoryViewportHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(400.0)).h(self.height).child(
+                list(self.rows.clone(), |_, _, _| {
+                    div().w_full().h(px(100.0)).into_any_element()
+                })
+                .size_full(),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn history_prefetch_keeps_two_screens_and_tracks_the_viewport(cx: &mut gpui::TestAppContext) {
+        let rows = ListState::new(5, ListAlignment::Bottom, px(2048.0))
+            .with_uniform_item_height(px(100.0));
+        assert!(!transcript_history_edge_is_near(&rows, false));
+        let (view, cx) = cx.add_window_view(move |_, _| HistoryViewportHarness {
+            rows,
+            height: px(300.0),
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            // Five rows are less than two 300px screens, even while tail-pinned.
+            assert!(transcript_history_edge_is_near(&view.read(cx).rows, false));
+        });
+        view.update(cx, |view, cx| {
+            view.rows.reset(20);
+            view.rows.scroll_to_end();
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            let rows = &view.read(cx).rows;
+            assert!(!transcript_history_edge_is_near(rows, false));
+            assert!(transcript_history_edge_is_near(rows, true));
+        });
+        view.update(cx, |view, cx| {
+            view.rows.scroll_to(ListOffset {
+                item_ix: 4,
+                offset_in_item: px(0.0),
+            });
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            let rows = &view.read(cx).rows;
+            assert!(!transcript_history_edge_is_near(rows, false));
+            assert!(!transcript_history_edge_is_near(rows, true));
+        });
+        view.update(cx, |view, cx| {
+            view.height = px(500.0);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            // Resizing makes the same 400px distance fall inside one screen.
+            assert!(transcript_history_edge_is_near(&view.read(cx).rows, false));
+        });
+        view.update(cx, |view, cx| {
+            view.height = px(3000.0);
+            view.rows.reset(100);
+            view.rows.scroll_to_end();
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            // A viewport taller than overdraw must not mistake unmeasured
+            // history for an empty initial window and fetch indefinitely.
+            assert!(!transcript_history_edge_is_near(&view.read(cx).rows, false));
+        });
+    }
 
     fn message_entry(seq: i64, content: &str, after_message: u32) -> TranscriptEntry {
         TranscriptEntry {
