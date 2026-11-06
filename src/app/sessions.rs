@@ -57,13 +57,6 @@ impl SessionHydrations {
     }
 }
 
-/// What a detail read produced: the bounded latest slice from the
-/// transcript index, or a legacy full hydration when no index exists.
-enum SessionDetail {
-    Window(waku_protocol::transcript::TranscriptWindow),
-    Full(AgentSession, Option<usize>),
-}
-
 pub(super) fn settle_idle_session_detail(session: &mut AgentSession) -> Option<usize> {
     if session.status.is_busy() {
         return None;
@@ -990,30 +983,12 @@ impl Waku {
                 continue;
             }
             let store = self.store.clone();
-            let daemon = self.daemon_for_session(session_id);
-            let preload = self.transcript_preloads.take(session_id);
             cx.spawn(async move |waku, cx| {
-                let cached = match preload {
-                    Some(read) => read.await,
-                    None => None,
-                };
-                let preload_hit = cached.is_some();
                 let result = cx
                     .background_executor()
                     .spawn(async move {
-                        // A window-capable daemon serves the latest slice
-                        // directly — bounded whatever the transcript's total
-                        // size. Any failure degrades to the legacy hydrate.
-                        if let Some(daemon) = daemon
-                            && daemon.client().transcript_windows_available()
-                            && let Ok(window) = super::transcript_preload::read_latest_window(
-                                &daemon.client(),
-                                session_id,
-                                cached,
-                            )
-                        {
-                            return Ok::<_, std::io::Error>(SessionDetail::Window(window));
-                        }
+                        // Transcript windows omit saved permission and provider settings.
+                        // Hydrate the authoritative session before enabling the composer.
                         let mut session =
                             store.load_session_detail(session_id)?.ok_or_else(|| {
                                 std::io::Error::new(
@@ -1023,73 +998,35 @@ impl Waku {
                             })?;
                         session.migrate_legacy_state();
                         let interrupted_turn = settle_idle_session_detail(&mut session);
-                        Ok(SessionDetail::Full(session, interrupted_turn))
+                        Ok::<_, std::io::Error>((session, interrupted_turn))
                     })
                     .await;
                 let _ = waku.update(cx, |waku, cx| {
-                    if preload_hit {
-                        waku.transcript_preloads.log_stats();
-                    }
                     if waku.state.selected_session == Some(session_id)
                         && let Some(started) = waku.session_hydrations.since(session_id)
                     {
-                        eprintln!(
-                            "transcript open: preload_hit={preload_hit} load_ms={}",
-                            started.elapsed().as_millis(),
-                        );
+                        eprintln!("transcript open: load_ms={}", started.elapsed().as_millis(),);
                     }
                     waku.session_hydrations.complete(session_id);
                     match result {
-                        Ok(detail) => {
+                        Ok((mut session, interrupted_turn)) => {
+                            waku.pending_task_metadata.observe(&mut session);
                             waku.trim_resident_transcripts();
-                            let (applied, interrupted_turn) = match detail {
-                                SessionDetail::Window(window) => {
-                                    let applied = if let Some(existing) = waku
-                                        .state
-                                        .sessions
-                                        .iter_mut()
-                                        .find(|existing| existing.id == session_id)
-                                        && !existing.detail_loaded
-                                    {
-                                        let view = super::transcript_window::materialize_session(
-                                            existing, &window,
-                                        );
-                                        waku.transcript_views.insert(session_id, view);
-                                        waku.pending_task_metadata.overlay(existing);
-                                        true
-                                    } else {
-                                        false
-                                    };
-                                    let interrupted_turn = applied
-                                        .then(|| {
-                                            waku.state
-                                                .session_mut(session_id)
-                                                .and_then(settle_idle_session_detail)
-                                        })
-                                        .flatten();
-                                    (applied, interrupted_turn)
+                            let applied = if let Some(existing) = waku
+                                .state
+                                .sessions
+                                .iter_mut()
+                                .find(|existing| existing.id == session_id)
+                            {
+                                let merged =
+                                    super::runtime::merge_hydrated_session(existing, session);
+                                waku.pending_task_metadata.overlay(existing);
+                                if merged {
+                                    waku.transcript_views.remove(&session_id);
                                 }
-                                SessionDetail::Full(mut session, interrupted_turn) => {
-                                    waku.pending_task_metadata.observe(&mut session);
-                                    let applied = if let Some(existing) = waku
-                                        .state
-                                        .sessions
-                                        .iter_mut()
-                                        .find(|existing| existing.id == session_id)
-                                    {
-                                        let merged = super::runtime::merge_hydrated_session(
-                                            existing, session,
-                                        );
-                                        waku.pending_task_metadata.overlay(existing);
-                                        if merged {
-                                            waku.transcript_views.remove(&session_id);
-                                        }
-                                        merged
-                                    } else {
-                                        false
-                                    };
-                                    (applied, interrupted_turn)
-                                }
+                                merged
+                            } else {
+                                false
                             };
                             if applied
                                 && waku.state.sessions.iter().any(|session| {

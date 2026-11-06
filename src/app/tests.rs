@@ -58,9 +58,9 @@ use crate::git_branch::BranchEntry;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, AtomRefKind, Checkpoint, CheckpointFile,
     CheckpointStatus, ConfigActivation, DriverEvent, Message, MessageAttachment, MessageRole,
-    Project, ProviderKind, QueuedMessage, ReasoningBlock, RuntimeEventCursor, SessionStatus,
-    SessionWorkspace, TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus, TurnStatus,
-    UserInputOption, UserInputQuestion, unix_time,
+    Project, ProviderKind, QueuedMessage, ReasoningBlock, RuntimeEventCursor, RuntimeMode,
+    SessionStatus, SessionWorkspace, TranscriptBlock, TranscriptNotice, TranscriptNoticeStatus,
+    TurnStatus, UserInputOption, UserInputQuestion, unix_time,
 };
 
 #[test]
@@ -4650,6 +4650,9 @@ fn startup_replay_batches_preserve_text_and_never_advance_the_cursor_past_applie
 fn startup_hydration_keeps_newer_list_edits_and_live_transcript_detail() {
     let mut stored = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     stored.begin_turn("Stored prompt");
+    stored.runtime_mode = RuntimeMode::FullAccess;
+    stored.service_tier = Some("fast".into());
+    stored.context_window = Some("large".into());
     stored.config_activation = Some(ConfigActivation {
         generation: 1,
         revision: 1,
@@ -4671,6 +4674,9 @@ fn startup_hydration_keeps_newer_list_edits_and_live_transcript_detail() {
     assert_eq!(current.provider, ProviderKind::Claude);
     assert_eq!(current.model.as_deref(), Some("newer selection"));
     assert_eq!(current.messages[0].content, "Stored prompt");
+    assert_eq!(current.runtime_mode, RuntimeMode::FullAccess);
+    assert_eq!(current.service_tier.as_deref(), Some("fast"));
+    assert_eq!(current.context_window.as_deref(), Some("large"));
 
     current.begin_turn("Newer live prompt");
     let before = serde_json::to_value(&current).unwrap();

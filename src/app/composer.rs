@@ -2671,7 +2671,7 @@ impl Waku {
         controls: &ComposerControls,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let session = controls.session?;
+        let session = controls.session.filter(|session| session.detail_loaded)?;
         let selected_mode = session.runtime_mode;
         let theme = Theme::current(cx);
         let environment = session.environment();

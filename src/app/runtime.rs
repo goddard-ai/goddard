@@ -369,45 +369,18 @@ fn attach_driver(
     event_wake: smol::channel::Sender<()>,
 ) -> anyhow::Result<Option<PreparedDriver>> {
     let client = daemon.client();
-    let (hydrated_session, transcript_window) = if hydrate || !client.task_views_available() {
-        if client.transcript_windows_available() {
-            // A bounded read replaces hydration: the latest slice plus its
-            // cursors are all an attach needs, whatever the transcript's
-            // total size. A failed read falls back to the legacy hydrate.
-            match client.read_transcript_window(
-                waku_protocol::transcript::TranscriptWindowRequest {
-                    session_id,
-                    target: waku_protocol::transcript::TranscriptWindowTarget::Latest,
-                    max_entries: None,
-                    max_bytes: None,
-                    known_revision: None,
-                },
-            ) {
-                Ok(window) => (None, Some(window)),
-                Err(_) => (
-                    waku_client::persistence::hydrate_session(&daemon, session_id)?,
-                    None,
-                ),
-            }
-        } else {
-            (
-                waku_client::persistence::hydrate_session(&daemon, session_id)?,
-                None,
-            )
-        }
+    // A transcript window cannot replace session hydration: its skeleton
+    // carries placeholder permissions and omits the saved provider settings.
+    let hydrated_session = if hydrate || !client.task_views_available() {
+        waku_client::persistence::hydrate_session(&daemon, session_id)?
     } else {
-        (None, None)
+        None
     };
     // Stored cursor beats the skeleton's list cursor: it is the baseline the
     // arriving events will actually extend.
     let replay_cursor = hydrated_session
         .as_ref()
         .and_then(|session| session.runtime_event_cursor)
-        .or_else(|| {
-            transcript_window
-                .as_ref()
-                .and_then(|window| window.event_cursor)
-        })
         .or(replay_cursor);
     let response = client.request(session_id, Uuid::nil(), waku_client::Command::AttachSession)?;
     let waku_client::ResponsePayload::SessionRuntime {
@@ -436,7 +409,7 @@ fn attach_driver(
         handle,
         events,
         hydrated_session,
-        transcript_window,
+        transcript_window: None,
     }))
 }
 
@@ -9392,6 +9365,88 @@ mod remote_retry_delay_tests {
 mod computer_use_launch_tests {
     use super::*;
     use waku_protocol::{ClientMessage, ResponseOutcome, ResponsePayload, ServerMessage};
+
+    #[test]
+    fn attaching_a_window_capable_daemon_still_loads_saved_session_settings() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let mut stored = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        stored.runtime_mode = RuntimeMode::FullAccess;
+        let session_id = stored.id;
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut socket = tungstenite::accept(stream).unwrap();
+            let mut hydrated = false;
+            loop {
+                let tungstenite::Message::Text(text) = socket.read().unwrap() else {
+                    continue;
+                };
+                let mut attached = false;
+                let reply = match serde_json::from_str(&text).unwrap() {
+                    ClientMessage::Hello {
+                        protocol_version, ..
+                    } => ServerMessage::Hello {
+                        protocol_version,
+                        daemon_version: "test".into(),
+                        daemon_commit: None,
+                        agent_cli_available: false,
+                        task_views_available: true,
+                        transcript_windows_available: true,
+                    },
+                    ClientMessage::Request(request) => {
+                        let payload = match request.command {
+                            waku_protocol::Command::GetSettings => ResponsePayload::Settings {
+                                settings: waku_client::DaemonSettings::default(),
+                            },
+                            waku_protocol::Command::HydrateSession {
+                                session_id: requested,
+                            } => {
+                                assert_eq!(requested, session_id);
+                                hydrated = true;
+                                ResponsePayload::Session {
+                                    session: Some(stored.clone()),
+                                }
+                            }
+                            waku_protocol::Command::AttachSession => {
+                                assert!(hydrated, "permissions must load before attaching");
+                                attached = true;
+                                ResponsePayload::SessionRuntime {
+                                    runtime_id: None,
+                                    supports_steer: false,
+                                    supports_user_input_actions: false,
+                                }
+                            }
+                            other => panic!("unexpected command: {other:?}"),
+                        };
+                        ServerMessage::Response {
+                            request_id: request.request_id,
+                            outcome: ResponseOutcome::Ok { payload },
+                        }
+                    }
+                    other => panic!("unexpected client message: {other:?}"),
+                };
+                socket
+                    .send(tungstenite::Message::Text(
+                        serde_json::to_string(&reply).unwrap().into(),
+                    ))
+                    .unwrap();
+                if attached {
+                    break;
+                }
+            }
+        });
+        let daemon = waku_client::DaemonSupervisor::connect(&address, "test".into()).unwrap();
+        let (event_wake, _events) = smol::channel::bounded(1);
+        assert!(
+            attach_driver(daemon, session_id, None, true, event_wake)
+                .unwrap()
+                .is_none()
+        );
+        server.join().unwrap();
+    }
 
     #[test]
     fn desktop_launch_uses_host_computer_use_settings() {

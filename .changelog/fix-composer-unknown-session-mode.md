@@ -1,1 +1,1 @@
-- Hide the composer’s mode chip until the session mode is known, instead of showing “Auto-accept edits” while loading.
+- Hide the composer’s mode chip until the saved session mode has loaded, instead of showing “Auto-accept edits” while loading.
