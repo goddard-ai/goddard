@@ -297,11 +297,7 @@ impl Waku {
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .gap(px(12.0))
-                .text_size(sp(12.5))
-                .text_color(theme.text_secondary)
                 .child(self.render_loading_task_mark(session_id, &theme, cx))
-                .child(tr!("sessions.loading"))
                 .into_any_element();
         }
         self.task_loading_reveal = None;
