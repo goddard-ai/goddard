@@ -2465,6 +2465,26 @@ struct TranscriptScrollPosition {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct PendingSessionActivation {
     session_id: Uuid,
+    /// Before selection changes, race hydration against this request's deadline.
+    deferred: Option<(SessionActivationTransition, Instant)>,
+    show_loading: bool,
+}
+
+impl PendingSessionActivation {
+    fn deferred_transition(
+        self,
+        session_id: Uuid,
+        detail_loaded: bool,
+        expired_request: Option<Instant>,
+    ) -> Option<SessionActivationTransition> {
+        let (transition, requested_at) = self.deferred?;
+        (self.session_id == session_id
+            && match expired_request {
+                Some(expired) => expired == requested_at,
+                None => detail_loaded,
+            })
+        .then_some(transition)
+    }
 }
 
 #[derive(Clone)]

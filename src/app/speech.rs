@@ -896,7 +896,7 @@ impl Waku {
                     .and_then(|state| state.session_id)
             });
             if let Some(session_id) = session_id {
-                self.select_session(session_id, cx);
+                self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
             }
         }
         crate::platform::end_consent_recognition();

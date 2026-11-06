@@ -1,5 +1,7 @@
 use super::*;
 
+const SESSION_NAVIGATION_WAIT: Duration = Duration::from_millis(100);
+
 /// One shared queue for navigation, runtime attachment and panel hydration.
 /// A visible task can overtake queued warmup, without duplicating an active read.
 #[derive(Default)]
@@ -123,6 +125,60 @@ fn retain_runtime_after_cancel(provider: ProviderKind) -> bool {
 #[cfg(test)]
 mod startup_hydration_tests {
     use super::*;
+
+    #[test]
+    fn deferred_navigation_accepts_ready_detail_or_its_own_deadline_only() {
+        let task = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let requested_at = Instant::now();
+        let pending = PendingSessionActivation {
+            session_id: task,
+            deferred: Some((SessionActivationTransition::Visit, requested_at)),
+            show_loading: false,
+        };
+        assert_eq!(pending.deferred_transition(task, false, None), None);
+        assert_eq!(
+            pending.deferred_transition(task, true, None),
+            Some(SessionActivationTransition::Visit)
+        );
+        assert_eq!(
+            pending.deferred_transition(task, false, Some(requested_at)),
+            Some(SessionActivationTransition::Visit)
+        );
+        // A prior task's load and timer cannot finish the newer navigation.
+        assert_eq!(pending.deferred_transition(other, true, None), None);
+        assert_eq!(
+            pending.deferred_transition(other, false, Some(requested_at)),
+            None
+        );
+        // Re-selecting the same task replaces the deadline too.
+        let replacement = PendingSessionActivation {
+            deferred: Some((
+                SessionActivationTransition::Inspect,
+                requested_at + Duration::from_millis(1),
+            )),
+            ..pending
+        };
+        assert_eq!(
+            replacement.deferred_transition(task, true, Some(requested_at)),
+            None
+        );
+        assert_eq!(
+            replacement.deferred_transition(task, true, None),
+            Some(SessionActivationTransition::Inspect)
+        );
+        // After the timeout switches to loading, late detail does not navigate again.
+        let loading = PendingSessionActivation {
+            deferred: None,
+            show_loading: true,
+            ..pending
+        };
+        assert_eq!(loading.deferred_transition(task, true, None), None);
+        assert_eq!(
+            loading.deferred_transition(task, false, Some(requested_at)),
+            None
+        );
+    }
 
     #[test]
     fn startup_async_detail_settles_interrupted_history_without_stopping_a_live_turn() {
@@ -787,7 +843,7 @@ impl Waku {
     }
 
     pub(super) fn select_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
+        self.navigate_to_session(session_id, SessionActivationTransition::Visit, cx);
     }
 
     fn refresh_codex_history(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
@@ -864,6 +920,78 @@ impl Waku {
             });
         })
         .detach();
+    }
+
+    /// User navigation may keep the outgoing surface mounted briefly. Internal
+    /// activations keep their synchronous contract for submission and panels.
+    pub(super) fn navigate_to_session(
+        &mut self,
+        session_id: Uuid,
+        transition: SessionActivationTransition,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_session_activation = None;
+        let can_wait = self.state.selected_session != Some(session_id)
+            && self.live_boss_chat_target(session_id).is_none()
+            && self.state.sessions.iter().any(|session| {
+                session.id == session_id
+                    && session.side_chat_of.is_none()
+                    && (!session.detail_loaded || self.stale_task_details.contains(&session_id))
+            })
+            && self
+                .qa_window
+                .as_ref()
+                .is_none_or(|qa| qa.record.session_id == session_id);
+        if !can_wait {
+            self.request_session_activation(session_id, transition, cx);
+            return;
+        }
+        let requested_at = Instant::now();
+        self.pending_session_activation = Some(PendingSessionActivation {
+            session_id,
+            deferred: Some((transition, requested_at)),
+            show_loading: false,
+        });
+        self.ensure_session_loaded(session_id, cx);
+        cx.spawn(async move |waku, cx| {
+            cx.background_executor()
+                .timer(SESSION_NAVIGATION_WAIT)
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                waku.finish_deferred_session_activation(session_id, Some(requested_at), cx);
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn finish_deferred_session_activation(
+        &mut self,
+        session_id: Uuid,
+        expired_request: Option<Instant>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let detail_loaded = self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && session.detail_loaded);
+        let Some(transition) = self.pending_session_activation.and_then(|pending| {
+            pending.deferred_transition(session_id, detail_loaded, expired_request)
+        }) else {
+            return false;
+        };
+        self.pending_session_activation = None;
+        self.request_session_activation(session_id, transition, cx);
+        if expired_request.is_some()
+            && let Some(pending) = self.pending_session_activation.as_mut()
+            && pending.session_id == session_id
+        {
+            // The grace period already hid loading; show feedback at its limit.
+            pending.show_loading = true;
+        }
+        cx.notify();
+        true
     }
 
     pub(super) fn request_session_activation(
@@ -1006,8 +1134,13 @@ impl Waku {
             .iter()
             .any(|session| session.id == session_id && !session.detail_loaded)
         {
-            self.session_hydrations
-                .enqueue(session_id, self.state.selected_session == Some(session_id));
+            self.session_hydrations.enqueue(
+                session_id,
+                self.state.selected_session == Some(session_id)
+                    || self
+                        .pending_session_activation
+                        .is_some_and(|pending| pending.session_id == session_id),
+            );
             self.start_pending_session_hydrations(cx);
         }
     }
@@ -1146,8 +1279,13 @@ impl Waku {
                     .iter()
                     .any(|session| session.id == session_id && !session.detail_loaded)
                 {
-                    waku.session_hydrations
-                        .enqueue(session_id, waku.state.selected_session == Some(session_id));
+                    waku.session_hydrations.enqueue(
+                        session_id,
+                        waku.state.selected_session == Some(session_id)
+                            || waku
+                                .pending_session_activation
+                                .is_some_and(|pending| pending.session_id == session_id),
+                    );
                 } else {
                     // A live snapshot or removal overtook the failed read.
                     waku.session_hydrations.complete(session_id);
@@ -1165,6 +1303,9 @@ impl Waku {
         detail_arrived: bool,
         cx: &mut Context<Self>,
     ) {
+        if self.finish_deferred_session_activation(session_id, None, cx) {
+            return;
+        }
         if self.state.selected_session != Some(session_id)
             || !self
                 .selected_session()
@@ -1328,8 +1469,11 @@ impl Waku {
         let detail_loaded = self
             .selected_session()
             .is_some_and(|session| session.detail_loaded);
-        self.pending_session_activation =
-            (!detail_loaded).then_some(PendingSessionActivation { session_id });
+        self.pending_session_activation = (!detail_loaded).then_some(PendingSessionActivation {
+            session_id,
+            deferred: None,
+            show_loading: false,
+        });
         self.ensure_recent_boss_history(cx);
         // The scratchpad's mic follows the visible chat — the outgoing
         // session's dictation pauses here, not when its panel repaints.
@@ -4530,7 +4674,7 @@ impl Waku {
         self.drop_dead_navigation_targets(current, true);
         match self.session_navigation.back_target() {
             Some(NavigationLocation::Task(target)) => {
-                self.request_session_activation(
+                self.navigate_to_session(
                     target,
                     SessionActivationTransition::Back { from: current },
                     cx,
@@ -4597,7 +4741,7 @@ impl Waku {
         self.drop_dead_navigation_targets(current, false);
         match self.session_navigation.forward_target() {
             Some(NavigationLocation::Task(target)) => {
-                self.request_session_activation(
+                self.navigate_to_session(
                     target,
                     SessionActivationTransition::Forward { from: current },
                     cx,
@@ -4818,7 +4962,7 @@ impl Waku {
             return;
         }
         self.settings_page = None;
-        self.request_session_activation(target, SessionActivationTransition::Visit, cx);
+        self.navigate_to_session(target, SessionActivationTransition::Visit, cx);
     }
 
     /// The ⌘D sweep's seen set while the sweep is live — `None` once the

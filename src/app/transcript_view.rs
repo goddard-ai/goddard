@@ -216,7 +216,8 @@ impl Waku {
     /// stays blank for [`LOADING_LOGO_DELAY`] past the hydration's start — a
     /// load that finishes faster never flashes chrome, and a long-running
     /// hydration selected late shows the mark on its first frame — then the
-    /// logo breathes on the shared pulse clock; the parked clock under
+    /// logo breathes on the shared pulse clock. A navigation that exhausted
+    /// its grace period reveals the mark immediately. The parked clock under
     /// reduce-motion holds the pulse's midpoint, and the armed reveal timer
     /// still unhides it on schedule.
     fn render_loading_task_mark(
@@ -240,8 +241,11 @@ impl Waku {
             }
         }
         let color = theme.text_tertiary;
+        let show_loading = self
+            .pending_session_activation
+            .is_some_and(|pending| pending.session_id == session_id && pending.show_loading);
         motion::pulse(LOADING_LOGO_FLASH_PERIOD, move |phase| {
-            if started.elapsed() < LOADING_LOGO_DELAY {
+            if !show_loading && started.elapsed() < LOADING_LOGO_DELAY {
                 div().into_any_element()
             } else {
                 goddard_logo_tinted(color)

@@ -873,7 +873,7 @@ impl Waku {
             return;
         };
         if self.state.selected_session != Some(session_id) {
-            self.select_session(session_id, cx);
+            self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
         }
         self.open_right_panel_surface(RightPanelSurface::BackgroundWork { key, title }, cx);
     }

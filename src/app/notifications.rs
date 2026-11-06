@@ -600,7 +600,7 @@ impl Waku {
 
         if let Some((session_id, summary)) = self.session_owning_pull_request(&thread) {
             self.close_inbox(cx);
-            self.select_session(session_id, cx);
+            self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
             let prompt = github::github_fix_prompt(&summary, None);
             self.github_fill_fix_prompt(prompt, cx);
             let focus = self.composer_focus(cx);

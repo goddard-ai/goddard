@@ -434,7 +434,9 @@ impl Waku {
         });
         self.composer_drafts.set(key, saved.draft.clone());
         match landing {
-            Some(session_id) => self.select_session(session_id, cx),
+            Some(session_id) => {
+                self.request_session_activation(session_id, SessionActivationTransition::Visit, cx)
+            }
             None if self
                 .state
                 .projects

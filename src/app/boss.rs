@@ -3243,7 +3243,7 @@ impl Waku {
             message_id,
             query: String::new(),
         });
-        self.request_session_activation(task_id, SessionActivationTransition::Inspect, cx);
+        self.navigate_to_session(task_id, SessionActivationTransition::Inspect, cx);
     }
 
     /// The unified Memory Records feed — issued on every Memory visit so
