@@ -6745,6 +6745,26 @@ mod tests {
     }
 
     #[test]
+    fn resuming_an_interrupted_chat_updates_last_reply_at() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("Ask");
+        session.mark_active_turn_provider_started();
+        session
+            .interrupt_active_turn(crate::model::TurnInterruption::You)
+            .expect("the running turn is interrupted");
+        session.last_reply_at = Some(1);
+
+        let resumed_turn = session.begin_hidden_turn("Continue the current task if able.");
+
+        assert_eq!(session.active_turn_id(), Some(resumed_turn));
+        assert_eq!(
+            session.last_reply_at,
+            Some(session.turns.last().unwrap().started_at)
+        );
+        assert!(session.last_reply_at.unwrap() > 1);
+    }
+
+    #[test]
     fn last_reply_at_is_derived_for_sessions_stored_without_it() {
         let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         session.begin_turn("Ask");
