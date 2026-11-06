@@ -7545,8 +7545,6 @@ terminal.unsplit_group:
 
 boss.message_current_employee:
   en: Message current employee
-boss.direct_prompt_resumes:
-  en: Sending a message will resume this employee.
 
 command_palette.search_worktrees:
   en: Search worktrees…

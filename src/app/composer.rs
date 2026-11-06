@@ -6537,9 +6537,7 @@ impl Waku {
                     .child(composer),
             )
             .when_some(employee_control, |card, control| {
-                let message = control
-                    .reason
-                    .or_else(|| control.resumes.then(|| tr!("boss.direct_prompt_resumes")));
+                let message = control.reason;
                 card.when_some(message, |card, message| {
                     card.child(
                         div()
