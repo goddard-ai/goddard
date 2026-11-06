@@ -15,6 +15,18 @@ pub(super) fn record_boss_event(
     session_id: Uuid,
     event: &DriverEvent,
 ) -> anyhow::Result<()> {
+    record_event_with_attachments(task_state, task_store, session_id, event, &[])
+}
+
+/// Persist composer attachments with the submission, before publishing it.
+/// A client save may never arrive, and a provider echo carries only text.
+pub(super) fn record_event_with_attachments(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    event: &DriverEvent,
+    attachments: &[crate::model::MessageAttachment],
+) -> anyhow::Result<()> {
     use crate::model::{ActivityItem, MessageRole, ReasoningBlock, TranscriptBlock};
     let mut state = task_state.lock();
     let Some(session) = state
@@ -86,6 +98,27 @@ pub(super) fn record_boss_event(
                 .find(|message| message.id == *message_id)
             {
                 prompt.reference_context = reference_context.clone();
+                if !attachments.is_empty() {
+                    prompt.attachments = attachments.to_vec();
+                    // The composer appends exact mention strings. Strip only
+                    // that suffix; whitespace within a filename is literal.
+                    let mut body = message.as_str();
+                    for attachment in attachments.iter().rev() {
+                        let mention = format!("@{}", attachment.mention);
+                        let Some(prefix) = body.strip_suffix(&mention) else {
+                            break;
+                        };
+                        if !prefix.is_empty()
+                            && !prefix.chars().next_back().is_some_and(char::is_whitespace)
+                        {
+                            break;
+                        }
+                        body = prefix.trim_end();
+                    }
+                    if prompt.display_content.is_none() && body != message.as_str() {
+                        prompt.display_content = Some(body.to_owned());
+                    }
+                }
             }
         }
         DriverEvent::TurnStarted => {
@@ -1417,5 +1450,105 @@ fn report_stable_checkpoint_failure(
     eprintln!("goddard-daemon: {session_id}: {message}");
     if let Ok(wire) = event_to_wire(DriverEvent::Error(message)) {
         let _ = events.for_session(session_id, runtime_id).send(wire);
+    }
+}
+
+#[cfg(test)]
+mod attachment_tests {
+    use super::*;
+
+    #[test]
+    fn submitted_attachments_survive_reload_without_a_composer_save() {
+        use crate::model::MessageAttachment;
+        let root = std::env::temp_dir().join(format!("attachment reload {}", Uuid::new_v4()));
+        let (backend, session_id) = super::super::tests::surface_test_backend(&root);
+        let stored = backend
+            .attachments
+            .import(
+                "Screenshot 2026-11-06 at 11.49.19.png",
+                waku_protocol::attachments::AttachmentUpload::File {
+                    data_base64: "aW1hZ2UgYnl0ZXM=".to_owned(),
+                },
+            )
+            .unwrap();
+        let attachment = MessageAttachment {
+            mention: stored.path.to_string_lossy().into_owned(),
+            path: stored.path,
+            name: stored.name,
+            is_dir: false,
+            is_image: true,
+            blob_reference: Some(stored.reference),
+            pasted_text_preview: None,
+            session_id: None,
+        };
+        let message_id = Uuid::new_v4();
+        let prompt = format!("what changes do you propose? @{}", attachment.mention);
+        let submitted = DriverEvent::PromptSubmitted {
+            message: prompt.clone(),
+            turn_id: Uuid::new_v4(),
+            message_id,
+            sent_by_task: None,
+            hidden: false,
+            report_trigger: None,
+            reference_context: None,
+        };
+        record_event_with_attachments(
+            &backend.task_state,
+            &backend.task_store,
+            session_id,
+            &submitted,
+            std::slice::from_ref(&attachment),
+        )
+        .unwrap();
+        // A later text-only echo must keep the durable attachment record.
+        record_boss_event(
+            &backend.task_state,
+            &backend.task_store,
+            session_id,
+            &submitted,
+        )
+        .unwrap();
+        let reopened = StateStore::daemon(root.join("app.db"));
+        let restored = reopened.load_session_detail(session_id).unwrap().unwrap();
+        let message = restored
+            .messages
+            .iter()
+            .find(|m| m.id == message_id)
+            .unwrap();
+        assert_eq!(message.content, prompt);
+        assert_eq!(message.visible_content(), "what changes do you propose?");
+        assert_eq!(message.attachments, vec![attachment.clone()]);
+        assert_eq!(
+            backend
+                .attachments
+                .read_file(
+                    attachment.blob_reference.as_deref().unwrap(),
+                    &message.attachments[0].path,
+                )
+                .unwrap(),
+            b"image bytes"
+        );
+
+        // A follower may have only text, with or without a display override.
+        for display_content in [None, Some("what changes do you propose?".to_owned())] {
+            let mut follower = restored.clone();
+            let message = follower
+                .messages
+                .iter_mut()
+                .find(|m| m.id == message_id)
+                .unwrap();
+            message.display_content = display_content;
+            message.attachments.clear();
+            preserve_task_view_projection(&restored, &mut follower);
+            assert_eq!(
+                follower.messages.last().unwrap().attachments,
+                vec![attachment.clone()]
+            );
+            assert_eq!(
+                follower.messages.last().unwrap().visible_content(),
+                "what changes do you propose?"
+            );
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 }

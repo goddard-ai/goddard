@@ -1,0 +1,1 @@
+- Keep image attachments visible after reopening a task, including filenames containing spaces.

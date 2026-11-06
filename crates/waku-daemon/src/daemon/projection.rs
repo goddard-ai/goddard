@@ -24,11 +24,16 @@ pub(super) fn preserve_task_view_projection(existing: &AgentSession, incoming: &
             && let Some(presentation) = presentations.get(&message.id)
             && presentation.role == message.role
             && presentation.content == message.content
+            && (presentation.display_content.is_some()
+                || !presentation.attachments.is_empty()
+                || !presentation.atoms.is_empty())
         {
             message
                 .display_content
                 .clone_from(&presentation.display_content);
-            message.attachments.clone_from(&presentation.attachments);
+            if !presentation.attachments.is_empty() {
+                message.attachments.clone_from(&presentation.attachments);
+            }
             message.atoms.clone_from(&presentation.atoms);
         }
     }

@@ -2690,6 +2690,7 @@ impl Backend for WakuBackend {
                     turn_id,
                     message_id,
                     hidden,
+                    attachments,
                     ..
                 } = &command
                 {
@@ -2719,7 +2720,13 @@ impl Backend for WakuBackend {
                         report_trigger: None,
                         reference_context: None,
                     };
-                    record_boss_event(&self.task_state, &self.task_store, session_id, &submitted)?;
+                    record_event_with_attachments(
+                        &self.task_state,
+                        &self.task_store,
+                        session_id,
+                        &submitted,
+                        attachments,
+                    )?;
                     events.send(event_to_wire(submitted)?)?;
                     if !*hidden && self.boss.is_boss_principal(session_id) {
                         // A boss op reaching back to the user — a `terminal`
