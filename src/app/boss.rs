@@ -1757,7 +1757,7 @@ impl Waku {
     pub(super) fn drain_boss_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         let mut finalized_plan_host = None;
-        while let Ok((key, state)) = self.boss_events.try_recv() {
+        while let Ok((key, mut state)) = self.boss_events.try_recv() {
             if self.boss_ui.states.get(&key).is_some_and(|previous| {
                 previous.identity.id == state.identity.id && previous.revision > state.revision
             }) {
@@ -1839,6 +1839,7 @@ impl Waku {
                     self.boss_ui.pin_scope_labels.insert((key, pin.id), label);
                 }
             }
+            self.sidebar_intents.observe_boss(key, &mut state);
             self.boss_ui.states.insert(key, state);
             if let Some((from, to)) = rotated_session {
                 self.migrate_boss_annotations(key, from, to, cx);
@@ -6529,11 +6530,15 @@ impl Waku {
                             "deliverable.archive_many",
                             archive_targets.len(),
                         ),
-                        move |_, cx| {
+                        move |window, cx| {
                             let _ = archive_waku.update(cx, |waku, cx| {
-                                for (key, id) in archive_targets.iter().copied() {
-                                    waku.set_deliverable_archived(key, id, true, cx);
-                                }
+                                let tasks = waku.sidebar_multi_selection_targets();
+                                waku.archive_sidebar_targets(
+                                    tasks,
+                                    archive_targets.clone(),
+                                    window,
+                                    cx,
+                                );
                             });
                         },
                     )
@@ -6934,10 +6939,9 @@ impl Waku {
         pinned: bool,
         cx: &mut Context<Self>,
     ) {
-        self.boss_request(
+        self.record_deliverable_intent(
             key,
-            BossOperation::PinDeliverable { id, pinned },
-            BossReply::List,
+            waku_protocol::sidebar_intent::SidebarEdit::DeliverablePin { id, pinned },
             cx,
         );
     }
@@ -6949,10 +6953,9 @@ impl Waku {
         dormant: bool,
         cx: &mut Context<Self>,
     ) {
-        self.boss_request(
+        self.record_deliverable_intent(
             key,
-            BossOperation::SweepDeliverable { id, dormant },
-            BossReply::List,
+            waku_protocol::sidebar_intent::SidebarEdit::DeliverableDormant { id, dormant },
             cx,
         );
     }
@@ -6967,10 +6970,9 @@ impl Waku {
         if archived {
             self.prune_deliverable_multi_selection(key, id);
         }
-        self.boss_request(
+        self.record_deliverable_intent(
             key,
-            BossOperation::ArchiveDeliverable { id, archived },
-            BossReply::List,
+            waku_protocol::sidebar_intent::SidebarEdit::DeliverableArchive { id, archived },
             cx,
         );
     }

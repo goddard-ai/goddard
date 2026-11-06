@@ -531,6 +531,8 @@ pub struct WakuBackend {
     /// The settings document only ever carries write-only slots and the
     /// `credential_configured` flags this store feeds.
     inference_secrets: crate::integrations::SecretStore,
+    sidebar_intent_order: parking_lot::ReentrantMutex<()>,
+    sidebar_intents: Mutex<sidebar_intents::Receipts>,
     task_store: Arc<StateStore>,
     task_state: Arc<Mutex<PersistedState>>,
     /// The hub's `task_state_changed` broadcast once `serve` installs it —
@@ -731,6 +733,7 @@ mod response;
 mod response_ops;
 mod rpc;
 mod runtime;
+mod sidebar_intents;
 mod summon;
 mod task_creation;
 mod transfer;

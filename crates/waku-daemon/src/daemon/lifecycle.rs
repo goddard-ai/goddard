@@ -6,6 +6,9 @@ impl WakuBackend {
             .load()
             .context("could not load Goddard task database")?;
         migrate_projectless_state(&task_store, &mut task_state)?;
+        let sidebar_intents = Mutex::new(sidebar_intents::Receipts::open(
+            task_store.path().with_extension("sidebar-receipts.json"),
+        )?);
         let composer_drafts = ComposerDraftStore::for_state_path(task_store.path());
         let attachments = AttachmentStore::new(
             task_store
@@ -77,6 +80,8 @@ impl WakuBackend {
         let task_store = Arc::new(task_store);
         let idle_shutdown = Arc::new(crate::server::idle_shutdown::IdleShutdownGate::default());
         let backend = Self {
+            sidebar_intent_order: parking_lot::ReentrantMutex::new(()),
+            sidebar_intents,
             idle_shutdown: idle_shutdown.clone(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_goal_claims: Mutex::new(HashMap::new()),

@@ -2854,9 +2854,25 @@ impl Waku {
                 .sessions
                 .retain(|session| remote_session_visible(session, boss_experiment_enabled));
         }
+        snapshot
+            .sessions
+            .retain(|session| !self.sidebar_intents.task_removed(session.id));
+        self.sidebar_intents.wake();
+        let intent_cleanups = self.sidebar_intents.cleanup_ids();
+        self.pending_workspace_cleanups.extend(
+            snapshot
+                .sessions
+                .iter()
+                .filter(|session| {
+                    session.archived_at.is_some() && intent_cleanups.contains(&session.id)
+                })
+                .map(|session| session.id),
+        );
         let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
         for session in &mut snapshot.sessions {
-            self.pending_task_metadata.observe(session);
+            self.pending_task_metadata.observe_raw(session);
+            self.sidebar_intents.observe_task(session);
+            self.pending_task_metadata.overlay(session);
         }
         for session in &snapshot.sessions {
             if session.archived_at.is_some() {
@@ -5271,6 +5287,9 @@ impl Waku {
                 session.detail_loaded = false;
             }
         }
+        let pending_metadata = self
+            .sidebar_intents
+            .strip_pending_task_metadata(&mut self.state);
         let app_error = if self.friend_sessions.is_empty() {
             self.store
                 .save(&mut self.state)
@@ -5293,6 +5312,11 @@ impl Waku {
             self.state.sessions.extend(watched);
             result
         };
+        for (id, edit) in pending_metadata {
+            if let Some(session) = self.state.session_mut(id) {
+                edit.apply(session);
+            }
+        }
         for session_id in &windowed {
             if let Some(session) = self.state.session_mut(*session_id) {
                 session.detail_loaded = true;
@@ -8928,7 +8952,7 @@ impl Waku {
             | self.drain_plan_usage_events()
             | self.drain_reset_credit_events()
             | self.drain_agy_poll_events()
-            | self.drain_task_metadata_results(cx)
+            | self.drain_sidebar_intents(cx)
             | self.drain_task_state_sync_events(cx)
             | self.drain_daemon_settings_events(cx)
             | self.drain_friends_events(cx)

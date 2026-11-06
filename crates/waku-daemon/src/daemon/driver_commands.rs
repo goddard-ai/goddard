@@ -106,6 +106,7 @@ pub(super) fn handle_driver_command(
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
         | Command::UpdateTaskMetadata { .. }
+        | Command::ApplySidebarIntent { .. }
         | Command::RemoveSession
         | Command::RemoveProject { .. }
         | Command::RefreshSessionHistory

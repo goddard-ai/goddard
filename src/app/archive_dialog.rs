@@ -34,6 +34,7 @@ pub fn init(cx: &mut App) {
 
 pub(super) struct ArchiveDialogState {
     session_id: Uuid,
+    archive_intent: Option<Uuid>,
     kind: ArchiveDialogKind,
     /// The sidebar row the session occupied when the archive started —
     /// carried through to `finish_archive_session` untouched by the dialog.
@@ -71,6 +72,20 @@ impl ArchiveDialogState {
 }
 
 impl Waku {
+    pub(super) fn discard_archive_confirmation(&mut self, id: Uuid) {
+        if let Some(dialog) = &mut self.archive_dialog {
+            dialog.pending.retain(|queued| {
+                queued.session_id != id || queued.kind != ArchiveDialogKind::Archive
+            });
+        }
+        if self.archive_dialog.as_ref().is_some_and(|dialog| {
+            dialog.session_id == id && dialog.kind == ArchiveDialogKind::Archive
+        }) && let Some(mut dialog) = self.archive_dialog.take()
+        {
+            self.archive_dialog = dialog.take_next();
+        }
+    }
+
     /// Opens the confirmation for a session whose archive preview reported
     /// work in flight or whose turn is still running. The caller owns the
     /// pending-preview bookkeeping.
@@ -131,6 +146,7 @@ impl Waku {
         let archive_focus = cx.focus_handle();
         let state = ArchiveDialogState {
             session_id,
+            archive_intent: self.sidebar_intents.preflight_token(session_id),
             kind,
             landing_row,
             title,
@@ -156,6 +172,13 @@ impl Waku {
         self.archive_dialog = dialog.take_next();
         match dialog.kind {
             ArchiveDialogKind::Archive => {
+                if !dialog.archive_intent.is_some_and(|token| {
+                    self.sidebar_intents
+                        .preflight_current(dialog.session_id, token)
+                }) {
+                    self.focus_next_archive_dialog(window, cx);
+                    return;
+                }
                 self.finish_archive_session(dialog.session_id, dialog.landing_row, window, cx)
             }
             ArchiveDialogKind::Dormant => {
@@ -170,6 +193,14 @@ impl Waku {
             return;
         };
         self.archive_dialog = dialog.take_next();
+        if dialog.kind == ArchiveDialogKind::Archive
+            && dialog.archive_intent.is_some_and(|token| {
+                self.sidebar_intents
+                    .preflight_current(dialog.session_id, token)
+            })
+        {
+            self.sidebar_intents.cancel_preflight(dialog.session_id);
+        }
         if self.focus_next_archive_dialog(window, cx) {
             return;
         }
@@ -501,6 +532,7 @@ mod tests {
 
     fn dialog(session_id: u128, cx: &mut TestAppContext) -> ArchiveDialogState {
         cx.update(|cx| ArchiveDialogState {
+            archive_intent: None,
             session_id: Uuid::from_u128(session_id),
             kind: ArchiveDialogKind::Archive,
             landing_row: Some(session_id as usize),

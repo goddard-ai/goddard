@@ -901,6 +901,20 @@ impl Waku {
     /// every session is archived and quiet, the daemon zips the workspace
     /// into `~/.goddard/archives` and removes it instead.
     pub(super) fn drain_pending_workspace_cleanups(&mut self, cx: &mut Context<Self>) {
+        if !self.pending_workspace_cleanups.is_empty()
+            && !self.archive_cleanup_wake_scheduled
+            && let Some(delay) = self.sidebar_intents.next_cleanup_wake()
+        {
+            self.archive_cleanup_wake_scheduled = true;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(delay).await;
+                let _ = this.update(cx, |this, cx| {
+                    this.archive_cleanup_wake_scheduled = false;
+                    this.drain_pending_workspace_cleanups(cx);
+                });
+            })
+            .detach();
+        }
         let mut deferred = HashSet::new();
         let mut ready = Vec::new();
         let mut projectless_ready = Vec::new();
@@ -914,6 +928,10 @@ impl Waku {
             else {
                 continue;
             };
+            if self.sidebar_intents.cleanup_deferred(session_id) {
+                deferred.insert(session_id);
+                continue;
+            }
             // Queued by archive or by the dormant sweep; either flag
             // lapsing — an unarchive or a wake — cancels the teardown.
             if session.archived_at.is_none() && !self.session_dormant_now(session) {

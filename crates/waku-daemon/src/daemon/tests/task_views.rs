@@ -35,7 +35,7 @@ fn task_views_handoff_recovers_hidden_output_and_fences_stale_saves() {
                     request_id: Uuid::new_v4(),
                     session_id,
                     runtime_id,
-                    command: Command::SetTaskView { detail, generation },
+                    command: Command::SetTaskView { detail, generation, payloads: Default::default() },
                 },
                 client.clone(),
                 None,
@@ -305,7 +305,7 @@ fn delayed_startup_save_cannot_recreate_an_assigned_worktree() {
     let root = std::env::temp_dir().join(format!("task-view-workspace-{}", Uuid::new_v4()));
     let (backend, session_id) = surface_test_backend(&root);
     let (sink, _events) = EventSink::detached().tapped_connection();
-    sink.set_task_view(false, 1);
+    sink.set_task_view(false, 1, Default::default());
     assert!(sink.task_views_enabled());
     let mut draft = backend
         .task_store

@@ -1,5 +1,5 @@
 use super::*;
-use waku_protocol::task_metadata::{TaskMetadataEdit, TaskMetadataField, TaskMetadataUpdate};
+use waku_protocol::task_metadata::{TaskMetadataEdit, TaskMetadataField};
 
 #[derive(Clone)]
 pub(super) struct MetadataRequest {
@@ -7,19 +7,13 @@ pub(super) struct MetadataRequest {
     sequence: u64,
     edited_at: u64,
     edit: TaskMetadataEdit,
-    failures: u32,
     observed: Option<(u64, TaskMetadataEdit)>,
-}
-
-pub(super) struct MetadataResult {
-    request: MetadataRequest,
-    result: Result<AgentSession, String>,
 }
 
 #[derive(Default)]
 pub(super) struct PendingTaskMetadata {
     sequence: u64,
-    edits: HashMap<(Uuid, TaskMetadataField), MetadataRequest>,
+    pub(super) edits: HashMap<(Uuid, TaskMetadataField), MetadataRequest>,
 }
 
 impl PendingTaskMetadata {
@@ -38,7 +32,6 @@ impl PendingTaskMetadata {
             sequence: self.sequence,
             edited_at: session.updated_at,
             edit,
-            failures: 0,
             observed: None,
         };
         self.edits.insert((session.id, field), request.clone());
@@ -80,7 +73,7 @@ impl PendingTaskMetadata {
         })
     }
 
-    pub(super) fn observe(&mut self, session: &mut AgentSession) {
+    pub(super) fn observe_raw(&mut self, session: &AgentSession) {
         for field in [
             TaskMetadataField::Title,
             TaskMetadataField::Placement,
@@ -98,6 +91,11 @@ impl PendingTaskMetadata {
                 ));
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn observe(&mut self, session: &mut AgentSession) {
+        self.observe_raw(session);
         self.overlay(session);
     }
 
@@ -123,7 +121,7 @@ impl PendingTaskMetadata {
         }
     }
 
-    fn acknowledge(
+    pub(super) fn acknowledge(
         &mut self,
         request: &MetadataRequest,
         saved: &AgentSession,
@@ -163,126 +161,14 @@ impl Waku {
             return;
         }
         let request = self.pending_task_metadata.record(session, field);
-        self.enqueue_task_metadata(request);
-    }
-
-    fn enqueue_task_metadata(&mut self, request: MetadataRequest) {
-        let key = self.daemons.session_owner(request.session_id);
-        if !self.task_metadata_workers.contains_key(&key) {
-            let (tx, rx) = unbounded::<MetadataRequest>();
-            let daemons = self.daemons.clone();
-            let results = self.task_metadata_tx.clone();
-            let wake = self.event_wake_tx.clone();
-            // One queue per daemon preserves rapid edit order without letting
-            // a slow remote host stall another host or the UI thread.
-            let spawned = std::thread::Builder::new()
-                .name(format!("task-metadata-{key:?}"))
-                .spawn(move || {
-                    while let Ok(request) = rx.recv() {
-                        // Bound each batch while combining bulk sidebar actions
-                        // into one daemon transaction instead of one per row.
-                        let requests = std::iter::once(request)
-                            .chain(rx.try_iter().take(127))
-                            .collect::<Vec<_>>();
-                        let result = (|| -> anyhow::Result<Vec<AgentSession>> {
-                            let supervisor = daemons
-                                .supervisor(key)
-                                .ok_or_else(|| anyhow::anyhow!("task host is disconnected"))?;
-                            let reply = supervisor.client().request(
-                                Uuid::nil(),
-                                Uuid::nil(),
-                                waku_client::Command::UpdateTaskMetadata {
-                                    updates: requests
-                                        .iter()
-                                        .map(|request| TaskMetadataUpdate {
-                                            session_id: request.session_id,
-                                            edit: request.edit.clone(),
-                                        })
-                                        .collect(),
-                                },
-                            )?;
-                            let waku_client::ResponsePayload::TaskStateSaved { sessions } = reply
-                            else {
-                                anyhow::bail!("invalid task save response");
-                            };
-                            Ok(sessions)
-                        })()
-                        .map_err(|error| error.to_string());
-                        for request in requests {
-                            let result = match &result {
-                                Ok(sessions) => sessions
-                                    .iter()
-                                    .find(|session| session.id == request.session_id)
-                                    .cloned()
-                                    .ok_or_else(|| "task save was not acknowledged".to_owned()),
-                                Err(error) => Err(error.clone()),
-                            };
-                            if results.send(MetadataResult { request, result }).is_err() {
-                                return;
-                            }
-                        }
-                        signal_event_pump(&wake);
-                    }
-                });
-            if let Err(error) = spawned {
-                let _ = self.task_metadata_tx.send(MetadataResult {
-                    request,
-                    result: Err(error.to_string()),
-                });
-                signal_event_pump(&self.event_wake_tx);
-                return;
-            }
-            self.task_metadata_workers.insert(key, tx);
-        }
-        if let Some(worker) = self.task_metadata_workers.get(&key)
-            && let Err(error) = worker.send(request)
-        {
-            self.task_metadata_workers.remove(&key);
-            let _ = self.task_metadata_tx.send(MetadataResult {
-                request: error.0,
-                result: Err("task save worker stopped".into()),
-            });
-            signal_event_pump(&self.event_wake_tx);
-        }
-    }
-
-    pub(super) fn drain_task_metadata_results(&mut self, cx: &mut Context<Self>) -> bool {
-        let mut changed = false;
-        while let Ok(MetadataResult {
-            mut request,
-            result,
-        }) = self.task_metadata_events.try_recv()
-        {
-            match result {
-                Ok(saved) => {
-                    if let Some(local) = self.state.session_mut(request.session_id) {
-                        self.pending_task_metadata
-                            .acknowledge(&request, &saved, local);
-                        changed = true;
-                    }
-                }
-                Err(error) if self.pending_task_metadata.current(&request) => {
-                    request.failures = request.failures.saturating_add(1);
-                    eprintln!("could not save task changes: {error}");
-                    if request.failures == 3 {
-                        self.show_toast(tr!("errors.task_changes_retrying"));
-                        changed = true;
-                    }
-                    let delay = Duration::from_secs(2u64.saturating_pow(request.failures.min(5)));
-                    cx.spawn(async move |waku, cx| {
-                        cx.background_executor().timer(delay).await;
-                        let _ = waku.update(cx, |waku, _| {
-                            if waku.pending_task_metadata.current(&request) {
-                                waku.enqueue_task_metadata(request);
-                            }
-                        });
-                    })
-                    .detach();
-                }
-                Err(_) => {}
-            }
-        }
-        changed
+        let key = self.daemons.session_owner(id);
+        let edit = request.edit;
+        self.sidebar_intents.record(
+            key,
+            waku_protocol::sidebar_intent::SidebarEdit::Task { id, edit },
+            None,
+            false,
+        );
     }
 }
 

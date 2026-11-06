@@ -3227,6 +3227,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::TrashSkills { .. } => "trashSkills",
         Command::LoadTaskState => "loadTaskState",
         Command::SaveTaskState { .. } => "saveTaskState",
+        Command::ApplySidebarIntent { .. } => "applySidebarIntent",
         Command::UpdateTaskMetadata { .. } => "updateTaskMetadata",
         Command::RemoveSession => "removeSession",
         Command::RemoveProject { .. } => "removeProject",
@@ -3461,6 +3462,7 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
             | waku_protocol::boss::BossOperation::ReportBlocker { .. }
             | waku_protocol::boss::BossOperation::Eval { .. }
             | waku_protocol::boss::BossOperation::Rename { .. } }
+        | Command::ApplySidebarIntent { .. }
         | Command::UpdateTaskMetadata { .. }
         | Command::RemoveSession
         | Command::ForkSessionFromResponse { .. }

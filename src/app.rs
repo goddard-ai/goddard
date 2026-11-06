@@ -435,6 +435,7 @@ struct ToastAction {
 
 #[derive(Clone, Debug)]
 enum ToastActionKind {
+    SidebarArchive(Uuid),
     /// The unarchive confirmation's "View now" jump to the restored task.
     Session(Uuid),
     /// The archive confirmation's Undo — restores every task the toast
@@ -3126,10 +3127,8 @@ pub struct Waku {
     archive_dialog: Option<archive_dialog::ArchiveDialogState>,
     archive_preview_pending: HashSet<Uuid>,
     archive_preview_toasts: HashSet<u64>,
+    sidebar_intents: sidebar_intents::SidebarIntents,
     pending_task_metadata: task_metadata::PendingTaskMetadata,
-    task_metadata_workers: HashMap<waku_client::DaemonKey, Sender<task_metadata::MetadataRequest>>,
-    task_metadata_tx: Sender<task_metadata::MetadataResult>,
-    task_metadata_events: Receiver<task_metadata::MetadataResult>,
     /// Session ids of the most recent archive — the set the palette's
     /// "Undo last archive" restores. In-memory only: a restart drops it.
     /// Members join while their archive toast is still up, matching the
@@ -3460,6 +3459,7 @@ pub struct Waku {
     /// detached work, or a queued turn-checkpoint capture — and drain once it
     /// goes quiet. Unarchived or removed sessions drop out on the next pass.
     pending_workspace_cleanups: HashSet<Uuid>,
+    archive_cleanup_wake_scheduled: bool,
     stream_state_dirty: bool,
     last_stream_save: Instant,
     /// User expansion overrides keyed by persisted transcript block index.
@@ -4646,6 +4646,7 @@ mod sessions;
 mod settings;
 mod shortcuts_dialog;
 mod sidebar;
+mod sidebar_intents;
 mod skills_page;
 mod speech;
 mod speed_reader;
@@ -4937,6 +4938,10 @@ impl Waku {
     /// the toast already showing instead of replacing it, so one Undo
     /// restores the whole group.
     pub(super) fn show_archived_toast(&mut self, session_id: Uuid) {
+        if let Some(batch) = self.sidebar_archive_batch(session_id) {
+            self.show_sidebar_archive_toast(batch);
+            return;
+        }
         let joined = match self.toast.as_mut().and_then(|toast| toast.action.as_mut()) {
             Some(ToastAction {
                 kind: ToastActionKind::Unarchive(session_ids),
@@ -4999,6 +5004,9 @@ impl Waku {
     /// most recently archived member. One-shot: the set clears whether the
     /// restore found anything or not.
     pub(super) fn undo_last_archive(&mut self, cx: &mut Context<Self>) {
+        if self.undo_sidebar_archive(cx) {
+            return;
+        }
         let restorable = still_archived_sessions(&self.state.sessions, &self.undoable_archive);
         self.undoable_archive.clear();
         match restorable.as_slice() {
@@ -5606,6 +5614,35 @@ impl Waku {
                 seed_remote_catalog(&mut state, &daemons, host, catalog);
             }
         }
+        let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
+        let sidebar_intents = sidebar_intents::SidebarIntents::open(
+            store
+                .remote_catalogs_path()
+                .with_extension("sidebar-intents.json"),
+            daemons.clone(),
+            event_wake_tx.clone(),
+        );
+        state
+            .sessions
+            .retain(|session| !sidebar_intents.task_removed(session.id));
+        for session in &mut state.sessions {
+            sidebar_intents.observe_task(session);
+        }
+        if state.selected_session.is_some_and(|id| {
+            sidebar_intents.is_archiving(&id)
+                || state
+                    .sessions
+                    .iter()
+                    .any(|s| s.id == id && s.archived_at.is_some())
+        }) {
+            state.selected_session = None;
+        }
+
+        let intent_workspace_cleanups = sidebar_intents
+            .cleanup_ids()
+            .into_iter()
+            .filter(|id| !daemons.session_owner(*id).is_remote())
+            .collect();
         let remote_catalogs_path = store.remote_catalogs_path();
         let home_directory = crate::projectless::home_directory();
         // Custom commands moved from this app's settings file into the
@@ -6103,9 +6140,18 @@ impl Waku {
         // Resolve colliding project names across the merged catalog — the
         // persisted list plus every seeded remote one.
         Project::resolve_display_names(&mut state.projects);
-        let projectless_save_error = projectless_migrated
-            .then(|| store.save(&mut state).err())
-            .flatten();
+        let projectless_save_error = if projectless_migrated {
+            let pending_metadata = sidebar_intents.strip_pending_task_metadata(&mut state);
+            let error = store.save(&mut state).err();
+            for (id, edit) in pending_metadata {
+                if let Some(session) = state.session_mut(id) {
+                    edit.apply(session);
+                }
+            }
+            error
+        } else {
+            None
+        };
         let startup_toast = projectless_migration_error
             .map(|error| tr!("errors.move_projectless_task", error = error))
             .or_else(|| {
@@ -6307,9 +6353,8 @@ impl Waku {
         let (plan_usage_tx, plan_usage_events) = unbounded();
         let (reset_credit_tx, reset_credit_events) = unbounded();
         let (agy_poll_tx, agy_poll_events) = unbounded();
-        let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
-        let (task_metadata_tx, task_metadata_events) = unbounded();
+
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (daemon_recovery_tx, daemon_recovery_events) = unbounded();
         let (daemon_status_tx, daemon_status_events) = unbounded();
@@ -7677,10 +7722,8 @@ impl Waku {
                 provider_switch_in_flight: HashSet::new(),
                 archive_preview_pending: HashSet::new(),
                 archive_preview_toasts: HashSet::new(),
+                sidebar_intents,
                 pending_task_metadata: task_metadata::PendingTaskMetadata::default(),
-                task_metadata_workers: HashMap::new(),
-                task_metadata_tx,
-                task_metadata_events,
                 undoable_archive: Vec::new(),
                 full_access_dialog: None,
                 incognito_dialog: None,
@@ -7779,7 +7822,8 @@ impl Waku {
                 response_fork_preparations: HashMap::new(),
                 pending_queue_drains: Vec::new(),
                 cancel_drains: HashMap::new(),
-                pending_workspace_cleanups: HashSet::new(),
+                pending_workspace_cleanups: intent_workspace_cleanups,
+                archive_cleanup_wake_scheduled: false,
                 stream_state_dirty: false,
                 last_stream_save: Instant::now(),
                 activities_expanded: HashMap::new(),

@@ -7568,3 +7568,30 @@ command_palette.idle_task:
   en: Idle
 command_palette.worktree_change_project:
   en: Change project…
+
+sidebar.changes_syncing:
+  en: Syncing %{count} sidebar changes
+sidebar.changes_blocked:
+  en: '%{count} sidebar changes need attention'
+sidebar.changes_not_saved:
+  en: Sidebar changes aren't saved
+sidebar.changes_detail:
+  en: Your choices appear immediately and synchronize in the background.
+sidebar.changes_retry:
+  en: Apply my changes
+sidebar.changes_undo:
+  en: Undo archive
+sidebar.changes_adopt:
+  en: Use daemon state
+sidebar.archive_inspection_offline:
+  en: Archive needs a connection to inspect the workspace.
+sidebar.archive_inspection_failed:
+  en: Archive safety check failed. Retry from sidebar changes.
+sidebar.archived_many:
+  en: 'Hidden %{count} items from the sidebar'
+sidebar.archive_undo_detail:
+  en: Undo restores archived items. It does not restart stopped turns or recover removed side chats.
+sidebar.changes_local_host:
+  en: This computer
+sidebar.changes_removed_host:
+  en: Removed host

@@ -32,6 +32,7 @@ import type { ResourceStatus } from "./ResourceStatus";
 import type { RouteDecision } from "./RouteDecision";
 import type { SessionMessageMatch } from "./SessionMessageMatch";
 import type { SharedSessionSummary } from "./SharedSessionSummary";
+import type { SidebarIntentResult } from "./SidebarIntentResult";
 import type { SkillsCatalog } from "./SkillsCatalog";
 import type { StoredAttachment } from "./StoredAttachment";
 import type { TranscriptFindResult } from "./TranscriptFindResult";
@@ -43,7 +44,7 @@ import type { WireframeCommentsPage } from "./WireframeCommentsPage";
 import type { WorkspaceResult } from "./WorkspaceResult";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type ResponsePayload = { "type": "wireframeComments", page: WireframeCommentsPage, } | { "type": "whistleStatus", available: boolean, downloaded: boolean, } | { "type": "transcription", text: string, language: string, words: Array<WhistleWord>, } | { "type": "agentMergeSubmitted", sha: string, } | { "type": "agentResources", status: ResourceStatus, } | { "type": "boss", result: BossResult, } | { "type": "ack" } | { "type": "managedGoalTurnClaimed", claimed: boolean, } | { "type": "sessionRuntime", runtimeId: string | null, supportsSteer: boolean,
+export type ResponsePayload = { "type": "sidebarIntent", result: SidebarIntentResult, } | { "type": "wireframeComments", page: WireframeCommentsPage, } | { "type": "whistleStatus", available: boolean, downloaded: boolean, } | { "type": "transcription", text: string, language: string, words: Array<WhistleWord>, } | { "type": "agentMergeSubmitted", sha: string, } | { "type": "agentResources", status: ResourceStatus, } | { "type": "boss", result: BossResult, } | { "type": "ack" } | { "type": "managedGoalTurnClaimed", claimed: boolean, } | { "type": "sessionRuntime", runtimeId: string | null, supportsSteer: boolean,
 /**
  * The transport can settle a user-input request without structured
  * answers — clarify and dismiss are both offered on this bit.

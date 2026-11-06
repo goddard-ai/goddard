@@ -1192,7 +1192,12 @@ impl Waku {
                     match result {
                         Ok((mut session, interrupted_turn)) => {
                             waku.session_hydrations.complete(session_id);
-                            waku.pending_task_metadata.observe(&mut session);
+                            if waku.sidebar_intents.task_removed(session_id) {
+                                return;
+                            }
+                            waku.pending_task_metadata.observe_raw(&session);
+                            waku.sidebar_intents.observe_task(&mut session);
+                            waku.pending_task_metadata.overlay(&mut session);
                             waku.trim_resident_transcripts();
                             let applied = if let Some(existing) = waku
                                 .state
@@ -3132,20 +3137,41 @@ impl Waku {
         else {
             return;
         };
-        let landing_row =
-            sidebar::sidebar_session_row_index(&self.sidebar_rows_cached(), session_id);
+        if self.archive_preview_pending.contains(&session_id) {
+            return;
+        }
         let busy = session.is_busy();
+        let workspace = match &session.workspace {
+            SessionWorkspace::Worktree {
+                path, base_branch, ..
+            } => Some((path.clone(), base_branch.clone())),
+            _ => None,
+        };
+        let landing_row = self
+            .sidebar_intents
+            .landing_rows
+            .remove(&session_id)
+            .or_else(|| {
+                sidebar::sidebar_session_row_index(&self.sidebar_rows_cached(), session_id)
+            });
+        let archive_intent = self.sidebar_intents.record(
+            self.daemons.session_owner(session_id),
+            waku_protocol::sidebar_intent::SidebarEdit::Task {
+                id: session_id,
+                edit: waku_protocol::task_metadata::TaskMetadataEdit::Archive {
+                    archived_at: Some(unix_time()),
+                },
+            },
+            None,
+            true,
+        );
+        cx.notify();
         // Only a worktree gets a preview: archiving snapshots its checkout
         // into the archive ref and removes the directory. A local checkout
         // is the user's own git state — archive never touches it, so dirty
         // files and unpushed commits are nothing to warn about. An active
         // turn is still worth confirming: archiving stops it.
-        let Some((workspace, base)) = (match &session.workspace {
-            SessionWorkspace::Worktree {
-                path, base_branch, ..
-            } => Some((path.clone(), base_branch.clone())),
-            _ => None,
-        }) else {
+        let Some((workspace, base)) = workspace else {
             if busy {
                 let focus_new_dialog = self.archive_dialog.is_none();
                 let focus = self.open_archive_dialog(
@@ -3172,12 +3198,19 @@ impl Waku {
         }
         let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
             self.archive_preview_pending.remove(&session_id);
-            self.finish_archive_session(session_id, landing_row, window, cx);
+            self.sidebar_intents
+                .preflight_failed(session_id, tr!("sidebar.archive_inspection_offline"));
+            self.show_toast(tr!("sidebar.archive_inspection_offline"));
             return;
         };
         let preview_toast =
             self.show_progress_toast(tr!("session.archive_preparing"), PROGRESS_TOAST_DURATION);
         self.archive_preview_toasts.insert(preview_toast);
+        enum PreflightOutcome {
+            Stopped,
+            Confirmation(FocusHandle, bool),
+            Ready,
+        }
         let window_handle = window.window_handle();
         cx.spawn(async move |waku, cx| {
             let preview = cx
@@ -3196,8 +3229,14 @@ impl Waku {
                 .await;
             let finish = waku
                 .update(cx, |waku, cx| {
-                    waku.archive_preview_pending.remove(&session_id);
                     waku.archive_preview_toasts.remove(&preview_toast);
+                    if !waku
+                        .sidebar_intents
+                        .preflight_current(session_id, archive_intent)
+                    {
+                        return PreflightOutcome::Stopped;
+                    }
+                    waku.archive_preview_pending.remove(&session_id);
                     if waku
                         .toast
                         .as_ref()
@@ -3213,32 +3252,42 @@ impl Waku {
                         .iter()
                         .find(|session| session.id == session_id)
                         .is_some_and(|session| session.is_busy());
-                    let preview = preview.unwrap_or_default();
+                    let Some(preview) = preview else {
+                        waku.sidebar_intents
+                            .preflight_failed(session_id, tr!("sidebar.archive_inspection_failed"));
+                        waku.show_toast(tr!("sidebar.archive_inspection_failed"));
+                        return PreflightOutcome::Stopped;
+                    };
                     if busy || !preview.files.is_empty() || !preview.unpushed_commits.is_empty() {
                         // Queued warnings must not reset the current modal's
                         // keyboard choice when another preview finishes.
                         let focus_new_dialog = waku.archive_dialog.is_none();
                         let focus =
                             waku.open_archive_dialog(session_id, preview, busy, landing_row, cx);
-                        Some((focus, focus_new_dialog))
+                        PreflightOutcome::Confirmation(focus, focus_new_dialog)
                     } else {
-                        None
+                        PreflightOutcome::Ready
                     }
                 })
-                .unwrap_or(None);
+                .unwrap_or(PreflightOutcome::Stopped);
             let _ = window_handle.update(cx, move |_, window, cx| {
                 match finish {
-                    Some((focus, true)) => {
+                    PreflightOutcome::Confirmation(focus, true) => {
                         // Like the other deferred surfaces, focus lands two
                         // frames after the modal joins the dispatch tree.
                         window.on_next_frame(move |window, _| {
                             window.on_next_frame(move |window, cx| window.focus(&focus, cx));
                         });
                     }
-                    Some((_, false)) => {}
-                    None => {
+                    PreflightOutcome::Confirmation(_, false) | PreflightOutcome::Stopped => {}
+                    PreflightOutcome::Ready => {
                         let _ = waku.update(cx, |waku, cx| {
-                            waku.finish_archive_session(session_id, landing_row, window, cx)
+                            if waku
+                                .sidebar_intents
+                                .preflight_current(session_id, archive_intent)
+                            {
+                                waku.finish_archive_session(session_id, landing_row, window, cx)
+                            }
                         });
                     }
                 }
@@ -3707,17 +3756,74 @@ impl Waku {
         let targets = self.sidebar_multi_selection_targets();
         let deliverables = self.sidebar_deliverable_multi_selection_targets();
         if !targets.is_empty() || !deliverables.is_empty() {
-            for session_id in targets {
-                self.archive_session(session_id, window, cx);
-            }
-            for (key, id) in deliverables {
-                self.set_deliverable_archived(key, id, true, cx);
-            }
+            self.archive_sidebar_targets(targets, deliverables, window, cx);
             return;
         }
         if let Some(session_id) = self.composer_session_id() {
             self.archive_session(session_id, window, cx);
         }
+    }
+
+    pub(super) fn archive_sidebar_targets(
+        &mut self,
+        targets: Vec<Uuid>,
+        deliverables: Vec<(waku_client::DaemonKey, Uuid)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sidebar_intents.batch = Some(Uuid::new_v4());
+        let rows = self.sidebar_rows_cached();
+        for id in &targets {
+            if let Some(row) = sidebar::sidebar_session_row_index(&rows, *id) {
+                self.sidebar_intents.landing_rows.insert(*id, row);
+            }
+        }
+        let mut seen = HashSet::new();
+        let targets = targets
+            .into_iter()
+            .filter(|id| seen.insert(*id))
+            .collect::<Vec<_>>();
+        for id in &targets {
+            if self.is_friend_session(*id) {
+                continue;
+            }
+            if !self.state.sessions.iter().any(|session| {
+                session.id == *id
+                    && session_archivable(
+                        session,
+                        self.boss_ui
+                            .states
+                            .values()
+                            .any(|state| state.session_id == Some(*id)),
+                    )
+            }) {
+                continue;
+            }
+            self.sidebar_intents.record(
+                self.daemons.session_owner(*id),
+                waku_protocol::sidebar_intent::SidebarEdit::Task {
+                    id: *id,
+                    edit: waku_protocol::task_metadata::TaskMetadataEdit::Archive {
+                        archived_at: Some(unix_time()),
+                    },
+                },
+                None,
+                true,
+            );
+        }
+        for id in targets {
+            self.archive_session(id, window, cx);
+        }
+        let mut seen = HashSet::new();
+        for (key, id) in deliverables
+            .into_iter()
+            .filter(|target| seen.insert(*target))
+        {
+            self.set_deliverable_archived(key, id, true, cx);
+        }
+        self.sidebar_intents.batch = None;
+        self.clear_sidebar_multi_selection(cx);
+        cx.notify();
     }
 
     /// Moves a task into or out of the sidebar's top Pinned group.

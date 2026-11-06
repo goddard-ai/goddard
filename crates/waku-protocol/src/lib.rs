@@ -103,3 +103,5 @@ pub use workspace::{
     PullRequestState, PullRequestSummary, RepoBranch, RepoWorktree, WorkItemComment, WorkItemKind,
     WorkItemQueryState, WorkspaceOperation, WorkspaceResult,
 };
+
+pub mod sidebar_intent;

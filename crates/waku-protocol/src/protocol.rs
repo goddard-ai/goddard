@@ -410,6 +410,9 @@ pub enum Command {
         dirs: Vec<PathBuf>,
     },
     LoadTaskState,
+    ApplySidebarIntent {
+        intent: crate::sidebar_intent::SidebarIntent,
+    },
     /// Apply only the named metadata fields, then acknowledge their durable revision.
     UpdateTaskMetadata {
         updates: Vec<crate::task_metadata::TaskMetadataUpdate>,
@@ -1528,6 +1531,9 @@ pub struct SubprocessLabelSample {
     rename_all_fields = "camelCase"
 )]
 pub enum ResponsePayload {
+    SidebarIntent {
+        result: crate::sidebar_intent::SidebarIntentResult,
+    },
     WireframeComments {
         page: crate::wireframe_comments::WireframeCommentsPage,
     },

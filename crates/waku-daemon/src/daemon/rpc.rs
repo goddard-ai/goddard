@@ -348,6 +348,23 @@ impl Backend for WakuBackend {
         agent: Option<Uuid>,
     ) -> anyhow::Result<ResponsePayload> {
         let _admission = self.idle_shutdown.enter()?;
+        // Conditional sidebar edits and older user metadata paths share an
+        // ordering boundary. Reentrant because the receipt path delegates to
+        // the existing metadata/Boss handlers on this same thread.
+        let _sidebar_order = matches!(
+            &request.command,
+            Command::ApplySidebarIntent { .. }
+                | Command::UpdateTaskMetadata { .. }
+                | Command::SaveTaskState { .. }
+                | Command::Boss {
+                    operation: waku_protocol::boss::BossOperation::ArchiveDeliverable { .. }
+                        | waku_protocol::boss::BossOperation::PinDeliverable { .. }
+                        | waku_protocol::boss::BossOperation::SweepDeliverable { .. }
+                        | waku_protocol::boss::BossOperation::DismissDeliverable { .. }
+                        | waku_protocol::boss::BossOperation::PublishDeliverable { .. }
+                }
+        )
+        .then(|| self.sidebar_intent_order.lock());
         let session_id = request.session_id;
         let runtime_id = request.runtime_id;
         // A scoped credential minted for a retired Boss generation carries
@@ -1180,6 +1197,10 @@ impl Backend for WakuBackend {
                     default_cwd: self.default_cwd.clone(),
                     projectless_root: crate::projectless::workspace_root(),
                 })
+            }
+            Command::ApplySidebarIntent { intent } => {
+                anyhow::ensure!(agent.is_none(), "sidebar edits require user authority");
+                self.apply_sidebar_intent(intent, events)
             }
             command @ (Command::SaveTaskState { .. } | Command::UpdateTaskMetadata { .. }) => {
                 let metadata_only = matches!(&command, Command::UpdateTaskMetadata { .. });

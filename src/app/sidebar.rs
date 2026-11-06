@@ -3646,6 +3646,7 @@ impl Waku {
                 theme.sidebar
             })
             .child(self.render_sidebar_titlebar(window, cx))
+            .children(self.render_sidebar_intent_status(cx))
             .child(
                 div()
                     .flex_none()
@@ -4053,6 +4054,7 @@ impl Waku {
         fingerprint = mix(fingerprint, u64::from(dates.day_start_hour));
         fingerprint = mix(fingerprint, dates.calendar_year as u64);
         fingerprint = mix(fingerprint, self.boss_ui.revision);
+        fingerprint = mix(fingerprint, self.sidebar_intents.revision);
         // Pending archives stay hidden even if another update still carries
         // an unarchived session. HashMap iteration must not affect the cache.
         let pending_archives = self
@@ -4322,7 +4324,7 @@ impl Waku {
                     .flatten()
                     .chain(self.boss_ui.recent.values().flatten())
                     .filter(|id| {
-                        !self.pending_task_metadata.is_archiving(id)
+                        !self.sidebar_task_archiving(id)
                             && sidebar_employee_shown(
                                 id,
                                 &self.state.sessions,
@@ -4369,7 +4371,7 @@ impl Waku {
             .filter(|session| {
                 session.has_started()
                     && session.archived_at.is_none()
-                    && !self.pending_task_metadata.is_archiving(&session.id)
+                    && !self.sidebar_task_archiving(&session.id)
                     && !session.is_side_chat()
                     && !self.state.qa_session_ids.contains(&session.id)
                     && !self.friend_sessions.contains_key(&session.id)
@@ -4530,7 +4532,7 @@ impl Waku {
                 let planning_ids = self
                     .sidebar_planning_session_ids(*key)
                     .into_iter()
-                    .filter(|id| !self.pending_task_metadata.is_archiving(id))
+                    .filter(|id| !self.sidebar_task_archiving(id))
                     .collect::<Vec<_>>();
                 if !self.state.sidebar_employee_groups {
                     let employees = self
@@ -4549,7 +4551,7 @@ impl Waku {
                         )
                         .copied()
                         .filter(|id| {
-                            !self.pending_task_metadata.is_archiving(id)
+                            !self.sidebar_task_archiving(id)
                                 && sidebar_employee_shown(
                                     id,
                                     &self.state.sessions,
@@ -4582,7 +4584,7 @@ impl Waku {
                 ] {
                     let shown = |id: &&Uuid| {
                         self.sidebar_employee_group(**id) == group
-                            && !self.pending_task_metadata.is_archiving(*id)
+                            && !self.sidebar_task_archiving(*id)
                             && sidebar_employee_shown(
                                 id,
                                 &self.state.sessions,
@@ -6794,9 +6796,14 @@ impl Waku {
                             ),
                             move |window, cx| {
                                 let _ = archive_waku.update(cx, |waku, cx| {
-                                    for target in &archive_targets {
-                                        waku.archive_session(*target, window, cx)
-                                    }
+                                    let deliverables =
+                                        waku.sidebar_deliverable_multi_selection_targets();
+                                    waku.archive_sidebar_targets(
+                                        archive_targets.clone(),
+                                        deliverables,
+                                        window,
+                                        cx,
+                                    );
                                 });
                             },
                         )

@@ -1,0 +1,1 @@
+- Tasks and deliverables disappear from the sidebar immediately when archived, retain pending changes across restarts, and offer grouped Undo and recovery when synchronization fails.

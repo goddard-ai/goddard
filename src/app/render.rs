@@ -1536,6 +1536,9 @@ impl Waku {
             let kind = action.kind.clone();
             let mut label = action.label.to_string();
             let mut tooltip = None;
+            if matches!(kind, ToastActionKind::SidebarArchive(_)) {
+                tooltip = Some(Tooltip::text(tr!("sidebar.archive_undo_detail")));
+            }
             if matches!(kind, ToastActionKind::Session(_)) {
                 if let Some(open) =
                     crate::ui::shortcut::ShortcutHint::action(&crate::OpenToastSession)
@@ -1597,6 +1600,9 @@ impl Waku {
                             ToastActionKind::Session(session_id) => {
                                 this.open_toast_session(*session_id, cx)
                             }
+                            ToastActionKind::SidebarArchive(batch) => {
+                                this.undo_sidebar_archive_batch(*batch, cx);
+                            }
                             ToastActionKind::Unarchive(session_ids) => {
                                 this.undo_archived_sessions(session_ids, cx)
                             }
@@ -1626,6 +1632,9 @@ impl Waku {
                         match &kind {
                             ToastActionKind::Session(session_id) => {
                                 this.open_toast_session(*session_id, cx)
+                            }
+                            ToastActionKind::SidebarArchive(batch) => {
+                                this.undo_sidebar_archive_batch(*batch, cx);
                             }
                             ToastActionKind::Unarchive(session_ids) => {
                                 this.undo_archived_sessions(session_ids, cx)

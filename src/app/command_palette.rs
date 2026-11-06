@@ -2822,7 +2822,7 @@ impl Waku {
         // app restarts.
         let undoable_archive =
             still_archived_sessions(&self.state.sessions, &self.undoable_archive);
-        if !undoable_archive.is_empty() {
+        if !undoable_archive.is_empty() || self.sidebar_archive_available() {
             let mut item = CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.undo_archive"),
