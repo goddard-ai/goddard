@@ -1,1 +1,1 @@
-- Fixed the transcript shifting when turn status markers arrive after opening a task; marker lines now reserve their space and scroll horizontally in narrow windows.
+- Fixed the transcript shifting when turn status markers arrive after opening a task; marker lines now reserve their space and scroll horizontally in narrow windows. Copy actions occupy the first footer line when no markers apply.

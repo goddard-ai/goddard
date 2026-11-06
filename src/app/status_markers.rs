@@ -961,20 +961,21 @@ fn status_marker_chip(marker: &StatusMarker, probability: f64, theme: &Theme) ->
         )
 }
 
-/// Reserve the same line before and after Jev answers. Overflow scrolls
-/// horizontally so neither narrow windows nor late verdicts move the reply.
-fn status_marker_slot(
+/// Keep the response footprint stable, but put its actions first when Jev
+/// has no markers. Overflow scrolls horizontally rather than growing the row.
+fn status_marker_footer(
     turn_id: Uuid,
     evaluation: Option<&Evaluation>,
     theme: &Theme,
     scroll: &ScrollHandle,
     focus: &FocusHandle,
+    footer: AnyElement,
 ) -> Div {
     let mut cleared = evaluation.map(cleared_markers).unwrap_or_default();
     cleared.sort_by(|(_, left), (_, right)| right.total_cmp(left));
     let has_markers = !cleared.is_empty();
     let keyboard_scroll = scroll.clone();
-    div()
+    let marker_row = div()
         .w_full()
         .min_w_0()
         .h(px(18.0))
@@ -1023,7 +1024,18 @@ fn status_marker_slot(
                 scrollbar::FadeEdge::Right,
                 theme.surface,
             ))
+        });
+    div()
+        .w_full()
+        .min_w_0()
+        .h(px(18.0) + FOOTER_ROW_BELOW_MARKERS)
+        .flex_none()
+        .flex()
+        .flex_col()
+        .when(has_markers, |column| {
+            column.child(div().w_full().mb(px(6.0)).child(marker_row))
         })
+        .child(footer)
 }
 
 /// The actionable turn marker shown in the sidebar, using the same icon,
@@ -1571,24 +1583,25 @@ impl Waku {
         );
     }
 
-    /// The marker chips a settled turn's response footer shows, if the
-    /// evaluation answered and at least one marker cleared its threshold.
+    /// The settled turn's marker chips and action strip share a stable
+    /// footprint; without chips the actions occupy its first line.
     /// Boss-owned surfaces and employee chats do not evaluate turns for
     /// these markers.
     #[track_caller]
-    pub(super) fn render_status_marker_row(
+    pub(super) fn render_status_marker_footer(
         &self,
         turn_id: Uuid,
+        footer: AnyElement,
         theme: &Theme,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    ) -> AnyElement {
         if !self.state.status_markers_enabled
             || self.selected_session().is_some_and(|session| {
                 self.session_is_boss_owned(session) || self.session_is_employee(session)
             })
         {
-            return None;
+            return footer;
         }
         let state = window.use_keyed_state(
             SharedString::from(format!("turn-status-marker-scroll-{turn_id}")),
@@ -1596,16 +1609,15 @@ impl Waku {
             |_, cx| (ScrollHandle::new(), cx.focus_handle()),
         );
         let (scroll, focus) = state.read(cx);
-        Some(
-            status_marker_slot(
-                turn_id,
-                self.turn_status_markers.get(&turn_id),
-                theme,
-                scroll,
-                focus,
-            )
-            .into_any_element(),
+        status_marker_footer(
+            turn_id,
+            self.turn_status_markers.get(&turn_id),
+            theme,
+            scroll,
+            focus,
+            footer,
         )
+        .into_any_element()
     }
 
     /// The sidebar status-slot glyph for a session, when its last turn's
@@ -1832,14 +1844,20 @@ mod tests {
                             .flex()
                             .flex_col()
                             .child(div().h(px(70.0)).child(format!("Response {index}")))
-                            .child(status_marker_slot(
+                            .child(status_marker_footer(
                                 Uuid::from_u128(index as u128),
                                 this.evaluation.as_ref(),
                                 &Theme::current(cx),
                                 &this.markers[index].0,
                                 &this.markers[index].1,
+                                div()
+                                    .id(SharedString::from(format!("footer-actions-{index}")))
+                                    .debug_selector(move || {
+                                        format!("footer-actions-{index}").into()
+                                    })
+                                    .h(px(27.0))
+                                    .into_any_element(),
                             ))
-                            .child(div().h(px(27.0)))
                             .into_any_element()
                     })
                 })
@@ -1895,6 +1913,9 @@ mod tests {
                     Some(evaluation(BTreeMap::new())),
                     None,
                 ] {
+                    let has_markers = verdict
+                        .as_ref()
+                        .is_some_and(|eval| !cleared_markers(eval).is_empty());
                     view.update(cx, |this, cx| {
                         this.evaluation = verdict;
                         this.list.remeasure_items(0..40);
@@ -1924,7 +1945,7 @@ mod tests {
                             assert_eq!(scroll.offset().x, Pixels::ZERO);
                         }
                     }
-                    cx.read(|cx| {
+                    let row_top = cx.read(|cx| {
                         let list = &view.read(cx).list;
                         let after = list.logical_scroll_top();
                         assert_eq!(after.item_ix, before.item_ix);
@@ -1933,7 +1954,22 @@ mod tests {
                             list.bounds_for_item(before.item_ix).unwrap().size.height,
                             height
                         );
+                        list.bounds_for_item(if at_tail { 39 } else { 20 })
+                            .unwrap()
+                            .top()
                     });
+                    let actions = cx
+                        .debug_bounds(if at_tail {
+                            "footer-actions-39"
+                        } else {
+                            "footer-actions-20"
+                        })
+                        .unwrap();
+                    assert_eq!(
+                        actions.top(),
+                        row_top + px(70.0 + if has_markers { 24.0 } else { 0.0 }),
+                        "actions occupy the marker line whenever no markers apply"
+                    );
                 }
             }
         }

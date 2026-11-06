@@ -2612,25 +2612,23 @@ impl Waku {
         let force_visible = self
             .hovered_response_row
             .is_some_and(|(hovered_turn_id, _)| hovered_turn_id == turn_id);
-        if let Some(markers) = self.render_status_marker_row(turn_id, theme, window, cx) {
-            column = column.child(div().w_full().mb(px(3.0)).child(markers));
-        }
+        let footer = render_message_footer(
+            theme,
+            &message,
+            footer_time.unwrap_or(message.created_at),
+            copy_content,
+            copied,
+            self.state.show_response_token_speed,
+            group_name,
+            force_visible,
+            false,
+            action,
+            None,
+            self.message_voice_briefing_footer(message.id),
+            cx.entity().downgrade(),
+        );
         column
-            .child(render_message_footer(
-                theme,
-                &message,
-                footer_time.unwrap_or(message.created_at),
-                copy_content,
-                copied,
-                self.state.show_response_token_speed,
-                group_name,
-                force_visible,
-                false,
-                action,
-                None,
-                self.message_voice_briefing_footer(message.id),
-                cx.entity().downgrade(),
-            ))
+            .child(self.render_status_marker_footer(turn_id, footer, theme, window, cx))
             .into_any_element()
     }
 
