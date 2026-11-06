@@ -614,6 +614,7 @@ impl Waku {
             view.loading_before = true;
             view.before_error = None;
         }
+        cx.notify();
         let client = daemon.client();
         cx.spawn(async move |waku, cx| {
             let result = cx
@@ -690,6 +691,7 @@ impl Waku {
             view.loading_after = true;
             view.after_error = None;
         }
+        cx.notify();
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -783,8 +785,18 @@ impl Waku {
             .when(error.is_none(), |view| {
                 view.child(
                     div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
                         .text_size(sp(12.5))
-                        .text_color(theme.text_secondary)
+                        .text_color(theme.text_tertiary)
+                        .when(loading, |row| {
+                            row.child(motion::spin_slow(icon(
+                                "icons/loader-circle.svg",
+                                12.0,
+                                theme.text_tertiary,
+                            )))
+                        })
                         .child(label.clone()),
                 )
             })

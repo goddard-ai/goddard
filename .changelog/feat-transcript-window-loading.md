@@ -1,1 +1,1 @@
-- Find-in-transcript searches the complete retained history, including tool output that was never downloaded. Opening a task loads its full session so saved permissions and provider settings remain accurate.
+- Find-in-transcript searches the complete retained history, including tool output that was never downloaded. Opening a task loads its full session so saved permissions and provider settings remain accurate. A muted spinner appears when scrolling reaches a transcript edge that is still loading.
