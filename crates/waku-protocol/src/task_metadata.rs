@@ -4,18 +4,25 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::model::AgentSession;
+use crate::model::{AgentSession, SessionWorkspace};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum TaskMetadataField {
     Title,
     Placement,
     Archive,
+    Workspace,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TaskMetadataEdit {
+    /// Confirm a checkout-to-worktree move independently of transcript saves.
+    Workspace {
+        workspace: SessionWorkspace,
+        #[ts(type = "string | null")]
+        moved_from: Option<std::path::PathBuf>,
+    },
     Rename {
         title: String,
     },
@@ -32,6 +39,10 @@ pub enum TaskMetadataEdit {
 impl TaskMetadataEdit {
     pub fn capture(field: TaskMetadataField, session: &AgentSession) -> Self {
         match field {
+            TaskMetadataField::Workspace => Self::Workspace {
+                workspace: session.workspace.clone(),
+                moved_from: session.workspace_moved_from.clone(),
+            },
             TaskMetadataField::Title => Self::Rename {
                 title: session.title.clone(),
             },
@@ -48,6 +59,7 @@ impl TaskMetadataEdit {
 
     pub fn field(&self) -> TaskMetadataField {
         match self {
+            Self::Workspace { .. } => TaskMetadataField::Workspace,
             Self::Rename { .. } => TaskMetadataField::Title,
             Self::Archive { .. } => TaskMetadataField::Archive,
             Self::Placement { .. } => TaskMetadataField::Placement,
@@ -56,6 +68,13 @@ impl TaskMetadataEdit {
 
     pub fn apply(&self, session: &mut AgentSession) {
         match self {
+            Self::Workspace {
+                workspace,
+                moved_from,
+            } => {
+                session.workspace.clone_from(workspace);
+                session.workspace_moved_from.clone_from(moved_from);
+            }
             Self::Rename { title } => {
                 session.title = title.trim().to_owned();
                 session.agent_rename_allowed = false;
@@ -83,6 +102,7 @@ pub struct TaskMetadataUpdate {
 /// The fields an older transcript save must not write back over newer edits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TaskMetadata {
+    workspace: SessionWorkspace,
     title: String,
     auto_title: Option<String>,
     auto_title_is_prompt: bool,
@@ -96,6 +116,7 @@ pub struct TaskMetadata {
 impl TaskMetadata {
     pub fn capture(session: &AgentSession) -> Self {
         Self {
+            workspace: session.workspace.clone(),
             title: session.title.clone(),
             auto_title: session.auto_title.clone(),
             auto_title_is_prompt: session.auto_title_is_prompt,
@@ -108,6 +129,7 @@ impl TaskMetadata {
     }
 
     pub fn apply(self, session: &mut AgentSession) {
+        session.workspace = self.workspace;
         session.title = self.title;
         session.auto_title = self.auto_title;
         session.auto_title_is_prompt = self.auto_title_is_prompt;

@@ -23457,6 +23457,116 @@ fn task_wireframes_require_opt_in_valid_documents_and_workspace_containment() {
 mod audit_regressions;
 
 #[test]
+fn worktree_moves_survive_stale_saves_and_reload() {
+    use waku_protocol::task_metadata::{TaskMetadataEdit, TaskMetadataUpdate};
+    let root = std::env::temp_dir().join(format!("task-worktree-move-{}", Uuid::new_v4()));
+    let (backend, id) = surface_test_backend(&root);
+    let original = backend.task_store.load_session_detail(id).unwrap().unwrap();
+    let workspace = SessionWorkspace::Worktree {
+        path: root.join("worktree"),
+        name: "worktree".into(),
+        branch: None,
+        base_branch: None,
+        adopted_by: None,
+        borrowed: false,
+    };
+    let request = |command| {
+        backend.handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command,
+            },
+            EventSink::detached(),
+            None,
+        )
+    };
+    let edit = TaskMetadataEdit::Workspace {
+        workspace: workspace.clone(),
+        moved_from: Some(root.join("repo")),
+    };
+    let move_request = || Command::UpdateTaskMetadata {
+        updates: vec![TaskMetadataUpdate {
+            session_id: id,
+            edit: edit.clone(),
+        }],
+    };
+    backend
+        .task_state
+        .lock()
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == id)
+        .unwrap()
+        .status = SessionStatus::Working;
+    assert!(
+        request(move_request())
+            .unwrap_err()
+            .to_string()
+            .contains("busy")
+    );
+    backend
+        .task_state
+        .lock()
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == id)
+        .unwrap()
+        .status = SessionStatus::Idle;
+    // Moving from a list row must hydrate and preserve the existing transcript.
+    assert!(
+        !backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|s| s.id == id)
+            .unwrap()
+            .detail_loaded
+    );
+    let ResponsePayload::TaskStateSaved { sessions } = request(move_request()).unwrap() else {
+        panic!("missing move acknowledgement");
+    };
+    assert_eq!(sessions[0].workspace, workspace);
+    assert_eq!(
+        sessions[0].metadata_revision,
+        original.metadata_revision + 1
+    );
+
+    // Delayed full and list saves can be newer by wall clock and still carry
+    // the checkout from before the move. Neither may revert the confirmed move.
+    for mut stale in [original.clone(), original.list_projection()] {
+        stale.updated_at = crate::model::unix_time() + 60;
+        request(Command::SaveTaskState {
+            projects: Vec::new(),
+            live_session_ids: vec![id],
+            sessions: vec![stale],
+            session_tails: Vec::new(),
+        })
+        .unwrap();
+        let stored = backend.task_store.load_session_detail(id).unwrap().unwrap();
+        assert_eq!(stored.workspace, workspace);
+        assert_eq!(stored.workspace_moved_from, Some(root.join("repo")));
+        assert_eq!(
+            serde_json::to_value(&stored.messages).unwrap(),
+            serde_json::to_value(&original.messages).unwrap()
+        );
+    }
+
+    // Stable-runtime merges preserve transcript ownership while consuming the
+    // one-shot move notice after the first prompt in the new workspace.
+    let mut stored = backend.task_store.load_session_detail(id).unwrap().unwrap();
+    let mut consumed = stored.clone();
+    assert!(consumed.take_workspace_move_notice().is_some());
+    merge_stale_session_metadata(&mut stored, consumed);
+    assert!(stored.workspace_moved_from.is_none());
+    assert_eq!(stored.workspace, workspace);
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn task_metadata_edits_survive_stale_saves_and_reload() {
     use waku_protocol::task_metadata::{TaskMetadataEdit, TaskMetadataUpdate};
     let root = std::env::temp_dir().join(format!("task-metadata-{}", Uuid::new_v4()));

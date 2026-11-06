@@ -313,6 +313,15 @@ pub(super) fn merge_session_list_columns(
 
 pub(super) fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSession) {
     if incoming.updated_at >= existing.updated_at {
+        // A confirmed move's first prompt consumes its notice. Stable chats
+        // keep daemon-owned transcripts but still owe this client-owned edit.
+        if incoming.detail_loaded
+            && incoming.metadata_revision >= existing.metadata_revision
+            && incoming.workspace == existing.workspace
+            && incoming.workspace_moved_from.is_none()
+        {
+            existing.workspace_moved_from = None;
+        }
         existing.metadata_revision = existing.metadata_revision.max(incoming.metadata_revision);
         existing.title = incoming.title;
         existing.agent_rename_allowed = incoming.agent_rename_allowed;

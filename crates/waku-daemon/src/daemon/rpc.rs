@@ -1326,6 +1326,42 @@ impl Backend for WakuBackend {
                         .iter()
                         .find(|s| s.id == update.session_id)
                         .ok_or_else(|| anyhow::anyhow!("task no longer exists"))?;
+                    if let waku_protocol::task_metadata::TaskMetadataEdit::Workspace {
+                        workspace,
+                        moved_from,
+                    } = &update.edit
+                    {
+                        anyhow::ensure!(
+                            !existing.is_busy()
+                                && !existing.boss_managed
+                                && self.boss.employee_including_retired(existing.id).is_none(),
+                            "task cannot move to a worktree while busy or managed"
+                        );
+                        anyhow::ensure!(
+                            existing.workspace.is_local(),
+                            "task is no longer in the local checkout"
+                        );
+                        anyhow::ensure!(
+                            matches!(
+                                workspace,
+                                SessionWorkspace::Worktree {
+                                    adopted_by: None,
+                                    borrowed: false,
+                                    ..
+                                }
+                            ),
+                            "move requires a new task worktree"
+                        );
+                        let project = state
+                            .projects
+                            .iter()
+                            .find(|project| project.id == existing.project_id)
+                            .ok_or_else(|| anyhow!("task project no longer exists"))?;
+                        anyhow::ensure!(
+                            moved_from.as_ref() == Some(&project.path),
+                            "task checkout changed before the move"
+                        );
+                    }
                     if existing
                         .metadata_revision
                         .checked_add(metadata_updates.len() as u64)
@@ -1356,6 +1392,13 @@ impl Backend for WakuBackend {
                         .find(|s| s.id == update.session_id)
                         .expect("validated task metadata target");
                     let was_archived = existing.archived_at.is_some();
+                    if matches!(
+                        update.edit,
+                        waku_protocol::task_metadata::TaskMetadataEdit::Workspace { .. }
+                    ) {
+                        // The move notice is detail, even when the picker acted on a list row.
+                        self.task_store.hydrate(existing)?;
+                    }
                     update.edit.apply(existing);
                     existing.metadata_revision += 1;
                     existing.updated_at = existing.updated_at.max(crate::model::unix_time());
@@ -1397,7 +1440,28 @@ impl Backend for WakuBackend {
                         // A delayed transcript save cannot undo a confirmed edit.
                         use waku_protocol::task_metadata::TaskMetadata;
                         if session.metadata_revision < existing.metadata_revision {
+                            // Preparation assigns a draft's first worktree using
+                            // a snapshot captured before unrelated metadata edits.
+                            // That assignment is still valid; a delayed draft
+                            // snapshot cannot undo an already assigned worktree.
+                            let assigned_workspace = (matches!(
+                                existing.workspace,
+                                SessionWorkspace::NewWorktree { .. }
+                            ) && matches!(
+                                session.workspace,
+                                SessionWorkspace::Worktree { .. }
+                            ))
+                            .then(|| session.workspace.clone());
+                            if session.workspace != existing.workspace {
+                                session
+                                    .workspace_moved_from
+                                    .clone_from(&existing.workspace_moved_from);
+                                session.workspace_move.clone_from(&existing.workspace_move);
+                            }
                             TaskMetadata::capture(existing).apply(&mut session);
+                            if let Some(workspace) = assigned_workspace {
+                                session.workspace = workspace;
+                            }
                             session.metadata_revision = existing.metadata_revision;
                             // A stale transcript checkpoint is not an intent
                             // to wake a task the user explicitly swept.

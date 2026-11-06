@@ -1,0 +1,1 @@
+- Fixed “Move to worktree” reporting success while a task could revert to its original checkout.

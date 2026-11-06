@@ -577,6 +577,16 @@ impl Waku {
             cx.notify();
             return;
         };
+        let metadata_client = if session.has_started() {
+            let Some(daemon) = self.daemon_for_session(session_id) else {
+                self.show_toast(tr!("errors.daemon_disconnected"));
+                cx.notify();
+                return;
+            };
+            Some(daemon.client().clone())
+        } else {
+            None
+        };
         let Some(project_path) = self
             .state
             .projects
@@ -596,17 +606,61 @@ impl Waku {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    match workspace_client.request(
+                    let moved_from = project_path.clone();
+                    let created = match workspace_client.request(
                         waku_client::WorkspaceOperation::CreateWorktreeFromCheckout {
                             project_path,
                             name,
                         },
                     )? {
-                        waku_client::WorkspaceResult::WorktreeCreated { worktree } => Ok(worktree),
-                        _ => Err(anyhow::anyhow!(
-                            "the daemon returned an invalid worktree response"
-                        )),
-                    }
+                        waku_client::WorkspaceResult::WorktreeCreated { worktree } => worktree,
+                        _ => anyhow::bail!("the daemon returned an invalid worktree response"),
+                    };
+                    // A general transcript save may be stale or list-only. Confirm
+                    // the workspace separately before reporting success or sending
+                    // queued prompts into it. Drafts have no daemon row yet.
+                    let revision = if let Some(client) = metadata_client {
+                        let reply = client.request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::UpdateTaskMetadata {
+                                updates: vec![waku_protocol::task_metadata::TaskMetadataUpdate {
+                                    session_id,
+                                    edit:
+                                        waku_protocol::task_metadata::TaskMetadataEdit::Workspace {
+                                            workspace: SessionWorkspace::Worktree {
+                                                path: created.path.clone(),
+                                                name: created.name.clone(),
+                                                branch: None,
+                                                base_branch: None,
+                                                adopted_by: None,
+                                                borrowed: false,
+                                            },
+                                            moved_from: Some(moved_from),
+                                        },
+                                }],
+                            },
+                        )?;
+                        let waku_client::ResponsePayload::TaskStateSaved { sessions } = reply
+                        else {
+                            anyhow::bail!("the daemon returned an invalid task move response");
+                        };
+                        Some(
+                            sessions
+                                .iter()
+                                .find(|session| {
+                                    session.id == session_id
+                                        && session.workspace.path() == Some(created.path.as_path())
+                                })
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!("the daemon did not confirm the task move")
+                                })?
+                                .metadata_revision,
+                        )
+                    } else {
+                        None
+                    };
+                    Ok((created, revision))
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
@@ -623,13 +677,13 @@ impl Waku {
     fn finish_move_to_worktree(
         &mut self,
         session_id: Uuid,
-        result: anyhow::Result<waku_client::worktree::CreatedWorktree>,
+        result: anyhow::Result<(waku_client::worktree::CreatedWorktree, Option<u64>)>,
         cx: &mut Context<Self>,
     ) {
         if !self.worktree_move_pending.remove(&session_id) {
             return;
         }
-        let created = match result {
+        let (created, revision) = match result {
             Ok(created) => created,
             Err(error) => {
                 self.show_toast(tr!("errors.move_to_worktree", error = error.to_string()));
@@ -653,8 +707,15 @@ impl Waku {
                     .map(|project| project.path.clone())
             });
         let rebound = self.state.session_mut(session_id).is_some_and(|session| {
-            if !session.workspace.is_local() || session.is_busy() {
+            // The acknowledged move may already have arrived through a catalog.
+            if (!session.workspace.is_local()
+                && session.workspace.path() != Some(created.path.as_path()))
+                || session.is_busy()
+            {
                 return false;
+            }
+            if let Some(revision) = revision {
+                session.metadata_revision = session.metadata_revision.max(revision);
             }
             session.workspace = SessionWorkspace::Worktree {
                 path: created.path.clone(),
@@ -674,9 +735,11 @@ impl Waku {
             true
         });
         if !rebound {
-            // The created worktree only ever holds a copy of the source
-            // checkout's state, so force-removing it loses nothing.
-            self.discard_worktree_copy(created.path, cx);
+            // An acknowledged worktree belongs to the daemon's task already;
+            // another client may have started work there before this callback.
+            if revision.is_none() {
+                self.discard_worktree_copy(created.path, cx);
+            }
             self.drain_queued_message(session_id, cx);
             cx.notify();
             return;
