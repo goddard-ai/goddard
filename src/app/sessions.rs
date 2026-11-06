@@ -11,11 +11,15 @@ pub(super) struct SessionHydrations {
     /// hydration selected late shows its mark immediately.
     started: HashMap<Uuid, Instant>,
     provider_refreshes: HashSet<Uuid>,
+    retrying: HashSet<Uuid>,
+    retry_attempts: HashMap<Uuid, u32>,
 }
 
 impl SessionHydrations {
     pub(super) fn contains(&self, session_id: Uuid) -> bool {
-        self.running.contains(&session_id) || self.queued.contains(&session_id)
+        self.running.contains(&session_id)
+            || self.queued.contains(&session_id)
+            || self.retrying.contains(&session_id)
     }
 
     /// When `session_id` entered the hydration set; `None` if it is not
@@ -25,7 +29,7 @@ impl SessionHydrations {
     }
 
     fn enqueue(&mut self, session_id: Uuid, visible: bool) {
-        if self.running.contains(&session_id) {
+        if self.running.contains(&session_id) || self.retrying.contains(&session_id) {
             return;
         }
         self.started.entry(session_id).or_insert_with(Instant::now);
@@ -37,10 +41,22 @@ impl SessionHydrations {
         }
     }
 
-    /// A hydration attempt ended — next enqueue restarts its clock.
+    /// Hydration finished or was abandoned — next enqueue restarts its clock.
     fn complete(&mut self, session_id: Uuid) {
         self.running.remove(&session_id);
         self.started.remove(&session_id);
+        self.retrying.remove(&session_id);
+        self.retry_attempts.remove(&session_id);
+    }
+
+    /// Keep the facade and its reveal clock while freeing the read slot.
+    fn retry(&mut self, session_id: Uuid) -> Duration {
+        self.running.remove(&session_id);
+        self.retrying.insert(session_id);
+        let attempt = self.retry_attempts.entry(session_id).or_default();
+        let delay = Duration::from_millis(250 * (1u64 << (*attempt).min(5)));
+        *attempt = attempt.saturating_add(1);
+        delay
     }
 
     fn next(&mut self) -> Option<Uuid> {
@@ -53,7 +69,10 @@ impl SessionHydrations {
     }
 
     fn iter(&self) -> impl Iterator<Item = &Uuid> {
-        self.running.iter().chain(self.queued.iter())
+        self.running
+            .iter()
+            .chain(self.queued.iter())
+            .chain(self.retrying.iter())
     }
 }
 
@@ -123,6 +142,36 @@ mod startup_hydration_tests {
         assert_eq!(settle_idle_session_detail(&mut live), None);
         assert_eq!(live.turns[0].status, TurnStatus::Running);
         assert!(live.messages.last().unwrap().streaming);
+    }
+
+    #[test]
+    fn failed_hydration_keeps_facade_without_blocking_other_tasks() {
+        let task = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let mut queue = SessionHydrations::default();
+        queue.enqueue(task, true);
+        let started = queue.since(task);
+        assert_eq!(queue.next(), Some(task));
+        for millis in [250, 500, 1000, 2000, 4000, 8000, 8000] {
+            assert_eq!(queue.retry(task), Duration::from_millis(millis));
+            assert!(queue.contains(task));
+            assert_eq!(queue.since(task), started);
+            queue.enqueue(task, true);
+            assert_eq!(queue.next(), None);
+            // Waiting retries leave capacity for unrelated reads.
+            queue.enqueue(other, false);
+            assert_eq!(queue.next(), Some(other));
+            queue.complete(other);
+            queue.retrying.remove(&task);
+            queue.enqueue(task, true);
+            assert_eq!(queue.next(), Some(task));
+        }
+        queue.complete(task);
+        assert!(!queue.contains(task));
+        assert_eq!(queue.since(task), None);
+        queue.enqueue(task, true);
+        assert_eq!(queue.next(), Some(task));
+        assert_eq!(queue.retry(task), Duration::from_millis(250));
     }
 
     #[test]
@@ -945,7 +994,7 @@ impl Waku {
     /// background warmup and the queue bounds concurrent transcript loads.
     pub(super) fn ensure_session_loaded(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.stale_task_details.contains(&session_id)
-            && !self.session_hydrations.iter().any(|id| *id == session_id)
+            && !self.session_hydrations.contains(session_id)
             && let Some(session) = self.state.session_mut(session_id)
         {
             session.detail_loaded = false;
@@ -975,7 +1024,7 @@ impl Waku {
                 continue;
             }
             if self.daemon_for_session(session_id).is_none() {
-                self.session_hydrations.complete(session_id);
+                self.retry_session_hydration(session_id, cx);
                 if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id)
                 {
                     self.use_remote_host(host, cx);
@@ -1007,9 +1056,9 @@ impl Waku {
                     {
                         eprintln!("transcript open: load_ms={}", started.elapsed().as_millis(),);
                     }
-                    waku.session_hydrations.complete(session_id);
                     match result {
                         Ok((mut session, interrupted_turn)) => {
+                            waku.session_hydrations.complete(session_id);
                             waku.pending_task_metadata.observe(&mut session);
                             waku.trim_resident_transcripts();
                             let applied = if let Some(existing) = waku
@@ -1073,13 +1122,8 @@ impl Waku {
                             }
                         }
                         Err(error) => {
-                            // Keep the selected loading view and its draft; a
-                            // retry never replays history or restores the composer.
-                            if waku.state.selected_session == Some(session_id) {
-                                waku.show_toast(tr!("errors.open_session", error = error));
-                            } else {
-                                eprintln!("could not hydrate task {session_id}: {error}");
-                            }
+                            eprintln!("could not hydrate task {session_id}; retrying: {error}");
+                            waku.retry_session_hydration(session_id, cx);
                         }
                     }
                     waku.start_pending_session_hydrations(cx);
@@ -1088,6 +1132,31 @@ impl Waku {
             })
             .detach();
         }
+    }
+
+    fn retry_session_hydration(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let delay = self.session_hydrations.retry(session_id);
+        cx.spawn(async move |waku, cx| {
+            cx.background_executor().timer(delay).await;
+            let _ = waku.update(cx, |waku, cx| {
+                waku.session_hydrations.retrying.remove(&session_id);
+                if waku
+                    .state
+                    .sessions
+                    .iter()
+                    .any(|session| session.id == session_id && !session.detail_loaded)
+                {
+                    waku.session_hydrations
+                        .enqueue(session_id, waku.state.selected_session == Some(session_id));
+                } else {
+                    // A live snapshot or removal overtook the failed read.
+                    waku.session_hydrations.complete(session_id);
+                }
+                waku.start_pending_session_hydrations(cx);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn finish_selected_session_hydration(

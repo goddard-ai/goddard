@@ -275,9 +275,18 @@ impl Waku {
             .filter(|session| !session.detail_loaded)
             .map(|session| session.id)
         {
-            let loading = self.session_hydrations.contains(session_id);
+            if !self.session_hydrations.contains(session_id) {
+                // A catalog or runtime update can invalidate detail after
+                // navigation. The facade must start a read even when no
+                // activation is pending; defer it outside the render lease.
+                let waku = cx.weak_entity();
+                cx.defer(move |cx| {
+                    let _ = waku.update(cx, |waku, cx| {
+                        waku.ensure_session_loaded(session_id, cx);
+                    });
+                });
+            }
             let theme = Theme::current(cx);
-            let focus = self.transcript_control_focus("hydrate-task-retry", cx);
             return div()
                 .size_full()
                 .flex()
@@ -287,31 +296,8 @@ impl Waku {
                 .gap(px(12.0))
                 .text_size(sp(12.5))
                 .text_color(theme.text_secondary)
-                .child(if loading {
-                    self.render_loading_task_mark(session_id, &theme, cx)
-                } else {
-                    div().child(tr!("sessions.load_failed")).into_any_element()
-                })
-                .when(!loading, |view| {
-                    view.child(
-                        div()
-                            .id("hydrate-task-retry")
-                            .track_focus(&focus)
-                            .tab_index(0)
-                            .rounded(px(6.0))
-                            .px(px(12.0))
-                            .py(px(6.0))
-                            .border(hairline())
-                            .border_color(theme.border_subtle)
-                            .focus_visible(|style| style.bg(theme.focus_highlight()))
-                            .hover(|style| style.bg(theme.overlay))
-                            .child(tr!("common.retry"))
-                            .on_activation(cx, move |this, _, cx| {
-                                this.ensure_session_loaded(session_id, cx);
-                                cx.notify();
-                            }),
-                    )
-                })
+                .child(self.render_loading_task_mark(session_id, &theme, cx))
+                .child(tr!("sessions.loading"))
                 .into_any_element();
         }
         self.task_loading_reveal = None;
