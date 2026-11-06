@@ -28,8 +28,9 @@ unchanged?: boolean,
  */
 invalidCursor?: boolean, entries: Array<TranscriptEntry>,
 /**
- * Cursor for the entry just outside each edge — `previous` continues
- * upward (`Before`), `next` continues downward (`After`).
+ * Continuation cursors at the first/last loaded entries: `previous`
+ * continues upward (`Before`), `next` downward (`After`). Requests exclude
+ * the cursor entry. Absent when no entries remain on that side.
  */
 previous?: TranscriptCursor | null, next?: TranscriptCursor | null, hasMoreBefore: boolean, hasMoreAfter: boolean,
 /**

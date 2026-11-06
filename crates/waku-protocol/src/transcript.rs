@@ -226,8 +226,9 @@ pub struct TranscriptWindow {
     #[serde(default, skip_serializing_if = "crate::model::is_false")]
     pub invalid_cursor: bool,
     pub entries: Vec<TranscriptEntry>,
-    /// Cursor for the entry just outside each edge — `previous` continues
-    /// upward (`Before`), `next` continues downward (`After`).
+    /// Continuation cursors at the first/last loaded entries: `previous`
+    /// continues upward (`Before`), `next` downward (`After`). Requests exclude
+    /// the cursor entry. Absent when no entries remain on that side.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous: Option<TranscriptCursor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -715,31 +715,6 @@ fn entry_at_seq(
         .map_err(to_io_error)
 }
 
-fn neighbor_cursor(
-    connection: &Connection,
-    session_id: &str,
-    seq: i64,
-    before: bool,
-) -> io::Result<Option<TranscriptCursor>> {
-    let (order, cmp) = if before { ("DESC", "<") } else { ("ASC", ">") };
-    connection
-        .query_row(
-            &format!(
-                "SELECT seq, entry_id FROM transcript_entries
-                 WHERE session_id = ?1 AND seq {cmp} ?2 ORDER BY seq {order} LIMIT 1"
-            ),
-            params![session_id, seq],
-            |row| {
-                Ok(TranscriptCursor {
-                    seq: row.get::<_, i64>(0)?,
-                    entry_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or_default(),
-                })
-            },
-        )
-        .optional()
-        .map_err(to_io_error)
-}
-
 /// The messages-table row shape `message_from_row` parses, with byte-clipped
 /// `content`/`display_content` and their true totals fetched alongside.
 struct MessageRow {
@@ -1158,10 +1133,18 @@ pub(crate) fn read_transcript_window(
     if !entries.is_empty() {
         seq_lo = entries.first().expect("entries nonempty").seq;
         seq_hi = entries.last().expect("entries nonempty").seq + 1;
-        window.previous = neighbor_cursor(connection, &sid, seq_lo, true)?;
-        window.next = neighbor_cursor(connection, &sid, seq_hi - 1, false)?;
         window.has_more_before = seq_lo > 0;
         window.has_more_after = seq_hi < head.entry_count;
+        // Before/After exclude their cursor entry. Anchor continuations to
+        // the actual loaded edges, after byte trimming, so no entry is skipped.
+        window.previous = window.has_more_before.then_some(TranscriptCursor {
+            seq: seq_lo,
+            entry_id: entries.first().expect("entries nonempty").entry_id(),
+        });
+        window.next = window.has_more_after.then_some(TranscriptCursor {
+            seq: seq_hi - 1,
+            entry_id: entries.last().expect("entries nonempty").entry_id(),
+        });
         window.message_base = entries
             .iter()
             .find(|entry| matches!(entry.data, TranscriptEntryData::Message { .. }))
@@ -1891,10 +1874,7 @@ mod tests {
             .read_transcript_window(
                 session_id,
                 &TranscriptWindowTarget::Before {
-                    cursor: TranscriptCursor {
-                        seq: latest.entries[0].seq,
-                        entry_id: latest.entries[0].entry_id(),
-                    },
+                    cursor: latest.previous.expect("older entries remain"),
                 },
                 4,
                 u32::MAX,
@@ -1940,6 +1920,115 @@ mod tests {
             .unwrap()
             .expect("indexed session");
         assert!(unchanged.unchanged);
+        std::fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn continuation_cursors_visit_every_entry_once_in_both_directions() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let mut session = session_with_transcript();
+        // Force byte-limited pages to split earlier than the entry ceiling,
+        // while every individual message still fits in the smallest budget.
+        for message in &mut session.messages {
+            message.content = "response text ".repeat(150);
+        }
+        let id = session.id;
+        let expected: Vec<_> = (0..3)
+            .flat_map(|turn| {
+                [
+                    session.messages[turn * 2].id,
+                    session.transcript_blocks[turn].activities[0].id,
+                    session.messages[turn * 2 + 1].id,
+                ]
+            })
+            .collect();
+        state.push_session(session);
+        store.save(&mut state).unwrap();
+        for max_entries in [2, 4] {
+            for max_bytes in [4096, u32::MAX] {
+                let mut page = store
+                    .read_transcript_window(
+                        id,
+                        &TranscriptWindowTarget::Latest,
+                        max_entries,
+                        max_bytes,
+                        None,
+                    )
+                    .unwrap()
+                    .unwrap();
+                if max_entries == 4 && max_bytes == 4096 {
+                    assert!(
+                        page.entries.len() < 3,
+                        "fixture must exercise byte trimming"
+                    );
+                }
+                let mut reverse: Vec<_> = page
+                    .entries
+                    .iter()
+                    .rev()
+                    .map(TranscriptEntry::entry_id)
+                    .collect();
+                let mut reads = 0;
+                while page.has_more_before {
+                    reads += 1;
+                    assert!(reads <= expected.len(), "backward paging must terminate");
+                    page = store
+                        .read_transcript_window(
+                            id,
+                            &TranscriptWindowTarget::Before {
+                                cursor: page.previous.expect("older entries need a continuation"),
+                            },
+                            max_entries,
+                            max_bytes,
+                            None,
+                        )
+                        .unwrap()
+                        .unwrap();
+                    assert!(
+                        !page.entries.is_empty(),
+                        "a continuation must make progress"
+                    );
+                    reverse.extend(page.entries.iter().rev().map(TranscriptEntry::entry_id));
+                }
+                assert!(page.previous.is_none());
+                reverse.reverse();
+                assert_eq!(
+                    reverse, expected,
+                    "backward paging skipped or repeated an entry"
+                );
+                let mut forward: Vec<_> =
+                    page.entries.iter().map(TranscriptEntry::entry_id).collect();
+                reads = 0;
+                while page.has_more_after {
+                    reads += 1;
+                    assert!(reads <= expected.len(), "forward paging must terminate");
+                    page = store
+                        .read_transcript_window(
+                            id,
+                            &TranscriptWindowTarget::After {
+                                cursor: page.next.expect("newer entries need a continuation"),
+                            },
+                            max_entries,
+                            max_bytes,
+                            None,
+                        )
+                        .unwrap()
+                        .unwrap();
+                    assert!(
+                        !page.entries.is_empty(),
+                        "a continuation must make progress"
+                    );
+                    forward.extend(page.entries.iter().map(TranscriptEntry::entry_id));
+                }
+                assert!(page.next.is_none());
+                assert_eq!(
+                    forward, expected,
+                    "forward paging skipped or repeated an entry"
+                );
+            }
+        }
         std::fs::remove_dir_all(directory).ok();
     }
 
