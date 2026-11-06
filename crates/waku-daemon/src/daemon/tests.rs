@@ -2282,6 +2282,7 @@ fn computer_use_is_scoped_independently_of_task_and_settings_writes() {
     backend.sessions.lock().insert(
         task,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -2375,6 +2376,7 @@ fn computer_use_through_the_built_cli_and_scoped_daemon_connection() {
     backend.sessions.lock().insert(
         task,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -2676,6 +2678,7 @@ fn an_ungranted_agent_rename_parks_a_request_until_answered() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -2780,6 +2783,7 @@ fn a_declined_agent_rename_leaves_the_title_alone() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -2831,6 +2835,7 @@ fn an_agent_rename_unparks_when_the_runtime_dies() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -2978,6 +2983,7 @@ fn an_approved_archive_proposal_archives_tasks_and_side_chats() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -3087,6 +3093,7 @@ fn a_duplicate_archive_answer_is_consumed() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -3185,6 +3192,7 @@ fn an_approved_archive_proposal_reports_stale_targets() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -3265,6 +3273,7 @@ fn a_declined_archive_proposal_archives_nothing() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -3329,6 +3338,7 @@ fn a_boss_archive_proposal_reaches_other_projects() {
     backend.sessions.lock().insert(
         boss_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: boss_runtime,
@@ -3779,6 +3789,7 @@ fn an_exited_runtime_releases_its_replay_journal() {
     let sessions = Arc::new(Mutex::new(HashMap::from([(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id,
@@ -4009,6 +4020,7 @@ fn runtime_generation_entry(
     cwd: &Path,
 ) -> RuntimeEntry {
     RuntimeEntry {
+        mode: Default::default(),
         _admission: None,
         plan_gate: None,
         runtime_id,
@@ -4964,6 +4976,7 @@ fn startup_runtime_events_are_forwarded_after_registration() {
         .register_runtime_forwarder(
             session_id,
             RuntimeEntry {
+                mode: Default::default(),
                 _admission: None,
                 plan_gate: None,
                 runtime_id,
@@ -5012,6 +5025,7 @@ fn streaming_deltas_do_not_enter_the_replay_journal() {
     let sessions = Arc::new(Mutex::new(HashMap::from([(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id,
@@ -5084,6 +5098,7 @@ fn closing_a_session_begins_driver_shutdown_while_a_handle_is_held() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id,
@@ -5270,6 +5285,7 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
                 (
                     id,
                     RuntimeEntry {
+                        mode: Default::default(),
                         _admission: None,
                         plan_gate: None,
                         runtime_id: Uuid::new_v4(),
@@ -5308,6 +5324,7 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
     sessions.lock().insert(
         idle_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -5361,6 +5378,7 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
     sessions.lock().insert(
         idle_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -5960,6 +5978,117 @@ fn boss_chat_is_continuous_and_uses_a_private_workspace_without_user_projects() 
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn visible_and_resume_prompts_require_the_selected_permission_mode() {
+    for hidden in [false, true] {
+        let root = std::env::temp_dir().join(format!("prompt-mode-{}", Uuid::new_v4()));
+        let (mut backend, session_id) = surface_test_backend(&root);
+        runtime_generation_configure_launch(&mut backend, &root);
+        let capture = Arc::new(CaptureDriver::default());
+        let runtime_id = Uuid::new_v4();
+        let mut entry = runtime_generation_entry(runtime_id, capture.clone(), &root);
+        entry.mode = RuntimeMode::FullAccess;
+        backend.sessions.lock().insert(session_id, entry);
+        let prompt = |runtime_id, mode| Request {
+            request_id: Uuid::new_v4(),
+            session_id,
+            runtime_id,
+            command: Command::Prompt {
+                runtime_mode: Some(mode),
+                prompt: "continue safely".into(),
+                turn_id: None,
+                message_id: None,
+                hidden,
+                attachments: Vec::new(),
+            },
+        };
+        let turn_count = backend.task_state.lock().sessions[0].turns.len();
+        let error = backend
+            .handle(
+                prompt(runtime_id, RuntimeMode::Ask),
+                EventSink::detached(),
+                None,
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("permission mode is still changing")
+        );
+        assert!(capture.prompts.lock().is_empty());
+        assert_eq!(
+            backend.task_state.lock().sessions[0].turns.len(),
+            turn_count,
+            "a refused prompt must not create a running turn"
+        );
+
+        // Once the replacement is installed with the desired posture, the
+        // same input is admitted for both Resume and ordinary sends.
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id,
+                    command: Command::CloseSession,
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        let replacement = Arc::new(CaptureDriver::default());
+        let fresh = replacement.clone();
+        let senders = Arc::new(Mutex::new(Vec::new()));
+        let keep_events = senders.clone();
+        backend.runtime_test_start = Some(Arc::new(move |_, options, sender| {
+            assert_eq!(options.mode, RuntimeMode::Ask);
+            keep_events.lock().push(sender);
+            Ok(DriverHandle::from_control(fresh.clone()))
+        }));
+        // The desktop's Start request carries the selection even before a
+        // settings save arrives; a cold agent start would reload stored mode.
+        let fresh_id = Uuid::new_v4();
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id: fresh_id,
+                    command: Command::Start {
+                        options: waku_protocol::WireDriverStartOptions {
+                            provider: "codex".into(),
+                            binary: root.join("controlled-provider"),
+                            cwd: root.join("repo"),
+                            mode: waku_protocol::encode_enum(RuntimeMode::Ask).unwrap(),
+                            model: None,
+                            reasoning_effort: None,
+                            service_tier: None,
+                            context_window: None,
+                            agent_preset: None,
+                            computer_use_enabled: false,
+                            read_own_transcript: false,
+                            provider_cursor: None,
+                        },
+                    },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        backend
+            .handle(
+                prompt(fresh_id, RuntimeMode::Ask),
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        assert!(capture.prompts.lock().is_empty());
+        assert_eq!(replacement.prompts.lock().len(), 1);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
 /// A boss `terminal` op owes its intent to the client that prompted
 /// the boss's turn: a visible prompt on a boss principal session
 /// records the submitting subscriber, and the op resolves that
@@ -5975,6 +6104,7 @@ fn boss_terminal_op_owes_the_prompting_client() {
     backend.sessions.lock().insert(
         supervisor,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id,
@@ -5997,6 +6127,7 @@ fn boss_terminal_op_owes_the_prompting_client() {
                 session_id: supervisor,
                 runtime_id,
                 command: Command::Prompt {
+                    runtime_mode: None,
                     prompt: "open me a shell".into(),
                     turn_id: None,
                     message_id: None,
@@ -6086,6 +6217,7 @@ fn a_clean_employee_finish_retires_runtime_revokes_token_and_stays_silent() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                mode: Default::default(),
                 _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
@@ -6181,6 +6313,7 @@ fn employee_finish_fixture(
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                mode: Default::default(),
                 _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
@@ -6221,6 +6354,7 @@ fn detach_boss_session(backend: &WakuBackend, supervisor: Uuid) -> Uuid {
     backend.sessions.lock().insert(
         decoy_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -7747,6 +7881,7 @@ fn an_expiring_employee_notifies_attached_clients() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                mode: Default::default(),
                 _admission: None,
                 plan_gate: None,
                 runtime_id,
@@ -7853,6 +7988,7 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
     backend.sessions.lock().insert(
         supervisor,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -7880,6 +8016,7 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -8002,6 +8139,7 @@ fn a_settle_expiry_drains_past_an_open_turn() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -9044,6 +9182,7 @@ fn summon_test_backend(root: &Path) -> (WakuBackend, Uuid) {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -9356,6 +9495,7 @@ fn summon_response_waits_for_completed_dispatch() {
         backend.sessions.lock().insert(
             employee.session_id,
             RuntimeEntry {
+                mode: Default::default(),
                 _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
@@ -9885,6 +10025,7 @@ fn a_summon_at_capacity_admits_a_durable_queued_ticket() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -12256,6 +12397,7 @@ fn setmodel_on_a_working_employee_interrupts_and_requeues() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -12396,6 +12538,7 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -12606,6 +12749,7 @@ fn setmodel_recovers_an_expired_employee_atomically() {
         backend.sessions.lock().insert(
             session_id,
             RuntimeEntry {
+                mode: Default::default(),
                 _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
@@ -12809,6 +12953,7 @@ fn setmodel_requeue_relaunches_on_the_new_provider() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -12859,6 +13004,7 @@ fn setmodel_requeue_relaunches_on_the_new_provider() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -13003,6 +13149,7 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -13041,6 +13188,7 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -13297,6 +13445,7 @@ fn setmodel_retune_resets_to_the_models_default_effort() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -13509,6 +13658,7 @@ fn a_boss_prompt_reaches_a_standalone_task() {
     backend.sessions.lock().insert(
         standalone_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -14640,6 +14790,7 @@ fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -15149,6 +15300,7 @@ fn legacy_dispatch_notifications_are_retired_without_delivery() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -15217,6 +15369,7 @@ fn employee_dispatch_is_silent_and_batches_queued_resumption() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                mode: Default::default(),
                 _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
@@ -15281,6 +15434,7 @@ fn employee_dispatch_is_silent_and_batches_queued_resumption() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -15368,6 +15522,7 @@ fn a_wave_reports_once_when_every_member_settles() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -15461,6 +15616,7 @@ fn an_all_cancelled_wave_reports_as_cancelled() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -15587,6 +15743,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -15714,6 +15871,7 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -16752,6 +16910,7 @@ fn finalize_plan_steers_an_open_boss_turn() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -17179,6 +17338,7 @@ fn a_queued_prompt_survives_expiry_and_drains_before_the_revive_prompt() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
@@ -17238,6 +17398,7 @@ fn a_revived_employee_prompt_reaches_session_subscribers() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: employee_runtime,
@@ -17854,6 +18015,7 @@ fn a_steer_echo_on_a_retired_boss_chat_unmirrors_the_carried_chip() {
     backend.sessions.lock().insert(
         predecessor,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: late_runtime,
@@ -18041,6 +18203,7 @@ fn archived_active_boss_recovers_on_open_send_and_reconciliation() {
     backend.sessions.lock().insert(
         active,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id,
@@ -18090,6 +18253,7 @@ fn archived_active_boss_recovers_on_open_send_and_reconciliation() {
                             session_id: active,
                             runtime_id,
                             command: Command::Prompt {
+                                runtime_mode: None,
                                 prompt: "Continue coordinating".into(),
                                 turn_id: None,
                                 message_id: None,
@@ -18776,6 +18940,7 @@ fn outcome_employee_fixture(
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                mode: Default::default(),
                 _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
@@ -22115,6 +22280,7 @@ fn automation_runs_wait_for_their_own_delivered_turns() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id,
@@ -23698,6 +23864,7 @@ fn task_views_ordinary_runtime_records_output_without_a_desktop_observer() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id,

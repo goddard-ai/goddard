@@ -4890,6 +4890,7 @@ mod tests {
                 session_id,
                 runtime_id,
                 Command::Prompt {
+                    runtime_mode: None,
                     prompt: "streamed from the first client".into(),
                     turn_id: None,
                     message_id: None,
@@ -5820,6 +5821,7 @@ mod tests {
                 session_id: blocked_session_id,
                 runtime_id: blocked_runtime_id,
                 command: Command::Prompt {
+                    runtime_mode: None,
                     prompt: "after start".into(),
                     turn_id: None,
                     message_id: None,

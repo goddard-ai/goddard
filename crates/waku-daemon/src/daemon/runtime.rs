@@ -382,6 +382,7 @@ impl WakuBackend {
         }
         // A launch that never came up keeps no credential.
         let sandboxed_launch = options.sandbox.is_some();
+        let mode = options.mode;
         let (handle, stable) = self.start_runtime_driver(
             session_id,
             runtime_id,
@@ -433,6 +434,7 @@ impl WakuBackend {
         self.register_runtime_forwarder(
             session_id,
             RuntimeEntry {
+                mode,
                 _admission: Some(self.idle_shutdown.enter()?),
                 plan_gate,
                 runtime_id,

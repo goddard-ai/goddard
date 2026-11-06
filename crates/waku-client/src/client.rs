@@ -1316,6 +1316,7 @@ mod tests {
         assert_eq!(request_timeout(&Command::AttachSession), REQUEST_TIMEOUT);
         assert_eq!(
             request_timeout(&Command::Prompt {
+                runtime_mode: None,
                 prompt: String::new(),
                 turn_id: None,
                 message_id: None,

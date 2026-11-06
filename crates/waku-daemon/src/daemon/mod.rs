@@ -21,8 +21,8 @@ use crate::model::{
     AgentAskOutcome, AgentModelOption, AgentProjectMapResult, AgentSession, AgentSessionSearchHit,
     BackgroundWorkEvent, Checkpoint, CheckpointStatus, ConfigActivation, DriverEvent,
     PermissionOption, Project, ProjectKind, ProjectMapIntent, ProjectMapRanking, ProviderKind,
-    ProviderModelOption, ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus,
-    SessionWorkspace, TurnStatus, UserInputQuestion, detail_prefix_signature,
+    ProviderModelOption, ProviderResumeCursor, ProviderSessionCatalogStatus, RuntimeMode,
+    SessionStatus, SessionWorkspace, TurnStatus, UserInputQuestion, detail_prefix_signature,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -380,6 +380,8 @@ struct TerminalEntry {
 /// reads both stamps. `provider`/`cwd` exist for the stats sampler, which
 /// claims a descendant subtree by the directory its members run in.
 struct RuntimeEntry {
+    /// Permission posture actually installed in this provider runtime.
+    mode: RuntimeMode,
     plan_gate: Option<Arc<plan_delivery::PlanGate>>,
     runtime_id: Uuid,
     driver: DriverHandle,

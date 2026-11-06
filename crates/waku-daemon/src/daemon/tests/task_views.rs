@@ -35,7 +35,11 @@ fn task_views_handoff_recovers_hidden_output_and_fences_stale_saves() {
                     request_id: Uuid::new_v4(),
                     session_id,
                     runtime_id,
-                    command: Command::SetTaskView { detail, generation, payloads: Default::default() },
+                    command: Command::SetTaskView {
+                        detail,
+                        generation,
+                        payloads: Default::default(),
+                    },
                 },
                 client.clone(),
                 None,
@@ -55,6 +59,7 @@ fn task_views_handoff_recovers_hidden_output_and_fences_stale_saves() {
                 session_id,
                 runtime_id,
                 command: Command::Prompt {
+                    runtime_mode: None,
                     prompt: "go".into(),
                     turn_id: Some(turn_id),
                     message_id: Some(Uuid::new_v4()),

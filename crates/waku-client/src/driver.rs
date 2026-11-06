@@ -80,13 +80,14 @@ impl DriverHandle {
     pub fn prompt(
         &self,
         prompt: String,
+        mode: RuntimeMode,
         turn_id: Option<Uuid>,
         message_id: Option<Uuid>,
         hidden: bool,
         attachments: Vec<MessageAttachment>,
     ) {
         self.inner
-            .prompt(prompt, turn_id, message_id, hidden, attachments);
+            .prompt(prompt, mode, turn_id, message_id, hidden, attachments);
     }
 
     pub fn supports_steer(&self) -> bool {
@@ -191,6 +192,7 @@ pub trait DriverControl: Send + Sync {
     fn prompt(
         &self,
         prompt: String,
+        mode: RuntimeMode,
         turn_id: Option<Uuid>,
         message_id: Option<Uuid>,
         hidden: bool,

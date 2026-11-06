@@ -7207,7 +7207,11 @@ impl Waku {
                 .expect("composer session still exists");
             session.runtime_mode = mode;
             session.updated_at = session.updated_at.max(unix_time());
-            self.apply_session_options(session_id, cx);
+            // Retire the attachment before Resume can submit. An asynchronous
+            // ApplyOptions response could otherwise close a newly begun turn
+            // or let it run with the previous permission mode. The next send
+            // starts a fresh runtime with this selection.
+            self.reset_session_runtime(session_id);
         }
         let project_mode_changed = self.state.remember_project_runtime_mode(project_id, mode);
         if session_changed || remembered_changed || project_mode_changed {

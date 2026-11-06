@@ -16,7 +16,7 @@ use crate::model::{
     AgentSession, AgentSessionSearchHit, AgentSessionTranscript, GoalOperation, HistorySourceKind,
     MessageAttachment, Project, ProjectMapIntent, ProviderKind, ProviderProbe,
     ProviderResumeCursor, ProviderSessionCatalogStatus, ProviderSessionHistory,
-    ProviderSessionSummary, SessionStatus, UserInputAnswer, UserInputQuestion,
+    ProviderSessionSummary, RuntimeMode, SessionStatus, UserInputAnswer, UserInputQuestion,
 };
 use crate::persistence::{
     ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
@@ -227,6 +227,11 @@ pub enum Command {
     },
     Prompt {
         prompt: String,
+        /// Permission mode required by this turn, including hidden Resume
+        /// prompts. A stale runtime must be rejected before accepting input.
+        /// Older clients omit this field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        runtime_mode: Option<RuntimeMode>,
         /// The ids the submitting client already gave this turn and its user
         /// message. The daemon republishes them with the submission so every
         /// other client attached to the runtime mirrors the same rows instead

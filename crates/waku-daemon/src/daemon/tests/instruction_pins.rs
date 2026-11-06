@@ -217,6 +217,7 @@ fn a_hinted_boss_prompt_delivers_under_the_operation_guard() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id: runtime,
@@ -238,6 +239,7 @@ fn a_hinted_boss_prompt_delivers_under_the_operation_guard() {
                     session_id: boss,
                     runtime_id: runtime,
                     command: Command::Prompt {
+                        runtime_mode: None,
                         prompt: "Keep the release hold while I confirm the restart".into(),
                         turn_id: None,
                         message_id: None,

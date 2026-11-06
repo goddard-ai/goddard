@@ -2641,6 +2641,16 @@ impl Backend for WakuBackend {
                             entry.runtime_id
                         );
                     }
+                    if let Command::Prompt {
+                        runtime_mode: Some(mode),
+                        ..
+                    } = &command
+                    {
+                        anyhow::ensure!(
+                            entry.mode == *mode,
+                            "permission mode is still changing; retry after the runtime restarts"
+                        );
+                    }
                     // Serving a request is activity — the idle reaper must
                     // not reclaim a runtime a client just talked to.
                     entry.last_active = std::time::Instant::now();
@@ -2649,6 +2659,18 @@ impl Backend for WakuBackend {
                     }
                     entry.driver.clone()
                 };
+                if let Command::ApplyOptions { options } = &command {
+                    let mode = decode_enum(&options.mode)?;
+                    let result = handle_driver_command(&driver, command)?;
+                    if matches!(result, ResponsePayload::OptionsApplied { applied: true }) {
+                        if let Some(entry) = self.sessions.lock().get_mut(&session_id)
+                            && entry.runtime_id == runtime_id
+                        {
+                            entry.mode = mode;
+                        }
+                    }
+                    return Ok(result);
+                }
                 if matches!(command, Command::Cancel) {
                     self.agent.cancel_resources(session_id);
                     // Hold parked Boss deliveries until the user's next

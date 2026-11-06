@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use crate::computer_use::ComputerToolRequest;
 use crate::model::{
     BackgroundWorkKey, DriverEvent, MessageAttachment, ProviderKind, ProviderResumeCursor,
-    RuntimeEventCursor,
+    RuntimeEventCursor, RuntimeMode,
 };
 use crossbeam_channel::{Sender, bounded, select};
 use parking_lot::Mutex;
@@ -361,6 +361,7 @@ impl DriverControl for RemoteDriverControl {
     fn prompt(
         &self,
         prompt: String,
+        mode: RuntimeMode,
         turn_id: Option<uuid::Uuid>,
         message_id: Option<uuid::Uuid>,
         hidden: bool,
@@ -368,6 +369,7 @@ impl DriverControl for RemoteDriverControl {
     ) {
         self.notify(waku_client::Command::Prompt {
             prompt,
+            runtime_mode: Some(mode),
             turn_id,
             message_id,
             hidden,
@@ -648,6 +650,7 @@ impl DriverControl for FriendWatchControl {
     fn prompt(
         &self,
         _prompt: String,
+        _mode: RuntimeMode,
         _turn_id: Option<uuid::Uuid>,
         _message_id: Option<uuid::Uuid>,
         _hidden: bool,

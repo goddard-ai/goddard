@@ -22,6 +22,7 @@ fn boss_runtime(backend: &WakuBackend, session_id: Uuid, runtime_id: Uuid) -> Ar
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
             _admission: None,
             plan_gate: None,
             runtime_id,
@@ -82,6 +83,7 @@ fn frozen_boss_admission_fails_closed_and_human_input_stays_queued() {
                 session_id: boss,
                 runtime_id: runtime,
                 command: Command::Prompt {
+                    runtime_mode: None,
                     prompt: "continue the coordinated work".into(),
                     turn_id: None,
                     message_id: None,
@@ -929,6 +931,7 @@ fn ordinary_boss_and_planning_chat_deliver_prompts_without_claiming_qualificatio
                     session_id: session,
                     runtime_id: runtime,
                     command: Command::Prompt {
+                        runtime_mode: None,
                         prompt: "continue coordinated work".into(),
                         turn_id: None,
                         message_id: Some(message_id),
@@ -1422,6 +1425,7 @@ fn compaction_upgrade_recovers_unsubmitted_checkpoints_but_retains_unknown_attem
                     session_id: old,
                     runtime_id: Uuid::nil(),
                     command: Command::Prompt {
+                        runtime_mode: None,
                         prompt: "preserve this human message".into(),
                         turn_id: None,
                         message_id: Some(queued),

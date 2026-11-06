@@ -2669,7 +2669,7 @@ impl Waku {
             session_id,
             SessionRuntime {
                 driver: handle,
-                options_generation: 0,
+                options_generation: Uuid::nil(),
                 events,
                 pending_events: VecDeque::new(),
                 pending_steers: VecDeque::new(),
@@ -6535,7 +6535,7 @@ impl Waku {
         let Some(runtime) = self.runtimes.get_mut(&session_id) else {
             return;
         };
-        runtime.options_generation = runtime.options_generation.wrapping_add(1);
+        runtime.options_generation = Uuid::new_v4();
         let generation = runtime.options_generation;
         let driver = runtime.driver.clone();
         cx.spawn(async move |waku, cx| {
@@ -6880,7 +6880,7 @@ impl Waku {
             session_id,
             SessionRuntime {
                 driver: prepared.handle,
-                options_generation: 0,
+                options_generation: Uuid::nil(),
                 events: prepared.events,
                 pending_events: VecDeque::new(),
                 pending_steers: VecDeque::new(),
@@ -8803,8 +8803,16 @@ impl Waku {
                     Some(intro) => format!("{intro}\n\n{driver_prompt}"),
                     None => driver_prompt,
                 };
+                let mode = self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .expect("submitted session still exists")
+                    .runtime_mode;
                 driver.prompt(
                     driver_prompt,
+                    mode,
                     turn_id,
                     message_id,
                     submission.hidden,

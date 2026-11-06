@@ -27,6 +27,7 @@ import type { QueuedMessage } from "./QueuedMessage";
 import type { ResourceOperation } from "./ResourceOperation";
 import type { RouteCandidate } from "./RouteCandidate";
 import type { RouteTarget } from "./RouteTarget";
+import type { RuntimeMode } from "./RuntimeMode";
 import type { SessionDetailTail } from "./SessionDetailTail";
 import type { SessionMessageSearchScope } from "./SessionMessageSearchScope";
 import type { SidebarIntent } from "./SidebarIntent";
@@ -53,6 +54,12 @@ export type Command = { "type": "transcribe", pcm: Array<number>, language?: str
  * full delivery for older clients.
  */
 payloads: TaskViewPayloadInterest, } | { "type": "start", options: WireDriverStartOptions, } | { "type": "prompt", prompt: string,
+/**
+ * Permission mode required by this turn, including hidden Resume
+ * prompts. A stale runtime must be rejected before accepting input.
+ * Older clients omit this field.
+ */
+runtimeMode?: RuntimeMode | null,
 /**
  * The ids the submitting client already gave this turn and its user
  * message. The daemon republishes them with the submission so every

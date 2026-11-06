@@ -1,0 +1,1 @@
+- Changing a task’s permission mode now takes effect when you immediately resume it, as well as when you send a new message.

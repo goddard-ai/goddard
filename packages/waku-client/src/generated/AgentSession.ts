@@ -209,10 +209,10 @@ planning?: SessionPlanning | null, provider_cursor: ProviderResumeCursor | null,
  */
 suspended_provider_sessions?: Array<SuspendedProviderSession>,
 /**
- * Compacted context staged by a provider switch, prepended to the next
- * outbound prompt and then cleared — the same one-shot delivery
- * `workspace_moved_from` uses. Persisted so a quit between the switch
- * and the next prompt does not lose it.
+ * Context staged by a provider switch or incoming friend delivery,
+ * prepended to the next outbound prompt and then cleared — the same
+ * one-shot delivery `workspace_moved_from` uses. Persisted so a quit
+ * before the next prompt does not lose it.
  */
 pending_provider_context?: string | null,
 /**

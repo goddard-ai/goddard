@@ -141,6 +141,7 @@ fn clients_follow_stop_and_the_next_turn_on_retained_and_replaced_runtimes() {
                     session_id,
                     runtime_id,
                     command: Command::Prompt {
+                        runtime_mode: None,
                         prompt: "next prompt".into(),
                         turn_id: Some(Uuid::new_v4()),
                         message_id: Some(Uuid::new_v4()),

@@ -760,6 +760,7 @@ mod tests {
             self.backend.sessions.lock().insert(
                 session,
                 RuntimeEntry {
+                    mode: Default::default(),
                     _admission: None,
                     plan_gate: None,
                     runtime_id: runtime,
@@ -1271,6 +1272,7 @@ mod tests {
             backend.sessions.lock().insert(
                 session,
                 RuntimeEntry {
+                    mode: Default::default(),
                     _admission: None,
                     plan_gate: None,
                     runtime_id: runtime,
@@ -1302,6 +1304,7 @@ mod tests {
             backend.sessions.lock().insert(
                 sibling_session,
                 RuntimeEntry {
+                    mode: Default::default(),
                     _admission: None,
                     plan_gate: None,
                     runtime_id: sibling_runtime,
