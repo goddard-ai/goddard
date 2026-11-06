@@ -556,7 +556,126 @@ fn transcript_history_edge_is_near(rows: &ListState, future: bool) -> bool {
     distance <= height
 }
 
+/// Vector indices change when a page is prepended. Diff pages by the content
+/// they identify so the retained suffix keeps its measurements and position.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum HistoryPageRow {
+    Message(Uuid),
+    TurnBlock(Option<Uuid>, usize),
+    ResponseFooter(Uuid, Uuid),
+    Other(TranscriptRowKind),
+}
+
+fn history_page_rows(
+    session: &AgentSession,
+    message_base: u32,
+    rows: &[TranscriptRowKind],
+) -> Vec<HistoryPageRow> {
+    rows.iter()
+        .map(|row| {
+            match *row {
+                TranscriptRowKind::Message(index) => session
+                    .messages
+                    .get(index)
+                    .map(|message| HistoryPageRow::Message(message.id)),
+                TranscriptRowKind::TurnBlock(index) => {
+                    session.transcript_blocks.get(index).map(|block| {
+                        HistoryPageRow::TurnBlock(
+                            block.turn_id,
+                            message_base as usize + block.after_message,
+                        )
+                    })
+                }
+                TranscriptRowKind::ResponseFooter(turn, index) => session
+                    .messages
+                    .get(index)
+                    .map(|message| HistoryPageRow::ResponseFooter(turn, message.id)),
+                _ => None,
+            }
+            .unwrap_or(HistoryPageRow::Other(*row))
+        })
+        .collect()
+}
+
+fn splice_history_page_rows(
+    rows: &ListState,
+    previous: &[HistoryPageRow],
+    next: &[HistoryPageRow],
+    preserve_scroll: bool,
+) {
+    let mut scroll = rows.logical_scroll_top();
+    // The loading row stays at the top across pages. Anchor its next content
+    // row instead, retaining that row's screen position even at the hard edge.
+    if matches!(
+        previous.get(scroll.item_ix),
+        Some(HistoryPageRow::Other(TranscriptRowKind::HistoryBoundary))
+    ) {
+        scroll.offset_in_item -= rows
+            .measured_heights(scroll.item_ix..scroll.item_ix + 1)
+            .first()
+            .copied()
+            .flatten()
+            .unwrap_or_default();
+        scroll.item_ix += 1;
+    }
+    let anchor = preserve_scroll
+        .then(|| previous.get(scroll.item_ix))
+        .flatten()
+        .and_then(|key| next.iter().position(|candidate| candidate == key));
+    if let Some((range, count)) = super::transcript::transcript_row_splice(previous, next) {
+        rows.splice(range, count);
+    }
+    if let Some(item_ix) = anchor {
+        rows.scroll_to(ListOffset {
+            item_ix,
+            offset_in_item: scroll.offset_in_item,
+        });
+    }
+}
+
 impl Waku {
+    fn snapshot_history_page_rows(&self, session_id: Uuid) -> Option<Vec<HistoryPageRow>> {
+        if self.state.selected_session != Some(session_id) {
+            return None;
+        }
+        self.sync_transcript_rows();
+        if self.transcript_is_scrolled.get() {
+            self.pin_transcript_for_disclosure();
+        }
+        let session = self.selected_session()?;
+        let view = self.transcript_views.get(&session_id)?;
+        Some(history_page_rows(
+            session,
+            view.message_base,
+            &self.transcript_row_kinds.borrow(),
+        ))
+    }
+
+    fn splice_history_page(&self, previous: &[HistoryPageRow]) {
+        self.refresh_transcript_row_kinds();
+        let Some(session) = self.selected_session() else {
+            return;
+        };
+        let Some(view) = self.transcript_views.get(&session.id) else {
+            return;
+        };
+        let next = history_page_rows(
+            session,
+            view.message_base,
+            &self.transcript_row_kinds.borrow(),
+        );
+        let preserve_scroll = self.transcript_is_scrolled.get();
+        splice_history_page_rows(&self.transcript_rows, previous, &next, preserve_scroll);
+        if self.transcript_anchor.get().is_some() {
+            splice_history_page_rows(
+                &self.anchored_transcript_rows,
+                previous,
+                &next,
+                preserve_scroll,
+            );
+        }
+    }
+
     /// Prefetch from measured layout, including on a tail-pinned fresh open.
     /// Failed reads wait for an explicit retry instead of looping every frame.
     pub(super) fn load_transcript_history_at_top(&mut self, cx: &mut Context<Self>) {
@@ -634,13 +753,7 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
-                let selected = waku.state.selected_session == Some(session_id);
-                let previous = selected.then(|| {
-                    if waku.transcript_is_scrolled.get() {
-                        waku.pin_transcript_for_disclosure();
-                    }
-                    waku.transcript_row_kinds.borrow().clone()
-                });
+                let previous = waku.snapshot_history_page_rows(session_id);
                 if let Some(view) = waku.transcript_views.get_mut(&session_id) {
                     view.loading_before = false;
                 }
@@ -652,7 +765,7 @@ impl Waku {
                             splice_window(session, view, &window, WindowMerge::Before);
                         }
                         if let Some(previous) = previous {
-                            waku.splice_transcript_rows_after_visibility_change(&previous);
+                            waku.splice_history_page(&previous);
                         }
                     }
                     Err(error) => {
@@ -710,13 +823,7 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
-                let selected = waku.state.selected_session == Some(session_id);
-                let previous = selected.then(|| {
-                    if waku.transcript_is_scrolled.get() {
-                        waku.pin_transcript_for_disclosure();
-                    }
-                    waku.transcript_row_kinds.borrow().clone()
-                });
+                let previous = waku.snapshot_history_page_rows(session_id);
                 if let Some(view) = waku.transcript_views.get_mut(&session_id) {
                     view.loading_after = false;
                 }
@@ -728,7 +835,7 @@ impl Waku {
                             splice_window(session, view, &window, WindowMerge::After);
                         }
                         if let Some(previous) = previous {
-                            waku.splice_transcript_rows_after_visibility_change(&previous);
+                            waku.splice_history_page(&previous);
                         }
                     }
                     Err(error) => {
@@ -1034,6 +1141,91 @@ mod tests {
             // history for an empty initial window and fetch indefinitely.
             assert!(!transcript_history_edge_is_near(&view.read(cx).rows, false));
         });
+    }
+
+    #[gpui::test]
+    fn prepending_history_preserves_visible_content_and_stops_prefetch(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        for (alignment, scroll_row, more_before) in [
+            (ListAlignment::Top, 3, true),
+            (ListAlignment::Top, 0, true),
+            (ListAlignment::Bottom, 3, false),
+            (ListAlignment::Bottom, 0, false),
+        ] {
+            let mut session = session();
+            let entries = |start: i64| {
+                (start..start + 20)
+                    .flat_map(|index| {
+                        [
+                            message_entry(index * 2, &format!("Message {index}"), index as u32),
+                            activity_entry(
+                                index * 2 + 1,
+                                index as u32 + 1,
+                                index as u32,
+                                0,
+                                "Command",
+                            ),
+                        ]
+                    })
+                    .collect()
+            };
+            let latest = window(session.id, entries(40), 40, true, false);
+            let mut state = materialize_session(&mut session, &latest);
+            let kinds = |session: &AgentSession, state: &TranscriptViewState| {
+                let mut kinds = super::super::transcript::folded_transcript_row_kinds(
+                    session,
+                    &HashSet::new(),
+                    None,
+                );
+                if state.has_more_before {
+                    kinds.insert(0, TranscriptRowKind::HistoryBoundary);
+                }
+                kinds
+            };
+            let previous =
+                history_page_rows(&session, state.message_base, &kinds(&session, &state));
+            let (view, cx) = cx.add_window_view(|_, _| HistoryViewportHarness {
+                rows: ListState::new(previous.len(), alignment, px(2048.0)),
+                height: px(400.0),
+            });
+            view.update(cx, |view, cx| {
+                view.rows.scroll_to(ListOffset {
+                    item_ix: scroll_row,
+                    offset_in_item: px(17.0),
+                });
+                cx.notify();
+            });
+            cx.run_until_parked();
+            let anchor_index = scroll_row.max(1);
+            let anchor = previous[anchor_index];
+            let before_y = cx.read(|cx| {
+                let rows = &view.read(cx).rows;
+                assert!(transcript_history_edge_is_near(rows, false));
+                rows.bounds_for_item(anchor_index).unwrap().top()
+            });
+            let page = window(session.id, entries(20), 20, more_before, false);
+            splice_window(&mut session, &mut state, &page, WindowMerge::Before);
+            let next = history_page_rows(&session, state.message_base, &kinds(&session, &state));
+            let new_anchor_index = next.iter().position(|key| *key == anchor).unwrap();
+            view.update(cx, |view, cx| {
+                splice_history_page_rows(&view.rows, &previous, &next, true);
+                cx.notify();
+            });
+            cx.run_until_parked();
+            cx.read(|cx| {
+                let rows = &view.read(cx).rows;
+                assert_eq!(
+                    rows.bounds_for_item(new_anchor_index).unwrap().top(),
+                    before_y,
+                    "the same content must stay at the same screen position"
+                );
+                assert!(
+                    !transcript_history_edge_is_near(rows, false),
+                    "a prepended page must move the loading edge away from the reader"
+                );
+            });
+        }
     }
 
     fn message_entry(seq: i64, content: &str, after_message: u32) -> TranscriptEntry {

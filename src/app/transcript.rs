@@ -1374,9 +1374,9 @@ pub(super) fn response_footer_message_index(
     response_footer_message_index_from_rows(session, &rows)
 }
 
-pub(super) fn transcript_row_splice(
-    previous: &[TranscriptRowKind],
-    next: &[TranscriptRowKind],
+pub(super) fn transcript_row_splice<T: PartialEq>(
+    previous: &[T],
+    next: &[T],
 ) -> Option<(Range<usize>, usize)> {
     let prefix = previous
         .iter()
