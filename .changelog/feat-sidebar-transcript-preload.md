@@ -1,0 +1,1 @@
+- Hover over a task in the sidebar for 200 ms to preload its latest transcript window before opening it.

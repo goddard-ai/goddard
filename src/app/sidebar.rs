@@ -3666,6 +3666,9 @@ impl Waku {
             .child(
                 div()
                     .id("sidebar-scroll")
+                    .on_scroll_wheel(cx.listener(|this, _, _, _| {
+                        this.transcript_preloads.cancel_hover();
+                    }))
                     .flex_1()
                     .min_h_0()
                     .relative()
@@ -6451,6 +6454,9 @@ impl Waku {
         let keyboard_menu = menu.clone();
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                this.set_transcript_preload_hover(session_id, *hovered, cx);
+            }))
             .w_full()
             .min_w_0()
             .pl(px(left_padding))

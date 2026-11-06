@@ -2616,6 +2616,7 @@ pub struct Waku {
     /// Session details currently being fetched from the daemon. Sidebar rows
     /// stay usable while the selected transcript hydrates asynchronously.
     session_hydrations: sessions::SessionHydrations,
+    transcript_preloads: transcript_preload::TranscriptPreloads,
     /// The session+load pass whose delayed muted-logo reveal timer was
     /// already armed — a hydration retry re-arms under its fresh stamp.
     task_loading_reveal: Option<(Uuid, Instant)>,
@@ -4636,6 +4637,7 @@ mod terminal_close_dialog;
 mod terminals;
 mod title_quality;
 mod transcript;
+mod transcript_preload;
 mod transcript_search;
 mod transcript_view;
 mod transcript_window;
@@ -7421,6 +7423,7 @@ impl Waku {
                 daemon_hostname,
                 daemon_lan_ip,
                 session_hydrations: sessions::SessionHydrations::default(),
+                transcript_preloads: transcript_preload::TranscriptPreloads::default(),
                 task_loading_reveal: None,
                 transcript_views: HashMap::new(),
                 driver_event_round: VecDeque::new(),

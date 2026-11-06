@@ -991,7 +991,13 @@ impl Waku {
             }
             let store = self.store.clone();
             let daemon = self.daemon_for_session(session_id);
+            let preload = self.transcript_preloads.take(session_id);
             cx.spawn(async move |waku, cx| {
+                let cached = match preload {
+                    Some(read) => read.await,
+                    None => None,
+                };
+                let preload_hit = cached.is_some();
                 let result = cx
                     .background_executor()
                     .spawn(async move {
@@ -1000,15 +1006,10 @@ impl Waku {
                         // size. Any failure degrades to the legacy hydrate.
                         if let Some(daemon) = daemon
                             && daemon.client().transcript_windows_available()
-                            && let Ok(window) = daemon.client().read_transcript_window(
-                                waku_protocol::transcript::TranscriptWindowRequest {
-                                    session_id,
-                                    target:
-                                        waku_protocol::transcript::TranscriptWindowTarget::Latest,
-                                    max_entries: None,
-                                    max_bytes: None,
-                                    known_revision: None,
-                                },
+                            && let Ok(window) = super::transcript_preload::read_latest_window(
+                                &daemon.client(),
+                                session_id,
+                                cached,
                             )
                         {
                             return Ok::<_, std::io::Error>(SessionDetail::Window(window));
@@ -1026,6 +1027,17 @@ impl Waku {
                     })
                     .await;
                 let _ = waku.update(cx, |waku, cx| {
+                    if preload_hit {
+                        waku.transcript_preloads.log_stats();
+                    }
+                    if waku.state.selected_session == Some(session_id)
+                        && let Some(started) = waku.session_hydrations.since(session_id)
+                    {
+                        eprintln!(
+                            "transcript open: preload_hit={preload_hit} load_ms={}",
+                            started.elapsed().as_millis(),
+                        );
+                    }
                     waku.session_hydrations.complete(session_id);
                     match result {
                         Ok(detail) => {
@@ -1291,6 +1303,7 @@ impl Waku {
     }
 
     fn activate_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        self.transcript_preloads.cancel_hover();
         let session_changed = self.state.selected_session != Some(session_id);
         if session_changed {
             self.capture_and_save_current_composer_draft(cx);
