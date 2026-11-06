@@ -670,6 +670,13 @@ fn render_sent_message_attachments(
         .justify_end()
         .gap(px(8.0));
     for (index, attachment) in attachments.iter().enumerate() {
+        let original_path = attachment
+            .blob_reference
+            .as_deref()
+            .and_then(|reference| {
+                waku_base::attachments::archived_path(reference, &attachment.path)
+            })
+            .unwrap_or_else(|| attachment.path.clone());
         if let Some(session_id) = attachment.session_id {
             let navigate_waku = waku.clone();
             let key_waku = waku.clone();
@@ -780,7 +787,7 @@ fn render_sent_message_attachments(
                         cx.stop_propagation();
                     }
                 });
-            let reveal_path = attachment.path.clone();
+            let reveal_path = original_path.clone();
             let mut attachment_column = div().flex().flex_col().items_end().gap(px(6.0));
             attachment_column = attachment_column.child(context_menu(
                 chip,
@@ -828,7 +835,7 @@ fn render_sent_message_attachments(
             let click_waku = waku.clone();
             let key_waku = waku.clone();
             let key_menu = menu.clone();
-            let click_path = attachment.path.to_string_lossy().into_owned();
+            let click_path = original_path.to_string_lossy().into_owned();
             let key_path = click_path.clone();
             let chip = div()
                 .id(SharedString::from(format!(
@@ -866,7 +873,7 @@ fn render_sent_message_attachments(
                         cx.stop_propagation();
                     }
                 });
-            let reveal_path = attachment.path.clone();
+            let reveal_path = original_path.clone();
             row = row.child(context_menu(
                 chip,
                 SharedString::from(format!("message-{message_id}-attachment-{index}-menu")),
@@ -900,8 +907,8 @@ fn render_sent_message_attachments(
                 let key_image = attachment_image.clone();
                 let preview_name = SharedString::from(attachment.name.clone());
                 let key_name = preview_name.clone();
-                let preview_path = attachment.path.clone();
-                let key_path = attachment.path.clone();
+                let preview_path = original_path.clone();
+                let key_path = original_path.clone();
                 tile = tile.child(
                     div()
                         .id(SharedString::from(format!(
@@ -966,7 +973,7 @@ fn render_sent_message_attachments(
             let key_menu = menu.clone();
             let click_waku = waku.clone();
             let key_waku = waku.clone();
-            let click_path = attachment.path.to_string_lossy().into_owned();
+            let click_path = original_path.to_string_lossy().into_owned();
             let key_path = click_path.clone();
             tile = tile
                 .cursor_pointer()
@@ -1009,7 +1016,7 @@ fn render_sent_message_attachments(
                     }
                 });
         }
-        let reveal_path = attachment.path.clone();
+        let reveal_path = original_path.clone();
         row = row.child(context_menu(
             tile,
             SharedString::from(format!("message-{message_id}-attachment-{index}-menu")),

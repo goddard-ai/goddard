@@ -1,0 +1,1 @@
+- New file and folder attachments retain their originals in the transcript even when an agent edits or deletes its working copies.

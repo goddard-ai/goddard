@@ -75,6 +75,7 @@ tungstenite = { version = "0.30", default-features = false, features = [
 rustls = "0.23"
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
+waku-base = { path = "crates/waku-base" }
 waku-client = { path = "crates/waku-client" }
 waku-localization = { path = "crates/waku-localization" }
 waku-protocol = { path = "crates/waku-protocol" }
