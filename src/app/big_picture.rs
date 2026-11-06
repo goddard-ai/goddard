@@ -1585,6 +1585,8 @@ impl Waku {
             }
             TranscriptRowKind::BossHistory(..)
             | TranscriptRowKind::BossHistoryBoundary(_)
+            | TranscriptRowKind::HistoryBoundary
+            | TranscriptRowKind::FutureBoundary
             // Card previews fold straight from the session — the queued
             // card is a live tail row on the employee's page only.
             | TranscriptRowKind::QueuedEmployee => {

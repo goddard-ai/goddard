@@ -340,6 +340,56 @@ impl DaemonClient {
         self.inner.transcript_windows_available
     }
 
+    /// One bounded slice of the flattened transcript — the task-open,
+    /// history-page, and search-reveal read. Callers gate on
+    /// [`Self::transcript_windows_available`] and fall back to
+    /// `HydrateSession` when the daemon predates windows.
+    pub fn read_transcript_window(
+        &self,
+        request: waku_protocol::transcript::TranscriptWindowRequest,
+    ) -> anyhow::Result<waku_protocol::transcript::TranscriptWindow> {
+        match self.request(
+            Uuid::nil(),
+            Uuid::nil(),
+            Command::ReadTranscriptWindow { request },
+        )? {
+            ResponsePayload::TranscriptWindow { window } => Ok(window),
+            _ => bail!("invalid transcript-window response"),
+        }
+    }
+
+    /// Range-read one lazy transcript field — a message body's continuation
+    /// or an activity's bulk payload.
+    pub fn read_transcript_payload(
+        &self,
+        request: waku_protocol::transcript::TranscriptPayloadRequest,
+    ) -> anyhow::Result<waku_protocol::transcript::TranscriptPayload> {
+        match self.request(
+            Uuid::nil(),
+            Uuid::nil(),
+            Command::ReadTranscriptPayload { request },
+        )? {
+            ResponsePayload::TranscriptPayload { payload } => Ok(payload),
+            _ => bail!("invalid transcript-payload response"),
+        }
+    }
+
+    /// Daemon-side occurrence search over the whole retained transcript —
+    /// conversation bodies and lazy tool fields — without paging history.
+    pub fn find_transcript(
+        &self,
+        request: waku_protocol::transcript::TranscriptFindRequest,
+    ) -> anyhow::Result<waku_protocol::transcript::TranscriptFindResult> {
+        match self.request(
+            Uuid::nil(),
+            Uuid::nil(),
+            Command::FindTranscript { request },
+        )? {
+            ResponsePayload::TranscriptFind { result } => Ok(result),
+            _ => bail!("invalid transcript-find response"),
+        }
+    }
+
     pub fn connect(address: &str, token: String) -> anyhow::Result<Self> {
         Self::connect_with_resume(address, token, Vec::new())
     }

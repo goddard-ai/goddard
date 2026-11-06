@@ -82,19 +82,34 @@ impl Waku {
         // a ticket entering or leaving `Queued` must move the fingerprint
         // or the tail row would appear and drop without a refold.
         let queued_card = self.selected_queued_employee().is_some() as u64;
+        // The window sentinel lives in `transcript_views` — paging state
+        // moving refolds the top row.
+        let windowed = self
+            .state
+            .selected_session
+            .and_then(|id| self.transcript_views.get(&id))
+            .map_or(0, |view| {
+                (view.has_more_before as u64) << 1
+                    | view.loading_before as u64
+                    | (view.has_more_after as u64) << 2
+                    | (view.loading_after as u64) << 3
+            });
         mix(
             mix(
-                self.selected_session()
-                    .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
-                        transcript_rows_fingerprint(
-                            session,
-                            &self.expanded_turns,
-                            self.blocked_checkpoint_turn(session.id),
-                        )
-                    }),
-                revision,
+                mix(
+                    self.selected_session()
+                        .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
+                            transcript_rows_fingerprint(
+                                session,
+                                &self.expanded_turns,
+                                self.blocked_checkpoint_turn(session.id),
+                            )
+                        }),
+                    revision,
+                ),
+                queued_card,
             ),
-            queued_card,
+            windowed,
         )
     }
 
@@ -180,19 +195,44 @@ impl Waku {
             return Vec::new();
         };
         let pending = self.blocked_checkpoint_turn(session.id);
+        // A bounded window's top edge earns a sentinel row — the trigger
+        // scrolling reaches for the previous page.
+        let windowed = self
+            .transcript_views
+            .get(&session.id)
+            .is_some_and(|view| view.has_more_before);
         if let Some(key) = self.boss_chat_key() {
-            return self.boss_ui.chat_history.get(&key).map_or_else(
+            let mut rows = self.boss_ui.chat_history.get(&key).map_or_else(
                 || {
                     super::boss_history::BossChatHistory::default().transcript_rows(
                         session,
                         &self.expanded_turns,
                         pending,
+                        windowed,
                     )
                 },
-                |history| history.transcript_rows(session, &self.expanded_turns, pending),
+                |history| history.transcript_rows(session, &self.expanded_turns, pending, windowed),
             );
+            if self
+                .transcript_views
+                .get(&session.id)
+                .is_some_and(|view| view.has_more_after)
+            {
+                rows.push(TranscriptRowKind::FutureBoundary);
+            }
+            return rows;
         }
         let mut rows = folded_transcript_row_kinds(session, &self.expanded_turns, pending);
+        if windowed {
+            rows.insert(0, TranscriptRowKind::HistoryBoundary);
+        }
+        if self
+            .transcript_views
+            .get(&session.id)
+            .is_some_and(|view| view.has_more_after)
+        {
+            rows.push(TranscriptRowKind::FutureBoundary);
+        }
         // The queued card is the transcript's live tail — below the last row,
         // and the only row on an employee shell that has no turns yet.
         if self.selected_queued_employee().is_some() {
@@ -813,6 +853,13 @@ pub(super) fn single_project_prompt_context(
 pub(super) enum TranscriptRowKind {
     BossHistory(Uuid, BossHistoryRow),
     BossHistoryBoundary(Uuid),
+    /// The top edge of a bounded transcript window: older entries exist on
+    /// the daemon but have not been paged in. Renders as a quiet load row;
+    /// scrolling to it fetches the previous window.
+    HistoryBoundary,
+    /// The bottom edge of a window materialized mid-transcript (find
+    /// reveal): newer retained entries page in behind the slice.
+    FutureBoundary,
     Message(usize),
     TurnBlock(usize),
     TurnFold(Uuid),
@@ -868,6 +915,8 @@ impl BossHistoryRow {
             TranscriptRowKind::BossTrigger(a) => Self::BossTrigger(a),
             TranscriptRowKind::BossHistory(..)
             | TranscriptRowKind::BossHistoryBoundary(_)
+            | TranscriptRowKind::HistoryBoundary
+            | TranscriptRowKind::FutureBoundary
             | TranscriptRowKind::QueuedEmployee => {
                 return None;
             }
@@ -1285,6 +1334,8 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::BossTrigger(_)
                 | TranscriptRowKind::BossHistory(..)
                 | TranscriptRowKind::BossHistoryBoundary(_)
+                | TranscriptRowKind::HistoryBoundary
+                | TranscriptRowKind::FutureBoundary
                 | TranscriptRowKind::QueuedEmployee => None,
             })
             .filter(|part| !part.content.trim().is_empty())
@@ -1894,6 +1945,8 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::BossTrigger(_)
         | TranscriptRowKind::BossHistory(..)
         | TranscriptRowKind::BossHistoryBoundary(_)
+        | TranscriptRowKind::HistoryBoundary
+        | TranscriptRowKind::FutureBoundary
         | TranscriptRowKind::QueuedEmployee => None,
     })?;
     let message = session.messages.get(message_index)?;
@@ -1912,6 +1965,8 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::BossTrigger(_)
             | TranscriptRowKind::BossHistory(..)
             | TranscriptRowKind::BossHistoryBoundary(_)
+            | TranscriptRowKind::HistoryBoundary
+            | TranscriptRowKind::FutureBoundary
             | TranscriptRowKind::QueuedEmployee => None,
         })
         .any(|message| !message.content.trim().is_empty())
@@ -1939,6 +1994,8 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::BossTrigger(_)
         | TranscriptRowKind::BossHistory(..)
         | TranscriptRowKind::BossHistoryBoundary(_)
+        | TranscriptRowKind::HistoryBoundary
+        | TranscriptRowKind::FutureBoundary
         | TranscriptRowKind::QueuedEmployee => false,
     };
     let Some(last_text) = turn_rows.iter().rposition(is_answer_text) else {
@@ -1981,6 +2038,8 @@ pub(super) fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Opt
         TranscriptRowKind::WorkingIndicator
         | TranscriptRowKind::BossHistory(..)
         | TranscriptRowKind::BossHistoryBoundary(_)
+        | TranscriptRowKind::HistoryBoundary
+        | TranscriptRowKind::FutureBoundary
         | TranscriptRowKind::QueuedEmployee => None,
     }
 }
@@ -2000,6 +2059,8 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
         TranscriptRowKind::WorkingIndicator
         | TranscriptRowKind::BossHistory(..)
         | TranscriptRowKind::BossHistoryBoundary(_)
+        | TranscriptRowKind::HistoryBoundary
+        | TranscriptRowKind::FutureBoundary
         | TranscriptRowKind::QueuedEmployee => None,
         // The marker precedes the response it woke — like the prompt it
         // stands in for, it is not part of the response's hover group.

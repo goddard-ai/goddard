@@ -57,6 +57,15 @@ pub(super) struct TranscriptSearch {
     previous_focus: Option<FocusHandle>,
     generation: u64,
     pending_reveal: bool,
+    /// Daemon-side find matches the rendered scan cannot cover — entries
+    /// outside the materialized window and lazy activity fields. Revealed
+    /// one at a time through `Around` window reads.
+    remote: Vec<waku_protocol::transcript::TranscriptFindMatch>,
+    remote_current: usize,
+    remote_loading: bool,
+    /// `find`'s lower bound while its scan is still progressive.
+    remote_total: u64,
+    remote_complete: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -140,6 +149,11 @@ impl Waku {
             previous_focus: None,
             generation: 0,
             pending_reveal: false,
+            remote: Vec::new(),
+            remote_current: 0,
+            remote_loading: false,
+            remote_total: 0,
+            remote_complete: true,
         });
     }
 
@@ -193,6 +207,11 @@ impl Waku {
         search.current = None;
         search.limited = false;
         search.pending_reveal = false;
+        search.remote.clear();
+        search.remote_current = 0;
+        search.remote_loading = false;
+        search.remote_total = 0;
+        search.remote_complete = true;
         search.generation = search.generation.wrapping_add(1);
         let previous_focus = search.previous_focus.take();
         if restore_focus && let Some(focus) = previous_focus {
@@ -288,10 +307,119 @@ impl Waku {
         search.limited = limited;
         search.generation = search.generation.wrapping_add(1);
         search.pending_reveal = current.is_some();
+        search.remote.clear();
+        search.remote_current = 0;
+        search.remote_total = 0;
+        search.remote_complete = true;
         cx.notify();
+
+        // The rendered scan covers materialized message text only. A
+        // windowed session's daemon searches the retained transcript —
+        // earlier history and lazy tool fields — without a page arriving.
+        if query.is_empty() {
+            return;
+        }
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        if !self.transcript_views.contains_key(&session_id) {
+            return;
+        }
+        let Some(daemon) = self.daemon_for_session(session_id) else {
+            return;
+        };
+        let client = daemon.client();
+        if !client.transcript_windows_available() {
+            return;
+        }
+        if let Some(search) = self.transcript_search.as_mut() {
+            search.remote_loading = true;
+        }
+        let request = waku_protocol::transcript::TranscriptFindRequest {
+            session_id,
+            query: query.to_string(),
+            scopes: Vec::new(),
+            cursor: None,
+            after: None,
+            known_revision: None,
+        };
+        let needle = query.clone();
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { client.find_transcript(request) })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                let Some(search) = waku.transcript_search.as_mut().filter(|search| search.open)
+                else {
+                    return;
+                };
+                search.remote_loading = false;
+                // An edited query discards the result wholesale.
+                if search.query.read(cx).content() != needle {
+                    return;
+                }
+                let Ok(result) = result else {
+                    return;
+                };
+                waku.apply_remote_find_result(session_id, result);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Fold a daemon find batch into the open search: keep only matches the
+    /// rendered scan cannot already cover — entries outside the
+    /// materialized slice plus every lazy field (tool output, arguments…)
+    /// the message scan never reaches.
+    fn apply_remote_find_result(
+        &mut self,
+        session_id: Uuid,
+        result: waku_protocol::transcript::TranscriptFindResult,
+    ) {
+        if result.session_id != session_id {
+            return;
+        }
+        let covered: HashSet<Uuid> = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.messages.iter().map(|message| message.id).collect())
+            .unwrap_or_default();
+        if let Some(search) = self.transcript_search.as_mut().filter(|search| search.open) {
+            search.remote = result
+                .matches
+                .into_iter()
+                .filter(|matched| {
+                    // Message bodies in the slice appear in `matches`
+                    // already; everything else is remote-only.
+                    !covered.contains(&matched.entry_id)
+                        || !matches!(
+                            matched.field,
+                            waku_protocol::transcript::TranscriptPayloadField::Content
+                                | waku_protocol::transcript::TranscriptPayloadField::DisplayContent
+                        )
+                })
+                .collect();
+            search.remote_current = 0;
+            search.remote_total = result.count;
+            search.remote_complete = result.complete;
+        }
     }
 
     pub(super) fn navigate_transcript_search(&mut self, backwards: bool, cx: &mut Context<Self>) {
+        let local_empty = self
+            .transcript_search
+            .as_ref()
+            .is_none_or(|search| !search.open || search.matches.is_empty());
+        if local_empty {
+            // With nothing in the rendered slice, navigation reveals the
+            // daemon's retained-transcript matches instead.
+            self.reveal_remote_find_match(cx);
+            return;
+        }
         let Some(search) = self
             .transcript_search
             .as_mut()
@@ -308,6 +436,169 @@ impl Waku {
         });
         search.generation = search.generation.wrapping_add(1);
         search.pending_reveal = true;
+        cx.notify();
+    }
+
+    /// Reveal the next daemon-find match: already-materialized entries land
+    /// through the ordinary reveal; entries outside the slice fetch an
+    /// `Around` window, replace it, and reveal after it mounts.
+    fn reveal_remote_find_match(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        let Some(matched) = self
+            .transcript_search
+            .as_ref()
+            .and_then(|search| search.remote.get(search.remote_current).cloned())
+        else {
+            return;
+        };
+        if let Some(search) = self.transcript_search.as_mut()
+            && !search.remote.is_empty()
+        {
+            search.remote_current = (search.remote_current + 1) % search.remote.len();
+        }
+        let query = self
+            .transcript_search
+            .as_ref()
+            .map(|search| search.query.read(cx).content().to_string())
+            .unwrap_or_default();
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        if session
+            .messages
+            .iter()
+            .any(|message| message.id == matched.entry_id)
+        {
+            self.pending_transcript_match = Some(PendingTranscriptMatch {
+                session_id,
+                message_id: matched.entry_id,
+                query,
+            });
+            cx.notify();
+            return;
+        }
+        if session.transcript_blocks.iter().any(|block| {
+            block
+                .activities
+                .iter()
+                .any(|item| item.id == matched.entry_id)
+        }) {
+            self.reveal_remote_activity_entry(session_id, matched.entry_id, cx);
+            return;
+        }
+        // Outside the slice — fetch a window centered on the match, remount
+        // it as the view, then reveal what lands.
+        let Some(daemon) = self.daemon_for_session(session_id) else {
+            return;
+        };
+        let client = daemon.client();
+        if !client.transcript_windows_available() {
+            return;
+        }
+        let entry_id = matched.entry_id;
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.read_transcript_window(
+                        waku_protocol::transcript::TranscriptWindowRequest {
+                            session_id,
+                            target: waku_protocol::transcript::TranscriptWindowTarget::Around {
+                                entry_id,
+                            },
+                            max_entries: None,
+                            max_bytes: None,
+                            known_revision: None,
+                        },
+                    )
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                let Ok(window) = result else {
+                    return;
+                };
+                let has_message = {
+                    let Some(session) = waku.state.session_mut(session_id) else {
+                        return;
+                    };
+                    let view = transcript_window::materialize_session(session, &window);
+                    waku.transcript_views.insert(session_id, view);
+                    session
+                        .messages
+                        .iter()
+                        .any(|message| message.id == entry_id)
+                };
+                if waku.state.selected_session == Some(session_id) {
+                    waku.sync_transcript_rows();
+                    if has_message {
+                        waku.pending_transcript_match = Some(PendingTranscriptMatch {
+                            session_id,
+                            message_id: entry_id,
+                            query,
+                        });
+                    } else {
+                        waku.reveal_remote_activity_entry(session_id, entry_id, cx);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// A daemon match on an activity already in the slice: open its turn and
+    /// item disclosure, then scroll the block row on screen.
+    fn reveal_remote_activity_entry(
+        &mut self,
+        session_id: Uuid,
+        entry_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(block_index) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| {
+                session
+                    .transcript_blocks
+                    .iter()
+                    .position(|block| block.activities.iter().any(|item| item.id == entry_id))
+            })
+        else {
+            return;
+        };
+        self.expanded_activity_items.insert(entry_id, true);
+        if let Some(turn_id) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| session.transcript_blocks.get(block_index))
+            .and_then(|block| block.turn_id)
+        {
+            self.expanded_turns.insert(turn_id);
+        }
+        self.sync_transcript_rows();
+        let row = self
+            .transcript_row_kinds
+            .borrow()
+            .iter()
+            .position(|kind| *kind == TranscriptRowKind::TurnBlock(block_index));
+        if let Some(item_ix) = row {
+            self.transcript_is_scrolled.set(true);
+            self.active_transcript_rows().scroll_to(ListOffset {
+                item_ix,
+                offset_in_item: px(0.0),
+            });
+        }
         cx.notify();
     }
 
@@ -759,18 +1050,30 @@ impl Waku {
             .filter(|search| search.open)?;
         let theme = Theme::current(cx);
         let query_empty = search.query.read(cx).content().is_empty();
-        let has_matches = !search.matches.is_empty();
+        let has_matches = !search.matches.is_empty() || !search.remote.is_empty();
         let count_label: Option<SharedString> = if query_empty {
             None
-        } else if !has_matches {
-            Some(tr!("find.no_results").into())
+        } else if search.matches.is_empty() && search.remote.is_empty() {
+            Some(if search.remote_loading {
+                tr!("find.searching").into()
+            } else {
+                tr!("find.no_results").into()
+            })
         } else {
             let current = search.current.map(|index| index + 1).unwrap_or(0);
             let suffix = if search.limited { "+" } else { "" };
+            let mut total = format!("{}{suffix}", search.matches.len());
+            if !search.remote.is_empty() {
+                let remote_suffix = if search.remote_complete { "" } else { "+" };
+                total = format!(
+                    "{total} +{}{remote_suffix}",
+                    search.remote.len().max(search.remote_total as usize)
+                );
+            }
             Some(SharedString::from(tr!(
                 "find.result_count",
                 current = current,
-                total = format!("{}{suffix}", search.matches.len())
+                total = total
             )))
         };
         let bar_width = (chat_viewport_width - 24.0).clamp(260.0, 430.0);

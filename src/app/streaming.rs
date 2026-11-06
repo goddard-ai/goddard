@@ -331,6 +331,10 @@ impl Waku {
                     self.stale_task_details.insert(session_id);
                 }
                 if detail || session.detail_loaded {
+                    // A detail snapshot carries the complete transcript —
+                    // any bounded slice materialized for this session is
+                    // superseded wholesale.
+                    self.transcript_views.remove(&session_id);
                     if let Some(existing) = self.state.session_mut(session_id) {
                         let mut snapshot = *session;
                         waku_protocol::streaming::merge_task_view_snapshot(

@@ -460,6 +460,11 @@ impl PersistedState {
         self.dirty_sessions.retain(|id| !ids.contains(id));
     }
 
+    /// Whether the next save batch will include this session's changes.
+    pub fn is_session_dirty(&self, id: Uuid) -> bool {
+        self.dirty_sessions.contains(&id)
+    }
+
     pub fn push_session(&mut self, session: AgentSession) {
         self.dirty_sessions.insert(session.id);
         self.sessions.push(session);

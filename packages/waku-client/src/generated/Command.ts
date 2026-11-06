@@ -31,6 +31,10 @@ import type { SessionDetailTail } from "./SessionDetailTail";
 import type { SessionMessageSearchScope } from "./SessionMessageSearchScope";
 import type { TaskClass } from "./TaskClass";
 import type { TaskMetadataUpdate } from "./TaskMetadataUpdate";
+import type { TaskViewPayloadInterest } from "./TaskViewPayloadInterest";
+import type { TranscriptFindRequest } from "./TranscriptFindRequest";
+import type { TranscriptPayloadRequest } from "./TranscriptPayloadRequest";
+import type { TranscriptWindowRequest } from "./TranscriptWindowRequest";
 import type { UsageWindow } from "./UsageWindow";
 import type { UserInputAnswer } from "./UserInputAnswer";
 import type { UserInputQuestion } from "./UserInputQuestion";
@@ -41,7 +45,13 @@ import type { WireframeCommentOperation } from "./WireframeCommentOperation";
 import type { WorkspaceOperation } from "./WorkspaceOperation";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type Command = { "type": "transcribe", pcm: Array<number>, language?: string | null, keywords?: string | null, } | { "type": "getWhistleStatus" } | { "type": "downloadWhistleModel" } | { "type": "boss", operation: BossOperation, } | { "type": "employeeComposerPrompt", viewedEmployeeId: string, submissionId: string, prompt: string, delivery: AgentPromptDelivery, } | { "type": "attachSession" } | { "type": "setTaskView", detail: boolean, generation: number, } | { "type": "start", options: WireDriverStartOptions, } | { "type": "prompt", prompt: string,
+export type Command = { "type": "transcribe", pcm: Array<number>, language?: string | null, keywords?: string | null, } | { "type": "getWhistleStatus" } | { "type": "downloadWhistleModel" } | { "type": "boss", operation: BossOperation, } | { "type": "employeeComposerPrompt", viewedEmployeeId: string, submissionId: string, prompt: string, delivery: AgentPromptDelivery, } | { "type": "attachSession" } | { "type": "setTaskView", detail: boolean, generation: number,
+/**
+ * `Compact` strips bulk fields from detail events — the viewer
+ * range-reads expanded payloads instead. Absent (`All`) preserves
+ * full delivery for older clients.
+ */
+payloads: TaskViewPayloadInterest, } | { "type": "start", options: WireDriverStartOptions, } | { "type": "prompt", prompt: string,
 /**
  * The ids the submitting client already gave this turn and its user
  * message. The daemon republishes them with the submission so every
@@ -80,7 +90,7 @@ queuedMessage?: QueuedMessage | null, } | { "type": "compact" } | { "type": "can
  * stored prefix rather than replacing it. Entries not listed here
  * are complete sessions as before.
  */
-sessionTails: Array<SessionDetailTail>, } | { "type": "removeSession" } | { "type": "removeProject", projectId: string, } | { "type": "refreshSessionHistory" } | { "type": "hydrateSession", sessionId: string, } | { "type": "indexSession" } | { "type": "searchSessionMessages", query: string, limit: number,
+sessionTails: Array<SessionDetailTail>, } | { "type": "removeSession" } | { "type": "removeProject", projectId: string, } | { "type": "refreshSessionHistory" } | { "type": "hydrateSession", sessionId: string, } | { "type": "readTranscriptWindow", request: TranscriptWindowRequest, } | { "type": "readTranscriptPayload", request: TranscriptPayloadRequest, } | { "type": "findTranscript", request: TranscriptFindRequest, } | { "type": "indexSession" } | { "type": "searchSessionMessages", query: string, limit: number,
 /**
  * Which sessions the search scans; absent means active tasks, so
  * pre-scope clients keep their palette behavior.

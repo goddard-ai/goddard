@@ -22,4 +22,11 @@ agentCliAvailable: boolean,
 /**
  * Supports connection-scoped task detail with snapshot handoff.
  */
-taskViewsAvailable: boolean, } | { "type": "rejected", message: string, } | { "type": "response", requestId: string, outcome: ResponseOutcome, } | { "type": "event" } & SequencedEvent | { "type": "taskStateChanged", revision: number, } | { "type": "settingsChanged", settings: DaemonSettings, } | { "type": "friendsChanged", state: FriendsState, } | { "type": "automationsChanged", state: AutomationsState, } | { "type": "reviewChanged", originUrl: string, } | { "type": "friendSessionClosed", sessionId: string, revoked: boolean, } | { "type": "bossSpeechRequested", requestId: string, parts: Array<string>, } | { "type": "bossBrowseRequested", requestId: string, sessionId: string, url: string, title: string | null, } | { "type": "wireframePreviewRequested", sessionId: string, path: string, } | { "type": "wireframeCommentsChanged", sessionId: string, document: string, } | { "type": "pairingChanged", state: PairingState, } | { "type": "pairPending" } | { "type": "pairGranted", token: string, daemonName: string, } | { "type": "pairDeclined", message: string, } | { "type": "shuttingDown" };
+taskViewsAvailable: boolean,
+/**
+ * Supports bounded transcript reads — `readTranscriptWindow`,
+ * `readTranscriptPayload`, `findTranscript`, and compact task-view
+ * payloads. Older daemons omit it; clients keep using
+ * `hydrateSession`.
+ */
+transcriptWindowsAvailable: boolean, } | { "type": "rejected", message: string, } | { "type": "response", requestId: string, outcome: ResponseOutcome, } | { "type": "event" } & SequencedEvent | { "type": "taskStateChanged", revision: number, } | { "type": "settingsChanged", settings: DaemonSettings, } | { "type": "friendsChanged", state: FriendsState, } | { "type": "automationsChanged", state: AutomationsState, } | { "type": "reviewChanged", originUrl: string, } | { "type": "friendSessionClosed", sessionId: string, revoked: boolean, } | { "type": "bossSpeechRequested", requestId: string, parts: Array<string>, } | { "type": "bossBrowseRequested", requestId: string, sessionId: string, url: string, title: string | null, } | { "type": "wireframePreviewRequested", sessionId: string, path: string, } | { "type": "wireframeCommentsChanged", sessionId: string, document: string, } | { "type": "pairingChanged", state: PairingState, } | { "type": "pairPending" } | { "type": "pairGranted", token: string, daemonName: string, } | { "type": "pairDeclined", message: string, } | { "type": "shuttingDown" };

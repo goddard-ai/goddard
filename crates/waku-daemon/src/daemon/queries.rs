@@ -1028,6 +1028,131 @@ impl WakuBackend {
         Ok(matches)
     }
 
+    /// Persist a dirty session before answering from the index, so a
+    /// streaming task's window/find sees the same transcript its live
+    /// events describe. Clean sessions skip the write entirely — opening a
+    /// quiet task must stay a pure read.
+    pub(super) fn flush_transcript_for_read(&self, session_id: Uuid) -> anyhow::Result<()> {
+        // The batch claims dirty marks under the lock, then the write runs
+        // unlocked — the same pattern the periodic SaveState uses.
+        let batch = {
+            let mut state = self.task_state.lock();
+            if !state.is_session_dirty(session_id) {
+                return Ok(());
+            }
+            let batch = self.task_store.save_batch(&mut state);
+            state.unmark_sessions_dirty(&batch.dirty_ids);
+            batch
+        };
+        if let Err(error) = self.task_store.write_batch(&batch) {
+            let mut state = self.task_state.lock();
+            for id in &batch.dirty_ids {
+                state.mark_session_dirty(*id);
+            }
+            return Err(error.into());
+        }
+        Ok(())
+    }
+
+    /// Bounded window/payload/find reads share one fallback: the index's
+    /// head row missing means "saved before the index existed" — convert
+    /// the legacy rows once, then the read runs against normalized tables.
+    pub(super) fn ensure_transcript_converted(&self, session_id: Uuid) -> anyhow::Result<()> {
+        if self.task_store.transcript_revision(session_id)?.is_none() {
+            self.task_store.convert_transcript(session_id)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn read_transcript_window(
+        &self,
+        request: waku_protocol::transcript::TranscriptWindowRequest,
+    ) -> anyhow::Result<waku_protocol::transcript::TranscriptWindow> {
+        use waku_protocol::transcript::{WINDOW_DEFAULT_BYTES, WINDOW_DEFAULT_ENTRIES};
+        let max_entries = request
+            .max_entries
+            .unwrap_or(WINDOW_DEFAULT_ENTRIES)
+            .clamp(1, waku_protocol::transcript::PAGE_MAX_ENTRIES);
+        let max_bytes = request
+            .max_bytes
+            .unwrap_or(WINDOW_DEFAULT_BYTES)
+            .clamp(4096, waku_protocol::transcript::PAGE_MAX_BYTES);
+        self.flush_transcript_for_read(request.session_id)?;
+        self.ensure_transcript_converted(request.session_id)?;
+        let window = self
+            .task_store
+            .read_transcript_window(
+                request.session_id,
+                &request.target,
+                max_entries,
+                max_bytes,
+                request.known_revision,
+            )?
+            .unwrap_or_else(|| waku_protocol::transcript::TranscriptWindow {
+                session_id: request.session_id,
+                revision: 0,
+                unchanged: false,
+                invalid_cursor: false,
+                entries: Vec::new(),
+                previous: None,
+                next: None,
+                has_more_before: false,
+                has_more_after: false,
+                message_base: 0,
+                message_count: 0,
+                entry_count: 0,
+                converted: false,
+                legacy_read: false,
+                turns: Vec::new(),
+                queued_messages: Vec::new(),
+                event_cursor: None,
+            });
+        Ok(window)
+    }
+
+    pub(super) fn read_transcript_payload(
+        &self,
+        request: waku_protocol::transcript::TranscriptPayloadRequest,
+    ) -> anyhow::Result<waku_protocol::transcript::TranscriptPayload> {
+        // No flush here — range reads carry a revision; a field that moved
+        // since the client's descriptor reports `stale` and re-reads.
+        self.ensure_transcript_converted(request.session_id)?;
+        let payload = self
+            .task_store
+            .read_transcript_payload(
+                request.session_id,
+                request.entry_id,
+                request.field,
+                request.expected_revision,
+                request.offset,
+                request.limit,
+            )?
+            .unwrap_or_else(|| waku_protocol::transcript::TranscriptPayload {
+                entry_id: request.entry_id,
+                field: request.field,
+                revision: 0,
+                stale: false,
+                total_bytes: 0,
+                offset: request.offset,
+                content: String::new(),
+                complete: true,
+                unavailable: Some("session has no retained transcript".into()),
+            });
+        Ok(payload)
+    }
+
+    pub(super) fn find_transcript(
+        &self,
+        request: waku_protocol::transcript::TranscriptFindRequest,
+    ) -> anyhow::Result<waku_protocol::transcript::TranscriptFindResult> {
+        self.flush_transcript_for_read(request.session_id)?;
+        self.ensure_transcript_converted(request.session_id)?;
+        let result = self
+            .task_store
+            .find_transcript(request.session_id, &request)?;
+        Ok(result)
+    }
+
     pub(super) fn agent_computer_use(
         &self,
         session_id: Uuid,

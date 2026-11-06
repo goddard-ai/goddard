@@ -4931,6 +4931,8 @@ find.bad_pattern:
   en: Bad pattern
 find.no_results:
   en: No results
+find.searching:
+  en: Searching…
 find.result_count:
   en: "%{current} of %{total}"
 find.match_case:
@@ -4974,6 +4976,14 @@ attachments.preview_unavailable:
 common.copy_named:
   en: Copy %{name}
 
+transcript.history_loading:
+  en: Loading earlier messages…
+transcript.history_load:
+  en: Load earlier messages
+transcript.history_retry:
+  en: Retry loading earlier messages
+transcript.future_load:
+  en: Load newer messages
 transcript.worked:
   en: Worked
 transcript.worked_for:

@@ -191,7 +191,10 @@ pub(super) fn handle_driver_command(
         | Command::SetFriendSessionSharing { .. }
         | Command::GetFriendSessions { .. }
         | Command::WatchFriendSession { .. }
-        | Command::UnwatchFriendSession { .. } => {
+        | Command::UnwatchFriendSession { .. }
+        | Command::ReadTranscriptWindow { .. }
+        | Command::ReadTranscriptPayload { .. }
+        | Command::FindTranscript { .. } => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }

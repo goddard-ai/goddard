@@ -1,0 +1,1 @@
+- **Transcript:** Tasks with long histories open on their latest conversation immediately instead of loading the full transcript first; earlier messages page in as you scroll up, and find-in-transcript still searches the complete retained history, including tool output that was never downloaded.

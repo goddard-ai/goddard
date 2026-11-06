@@ -114,7 +114,22 @@ fn connect_remote(
         .spawn(move || {
             let mut client = thread_initial_client;
             let mut remote_events = client.subscribe(session_id, runtime_id);
-            if let Err(error) = client.set_task_view(session_id, runtime_id, forwarding_detail_visible.load(Ordering::Acquire)) {
+            let set_view = |client: &waku_client::DaemonClient| {
+                // Compact interests strip bulk activity fields the viewer
+                // range-reads back on expansion; older daemons ignore the
+                // field and keep their legacy shape.
+                client.set_task_view_payloads(
+                    session_id,
+                    runtime_id,
+                    forwarding_detail_visible.load(Ordering::Acquire),
+                    if client.transcript_windows_available() {
+                        waku_protocol::transcript::TaskViewPayloadInterest::Compact
+                    } else {
+                        waku_protocol::transcript::TaskViewPayloadInterest::All
+                    },
+                )
+            };
+            if let Err(error) = set_view(&client) {
                 let _ = forwarding_events.send(DriverEvent::Error(format!("Could not load task view: {error:#}")));
             }
             loop {
@@ -122,7 +137,7 @@ fn connect_remote(
                     select! {
                         recv(forwarding_shutdown) -> _ => return,
                         recv(view_changes) -> _ => {
-                            if let Err(error) = client.set_task_view(session_id, runtime_id, forwarding_detail_visible.load(Ordering::Acquire)) {
+                            if let Err(error) = set_view(&client) {
                                 let _ = forwarding_events.send(DriverEvent::Error(format!("Could not load task view: {error:#}")));
                             }
                         },
@@ -213,11 +228,7 @@ fn connect_remote(
                         *forwarding_client.lock() = replacement.clone();
                         client = replacement;
                         remote_events = client.subscribe(session_id, runtime_id);
-                        let _ = client.set_task_view(
-                            session_id,
-                            runtime_id,
-                            forwarding_detail_visible.load(Ordering::Acquire),
-                        );
+                        let _ = set_view(&client);
                     }
                     Ok(waku_client::ResponsePayload::SessionRuntime { .. }) => {
                         // The runtime is gone, but the daemon answering is

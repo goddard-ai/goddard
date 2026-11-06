@@ -210,6 +210,7 @@ pub(super) fn start_driver(
         handle,
         events,
         hydrated_session: None,
+        transcript_window: None,
     })
 }
 
@@ -368,16 +369,45 @@ fn attach_driver(
     event_wake: smol::channel::Sender<()>,
 ) -> anyhow::Result<Option<PreparedDriver>> {
     let client = daemon.client();
-    let hydrated_session = if hydrate || !client.task_views_available() {
-        waku_client::persistence::hydrate_session(&daemon, session_id)?
+    let (hydrated_session, transcript_window) = if hydrate || !client.task_views_available() {
+        if client.transcript_windows_available() {
+            // A bounded read replaces hydration: the latest slice plus its
+            // cursors are all an attach needs, whatever the transcript's
+            // total size. A failed read falls back to the legacy hydrate.
+            match client.read_transcript_window(
+                waku_protocol::transcript::TranscriptWindowRequest {
+                    session_id,
+                    target: waku_protocol::transcript::TranscriptWindowTarget::Latest,
+                    max_entries: None,
+                    max_bytes: None,
+                    known_revision: None,
+                },
+            ) {
+                Ok(window) => (None, Some(window)),
+                Err(_) => (
+                    waku_client::persistence::hydrate_session(&daemon, session_id)?,
+                    None,
+                ),
+            }
+        } else {
+            (
+                waku_client::persistence::hydrate_session(&daemon, session_id)?,
+                None,
+            )
+        }
     } else {
-        None
+        (None, None)
     };
-    // The hydrated detail's stored cursor supersedes the skeleton's: it is
-    // the baseline the arriving events will actually extend.
+    // Stored cursor beats the skeleton's list cursor: it is the baseline the
+    // arriving events will actually extend.
     let replay_cursor = hydrated_session
         .as_ref()
         .and_then(|session| session.runtime_event_cursor)
+        .or_else(|| {
+            transcript_window
+                .as_ref()
+                .and_then(|window| window.event_cursor)
+        })
         .or(replay_cursor);
     let response = client.request(session_id, Uuid::nil(), waku_client::Command::AttachSession)?;
     let waku_client::ResponsePayload::SessionRuntime {
@@ -406,6 +436,7 @@ fn attach_driver(
         handle,
         events,
         hydrated_session,
+        transcript_window,
     }))
 }
 
@@ -4197,7 +4228,8 @@ impl Waku {
                         && self.state.selected_session == Some(session_id))
                     .then(|| self.transcript_row_kinds.borrow().clone());
                     let detail_arrived = !self.state.sessions[index].detail_loaded
-                        && prepared.hydrated_session.is_some();
+                        && (prepared.hydrated_session.is_some()
+                            || prepared.transcript_window.is_some());
                     self.install_prepared_driver(session_id, prepared);
                     if self.pending_session_cancels.remove(&session_id) {
                         self.cancel_session_turn(session_id, cx);
@@ -5247,6 +5279,25 @@ impl Waku {
                 .err()
                 .map(|error| error.to_string())
         };
+        // A windowed session holds a slice, not the transcript — persisting
+        // it as detail would truncate the store's copy and its index. Such
+        // rows save as skeletons: the previous full detail stays on disk and
+        // the in-memory flag restores immediately after the synchronous
+        // write.
+        let windowed: Vec<Uuid> = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.detail_loaded && self.session_transcript_is_partial(session.id)
+            })
+            .map(|session| session.id)
+            .collect();
+        for session_id in &windowed {
+            if let Some(session) = self.state.session_mut(*session_id) {
+                session.detail_loaded = false;
+            }
+        }
         let app_error = if self.friend_sessions.is_empty() {
             self.store
                 .save(&mut self.state)
@@ -5269,6 +5320,11 @@ impl Waku {
             self.state.sessions.extend(watched);
             result
         };
+        for session_id in &windowed {
+            if let Some(session) = self.state.session_mut(*session_id) {
+                session.detail_loaded = true;
+            }
+        }
         let app_saved = app_error.is_none();
         if let Some(error) = daemon_error.or(app_error) {
             eprintln!("could not save local state: {error}");
@@ -6813,6 +6869,14 @@ impl Waku {
             && !existing.detail_loaded
         {
             *existing = hydrated;
+            self.transcript_views.remove(&session_id);
+        }
+        if let Some(window) = prepared.transcript_window
+            && let Some(existing) = self.state.session_mut(session_id)
+            && !existing.detail_loaded
+        {
+            let view = transcript_window::materialize_session(existing, &window);
+            self.transcript_views.insert(session_id, view);
         }
         let handle = prepared.handle.clone();
         self.runtimes.insert(
@@ -9360,6 +9424,7 @@ mod computer_use_launch_tests {
                                 daemon_commit: None,
                                 agent_cli_available: false,
                                 task_views_available: false,
+                                transcript_windows_available: false,
                             },
                             None,
                         ),

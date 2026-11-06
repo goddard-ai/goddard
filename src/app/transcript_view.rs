@@ -319,6 +319,7 @@ impl Waku {
         self.resolve_transcript_commit_refs(cx);
         self.sync_transcript_rows();
         self.load_boss_history_at_top(cx);
+        self.load_transcript_history_at_top(cx);
         self.retire_fading_working_indicator(cx);
         self.retire_fading_queued_card(cx);
         self.sync_transcript_layout_width(window);
@@ -1573,6 +1574,23 @@ impl Waku {
             cx.notify();
             return;
         }
+        // Opening an activity on a windowed session schedules its lazy field
+        // reads — the head clip already renders, the range read fills the
+        // rest. Collected ahead because the closure cannot borrow `cx`.
+        let lazy_fields: Vec<_> = if current {
+            Vec::new()
+        } else {
+            self.transcript_views
+                .get(&session_id)
+                .map(|view| {
+                    view.payloads
+                        .keys()
+                        .filter(|(entry_id, _)| *entry_id == id)
+                        .map(|(_, field)| *field)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
         self.toggle_block_disclosure(block_index, cx, |this| {
             this.expanded_activity_items.insert(id, !current);
             if current {
@@ -1583,6 +1601,9 @@ impl Waku {
                 this.activity_diff_viewports.borrow_mut().remove(&id);
             }
         });
+        for field in lazy_fields {
+            self.ensure_transcript_payload(session_id, id, field, cx);
+        }
     }
 
     /// Opens a file a tool changed in the right panel's viewer.
@@ -2010,6 +2031,18 @@ impl Waku {
             Some(TranscriptRowKind::BossHistoryBoundary(id)) => {
                 return self.render_boss_history_boundary(id, cx);
             }
+            Some(TranscriptRowKind::HistoryBoundary) => {
+                let Some(session_id) = self.state.selected_session else {
+                    return div().into_any_element();
+                };
+                return self.render_transcript_history_boundary(session_id, false, cx);
+            }
+            Some(TranscriptRowKind::FutureBoundary) => {
+                let Some(session_id) = self.state.selected_session else {
+                    return div().into_any_element();
+                };
+                return self.render_transcript_history_boundary(session_id, true, cx);
+            }
             Some(TranscriptRowKind::BossHistory(id, row)) => {
                 let Some(entry) = self.boss_history_session(id) else {
                     return div().into_any_element();
@@ -2089,9 +2122,10 @@ impl Waku {
             .transcript_display_session()
             .and_then(|session| response_row_turn_id(session, kind));
         let inner = match kind {
-            TranscriptRowKind::BossHistory(..) | TranscriptRowKind::BossHistoryBoundary(_) => {
-                div().into_any_element()
-            }
+            TranscriptRowKind::BossHistory(..)
+            | TranscriptRowKind::BossHistoryBoundary(_)
+            | TranscriptRowKind::HistoryBoundary
+            | TranscriptRowKind::FutureBoundary => div().into_any_element(),
             TranscriptRowKind::Message(message_index) => self
                 .transcript_display_session()
                 .and_then(|session| {

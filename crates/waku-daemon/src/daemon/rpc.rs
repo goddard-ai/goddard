@@ -1712,6 +1712,18 @@ impl Backend for WakuBackend {
                 });
                 Ok(ResponsePayload::Session { session })
             }
+            Command::ReadTranscriptWindow { request } => {
+                let window = self.read_transcript_window(request)?;
+                Ok(ResponsePayload::TranscriptWindow { window })
+            }
+            Command::ReadTranscriptPayload { request } => {
+                let payload = self.read_transcript_payload(request)?;
+                Ok(ResponsePayload::TranscriptPayload { payload })
+            }
+            Command::FindTranscript { request } => {
+                let result = self.find_transcript(request)?;
+                Ok(ResponsePayload::TranscriptFind { result })
+            }
             Command::IndexSession => Ok(ResponsePayload::Ack),
             Command::SearchSessionMessages {
                 query,

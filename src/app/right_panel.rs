@@ -7978,6 +7978,8 @@ impl Waku {
             }
             TranscriptRowKind::BossHistory(..)
             | TranscriptRowKind::BossHistoryBoundary(_)
+            | TranscriptRowKind::HistoryBoundary
+            | TranscriptRowKind::FutureBoundary
             // The queued card lives only on the selected employee's own
             // transcript — the fold for a side chat never emits it.
             | TranscriptRowKind::QueuedEmployee => {

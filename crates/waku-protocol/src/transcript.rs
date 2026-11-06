@@ -92,7 +92,7 @@ pub struct TranscriptWindowRequest {
 /// A transcript field that can hold bulk text — the unit lazy loading and
 /// find address. `Content`/`DisplayContent`/`Notice`/`Attachments`/`Atoms`
 /// belong to message entries, the rest to activity entries.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum TranscriptPayloadField {
     Output,

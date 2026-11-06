@@ -1213,6 +1213,9 @@ struct PreparedDriver {
     /// driver events are transcript writes, so the detail has to land before
     /// they do or what they build is never persistable.
     hydrated_session: Option<AgentSession>,
+    /// The bounded alternative to `hydrated_session` — a latest-turn window
+    /// materialized into the skeleton instead of the full detail.
+    transcript_window: Option<waku_protocol::transcript::TranscriptWindow>,
 }
 
 /// One daemon's catalog contribution to the merged project/session lists,
@@ -2616,6 +2619,12 @@ pub struct Waku {
     /// The session+load pass whose delayed muted-logo reveal timer was
     /// already armed — a hydration retry re-arms under its fresh stamp.
     task_loading_reveal: Option<(Uuid, Instant)>,
+    /// Bounded transcript windows materialized into resident sessions. A
+    /// session present here holds a slice of its flattened stream, not the
+    /// complete transcript — `has_more_before`/`has_more_after` mark the
+    /// gaps, and such rows persist as skeletons so the slice never
+    /// overwrites the retained detail.
+    transcript_views: HashMap<Uuid, transcript_window::TranscriptViewState>,
     /// Unvisited runtimes in this drain round. Retained across yields so a
     /// busy selected task cannot starve background completions and approvals.
     driver_event_round: VecDeque<Uuid>,
@@ -4629,6 +4638,7 @@ mod title_quality;
 mod transcript;
 mod transcript_search;
 mod transcript_view;
+mod transcript_window;
 mod usage_meter;
 mod usage_page;
 mod voice_briefing;
@@ -7412,6 +7422,7 @@ impl Waku {
                 daemon_lan_ip,
                 session_hydrations: sessions::SessionHydrations::default(),
                 task_loading_reveal: None,
+                transcript_views: HashMap::new(),
                 driver_event_round: VecDeque::new(),
                 pending_session_cancels: HashSet::new(),
                 summon_card_cache: RefCell::new(None),

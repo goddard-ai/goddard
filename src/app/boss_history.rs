@@ -286,6 +286,7 @@ impl BossChatHistory {
         live: &AgentSession,
         expanded: &HashSet<Uuid>,
         pending: Option<Uuid>,
+        live_windowed: bool,
     ) -> Vec<TranscriptRowKind> {
         let (history, boundary) = self.chain(live);
         let mut rows = Vec::new();
@@ -300,6 +301,9 @@ impl BossChatHistory {
                     BossHistoryRow::from_content(*row)?,
                 ))
             }));
+        }
+        if live_windowed {
+            rows.push(TranscriptRowKind::HistoryBoundary);
         }
         rows.extend(folded_transcript_row_kinds(live, expanded, pending));
         rows
@@ -691,7 +695,7 @@ mod tests {
         // there is no earlier content to display until hydration finishes.
         assert!(
             history
-                .transcript_rows(&projection, &HashSet::new(), None)
+                .transcript_rows(&projection, &HashSet::new(), None, false)
                 .iter()
                 .all(|row| !matches!(row, TranscriptRowKind::BossHistory(..)))
         );
@@ -703,7 +707,7 @@ mod tests {
             history.sessions[&old.id].session.messages[0].content,
             old.messages[0].content
         );
-        let rows = history.transcript_rows(&next, &HashSet::new(), None);
+        let rows = history.transcript_rows(&next, &HashSet::new(), None, false);
         assert!(rows.contains(&TranscriptRowKind::BossHistory(
             old.id,
             BossHistoryRow::Message(0)
@@ -752,7 +756,7 @@ mod tests {
             Ok(BossHistorySession::new(middle)),
         );
         let previous: Vec<_> = history
-            .transcript_rows(&old, &HashSet::new(), None)
+            .transcript_rows(&old, &HashSet::new(), None, false)
             .into_iter()
             .map(|row| {
                 BossHistoryRow::from_content(row).map_or(row, |content| {
@@ -761,7 +765,7 @@ mod tests {
             })
             .collect();
         assert!(history.swap_live_session(&sessions, &mut selected, latest.id));
-        let next = history.transcript_rows(&latest, &HashSet::new(), None);
+        let next = history.transcript_rows(&latest, &HashSet::new(), None, false);
         let scroll = ListOffset {
             item_ix: 1,
             offset_in_item: px(17.5),
@@ -810,7 +814,7 @@ mod tests {
         assert!(!history.begin_load(recent.id));
         assert_eq!(history.chain(&live), (vec![recent.id], Some(oldest.id)));
         assert!(!history.loading.contains(&oldest.id));
-        let rows = history.transcript_rows(&live, &HashSet::new(), None);
+        let rows = history.transcript_rows(&live, &HashSet::new(), None, false);
         assert_eq!(rows[0], TranscriptRowKind::BossHistoryBoundary(oldest.id));
         assert!(
             !rows.iter().any(
@@ -844,7 +848,7 @@ mod tests {
         history
             .sessions
             .insert(recent.id, BossHistorySession::new(recent));
-        let rows = history.transcript_rows(&live, &HashSet::new(), None);
+        let rows = history.transcript_rows(&live, &HashSet::new(), None, false);
         assert_eq!(rows[0], TranscriptRowKind::BossHistoryBoundary(older.id));
         let top = ListOffset {
             item_ix: 0,
@@ -900,7 +904,7 @@ mod tests {
                 .sessions
                 .insert(session.id, BossHistorySession::new(session));
         }
-        let rows = history.transcript_rows(&live, &HashSet::new(), None);
+        let rows = history.transcript_rows(&live, &HashSet::new(), None, false);
         let turns = history.navigation_turns(&live, &rows);
         assert_eq!(
             turns
@@ -953,11 +957,11 @@ mod tests {
         history
             .sessions
             .insert(recent.id, BossHistorySession::new(recent));
-        let before = history.transcript_rows(&live, &HashSet::new(), None);
+        let before = history.transcript_rows(&live, &HashSet::new(), None, false);
         history
             .sessions
             .insert(older.id, BossHistorySession::new(older));
-        let after = history.transcript_rows(&live, &HashSet::new(), None);
+        let after = history.transcript_rows(&live, &HashSet::new(), None, false);
         let (replaced, inserted) = transcript_row_splice(&before, &after).unwrap();
         assert_eq!(replaced, 0..1);
         assert_eq!(&before[1..], &after[inserted..]);
@@ -987,13 +991,13 @@ mod tests {
         history
             .sessions
             .insert(old.id, BossHistorySession::new(old.clone()));
-        history.transcript_rows(&live, &HashSet::new(), None);
+        history.transcript_rows(&live, &HashSet::new(), None, false);
         let entry = &history.sessions[&old.id];
         let cached = entry.cached_rows();
         let navigation = entry.navigation();
         live.begin_turn("Still live");
         live.push_message(MessageRole::Assistant, "Streaming");
-        history.transcript_rows(&live, &HashSet::new(), None);
+        history.transcript_rows(&live, &HashSet::new(), None, false);
         assert!(Arc::ptr_eq(&cached, &entry.cached_rows()));
         assert!(Arc::ptr_eq(&navigation, &entry.navigation()));
         assert_eq!(entry.content_index(BossHistoryRow::Message(0)), Some(0));
