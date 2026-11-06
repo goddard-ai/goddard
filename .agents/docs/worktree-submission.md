@@ -25,7 +25,10 @@ boss can retarget a single project with
 `branch` or set it to `()` to clear it. The named branch must be checked out
 somewhere in the project's repository for submissions to land on it.
 
-The daemon queues submissions in arrival order, checks that the employee's
+The daemon queues submissions in arrival order per repository, sharing the
+queue with `/land` from every client and worktree. Separate repositories can
+land independently. A conflict or failure releases the queue; resolve the
+affected worktree before retrying. The daemon checks that the employee's
 recorded worktree is clean, rebases it onto the configured QA branch (normally
 `dev`), skips patch-equivalent commits, and squashes the submitted changes
 into one reviewable commit per employee unit. It runs `git diff --check` and

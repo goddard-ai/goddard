@@ -317,10 +317,15 @@ export async function landWorkspace(
   base: string | null,
 ): Promise<LandOutcome> {
   const response = expectResponse(
-    await client.request({
-      type: 'workspace',
-      operation: { type: 'land', cwd, base, strategy: 'rebase' },
-    }),
+    await client.request(
+      {
+        type: 'workspace',
+        operation: { type: 'land', cwd, base, strategy: 'rebase' },
+      },
+      undefined,
+      undefined,
+      { timeoutMs: null },
+    ),
     'workspace',
   );
   if (response.result.type !== 'land') {

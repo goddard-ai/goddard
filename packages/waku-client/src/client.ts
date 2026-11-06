@@ -64,8 +64,8 @@ export interface WakuClientOptions {
 }
 
 export interface RequestOptions {
-  /** Overrides the client-wide request timeout for this request. */
-  timeoutMs?: number;
+  /** Overrides the client-wide request timeout. Null waits until reply or disconnect. */
+  timeoutMs?: number | null;
 }
 
 export class WakuRpcError extends Error {
@@ -120,7 +120,7 @@ export class WakuConnectionError extends Error {
 interface PendingRequest {
   resolve: (payload: ResponsePayload) => void;
   reject: (error: Error) => void;
-  timeout: ReturnType<typeof setTimeout>;
+  timeout: ReturnType<typeof setTimeout> | null;
 }
 
 interface LastSequence {
@@ -366,7 +366,7 @@ export class WakuClient {
     };
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      const timeout = options.timeoutMs === null ? null : setTimeout(() => {
         this.pending.delete(requestId);
         reject(new Error("timed out waiting for Goddard daemon"));
       }, options.timeoutMs ?? this.requestTimeoutMs);
@@ -374,7 +374,7 @@ export class WakuClient {
       try {
         socket.send(JSON.stringify(message));
       } catch (error) {
-        clearTimeout(timeout);
+        if (timeout !== null) clearTimeout(timeout);
         this.pending.delete(requestId);
         reject(asError(error));
       }
@@ -496,7 +496,7 @@ export class WakuClient {
       const pending = this.pending.get(message.requestId);
       if (!pending) return;
       this.pending.delete(message.requestId);
-      clearTimeout(pending.timeout);
+      if (pending.timeout !== null) clearTimeout(pending.timeout);
       if (message.outcome.status === "ok") pending.resolve(message.outcome.payload);
       else
         pending.reject(
@@ -576,7 +576,7 @@ export class WakuClient {
     const pending = [...this.pending.values()];
     this.pending.clear();
     for (const request of pending) {
-      clearTimeout(request.timeout);
+      if (request.timeout !== null) clearTimeout(request.timeout);
       request.reject(error);
     }
     this.setConnectionState("disconnected");

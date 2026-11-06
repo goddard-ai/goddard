@@ -605,6 +605,7 @@ const LANDED_COMMITS_LIMIT: usize = 50;
 /// progress; re-running while stopped reports the same conflict again
 /// rather than erroring.
 pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::Result<LandOutcome> {
+    let _permit = crate::landing_queue::acquire(cwd)?;
     ensure_repository(cwd)?;
     let Some(base) = land_base(cwd, base)? else {
         bail!("could not find a base branch to land on");
@@ -616,10 +617,14 @@ pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::R
             files: conflicted_paths(cwd)?,
         });
     }
-    if is_ancestor(cwd, "HEAD", &base)? {
+    let base_head = git_stdout(
+        cwd,
+        &["rev-parse", "--verify", &format!("refs/heads/{base}")],
+    )?;
+    if is_ancestor(cwd, "HEAD", &base_head)? {
         return Ok(LandOutcome::AlreadyLanded { base });
     }
-    if !is_ancestor(cwd, &base, "HEAD")? {
+    if !is_ancestor(cwd, &base_head, "HEAD")? {
         // Diverged history integrates first. Rebase and merge both require a
         // clean tree; refuse rather than autostash, whose pop conflicts land
         // after the integration's own machinery is gone.
@@ -627,8 +632,8 @@ pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::R
             bail!("commit or stash your changes before landing");
         }
         let output = match strategy {
-            PullStrategy::Rebase => git_capture(cwd, &["rebase", &base])?,
-            PullStrategy::Merge => git_capture(cwd, &["merge", "--no-edit", &base])?,
+            PullStrategy::Rebase => git_capture(cwd, &["rebase", &base_head])?,
+            PullStrategy::Merge => git_capture(cwd, &["merge", "--no-edit", &base_head])?,
         };
         if !output.status.success() {
             if let Some(in_progress) = sync_in_progress(cwd)? {
@@ -643,12 +648,12 @@ pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::R
     }
     // The range must resolve before the base moves: after the fast-forward
     // `base..HEAD` is empty. These are the commits that land, newest first.
-    let range = format!("{base}..HEAD");
+    let range = format!("{base_head}..HEAD");
     let ahead = git_optional_stdout(cwd, &["rev-list", "--count", &range])?
         .and_then(|count| count.trim().parse::<u64>().ok())
         .unwrap_or(0);
     let commits = log_commits(cwd, &[range], 0, LANDED_COMMITS_LIMIT)?;
-    fast_forward_base(cwd, &base)?;
+    fast_forward_base(cwd, &base, &base_head)?;
     Ok(LandOutcome::Landed {
         base,
         commits,
@@ -778,23 +783,26 @@ fn land_target_on_base(cwd: &Path, base: String) -> anyhow::Result<Option<LandTa
     }))
 }
 
-/// Move `base` to HEAD. Git refuses a raw ref move on a checked-out branch,
-/// so a base another worktree owns gets a real `--ff-only` merge there — its
-/// index and files advance too. A base checked out nowhere moves with
-/// `branch -f`; HEAD is already known to contain it.
-fn fast_forward_base(cwd: &Path, base: &str) -> anyhow::Result<()> {
+/// Move `base` to HEAD. A base another worktree owns gets a real `--ff-only`
+/// merge there — its index and files advance too. An unchecked base moves with
+/// a compare-and-swap ref update; an external ref move must never be lost.
+fn fast_forward_base(cwd: &Path, base: &str, expected: &str) -> anyhow::Result<()> {
     let head = git_stdout(cwd, &["rev-parse", "HEAD"])?;
-    let checkout = checkouts(cwd)?
+    let checkouts: Vec<_> = checkouts(cwd)?
         .into_iter()
-        .find(|entry| entry.branch.as_deref() == Some(base))
-        .map(|entry| entry.path);
-    match checkout {
-        Some(path) => {
-            git_success(&path, &["merge", "--ff-only", &head])?;
+        .filter(|entry| entry.branch.as_deref() == Some(base))
+        .collect();
+    match checkouts.as_slice() {
+        [checkout] => {
+            git_success(&checkout.path, &["merge", "--ff-only", &head])?;
         }
-        None => {
-            git_success(cwd, &["branch", "-f", base, &head])?;
+        [] => {
+            git_success(
+                cwd,
+                &["update-ref", &format!("refs/heads/{base}"), &head, expected],
+            )?;
         }
+        _ => bail!("the base branch {base:?} is checked out in multiple worktrees"),
     }
     Ok(())
 }
@@ -1443,6 +1451,68 @@ mod tests {
             "other"
         );
         assert!(!repository.join("work.txt").exists());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn land_preserves_an_external_move_of_an_unchecked_base() {
+        let (root, repository, worktree) = land_repository();
+        let expected = git_stdout(&repository, &["rev-parse", "main"]).unwrap();
+        commit_in(&repository, "external.txt", "external\n");
+        let moved = git_stdout(&repository, &["rev-parse", "main"]).unwrap();
+        run_git(&repository, &["switch", "-q", "-c", "other"]);
+        commit_in(&worktree, "work.txt", "session\n");
+
+        assert!(fast_forward_base(&worktree, "main", &expected).is_err());
+        assert_eq!(
+            git_stdout(&repository, &["rev-parse", "main"]).unwrap(),
+            moved
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn concurrent_lands_share_the_worktree_repository_queue() {
+        let (root, repository, worktree) = land_repository();
+        let other = root.join("other-worktree");
+        run_git(
+            &repository,
+            &["worktree", "add", "-q", "--detach", other.to_str().unwrap()],
+        );
+        commit_in(&worktree, "a.txt", "a\n");
+        commit_in(&other, "b.txt", "b\n");
+        let nested = other.join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        #[cfg(unix)]
+        let first_cwd = {
+            let alias = root.join("worktree-alias");
+            std::os::unix::fs::symlink(&worktree, &alias).unwrap();
+            alias
+        };
+        #[cfg(not(unix))]
+        let first_cwd = worktree.clone();
+        let start = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let jobs = [first_cwd, nested].map(|cwd| {
+            let start = start.clone();
+            std::thread::spawn(move || {
+                start.wait();
+                land(&cwd, Some("main"), PullStrategy::Rebase).unwrap()
+            })
+        });
+        start.wait();
+        for job in jobs {
+            assert!(matches!(job.join().unwrap(), LandOutcome::Landed { .. }));
+        }
+        assert!(repository.join("a.txt").exists());
+        assert!(repository.join("b.txt").exists());
+        assert_eq!(
+            git_stdout(&repository, &["status", "--porcelain"]).unwrap(),
+            ""
+        );
+        assert!(matches!(
+            land(&worktree, Some("main"), PullStrategy::Rebase).unwrap(),
+            LandOutcome::AlreadyLanded { .. }
+        ));
         std::fs::remove_dir_all(root).ok();
     }
 

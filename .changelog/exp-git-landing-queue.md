@@ -1,0 +1,1 @@
+- Parallel `/land` and `merge submit` attempts now wait their turn within each repository, preventing competing landings from racing to advance the same base branch.

@@ -564,7 +564,12 @@ async function workspaceRequest(
   operation: WorkspaceOperation,
 ): Promise<WorkspaceResult> {
   const response = expectResponse(
-    await client.request({ type: 'workspace', operation }),
+    await client.request(
+      { type: 'workspace', operation },
+      undefined,
+      undefined,
+      operation.type === 'land' ? { timeoutMs: null } : {},
+    ),
     'workspace',
   )
   return response.result
