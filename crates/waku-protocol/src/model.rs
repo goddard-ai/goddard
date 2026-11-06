@@ -1560,6 +1560,10 @@ pub struct AgentTurn {
     pub status: TurnStatus,
     #[serde(default)]
     pub provider_turn_started: bool,
+    /// First provider acceptance observed for this turn; absent in older history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub provider_started_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_resume_at: Option<String>,
     /// Who ended an `Interrupted` turn — the fold label reads "You
@@ -2830,6 +2834,7 @@ impl AgentSession {
                 turn_count: offset + 1,
                 status: TurnStatus::Completed,
                 provider_turn_started: true,
+                provider_started_at: None,
                 provider_resume_at: None,
                 interruption: None,
                 started_at,
@@ -2877,6 +2882,7 @@ impl AgentSession {
             turn_count: self.turns.len() + 1,
             status: TurnStatus::Running,
             provider_turn_started: false,
+            provider_started_at: None,
             provider_resume_at: None,
             interruption: None,
             started_at: now,
@@ -2921,6 +2927,7 @@ impl AgentSession {
             turn_count: self.turns.len() + 1,
             status: TurnStatus::Running,
             provider_turn_started: false,
+            provider_started_at: None,
             provider_resume_at: None,
             interruption: None,
             started_at: now,
@@ -3024,6 +3031,7 @@ impl AgentSession {
             turn_count: self.turns.len() + 1,
             status: TurnStatus::Running,
             provider_turn_started: false,
+            provider_started_at: None,
             provider_resume_at: None,
             interruption: None,
             started_at: now,
@@ -3132,7 +3140,10 @@ impl AgentSession {
             .last_mut()
             .filter(|turn| turn.status == TurnStatus::Running)
         {
-            turn.provider_turn_started = true;
+            if !turn.provider_turn_started {
+                turn.provider_started_at = Some(unix_time());
+                turn.provider_turn_started = true;
+            }
         }
     }
 
@@ -8870,6 +8881,30 @@ mod tests {
         assert_eq!(session.turns.len(), 1);
         assert_eq!(session.messages.len(), 1);
         assert_eq!(session.status, SessionStatus::Connecting);
+    }
+
+    #[test]
+    fn provider_acceptance_records_once_and_old_turns_still_load() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("Build it");
+        session.turns.last_mut().unwrap().started_at = 1;
+        assert_eq!(session.turns.last().unwrap().provider_started_at, None);
+        session.mark_active_turn_provider_started();
+        let turn = session.turns.last_mut().unwrap();
+        assert!(turn.provider_turn_started);
+        assert!(turn.provider_started_at.unwrap() > turn.started_at);
+        // Further output or repeated start events must not restart the clock.
+        turn.provider_started_at = Some(25);
+        session.mark_active_turn_provider_started();
+        assert_eq!(session.turns.last().unwrap().provider_started_at, Some(25));
+        let mut legacy = serde_json::to_value(session.turns.last().unwrap()).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("provider_started_at");
+        let legacy: AgentTurn = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.provider_turn_started);
+        assert_eq!(legacy.provider_started_at, None);
     }
 
     #[test]

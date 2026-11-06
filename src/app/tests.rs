@@ -6276,6 +6276,78 @@ fn working_elapsed_stays_compact() {
     assert_eq!(format_working_elapsed(3_720), "1h 2m");
 }
 
+#[test]
+fn working_indicator_waits_for_acceptance_and_preserves_preparation() {
+    use super::SubmissionStage;
+    use super::transcript::working_indicator_label;
+
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("Build it");
+    session.status = SessionStatus::Connecting;
+    session.turns.last_mut().unwrap().started_at = 10;
+    for (stage, label) in [
+        (SubmissionStage::Workspace, tr!("routing.workspace")),
+        (SubmissionStage::Checkpoint, tr!("routing.checkpoint")),
+        (SubmissionStage::Routing, tr!("routing.in_progress")),
+        (SubmissionStage::Starting, tr!("composer.starting_agent")),
+    ] {
+        assert_eq!(
+            working_indicator_label(Some(&session), Some(stage), 100),
+            label
+        );
+    }
+    assert_eq!(
+        working_indicator_label(Some(&session), None, 100),
+        tr!("transcript.sending_prompt")
+    );
+    // A connected transport can still be waiting for provider acceptance.
+    session.status = SessionStatus::Working;
+    assert_eq!(
+        working_indicator_label(Some(&session), None, 100),
+        tr!("transcript.sending_prompt")
+    );
+    session.mark_active_turn_provider_started();
+    session.turns.last_mut().unwrap().provider_started_at = Some(100);
+    assert_eq!(
+        working_indicator_label(Some(&session), Some(SubmissionStage::Starting), 102),
+        tr!(
+            "transcript.working_for",
+            duration = format_working_elapsed(2)
+        )
+    );
+    session.status = SessionStatus::Background;
+    assert_eq!(
+        working_indicator_label(Some(&session), None, 102),
+        tr!("transcript.waiting_background")
+    );
+    session.status = SessionStatus::Idle;
+    session.finish_active_turn(TurnStatus::Completed);
+    session.turns.last_mut().unwrap().completed_at = Some(105);
+    assert_eq!(
+        working_indicator_label(Some(&session), None, 200),
+        tr!(
+            "transcript.working_for",
+            duration = format_working_elapsed(5)
+        )
+    );
+    assert_eq!(
+        super::transcript::turn_fold_label(&session, session.turns.last().unwrap().id),
+        tr!(
+            "transcript.worked_for",
+            duration = format_worked_duration(5)
+        )
+    );
+    // History without an acceptance time retains its previous duration.
+    session.turns.last_mut().unwrap().provider_started_at = None;
+    assert_eq!(
+        working_indicator_label(Some(&session), None, 200),
+        tr!(
+            "transcript.working_for",
+            duration = format_working_elapsed(95)
+        )
+    );
+}
+
 /// The working indicator is on screen for the whole live turn: from before
 /// the first chunk, below streamed content once chunks arrive, through the
 /// permission pause — and gone the moment the session stops being busy.

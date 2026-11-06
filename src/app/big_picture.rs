@@ -1787,21 +1787,13 @@ impl Waku {
         session: &AgentSession,
         theme: &Theme,
     ) -> AnyElement {
-        let elapsed = session
-            .turns
-            .last()
-            .filter(|turn| turn.status == TurnStatus::Running)
-            .map(|turn| unix_time().saturating_sub(turn.started_at))
-            .unwrap_or(0);
-        // A parked turn is waiting on detached work, not working.
-        let label = if session.status == SessionStatus::Background {
-            tr!("transcript.waiting_background")
-        } else {
-            tr!(
-                "transcript.working_for",
-                duration = format_working_elapsed(elapsed)
-            )
-        };
+        let label = working_indicator_label(
+            Some(session),
+            self.submission_stages
+                .get(&session.id)
+                .map(|slot| SubmissionStage::current(slot)),
+            unix_time(),
+        );
         div()
             .h(px(22.0))
             .flex()

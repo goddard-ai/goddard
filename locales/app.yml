@@ -4992,6 +4992,8 @@ transcript.you_stopped_after:
   en: You stopped after %{duration}
 transcript.interrupted_after:
   en: Interrupted after %{duration}
+transcript.sending_prompt:
+  en: Sending prompt…
 transcript.working_for:
   en: Working for %{duration}
 transcript.checking_changes:

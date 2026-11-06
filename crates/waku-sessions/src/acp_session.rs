@@ -138,6 +138,7 @@ pub fn history_from_updates(
                     turn_count: history.turns.len() + 1,
                     status: TurnStatus::Completed,
                     provider_turn_started: true,
+                    provider_started_at: None,
                     provider_resume_at: None,
                     interruption: None,
                     started_at: at.unwrap_or(fallback),

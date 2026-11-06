@@ -405,6 +405,7 @@ fn history_from_session(provider: ProviderKind, session: &ParsedSession) -> Prov
                 turn_count: history.turns.len() + 1,
                 status: TurnStatus::Interrupted,
                 provider_turn_started: true,
+                provider_started_at: None,
                 provider_resume_at: None,
                 interruption: Some(TurnInterruption::Provider),
                 started_at: entry.timestamp,

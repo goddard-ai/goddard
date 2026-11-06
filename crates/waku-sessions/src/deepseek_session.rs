@@ -129,6 +129,7 @@ fn start_import_turn(history: &mut ProviderSessionHistory, timestamp: u64) -> Uu
         turn_count: history.turns.len() + 1,
         status: TurnStatus::Interrupted,
         provider_turn_started: true,
+        provider_started_at: None,
         provider_resume_at: None,
         interruption: Some(TurnInterruption::Provider),
         started_at: timestamp,

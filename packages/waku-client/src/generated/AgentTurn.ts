@@ -3,7 +3,11 @@ import type { Checkpoint } from "./Checkpoint";
 import type { TurnInterruption } from "./TurnInterruption";
 import type { TurnStatus } from "./TurnStatus";
 
-export type AgentTurn = { id: string, turn_count: number, status: TurnStatus, provider_turn_started: boolean, provider_resume_at?: string | null,
+export type AgentTurn = { id: string, turn_count: number, status: TurnStatus, provider_turn_started: boolean,
+/**
+ * First provider acceptance observed for this turn; absent in older history.
+ */
+provider_started_at?: number, provider_resume_at?: string | null,
 /**
  * Who ended an `Interrupted` turn — the fold label reads "You
  * stopped" only when the person did. `None` predates the field;

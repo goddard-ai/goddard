@@ -4199,6 +4199,7 @@ mod tests {
             turn_count: 4,
             status: TurnStatus::Completed,
             provider_turn_started: true,
+            provider_started_at: None,
             provider_resume_at: None,
             interruption: None,
             started_at: 10,

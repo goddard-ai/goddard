@@ -321,6 +321,7 @@ fn parse_session_history(response: &Value) -> ProviderSessionHistory {
             turn_count: history.turns.len() + 1,
             status,
             provider_turn_started: true,
+            provider_started_at: None,
             provider_resume_at: None,
             interruption: (status == TurnStatus::Interrupted).then_some(TurnInterruption::Provider),
             started_at,

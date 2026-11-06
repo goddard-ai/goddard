@@ -1,0 +1,1 @@
+- Task transcripts show “Sending prompt…” until the provider accepts the prompt, with working time starting at acceptance and preparation progress still shown.

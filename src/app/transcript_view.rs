@@ -3931,21 +3931,6 @@ impl Waku {
             .working_indicator_fade
             .get()
             .filter(|fade| session.is_some_and(|session| session.id == fade.session_id));
-        let elapsed = session
-            .and_then(|session| session.turns.last())
-            .map(|turn| {
-                if fade.is_some() {
-                    // The turn already settled; hold the label at its final
-                    // duration for the fade.
-                    turn.completed_at.unwrap_or_else(unix_time)
-                } else if turn.status == TurnStatus::Running {
-                    unix_time()
-                } else {
-                    turn.started_at
-                }
-                .saturating_sub(turn.started_at)
-            })
-            .unwrap_or(0);
         // A sandboxed launch spends its Connecting window building the guest;
         // name that work instead of the ordinary working/routing labels.
         let setup = session
@@ -3971,26 +3956,13 @@ impl Waku {
                 ),
                 crate::model::SandboxSetupStatus::Ready => unreachable!("cleared on store"),
             }
-        } else if session.is_some_and(|session| session.status == SessionStatus::Background) {
-            tr!("transcript.waiting_background")
-        } else if session.is_some_and(|session| {
-            session.status == SessionStatus::Connecting
-                && session.auto_route
-                && session.route_decision.is_none()
-        }) {
-            match session
-                .and_then(|session| self.submission_stages.get(&session.id))
-                .map(|slot| SubmissionStage::current(slot))
-            {
-                Some(SubmissionStage::Checkpoint) => tr!("routing.checkpoint"),
-                Some(SubmissionStage::Routing) => tr!("routing.in_progress"),
-                Some(SubmissionStage::Starting) => tr!("composer.starting_agent"),
-                _ => tr!("routing.workspace"),
-            }
         } else {
-            tr!(
-                "transcript.working_for",
-                duration = format_working_elapsed(elapsed)
+            working_indicator_label(
+                session,
+                session
+                    .and_then(|session| self.submission_stages.get(&session.id))
+                    .map(|slot| SubmissionStage::current(slot)),
+                unix_time(),
             )
         };
         let row = div()

@@ -24,6 +24,38 @@ pub(super) fn display_message_content(message: &Message) -> String {
     visible
 }
 
+/// Preparation owns the label until dispatch, then only provider evidence
+/// changes sending to working. A connection alone does not accept a prompt.
+pub(super) fn working_indicator_label(
+    session: Option<&AgentSession>,
+    stage: Option<SubmissionStage>,
+    now: u64,
+) -> String {
+    if session.is_some_and(|session| session.status == SessionStatus::Background) {
+        return tr!("transcript.waiting_background");
+    }
+    let turn = session.and_then(|session| session.turns.last());
+    if turn.is_some_and(|turn| !turn.provider_turn_started) {
+        return match stage {
+            Some(SubmissionStage::Workspace) => tr!("routing.workspace"),
+            Some(SubmissionStage::Checkpoint) => tr!("routing.checkpoint"),
+            Some(SubmissionStage::Routing) => tr!("routing.in_progress"),
+            Some(SubmissionStage::Starting) => tr!("composer.starting_agent"),
+            None => tr!("transcript.sending_prompt"),
+        };
+    }
+    let elapsed = turn
+        .map(|turn| {
+            let end = turn.completed_at.unwrap_or(now);
+            end.saturating_sub(turn.provider_started_at.unwrap_or(turn.started_at))
+        })
+        .unwrap_or(0);
+    tr!(
+        "transcript.working_for",
+        duration = format_working_elapsed(elapsed)
+    )
+}
+
 impl Waku {
     /// One list row per message plus each ordered non-message turn block.
     pub(super) fn transcript_row_count(&self) -> usize {
@@ -2163,7 +2195,7 @@ pub(super) fn turn_fold_label(session: &AgentSession, turn_id: Uuid) -> String {
     let seconds = turn
         .completed_at
         .unwrap_or_else(unix_time)
-        .saturating_sub(turn.started_at)
+        .saturating_sub(turn.provider_started_at.unwrap_or(turn.started_at))
         .max(1);
     let duration = format_worked_duration(seconds);
     if turn.status == TurnStatus::Interrupted {
