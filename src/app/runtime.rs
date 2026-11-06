@@ -645,6 +645,12 @@ fn merge_session_catalog_row(
     local.metadata_revision = local.metadata_revision.max(remote.metadata_revision);
     local.agent_rename_allowed = remote.agent_rename_allowed;
     local.title = remote.title;
+    local.auto_title_is_prompt = if remote.detail_loaded {
+        remote.auto_title_is_prompt
+    } else {
+        local.auto_title == remote.auto_title
+            && (local.auto_title_is_prompt || remote.auto_title_is_prompt)
+    };
     local.auto_title = remote.auto_title;
     local.project_id = remote.project_id;
     // A snapshot that predates the confirmed activation cannot own

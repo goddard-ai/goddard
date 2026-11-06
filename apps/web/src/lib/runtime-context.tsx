@@ -977,6 +977,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             && !optimisticSession.messages.some((message) => message.role === 'user')
           ) {
             optimisticSession.auto_title = objective.split(/\s+/u).filter(Boolean).slice(0, 7).join(' ') || null
+            optimisticSession.auto_title_is_prompt = Boolean(optimisticSession.auto_title)
           }
           optimisticSession.messages.push({
             id: crypto.randomUUID(),

@@ -273,6 +273,10 @@ pub(super) fn merge_session_list_columns(
     }
     existing.metadata_revision = existing.metadata_revision.max(incoming.metadata_revision);
     existing.title = incoming.title;
+    // Placeholder provenance lives in detail, not SQLite list columns.
+    // A list-only save can invalidate it by changing the title, but cannot
+    // supply a replacement value.
+    existing.auto_title_is_prompt &= existing.auto_title == incoming.auto_title;
     existing.auto_title = incoming.auto_title;
     existing.agent_rename_allowed = incoming.agent_rename_allowed;
     existing.project_id = incoming.project_id;

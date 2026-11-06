@@ -85,6 +85,7 @@ pub struct TaskMetadataUpdate {
 pub struct TaskMetadata {
     title: String,
     auto_title: Option<String>,
+    auto_title_is_prompt: bool,
     agent_rename_allowed: bool,
     archived_at: Option<u64>,
     pinned_at: Option<u64>,
@@ -97,6 +98,7 @@ impl TaskMetadata {
         Self {
             title: session.title.clone(),
             auto_title: session.auto_title.clone(),
+            auto_title_is_prompt: session.auto_title_is_prompt,
             agent_rename_allowed: session.agent_rename_allowed,
             archived_at: session.archived_at,
             pinned_at: session.pinned_at,
@@ -108,6 +110,7 @@ impl TaskMetadata {
     pub fn apply(self, session: &mut AgentSession) {
         session.title = self.title;
         session.auto_title = self.auto_title;
+        session.auto_title_is_prompt = self.auto_title_is_prompt;
         session.agent_rename_allowed = self.agent_rename_allowed;
         session.archived_at = self.archived_at;
         session.pinned_at = self.pinned_at;

@@ -10,6 +10,9 @@ export function reconcileSavedSession(local: AgentSession, saved?: AgentSession)
     metadata_revision: metadata.metadata_revision,
     title: metadata.title,
     auto_title: metadata.auto_title,
+    auto_title_is_prompt: metadata.detail_loaded !== false
+      ? metadata.auto_title_is_prompt
+      : local.auto_title === metadata.auto_title && local.auto_title_is_prompt,
     agent_rename_allowed: metadata.agent_rename_allowed,
     pinned_at: metadata.pinned_at,
     archived_at: metadata.archived_at,

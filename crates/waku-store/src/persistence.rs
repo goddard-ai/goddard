@@ -2878,6 +2878,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         metadata_revision: u64::try_from(metadata_revision).ok()?,
         title,
         auto_title,
+        auto_title_is_prompt: false,
         project_id: Uuid::parse_str(&project_id).ok()?,
         workspace,
         workspace_moved_from: None,
@@ -2953,6 +2954,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
 pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
     // Resolved before the field moves — `environment()` borrows `stored`.
     let stored_environment = stored.environment();
+    session.auto_title_is_prompt =
+        session.auto_title == stored.auto_title && stored.auto_title_is_prompt;
     session.transcript_blocks = stored.transcript_blocks;
     session.turns = stored.turns;
     session.queued_messages = stored.queued_messages;
@@ -4820,6 +4823,35 @@ mod tests {
         assert_eq!(restored.sessions[0].config_activation, Some(activation));
         assert_eq!(restored.sessions[0].metadata_revision, 8);
 
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn provider_title_placeholder_replacement_survives_reload() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        state.sessions[0].begin_turn("Fix image attachment paths");
+        state.sessions[0].set_title_from_prompt("Fix image attachment paths");
+        store.save(&mut state).unwrap();
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        reopened.hydrate(&mut restored.sessions[0]).unwrap();
+        assert!(restored.sessions[0].auto_title_is_prompt);
+        assert!(restored.sessions[0].set_provider_title(Some("Repair image attachments".into())));
+        restored.mark_session_dirty(restored.sessions[0].id);
+        reopened.save(&mut restored).unwrap();
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        reopened.hydrate(&mut restored.sessions[0]).unwrap();
+        assert!(!restored.sessions[0].auto_title_is_prompt);
+        assert!(!restored.sessions[0].set_provider_title(Some("Proceed With Current Task".into())));
+        assert_eq!(
+            restored.sessions[0].display_title(),
+            "Repair image attachments"
+        );
         fs::remove_dir_all(directory).ok();
     }
 

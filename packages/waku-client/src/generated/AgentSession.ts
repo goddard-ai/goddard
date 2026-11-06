@@ -36,7 +36,12 @@ title: string,
  * Best-effort title supplied by the provider, or derived locally from the
  * first prompt until the provider reports a better one.
  */
-auto_title?: string | null, project_id: string,
+auto_title?: string | null,
+/**
+ * The automatic title is still the replaceable first-prompt placeholder.
+ * Missing on older records: conservatively preserve their existing title.
+ */
+auto_title_is_prompt?: boolean, project_id: string,
 /**
  * Local project checkout or an isolated Git worktree for this task.
  */

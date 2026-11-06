@@ -1817,6 +1817,10 @@ pub struct AgentSession {
     /// first prompt until the provider reports a better one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_title: Option<String>,
+    /// The automatic title is still the replaceable first-prompt placeholder.
+    /// Missing on older records: conservatively preserve their existing title.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_title_is_prompt: bool,
     pub project_id: Uuid,
     /// Local project checkout or an isolated Git worktree for this task.
     #[serde(default, skip_serializing_if = "SessionWorkspace::is_local")]
@@ -2098,6 +2102,7 @@ impl AgentSession {
             id: Uuid::new_v4(),
             title: Self::DEFAULT_TITLE.to_owned(),
             auto_title: None,
+            auto_title_is_prompt: false,
             project_id,
             workspace: SessionWorkspace::Local,
             workspace_moved_from: None,
@@ -2162,6 +2167,7 @@ impl AgentSession {
             metadata_revision: self.metadata_revision,
             title: self.title.clone(),
             auto_title: self.auto_title.clone(),
+            auto_title_is_prompt: self.auto_title_is_prompt,
             project_id: self.project_id,
             // List columns: rows label the sending friend without hydrating.
             friend_peer_id: self.friend_peer_id.clone(),
@@ -2669,16 +2675,25 @@ impl AgentSession {
                 title = format!("{}…", title.chars().take(53).collect::<String>());
             }
             self.auto_title = Some(title);
+            self.auto_title_is_prompt = true;
         }
     }
 
-    /// Accepts a provider title only while the task still displays its default
-    /// name. Prompt-derived, generated, and explicit titles all take precedence.
+    /// Accepts one provider title while the task is unnamed or still displays
+    /// its first-prompt placeholder. Invalid or empty updates do not consume it.
     pub fn set_provider_title(&mut self, title: Option<String>) -> bool {
-        if self.display_title() != Self::DEFAULT_TITLE {
+        if self.title != Self::DEFAULT_TITLE && !self.title.trim().is_empty() {
             return false;
         }
-        self.set_auto_title(title)
+        if self.display_title() != Self::DEFAULT_TITLE && !self.auto_title_is_prompt {
+            return false;
+        }
+        let Some(title) = title else { return false };
+        let title = strip_injected_prompt_blocks(&title);
+        if title.is_empty() || title == Self::DEFAULT_TITLE {
+            return false;
+        }
+        self.set_auto_title(Some(title))
     }
 
     /// Replaces the automatic title without disturbing an explicit user title.
@@ -2689,7 +2704,8 @@ impl AgentSession {
             let title = strip_injected_prompt_blocks(&title);
             (!title.is_empty()).then_some(title)
         });
-        if self.auto_title == title {
+        let was_prompt = std::mem::take(&mut self.auto_title_is_prompt);
+        if self.auto_title == title && !was_prompt {
             return false;
         }
         self.auto_title = title;
@@ -2707,6 +2723,7 @@ impl AgentSession {
             return false;
         };
         self.title = title;
+        self.auto_title_is_prompt = false;
         self.updated_at = unix_time();
         true
     }
@@ -3141,6 +3158,7 @@ impl AgentSession {
             .retain(|message| message.turn_id != Some(turn_id));
         if self.messages.is_empty() {
             self.auto_title = None;
+            self.auto_title_is_prompt = false;
         }
     }
 
@@ -3371,6 +3389,7 @@ impl AgentSession {
         // The fork is the user's ordinary task, whatever its source was.
         fork.boss_managed = false;
         fork.auto_title = Some(fork_title.to_owned());
+        fork.auto_title_is_prompt = false;
         fork.status = SessionStatus::Idle;
         fork.created_at = now;
         fork.updated_at = now;
@@ -4693,7 +4712,8 @@ pub enum DriverEvent {
     /// not name one explicitly, so the driver reports the resolved value.
     AgentPresetSelected(Option<String>),
     /// A provider-owned, automatically generated session title. Accepted only
-    /// while the task displays its default name; later updates are ignored.
+    /// while the task displays its default name or first-prompt placeholder;
+    /// later updates are ignored.
     AutoTitleUpdated(Option<String>),
     /// The slash commands the live process itself reports — Claude's
     /// stream-json init handshake and ACP's `available_commands_update`.
@@ -7582,10 +7602,16 @@ mod tests {
         assert!(!session.set_provider_title(None));
         assert_eq!(session.display_title(), "Fix provider title events");
         assert_eq!(session.updated_at, updated_at);
+
+        let mut placeholder = AgentSession::new(project.id, ProviderKind::OpenCode);
+        placeholder.set_title_from_prompt("investigate the broken provider event");
+        assert!(placeholder.set_provider_title(Some("Fix provider title events".into())));
+        assert_eq!(placeholder.display_title(), "Fix provider title events");
+        assert!(!placeholder.set_provider_title(Some("Proceed With Current Task".into())));
     }
 
     #[test]
-    fn provider_titles_preserve_prompt_inferred_and_explicit_titles() {
+    fn provider_titles_replace_prompt_placeholders_once_and_preserve_explicit_titles() {
         let project = Project::from_path(PathBuf::from("/tmp/waku"));
         for explicit in [false, true] {
             let mut session = AgentSession::new(project.id, ProviderKind::OpenCode);
@@ -7594,6 +7620,16 @@ mod tests {
                 assert!(session.set_title_from_user("  My title  "));
                 assert!(!session.set_title("   "));
                 assert_eq!(session.display_title(), "My title");
+            }
+            if !explicit {
+                assert!(!session.set_provider_title(None));
+                assert!(!session.set_provider_title(Some("   ".into())));
+                // Even a provider title identical to the placeholder consumes
+                // the one-time replacement, and that fact survives reload.
+                let placeholder = session.auto_title.clone();
+                assert!(session.set_provider_title(placeholder));
+                session = serde_json::from_value(serde_json::to_value(&session).unwrap()).unwrap();
+                assert!(!session.auto_title_is_prompt);
             }
             let title = session.display_title().to_owned();
             let fallback = session.auto_title.clone();

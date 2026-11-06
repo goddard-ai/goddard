@@ -655,6 +655,7 @@ impl Waku {
                     session.updated_at = unix_time();
                     if let Some(title) = title {
                         session.auto_title = Some(title);
+                        session.auto_title_is_prompt = false;
                     }
                     dirty = true;
                 }

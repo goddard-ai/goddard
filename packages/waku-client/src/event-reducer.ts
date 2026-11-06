@@ -190,12 +190,14 @@ export function reduceRuntimeEvent(
       session.agent_preset = typeof payload === 'string' ? payload : null
       break
     case 'autoTitleUpdated': {
-      // Match AgentSession::set_provider_title: existing automatic and
-      // explicit names both take precedence over provider metadata.
+      // Match AgentSession::set_provider_title: only the initial prompt
+      // placeholder may be replaced; generated and explicit names are final.
       if (session.title.trim() && session.title !== 'New task') break
-      if (session.auto_title?.trim() && session.auto_title !== 'New task') break
+      if (session.auto_title?.trim() && session.auto_title !== 'New task' && !session.auto_title_is_prompt) break
       const title = typeof payload === 'string' ? stripInjectedPromptBlocks(payload) : ''
-      session.auto_title = title || null
+      if (!title || title === 'New task') break
+      session.auto_title = title
+      session.auto_title_is_prompt = false
       break
     }
     case 'availableCommands':
@@ -793,6 +795,7 @@ function setTitleFromPrompt(session: AgentSession, prompt: string) {
   if (!title) return
   if ([...title].length > 54) title = `${[...title].slice(0, 53).join('')}…`
   session.auto_title = title
+  session.auto_title_is_prompt = true
 }
 
 function activeTurn(session: AgentSession) {
