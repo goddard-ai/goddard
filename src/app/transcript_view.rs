@@ -326,6 +326,7 @@ impl Waku {
         let commit_popover = self.render_transcript_commit_popover(cx);
         let boss_lifecycle = self.render_boss_lifecycle_status(cx);
         let daemon_request = self.render_daemon_request(cx);
+        let employee_requests = self.render_employee_requests(window, cx);
         let transcript_rows = self.active_transcript_rows().clone();
         // A scrollbar drag owns the position for as long as it lasts, and the
         // bar writes offsets straight into the list rather than through its
@@ -553,6 +554,7 @@ impl Waku {
                 let strip = [boss_lifecycle, daemon_request]
                     .into_iter()
                     .flatten()
+                    .chain(employee_requests)
                     .collect::<Vec<_>>();
                 (!strip.is_empty()).then(|| {
                     div()
@@ -595,11 +597,30 @@ impl Waku {
     /// the user answers or the daemon settles the request, whichever happens
     /// first.
     fn render_daemon_request(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session_id = self.state.selected_session?;
         let permission = self
             .selected_runtime()?
             .pending_daemon_request
             .as_ref()?
             .clone();
+        Some(
+            div()
+                .id("daemon-request-layer")
+                .child(self.daemon_request_card(session_id, &permission, None, cx))
+                .into_any_element(),
+        )
+    }
+
+    /// A daemon request's options card, shared by the selected session's
+    /// pinned request and a supervisor's inline employee card. Actions are
+    /// bound to the owning session and request id.
+    fn daemon_request_card(
+        &self,
+        session_id: Uuid,
+        permission: &PendingPermission,
+        attribution: Option<Div>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let request_id = permission.request_id.clone();
         // Escape answers with the first deny option — a real response, not
@@ -616,13 +637,16 @@ impl Waku {
             let option_id = option.id.clone();
             let allow = option.allow;
             let focus = self.transcript_control_focus(
-                format!("daemon-request-{}-{}", permission.request_id, option.id),
+                format!(
+                    "daemon-request-{session_id}-{}-{}",
+                    permission.request_id, option.id
+                ),
                 cx,
             );
             buttons = buttons.child(
                 div()
                     .id(SharedString::from(format!(
-                        "daemon-request-{}-{}",
+                        "daemon-request-{session_id}-{}-{}",
                         permission.request_id, option.id
                     )))
                     .track_focus(&focus)
@@ -662,81 +686,238 @@ impl Waku {
                             .unwrap_or_else(|| option.label.clone()),
                     ))
                     .on_activation(cx, move |this, _, cx| {
-                        this.respond_daemon_request(request_id.clone(), option_id.clone(), cx);
+                        this.respond_daemon_request(
+                            session_id,
+                            request_id.clone(),
+                            option_id.clone(),
+                            cx,
+                        );
                     }),
             );
         }
         let deny_request_id = request_id.clone();
-        Some(
-            div()
-                .id("daemon-request-layer")
-                .child(
-                    div()
-                        .id("daemon-request")
-                        .w_full()
-                        .max_w(px(CONTENT_MAX_WIDTH))
-                        .mx_auto()
-                        .p(px(12.0))
-                        .rounded(px(15.0))
-                        .border(hairline())
-                        .border_color(theme.border_subtle)
-                        .bg(theme.raised)
-                        .shadow_md()
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                            if event.keystroke.key == "escape"
-                                && let Some(option_id) = deny_option.clone()
-                            {
-                                this.respond_daemon_request(deny_request_id.clone(), option_id, cx);
-                                cx.stop_propagation();
-                            }
-                        }))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .child(icon("icons/alert.svg", 13.0, theme.warning))
-                                .child(
-                                    div()
-                                        .text_size(sp(12.5))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text)
-                                        .child(SharedString::from(
-                                            permission
-                                                .title_i18n
-                                                .as_ref()
-                                                .map(waku_client::WireTranslation::render)
-                                                .unwrap_or_else(|| permission.title.clone()),
-                                        )),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .id("daemon-request-detail")
-                                .mt(px(8.0))
-                                .max_h(px(92.0))
-                                .overflow_y_scroll()
-                                .p(px(8.0))
-                                .rounded(px(9.0))
-                                .bg(theme.inset)
-                                .font_family(crate::fonts::current(cx).code)
-                                .text_size(sp(12.5))
-                                .line_height(sp(16.0))
-                                .text_color(theme.text_secondary)
-                                .whitespace_normal()
-                                .child(SharedString::from(
-                                    permission
-                                        .detail_i18n
-                                        .as_ref()
-                                        .map(waku_client::WireTranslation::render)
-                                        .unwrap_or_else(|| permission.detail.clone()),
-                                )),
-                        )
-                        .child(buttons),
-                )
-                .into_any_element(),
+        div()
+            .id(SharedString::from(format!(
+                "daemon-request-{session_id}-{}",
+                permission.request_id
+            )))
+            .w_full()
+            .max_w(px(CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .p(px(12.0))
+            .rounded(px(15.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.raised)
+            .shadow_md()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape"
+                    && let Some(option_id) = deny_option.clone()
+                {
+                    this.respond_daemon_request(session_id, deny_request_id.clone(), option_id, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .children(attribution)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(icon("icons/alert.svg", 13.0, theme.warning))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(SharedString::from(
+                                permission
+                                    .title_i18n
+                                    .as_ref()
+                                    .map(waku_client::WireTranslation::render)
+                                    .unwrap_or_else(|| permission.title.clone()),
+                            )),
+                    ),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!(
+                        "daemon-request-detail-{session_id}-{}",
+                        permission.request_id
+                    )))
+                    .mt(px(8.0))
+                    .max_h(px(92.0))
+                    .overflow_y_scroll()
+                    .p(px(8.0))
+                    .rounded(px(9.0))
+                    .bg(theme.inset)
+                    .font_family(crate::fonts::current(cx).code)
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_secondary)
+                    .whitespace_normal()
+                    .child(SharedString::from(
+                        permission
+                            .detail_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| permission.detail.clone()),
+                    )),
+            )
+            .child(buttons)
+    }
+
+    /// The free-text field an employee question card edits, created lazily
+    /// per session — the shared `user_input_answer` belongs to the selected
+    /// session's card, so each employee's mounts its own.
+    fn employee_answer_input(
+        &mut self,
+        session_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TextInput> {
+        if let Some(input) = self.employee_input_answers.get(&session_id) {
+            return input.clone();
+        }
+        let input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .accessibility_label(tr!("a11y.answer"))
+                .placeholder(tr!("user_input.other_placeholder"))
+        });
+        cx.subscribe(
+            &input,
+            move |this: &mut Self, input, event: &InputEvent, cx| match event {
+                InputEvent::Submit(answer) => {
+                    this.submit_user_input_custom_answer(session_id, answer.clone(), cx);
+                }
+                InputEvent::Edited => {
+                    let answer = input.read(cx).content().to_owned();
+                    this.update_user_input_custom_answer(session_id, answer, cx);
+                }
+                InputEvent::Focus
+                | InputEvent::BackspaceOnEmpty
+                | InputEvent::InlineAtomClicked(_)
+                | InputEvent::InlineAtomActivated(_) => {}
+            },
         )
+        .detach();
+        self.employee_input_answers
+            .insert(session_id, input.clone());
+        input
+    }
+
+    /// Pending approvals an employee's supervisor can answer without
+    /// leaving this transcript — rendered as pinned overlay cards like the
+    /// daemon request, so an ask never hides behind a scroll position or a
+    /// task switch. Each card names its employee and binds its actions to
+    /// the employee session's own runtime, so the answer resolves the
+    /// original request wherever it was raised.
+    fn render_employee_requests(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let Some(selected) = self.state.selected_session else {
+            return Vec::new();
+        };
+        // Answer fields for requests that settled or vanished go with them.
+        let keep: HashSet<Uuid> = self
+            .employee_input_answers
+            .keys()
+            .copied()
+            .filter(|session_id| {
+                self.runtimes
+                    .get(session_id)
+                    .is_some_and(|runtime| runtime.pending_user_input.is_some())
+            })
+            .collect();
+        self.employee_input_answers
+            .retain(|session_id, _| keep.contains(session_id));
+        // Every live roster entry supervised by the session on screen.
+        // `resolve_boss_chat_session` follows a boss rotation so an
+        // employee summoned by a retired chat still reports to its
+        // replacement.
+        let mut employees: Vec<(Uuid, String, String)> = Vec::new();
+        let mut seen = HashSet::new();
+        for state in self.boss_ui.states.values() {
+            for employee in &state.employees {
+                if employee.expired()
+                    || !seen.insert(employee.session_id)
+                    || self.resolve_boss_chat_session(employee.supervisor_id) != selected
+                {
+                    continue;
+                }
+                employees.push((
+                    employee.session_id,
+                    employee.identity.name.clone(),
+                    employee.job_title.clone(),
+                ));
+            }
+        }
+        let mut cards: Vec<AnyElement> = Vec::new();
+        for (session_id, name, job_title) in employees {
+            let Some(runtime) = self.runtimes.get(&session_id) else {
+                continue;
+            };
+            let daemon = runtime.pending_daemon_request.clone();
+            // One interactive card per employee — the same precedence the
+            // session's own composer lane gives a pending question, a
+            // computer approval, then a provider permission.
+            enum Primary {
+                Questions(PendingUserInput),
+                Computer(PendingComputerApproval),
+                Permission(PendingPermission),
+            }
+            let primary = runtime
+                .pending_user_input
+                .clone()
+                .map(Primary::Questions)
+                .or_else(|| {
+                    runtime
+                        .pending_computer_approval
+                        .clone()
+                        .map(Primary::Computer)
+                })
+                .or_else(|| runtime.pending_permission.clone().map(Primary::Permission));
+            if daemon.is_none() && primary.is_none() {
+                continue;
+            }
+            if let Some(permission) = daemon {
+                let attribution = self.employee_attribution(&name, &job_title, cx);
+                cards.push(
+                    self.daemon_request_card(session_id, &permission, Some(attribution), cx)
+                        .into_any_element(),
+                );
+            }
+            let Some(primary) = primary else {
+                continue;
+            };
+            let attribution = self.employee_attribution(&name, &job_title, cx);
+            let card = match primary {
+                Primary::Questions(pending) => {
+                    let input = self.employee_answer_input(session_id, window, cx);
+                    self.render_user_input(session_id, pending, input, Some(attribution), cx)
+                        .into_any_element()
+                }
+                Primary::Computer(pending) => self
+                    .render_computer_permission(session_id, &pending, Some(attribution), cx)
+                    .into_any_element(),
+                Primary::Permission(pending) => self
+                    .permission_request_card(session_id, &pending, Some(attribution), cx)
+                    .into_any_element(),
+            };
+            // The card floats over transcript rows — keep its clicks out of
+            // the selection surface the way the daemon request does.
+            cards.push(
+                div()
+                    .id(SharedString::from(format!("employee-request-{session_id}")))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(card)
+                    .into_any_element(),
+            );
+        }
+        cards
     }
 
     /// The Boss chat's lifecycle banner — a transcript-top overlay like

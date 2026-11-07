@@ -1563,7 +1563,7 @@ impl Waku {
             if !deliverable_page_dropped {
                 self.restore_selected_composer_draft(cx);
             }
-            self.sync_user_input_answer(cx);
+            self.sync_user_input_answer(session_id, cx);
             self.restore_missing_worktree(session_id, cx);
             // An open Git panel follows the newly selected session's checkout.
             self.sync_git_panel_workspace(cx);
@@ -5727,20 +5727,22 @@ impl Waku {
         // with the deny option is a real response, not a hide, so the
         // parked CLI call settles instead of hanging on a card the user
         // can no longer see.
-        let daemon_deny = self
-            .selected_runtime()
-            .and_then(|runtime| runtime.pending_daemon_request.as_ref())
-            .and_then(|pending| {
-                pending
-                    .options
-                    .iter()
-                    .find(|option| !option.allow)
-                    .map(|option| (pending.request_id.clone(), option.id.clone()))
-            });
+        let daemon_deny = self.state.selected_session.and_then(|session_id| {
+            self.runtimes
+                .get(&session_id)
+                .and_then(|runtime| runtime.pending_daemon_request.as_ref())
+                .and_then(|pending| {
+                    pending
+                        .options
+                        .iter()
+                        .find(|option| !option.allow)
+                        .map(|option| (session_id, pending.request_id.clone(), option.id.clone()))
+                })
+        });
         if !action.immediate
-            && let Some((request_id, option_id)) = daemon_deny
+            && let Some((session_id, request_id, option_id)) = daemon_deny
         {
-            self.respond_daemon_request(request_id, option_id, cx);
+            self.respond_daemon_request(session_id, request_id, option_id, cx);
             return;
         }
         // Bare Escape drops the sidebar's multi-selection before it arms the
@@ -7618,24 +7620,33 @@ impl Waku {
         cx.notify();
     }
 
+    /// Answer a pending permission on the session the card belongs to.
+    /// Approval cards are rendered wherever a supervisor surfaces them —
+    /// including a Boss transcript listing its employees — so the session
+    /// travels with the action rather than being read from the selection,
+    /// and a card whose request was already settled or superseded answers
+    /// nothing: the runtime's pending request must still be this one.
     pub(super) fn respond_permission(
         &mut self,
+        session_id: Uuid,
         request_id: String,
         option_id: String,
         cx: &mut Context<Self>,
     ) {
         let computer_approval =
             waku_protocol::computer_use::ComputerApprovalId::decode(&request_id);
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
         let provider = self
             .state
             .sessions
             .iter()
             .find(|session| session.id == session_id)
             .map(|session| session.provider.id());
-        let decision = if let Some(runtime) = self.runtimes.get_mut(&session_id) {
+        let decision = if let Some(runtime) = self.runtimes.get_mut(&session_id)
+            && runtime
+                .pending_permission
+                .as_ref()
+                .is_some_and(|pending| pending.request_id == request_id)
+        {
             let decision = runtime
                 .pending_permission
                 .as_ref()
@@ -7655,7 +7666,10 @@ impl Waku {
         } else {
             None
         };
-        if let (Some(provider), Some(decision)) = (provider, decision) {
+        let Some(decision) = decision else {
+            return;
+        };
+        if let Some(provider) = provider {
             self.analytics
                 .track(crate::analytics::Event::PermissionResponded {
                     provider,
@@ -7682,7 +7696,7 @@ impl Waku {
             }
             self.save();
         }
-        if let Some(session) = self.selected_session_mut() {
+        if let Some(session) = self.state.session_mut(session_id) {
             session.status = SessionStatus::Working;
         }
         cx.notify();
@@ -7695,13 +7709,11 @@ impl Waku {
     /// daemon's `RequestSettled`.
     pub(super) fn respond_daemon_request(
         &mut self,
+        session_id: Uuid,
         request_id: String,
         option_id: String,
         cx: &mut Context<Self>,
     ) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
         let provider = self
             .state
             .sessions
@@ -7711,6 +7723,15 @@ impl Waku {
         let Some(runtime) = self.runtimes.get_mut(&session_id) else {
             return;
         };
+        // A card for a superseded request answers nothing — the parked
+        // daemon waiter it names must still be the pending one.
+        if runtime
+            .pending_daemon_request
+            .as_ref()
+            .is_none_or(|pending| pending.request_id != request_id)
+        {
+            return;
+        }
         let decision = runtime
             .pending_daemon_request
             .as_ref()
@@ -7742,9 +7763,27 @@ impl Waku {
         cx.notify();
     }
 
-    pub(super) fn sync_user_input_answer(&mut self, cx: &mut Context<Self>) {
+    /// The free-text answer field a session's question card edits — the
+    /// shared composer-adjacent input for the selected session, the card's
+    /// own entity for a supervisor-surfaced employee request.
+    fn user_input_answer_for(&self, session_id: Uuid) -> Option<Entity<TextInput>> {
+        if self.state.selected_session == Some(session_id) {
+            Some(self.user_input_answer.clone())
+        } else {
+            self.employee_input_answers.get(&session_id).cloned()
+        }
+    }
+
+    pub(super) fn clear_user_input_answer(&self, session_id: Uuid, cx: &mut Context<Self>) {
+        if let Some(input) = self.user_input_answer_for(session_id) {
+            input.update(cx, |input, cx| input.clear(cx));
+        }
+    }
+
+    pub(super) fn sync_user_input_answer(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         let answer = self
-            .selected_runtime()
+            .runtimes
+            .get(&session_id)
             .and_then(|runtime| runtime.pending_user_input.as_ref())
             .and_then(|pending| {
                 pending
@@ -7754,23 +7793,31 @@ impl Waku {
             .and_then(|(pending, question)| pending.custom_answers.get(&question.id))
             .cloned()
             .unwrap_or_default();
-        self.user_input_answer
-            .update(cx, |input, cx| input.set_content(answer, cx));
+        if let Some(input) = self.user_input_answer_for(session_id) {
+            input.update(cx, |input, cx| input.set_content(answer, cx));
+        }
+    }
+
+    /// The session's pending questions — `None` when absent or when the
+    /// card that raised the action belongs to an already-settled request.
+    fn pending_user_input_mut(
+        &mut self,
+        session_id: Uuid,
+        request_id: Option<&str>,
+    ) -> Option<&mut PendingUserInput> {
+        self.runtimes
+            .get_mut(&session_id)
+            .and_then(|runtime| runtime.pending_user_input.as_mut())
+            .filter(|pending| request_id.is_none_or(|request_id| pending.request_id == request_id))
     }
 
     pub(super) fn update_user_input_custom_answer(
         &mut self,
+        session_id: Uuid,
         answer: impl AsRef<str>,
         cx: &mut Context<Self>,
     ) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        let Some(pending) = self
-            .runtimes
-            .get_mut(&session_id)
-            .and_then(|runtime| runtime.pending_user_input.as_mut())
-        else {
+        let Some(pending) = self.pending_user_input_mut(session_id, None) else {
             return;
         };
         let Some(question_id) = pending
@@ -7791,25 +7838,32 @@ impl Waku {
 
     pub(super) fn submit_user_input_custom_answer(
         &mut self,
+        session_id: Uuid,
         answer: String,
         cx: &mut Context<Self>,
     ) {
         if answer.trim().is_empty() {
             return;
         }
-        self.update_user_input_custom_answer(answer, cx);
-        self.advance_user_input(cx);
+        self.update_user_input_custom_answer(session_id, answer, cx);
+        let request_id = self
+            .runtimes
+            .get(&session_id)
+            .and_then(|runtime| runtime.pending_user_input.as_ref())
+            .map(|pending| pending.request_id.clone());
+        if let Some(request_id) = request_id {
+            self.advance_user_input(session_id, request_id, cx);
+        }
     }
 
-    pub(super) fn select_user_input_option(&mut self, label: String, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        let Some(pending) = self
-            .runtimes
-            .get_mut(&session_id)
-            .and_then(|runtime| runtime.pending_user_input.as_mut())
-        else {
+    pub(super) fn select_user_input_option(
+        &mut self,
+        session_id: Uuid,
+        request_id: String,
+        label: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pending) = self.pending_user_input_mut(session_id, Some(&request_id)) else {
             return;
         };
         let Some((question_id, multi_select)) = pending
@@ -7833,40 +7887,35 @@ impl Waku {
             pending.selections.remove(&question_id);
         }
         pending.custom_answers.remove(&question_id);
-        self.user_input_answer
-            .update(cx, |input, cx| input.clear(cx));
+        self.clear_user_input_answer(session_id, cx);
         cx.notify();
     }
 
-    pub(super) fn previous_user_input(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
-        let Some(pending) = self
-            .runtimes
-            .get_mut(&session_id)
-            .and_then(|runtime| runtime.pending_user_input.as_mut())
-        else {
+    pub(super) fn previous_user_input(
+        &mut self,
+        session_id: Uuid,
+        request_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pending) = self.pending_user_input_mut(session_id, Some(&request_id)) else {
             return;
         };
         if pending.question_index == 0 {
             return;
         }
         pending.question_index -= 1;
-        self.sync_user_input_answer(cx);
+        self.sync_user_input_answer(session_id, cx);
         cx.notify();
     }
 
-    pub(super) fn advance_user_input(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
+    pub(super) fn advance_user_input(
+        &mut self,
+        session_id: Uuid,
+        request_id: String,
+        cx: &mut Context<Self>,
+    ) {
         let should_submit = {
-            let Some(pending) = self
-                .runtimes
-                .get_mut(&session_id)
-                .and_then(|runtime| runtime.pending_user_input.as_mut())
-            else {
+            let Some(pending) = self.pending_user_input_mut(session_id, Some(&request_id)) else {
                 return;
             };
             let Some(question) = pending.current_question() else {
@@ -7905,10 +7954,9 @@ impl Waku {
             if let Some(session) = self.state.session_mut(session_id) {
                 session.status = SessionStatus::Working;
             }
-            self.user_input_answer
-                .update(cx, |input, cx| input.clear(cx));
+            self.clear_user_input_answer(session_id, cx);
         } else {
-            self.sync_user_input_answer(cx);
+            self.sync_user_input_answer(session_id, cx);
         }
         cx.notify();
     }
@@ -7917,16 +7965,19 @@ impl Waku {
     /// provider reads it as "let me explain" and re-decides rather than
     /// recording an answer. Only offered where the transport supports
     /// user-input actions; the button itself gates on non-empty text.
-    pub(super) fn clarify_user_input(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
+    pub(super) fn clarify_user_input(
+        &mut self,
+        session_id: Uuid,
+        request_id: String,
+        cx: &mut Context<Self>,
+    ) {
         let Some(runtime) = self.runtimes.get_mut(&session_id) else {
             return;
         };
         let Some(content) = runtime
             .pending_user_input
             .as_ref()
+            .filter(|pending| pending.request_id == request_id)
             .and_then(|pending| {
                 pending
                     .current_question()
@@ -7946,41 +7997,42 @@ impl Waku {
         if let Some(session) = self.state.session_mut(session_id) {
             session.status = SessionStatus::Working;
         }
-        self.user_input_answer
-            .update(cx, |input, cx| input.clear(cx));
+        self.clear_user_input_answer(session_id, cx);
         cx.notify();
     }
 
     /// Dismiss the pending questions without answering. The provider stops
     /// waiting on them; the card is gone either way, so a transport that
     /// ignores the command leaves no dead UI.
-    pub(super) fn dismiss_user_input(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
+    pub(super) fn dismiss_user_input(
+        &mut self,
+        session_id: Uuid,
+        request_id: String,
+        cx: &mut Context<Self>,
+    ) {
         let Some(runtime) = self.runtimes.get_mut(&session_id) else {
             return;
         };
-        let Some(pending) = runtime.pending_user_input.take() else {
+        let pending = runtime
+            .pending_user_input
+            .take_if(|pending| pending.request_id == request_id);
+        let Some(pending) = pending else {
             return;
         };
         runtime.driver.cancel_user_input(pending.request_id);
         if let Some(session) = self.state.session_mut(session_id) {
             session.status = SessionStatus::Working;
         }
-        self.user_input_answer
-            .update(cx, |input, cx| input.clear(cx));
+        self.clear_user_input_answer(session_id, cx);
         cx.notify();
     }
 
     pub(super) fn respond_computer_permission(
         &mut self,
+        session_id: Uuid,
         decision: &'static str,
         cx: &mut Context<Self>,
     ) {
-        let Some(session_id) = self.state.selected_session else {
-            return;
-        };
         let provider = self
             .state
             .sessions

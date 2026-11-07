@@ -530,13 +530,78 @@ impl Waku {
     // ── Permission ─────────────────────────────────────────────────────────
 
     pub(super) fn render_permission(&self, cx: &mut Context<Self>) -> Option<Div> {
-        if let Some(input) = self.selected_runtime()?.pending_user_input.clone() {
-            return Some(self.render_user_input(input, cx));
+        let session_id = self.state.selected_session?;
+        let runtime = self.selected_runtime()?;
+        if let Some(input) = runtime.pending_user_input.clone() {
+            return Some(div().px(px(20.0)).pb(px(8.0)).child(self.render_user_input(
+                session_id,
+                input,
+                self.user_input_answer.clone(),
+                None,
+                cx,
+            )));
         }
-        if let Some(permission) = self.selected_runtime()?.pending_computer_approval.as_ref() {
-            return Some(self.render_computer_permission(permission, cx));
+        if let Some(permission) = runtime.pending_computer_approval.as_ref() {
+            return Some(
+                div()
+                    .px(px(20.0))
+                    .pb(px(8.0))
+                    .child(self.render_computer_permission(session_id, permission, None, cx)),
+            );
         }
-        let permission = self.selected_runtime()?.pending_permission.as_ref()?;
+        let permission = runtime.pending_permission.as_ref()?;
+        Some(
+            div()
+                .px(px(20.0))
+                .pb(px(8.0))
+                .child(self.permission_request_card(session_id, permission, None, cx)),
+        )
+    }
+
+    /// Who a supervisor-surfaced request belongs to — the employee's name
+    /// and job — rendered as a line above the card's own title so the
+    /// supervisor can tell which of its employees is asking.
+    pub(super) fn employee_attribution(
+        &self,
+        name: &str,
+        job_title: &str,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        div()
+            .flex()
+            .items_center()
+            .gap(px(7.0))
+            .mb(px(8.0))
+            .child(icon("icons/bot.svg", 12.0, theme.text_tertiary))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.text)
+                    .child(SharedString::from(name.to_owned())),
+            )
+            .children((!job_title.is_empty()).then(|| {
+                div()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .truncate()
+                    .child(SharedString::from(job_title.to_owned()))
+            }))
+    }
+
+    /// The permission option buttons and title/detail block shared by the
+    /// selected session's composer-lane card and a supervisor's inline
+    /// employee card. Every action carries the owning session and request
+    /// id so an answer always lands on the original request.
+    pub(super) fn permission_request_card(
+        &self,
+        session_id: Uuid,
+        permission: &PendingPermission,
+        attribution: Option<Div>,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let theme = Theme::current(cx);
         let request_id = permission.request_id.clone();
         // Escape answers the request with the first deny option — a real
@@ -553,13 +618,16 @@ impl Waku {
             let option_id = option.id.clone();
             let allow = option.allow;
             let focus = self.transcript_control_focus(
-                format!("permission-{}-{}", permission.request_id, option.id),
+                format!(
+                    "permission-{session_id}-{}-{}",
+                    permission.request_id, option.id
+                ),
                 cx,
             );
             buttons = buttons.child(
                 div()
                     .id(SharedString::from(format!(
-                        "permission-{}-{}",
+                        "permission-{session_id}-{}-{}",
                         permission.request_id, option.id
                     )))
                     .track_focus(&focus)
@@ -599,82 +667,94 @@ impl Waku {
                             .unwrap_or_else(|| option.label.clone()),
                     ))
                     .on_activation(cx, move |this, _, cx| {
-                        this.respond_permission(request_id.clone(), option_id.clone(), cx);
+                        this.respond_permission(
+                            session_id,
+                            request_id.clone(),
+                            option_id.clone(),
+                            cx,
+                        );
                     }),
             );
         }
         let deny_request_id = request_id.clone();
-        Some(
-            div().px(px(20.0)).pb(px(8.0)).child(
+        div()
+            .w_full()
+            .max_w(px(CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .p(px(12.0))
+            .rounded(px(15.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.raised)
+            .shadow_md()
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape"
+                    && let Some(option_id) = deny_option.clone()
+                {
+                    this.respond_permission(session_id, deny_request_id.clone(), option_id, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .children(attribution)
+            .child(
                 div()
-                    .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH))
-                    .mx_auto()
-                    .p(px(12.0))
-                    .rounded(px(15.0))
-                    .border(hairline())
-                    .border_color(theme.border_subtle)
-                    .bg(theme.raised)
-                    .shadow_md()
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                        if event.keystroke.key == "escape"
-                            && let Some(option_id) = deny_option.clone()
-                        {
-                            this.respond_permission(deny_request_id.clone(), option_id, cx);
-                            cx.stop_propagation();
-                        }
-                    }))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(icon("icons/alert.svg", 13.0, theme.warning))
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(icon("icons/alert.svg", 13.0, theme.warning))
-                            .child(
-                                div()
-                                    .text_size(sp(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(SharedString::from(
-                                        permission
-                                            .title_i18n
-                                            .as_ref()
-                                            .map(waku_client::WireTranslation::render)
-                                            .unwrap_or_else(|| permission.title.clone()),
-                                    )),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("permission-detail")
-                            .mt(px(8.0))
-                            .max_h(px(92.0))
-                            .overflow_y_scroll()
-                            .p(px(8.0))
-                            .rounded(px(9.0))
-                            .bg(theme.inset)
-                            .font_family(crate::fonts::current(cx).code)
                             .text_size(sp(12.5))
-                            .line_height(sp(16.0))
-                            .text_color(theme.text_secondary)
-                            .whitespace_normal()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
                             .child(SharedString::from(
                                 permission
-                                    .detail_i18n
+                                    .title_i18n
                                     .as_ref()
                                     .map(waku_client::WireTranslation::render)
-                                    .unwrap_or_else(|| permission.detail.clone()),
+                                    .unwrap_or_else(|| permission.title.clone()),
                             )),
-                    )
-                    .child(buttons),
-            ),
-        )
+                    ),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!(
+                        "permission-detail-{session_id}-{}",
+                        permission.request_id
+                    )))
+                    .mt(px(8.0))
+                    .max_h(px(92.0))
+                    .overflow_y_scroll()
+                    .p(px(8.0))
+                    .rounded(px(9.0))
+                    .bg(theme.inset)
+                    .font_family(crate::fonts::current(cx).code)
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_secondary)
+                    .whitespace_normal()
+                    .child(SharedString::from(
+                        permission
+                            .detail_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| permission.detail.clone()),
+                    )),
+            )
+            .child(buttons)
     }
 
-    fn render_user_input(&self, pending: PendingUserInput, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_user_input(
+        &self,
+        session_id: Uuid,
+        pending: PendingUserInput,
+        answer_input: Entity<TextInput>,
+        attribution: Option<Div>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let Some(question) = pending.current_question().cloned() else {
-            return div();
+            return div().id("user-input-empty");
         };
         let selected = pending
             .selections
@@ -694,14 +774,16 @@ impl Waku {
             let is_selected = selected.iter().any(|answer| answer == &option.label);
             let click_label = option.label.clone();
             let key_label = option.label.clone();
+            let key_request_id = request_id.clone();
+            let click_request_id = request_id.clone();
             let focus = self.transcript_control_focus(
-                format!("user-input-{request_id}-{question_index}-option-{index}"),
+                format!("user-input-{session_id}-{request_id}-{question_index}-option-{index}"),
                 cx,
             );
             options = options.child(
                 div()
                     .id(SharedString::from(format!(
-                        "user-input-{request_id}-{question_index}-option-{index}"
+                        "user-input-{session_id}-{request_id}-{question_index}-option-{index}"
                     )))
                     .track_focus(&focus)
                     .tab_index(0)
@@ -755,11 +837,21 @@ impl Waku {
                         row.child(icon("icons/check.svg", 12.0, theme.accent))
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.select_user_input_option(click_label.clone(), cx);
+                        this.select_user_input_option(
+                            session_id,
+                            click_request_id.clone(),
+                            click_label.clone(),
+                            cx,
+                        );
                     }))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.select_user_input_option(key_label.clone(), cx);
+                            this.select_user_input_option(
+                                session_id,
+                                key_request_id.clone(),
+                                key_label.clone(),
+                                cx,
+                            );
                             cx.stop_propagation();
                         }
                     })),
@@ -767,7 +859,7 @@ impl Waku {
         }
 
         let next_focus = self.transcript_control_focus(
-            format!("user-input-{request_id}-{question_index}-continue"),
+            format!("user-input-{session_id}-{request_id}-{question_index}-continue"),
             cx,
         );
         // Daemon-owned `agent ask` requests always take the actions — the
@@ -775,16 +867,19 @@ impl Waku {
         // irrelevant. Provider-owned requests need the transport's support.
         let supports_actions = request_id.starts_with(waku_protocol::AGENT_ASK_REQUEST_PREFIX)
             || self
-                .selected_runtime()
+                .runtimes
+                .get(&session_id)
                 .is_some_and(|runtime| runtime.driver.supports_user_input_actions());
         let dismiss = supports_actions.then(|| {
             let focus = self.transcript_control_focus(
-                format!("user-input-{request_id}-{question_index}-dismiss"),
+                format!("user-input-{session_id}-{request_id}-{question_index}-dismiss"),
                 cx,
             );
+            let click_request_id = request_id.clone();
+            let key_request_id = request_id.clone();
             div()
                 .id(SharedString::from(format!(
-                    "user-input-{request_id}-{question_index}-dismiss"
+                    "user-input-{session_id}-{request_id}-{question_index}-dismiss"
                 )))
                 .track_focus(&focus)
                 .tab_index(0)
@@ -802,22 +897,24 @@ impl Waku {
                 .hover(|style| style.bg(theme.overlay).text_color(theme.text_secondary))
                 .active(|style| style.opacity(0.8))
                 .child(tr!("user_input.dismiss"))
-                .on_click(cx.listener(|this, _, _, cx| this.dismiss_user_input(cx)))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.dismiss_user_input(session_id, click_request_id.clone(), cx)
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                     if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.dismiss_user_input(cx);
+                        this.dismiss_user_input(session_id, key_request_id.clone(), cx);
                         cx.stop_propagation();
                     }
                 }))
         });
         let clarify = supports_actions.then(|| {
             let focus = self.transcript_control_focus(
-                format!("user-input-{request_id}-{question_index}-clarify"),
+                format!("user-input-{session_id}-{request_id}-{question_index}-clarify"),
                 cx,
             );
             div()
                 .id(SharedString::from(format!(
-                    "user-input-{request_id}-{question_index}-clarify"
+                    "user-input-{session_id}-{request_id}-{question_index}-clarify"
                 )))
                 .track_focus(&focus)
                 .tab_index(0)
@@ -842,14 +939,18 @@ impl Waku {
                     theme.text_ghost
                 })
                 .when(has_custom, |button| {
+                    let click_request_id = request_id.clone();
+                    let key_request_id = request_id.clone();
                     button
                         .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.opacity(0.8))
-                        .on_click(cx.listener(|this, _, _, cx| this.clarify_user_input(cx)))
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.clarify_user_input(session_id, click_request_id.clone(), cx)
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                             if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                this.clarify_user_input(cx);
+                                this.clarify_user_input(session_id, key_request_id.clone(), cx);
                                 cx.stop_propagation();
                             }
                         }))
@@ -858,12 +959,14 @@ impl Waku {
         });
         let back = (question_index > 0).then(|| {
             let focus = self.transcript_control_focus(
-                format!("user-input-{request_id}-{question_index}-back"),
+                format!("user-input-{session_id}-{request_id}-{question_index}-back"),
                 cx,
             );
+            let click_request_id = request_id.clone();
+            let key_request_id = request_id.clone();
             div()
                 .id(SharedString::from(format!(
-                    "user-input-{request_id}-{question_index}-back"
+                    "user-input-{session_id}-{request_id}-{question_index}-back"
                 )))
                 .track_focus(&focus)
                 .tab_index(0)
@@ -881,17 +984,19 @@ impl Waku {
                 .hover(|style| style.bg(theme.overlay).text_color(theme.text_secondary))
                 .active(|style| style.opacity(0.8))
                 .child(tr!("user_input.back"))
-                .on_click(cx.listener(|this, _, _, cx| this.previous_user_input(cx)))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.previous_user_input(session_id, click_request_id.clone(), cx)
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                     if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.previous_user_input(cx);
+                        this.previous_user_input(session_id, key_request_id.clone(), cx);
                         cx.stop_propagation();
                     }
                 }))
         });
         let continue_button = div()
             .id(SharedString::from(format!(
-                "user-input-{request_id}-{question_index}-continue"
+                "user-input-{session_id}-{request_id}-{question_index}-continue"
             )))
             .track_focus(&next_focus)
             .tab_index(0)
@@ -915,14 +1020,18 @@ impl Waku {
                 theme.text_ghost
             })
             .when(can_continue, |button| {
+                let click_request_id = request_id.clone();
+                let key_request_id = request_id.clone();
                 button
                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|style| style.opacity(0.9))
                     .active(|style| style.opacity(0.8))
-                    .on_click(cx.listener(|this, _, _, cx| this.advance_user_input(cx)))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.advance_user_input(session_id, click_request_id.clone(), cx)
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.advance_user_input(cx);
+                            this.advance_user_input(session_id, key_request_id.clone(), cx);
                             cx.stop_propagation();
                         }
                     }))
@@ -951,102 +1060,105 @@ impl Waku {
                 ))
         });
 
-        div().flex_none().px(px(20.0)).pb(px(8.0)).child(
-            div()
-                .id(SharedString::from(format!("user-input-{request_id}")))
-                .w_full()
-                .max_w(px(CONTENT_MAX_WIDTH))
-                .mx_auto()
-                .px(px(14.0))
-                .pt(px(12.0))
-                .pb(px(10.0))
-                .rounded(px(16.0))
-                .border(hairline())
-                .border_color(theme.border_subtle)
-                .bg(theme.composer)
-                .tab_index(0)
-                .tab_group()
-                .tab_stop(false)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(
-                            div()
-                                .text_size(sp(12.5))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme.text_tertiary)
-                                .child(SharedString::from(question.header.clone())),
-                        )
-                        .children(progress),
-                )
-                .child(
-                    div()
-                        .mt(px(5.0))
-                        .text_size(sp(13.0))
-                        .line_height(sp(18.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .whitespace_normal()
-                        .child(SharedString::from(question.question.clone())),
-                )
-                .children((!question.options.is_empty()).then_some(options))
-                .child(
-                    div()
-                        .mt(px(if question.options.is_empty() {
-                            9.0
+        div()
+            .id(SharedString::from(format!(
+                "user-input-{session_id}-{request_id}"
+            )))
+            .w_full()
+            .max_w(px(CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .px(px(14.0))
+            .pt(px(12.0))
+            .pb(px(10.0))
+            .rounded(px(16.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.composer)
+            .tab_index(0)
+            .tab_group()
+            .tab_stop(false)
+            .children(attribution)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from(question.header.clone())),
+                    )
+                    .children(progress),
+            )
+            .child(
+                div()
+                    .mt(px(5.0))
+                    .text_size(sp(13.0))
+                    .line_height(sp(18.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .whitespace_normal()
+                    .child(SharedString::from(question.question.clone())),
+            )
+            .children((!question.options.is_empty()).then_some(options))
+            .child(
+                div()
+                    .mt(px(if question.options.is_empty() {
+                        9.0
+                    } else {
+                        4.0
+                    }))
+                    .h(px(34.0))
+                    .px(px(10.0))
+                    .rounded(px(10.0))
+                    .border(hairline())
+                    .border_color(if has_custom {
+                        theme.accent.opacity(0.34)
+                    } else {
+                        theme.border.opacity(0.0)
+                    })
+                    .bg(if has_custom {
+                        theme.accent.opacity(0.06)
+                    } else {
+                        theme.overlay
+                    })
+                    .flex()
+                    .items_center()
+                    .gap(px(7.0))
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .child(icon(
+                        "icons/pencil.svg",
+                        11.0,
+                        if has_custom {
+                            theme.accent
                         } else {
-                            4.0
-                        }))
-                        .h(px(34.0))
-                        .px(px(10.0))
-                        .rounded(px(10.0))
-                        .border(hairline())
-                        .border_color(if has_custom {
-                            theme.accent.opacity(0.34)
-                        } else {
-                            theme.border.opacity(0.0)
-                        })
-                        .bg(if has_custom {
-                            theme.accent.opacity(0.06)
-                        } else {
-                            theme.overlay
-                        })
-                        .flex()
-                        .items_center()
-                        .gap(px(7.0))
-                        .text_size(sp(12.5))
-                        .line_height(sp(16.0))
-                        .child(icon(
-                            "icons/pencil.svg",
-                            11.0,
-                            if has_custom {
-                                theme.accent
-                            } else {
-                                theme.text_ghost
-                            },
-                        ))
-                        .child(self.user_input_answer.clone()),
-                )
-                .child(
-                    div()
-                        .mt(px(8.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .children(back)
-                        .children(dismiss)
-                        .child(div().flex_1())
-                        .children(clarify)
-                        .child(continue_button),
-                ),
-        )
+                            theme.text_ghost
+                        },
+                    ))
+                    .child(answer_input),
+            )
+            .child(
+                div()
+                    .mt(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .children(back)
+                    .children(dismiss)
+                    .child(div().flex_1())
+                    .children(clarify)
+                    .child(continue_button),
+            )
     }
 
-    fn render_computer_permission(
+    pub(super) fn render_computer_permission(
         &self,
+        session_id: Uuid,
         permission: &PendingComputerApproval,
+        attribution: Option<Div>,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
@@ -1062,7 +1174,7 @@ impl Waku {
         for (decision, label, primary) in options {
             let focus = self.transcript_control_focus(
                 format!(
-                    "computer-permission-{}-{decision}",
+                    "computer-permission-{session_id}-{}-{decision}",
                     permission.request.call_id
                 ),
                 cx,
@@ -1070,7 +1182,7 @@ impl Waku {
             buttons = buttons.child(
                 div()
                     .id(SharedString::from(format!(
-                        "computer-permission-{}-{decision}",
+                        "computer-permission-{session_id}-{}-{decision}",
                         permission.request.call_id
                     )))
                     .track_focus(&focus)
@@ -1104,96 +1216,95 @@ impl Waku {
                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .child(label)
                     .on_activation(cx, move |this, _, cx| {
-                        this.respond_computer_permission(decision, cx);
+                        this.respond_computer_permission(session_id, decision, cx);
                     }),
             );
         }
 
-        div().px(px(20.0)).pb(px(8.0)).child(
-            div()
-                .w_full()
-                .max_w(px(CONTENT_MAX_WIDTH))
-                .mx_auto()
-                .p(px(13.0))
-                .rounded(px(15.0))
-                .border(hairline())
-                .border_color(theme.warning.opacity(0.5))
-                .bg(theme.raised)
-                .shadow_md()
-                // Escape answers "deny" — a real rejection, not a hide, so
-                // the waiting tool call settles instead of hanging.
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    if event.keystroke.key == "escape" {
-                        this.respond_computer_permission("deny", cx);
-                        cx.stop_propagation();
-                    }
-                }))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(9.0))
-                        .child(icon("icons/globe.svg", 14.0, theme.warning))
-                        .child(
+        div()
+            .w_full()
+            .max_w(px(CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .p(px(13.0))
+            .rounded(px(15.0))
+            .border(hairline())
+            .border_color(theme.warning.opacity(0.5))
+            .bg(theme.raised)
+            .shadow_md()
+            // Escape answers "deny" — a real rejection, not a hide, so
+            // the waiting tool call settles instead of hanging.
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" {
+                    this.respond_computer_permission(session_id, "deny", cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .children(attribution)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(9.0))
+                    .child(icon("icons/globe.svg", 14.0, theme.warning))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("computer_use.allow_control", app = &target.app_name)),
+                    ),
+            )
+            .child(
+                div()
+                    .mt(px(7.0))
+                    .text_size(sp(12.5))
+                    .line_height(sp(14.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("computer_use.screenshot_shared")),
+            )
+            .child(
+                div()
+                    .mt(px(8.0))
+                    .p(px(9.0))
+                    .rounded(px(10.0))
+                    .bg(theme.inset)
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .truncate()
+                            .child(SharedString::from(target.window_title.clone())),
+                    )
+                    .child(
+                        div()
+                            .mt(px(4.0))
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(SharedString::from(permission.request.summary())),
+                    )
+                    .when(permission.sensitive, |element| {
+                        element.child(
                             div()
+                                .mt(px(5.0))
                                 .text_size(sp(12.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(tr!("computer_use.allow_control", app = &target.app_name)),
-                        ),
-                )
-                .child(
-                    div()
-                        .mt(px(7.0))
-                        .text_size(sp(12.5))
-                        .line_height(sp(14.0))
-                        .text_color(theme.text_secondary)
-                        .child(tr!("computer_use.screenshot_shared")),
-                )
-                .child(
-                    div()
-                        .mt(px(8.0))
-                        .p(px(9.0))
-                        .rounded(px(10.0))
-                        .bg(theme.inset)
-                        .child(
-                            div()
-                                .text_size(sp(12.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .truncate()
-                                .child(SharedString::from(target.window_title.clone())),
+                                .text_color(theme.warning)
+                                .child(tr!("computer_use.sensitive_action")),
                         )
-                        .child(
-                            div()
-                                .mt(px(4.0))
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .child(SharedString::from(permission.request.summary())),
-                        )
-                        .when(permission.sensitive, |element| {
-                            element.child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.warning)
-                                    .child(tr!("computer_use.sensitive_action")),
-                            )
-                        }),
-                )
-                .child(
-                    div()
-                        .mt(px(7.0))
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_tertiary)
-                        .child(if target.persistable() {
-                            tr!("computer_use.bundle_id", id = &target.bundle_id)
-                        } else {
-                            tr!("computer_use.no_bundle_id")
-                        }),
-                )
-                .child(buttons),
-        )
+                    }),
+            )
+            .child(
+                div()
+                    .mt(px(7.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(if target.persistable() {
+                        tr!("computer_use.bundle_id", id = &target.bundle_id)
+                    } else {
+                        tr!("computer_use.no_bundle_id")
+                    }),
+            )
+            .child(buttons)
     }
 
     pub(super) fn render_computer_use_overlay(

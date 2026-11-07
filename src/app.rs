@@ -2713,6 +2713,11 @@ pub struct Waku {
     home_directory: Option<PathBuf>,
     composer: Entity<ComposerInput>,
     user_input_answer: Entity<TextInput>,
+    /// Free-text answer fields for employee question cards surfaced in a
+    /// supervisor's transcript — the shared `user_input_answer` belongs to
+    /// the selected session's card, so each employee request mounts its own.
+    /// Entries are pruned once the session's pending questions settle.
+    employee_input_answers: HashMap<Uuid, Entity<TextInput>>,
     /// Drafts are independent of transcript persistence: started tasks key by
     /// session id, while blank New Task pages key by project id.
     composer_drafts: ComposerDrafts,
@@ -6806,18 +6811,23 @@ impl Waku {
 
             cx.subscribe(
                 &user_input_answer,
-                |this: &mut Self, input, event: &InputEvent, cx| match event {
-                    InputEvent::Submit(answer) => {
-                        this.submit_user_input_custom_answer(answer.clone(), cx);
+                |this: &mut Self, input, event: &InputEvent, cx| {
+                    let Some(session_id) = this.state.selected_session else {
+                        return;
+                    };
+                    match event {
+                        InputEvent::Submit(answer) => {
+                            this.submit_user_input_custom_answer(session_id, answer.clone(), cx);
+                        }
+                        InputEvent::Edited => {
+                            let answer = input.read(cx).content().to_owned();
+                            this.update_user_input_custom_answer(session_id, answer, cx);
+                        }
+                        InputEvent::Focus
+                        | InputEvent::BackspaceOnEmpty
+                        | InputEvent::InlineAtomClicked(_)
+                        | InputEvent::InlineAtomActivated(_) => {}
                     }
-                    InputEvent::Edited => {
-                        let answer = input.read(cx).content().to_owned();
-                        this.update_user_input_custom_answer(answer, cx);
-                    }
-                    InputEvent::Focus
-                    | InputEvent::BackspaceOnEmpty
-                    | InputEvent::InlineAtomClicked(_)
-                    | InputEvent::InlineAtomActivated(_) => {}
                 },
             )
             .detach();
@@ -7530,6 +7540,7 @@ impl Waku {
                 home_directory,
                 composer,
                 user_input_answer,
+                employee_input_answers: HashMap::new(),
                 composer_drafts,
                 composer_draft_store,
                 composer_draft_save_generation: 0,

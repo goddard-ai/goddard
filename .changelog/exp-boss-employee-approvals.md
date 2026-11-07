@@ -1,0 +1,1 @@
+- The Boss chat now pins an employee's unanswered request — a tool permission, a structured question, or a computer-use approval — to the top of its transcript with the same controls the employee's task shows, so you can answer it inline instead of navigating to the employee's task.
