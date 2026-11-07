@@ -1292,6 +1292,8 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
     // settled response stands in for the whole visible answer, so its menu
     // shares the footer's copy content — parts hidden behind "Worked for X"
     // stay out — rather than copying the final part alone.
+    let menu_atoms = message.atoms.clone();
+    let menu_display_content = content.clone();
     let menu_copy_content = assistant_footer_copy_content
         .clone()
         .unwrap_or_else(|| SharedString::from(waku_protocol::model::atom_visible_text(&content)));
@@ -1811,8 +1813,13 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         SharedString::from(format!("message-menu-{message_id}")),
         &menu,
         move |cx| {
+            let copy_content = if menu_atoms.is_empty() {
+                menu_copy_content.to_string()
+            } else {
+                waku_protocol::model::message_copy_text(&menu_display_content, &menu_atoms)
+            };
             message_menu_items(
-                &menu_copy_content,
+                &copy_content,
                 role,
                 user_message_action,
                 assistant_message_action,

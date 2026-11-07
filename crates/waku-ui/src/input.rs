@@ -723,6 +723,8 @@ pub struct InlineAtom {
     /// Optional preview, prepared by the owner and shown over the painted label.
     pub tooltip: Option<Rc<dyn Fn(&mut Window, &mut App) -> AnyView>>,
     pub label: SharedString,
+    /// Clipboard replacement for chips whose display label hides their content.
+    pub copy_text: Option<SharedString>,
     pub icon: Option<&'static str>,
     pub avatar: Option<Arc<gpui::RenderImage>>,
 }
@@ -2703,8 +2705,7 @@ impl TextInput {
     }
 
     /// `content[range]` with each [`INLINE_ATOM_MARKER`] swapped for its
-    /// label — what a copy of text holding an atom should carry to the
-    /// clipboard.
+    /// clipboard representation, falling back to the painted label.
     fn export_text(&self, range: &Range<usize>) -> String {
         let slice = &self.content[range.clone()];
         if !slice.contains(INLINE_ATOM_MARKER) {
@@ -2718,13 +2719,12 @@ impl TextInput {
         let marker_len = INLINE_ATOM_MARKER.len_utf8();
         let mut out = String::with_capacity(slice.len());
         let mut rest = slice;
-        // The clipboard keeps the atom's label, not its icon slot — the
-        // painted slot only exists to carry the chip's icon.
+        // Copy hidden content when supplied, without the painted icon slot.
         let mut atoms = self.inline_atoms.iter().skip(offset);
         while let Some(index) = rest.find(INLINE_ATOM_MARKER) {
             out.push_str(&rest[..index]);
             if let Some(atom) = atoms.next() {
-                out.push_str(&atom.label);
+                out.push_str(atom.copy_text.as_ref().unwrap_or(&atom.label));
             }
             rest = &rest[index + marker_len..];
         }
@@ -4955,6 +4955,49 @@ mod tests {
     }
 
     #[gpui::test]
+    fn copying_and_cutting_paste_chips_preserves_hidden_text(cx: &mut TestAppContext) {
+        use super::{INLINE_ATOM_MARKER as A, InlineAtom};
+        cx.update(super::init);
+        let (harness, cx) = cx.add_window_view(|window, cx| InputHarness {
+            input: cx.new(|cx| {
+                let mut input = TextInput::new(window, cx).multi_line();
+                input.set_content(format!("before {A} between {A} after"), cx);
+                input.set_inline_atoms(
+                    ["first\n\n> nested", "second"]
+                        .into_iter()
+                        .map(|text| InlineAtom {
+                            label: "Pasted text".into(),
+                            copy_text: Some(
+                                waku_protocol::model::pasted_text_blockquote(text).into(),
+                            ),
+                            icon: Some(super::ATOM_PASTED_ICON),
+                            avatar: None,
+                            tooltip: None,
+                        })
+                        .collect(),
+                    cx,
+                );
+                input
+            }),
+            width: px(400.),
+        });
+        let input = cx.read_entity(&harness, |harness, _| harness.input.clone());
+        cx.update(|window, cx| input.update(cx, |input, cx| {
+            input.selected_range = 0..input.content.len();
+            input.copy(&super::Copy, window, cx);
+            assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(),
+                "before \n\n> **Pasted text**\n>\n> first\n> \n> > nested\n\n between \n\n> **Pasted text**\n>\n> second\n\n after");
+            // Selecting only the second chip must use its own payload.
+            let start = input.content.rfind(A).unwrap();
+            input.selected_range = start..start + A.len_utf8();
+            input.cut(&super::Cut, window, cx);
+            assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(),
+                "\n\n> **Pasted text**\n>\n> second\n\n");
+            assert_eq!(input.content, format!("before {A} between  after"));
+        }));
+    }
+
+    #[gpui::test]
     fn inline_atoms_translate_layout_indices(cx: &mut TestAppContext) {
         use super::{ATOM_SESSION_ICON, INLINE_ATOM_MARKER as A, InlineAtom};
         cx.update(super::init);
@@ -4966,6 +5009,7 @@ mod tests {
                 input.set_inline_atoms(
                     vec![InlineAtom {
                         label: "Big refactor".into(),
+                        copy_text: None,
                         icon: Some(ATOM_SESSION_ICON),
                         avatar: None,
                         tooltip: None,
@@ -5024,6 +5068,7 @@ mod tests {
                 input.set_inline_atoms(
                     vec![InlineAtom {
                         label: "pasted text".into(),
+                        copy_text: None,
                         icon: Some(ATOM_PASTED_ICON),
                         avatar: None,
                         tooltip: Some(Rc::new(move |window, cx| {

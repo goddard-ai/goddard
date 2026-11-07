@@ -3868,6 +3868,45 @@ pub fn atom_visible_text(text: &str) -> String {
     atom_text(text, true)
 }
 
+/// Clipboard representation of a folded paste, separated from surrounding prose.
+pub fn pasted_text_blockquote(text: &str) -> String {
+    let mut output = String::from("\n\n> **Pasted text**\n>");
+    for line in text.split('\n') {
+        output.push_str("\n> ");
+        output.push_str(line);
+    }
+    output.push_str("\n\n");
+    output
+}
+
+/// Copy display atoms as readable text, expanding folded pastes from their
+/// saved payloads. Reference chips retain their visible labels.
+pub fn message_copy_text(text: &str, atoms: &[MessageAtom]) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut atoms = atoms.iter();
+    while let Some(start) = rest.find(MESSAGE_ATOM_OPEN) {
+        let inner = &rest[start + MESSAGE_ATOM_OPEN.len_utf8()..];
+        let Some(end) = inner.find(MESSAGE_ATOM_END) else {
+            break;
+        };
+        let span_end = start + MESSAGE_ATOM_OPEN.len_utf8() + end + MESSAGE_ATOM_END.len_utf8();
+        output.push_str(&rest[..start]);
+        let atom = atoms.next();
+        if !inner.starts_with(MESSAGE_ATOM_REF)
+            && decode_atom_session_id(&inner[..end]).0.is_none()
+            && let Some(atom) = atom
+        {
+            output.push_str(&pasted_text_blockquote(&atom.payload));
+        } else {
+            output.push_str(&atom_visible_text(&rest[start..span_end]));
+        }
+        rest = &rest[span_end..];
+    }
+    output.push_str(rest);
+    output
+}
+
 /// Atom sentinels and session-id encodings removed, span contents kept —
 /// for text whose label escapes markdown already resolved, like the parsed
 /// runs a find-in-page scan indexes.
@@ -9232,6 +9271,38 @@ mod tests {
         assert_eq!(decode_atom_session_id("a title"), (None, 0));
         let partial: String = encoded.chars().take(10).collect();
         assert_eq!(decode_atom_session_id(&partial), (None, 0));
+    }
+
+    #[test]
+    fn message_copy_expands_pastes_in_order_without_expanding_references() {
+        let session_id = Uuid::new_v4();
+        let source = format!(
+            "Fix {o}Pasted text{e} then {o}{r}{}Project{e} and {o}{}Task{e} plus {o}Pasted text{e} done",
+            AtomRefKind::Project.mark(),
+            encode_atom_session_id(session_id),
+            o = MESSAGE_ATOM_OPEN,
+            e = MESSAGE_ATOM_END,
+            r = MESSAGE_ATOM_REF,
+        );
+        let atoms: Vec<_> = [
+            "first\n\n> nested\n",
+            "project token",
+            "session token",
+            "second",
+        ]
+        .into_iter()
+        .map(|payload| MessageAtom {
+            label: "Pasted text".into(),
+            payload: payload.into(),
+            session_id: None,
+        })
+        .collect();
+        let expected = "Fix \n\n> **Pasted text**\n>\n> first\n> \n> > nested\n> \n\n then Project and Task plus \n\n> **Pasted text**\n>\n> second\n\n done";
+        assert_eq!(message_copy_text(&source, &atoms), expected);
+        assert_eq!(message_copy_text(&source, &[]), atom_visible_text(&source));
+        assert_eq!(message_copy_text("plain text", &atoms), "plain text");
+        let malformed = format!("prefix {MESSAGE_ATOM_OPEN}unfinished");
+        assert_eq!(message_copy_text(&malformed, &atoms), malformed);
     }
 
     #[test]

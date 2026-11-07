@@ -1,0 +1,1 @@
+- Copying a sent message or composer text now includes pasted text chip contents in blockquotes titled “Pasted text.”

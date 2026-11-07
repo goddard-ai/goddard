@@ -9018,6 +9018,12 @@ fn inline_atom_paints(
             };
             crate::input::InlineAtom {
                 label: SharedString::from(atom.label()),
+                copy_text: match &atom.kind {
+                    ComposerAtomKind::PastedText(text) => {
+                        Some(waku_protocol::model::pasted_text_blockquote(text).into())
+                    }
+                    _ => None,
+                },
                 icon: Some(icon),
                 avatar,
                 tooltip: match &atom.kind {
