@@ -7612,3 +7612,12 @@ session.workspace_recovered:
   en: Workspace recovered. You can send your prompt again.
 session.workspace_recovery_failed:
   en: "Workspace recovery failed: %{error}"
+
+command_palette.git_commit:
+  en: "Git: Commit…"
+command_palette.git_push:
+  en: "Git: Push"
+command_palette.git_pull:
+  en: "Git: Pull"
+command_palette.git_pull_rebase:
+  en: "Git: Pull with Rebase"

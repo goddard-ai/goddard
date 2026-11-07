@@ -1,0 +1,1 @@
+- Run Git commit, push, pull, and pull with rebase from the command palette using the active terminal, task workspace, or project; each command shows its target directory.

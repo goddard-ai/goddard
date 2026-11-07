@@ -271,6 +271,10 @@ enum PaletteAction {
         branch: String,
         onto: Option<String>,
     },
+    GitCommit(PathBuf),
+    GitPush(PathBuf),
+    GitPull(PathBuf),
+    GitPullRebase(PathBuf),
     SyncBranch,
     /// The "Sync branch…" fallback picker's pick: open the branch picker
     /// rooted at this project's path.
@@ -2670,10 +2674,39 @@ impl Waku {
         .detach();
     }
 
+    /// Resolve only the visible surface's context; a terminal must never
+    /// fall back to a remembered task when its cwd is unavailable.
+    fn command_palette_git_workspace(&self, cx: &App) -> Option<PathBuf> {
+        if self.big_picture.is_open() {
+            return self.workspace_subject_path();
+        }
+        if let Some(id) = self.standalone_git_panel_terminal() {
+            return self.terminal_cwd(id, cx);
+        }
+        match self.main_screen(self.live_deliverable_page().is_some()) {
+            render::MainScreen::Terminal(id) => self.terminal_cwd(id, cx),
+            render::MainScreen::Session
+            | render::MainScreen::Deliverable
+            | render::MainScreen::VoiceScratchpad => self.workspace_subject_path(),
+            render::MainScreen::Projects => self
+                .projects_page
+                .and_then(|id| self.state.projects.iter().find(|project| project.id == id))
+                .filter(|project| !project.is_projectless())
+                .map(|project| project.path.clone()),
+            _ => self
+                .focused_project_id()
+                .and_then(|id| self.state.projects.iter().find(|project| project.id == id))
+                .or_else(|| self.selected_project())
+                .filter(|project| !project.is_projectless())
+                .map(|project| project.path.clone()),
+        }
+    }
+
     fn command_palette_commands(
         &self,
         searching: bool,
         updater_available: bool,
+        cx: &App,
     ) -> Vec<CommandPaletteItem> {
         let display_section = |suggested| {
             if searching {
@@ -3027,6 +3060,49 @@ impl Waku {
             );
             incognito_item.detail = Some(format!("#{worktree_name}"));
             commands.push(incognito_item);
+        }
+
+        if self.git_panel_operation.is_none() && self.commit_operation.is_none() {
+            if let Some(workspace) = self.command_palette_git_workspace(cx) {
+                for (label, icon, action, keywords) in [
+                    (
+                        tr!("command_palette.git_commit"),
+                        "icons/git-branch.svg",
+                        PaletteAction::GitCommit(workspace.clone()),
+                        "git commit changes message staged",
+                    ),
+                    (
+                        tr!("command_palette.git_push"),
+                        "icons/cloud-upload.svg",
+                        PaletteAction::GitPush(workspace.clone()),
+                        "git push publish upstream remote",
+                    ),
+                    (
+                        tr!("command_palette.git_pull"),
+                        "icons/download.svg",
+                        PaletteAction::GitPull(workspace.clone()),
+                        "git pull fetch fast forward upstream remote",
+                    ),
+                    (
+                        tr!("command_palette.git_pull_rebase"),
+                        "icons/git-branch.svg",
+                        PaletteAction::GitPullRebase(workspace.clone()),
+                        "git pull fetch rebase sync upstream remote",
+                    ),
+                ] {
+                    let mut item = CommandPaletteItem::command(
+                        PaletteSection::Commands,
+                        label,
+                        icon,
+                        None,
+                        action,
+                        keywords,
+                        next(),
+                    );
+                    item.detail = Some(workspace.display().to_string());
+                    commands.push(item);
+                }
+            }
         }
 
         // Same gate as the composer's `/land`: the session the composer
@@ -5309,7 +5385,8 @@ impl Waku {
             .is_some_and(|state| state.0.is_some());
         let query = query.trim();
         if query.is_empty() {
-            self.command_palette.results = self.command_palette_commands(false, updater_available);
+            self.command_palette.results =
+                self.command_palette_commands(false, updater_available, cx);
             self.command_palette.selected = 0;
             self.command_palette.scroll.scroll_to_item(0);
             return;
@@ -5390,7 +5467,7 @@ impl Waku {
         let mut commands = if needle.is_empty() {
             Vec::new()
         } else {
-            self.command_palette_commands(true, updater_available)
+            self.command_palette_commands(true, updater_available, cx)
                 .into_iter()
                 .filter_map(|item| {
                     pattern
@@ -6166,6 +6243,14 @@ impl Waku {
                         cx,
                     );
                 }
+            }
+            PaletteAction::GitCommit(workspace) => {
+                self.open_commit_dialog_in(workspace, window, cx);
+            }
+            PaletteAction::GitPush(workspace) => self.start_workspace_push(workspace, cx),
+            PaletteAction::GitPull(workspace) => self.start_workspace_pull_changes(workspace, cx),
+            PaletteAction::GitPullRebase(workspace) => {
+                self.start_workspace_sync(workspace, waku_client::git::PullStrategy::Rebase, cx);
             }
             PaletteAction::SyncBranch => {
                 self.settings_page = None;
