@@ -1,0 +1,1 @@
+- Summary paragraphs starting with “Put simply: ” appear bold and larger, making the takeaway easier to spot.

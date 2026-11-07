@@ -3407,22 +3407,35 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
     ctx.starts_block.set(true);
     match block {
         Block::Paragraph { runs } => {
+            // Match the visible prefix across inline emphasis without changing
+            // the source or treating code examples as summary prose.
+            let is_summary = runs
+                .iter()
+                .take_while(|run| !run.style.code && !run.style.math)
+                .flat_map(|run| run.text.bytes())
+                .take(b"Put simply: ".len())
+                .eq(b"Put simply: ".iter().copied());
             let key = ctx.next_key();
             let flat = ctx.flat(key.index, || {
                 flatten(
                     runs,
                     ctx.palette,
                     &ctx.families,
-                    FontWeight::NORMAL,
+                    if is_summary {
+                        FontWeight::BOLD
+                    } else {
+                        FontWeight::NORMAL
+                    },
                     ctx.palette.text,
                     &ctx.session_mentions,
                 )
             });
+            let scale = if is_summary { 1.14 } else { 1.0 };
             div()
                 .w_full()
                 .min_w_0()
-                .text_size(px(ctx.metrics.text_size))
-                .line_height(px(ctx.metrics.line_height))
+                .text_size(px(ctx.metrics.text_size * scale))
+                .line_height(px(ctx.metrics.line_height * scale))
                 .child(text_element(&flat, key, ctx))
                 .into_any_element()
         }
