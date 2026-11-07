@@ -999,9 +999,30 @@ pub enum Command {
     AgentResources {
         operation: crate::resources::ResourceOperation,
     },
-    /// Share one of my projects with a friend. The daemon resolves the
-    /// project's name and `origin` URL from `project_path` and re-sends
-    /// the friend our full shared set.
+    /// Read the source checkout's origin and current branch without modifying it.
+    GetProjectSyncInfo {
+        project_path: PathBuf,
+    },
+    /// Push only committed changes, after rechecking origin and branch.
+    PushProjectSync {
+        project_path: PathBuf,
+        origin_url: String,
+        branch: String,
+    },
+    /// Resolve exactly one registered project by origin. Refuse dirty trees,
+    /// branch mismatches and divergence; check_only performs the preflight.
+    PullProjectSync {
+        origin_url: String,
+        branch: String,
+        check_only: bool,
+    },
+    /// Share the project and establish our side of a Friends sync pairing.
+    /// The recipient opts into the shared project through Friends.
+    SyncProjectWithFriend {
+        node_id: String,
+        project_path: PathBuf,
+    },
+    /// Share one of my projects with a friend, resolving its origin daemon-side.
     ShareProjectWithFriend {
         node_id: String,
         #[ts(type = "string")]
@@ -1561,6 +1582,11 @@ pub enum ResponsePayload {
         result: crate::boss::BossResult,
     },
     Ack,
+    ProjectSyncInfo {
+        project_path: PathBuf,
+        origin_url: String,
+        branch: String,
+    },
     ManagedGoalTurnClaimed {
         claimed: bool,
     },

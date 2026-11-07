@@ -122,6 +122,7 @@ enum SyncJob {
     ShareProject {
         peer: EndpointId,
         project_path: PathBuf,
+        sync: bool,
         reply: Sender<anyhow::Result<()>>,
     },
     /// Stop sharing an origin with a friend — re-sends the set, then
@@ -254,6 +255,7 @@ enum ShareCommand {
     ShareProject {
         node_id: String,
         project_path: PathBuf,
+        sync: bool,
         reply: Sender<anyhow::Result<()>>,
     },
     UnshareProject {
@@ -818,6 +820,16 @@ impl ShareService {
         self.call(|reply| ShareCommand::ShareProject {
             node_id,
             project_path,
+            sync: false,
+            reply,
+        })
+    }
+
+    pub fn sync_project(&self, node_id: String, project_path: PathBuf) -> anyhow::Result<()> {
+        self.call(|reply| ShareCommand::ShareProject {
+            node_id,
+            project_path,
+            sync: true,
             reply,
         })
     }
@@ -1935,9 +1947,37 @@ impl SyncWorker {
                 SyncJob::ShareProject {
                     peer,
                     project_path,
+                    sync,
                     reply,
                 } => {
-                    self.share_project(peer, project_path, reply);
+                    if sync {
+                        let result = (|| {
+                            let (origin, _) = waku_vcs::project_sync::info(&project_path)?;
+                            let already_shared = self.store().outgoing.iter().any(|share| {
+                                share.peer == peer
+                                    && normalize_origin(&share.origin_url)
+                                        == normalize_origin(&origin)
+                            });
+                            if !already_shared {
+                                let (tx, rx) = crossbeam_channel::bounded(1);
+                                self.share_project(peer, project_path.clone(), tx);
+                                rx.recv()??;
+                            } else {
+                                // Re-offer on retry in case the earlier share never reached them.
+                                let _ = self.effect_tx.send(RuntimeEffect::ShareProjects {
+                                    peer,
+                                    projects: self.shared_set(&peer),
+                                });
+                            }
+                            let (tx, rx) = crossbeam_channel::bounded(1);
+                            self.create_link(peer, origin, project_path, false, Some(tx));
+                            rx.recv()??;
+                            Ok(())
+                        })();
+                        let _ = reply.send(result);
+                    } else {
+                        self.share_project(peer, project_path, reply);
+                    }
                 }
                 SyncJob::UnshareProject {
                     peer,
@@ -2909,6 +2949,7 @@ fn run_runtime(
                 ShareCommand::ShareProject {
                     node_id,
                     project_path,
+                    sync,
                     reply,
                 } => {
                     let result = node_id
@@ -2922,6 +2963,7 @@ fn run_runtime(
                                 .send(SyncJob::ShareProject {
                                     peer,
                                     project_path,
+                                    sync,
                                     reply: reply.clone(),
                                 })
                                 .map_err(|e| anyhow::anyhow!("{e}"))

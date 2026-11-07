@@ -342,6 +342,10 @@ enum PaletteAction {
     CopyFriendCode,
     ShareFileOrFolder,
     ShareFileWithFriend(String),
+    SyncTo(bool),
+    ChooseSyncProject(Uuid, bool),
+    SyncToHost(Uuid, Uuid),
+    SyncToFriend(Uuid, String),
     ShareProject,
     ChooseShareProject(Uuid),
     ShareProjectWithFriend {
@@ -369,6 +373,8 @@ enum CommandPaletteView {
     /// The "Focus project…" project picker.
     FocusProject,
     ShareFileFriends,
+    SyncProjects(bool),
+    SyncTargets(Uuid, bool),
     ShareProjects,
     ShareProjectFriends(Uuid),
     /// The "New task in…" directory picker.
@@ -781,6 +787,7 @@ pub(super) struct CommandPaletteUi {
     previous_focus: Option<FocusHandle>,
     focused_terminal: Option<Uuid>,
     view: CommandPaletteView,
+    sync_workspace: Option<(Uuid, PathBuf)>,
     results: Vec<CommandPaletteItem>,
     message_searches: QueryCache<String, Vec<crate::persistence::SessionMessageMatch>>,
     active_message_query: Option<String>,
@@ -871,6 +878,7 @@ impl CommandPaletteUi {
             previous_focus: None,
             focused_terminal: None,
             view: CommandPaletteView::Commands,
+            sync_workspace: None,
             results: Vec::new(),
             message_searches: QueryCache::new(MESSAGE_SEARCH_CACHE_CAPACITY),
             active_message_query: None,
@@ -1247,8 +1255,10 @@ impl Waku {
         self.command_palette.search.update(cx, |input, cx| {
             input.set_placeholder(
                 tr!(match view {
-                    CommandPaletteView::ShareProjects =>
+                    CommandPaletteView::SyncProjects(_) | CommandPaletteView::ShareProjects =>
                         "command_palette.share_project_placeholder",
+                    CommandPaletteView::SyncTargets(_, false) =>
+                        "command_palette.sync_host_placeholder",
                     _ => "command_palette.share_friend_placeholder",
                 }),
                 cx,
@@ -2415,9 +2425,10 @@ impl Waku {
             }
             CommandPaletteView::RemoveProject => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::FocusProject => self.leave_command_palette_drill_in_view(cx),
-            CommandPaletteView::ShareFileFriends | CommandPaletteView::ShareProjects => {
-                self.leave_command_palette_drill_in_view(cx)
-            }
+            CommandPaletteView::ShareFileFriends
+            | CommandPaletteView::SyncProjects(_)
+            | CommandPaletteView::SyncTargets(_, _)
+            | CommandPaletteView::ShareProjects => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::ShareProjectFriends(_) => {
                 self.open_command_palette_friends_view(CommandPaletteView::ShareProjects, cx)
             }
@@ -2458,6 +2469,13 @@ impl Waku {
             }
             CommandPaletteView::RemoveProject => tr!("command_palette.remove_project_placeholder"),
             CommandPaletteView::FocusProject => tr!("command_palette.focus_project_placeholder"),
+            CommandPaletteView::SyncProjects(_) => tr!("command_palette.share_project_placeholder"),
+            CommandPaletteView::SyncTargets(_, true) => {
+                tr!("command_palette.share_friend_placeholder")
+            }
+            CommandPaletteView::SyncTargets(_, false) => {
+                tr!("command_palette.sync_host_placeholder")
+            }
             CommandPaletteView::ShareProjects => tr!("command_palette.share_project_placeholder"),
             CommandPaletteView::ShareFileFriends | CommandPaletteView::ShareProjectFriends(_) => {
                 tr!("command_palette.share_friend_placeholder")
@@ -2532,6 +2550,8 @@ impl Waku {
                 | CommandPaletteView::RemoveProject
                 | CommandPaletteView::FocusProject
                 | CommandPaletteView::ShareFileFriends
+                | CommandPaletteView::SyncProjects(_)
+                | CommandPaletteView::SyncTargets(_, _)
                 | CommandPaletteView::ShareProjects
                 | CommandPaletteView::ShareProjectFriends(_)
                 | CommandPaletteView::NewTaskIn
@@ -2727,6 +2747,24 @@ impl Waku {
         };
         let mut commands = vec![
             CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("command_palette.sync_to_host"),
+                "icons/git-branch.svg",
+                None,
+                PaletteAction::SyncTo(false),
+                "sync push pull remote host origin project",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("command_palette.sync_to_friend"),
+                "icons/git-branch.svg",
+                None,
+                PaletteAction::SyncTo(true),
+                "sync friend pairing iroh project origin",
+                next(),
+            ),
+            CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("qa.start_action"),
                 "icons/git-branch.svg",
@@ -2884,6 +2922,9 @@ impl Waku {
             commands.push(item);
         }
 
+        if !self.state.friends_enabled {
+            commands.retain(|item| item.action != PaletteAction::SyncTo(true));
+        }
         if self.state.friends_enabled {
             commands.extend([
                 CommandPaletteItem::command(
@@ -4306,13 +4347,157 @@ impl Waku {
             .collect()
     }
 
+    fn sync_project_to_host(&mut self, project: Uuid, host: Uuid, cx: &mut Context<Self>) {
+        let Some(path) = self
+            .state
+            .projects
+            .iter()
+            .find(|item| item.id == project)
+            .map(|item| item.path.clone())
+        else {
+            return;
+        };
+        let path = self
+            .command_palette
+            .sync_workspace
+            .as_ref()
+            .filter(|(id, _)| *id == project)
+            .map(|(_, path)| path.clone())
+            .unwrap_or(path);
+        let Some(source) = self
+            .daemons
+            .daemon_for_project(project)
+            .map(|daemon| daemon.client())
+        else {
+            self.show_toast(tr!("command_palette.sync_source_offline"));
+            return;
+        };
+        let Some(target) = self
+            .daemons
+            .supervisor(waku_client::DaemonKey::Remote(host))
+            .map(|daemon| daemon.client())
+        else {
+            self.show_toast(tr!("command_palette.sync_host_offline"));
+            return;
+        };
+        self.show_toast(tr!("command_palette.sync_running"));
+        cx.spawn(async move |this, cx| {
+            let result: anyhow::Result<()> = cx
+                .background_executor()
+                .spawn(async move {
+                    use waku_client::{Command, ResponsePayload};
+                    let ResponsePayload::ProjectSyncInfo {
+                        origin_url, branch, ..
+                    } = source.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        Command::GetProjectSyncInfo {
+                            project_path: path.clone(),
+                        },
+                    )?
+                    else {
+                        anyhow::bail!("unexpected project sync response");
+                    };
+                    target.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        Command::PullProjectSync {
+                            origin_url: origin_url.clone(),
+                            branch: branch.clone(),
+                            check_only: true,
+                        },
+                    )?;
+                    source.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        Command::PushProjectSync {
+                            project_path: path,
+                            origin_url: origin_url.clone(),
+                            branch: branch.clone(),
+                        },
+                    )?;
+                    target
+                        .request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            Command::PullProjectSync {
+                                origin_url,
+                                branch,
+                                check_only: false,
+                            },
+                        )
+                        .map_err(|error| {
+                            anyhow::anyhow!(
+                                "push to origin succeeded, but remote pull failed: {error:#}"
+                            )
+                        })?;
+                    Ok(())
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => this.show_success_toast(tr!("command_palette.sync_complete")),
+                    Err(error) => this.show_toast(tr!(
+                        "command_palette.sync_failed",
+                        error = format!("{error:#}")
+                    )),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn command_palette_share_candidates(&self) -> Vec<CommandPaletteItem> {
         match self.command_palette.view {
-            CommandPaletteView::ShareProjects => self
+            CommandPaletteView::SyncTargets(project, friend) => {
+                if friend {
+                    self.friends_state
+                        .friends
+                        .iter()
+                        .enumerate()
+                        .map(|(order, friend)| {
+                            CommandPaletteItem::command(
+                                PaletteSection::Commands,
+                                friends::friend_display_name(friend).to_owned(),
+                                "icons/folder.svg",
+                                None,
+                                PaletteAction::SyncToFriend(project, friend.node_id.clone()),
+                                "friend sync pair",
+                                order,
+                            )
+                        })
+                        .collect()
+                } else {
+                    let owner = self.daemons.project_owner(project);
+                    self.state
+                        .remote_hosts
+                        .iter()
+                        .filter(|host| owner != waku_client::DaemonKey::Remote(host.id))
+                        .enumerate()
+                        .map(|(order, host)| {
+                            CommandPaletteItem::command(
+                                PaletteSection::Commands,
+                                host.name.clone(),
+                                "icons/folder.svg",
+                                None,
+                                PaletteAction::SyncToHost(project, host.id),
+                                "remote host sync",
+                                order,
+                            )
+                        })
+                        .collect()
+                }
+            }
+            CommandPaletteView::ShareProjects | CommandPaletteView::SyncProjects(_) => self
                 .state
                 .projects
                 .iter()
                 .filter(|project| !project.temporary && !project.is_projectless())
+                .filter(|project| {
+                    self.command_palette.view != CommandPaletteView::SyncProjects(true)
+                        || !self.daemons.is_remote_project(project.id)
+                })
                 .enumerate()
                 .map(|(order, project)| {
                     let label = project.display_name();
@@ -4329,7 +4514,12 @@ impl Waku {
                         )),
                         icon: PaletteIcon::Asset("icons/folder.svg"),
                         shortcut: None,
-                        action: PaletteAction::ChooseShareProject(project.id),
+                        action: match self.command_palette.view {
+                            CommandPaletteView::SyncProjects(friend) => {
+                                PaletteAction::ChooseSyncProject(project.id, friend)
+                            }
+                            _ => PaletteAction::ChooseShareProject(project.id),
+                        },
                         content_match: None,
                         order,
                         recency: 0,
@@ -5370,6 +5560,8 @@ impl Waku {
                 return;
             }
             CommandPaletteView::ShareFileFriends
+            | CommandPaletteView::SyncProjects(_)
+            | CommandPaletteView::SyncTargets(_, _)
             | CommandPaletteView::ShareProjects
             | CommandPaletteView::ShareProjectFriends(_) => {
                 self.refresh_command_palette_share_results(query, preserve_selection);
@@ -5895,6 +6087,53 @@ impl Waku {
         };
 
         match action {
+            PaletteAction::SyncTo(friend) => {
+                self.command_palette.sync_workspace = None;
+                let ambient_path = self.command_palette_git_workspace(cx);
+                let ambient = ambient_path
+                    .as_ref()
+                    .and_then(|path| {
+                        match self.main_screen(self.live_deliverable_page().is_some()) {
+                            render::MainScreen::Session
+                            | render::MainScreen::Deliverable
+                            | render::MainScreen::VoiceScratchpad => self.workspace_subject().1,
+                            render::MainScreen::Projects => self.projects_page,
+                            _ => self.focused_project_id(),
+                        }
+                        .or_else(|| {
+                            let mut matches = self
+                                .state
+                                .projects
+                                .iter()
+                                .filter(|project| path.starts_with(&project.path));
+                            let first = matches.next()?;
+                            matches.next().is_none().then_some(first.id)
+                        })
+                    })
+                    .filter(|id| {
+                        self.state.projects.iter().any(|project| {
+                            project.id == *id && !project.is_projectless() && !project.temporary
+                        })
+                    });
+                let ambient = ambient.filter(|id| !friend || !self.daemons.is_remote_project(*id));
+                self.command_palette.sync_workspace = ambient.zip(ambient_path);
+                self.open_command_palette_friends_view(
+                    match ambient {
+                        Some(project) => CommandPaletteView::SyncTargets(project, friend),
+                        None => CommandPaletteView::SyncProjects(friend),
+                    },
+                    cx,
+                );
+                return;
+            }
+            PaletteAction::ChooseSyncProject(project, friend) => {
+                self.command_palette.sync_workspace = None;
+                self.open_command_palette_friends_view(
+                    CommandPaletteView::SyncTargets(project, friend),
+                    cx,
+                );
+                return;
+            }
             PaletteAction::SearchWorktrees => {
                 self.start_worktree_search(cx);
                 return;
@@ -6114,6 +6353,42 @@ impl Waku {
                     .any(|friend| friend.node_id == node_id)
                 {
                     self.pick_and_send_file(node_id, cx);
+                }
+            }
+            PaletteAction::SyncToHost(project, host) => {
+                self.sync_project_to_host(project, host, cx)
+            }
+            PaletteAction::SyncToFriend(project, friend) => {
+                if let Some(project) = self.state.projects.iter().find(|item| item.id == project) {
+                    let project_path = project.path.clone();
+                    let client = self.daemon.client();
+                    cx.spawn(async move |this, cx| {
+                        let result = cx
+                            .background_executor()
+                            .spawn(async move {
+                                client.request(
+                                    Uuid::nil(),
+                                    Uuid::nil(),
+                                    waku_client::Command::SyncProjectWithFriend {
+                                        node_id: friend,
+                                        project_path,
+                                    },
+                                )
+                            })
+                            .await;
+                        let _ = this.update(cx, |this, cx| {
+                            match result {
+                                Ok(_) => this
+                                    .show_success_toast(tr!("command_palette.sync_friend_pending")),
+                                Err(error) => this.show_toast(tr!(
+                                    "friends.command_failed",
+                                    error = format!("{error:#}")
+                                )),
+                            }
+                            cx.notify();
+                        });
+                    })
+                    .detach();
                 }
             }
             PaletteAction::ShareProjectWithFriend { project, friend } => {
@@ -6446,6 +6721,8 @@ impl Waku {
             | PaletteAction::OpenRemoveProject
             | PaletteAction::OpenFocusProject
             | PaletteAction::ShareFileOrFolder
+            | PaletteAction::SyncTo(_)
+            | PaletteAction::ChooseSyncProject(_, _)
             | PaletteAction::ShareProject
             | PaletteAction::ChooseShareProject(_)
             | PaletteAction::NewTaskIn
@@ -6537,6 +6814,8 @@ impl Waku {
             | CommandPaletteView::RemoveProject
             | CommandPaletteView::FocusProject
             | CommandPaletteView::ShareFileFriends
+            | CommandPaletteView::SyncProjects(_)
+            | CommandPaletteView::SyncTargets(_, _)
             | CommandPaletteView::ShareProjects
             | CommandPaletteView::ShareProjectFriends(_)
             | CommandPaletteView::IssueProjects

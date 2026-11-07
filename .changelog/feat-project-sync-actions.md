@@ -1,0 +1,1 @@
+- Use “Sync to remote host...” in the command palette to push committed changes to origin and pull them in a matching project, or “Sync to friend...” to request a Friends sync pairing. Both use the current project or ask you to choose; uncommitted changes are never committed automatically.

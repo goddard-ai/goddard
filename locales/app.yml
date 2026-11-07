@@ -7636,3 +7636,22 @@ terminal.go_to_previous_worktree:
   en: "Terminal: Go to previous worktree"
 terminal.go_to_default_checkout:
   en: "Terminal: Go to default branch checkout"
+
+command_palette.sync_to_host:
+  en: Sync to remote host...
+command_palette.sync_to_friend:
+  en: Sync to friend...
+command_palette.sync_host_placeholder:
+  en: Choose a remote host…
+command_palette.sync_friend_pending:
+  en: Sync pairing requested. Your friend can enable it in Friends → Shared with you.
+command_palette.sync_source_offline:
+  en: The source project's host is offline.
+command_palette.sync_host_offline:
+  en: The remote host is offline.
+command_palette.sync_running:
+  en: Pushing to origin, then pulling on the remote host…
+command_palette.sync_complete:
+  en: Project synced to remote host.
+command_palette.sync_failed:
+  en: "Project sync failed: %{error}"

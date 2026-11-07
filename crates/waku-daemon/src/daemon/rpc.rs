@@ -694,6 +694,47 @@ impl Backend for WakuBackend {
                 self.rename_friend_sessions(&node_id)?;
                 Ok(ResponsePayload::Ack)
             }
+            Command::GetProjectSyncInfo { project_path } => {
+                let (origin_url, branch) = waku_vcs::project_sync::info(&project_path)?;
+                Ok(ResponsePayload::ProjectSyncInfo {
+                    project_path,
+                    origin_url,
+                    branch,
+                })
+            }
+            Command::PushProjectSync {
+                project_path,
+                origin_url,
+                branch,
+            } => {
+                waku_vcs::project_sync::push(&project_path, &origin_url, &branch)?;
+                self.share.notify_push(origin_url, vec![branch]);
+                Ok(ResponsePayload::Ack)
+            }
+            Command::PullProjectSync {
+                origin_url,
+                branch,
+                check_only,
+            } => {
+                let paths = self
+                    .task_state
+                    .lock()
+                    .projects
+                    .iter()
+                    .filter(|project| !project.temporary && !project.is_projectless())
+                    .map(|project| project.path.clone())
+                    .collect::<Vec<_>>();
+                let path = waku_vcs::project_sync::matching_project(&paths, &origin_url)?;
+                waku_vcs::project_sync::pull(&path, &origin_url, &branch, check_only)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::SyncProjectWithFriend {
+                node_id,
+                project_path,
+            } => {
+                self.share.sync_project(node_id, project_path)?;
+                Ok(ResponsePayload::Ack)
+            }
             Command::ShareProjectWithFriend {
                 node_id,
                 project_path,

@@ -2889,6 +2889,10 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::LoadProviderSession { .. }
             | Command::ForkProviderSession { .. }
             | Command::Workspace { .. }
+            | Command::GetProjectSyncInfo { .. }
+            | Command::PushProjectSync { .. }
+            | Command::PullProjectSync { .. }
+            | Command::SyncProjectWithFriend { .. }
             | Command::EmployeeComposerPrompt { .. }
             | Command::Boss {
                 operation: waku_protocol::boss::BossOperation::Summon { .. }
@@ -3304,6 +3308,10 @@ fn command_kind(command: &Command) -> &'static str {
         Command::AgentComputerUse { .. } => "agentComputerUse",
         Command::AgentComputerUseRun { .. } => "agentComputerUseRun",
         Command::AgentComputerUseReset => "agentComputerUseReset",
+        Command::GetProjectSyncInfo { .. } => "getProjectSyncInfo",
+        Command::PushProjectSync { .. } => "pushProjectSync",
+        Command::PullProjectSync { .. } => "pullProjectSync",
+        Command::SyncProjectWithFriend { .. } => "syncProjectWithFriend",
         Command::ShareProjectWithFriend { .. } => "shareProjectWithFriend",
         Command::UnshareProjectWithFriend { .. } => "unshareProjectWithFriend",
         Command::EnableFriendSync { .. } => "enableFriendSync",

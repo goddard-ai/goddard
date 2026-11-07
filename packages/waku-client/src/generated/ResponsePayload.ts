@@ -44,7 +44,7 @@ import type { WireframeCommentsPage } from "./WireframeCommentsPage";
 import type { WorkspaceResult } from "./WorkspaceResult";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type ResponsePayload = { "type": "sidebarIntent", result: SidebarIntentResult, } | { "type": "wireframeComments", page: WireframeCommentsPage, } | { "type": "whistleStatus", available: boolean, downloaded: boolean, } | { "type": "transcription", text: string, language: string, words: Array<WhistleWord>, } | { "type": "agentMergeSubmitted", sha: string, } | { "type": "agentResources", status: ResourceStatus, } | { "type": "boss", result: BossResult, } | { "type": "ack" } | { "type": "managedGoalTurnClaimed", claimed: boolean, } | { "type": "sessionRuntime", runtimeId: string | null, supportsSteer: boolean,
+export type ResponsePayload = { "type": "sidebarIntent", result: SidebarIntentResult, } | { "type": "wireframeComments", page: WireframeCommentsPage, } | { "type": "whistleStatus", available: boolean, downloaded: boolean, } | { "type": "transcription", text: string, language: string, words: Array<WhistleWord>, } | { "type": "agentMergeSubmitted", sha: string, } | { "type": "agentResources", status: ResourceStatus, } | { "type": "boss", result: BossResult, } | { "type": "ack" } | { "type": "projectSyncInfo", projectPath: string, originUrl: string, branch: string, } | { "type": "managedGoalTurnClaimed", claimed: boolean, } | { "type": "sessionRuntime", runtimeId: string | null, supportsSteer: boolean,
 /**
  * The transport can settle a user-input request without structured
  * answers — clarify and dismiss are both offered on this bit.

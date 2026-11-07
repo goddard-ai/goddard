@@ -181,6 +181,10 @@ pub(super) fn handle_driver_command(
         | Command::UpsertAutomation { .. }
         | Command::RemoveAutomation { .. }
         | Command::RunAutomationNow { .. }
+        | Command::GetProjectSyncInfo { .. }
+        | Command::PushProjectSync { .. }
+        | Command::PullProjectSync { .. }
+        | Command::SyncProjectWithFriend { .. }
         | Command::ShareProjectWithFriend { .. }
         | Command::UnshareProjectWithFriend { .. }
         | Command::EnableFriendSync { .. }
