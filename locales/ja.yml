@@ -3448,6 +3448,7 @@ experiments.voice_briefing_eager_caption: 戻る前に要約と音声を準備�
 experiments.voice_scratchpad_margin_double_click_title: チャットの余白をダブルクリックで VoicePad を切り替え
 experiments.voice_scratchpad_margin_double_click_description: チャットコンテンツの横の空白をダブルクリックすると、開いている VoicePad の表示・非表示を切り替えられます。デフォルトはオフです。
 sidebar.deliverables_view_all: すべての成果物を表示
+sidebar.group_option_peek: このグループの Option を長押し — ホバーで有効化、クリックまたは Enter で固定
 annotations.earlier_chat: 過去のボスチャット
 memory.add_note: メモを追加
 memory.save_note: メモを保存

@@ -843,6 +843,10 @@ impl Waku {
     }
 
     pub(super) fn select_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        // A selection change ends any group-local Option engagement — the
+        // pointer or keypress that selected already got its effect, and no
+        // modifier state should outlive the row it armed on.
+        self.sidebar_group_alt.set(None);
         self.navigate_to_session(session_id, SessionActivationTransition::Visit, cx);
     }
 

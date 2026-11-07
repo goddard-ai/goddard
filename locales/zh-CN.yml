@@ -3399,6 +3399,7 @@ experiments.voice_briefing_eager_caption: 在你返回之前准备好摘要和�
 experiments.voice_scratchpad_margin_double_click_title: 双击聊天边距切换 VoicePad
 experiments.voice_scratchpad_margin_double_click_description: 双击聊天内容旁的空白区域即可显示或隐藏已打开的 VoicePad。默认关闭。
 sidebar.deliverables_view_all: 查看全部交付物
+sidebar.group_option_peek: 为此分组按住 Option — 悬停启用，点击或按回车固定
 annotations.earlier_chat: 更早的老板聊天
 memory.add_note: 添加备注
 memory.save_note: 保存备注

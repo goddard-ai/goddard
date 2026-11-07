@@ -6176,7 +6176,7 @@ fn sidebar_time_labels_show_reply_age_during_a_live_turn() {
 
     // Never replied, nothing running: the row stays quiet.
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-    assert_eq!(session_time_label(&session, 1_000), None);
+    assert_eq!(session_time_label(&session, 1_000, false), None);
 
     // A live turn keeps the reply age — the worktree icon sits beside it
     // rather than replacing it.
@@ -6184,13 +6184,26 @@ fn sidebar_time_labels_show_reply_age_during_a_live_turn() {
     session.status = SessionStatus::Working;
     session.turns[0].started_at = 100;
     session.last_reply_at = Some(40);
-    assert_eq!(session_time_label(&session, 109).as_deref(), Some("1m"));
+    assert_eq!(
+        session_time_label(&session, 109, false).as_deref(),
+        Some("1m")
+    );
 
     // Settled again: still how long ago the agent last replied.
     session.finish_active_turn(TurnStatus::Completed);
     session.status = SessionStatus::Idle;
     session.last_reply_at = Some(500);
-    assert_eq!(session_time_label(&session, 800).as_deref(), Some("5m"));
+    assert_eq!(
+        session_time_label(&session, 800, false).as_deref(),
+        Some("5m")
+    );
+
+    // An Option hold or a group-local Option engagement swaps the relative
+    // age for the reply's calendar date.
+    assert_eq!(
+        session_time_label(&session, 800, true).as_deref(),
+        Some(super::sidebar::sidebar_short_date(500, 800).as_str())
+    );
 }
 
 /// The time-label wake-up chain arms exactly one timer, aimed at the next

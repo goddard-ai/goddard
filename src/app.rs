@@ -3557,6 +3557,10 @@ pub struct Waku {
     sidebar_alt_held: bool,
     sidebar_alt_modifier_down: bool,
     sidebar_alt_generation: u64,
+    /// Group-local Option: the sidebar group header whose hover control is
+    /// engaged — its member rows render exactly as if Option/Alt were held.
+    /// Hover arms it; click or a keyboard press pins it.
+    sidebar_group_alt: Cell<Option<sidebar::SidebarGroupAlt>>,
     /// Dormant sessions whose clean worktrees the background sweep has
     /// already snapshotted and removed — re-checked only when a session
     /// leaves dormancy. In-flight entries also dedupe a pass's spawns.
@@ -3590,6 +3594,9 @@ pub struct Waku {
     sidebar_group_header_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
     sidebar_group_compose_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
     sidebar_group_open_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
+    /// Stable keyboard focus for each group header's group-local Option
+    /// control.
+    sidebar_group_alt_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
     /// Stable keyboard focus for each session row's hover-revealed archive
     /// control.
     sidebar_session_archive_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
@@ -7894,6 +7901,7 @@ impl Waku {
                 sidebar_alt_held: false,
                 sidebar_alt_modifier_down: false,
                 sidebar_alt_generation: 0,
+                sidebar_group_alt: Cell::new(None),
                 dormant_worktrees_swept: RefCell::new(HashSet::new()),
                 dormant_sweep_scanned_at: Cell::new(None),
                 dormant_sweep_in_flight: Cell::new(false),
@@ -7906,6 +7914,7 @@ impl Waku {
                 sidebar_group_header_focuses: RefCell::new(HashMap::new()),
                 sidebar_group_compose_focuses: RefCell::new(HashMap::new()),
                 sidebar_group_open_focuses: RefCell::new(HashMap::new()),
+                sidebar_group_alt_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_archive_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_pin_focuses: RefCell::new(HashMap::new()),
                 sidebar_employee_archive_focuses: RefCell::new(HashMap::new()),

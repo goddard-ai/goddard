@@ -200,6 +200,46 @@ impl SidebarGroup {
     }
 }
 
+/// Which group headers carry the group-local Option control: the boss's
+/// employee sections and every date/project session group. Pinned, Dormant,
+/// Terminals, Deliverables, and Planning headers keep only the fold click —
+/// pinned and dormant rows still answer to a physical Option hold.
+fn sidebar_group_has_alt_toggle(group: SidebarGroup) -> bool {
+    matches!(
+        group,
+        SidebarGroup::Outcomes
+            | SidebarGroup::Errands
+            | SidebarGroup::Waiting
+            | SidebarGroup::Employees
+            | SidebarGroup::Date(_)
+            | SidebarGroup::Project(_)
+            | SidebarGroup::Projectless
+    )
+}
+
+/// An engaged group-local Option header. Employee sections repeat once per
+/// boss, so the engaging header's row index — not its `SidebarGroup` — is
+/// the identity; the group is kept alongside to validate the index against
+/// a rebuilt snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct SidebarGroupAlt {
+    /// Index of the engaging `SidebarRow::Header` in the current rows
+    /// snapshot.
+    pub(super) row: usize,
+    /// The group that header rendered.
+    pub(super) group: SidebarGroup,
+    /// Pinned engagement (click or keyboard) survives the pointer leaving
+    /// the group; a hover arm ends at the group's edge.
+    pub(super) sticky: bool,
+}
+
+/// Whether a stored engagement still heads the group it armed on. Rows
+/// rebuild on every structural sidebar change, so the index alone is not
+/// proof — the row it lands on must still be that group's header.
+fn sidebar_group_alt_active(rows: &[SidebarRow], engaged: SidebarGroupAlt) -> bool {
+    rows.get(engaged.row) == Some(&SidebarRow::Header(engaged.group))
+}
+
 fn sidebar_purpose_group(
     purpose: Option<waku_protocol::boss::EmployeePurpose>,
     queued: bool,
@@ -815,15 +855,44 @@ fn dock_glyph_image(path: &'static str, color: Hsla, cx: &App) -> Option<Arc<gpu
 }
 
 /// The session row's trailing time: how long ago the agent last replied,
-/// shown through a live turn too. A session that has never replied shows
-/// nothing.
-pub(super) fn session_time_label(session: &AgentSession, now: u64) -> Option<String> {
+/// shown through a live turn too — or, while `absolute_date` is set (an
+/// Option hold or a group-local Option engagement), the reply's calendar
+/// date instead. A session that has never replied shows nothing.
+pub(super) fn session_time_label(
+    session: &AgentSession,
+    now: u64,
+    absolute_date: bool,
+) -> Option<String> {
     if session.status == SessionStatus::Background {
         return Some(tr!("sidebar.status_background"));
     }
-    session
-        .last_reply_at
-        .map(|last_reply_at| format_time_ago(now.saturating_sub(last_reply_at)))
+    session.last_reply_at.map(|last_reply_at| {
+        if absolute_date {
+            sidebar_short_date(last_reply_at, now)
+        } else {
+            format_time_ago(now.saturating_sub(last_reply_at))
+        }
+    })
+}
+
+/// The absolute counterpart to `format_time_ago`: an abbreviated local
+/// month and day for the current calendar year ("Oct 25"), the year tacked
+/// on for earlier ones ("Oct 25, 2025").
+pub(super) fn sidebar_short_date(timestamp: u64, now: u64) -> String {
+    let to_local = |at: u64| {
+        i64::try_from(at)
+            .ok()
+            .and_then(|at| DateTime::<Utc>::from_timestamp(at, 0))
+            .map(|at| at.with_timezone(&Local))
+    };
+    let Some(local) = to_local(timestamp) else {
+        return String::new();
+    };
+    if to_local(now).is_some_and(|now| now.year() == local.year()) {
+        local.format("%b %-d").to_string()
+    } else {
+        local.format("%b %-d, %Y").to_string()
+    }
 }
 
 /// The session row's draft line: the unsent composer text left on the task,
@@ -1490,6 +1559,20 @@ fn sidebar_row_selection(row: &SidebarRow) -> Option<SidebarSelection> {
         SidebarRow::Deliverable(key, id) => Some(SidebarSelection::Deliverable(*key, *id)),
         _ => None,
     }
+}
+
+/// The header a sidebar row belongs to — the row's own index for a header,
+/// else the nearest preceding `Header` in the flat snapshot; `None` for the
+/// chrome rows above the first group and for the boss row that opens a new
+/// roster block. Group-local Option engagement uses it to bound the region
+/// the hover arm covers.
+fn sidebar_row_group_header(rows: &[SidebarRow], index: usize) -> Option<usize> {
+    if matches!(rows.get(index), Some(SidebarRow::Boss(_))) {
+        return None;
+    }
+    rows.get(..=index)?
+        .iter()
+        .rposition(|row| matches!(row, SidebarRow::Header(_)))
 }
 
 /// The session a row navigates to — `Planning` rows carry a session the
@@ -3670,6 +3753,12 @@ impl Waku {
                     .on_scroll_wheel(cx.listener(|this, _, _, _| {
                         this.transcript_preloads.cancel_hover();
                     }))
+                    // Leaving the history region ends a hover-armed
+                    // group-local Option the same way entering a foreign row
+                    // does; pinned (click/keyboard) engagement is untouched.
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        this.sidebar_group_alt_pointer_enter(!*hovered, cx);
+                    }))
                     .flex_1()
                     .min_h_0()
                     .relative()
@@ -3987,6 +4076,78 @@ impl Waku {
         }
         if self.sidebar_shortcut_hints {
             self.sidebar_shortcut_hints = false;
+            cx.notify();
+        }
+        if self.sidebar_group_alt.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// The engaged group-local Option header, validated against the rows
+    /// snapshot: the stored position must still head the group it armed on.
+    /// A rebuilt, regrouped, or shifted list drops the engagement rather
+    /// than letting it drift onto whatever row inherited the index.
+    fn sidebar_group_alt_engagement(&self, rows: &[SidebarRow]) -> Option<SidebarGroupAlt> {
+        let engaged = self.sidebar_group_alt.get()?;
+        if !sidebar_group_alt_active(rows, engaged) {
+            self.sidebar_group_alt.set(None);
+            return None;
+        }
+        Some(engaged)
+    }
+
+    /// Hover the header's Option control: arm the group-local modifier for
+    /// its rows. Re-entering a pinned (click or keyboard) engagement keeps
+    /// the pin instead of demoting it to a hover arm.
+    fn arm_sidebar_group_alt(&mut self, row: usize, group: SidebarGroup, cx: &mut Context<Self>) {
+        let current = self.sidebar_group_alt.get();
+        if current.is_some_and(|alt| alt.row == row && alt.group == group) {
+            return;
+        }
+        self.sidebar_group_alt.set(Some(SidebarGroupAlt {
+            row,
+            group,
+            sticky: false,
+        }));
+        cx.notify();
+    }
+
+    /// Click or keyboard activation pins the engagement: it survives the
+    /// pointer leaving the group until the same activation releases it, the
+    /// header goes away, or a selection change clears it.
+    fn toggle_sidebar_group_alt(&mut self, row: usize, group: SidebarGroup, cx: &mut Context<Self>) {
+        let pinned = self
+            .sidebar_group_alt
+            .get()
+            .is_some_and(|alt| alt.row == row && alt.group == group && alt.sticky);
+        self.sidebar_group_alt.set((!pinned).then_some(SidebarGroupAlt {
+            row,
+            group,
+            sticky: true,
+        }));
+        cx.notify();
+    }
+
+    /// Release the engagement — sticky or not — repainting only when one
+    /// was armed.
+    fn clear_sidebar_group_alt(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_group_alt.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// A pointer entering a row outside a hover-armed group ends the arm:
+    /// the arm lives while the pointer stays inside the engaged header and
+    /// its member rows, so the controls the modifier reveals stay reachable
+    /// after the pointer leaves the small header control itself.
+    fn sidebar_group_alt_pointer_enter(&mut self, foreign: bool, cx: &mut Context<Self>) {
+        if foreign
+            && self
+                .sidebar_group_alt
+                .get()
+                .is_some_and(|alt| !alt.sticky)
+        {
+            self.sidebar_group_alt.set(None);
             cx.notify();
         }
     }
@@ -4340,6 +4501,9 @@ impl Waku {
                     }),
             );
             let (rows, collapsed_members, deliverables_unread) = self.sidebar_rows(dates);
+            // A rebuilt snapshot can move the armed group-local Option
+            // header — validate it before rows re-render against the drift.
+            self.sidebar_group_alt_engagement(&rows);
             *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(rows);
             *self.sidebar_collapsed_group_members.borrow_mut() = Rc::new(collapsed_members);
             self.sidebar_deliverables_unread.set(deliverables_unread);
@@ -4981,7 +5145,13 @@ impl Waku {
         let Some(row) = rows.get(index) else {
             return div().into_any_element();
         };
-        match *row {
+        // The group-local Option arm: which header this row belongs to, and
+        // whether that header's engagement is live. Member rows of the armed
+        // group render exactly as if Option were held.
+        let group_header = sidebar_row_group_header(rows, index);
+        let engaged = self.sidebar_group_alt_engagement(rows);
+        let row_alt = engaged.is_some_and(|alt| Some(alt.row) == group_header);
+        let element = match *row {
             SidebarRow::Search => self.render_sidebar_search(window, cx).into_any_element(),
             SidebarRow::Projects => self.render_sidebar_projects(window, cx).into_any_element(),
             SidebarRow::Inbox => self.render_sidebar_inbox(window, cx).into_any_element(),
@@ -5006,7 +5176,7 @@ impl Waku {
                 .flatten();
                 self.render_boss_planning_row(session_id, shortcut_index, cx)
             }
-            SidebarRow::Employee(id) => self.render_boss_employee_row(id, cx),
+            SidebarRow::Employee(id) => self.render_boss_employee_row(id, row_alt, cx),
             SidebarRow::Deliverable(key, id) => self.render_sidebar_deliverable_row(key, id, cx),
             SidebarRow::Header(group) => {
                 // The header actions belong to the session history — the
@@ -5016,7 +5186,7 @@ impl Waku {
                     && !rows[..index].iter().any(|row| {
                         matches!(row, SidebarRow::Header(other) if !matches!(other, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees))
                     });
-                self.render_sidebar_group_header(group, first, cx)
+                self.render_sidebar_group_header(group, index, row_alt, first, cx)
                     .into_any_element()
             }
             SidebarRow::Session(session_id) => {
@@ -5028,7 +5198,7 @@ impl Waku {
                         .position(|candidate| candidate == session_id)
                 })
                 .flatten();
-                self.render_sidebar_session_item(session_id, shortcut_index, cx)
+                self.render_sidebar_session_item(session_id, shortcut_index, row_alt, cx)
                     .into_any_element()
             }
             SidebarRow::Terminal(terminal_id) => self
@@ -5052,12 +5222,28 @@ impl Waku {
                     SIDEBAR_GROUP_SPACER_HEIGHT
                 }))
                 .into_any_element(),
+        };
+        // While a hover arm is live, any row outside the armed group ends it
+        // on entry — the arm survives only inside the group's own header and
+        // member rows. A pinned engagement ignores the pointer entirely.
+        if engaged.is_some_and(|alt| !alt.sticky && Some(alt.row) != group_header) {
+            return div()
+                .id(SharedString::from(format!("sidebar-alt-clear-{index}")))
+                .size_full()
+                .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                    this.sidebar_group_alt_pointer_enter(*hovered, cx);
+                }))
+                .child(element)
+                .into_any_element();
         }
+        element
     }
 
     fn render_sidebar_group_header(
         &self,
         group: SidebarGroup,
+        index: usize,
+        alt_active: bool,
         first: bool,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -5471,6 +5657,94 @@ impl Waku {
                     )
             });
 
+        // The group-local Option control: hovering it arms the group's rows
+        // as if Option were held — model and date details swap in, the pin
+        // control becomes the sweep. The arm survives while the pointer
+        // stays inside the group so the revealed controls remain reachable;
+        // a click or a keyboard press pins it instead.
+        let alt_toggle = sidebar_group_has_alt_toggle(group).then(|| {
+            let alt_focus = self
+                .sidebar_group_alt_focuses
+                .borrow_mut()
+                .entry(group)
+                .or_insert_with(|| cx.focus_handle())
+                .clone();
+            div()
+                .w(px(20.0))
+                .h(px(22.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_end()
+                .child(
+                    div()
+                        // Employee sections repeat once per boss, so the
+                        // element id carries the row index the engagement
+                        // keys on.
+                        .id(SharedString::from(format!(
+                            "sidebar-group-alt-{group_key}-{index}"
+                        )))
+                        .track_focus(&alt_focus)
+                        .tab_index(0)
+                        .tab_stop(true)
+                        .w_0()
+                        .h(px(20.0))
+                        .overflow_hidden()
+                        .rounded(px(4.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .opacity(0.0)
+                        .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
+                        .when(alt_active, |style| style.w(px(20.0)).opacity(1.0))
+                        .focus_visible(|style| {
+                            style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight())
+                        })
+                        .hover(|style| style.bg(theme.overlay))
+                        .active(|style| style.bg(theme.overlay_strong))
+                        .aria_label(tr!("sidebar.group_option_peek"))
+                        .tooltip(Tooltip::text(tr!("sidebar.group_option_peek")))
+                        .child(icon(
+                            "icons/eye.svg",
+                            12.0,
+                            if alt_active {
+                                theme.accent
+                            } else {
+                                theme.text_secondary
+                            },
+                        ))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            if *hovered {
+                                this.arm_sidebar_group_alt(index, group, cx);
+                            }
+                        }))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.toggle_sidebar_group_alt(index, group, cx);
+                        }))
+                        .on_key_down(cx.listener(
+                            move |this, event: &KeyDownEvent, _, cx| {
+                                match event.keystroke.key.as_str() {
+                                    "enter" | "space" => {
+                                        this.toggle_sidebar_group_alt(index, group, cx);
+                                        cx.stop_propagation();
+                                    }
+                                    "escape"
+                                        if this.sidebar_group_alt.get().is_some_and(
+                                            |alt| alt.row == index && alt.group == group,
+                                        ) =>
+                                    {
+                                        this.clear_sidebar_group_alt(cx);
+                                        cx.stop_propagation();
+                                    }
+                                    _ => {}
+                                }
+                            },
+                        )),
+                )
+        });
         // The Terminals and Recent deliverables groups read as action rows —
         // they match the New Task and Search rows' metrics: height, padding,
         // icon box, gap, and regular label weight. Every other group keeps
@@ -5659,6 +5933,7 @@ impl Waku {
         )
         .when_some(compose, |element, compose| element.child(compose))
         .when_some(open_all, |element, open_all| element.child(open_all))
+        .when_some(alt_toggle, |element, alt_toggle| element.child(alt_toggle))
         // A folded employee group reports work in flight with the spinner
         // its hidden rows would carry, in the same accent a working row
         // earns from `status_color`.
@@ -6407,6 +6682,7 @@ impl Waku {
         &self,
         session_id: Uuid,
         shortcut_index: Option<usize>,
+        group_alt: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -6478,7 +6754,12 @@ impl Waku {
                     theme.sidebar_item_background
                 })
             })
-            .child(self.render_session_row_body(session_id, grouped_by_project, cx))
+            .child(self.render_session_row_body(
+                session_id,
+                grouped_by_project,
+                group_alt,
+                cx,
+            ))
             .when(!renaming, |element| {
                 let drag_title = SharedString::from(localized_session_title(session));
                 element
@@ -7054,8 +7335,12 @@ impl Waku {
         &self,
         session_id: Uuid,
         grouped_by_project: bool,
+        group_alt: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // Group-local Option stacks with a physical hold — either one swaps
+        // in the alternate details and retasks the pin control.
+        let alt_effective = self.sidebar_alt_held || group_alt;
         let theme = Theme::current(cx);
         let Some(session) = self
             .state
@@ -7242,9 +7527,8 @@ impl Waku {
         // model and reasoning effort this session is configured to use.
         // `session_options` resolves packed model suffixes and rejects traits
         // the selected model does not support, matching the driver options.
-        let model_detail = self
-            .sidebar_alt_held
-            .then(|| self.session_sidebar_model_detail(session));
+        let model_detail =
+            alt_effective.then(|| self.session_sidebar_model_detail(session));
         let has_detail_label = detail_label.is_some() || model_detail.is_some();
         let group_name = SharedString::from(format!("session-row-{session_id}"));
         let archive_focus = self
@@ -7319,7 +7603,7 @@ impl Waku {
             .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
-            .when(!self.sidebar_alt_held, |element| {
+            .when(!alt_effective, |element| {
                 element.tooltip(Tooltip::text_with_action(
                     if pinned {
                         tr!("session.unpin")
@@ -7329,7 +7613,7 @@ impl Waku {
                     &ToggleSessionPin,
                 ))
             })
-            .when(self.sidebar_alt_held, |element| {
+            .when(alt_effective, |element| {
                 element.tooltip(Tooltip::text(if dormant {
                     tr!("session.restore")
                 } else {
@@ -7337,7 +7621,7 @@ impl Waku {
                 }))
             })
             .child(icon(
-                if self.sidebar_alt_held {
+                if alt_effective {
                     if dormant {
                         "icons/rotate-cw.svg"
                     } else {
@@ -7354,7 +7638,7 @@ impl Waku {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 cx.stop_propagation();
-                if event.modifiers().alt || this.sidebar_alt_held {
+                if event.modifiers().alt || this.sidebar_alt_held || group_alt {
                     if dormant {
                         this.restore_dormant_sessions(&[session_id], cx);
                     } else {
@@ -7470,7 +7754,7 @@ impl Waku {
                             )
                     })
                     .when_some(
-                        detail_label.filter(|_| !self.sidebar_alt_held),
+                        detail_label.filter(|_| !alt_effective),
                         |element, label| {
                             element
                                 .child(icon(detail_icon, 12.5, theme.text_tertiary))
@@ -7482,7 +7766,7 @@ impl Waku {
                                         .text_color(theme.text_tertiary)
                                         .child(div().min_w_0().truncate().child(label))
                                         .when(
-                                            !self.sidebar_alt_held
+                                            !alt_effective
                                                 && checkout_status.is_some_and(|status| {
                                                     status.uncommitted_changes
                                                 }),
@@ -7496,7 +7780,7 @@ impl Waku {
                                         ),
                                 )
                                 .when_some(
-                                    (!self.sidebar_alt_held)
+                                    (!alt_effective)
                                         .then_some(checkout_status)
                                         .flatten()
                                         .map(|status| status.unpushed_commits)
@@ -7577,7 +7861,7 @@ impl Waku {
                         )
                     })
                     .when_some(
-                        session_time_label(session, unix_time()),
+                        session_time_label(session, unix_time(), alt_effective),
                         |element, label| {
                             element.child(
                                 div()
@@ -9824,6 +10108,96 @@ mod tests {
         let below = sidebar_reveal_offset(&rows, 24, top, height * 4.0).unwrap();
         assert_eq!(below.item_ix, 21);
         assert_eq!(below.offset_in_item, px(0.0));
+    }
+
+    #[test]
+    fn group_local_option_maps_rows_to_their_owning_header() {
+        let key = waku_client::DaemonKey::Local;
+        let rows = vec![
+            SidebarRow::Search,
+            SidebarRow::Boss(key),
+            SidebarRow::Header(SidebarGroup::Outcomes),
+            SidebarRow::Employee(Uuid::from_u128(1)),
+            SidebarRow::Header(SidebarGroup::Errands),
+            SidebarRow::Employee(Uuid::from_u128(2)),
+            SidebarRow::CollapsibleGroupSpacer { collapsed: false },
+            SidebarRow::Header(SidebarGroup::Date(SessionDateGroup::Today)),
+            SidebarRow::Session(Uuid::from_u128(3)),
+            SidebarRow::ShowMore(SidebarGroup::Date(SessionDateGroup::Today)),
+        ];
+        // Chrome rows and the boss row belong to no group.
+        assert_eq!(sidebar_row_group_header(&rows, 0), None);
+        assert_eq!(sidebar_row_group_header(&rows, 1), None);
+        // A header owns itself; member and fold rows own their header — the
+        // second boss section does not inherit the first's header.
+        assert_eq!(sidebar_row_group_header(&rows, 2), Some(2));
+        assert_eq!(sidebar_row_group_header(&rows, 3), Some(2));
+        assert_eq!(sidebar_row_group_header(&rows, 4), Some(4));
+        assert_eq!(sidebar_row_group_header(&rows, 5), Some(4));
+        assert_eq!(sidebar_row_group_header(&rows, 6), Some(4));
+        assert_eq!(sidebar_row_group_header(&rows, 7), Some(7));
+        assert_eq!(sidebar_row_group_header(&rows, 8), Some(7));
+        assert_eq!(sidebar_row_group_header(&rows, 9), Some(7));
+
+        // The engagement validates against the snapshot: only the armed
+        // header's own index and group pass, so a rebuild that shifts rows
+        // drops it rather than letting it drift onto a neighbor.
+        let engaged = SidebarGroupAlt {
+            row: 7,
+            group: SidebarGroup::Date(SessionDateGroup::Today),
+            sticky: false,
+        };
+        assert!(sidebar_group_alt_active(&rows, engaged));
+        assert!(!sidebar_group_alt_active(
+            &rows,
+            SidebarGroupAlt { row: 2, ..engaged }
+        ));
+        assert!(!sidebar_group_alt_active(
+            &rows,
+            SidebarGroupAlt {
+                row: 7,
+                group: SidebarGroup::Date(SessionDateGroup::Yesterday),
+                ..engaged
+            }
+        ));
+        let shifted = [&rows[..7], &rows[7..]].concat();
+        let mut shifted = shifted;
+        shifted.insert(0, SidebarRow::Inbox);
+        assert!(!sidebar_group_alt_active(&shifted, engaged));
+    }
+
+    #[test]
+    fn group_local_option_date_label_marks_only_previous_years() {
+        let now = Local
+            .with_ymd_and_hms(2026, 11, 7, 15, 0, 0)
+            .earliest()
+            .unwrap()
+            .timestamp() as u64;
+        let this_year = Local
+            .with_ymd_and_hms(2026, 10, 25, 9, 0, 0)
+            .earliest()
+            .unwrap()
+            .timestamp() as u64;
+        assert_eq!(sidebar_short_date(this_year, now), "Oct 25");
+        let last_year = Local
+            .with_ymd_and_hms(2025, 10, 25, 9, 0, 0)
+            .earliest()
+            .unwrap()
+            .timestamp() as u64;
+        assert_eq!(sidebar_short_date(last_year, now), "Oct 25, 2025");
+        // The year boundary compares calendar years, not elapsed time — a
+        // December reply stays current-year on January first.
+        let new_year = Local
+            .with_ymd_and_hms(2027, 1, 1, 0, 30, 0)
+            .earliest()
+            .unwrap()
+            .timestamp() as u64;
+        let december = Local
+            .with_ymd_and_hms(2026, 12, 31, 23, 0, 0)
+            .earliest()
+            .unwrap()
+            .timestamp() as u64;
+        assert_eq!(sidebar_short_date(december, new_year), "Dec 31, 2026");
     }
 
     #[test]

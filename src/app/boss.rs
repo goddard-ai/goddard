@@ -5446,7 +5446,12 @@ impl Waku {
         )
     }
 
-    pub(super) fn render_boss_employee_row(&self, id: Uuid, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_boss_employee_row(
+        &self,
+        id: Uuid,
+        group_alt: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(identity) = self.boss_ui.identities.get(&id) else {
             return div().into_any_element();
         };
@@ -5471,8 +5476,9 @@ impl Waku {
             id,
         );
         // Option trades the job title for the employee's model and effort,
-        // the same reveal a task row's detail line performs.
-        let alt_held = self.sidebar_alt_held;
+        // the same reveal a task row's detail line performs. A group-local
+        // Option engagement on the row's sidebar group counts the same.
+        let alt_held = self.sidebar_alt_held || group_alt;
         let (detail, detail_provider) = if alt_held {
             self.boss_ui.queued_model_targets.get(&id).map_or_else(
                 || {
@@ -5510,7 +5516,8 @@ impl Waku {
                 None,
             )
         };
-        let (uses_worktree, activity_label) = employee_sidebar_details(session, unix_time());
+        let (uses_worktree, activity_label) =
+            employee_sidebar_details(session, unix_time(), alt_held);
         let project = session.and_then(|session| {
             self.state
                 .projects
@@ -12430,13 +12437,17 @@ fn boss_sidebar_detail_line(
         .when_some(trailing_detail, |row, detail| row.child(detail))
 }
 
-fn employee_sidebar_details(session: Option<&AgentSession>, now: u64) -> (bool, Option<String>) {
+fn employee_sidebar_details(
+    session: Option<&AgentSession>,
+    now: u64,
+    absolute_date: bool,
+) -> (bool, Option<String>) {
     let Some(session) = session else {
         return (false, None);
     };
     (
         session.workspace.is_worktree(),
-        sidebar::session_time_label(session, now),
+        sidebar::session_time_label(session, now, absolute_date),
     )
 }
 
@@ -12826,16 +12837,23 @@ mod tests {
         employee.last_reply_at = Some(880);
 
         assert_eq!(
-            employee_sidebar_details(Some(&employee), now),
+            employee_sidebar_details(Some(&employee), now, false),
             (true, Some(sidebar::format_time_ago(120)))
         );
 
         employee.workspace = SessionWorkspace::Local;
         assert_eq!(
-            employee_sidebar_details(Some(&employee), now),
+            employee_sidebar_details(Some(&employee), now, false),
             (false, Some(sidebar::format_time_ago(120)))
         );
-        assert_eq!(employee_sidebar_details(None, now), (false, None));
+        assert_eq!(
+            employee_sidebar_details(Some(&employee), now, true),
+            (
+                false,
+                Some(sidebar::sidebar_short_date(880, now))
+            )
+        );
+        assert_eq!(employee_sidebar_details(None, now, false), (false, None));
     }
 
     #[test]

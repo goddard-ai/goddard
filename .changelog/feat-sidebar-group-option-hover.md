@@ -1,0 +1,1 @@
+- **Group-local Option preview:** Hover the eye icon on a sidebar group header to apply the Option hold's effects to just that group — model and effort details, calendar dates instead of relative ages, and the sweep/restore pin control. Click the icon or press Enter on it to pin the view until it's released.
