@@ -1785,6 +1785,15 @@ impl Waku {
                 }
             }
             Some(SuggestionDispatch::Archive) => {
+                if let Some(op) = self.git_panel_operation.as_mut()
+                    && let Some(follow_up) = op.archive_follow_up.as_mut()
+                    && follow_up.session_id == suggestion.session_id
+                {
+                    follow_up.queued = true;
+                    self.action_suggestion = None;
+                    cx.notify();
+                    return;
+                }
                 self.archive_session(suggestion.session_id, window, cx);
             }
             Some(dispatch) => {

@@ -251,6 +251,8 @@ pub(super) struct GitPanelOperation {
     /// The base a `PushingBase`/`SyncingBase` op targets — the failure
     /// modal quotes it back when the run ends badly.
     pub base: Option<String>,
+    /// The landed task offered Archive while this push was running.
+    pub archive_follow_up: Option<push_base::ArchiveFollowUp>,
 }
 
 /// Everything the panel needs, created when the panel opens and rebuilt when
@@ -1275,6 +1277,7 @@ impl Waku {
             sync_branch: false,
             sync_branch_name: None,
             base: None,
+            archive_follow_up: None,
         });
         cx.notify();
         Some((id, workspace))
@@ -2004,6 +2007,17 @@ impl Waku {
         else {
             return;
         };
+        if let Some(follow_up) = op.archive_follow_up
+            && !matches!(
+                &result,
+                Ok(WorkspaceResult::PushBase {
+                    outcome: waku_client::git::PushBaseOutcome::Pushed { .. }
+                        | waku_client::git::PushBaseOutcome::UpToDate { .. }
+                })
+            )
+        {
+            self.set_action_follow_up(follow_up.session_id, "push-base", op.base.clone());
+        }
         let same_panel = self
             .git_panel
             .as_ref()

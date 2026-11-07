@@ -21,6 +21,13 @@ actions!(
     [ConfirmPushBaseDialog, DismissPushBaseDialog]
 );
 
+/// Bound to the operation so changing the selected task cannot retarget Archive.
+#[derive(Clone, Copy)]
+pub(super) struct ArchiveFollowUp {
+    pub session_id: Uuid,
+    pub queued: bool,
+}
+
 const DIALOG_CONTEXT: &str = "PushBaseDialog";
 
 /// How often one (workspace, base) pair may auto-fetch its upstream —
@@ -362,6 +369,29 @@ impl Waku {
             );
             return;
         };
+        let follow_up_session = self
+            .action_suggestion
+            .as_ref()
+            .filter(|suggestion| {
+                suggestion.prediction_id.is_none()
+                    && suggestion.action == "push-base"
+                    && suggestion.base.as_ref() == Some(&base)
+                    && self.state.sessions.iter().any(|session| {
+                        session.id == suggestion.session_id
+                            && self.workspace_path_for_session(session) == Some(workspace.as_path())
+                    })
+            })
+            .map(|suggestion| suggestion.session_id);
+        if let Some(session_id) = follow_up_session {
+            if let Some(op) = self.git_panel_operation.as_mut() {
+                op.archive_follow_up = Some(ArchiveFollowUp {
+                    session_id,
+                    queued: false,
+                });
+            }
+            self.set_action_follow_up(session_id, "archive", None);
+            cx.notify();
+        }
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -435,15 +465,23 @@ impl Waku {
         outcome: PushBaseOutcome,
         cx: &mut Context<Self>,
     ) {
-        let follow_up_session =
-            self.journal_session_for_workspace(&op.workspace)
-                .filter(|session_id| {
-                    self.action_suggestion.as_ref().is_some_and(|suggestion| {
-                        suggestion.prediction_id.is_none()
-                            && suggestion.session_id == *session_id
-                            && suggestion.action == "push-base"
-                    })
+        if let Some(ArchiveFollowUp {
+            session_id,
+            queued: true,
+        }) = op.archive_follow_up
+            && matches!(
+                &outcome,
+                PushBaseOutcome::Pushed { .. } | PushBaseOutcome::UpToDate { .. }
+            )
+        {
+            let waku = cx.entity();
+            let window_handle = self.window_handle;
+            cx.defer(move |cx| {
+                let _ = window_handle.update(cx, move |_, window, cx| {
+                    waku.update(cx, |this, cx| this.archive_session(session_id, window, cx));
                 });
+            });
+        }
         match outcome {
             PushBaseOutcome::Pushed { base, upstream } => {
                 self.settle_operation_toast(
@@ -451,9 +489,6 @@ impl Waku {
                     tr!("push_base.pushed", base = base, upstream = upstream),
                     ToastTone::Success,
                 );
-                if let Some(session_id) = follow_up_session {
-                    self.set_action_follow_up(session_id, "archive", None);
-                }
             }
             PushBaseOutcome::UpToDate { base, upstream } => {
                 self.settle_operation_toast(
@@ -461,9 +496,6 @@ impl Waku {
                     tr!("push_base.up_to_date", base = base, upstream = upstream),
                     ToastTone::Notice,
                 );
-                if let Some(session_id) = follow_up_session {
-                    self.set_action_follow_up(session_id, "archive", None);
-                }
             }
             PushBaseOutcome::NoUpstream { base } => {
                 self.settle_operation_toast(
@@ -471,7 +503,7 @@ impl Waku {
                     tr!("push_base.no_upstream", base = base),
                     ToastTone::Notice,
                 );
-                if follow_up_session.is_some() {
+                if op.archive_follow_up.is_some() {
                     self.action_suggestion = None;
                 }
             }
