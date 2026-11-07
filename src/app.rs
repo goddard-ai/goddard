@@ -3326,6 +3326,8 @@ pub struct Waku {
     friend_session_closed_events: Receiver<(Uuid, bool)>,
     /// The Settings → Friends "add friend" code field.
     friend_code_input: Entity<TextInput>,
+    friend_add_open: bool,
+    friend_profile_open: bool,
     /// The Settings → Friends display-name field — the name friends see on
     /// our requests and offers.
     friend_name_input: Entity<TextInput>,
@@ -7575,6 +7577,8 @@ impl Waku {
                 project_switch_reset_pending: HashSet::new(),
                 settings_search,
                 friend_code_input,
+                friend_add_open: false,
+                friend_profile_open: false,
                 friend_name_input,
                 friend_nickname_input,
                 editing_friend_nickname: None,

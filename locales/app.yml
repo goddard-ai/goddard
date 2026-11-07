@@ -5735,6 +5735,12 @@ friends.your_code:
   en: Your friend code
 friends.code_hint:
   en: Share this code with someone running Goddard. Once they add you and you accept, either of you can send files.
+friends.actions:
+  en: Friend actions
+friends.edit_profile:
+  en: Edit name
+friends.copy_code:
+  en: Copy my code
 friends.add_friend:
   en: Add a friend
 friends.add_hint:
