@@ -227,6 +227,7 @@ enum PaletteAction {
     NewTerminalIn,
     SplitTerminalRight,
     SplitTerminalDown,
+    NavigateTerminal(Uuid, terminals::TerminalCheckoutTarget),
     NewTaskInDirectory(PathBuf, bool),
     NewTaskProjectless(bool),
     NewTaskInSameWorktree,
@@ -778,6 +779,7 @@ pub(super) struct CommandPaletteUi {
     opened_at: Option<Instant>,
     focus_generation: u64,
     previous_focus: Option<FocusHandle>,
+    focused_terminal: Option<Uuid>,
     view: CommandPaletteView,
     results: Vec<CommandPaletteItem>,
     message_searches: QueryCache<String, Vec<crate::persistence::SessionMessageMatch>>,
@@ -867,6 +869,7 @@ impl CommandPaletteUi {
             opened_at: None,
             focus_generation: 0,
             previous_focus: None,
+            focused_terminal: None,
             view: CommandPaletteView::Commands,
             results: Vec::new(),
             message_searches: QueryCache::new(MESSAGE_SEARCH_CACHE_CAPACITY),
@@ -1024,6 +1027,7 @@ impl Waku {
             .collect::<Vec<_>>();
         // A focused picker input disappears when its menu closes. Restore to a
         // durable surface instead of remembering that soon-detached handle.
+        self.command_palette.focused_terminal = self.focused_terminal_id(window, cx);
         self.command_palette.previous_focus = if open_menus.is_empty() {
             window.focused(cx)
         } else if self.settings_page.is_some() {
@@ -3893,6 +3897,35 @@ impl Waku {
                 item.action != PaletteAction::StartQa && item.action != PaletteAction::EditQaSetup
             });
         }
+        if let Some(id) = self.command_palette.focused_terminal {
+            for (target, label, keywords) in [
+                (
+                    terminals::TerminalCheckoutTarget::Primary,
+                    tr!("terminal.go_to_primary_checkout"),
+                    "terminal cd git repository root primary checkout",
+                ),
+                (
+                    terminals::TerminalCheckoutTarget::Previous,
+                    tr!("terminal.go_to_previous_worktree"),
+                    "terminal cd previous last worktree checkout back",
+                ),
+                (
+                    terminals::TerminalCheckoutTarget::DefaultBranch,
+                    tr!("terminal.go_to_default_checkout"),
+                    "terminal cd default branch main master checkout worktree",
+                ),
+            ] {
+                commands.push(CommandPaletteItem::command(
+                    PaletteSection::Commands,
+                    label,
+                    "icons/terminal-square.svg",
+                    None,
+                    PaletteAction::NavigateTerminal(id, target),
+                    keywords,
+                    next(),
+                ));
+            }
+        }
         commands
     }
 
@@ -6031,6 +6064,9 @@ impl Waku {
                 if !self.open_terminal_project_switcher(window, cx) {
                     self.new_terminal_action(&NewTerminal, window, cx);
                 }
+            }
+            PaletteAction::NavigateTerminal(id, target) => {
+                self.navigate_terminal_checkout(id, target, cx);
             }
             PaletteAction::SplitTerminalRight => {
                 self.split_terminal_action(&SplitTerminal, window, cx)

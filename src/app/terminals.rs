@@ -2,6 +2,49 @@ use super::*;
 use crate::persistence::TerminalPaneLayout;
 use crate::ui::ActivationExt;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TerminalCheckoutTarget {
+    Primary,
+    Previous,
+    DefaultBranch,
+}
+
+fn checkout_destination(
+    target: TerminalCheckoutTarget,
+    entries: &[waku_protocol::workspace::RepoWorktree],
+    metadata: &crate::git_branch::BranchMetadata,
+    previous: Option<PathBuf>,
+) -> anyhow::Result<PathBuf> {
+    match target {
+        TerminalCheckoutTarget::Previous => {
+            previous.ok_or_else(|| anyhow::anyhow!("no previous worktree for this terminal"))
+        }
+        TerminalCheckoutTarget::Primary => entries
+            .iter()
+            .find(|entry| entry.is_main)
+            .map(|entry| entry.path.clone())
+            .ok_or_else(|| anyhow::anyhow!("no primary checkout is available")),
+        TerminalCheckoutTarget::DefaultBranch => {
+            // `default_branch` falls back to the current feature branch. Only
+            // origin/HEAD or conventional local defaults identify this target.
+            let branch = metadata
+                .remote_default
+                .as_deref()
+                .or_else(|| {
+                    ["main", "master"]
+                        .into_iter()
+                        .find(|name| metadata.branches.iter().any(|branch| branch.name == *name))
+                })
+                .ok_or_else(|| anyhow::anyhow!("could not determine the default branch"))?;
+            entries
+                .iter()
+                .find(|entry| entry.branch.as_deref() == Some(branch))
+                .map(|entry| entry.path.clone())
+                .ok_or_else(|| anyhow::anyhow!("no existing checkout of default branch {branch}"))
+        }
+    }
+}
+
 /// One entry in the sidebar's Terminals group. `session` scopes the
 /// terminal to the task whose right-panel surfaces own it; `None` is a
 /// global terminal that exists only in the group.
@@ -2091,10 +2134,80 @@ impl Waku {
         cx.notify();
     }
 
+    pub(super) fn navigate_terminal_checkout(
+        &mut self,
+        id: Uuid,
+        target: TerminalCheckoutTarget,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.right_panel_terminals.get(&id).cloned() else {
+            return;
+        };
+        let cwd = view.read(cx).working_directory().to_path_buf();
+        let previous = view.read(cx).previous_checkout();
+        let Some(workspace) = self.workspace_client_for_path(&cwd) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            return;
+        };
+        let view = view.downgrade();
+        let requested_cwd = cwd.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    use waku_client::{WorkspaceOperation, WorkspaceResult};
+                    let WorkspaceResult::BranchMetadata {
+                        snapshot: Some(metadata),
+                    } = workspace
+                        .request(WorkspaceOperation::InspectBranchMetadata { cwd: cwd.clone() })?
+                    else {
+                        anyhow::bail!("terminal is not in a Git checkout");
+                    };
+                    let entries = if target == TerminalCheckoutTarget::Previous {
+                        Vec::new()
+                    } else {
+                        let WorkspaceResult::RepoWorktrees {
+                            entries: Some(entries),
+                        } = workspace.request(WorkspaceOperation::ListWorktrees {
+                            cwd,
+                            skip_status: true,
+                        })?
+                        else {
+                            anyhow::bail!("could not list repository checkouts");
+                        };
+                        entries
+                    };
+                    let destination = checkout_destination(target, &entries, &metadata, previous)?;
+                    Ok::<_, anyhow::Error>((metadata.repository, destination))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                let Some(view) = view.upgrade() else {
+                    return;
+                };
+                // A directory change while Git was resolving invalidates the
+                // request. Never redirect a terminal that has since moved.
+                if view.read(cx).working_directory() != requested_cwd {
+                    this.show_toast("Terminal directory changed; try again");
+                    return;
+                }
+                let result = result.and_then(|(source, destination)| {
+                    view.update(cx, |view, cx| {
+                        view.navigate_checkout(source, destination, cx)
+                    })
+                });
+                if let Err(error) = result {
+                    this.show_toast(format!("Could not switch terminal checkout: {error}"));
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Any terminal view holding keyboard focus — a pane or an anchor in
     /// either surface. The scan only walks the two groups that can be on
     /// screen: the main-area selection and the active panel tab.
-    fn focused_terminal_id(&self, window: &Window, cx: &App) -> Option<Uuid> {
+    pub(super) fn focused_terminal_id(&self, window: &Window, cx: &App) -> Option<Uuid> {
         let candidates = self
             .selected_terminal
             .into_iter()
@@ -4665,6 +4778,84 @@ fn code_run_content_projects(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checkout_navigation_distinguishes_primary_default_and_previous() {
+        use waku_protocol::workspace::RepoWorktree;
+        let entry = |path: &str, branch: &str, is_main| RepoWorktree {
+            path: path.into(),
+            head: String::new(),
+            branch: Some(branch.into()),
+            is_main,
+            dirty_files: None,
+            ahead: None,
+            behind: None,
+            last_commit_at: None,
+        };
+        let entries = vec![
+            entry("/repo", "dev", true),
+            entry("/main checkout", "main", false),
+        ];
+        let mut metadata = crate::git_branch::BranchMetadata {
+            repository: "/feature".into(),
+            current: Some("feature".into()),
+            detached_head: None,
+            default_branch: Some("feature".into()),
+            remote_default: Some("main".into()),
+            origin_url: None,
+            branches: Vec::new(),
+        };
+        assert_eq!(
+            checkout_destination(TerminalCheckoutTarget::Primary, &entries, &metadata, None)
+                .unwrap(),
+            PathBuf::from("/repo")
+        );
+        assert_eq!(
+            checkout_destination(
+                TerminalCheckoutTarget::DefaultBranch,
+                &entries,
+                &metadata,
+                None
+            )
+            .unwrap(),
+            PathBuf::from("/main checkout")
+        );
+        assert_eq!(
+            checkout_destination(
+                TerminalCheckoutTarget::Previous,
+                &entries,
+                &metadata,
+                Some("/old".into())
+            )
+            .unwrap(),
+            PathBuf::from("/old")
+        );
+        assert!(
+            checkout_destination(TerminalCheckoutTarget::Previous, &entries, &metadata, None)
+                .is_err()
+        );
+        metadata.remote_default = Some("trunk".into());
+        assert!(
+            checkout_destination(
+                TerminalCheckoutTarget::DefaultBranch,
+                &entries,
+                &metadata,
+                None
+            )
+            .is_err()
+        );
+        metadata.remote_default = None;
+        // The display fallback to the current feature branch is not a default.
+        assert!(
+            checkout_destination(
+                TerminalCheckoutTarget::DefaultBranch,
+                &entries,
+                &metadata,
+                None
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn maximizing_a_standalone_split_keeps_the_group_available_for_restore() {

@@ -1,0 +1,1 @@
+- Use the command palette from a focused terminal to go to its primary `.git` checkout root, return to the previous checkout visited through these commands, or go to an existing checkout of the default branch.

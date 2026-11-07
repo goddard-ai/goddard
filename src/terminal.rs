@@ -1508,6 +1508,8 @@ pub struct TerminalView {
     /// from it as soon as the shell reports a `cd`, so "where this
     /// terminal was spawned" reads here instead.
     spawn_directory: PathBuf,
+    previous_checkout: Option<PathBuf>,
+    pending_checkout: Option<(PathBuf, PathBuf)>,
     /// Basename of the PTY's shell — "zsh", "bash" — what a sidebar row
     /// reports when the terminal sits outside any repository.
     shell_name: String,
@@ -1628,6 +1630,8 @@ impl TerminalView {
             title: default_title.clone(),
             default_title,
             custom_title: None,
+            previous_checkout: None,
+            pending_checkout: None,
             spawn_directory: working_directory.clone(),
             working_directory,
             shell_name,
@@ -1745,6 +1749,8 @@ impl TerminalView {
             title: default_title.clone(),
             default_title,
             custom_title: None,
+            previous_checkout: None,
+            pending_checkout: None,
             spawn_directory: working_directory.clone(),
             working_directory,
             shell_name,
@@ -1881,6 +1887,50 @@ impl TerminalView {
         let mut view = Self::with_launch(working_directory, launch, cx);
         view.embedded = true;
         view
+    }
+
+    pub(super) fn previous_checkout(&self) -> Option<PathBuf> {
+        self.previous_checkout.clone()
+    }
+
+    /// Run a directory change only at an idle shell, clearing any unfinished
+    /// edit buffer first so the palette cannot append to and execute user input.
+    pub(super) fn navigate_checkout(
+        &mut self,
+        source: PathBuf,
+        target: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.command_running && !self.exited,
+            "terminal is not at an idle shell prompt"
+        );
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("terminal is not connected"))?;
+        anyhow::ensure!(
+            !session.mode().contains(TermMode::ALT_SCREEN),
+            "terminal is running a full-screen program"
+        );
+        let path = target
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("checkout path is not valid UTF-8"))?;
+        anyhow::ensure!(
+            !path.chars().any(char::is_control),
+            "checkout path contains control characters"
+        );
+        if self.working_directory == target {
+            return Ok(());
+        }
+        let command = format!("cd -- {}", crate::custom_commands::shell_quote(&target));
+        // Cancel unfinished input in either Emacs or vi editing mode.
+        session.write(b"\x03".to_vec());
+        session.write(bracketed_paste(command, session.mode()));
+        session.write(b"\r".to_vec());
+        self.pending_checkout = Some((source, target));
+        cx.notify();
+        Ok(())
     }
 
     pub fn working_directory(&self) -> &Path {
@@ -2023,6 +2073,12 @@ impl TerminalView {
                 }
                 TerminalUiEvent::Cwd(path) => {
                     if path != self.working_directory {
+                        if let Some((source, target)) = self.pending_checkout.take()
+                            && path == target
+                            && source != target
+                        {
+                            self.previous_checkout = Some(source);
+                        }
                         self.working_directory = path;
                         cx.emit(TerminalViewEvent::ActivityChanged);
                     }

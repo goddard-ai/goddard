@@ -7621,3 +7621,10 @@ command_palette.git_pull:
   en: "Git: Pull"
 command_palette.git_pull_rebase:
   en: "Git: Pull with Rebase"
+
+terminal.go_to_primary_checkout:
+  en: "Terminal: Go to primary .git checkout root"
+terminal.go_to_previous_worktree:
+  en: "Terminal: Go to previous worktree"
+terminal.go_to_default_checkout:
+  en: "Terminal: Go to default branch checkout"
