@@ -588,17 +588,18 @@ impl Waku {
                 .as_ref()
                 .is_some_and(|job| job.state == LandingState::Queued);
         let mut row = div()
-            .mx(px(12.0))
-            .mb(px(6.0))
-            .px(px(10.0))
-            .py(px(6.0))
-            .rounded(px(8.0))
-            .bg(theme.inset)
+            .w_full()
+            .max_w(px(crate::app::CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .mb(px(4.0))
+            .px(px(12.0))
             .flex()
             .items_center()
-            .gap(px(10.0))
-            .text_size(sp(12.0))
-            .child(div().flex_1().child(self.landing_label(id)));
+            .gap(px(6.0))
+            .text_size(sp(11.5))
+            .text_color(theme.text_tertiary)
+            .child(icon("icons/git-merge.svg", 11.0, theme.text_tertiary))
+            .child(div().min_w_0().flex_1().child(self.landing_label(id)));
         if queued {
             row = row.child(
                 div()
