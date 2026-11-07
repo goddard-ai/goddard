@@ -435,6 +435,7 @@ struct ToastAction {
 
 #[derive(Clone, Debug)]
 enum ToastActionKind {
+    CancelQueuedLanding(Uuid),
     SidebarArchive(Uuid),
     /// The unarchive confirmation's "View now" jump to the restored task.
     Session(Uuid),
@@ -3629,6 +3630,16 @@ pub struct Waku {
     git_panel: Option<git_panel::GitPanelState>,
     /// The commit/push/sync the panel's action button is running, if any.
     git_panel_operation: Option<git_panel::GitPanelOperation>,
+    landing_operations: HashMap<Uuid, landing::NativeLanding>,
+    landing_panel_queue: Option<(PathBuf, waku_client::landing::LandingQueueSnapshot)>,
+    landing_cancellations: std::collections::HashSet<Uuid>,
+    landing_cancel_focus: HashMap<Uuid, FocusHandle>,
+    landing_task_titles: HashMap<Uuid, String>,
+    landing_panel_rows: Vec<waku_client::landing::LandingJob>,
+    landing_panel_total: usize,
+    landing_queue_expanded: bool,
+    landing_queue_focus: FocusHandle,
+    landing_queue_watch: Option<Uuid>,
     /// Guards snapshot/commit fetches against superseded panel state.
     git_panel_generation: u64,
     /// Per-file hover previews, keyed by path and section. A partially staged
@@ -4618,6 +4629,7 @@ mod incognito_dialog;
 mod issue_dialog;
 mod keybindings_page;
 mod keyboard_options;
+mod landing;
 mod memory_annotations;
 mod memory_card;
 mod model_picker;
@@ -5505,6 +5517,10 @@ impl Waku {
             .values()
             .any(|run| run.toast_id == toast.id)
             || self.archive_preview_toasts.contains(&toast.id)
+            || self
+                .landing_operations
+                .values()
+                .any(|entry| entry.operation.toast_id == Some(toast.id))
             || self
                 .git_panel_operation
                 .as_ref()
@@ -7900,6 +7916,16 @@ impl Waku {
                 git_panel_top_height,
                 git_panel: None,
                 git_panel_operation: None,
+                landing_operations: HashMap::new(),
+                landing_panel_queue: None,
+                landing_cancellations: std::collections::HashSet::new(),
+                landing_cancel_focus: HashMap::new(),
+                landing_task_titles: HashMap::new(),
+                landing_panel_rows: Vec::new(),
+                landing_panel_total: 0,
+                landing_queue_expanded: true,
+                landing_queue_focus: cx.focus_handle(),
+                landing_queue_watch: None,
                 git_panel_generation: 0,
                 git_panel_file_diffs: HashMap::new(),
                 git_panel_hover: None,

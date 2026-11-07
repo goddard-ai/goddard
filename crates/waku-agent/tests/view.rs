@@ -77,6 +77,7 @@ fn boss_view_defaults_to_a_digest_and_serves_named_slices() {
                             agent_cli_available: true,
                             task_views_available: false,
                         transcript_windows_available: false,
+                        landing_queue_available: false,
                         })
                         .unwrap()
                         .into(),

@@ -67,6 +67,7 @@ impl Daemon {
                     agent_cli_available: true,
                     task_views_available: false,
                     transcript_windows_available: false,
+                    landing_queue_available: false,
                 };
                 socket
                     .send(tungstenite::Message::Text(

@@ -1816,6 +1816,7 @@ mod tests {
                     agent_cli_available: false,
                     task_views_available: false,
                     transcript_windows_available: false,
+                    landing_queue_available: false,
                 })
                 .chain(events.into_iter().map(|(epoch, sequence)| {
                     ServerMessage::Event(SequencedEvent {
@@ -1983,6 +1984,7 @@ mod tests {
                             agent_cli_available: false,
                             task_views_available: false,
                             transcript_windows_available: false,
+                            landing_queue_available: false,
                         })
                         .unwrap();
                         if socket
@@ -2144,6 +2146,7 @@ mod tests {
                                     agent_cli_available: false,
                                     task_views_available: false,
                                     transcript_windows_available: false,
+                                    landing_queue_available: false,
                                 })
                                 .unwrap();
                             if socket

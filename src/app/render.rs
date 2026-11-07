@@ -556,6 +556,7 @@ impl Waku {
                 .inset_0(),
             )
             .children(self.render_queued_messages(cx))
+            .child(self.render_current_landing_status(cx))
             .child(self.render_composer(window, cx))
             .child(self.render_workspace_footer(cx))
     }
@@ -1626,6 +1627,9 @@ impl Waku {
                                 this.open_created_issue(*project, *number, url.as_ref(), window, cx)
                             }
                             ToastActionKind::BossSpeech => this.accept_pending_boss_speech(cx),
+                            ToastActionKind::CancelQueuedLanding(id) => {
+                                this.cancel_queued_landing(*id, cx)
+                            }
                         }
                         cx.stop_propagation();
                     }
@@ -1662,6 +1666,9 @@ impl Waku {
                                 this.open_created_issue(*project, *number, url.as_ref(), window, cx)
                             }
                             ToastActionKind::BossSpeech => this.accept_pending_boss_speech(cx),
+                            ToastActionKind::CancelQueuedLanding(id) => {
+                                this.cancel_queued_landing(*id, cx)
+                            }
                         }
                         cx.stop_propagation();
                     }

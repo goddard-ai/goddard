@@ -7655,3 +7655,29 @@ command_palette.sync_complete:
   en: Project synced to remote host.
 command_palette.sync_failed:
   en: "Project sync failed: %{error}"
+
+git_panel.land_requesting:
+  en: Requesting landing…
+git_panel.land_queued_next:
+  en: Queued · next
+git_panel.land_queued_position:
+  en: 'Queued · #%{position}'
+git_panel.land_cancel_queued:
+  en: Cancel queued landing
+git_panel.land_canceling:
+  en: Canceling queued landing…
+git_panel.land_canceled:
+  en: Landing canceled
+git_panel.land_status_unavailable:
+  en: Landing status unavailable
+git_panel.land_refresh_status:
+  en: Refresh status
+git_panel.land_queue:
+  en: Landing queue
+git_panel.land_queue_submit:
+  en: Employee submission
+git_panel.land_result_unknown:
+  en: Landing result expired or daemon restarted; inspect the worktree before retrying.
+
+git_panel.land_queue_more:
+  en: '%{count} more queued'

@@ -68,8 +68,13 @@ impl WakuBackend {
             .filter(|branch| !branch.trim().is_empty())
             .unwrap_or(&settings.qa_branch);
         let branch = crate::review::qa_branch_name(configured);
-        let sha =
-            crate::agent_merge::submit(&project.path, &worktree, base_branch.as_deref(), &branch)?;
+        let sha = crate::agent_merge::submit_for_owner(
+            &project.path,
+            &worktree,
+            base_branch.as_deref(),
+            &branch,
+            Some(owner),
+        )?;
         Ok(ResponsePayload::AgentMergeSubmitted { sha })
     }
 

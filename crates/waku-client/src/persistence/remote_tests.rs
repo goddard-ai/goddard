@@ -41,6 +41,7 @@ impl DaemonFixture {
                         agent_cli_available: false,
                         task_views_available: false,
                         transcript_windows_available: false,
+                        landing_queue_available: false,
                     },
                     ClientMessage::Request(request) => {
                         let payload = match &request.command {

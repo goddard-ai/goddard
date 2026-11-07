@@ -1,3 +1,4 @@
+import { landingStore } from '@waku/client';
 import type {
   AgentSession,
   AgentInvocation,
@@ -553,7 +554,9 @@ export async function landWorkspace(
   client: WakuClient,
   cwd: string,
   base: string | null,
+  taskId?: string,
 ): Promise<LandOutcome> {
+  if (client.landingQueueAvailable && taskId) return landingStore(client).land(taskId, cwd, base);
   const result = await workspaceRequest(client, { type: 'land', cwd, base, strategy: 'rebase' })
   if (result.type !== 'land') throw new Error('The daemon returned an unexpected land response')
   return result.outcome

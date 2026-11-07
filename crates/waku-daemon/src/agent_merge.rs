@@ -5,13 +5,54 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context as _, bail};
 
+#[cfg(test)]
 pub(crate) fn submit(
     project: &Path,
     source: &Path,
     recorded_base: Option<&str>,
     branch: &str,
 ) -> anyhow::Result<String> {
-    let _permit = waku_git::landing_queue::acquire(project)?;
+    submit_for_owner(project, source, recorded_base, branch, None)
+}
+
+pub(crate) fn submit_for_owner(
+    project: &Path,
+    source: &Path,
+    recorded_base: Option<&str>,
+    branch: &str,
+    owner: Option<uuid::Uuid>,
+) -> anyhow::Result<String> {
+    let project = project.to_path_buf();
+    let source_path = source.to_path_buf();
+    let base = recorded_base.map(str::to_owned);
+    let target = branch.to_owned();
+    let job = waku_git::landing_queue::enqueue(
+        source,
+        uuid::Uuid::new_v4(),
+        owner,
+        waku_protocol::landing::LandingKind::Submit,
+        Some(branch),
+        waku_protocol::git::PullStrategy::Rebase,
+        move |permit| {
+            permit.check_repository(&project)?;
+            Ok(waku_protocol::landing::LandingResult::Submitted {
+                sha: submit_inner(&project, &source_path, base.as_deref(), &target)?,
+            })
+        },
+    )?;
+    match waku_git::landing_queue::wait(job.id)? {
+        waku_protocol::landing::LandingResult::Submitted { sha } => Ok(sha),
+        waku_protocol::landing::LandingResult::Failed { message } => bail!("{message}"),
+        _ => bail!("unexpected submission result"),
+    }
+}
+
+fn submit_inner(
+    project: &Path,
+    source: &Path,
+    recorded_base: Option<&str>,
+    branch: &str,
+) -> anyhow::Result<String> {
     let root = git_text(project, &["rev-parse", "--show-toplevel"])?;
     let root = PathBuf::from(root.trim());
     let target = git_text(

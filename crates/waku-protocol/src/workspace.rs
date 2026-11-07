@@ -669,6 +669,21 @@ pub enum WorkspaceOperation {
         path: Option<PathBuf>,
         restore: bool,
     },
+
+    StartLanding {
+        id: uuid::Uuid,
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        base: Option<String>,
+        strategy: crate::git::PullStrategy,
+    },
+    LandingJob { id: uuid::Uuid },
+    LandingQueue {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    LandingSnapshot { queue_id: uuid::Uuid },
+    CancelQueuedLanding { id: uuid::Uuid },
     QaDefaults {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -1443,6 +1458,10 @@ pub enum WorkspaceResult {
     TaskWorkspace {
         workspace: Option<crate::model::SessionWorkspace>,
     },
+
+    LandingJob { job: Option<crate::landing::LandingJob> },
+    LandingQueue { snapshot: crate::landing::LandingQueueSnapshot },
+    LandingCanceled { outcome: crate::landing::CancelLandingOutcome },
     QaDefaults {
         config: QaConfig,
     },

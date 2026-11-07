@@ -16,15 +16,31 @@ impl WorkspaceClient {
     }
 
     pub fn request(&self, operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult> {
+        self.request_for_session(Uuid::nil(), operation)
+    }
+
+    pub fn landing_queue_available(&self) -> bool {
+        self.client.landing_queue_available()
+    }
+
+    pub fn subscribe_landing_queue(&self) -> crossbeam_channel::Receiver<(Uuid, u64)> {
+        self.client.subscribe_landing_queue()
+    }
+
+    pub fn request_for_session(
+        &self,
+        session: Uuid,
+        operation: WorkspaceOperation,
+    ) -> anyhow::Result<WorkspaceResult> {
         // A repository's FIFO may outlast the ordinary RPC timeout. Keep the
         // result attached rather than reporting failure while it still lands.
         let waits_for_landing = matches!(operation, WorkspaceOperation::Land { .. });
         let command = Command::Workspace { operation };
         let response = if waits_for_landing {
             self.client
-                .request_with_timeout(Uuid::nil(), Uuid::nil(), command, None)?
+                .request_with_timeout(session, Uuid::nil(), command, None)?
         } else {
-            self.client.request(Uuid::nil(), Uuid::nil(), command)?
+            self.client.request(session, Uuid::nil(), command)?
         };
         match response {
             ResponsePayload::Workspace { result } => Ok(result),

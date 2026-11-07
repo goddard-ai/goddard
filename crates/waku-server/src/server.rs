@@ -31,6 +31,13 @@ use waku_protocol::{
 };
 
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(25);
+static PARKED_LANDINGS: AtomicUsize = AtomicUsize::new(0);
+struct ParkedLanding;
+impl Drop for ParkedLanding {
+    fn drop(&mut self) {
+        PARKED_LANDINGS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(25);
 // Yield to inbound clicks even when producers keep the outbound FIFO full.
 const BUSY_SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(1);
@@ -480,6 +487,26 @@ impl waku_exec::terminal::TerminalEventSink for EventSink {
 }
 
 impl EventSink {
+    /// Queue invalidations are private to the connection that inspected it.
+    pub fn landing_queue_changed(&self, queue_id: Uuid, revision: u64) -> bool {
+        let mut state = self.hub.state.lock();
+        let Some(subscriber) = state.subscribers.get(&self.source_subscriber_id) else {
+            return false;
+        };
+        if subscriber.session_filter.is_some() {
+            return false;
+        }
+        if subscriber
+            .messages
+            .try_send(ServerMessage::LandingQueueChanged { queue_id, revision })
+            .is_ok()
+        {
+            return true;
+        }
+        let _ = subscriber.kicked.try_send(());
+        state.subscribers.remove(&self.source_subscriber_id);
+        false
+    }
     /// Change only the requesting connection's observation, never the runtime.
     pub fn set_task_view(
         &self,
@@ -1816,6 +1843,49 @@ impl RequestDispatcher {
             }
             return;
         }
+        // Compatibility RPCs await the queue's bounded executor. Park a
+        // bounded number outside the heavy pool, leaving admission/control
+        // responsive even when many worktrees submit simultaneously.
+        if matches!(
+            request.command,
+            Command::AgentMergeSubmit
+                | Command::Workspace {
+                    operation: WorkspaceOperation::Land { .. }
+                }
+        ) {
+            if PARKED_LANDINGS
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                    (count < 64).then_some(count + 1)
+                })
+                .is_err()
+            {
+                send_dispatch_error(
+                    failed_request_id,
+                    failed_session_id,
+                    failed_outgoing,
+                    &self.hub,
+                    "too many synchronous landing waiters; retry shortly".into(),
+                );
+                return;
+            }
+            if let Err(error) = std::thread::Builder::new()
+                .name("landing-wait".into())
+                .spawn(move || {
+                    let _parked = ParkedLanding;
+                    handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
+                })
+            {
+                PARKED_LANDINGS.fetch_sub(1, Ordering::AcqRel);
+                send_dispatch_error(
+                    failed_request_id,
+                    failed_session_id,
+                    failed_outgoing,
+                    &self.hub,
+                    format!("could not wait for landing: {error}"),
+                );
+            }
+            return;
+        }
         let navigation = is_navigation_request(&request.command);
         let heavy = !navigation && is_subprocess_heavy(&request.command);
         let health = is_health_check(&request.command);
@@ -2450,6 +2520,7 @@ fn handle_connection(
             agent_cli_available: waku_exec::agent_cli_path().is_ok(),
             task_views_available: true,
             transcript_windows_available: true,
+            landing_queue_available: true,
         },
     )?;
     socket.set_config(|config| {
@@ -2877,6 +2948,16 @@ fn command_targets_runtime(command: &Command) -> bool {
 }
 
 fn is_subprocess_heavy(command: &Command) -> bool {
+    if matches!(
+        command,
+        Command::Workspace {
+            operation: WorkspaceOperation::LandingJob { .. }
+                | WorkspaceOperation::LandingSnapshot { .. }
+                | WorkspaceOperation::CancelQueuedLanding { .. }
+        }
+    ) {
+        return false;
+    }
     matches!(
         command,
         Command::Transcribe { .. }
@@ -2915,7 +2996,7 @@ fn is_subprocess_heavy(command: &Command) -> bool {
     )
 }
 
-/// Only the requests needed to mount a task or deliverable use this lane.
+/// Task mounting and memory-only landing controls use this responsive lane.
 /// Attach stays in the runtime mailbox and its original outbound FIFO: its
 /// replay events must still arrive before the attach response.
 fn is_navigation_request(command: &Command) -> bool {
@@ -2928,6 +3009,9 @@ fn is_navigation_request(command: &Command) -> bool {
             | Command::Workspace {
                 operation: WorkspaceOperation::ReadTextFile { .. }
                     | WorkspaceOperation::ReadBinaryFile { .. }
+                    | WorkspaceOperation::LandingJob { .. }
+                    | WorkspaceOperation::LandingSnapshot { .. }
+                    | WorkspaceOperation::CancelQueuedLanding { .. }
             }
     )
 }
@@ -3347,6 +3431,12 @@ fn pool_job_label(command: &Command) -> String {
 fn workspace_operation_kind(operation: &WorkspaceOperation) -> &'static str {
     match operation {
         WorkspaceOperation::RecoverTaskWorkspace { .. } => "recoverTaskWorkspace",
+
+        WorkspaceOperation::StartLanding { .. } => "startLanding",
+        WorkspaceOperation::LandingJob { .. } => "landingJob",
+        WorkspaceOperation::LandingQueue { .. } => "landingQueue",
+        WorkspaceOperation::LandingSnapshot { .. } => "landingSnapshot",
+        WorkspaceOperation::CancelQueuedLanding { .. } => "cancelQueuedLanding",
         WorkspaceOperation::ListTree { .. } => "listTree",
         WorkspaceOperation::BrowseDirectory { .. } => "browseDirectory",
         WorkspaceOperation::ReadTextFile { .. } => "readTextFile",
@@ -4646,7 +4736,7 @@ mod tests {
         let sink = hub
             .event_sink(session, runtime)
             .with_source_subscriber(filtered_id);
-        assert!(sink.set_task_view(false, 1));
+        assert!(sink.set_task_view(false, 1, Default::default()));
         for _ in 0..50 {
             sink.send_ephemeral(WireDriverEvent::new("textDelta", "hidden".into()))
                 .unwrap();
@@ -4662,15 +4752,15 @@ mod tests {
         assert!(filtered.try_recv().is_err());
         assert_eq!(legacy.try_iter().count(), 51);
 
-        assert!(sink.set_task_view(true, 3));
+        assert!(sink.set_task_view(true, 3, Default::default()));
         // A delayed hide from rapid navigation cannot cancel the newer view.
-        assert!(!sink.set_task_view(false, 2));
+        assert!(!sink.set_task_view(false, 2, Default::default()));
         sink.send_ephemeral(WireDriverEvent::new("textDelta", "visible".into()))
             .unwrap();
         assert!(
             matches!(filtered.try_recv().unwrap(), ServerMessage::Event(e) if e.event.payload == "visible")
         );
-        assert!(sink.set_task_view(false, 4));
+        assert!(sink.set_task_view(false, 4, Default::default()));
         sink.send_ephemeral(WireDriverEvent::new("reasoningDelta", "hidden".into()))
             .unwrap();
         sink.send(WireDriverEvent::new(
@@ -4733,7 +4823,7 @@ mod tests {
         let sink = hub
             .event_sink(session, runtime)
             .with_source_subscriber(subscriber);
-        sink.set_task_view(false, 1);
+        sink.set_task_view(false, 1, Default::default());
         assert!(sink.needs_settlement_snapshot());
         sink.send(WireDriverEvent::new(
             "turnFinished",
@@ -4761,7 +4851,7 @@ mod tests {
                 .get("taskSnapshot")
                 .is_none()
         );
-        sink.set_task_view(true, 2);
+        sink.set_task_view(true, 2, Default::default());
         assert!(!sink.needs_settlement_snapshot());
     }
 
@@ -4779,7 +4869,7 @@ mod tests {
         let sink = hub
             .event_sink(session, runtime)
             .with_source_subscriber(subscriber);
-        sink.set_task_view(false, 1);
+        sink.set_task_view(false, 1, Default::default());
         let mut item = BackgroundWorkItem::new(
             BackgroundWorkKind::Process,
             "process",
@@ -4810,7 +4900,7 @@ mod tests {
         )
         .unwrap();
         assert!(messages.try_recv().is_err());
-        sink.set_task_view(true, 2);
+        sink.set_task_view(true, 2, Default::default());
         sink.restore_task_output().unwrap();
         let ServerMessage::Event(restored) = messages.try_recv().unwrap() else {
             panic!("expected output snapshot")
@@ -5469,6 +5559,17 @@ mod tests {
             started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         }
         let commands = [
+            Command::Workspace {
+                operation: WorkspaceOperation::LandingJob { id: Uuid::new_v4() },
+            },
+            Command::Workspace {
+                operation: WorkspaceOperation::LandingSnapshot {
+                    queue_id: Uuid::new_v4(),
+                },
+            },
+            Command::Workspace {
+                operation: WorkspaceOperation::CancelQueuedLanding { id: Uuid::new_v4() },
+            },
             Command::HydrateSession {
                 session_id: Uuid::new_v4(),
             },

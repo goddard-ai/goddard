@@ -157,6 +157,8 @@ export class WakuClient {
   private receivedAt = 0;
   private disconnectReason: string | null = null;
   private daemonVersion: string | null = null;
+  private supportsLandingQueue = false;
+  private landingListeners = new Set<(queueId: string, revision: number) => void>();
   private daemonCommit: string | null = null;
 
   constructor(options: WakuClientOptions) {
@@ -187,6 +189,15 @@ export class WakuClient {
 
   get connected(): boolean {
     return this.state === "connected";
+  }
+
+  createOperationId(): string { return this.randomUUID(); }
+
+  get landingQueueAvailable(): boolean { return this.supportsLandingQueue; }
+
+  subscribeLandingQueue(listener: (queueId: string, revision: number) => void): () => void {
+    this.landingListeners.add(listener);
+    return () => { this.landingListeners.delete(listener); };
   }
 
   get connectionState(): WakuConnectionState {
@@ -294,6 +305,7 @@ export class WakuClient {
               return;
             }
             this.daemonVersion = message.daemonVersion;
+            this.supportsLandingQueue = message.landingQueueAvailable ?? false;
             this.daemonCommit = message.daemonCommit;
             handshakeSettled = true;
             established = true;
@@ -532,6 +544,10 @@ export class WakuClient {
         }
         this.pendingEvents.set(key, buffered);
       }
+      return;
+    }
+    if (message.type === "landingQueueChanged") {
+      for (const listener of this.landingListeners) listener(message.queueId, message.revision);
       return;
     }
     if (message.type === "taskStateChanged") {

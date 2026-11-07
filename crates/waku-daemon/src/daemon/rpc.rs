@@ -2135,6 +2135,53 @@ impl Backend for WakuBackend {
                         .capture_turn_checkpoint(cwd, session_id, turn_count, untouched)?,
                 },
             }),
+            Command::Workspace {
+                operation:
+                    WorkspaceOperation::StartLanding {
+                        id,
+                        cwd,
+                        base,
+                        strategy,
+                    },
+            } => {
+                let task = (!session_id.is_nil()).then_some(session_id);
+                let workspace = cwd.clone();
+                let target = base.clone();
+                let share = self.share.clone();
+                // Admission returns before execution; queued/running Git work
+                // must still keep the daemon's idle-shutdown gate occupied.
+                let admission = self.idle_shutdown.enter()?;
+                let job = waku_git::landing_queue::enqueue(
+                    &cwd,
+                    id,
+                    task,
+                    waku_protocol::landing::LandingKind::Land,
+                    base.as_deref(),
+                    strategy,
+                    move |permit| {
+                        let _admission = admission;
+                        let outcome = waku_git::git_panel::land_with_permit(
+                            &workspace,
+                            target.as_deref(),
+                            strategy,
+                            permit,
+                        )?;
+                        share.note_repo_activity();
+                        Ok(waku_protocol::landing::LandingResult::Land { outcome })
+                    },
+                )?;
+                let sink = events.clone();
+                waku_git::landing_queue::observe(
+                    job.queue_id,
+                    events.source_subscriber_id(),
+                    Arc::new(move |queue, revision| sink.landing_queue_changed(queue, revision)),
+                )?;
+                Ok(ResponsePayload::Workspace {
+                    result: WorkspaceResult::LandingJob {
+                        job: waku_git::landing_queue::job(job.id)?,
+                    },
+                })
+            }
             Command::Workspace { operation } => {
                 // Commit/push/land move local refs — prompt the share
                 // poll so synced branches push and notify promptly
@@ -2169,7 +2216,33 @@ impl Backend for WakuBackend {
                     | WorkspaceOperation::ReviewPromote { cwd } => self.project_qa_branch(cwd),
                     _ => self.settings.get().qa_branch,
                 };
-                let result = crate::workspace::execute(operation, &qa_branch)?;
+                let mut result = crate::workspace::execute(operation, &qa_branch)?;
+                let queue = match &result {
+                    WorkspaceResult::LandingJob { job: Some(job) } => Some(job.queue_id),
+                    WorkspaceResult::LandingQueue { snapshot } => Some(snapshot.queue_id),
+                    _ => None,
+                };
+                if let Some(queue) = queue {
+                    let sink = events.clone();
+                    waku_git::landing_queue::observe(
+                        queue,
+                        events.source_subscriber_id(),
+                        Arc::new(move |queue, revision| {
+                            sink.landing_queue_changed(queue, revision)
+                        }),
+                    )?;
+                    result = match result {
+                        WorkspaceResult::LandingQueue { .. } => WorkspaceResult::LandingQueue {
+                            snapshot: waku_git::landing_queue::snapshot(queue)?,
+                        },
+                        WorkspaceResult::LandingJob { job: Some(job) } => {
+                            WorkspaceResult::LandingJob {
+                                job: waku_git::landing_queue::job(job.id)?,
+                            }
+                        }
+                        other => other,
+                    };
+                }
                 if kick {
                     self.share.note_repo_activity();
                 }

@@ -76,6 +76,14 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
         WorkspaceOperation::RecoverTaskWorkspace { .. } => {
             bail!("task workspace recovery requires the session daemon")
         }
+
+        WorkspaceOperation::StartLanding { id, cwd, base, strategy } => WorkspaceResult::LandingJob {
+            job: Some(waku_git::git_panel::enqueue_land(&cwd, id, None, base.as_deref(), strategy)?),
+        },
+        WorkspaceOperation::LandingJob { id } => WorkspaceResult::LandingJob { job: waku_git::landing_queue::job(id)? },
+        WorkspaceOperation::LandingQueue { cwd } => WorkspaceResult::LandingQueue { snapshot: waku_git::landing_queue::inspect(&cwd)? },
+        WorkspaceOperation::LandingSnapshot { queue_id } => WorkspaceResult::LandingQueue { snapshot: waku_git::landing_queue::snapshot(queue_id)? },
+        WorkspaceOperation::CancelQueuedLanding { id } => WorkspaceResult::LandingCanceled { outcome: waku_git::landing_queue::cancel(id)? },
         WorkspaceOperation::QaDefaults {
             cwd,
             preferred_branch,

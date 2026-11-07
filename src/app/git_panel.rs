@@ -849,6 +849,7 @@ impl Waku {
         let panel_id = panel.id;
         let workspace = panel.workspace.clone();
         let base = panel.base.clone();
+        self.watch_landing_queue(panel_id, workspace.clone(), cx);
         self.git_panel_generation = self.git_panel_generation.wrapping_add(1);
         let generation = self.git_panel_generation;
         let Some(client) = self.workspace_client_for_path(&workspace) else {
@@ -1192,7 +1193,13 @@ impl Waku {
         let Some(panel) = self.git_panel.as_ref() else {
             return GitPanelPrimary::Unavailable;
         };
-        if self.git_panel_operation.is_some() {
+        if self.git_panel_operation.is_some()
+            || self.git_panel.as_ref().is_some_and(|panel| {
+                self.landing_operations
+                    .values()
+                    .any(|entry| entry.operation.workspace == panel.workspace)
+            })
+        {
             return GitPanelPrimary::Busy;
         }
         let Some(snapshot) = panel.snapshot.as_ref() else {
@@ -1265,7 +1272,12 @@ impl Waku {
         workspace: PathBuf,
         cx: &mut Context<Self>,
     ) -> Option<(Uuid, PathBuf)> {
-        if self.git_panel_operation.is_some() {
+        if self.git_panel_operation.is_some()
+            || self
+                .landing_operations
+                .values()
+                .any(|entry| entry.operation.workspace == workspace)
+        {
             return None;
         }
         let id = Uuid::new_v4();
@@ -1577,6 +1589,13 @@ impl Waku {
         progress_toast: bool,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .workspace_client_for_path(&workspace)
+            .is_some_and(|client| client.landing_queue_available())
+        {
+            self.start_queued_landing(workspace, base, strategy, progress_toast, cx);
+            return;
+        }
         let Some((op_id, workspace)) =
             self.begin_workspace_op(GitPanelPending::Landing, workspace, cx)
         else {
@@ -2004,6 +2023,11 @@ impl Waku {
         let Some(op) = self
             .git_panel_operation
             .take_if(|operation| operation.id == op_id)
+            .or_else(|| {
+                self.landing_operations
+                    .remove(&op_id)
+                    .map(|entry| entry.operation)
+            })
         else {
             return;
         };
@@ -3742,7 +3766,13 @@ impl Waku {
             .git_panel_operation
             .as_ref()
             .is_some_and(|operation| operation.pending == GitPanelPending::Landing);
-        let enabled = self.git_panel_operation.is_none();
+        let own = self.git_panel.as_ref().and_then(|panel| {
+            self.landing_operations
+                .iter()
+                .find(|(_, entry)| entry.operation.workspace == panel.workspace)
+        });
+        let landing = landing || own.is_some();
+        let enabled = self.git_panel_operation.is_none() && own.is_none();
         let mut button = div()
             .id("git-panel-land")
             .track_focus(
@@ -3775,7 +3805,8 @@ impl Waku {
                 icon("icons/git-merge.svg", 12.0, theme.text_tertiary).into_any_element()
             })
             .child(if landing {
-                tr!("git_panel.landing")
+                own.map(|(id, _)| self.landing_label(*id))
+                    .unwrap_or_else(|| tr!("git_panel.landing"))
             } else {
                 tr!("git_panel.land_onto", base = target.branch.clone())
             });
@@ -3834,6 +3865,7 @@ impl Waku {
                 .w_full()
                 .flex()
                 .flex_col()
+                .child(self.render_landing_queue(cx))
                 .child(self.render_git_panel_commit_area(cx));
             if let Some(snapshot) = self
                 .git_panel

@@ -1,1 +1,1 @@
-- Parallel `/land` and `merge submit` attempts now wait their turn within each repository, preventing competing landings from racing to advance the same base branch.
+- See `/land` queue position in desktop, web, and mobile, and cancel a landing before it starts. `/land` and `merge submit` share each repository’s queue; duplicate `/land` requests attach to existing jobs, and reconnecting checks status without submitting again.

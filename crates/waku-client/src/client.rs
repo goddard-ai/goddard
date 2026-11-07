@@ -88,6 +88,7 @@ struct ClientInner {
     /// Bounded transcript reads (`readTranscriptWindow`/`Payload`/`find`)
     /// and compact task-view payloads, reported in the handshake.
     transcript_windows_available: bool,
+    landing_queue_available: bool,
     task_view_generation: std::sync::atomic::AtomicU64,
     pending: Mutex<HashMap<Uuid, Sender<Result<ResponsePayload, RpcError>>>>,
     sessions: Mutex<HashMap<(Uuid, Uuid), Sender<SequencedEvent>>>,
@@ -103,6 +104,7 @@ struct ClientInner {
     automations_subscribers: Mutex<Vec<Sender<waku_protocol::automations::AutomationsState>>>,
     /// `ReviewChanged` broadcasts — the origin URL whose QA state moved.
     review_subscribers: Mutex<Vec<Sender<String>>>,
+    landing_subscribers: Mutex<Vec<Sender<(Uuid, u64)>>>,
     /// `(session_id, revoked)` — a watched friend session's stream ended.
     friend_session_closed_subscribers: Mutex<Vec<Sender<(Uuid, bool)>>>,
     /// `bossSpeechRequested` broadcasts — `(request_id, parts)` for the
@@ -337,6 +339,16 @@ impl DaemonClient {
 
     /// Whether the connected daemon serves bounded transcript windows,
     /// payload ranges, and daemon-side find (`readTranscriptWindow` et al.).
+    pub fn landing_queue_available(&self) -> bool {
+        self.inner.landing_queue_available
+    }
+
+    pub fn subscribe_landing_queue(&self) -> Receiver<(Uuid, u64)> {
+        let (sender, receiver) = unbounded();
+        self.inner.landing_subscribers.lock().push(sender);
+        receiver
+    }
+
     pub fn transcript_windows_available(&self) -> bool {
         self.inner.transcript_windows_available
     }
@@ -451,6 +463,7 @@ impl DaemonClient {
             agent_cli_available,
             task_views_available,
             transcript_windows_available,
+            landing_queue_available,
         ) = match hello {
             ServerMessage::Hello {
                 protocol_version,
@@ -459,12 +472,14 @@ impl DaemonClient {
                 agent_cli_available,
                 task_views_available,
                 transcript_windows_available,
+                landing_queue_available,
             } if protocol_version == PROTOCOL_VERSION => (
                 daemon_version,
                 daemon_commit,
                 agent_cli_available,
                 task_views_available,
                 transcript_windows_available,
+                landing_queue_available,
             ),
             ServerMessage::Hello {
                 protocol_version, ..
@@ -488,6 +503,7 @@ impl DaemonClient {
             agent_cli_available,
             task_views_available,
             transcript_windows_available,
+            landing_queue_available,
             task_view_generation: std::sync::atomic::AtomicU64::new(0),
             pending: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
@@ -499,6 +515,7 @@ impl DaemonClient {
             pairing_subscribers: Mutex::new(Vec::new()),
             automations_subscribers: Mutex::new(Vec::new()),
             review_subscribers: Mutex::new(Vec::new()),
+            landing_subscribers: Mutex::new(Vec::new()),
             friend_session_closed_subscribers: Mutex::new(Vec::new()),
             speech_subscribers: Mutex::new(Vec::new()),
             wireframe_subscribers: Mutex::new(Vec::new()),
@@ -1062,6 +1079,12 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send(state.clone()).is_ok());
                     }
+                    ServerMessage::LandingQueueChanged { queue_id, revision } => {
+                        inner
+                            .landing_subscribers
+                            .lock()
+                            .retain(|subscriber| subscriber.send((queue_id, revision)).is_ok());
+                    }
                     ServerMessage::ReviewChanged { origin_url } => {
                         inner
                             .review_subscribers
@@ -1361,6 +1384,7 @@ mod tests {
                                     agent_cli_available: false,
                                     task_views_available: false,
                                     transcript_windows_available: false,
+                                    landing_queue_available: false,
                                 },
                             )
                             .unwrap();
@@ -1468,6 +1492,7 @@ mod tests {
                         agent_cli_available: false,
                         task_views_available: false,
                         transcript_windows_available: false,
+                        landing_queue_available: false,
                     })
                     .unwrap()
                     .into(),

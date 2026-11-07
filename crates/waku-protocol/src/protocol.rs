@@ -1266,6 +1266,8 @@ pub enum ServerMessage {
         /// `hydrateSession`.
         #[serde(default)]
         transcript_windows_available: bool,
+        #[serde(default)]
+        landing_queue_available: bool,
     },
     Rejected {
         message: String,
@@ -1355,6 +1357,7 @@ pub enum ServerMessage {
     PairDeclined {
         message: String,
     },
+    LandingQueueChanged { queue_id: Uuid, revision: u64 },
     ShuttingDown,
 }
 

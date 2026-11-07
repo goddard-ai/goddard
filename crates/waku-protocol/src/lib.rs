@@ -51,6 +51,7 @@ pub mod identity;
 pub mod inference;
 pub mod instruction_pins;
 pub mod integrations;
+pub mod landing;
 pub mod migration;
 pub mod model;
 pub mod model_catalog;

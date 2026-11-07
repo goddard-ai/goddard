@@ -1,3 +1,5 @@
+import { LandingCanceledError } from '@waku/client';
+import { LandingStatus } from './landing-status';
 import type {
   AgentSession,
   MessageAttachment,
@@ -273,25 +275,33 @@ export function MobileComposer({
       await runtime.renameSession(session.id, title);
     },
     onLand: async () => {
-      if (!daemon.client || !project) throw new Error('Select a task to see its Git state');
-      const outcome = await landWorkspace(
-        daemon.client,
-        sessionCwd(session, project),
-        session.workspace?.kind === 'worktree' ? session.workspace.baseBranch ?? null : null,
-      );
-      if ('landed' in outcome) {
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        return;
-      }
-      // Nothing to send: the requested end state already holds.
-      if ('alreadyLanded' in outcome) {
-        return;
-      }
-      // Mobile has no conflict modal; the banner carries the way out.
-      const kind = outcome.conflict.in_progress === 'rebase' ? 'rebase' : 'merge';
-      throw new Error(
-        `Landing onto ${outcome.conflict.base} stopped on ${kind} conflicts. Resolve them in the worktree, then run /land again.`,
-      );
+      const landingClient = daemon.client;
+      if (!landingClient || !project) throw new Error('Select a task to see its Git state');
+      const landing = (async () => {
+        const outcome = await landWorkspace(
+          landingClient,
+          sessionCwd(session, project),
+          session.workspace?.kind === 'worktree' ? session.workspace.baseBranch ?? null : null,
+          session.id,
+        ).catch((error: unknown) => { if (error instanceof LandingCanceledError) return null; throw error; });
+        if (!outcome) return;
+        if ('landed' in outcome) {
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          return;
+        }
+        // Nothing to send: the requested end state already holds.
+        if ('alreadyLanded' in outcome) {
+          return;
+        }
+        // Mobile has no conflict modal; the banner carries the way out.
+        const kind = outcome.conflict.in_progress === 'rebase' ? 'rebase' : 'merge';
+        throw new Error(
+          `Landing onto ${outcome.conflict.base} stopped on ${kind} conflicts. Resolve them in the worktree, then run /land again.`,
+        );
+      })();
+      void landing.catch((cause: unknown) => {
+        if (mounted.current && activeSessionId.current === session.id) setLocalError(cause instanceof Error ? cause.message : String(cause));
+      });
     },
     onClear: () => {
       draftSync.markEdited();
@@ -478,6 +488,7 @@ export function MobileComposer({
 
   return (
     <Animated.View style={[styles.shell, shellPadding]}>
+      {daemon.client && project && <LandingStatus client={daemon.client} taskId={session.id} cwd={sessionCwd(session, project)} />}
       {permission && !userInput && (
         <PermissionPanel
           permission={permission}

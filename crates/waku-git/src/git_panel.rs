@@ -605,11 +605,50 @@ const LANDED_COMMITS_LIMIT: usize = 50;
 /// progress; re-running while stopped reports the same conflict again
 /// rather than erroring.
 pub fn land(cwd: &Path, base: Option<&str>, strategy: PullStrategy) -> anyhow::Result<LandOutcome> {
-    let _permit = crate::landing_queue::acquire(cwd)?;
+    let job = enqueue_land(cwd, uuid::Uuid::new_v4(), None, base, strategy)?;
+    match crate::landing_queue::wait(job.id)? {
+        waku_protocol::landing::LandingResult::Land { outcome } => Ok(outcome),
+        waku_protocol::landing::LandingResult::Failed { message } => bail!("{message}"),
+        _ => bail!("unexpected landing result"),
+    }
+}
+
+pub fn enqueue_land(
+    cwd: &Path,
+    id: uuid::Uuid,
+    task: Option<uuid::Uuid>,
+    base: Option<&str>,
+    strategy: PullStrategy,
+) -> anyhow::Result<waku_protocol::landing::LandingJob> {
+    let workspace = cwd.to_path_buf();
+    let target = base.map(str::to_owned);
+    crate::landing_queue::enqueue(
+        cwd,
+        id,
+        task,
+        waku_protocol::landing::LandingKind::Land,
+        base,
+        strategy,
+        move |permit| {
+            Ok(waku_protocol::landing::LandingResult::Land {
+                outcome: land_with_permit(&workspace, target.as_deref(), strategy, permit)?,
+            })
+        },
+    )
+}
+
+pub fn land_with_permit(
+    cwd: &Path,
+    base: Option<&str>,
+    strategy: PullStrategy,
+    permit: &crate::landing_queue::LandingPermit,
+) -> anyhow::Result<LandOutcome> {
+    permit.check_repository(cwd)?;
     ensure_repository(cwd)?;
     let Some(base) = land_base(cwd, base)? else {
         bail!("could not find a base branch to land on");
     };
+    permit.resolved_base(&base);
     if let Some(in_progress) = sync_in_progress(cwd)? {
         return Ok(LandOutcome::Conflict {
             base,

@@ -28,7 +28,19 @@ somewhere in the project's repository for submissions to land on it.
 The daemon queues submissions in arrival order per repository, sharing the
 queue with `/land` from every client and worktree. Separate repositories can
 land independently. A conflict or failure releases the queue; resolve the
-affected worktree before retrying. The daemon checks that the employee's
+affected worktree before retrying. Desktop, web, and mobile show queue position
+and allow canceling unstarted landings; a job that has begun cannot be canceled
+through the queue. Status and cancellation stay responsive while Git workers
+are busy. Duplicate `/land` requests for the same source and target attach to the
+existing job. Source HEAD/branch changes while waiting cause a failure before
+integration, so a queued request cannot silently include later commits.
+
+Job state is in memory, with up to 128 terminal results retained for 30 minutes.
+After a disconnect, clients reconcile status without resubmitting. A restart
+or expired result reports that the prior outcome is unknown; inspect Git state
+before retrying. The CLI still waits for its final submitted SHA.
+
+The daemon checks that the employee's
 recorded worktree is clean, rebases it onto the configured QA branch (normally
 `dev`), skips patch-equivalent commits, and squashes the submitted changes
 into one reviewable commit per employee unit. It runs `git diff --check` and

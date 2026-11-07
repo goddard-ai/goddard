@@ -1,3 +1,4 @@
+import { landingStore } from '@waku/client';
 import type {
   AgentInvocation,
   AgentSession,
@@ -315,7 +316,9 @@ export async function landWorkspace(
   client: WakuClient,
   cwd: string,
   base: string | null,
+  taskId?: string,
 ): Promise<LandOutcome> {
+  if (client.landingQueueAvailable && taskId) return landingStore(client).land(taskId, cwd, base);
   const response = expectResponse(
     await client.request(
       {

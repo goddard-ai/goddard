@@ -36,6 +36,7 @@ fn computer_js_bounds_a_request_even_when_the_daemon_never_answers() {
                     agent_cli_available: true,
                     task_views_available: false,
                     transcript_windows_available: false,
+                    landing_queue_available: false,
                 })
                 .unwrap()
                 .into(),
@@ -105,6 +106,7 @@ fn cli_closes_cleanly_after_success_and_failure_without_waiting_for_a_stalled_pe
                         agent_cli_available: true,
                         task_views_available: false,
                         transcript_windows_available: false,
+                        landing_queue_available: false,
                     })
                     .unwrap()
                     .into(),
