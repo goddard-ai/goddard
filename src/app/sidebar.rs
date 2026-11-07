@@ -1575,6 +1575,21 @@ fn sidebar_row_group_header(rows: &[SidebarRow], index: usize) -> Option<usize> 
         .rposition(|row| matches!(row, SidebarRow::Header(_)))
 }
 
+/// Which occurrence of its group a header row is. Employee-section headers
+/// repeat once per boss, so the group alone cannot name a header's focus
+/// handle, hover group, or element id — those need the header's position
+/// among the same-group headers in this snapshot, which stays stable while
+/// the roster keeps its order.
+fn sidebar_group_header_occurrence(rows: &[SidebarRow], index: usize) -> usize {
+    let Some(SidebarRow::Header(group)) = rows.get(index) else {
+        return 0;
+    };
+    rows[..index]
+        .iter()
+        .filter(|row| matches!(row, SidebarRow::Header(other) if other == group))
+        .count()
+}
+
 /// The session a row navigates to — `Planning` rows carry a session the
 /// same way `Session` rows do, so every traversal that walks "the session
 /// rows" (⌘D, ⌘1–9, multi-select ranges, landing indexes) sees them.
@@ -5186,8 +5201,15 @@ impl Waku {
                     && !rows[..index].iter().any(|row| {
                         matches!(row, SidebarRow::Header(other) if !matches!(other, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees))
                     });
-                self.render_sidebar_group_header(group, index, row_alt, first, cx)
-                    .into_any_element()
+                self.render_sidebar_group_header(
+                    group,
+                    index,
+                    sidebar_group_header_occurrence(rows, index),
+                    row_alt,
+                    first,
+                    cx,
+                )
+                .into_any_element()
             }
             SidebarRow::Session(session_id) => {
                 let shortcut_index = (self.sidebar_shortcut_hints
@@ -5243,6 +5265,7 @@ impl Waku {
         &self,
         group: SidebarGroup,
         index: usize,
+        occurrence: usize,
         alt_active: bool,
         first: bool,
         cx: &mut Context<Self>,
@@ -5378,11 +5401,16 @@ impl Waku {
         })
         .flatten();
         let group_key = group.element_key();
-        let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
+        // Repeated employee-section headers each get their own hover group,
+        // element ids, and focus handles — a second boss's matching section
+        // must not share them, or hover reveals and keyboard focus leak
+        // across sections.
+        let group_name =
+            SharedString::from(format!("sidebar-group-header-{group_key}-{occurrence}"));
         let header_focus = self
             .sidebar_group_header_focuses
             .borrow_mut()
-            .entry(group)
+            .entry((group, occurrence))
             .or_insert_with(|| cx.focus_handle())
             .clone();
         // A compose affordance only exists where it can create something —
@@ -5515,7 +5543,7 @@ impl Waku {
             let compose_focus = self
                 .sidebar_group_compose_focuses
                 .borrow_mut()
-                .entry(group)
+                .entry((group, occurrence))
                 .or_insert_with(|| cx.focus_handle())
                 .clone();
             div()
@@ -5600,7 +5628,7 @@ impl Waku {
                 let open_focus = self
                     .sidebar_group_open_focuses
                     .borrow_mut()
-                    .entry(group)
+                    .entry((group, occurrence))
                     .or_insert_with(|| cx.focus_handle())
                     .clone();
                 div()
@@ -5666,7 +5694,7 @@ impl Waku {
             let alt_focus = self
                 .sidebar_group_alt_focuses
                 .borrow_mut()
-                .entry(group)
+                .entry((group, occurrence))
                 .or_insert_with(|| cx.focus_handle())
                 .clone();
             div()
@@ -5766,7 +5794,7 @@ impl Waku {
             },
         )
         .id(SharedString::from(format!(
-            "sidebar-group-toggle-{group_key}"
+            "sidebar-group-toggle-{group_key}-{occurrence}"
         )))
         .track_focus(&header_focus)
         .tab_index(0)
@@ -10164,6 +10192,32 @@ mod tests {
         let mut shifted = shifted;
         shifted.insert(0, SidebarRow::Inbox);
         assert!(!sidebar_group_alt_active(&shifted, engaged));
+    }
+
+    #[test]
+    fn repeated_group_headers_get_distinct_occurrences() {
+        // Two boss blocks repeat the same employee-section headers; each
+        // header's occurrence — not just its group — names its focus handle
+        // and hover group, so controls never leak across sections.
+        let rows = vec![
+            SidebarRow::Search,
+            SidebarRow::Boss(waku_client::DaemonKey::Local),
+            SidebarRow::Header(SidebarGroup::Employees),
+            SidebarRow::Employee(Uuid::from_u128(1)),
+            SidebarRow::Boss(waku_client::DaemonKey::Remote(Uuid::from_u128(9))),
+            SidebarRow::Header(SidebarGroup::Employees),
+            SidebarRow::Employee(Uuid::from_u128(2)),
+            SidebarRow::Header(SidebarGroup::Employees),
+            SidebarRow::Employee(Uuid::from_u128(3)),
+            SidebarRow::Header(SidebarGroup::Date(SessionDateGroup::Today)),
+        ];
+        assert_eq!(sidebar_group_header_occurrence(&rows, 2), 0);
+        assert_eq!(sidebar_group_header_occurrence(&rows, 5), 1);
+        assert_eq!(sidebar_group_header_occurrence(&rows, 7), 2);
+        // Singleton groups always land on zero; non-header rows do too.
+        assert_eq!(sidebar_group_header_occurrence(&rows, 9), 0);
+        assert_eq!(sidebar_group_header_occurrence(&rows, 6), 0);
+        assert_eq!(sidebar_group_header_occurrence(&rows, 0), 0);
     }
 
     #[test]

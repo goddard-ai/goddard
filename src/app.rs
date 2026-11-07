@@ -3592,13 +3592,15 @@ pub struct Waku {
     /// the "Show dormant" fold — runtime-only like the live reveal counts.
     sidebar_project_dormant_reveals: HashMap<SidebarGroup, usize>,
     /// Stable keyboard focus for each virtualized sidebar group header and
-    /// its hover-revealed New Task and open-library controls.
-    sidebar_group_header_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
-    sidebar_group_compose_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
-    sidebar_group_open_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
+    /// its hover-revealed New Task and open-library controls. The key pairs
+    /// the group with the header's occurrence among same-group headers,
+    /// since employee sections repeat once per boss.
+    sidebar_group_header_focuses: RefCell<HashMap<(SidebarGroup, usize), FocusHandle>>,
+    sidebar_group_compose_focuses: RefCell<HashMap<(SidebarGroup, usize), FocusHandle>>,
+    sidebar_group_open_focuses: RefCell<HashMap<(SidebarGroup, usize), FocusHandle>>,
     /// Stable keyboard focus for each group header's group-local Option
     /// control.
-    sidebar_group_alt_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
+    sidebar_group_alt_focuses: RefCell<HashMap<(SidebarGroup, usize), FocusHandle>>,
     /// Stable keyboard focus for each session row's hover-revealed archive
     /// control.
     sidebar_session_archive_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
