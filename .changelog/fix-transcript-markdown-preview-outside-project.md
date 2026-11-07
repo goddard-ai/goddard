@@ -1,0 +1,1 @@
+- Markdown file links in agent replies open in the right panel preview even when the file is outside every known project.

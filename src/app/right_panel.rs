@@ -40,7 +40,7 @@ pub(super) struct WorkingTreeEntry {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum TranscriptLinkRoute {
-    ProjectFile(String, Option<String>),
+    PanelFile(String, Option<String>),
     Finder(PathBuf),
     /// A `goddard://task/<id>` reference — `None` when the id is malformed.
     /// A `?message=<id>` query deep-links to that message's transcript row.
@@ -203,7 +203,7 @@ fn markdown_file_link_path_inner(target: &str) -> Option<PathBuf> {
     let target = target
         .rsplit_once('#')
         .filter(|(path, fragment)| {
-            !line_fragment(fragment) && path.to_ascii_lowercase().ends_with(".md")
+            !line_fragment(fragment) && file_highlighter_language(path) == "markdown"
         })
         .map_or(target, |(path, _)| path);
     if target
@@ -222,9 +222,7 @@ fn markdown_file_link_heading(target: &str) -> Option<String> {
         return None;
     }
     let path = markdown_file_link_path(path_target)?;
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+    (file_highlighter_language(&path.to_string_lossy()) == "markdown")
         .then(|| percent_decode_file_path(fragment))
 }
 
@@ -331,7 +329,9 @@ fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLi
     if let Some(relative_path) =
         workspace.and_then(|workspace| workspace_relative_file_path(workspace, &path))
     {
-        TranscriptLinkRoute::ProjectFile(relative_path, heading)
+        TranscriptLinkRoute::PanelFile(relative_path, heading)
+    } else if file_highlighter_language(&path.to_string_lossy()) == "markdown" {
+        TranscriptLinkRoute::PanelFile(path.to_string_lossy().into_owned(), heading)
     } else {
         TranscriptLinkRoute::Finder(path)
     }
@@ -1318,14 +1318,14 @@ pub(super) fn transfer_file_is_previewable(path: &Path) -> bool {
     )
 }
 
-/// Stored deliverables use their own read root without re-rooting the
+/// Absolute file previews use their own read root without re-rooting the
 /// conversation's file tree. Workspace requests require a relative file name.
 fn panel_file_read_target(
     panel_root: Option<&Path>,
     file_path: &str,
     published_deliverable: bool,
 ) -> Option<(PathBuf, String)> {
-    if published_deliverable {
+    if published_deliverable || Path::new(file_path).is_absolute() {
         let path = Path::new(file_path);
         Some((
             path.parent()?.to_path_buf(),
@@ -3443,18 +3443,18 @@ mod tests {
 
         assert_eq!(
             transcript_link_route(&project_file_with_line, Some(workspace)),
-            TranscriptLinkRoute::ProjectFile(relative_project_file.clone(), None)
+            TranscriptLinkRoute::PanelFile(relative_project_file.clone(), None)
         );
         assert_eq!(
             transcript_link_route(&project_file_with_column, Some(workspace)),
-            TranscriptLinkRoute::ProjectFile(relative_project_file, None)
+            TranscriptLinkRoute::PanelFile(relative_project_file, None)
         );
 
         let encoded_file_url =
             url::Url::from_file_path(workspace.join("My File.rs")).expect("absolute file path");
         assert_eq!(
             transcript_link_route(&format!("{encoded_file_url}#L12C4"), Some(workspace)),
-            TranscriptLinkRoute::ProjectFile("My File.rs".into(), None)
+            TranscriptLinkRoute::PanelFile("My File.rs".into(), None)
         );
 
         let outside_file = workspace.join("../kero/src/app.rs");
@@ -3466,6 +3466,52 @@ mod tests {
         assert_eq!(
             transcript_link_route("https://example.com/file.rs:12", Some(workspace)),
             TranscriptLinkRoute::External
+        );
+    }
+
+    #[test]
+    fn markdown_links_outside_projects_open_in_the_panel() {
+        let root = std::env::temp_dir().join("goddard-markdown-links");
+        let path = root.join("Review Notes.MD");
+        let file_url = url::Url::from_file_path(&path).unwrap();
+        let workspace = root.join("project");
+        for target in [
+            path.to_string_lossy().into_owned(),
+            format!("{}:12:4", path.display()),
+            file_url.to_string(),
+        ] {
+            for workspace in [None, Some(workspace.as_path())] {
+                assert_eq!(
+                    transcript_link_route(&target, workspace),
+                    TranscriptLinkRoute::PanelFile(path.to_string_lossy().into_owned(), None),
+                );
+            }
+        }
+        assert_eq!(
+            transcript_link_route(&format!("{file_url}#review-notes"), None),
+            TranscriptLinkRoute::PanelFile(
+                path.to_string_lossy().into_owned(),
+                Some("review-notes".into()),
+            ),
+        );
+        for extension in ["md", "markdown", "mdx"] {
+            let path = root.join(format!("notes.{extension}"));
+            assert_eq!(
+                transcript_link_route(&format!("{}#summary", path.display()), None),
+                TranscriptLinkRoute::PanelFile(
+                    path.to_string_lossy().into_owned(),
+                    Some("summary".into()),
+                ),
+            );
+        }
+        let expected = Some((root, "Review Notes.MD".into()));
+        assert_eq!(
+            panel_file_read_target(None, path.to_str().unwrap(), false),
+            expected
+        );
+        assert_eq!(
+            panel_file_read_target(Some(&workspace), path.to_str().unwrap(), false),
+            expected,
         );
     }
 
@@ -3577,7 +3623,7 @@ mod tests {
         }
         assert_eq!(
             transcript_link_route(&project.join("source.md").to_string_lossy(), Some(&project)),
-            TranscriptLinkRoute::ProjectFile("source.md".into(), None)
+            TranscriptLinkRoute::PanelFile("source.md".into(), None)
         );
         assert_eq!(
             transcript_link_route("https://example.com/review.md", None),
@@ -3586,7 +3632,7 @@ mod tests {
         let unpublished = root.join("unpublished/review.md");
         assert_eq!(
             transcript_link_route(&unpublished.to_string_lossy(), None),
-            TranscriptLinkRoute::Finder(unpublished)
+            TranscriptLinkRoute::PanelFile(unpublished.to_string_lossy().into_owned(), None)
         );
     }
 
@@ -5235,6 +5281,9 @@ impl Waku {
             }
             self.mark_deliverable_viewed(DaemonKey::Local, deliverable.id, cx);
             let file_path = path.to_string_lossy().into_owned();
+            if let Some(editor) = self.right_panel_file_editors.get_mut(&file_path) {
+                editor.show_source = false;
+            }
             self.open_right_panel_file(file_path.clone(), cx);
             self.set_right_panel_visible(true, cx);
             let target = crate::model::ReferenceContext::decode_reference(target)
@@ -5304,8 +5353,12 @@ impl Waku {
         let files_root = self.resolve_right_panel_files_root(cx);
         let route = transcript_link_route(target, files_root.as_deref());
         let linked_path = match &route {
-            TranscriptLinkRoute::ProjectFile(relative_path, _) => {
-                files_root.as_ref().map(|root| root.join(relative_path))
+            TranscriptLinkRoute::PanelFile(relative_path, _) => {
+                if Path::new(relative_path).is_absolute() {
+                    Some(PathBuf::from(relative_path))
+                } else {
+                    files_root.as_ref().map(|root| root.join(relative_path))
+                }
             }
             TranscriptLinkRoute::Finder(path) => Some(path.clone()),
             TranscriptLinkRoute::Task(..) | TranscriptLinkRoute::External => None,
@@ -5319,11 +5372,17 @@ impl Waku {
             return true;
         }
         match route {
-            TranscriptLinkRoute::ProjectFile(relative_path, heading) => {
+            TranscriptLinkRoute::PanelFile(relative_path, heading) => {
                 // A `file:line` target rides the same pending slot the finder
                 // uses: the editor takes focus and the jump lands once the
                 // file's first read does.
                 let location = file_link_location(target);
+                if file_highlighter_language(&relative_path) == "markdown" {
+                    self.set_markdown_preview(true, cx);
+                    if let Some(editor) = self.right_panel_file_editors.get_mut(&relative_path) {
+                        editor.show_source = false;
+                    }
+                }
                 self.open_right_panel_surface(RightPanelSurface::Files, cx);
                 self.open_right_panel_file(relative_path.clone(), cx);
                 if location.is_some() || heading.is_some() {
@@ -10665,10 +10724,14 @@ impl Waku {
             }
             return;
         };
+        let standalone_file = Path::new(&relative_path).is_absolute();
         let workspace = if published_deliverable {
             self.daemons
                 .supervisor(DaemonKey::Local)
                 .map(|daemon| waku_client::WorkspaceClient::new(daemon.client()))
+        } else if standalone_file && let Some(session) = self.selected_session() {
+            // Out-of-workspace references still belong to the transcript's host.
+            self.workspace_client_for_session(session.id)
         } else {
             self.workspace_client_for_path(&project_path)
         };
@@ -10707,7 +10770,7 @@ impl Waku {
                                     read_right_panel_file(&workspace, &project_path, &read_path);
                                 RightPanelFileRead::Text(
                                     content,
-                                    writable && !published_deliverable,
+                                    writable && !published_deliverable && !standalone_file,
                                 )
                             }
                         }
