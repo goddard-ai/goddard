@@ -9482,6 +9482,7 @@ mod computer_use_launch_tests {
                         agent_cli_available: false,
                         task_views_available: true,
                         transcript_windows_available: true,
+                        landing_queue_available: false,
                     },
                     ClientMessage::Request(request) => {
                         let payload = match request.command {
@@ -9567,6 +9568,7 @@ mod computer_use_launch_tests {
                                 agent_cli_available: false,
                                 task_views_available: false,
                                 transcript_windows_available: false,
+                                landing_queue_available: false,
                             },
                             None,
                         ),
@@ -9703,6 +9705,7 @@ mod task_registration_tests {
                             agent_cli_available: false,
                             task_views_available: true,
                             transcript_windows_available: false,
+                            landing_queue_available: false,
                         },
                         ClientMessage::Request(request) => {
                             let payload = match request.command {
@@ -9830,6 +9833,7 @@ mod workspace_recovery_tests {
                         agent_cli_available: false,
                         task_views_available: true,
                         transcript_windows_available: false,
+                        landing_queue_available: false,
                     },
                     ClientMessage::Request(request) => {
                         assert!(
