@@ -1,1 +1,1 @@
-- **Boss:** stopped false "no work assigned" reminders for outcomes whose employee chain is actively dispatching or executing a step; the reminder still fires when the chain is paused, cancelled, or finished.
+- **Boss:** unattended-task reminders now leave deliberately held work alone: a chain parked by its Pause control counts as a recorded wait, while a chain paused by a failed handoff still surfaces with its pause reason. The first reminder also waits an hour of quiet instead of 15 minutes.

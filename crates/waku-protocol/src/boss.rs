@@ -3002,9 +3002,17 @@ pub struct OutcomeReminder {
 }
 
 /// The daemon clock's grace and repeat cadence for unattended-task
-/// reminders — fifteen minutes of quiet before the first batched
-/// reminder, then at most one per day per uninterrupted period.
-pub const OUTCOME_UNATTENDED_GRACE: u64 = 15 * 60;
+/// reminders — one hour of quiet before the first batched reminder, then
+/// at most one per day per uninterrupted period. The reminder is the
+/// backstop for work nothing owns: stalled chains and interrupted
+/// assignments already surface through their own attention channels the
+/// moment they happen, and a boss mid-orchestration legitimately leaves
+/// an outcome unstaffed for tens of minutes. An hour of quiet is the
+/// smallest window that separates a dropped task from a coordination gap
+/// while still catching abandoned work inside the same work session —
+/// matched to the service's other human-scale grace, the planning
+/// archive window.
+pub const OUTCOME_UNATTENDED_GRACE: u64 = 60 * 60;
 pub const OUTCOME_REMINDER_INTERVAL: u64 = 24 * 60 * 60;
 
 /// The `newOutcome` summon input — the parent outcome and success criteria
@@ -3119,9 +3127,12 @@ impl BossOutcome {
     /// that still owns its step — Waiting through CheckingHandoff are
     /// dispatching or executing, Pausing and Cancelling hold the outcome
     /// while they settle — so a long-running step stays covered between
-    /// lifecycle events. A Paused chain awaits a decision: that is genuine
-    /// stalled work the reminder must still surface, and terminal chains
-    /// no longer own anything.
+    /// lifecycle events. A Paused chain shields only when the pause itself
+    /// was the decision: an owner hold carries no unhandled exception, so
+    /// it reads like a recorded wait. A pause the daemon raised on a failed
+    /// gate or seal keeps its `ChainAttention` unread — that is genuine
+    /// stalled work awaiting a decision, and the reminder still surfaces
+    /// it. Terminal chains no longer own anything.
     pub fn reminder_eligible(
         &self,
         employees: &[BossEmployee],
@@ -3134,12 +3145,15 @@ impl BossOutcome {
             && self.pending_handoffs().next().is_none()
             && !chains.iter().any(|chain| {
                 chain.request.outcome_id == self.id
-                    && !matches!(
-                        chain.status,
-                        crate::chains::ChainStatus::Paused
-                            | crate::chains::ChainStatus::Completed
-                            | crate::chains::ChainStatus::Cancelled
-                    )
+                    && match chain.status {
+                        crate::chains::ChainStatus::Completed
+                        | crate::chains::ChainStatus::Cancelled => false,
+                        crate::chains::ChainStatus::Paused => chain
+                            .attention
+                            .as_ref()
+                            .is_none_or(|attention| attention.handled_at.is_some()),
+                        _ => true,
+                    }
             })
             && !employees.iter().any(|employee| {
                 employee

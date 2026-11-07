@@ -2939,11 +2939,34 @@ pub(super) fn outcome_reminder_prompt(
             {
                 return None;
             }
-            let latest = task
-                .handoffs
-                .last()
-                .map(|handoff| format!("latest: {}", handoff.intent))
-                .unwrap_or_else(|| "no work assigned yet".to_string());
+            // An unhandled chain exception is what keeps this outcome
+            // eligible — name the stall first, then the latest handoff
+            // intent, before falling back to ownership labels.
+            let latest = document
+                .chains
+                .iter()
+                .filter(|chain| chain.request.outcome_id == task.id)
+                .filter_map(|chain| chain.attention.as_ref())
+                .filter(|attention| attention.handled_at.is_none())
+                .next_back()
+                .map(|attention| format!("chain paused — {}", attention.reason))
+                .or_else(|| {
+                    task.handoffs
+                        .last()
+                        .map(|handoff| format!("latest: {}", handoff.intent))
+                })
+                .unwrap_or_else(|| {
+                    if task.assignments.is_empty()
+                        && !document
+                            .chains
+                            .iter()
+                            .any(|chain| chain.request.outcome_id == task.id)
+                    {
+                        "no work assigned yet".to_string()
+                    } else {
+                        "no live work".to_string()
+                    }
+                });
             let unattended = outcome_reminder_duration(
                 now.saturating_sub(reference.unattended_since.max(task.last_activity_at)),
             );

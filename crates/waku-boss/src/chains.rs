@@ -3153,12 +3153,99 @@ mod tests {
             "a stopping chain still owns its outcome"
         );
 
-        // …but a settled pause is genuine stalled work: the outcome
-        // re-enters eligibility and the reminder still lands.
+        // …and a settled owner hold stays covered too: the pause itself
+        // was the decision, so the outcome never re-enters eligibility.
+        // Regression: a deliberate hold used to remind "no active
+        // assignment" one grace period after it settled.
         let chain = fixture.read(chain.id);
         fixture.release(&chain);
         assert_eq!(fixture.read(chain.id).status, ChainStatus::Paused);
         let paused_at = now + 28 * 60 * 60;
+        for offset in [0, grace + 1, 24 * 60 * 60] {
+            assert!(
+                fixture
+                    .service
+                    .scan_outcome_reminders(paused_at + offset)
+                    .unwrap()
+                    .is_empty(),
+                "an owner-held pause must never read as unattended"
+            );
+            assert_eq!(unattended_since(&fixture.service), None);
+        }
+
+        // Cancel releases ownership entirely — the outcome becomes
+        // eligible with a fresh grace period.
+        let cancelled = fixture.control(chain.id, ChainControl::Cancel).unwrap();
+        assert_eq!(cancelled.status, ChainStatus::Cancelled);
+        let cancelled_at = paused_at + 120;
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(cancelled_at)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(unattended_since(&fixture.service), Some(cancelled_at));
+        assert_eq!(
+            fixture
+                .service
+                .scan_outcome_reminders(cancelled_at + grace + 1)
+                .unwrap(),
+            vec![outcome],
+            "a cancelled chain leaves the outcome unowned"
+        );
+    }
+
+    /// An exception pause still reads as stalled work: a chain the daemon
+    /// held on a failed gate keeps its unread `ChainAttention`, so the
+    /// outcome stays reminder-eligible until an owner handles it — an
+    /// owner pause laid over the exception changes nothing, while
+    /// accepting the handoff retires the exception and the deliberate
+    /// hold then shields like any other.
+    #[test]
+    fn exception_pauses_still_surface_unattended_work() {
+        let fixture = Fixture::new();
+        let outcome = fixture.definition.outcome_id;
+        let unattended_since = |service: &BossService| {
+            service
+                .document()
+                .outcomes
+                .iter()
+                .find(|entry| entry.id == outcome)
+                .and_then(|entry| entry.unattended_since)
+        };
+        let now = waku_protocol::model::unix_time();
+        let grace = waku_protocol::boss::OUTCOME_UNATTENDED_GRACE;
+
+        let chain = fixture.create();
+        fixture.admit(&chain);
+        fixture.observe(&chain, ChainObservation::Starting);
+        fixture.observe(
+            &chain,
+            ChainObservation::Working {
+                starting_revision: "rev".into(),
+                workspace: "/tmp/chain-workspace".into(),
+            },
+        );
+        fixture.packet(&chain, ResultDisposition::Success);
+        fixture.terminal(&chain, ResultDisposition::Success);
+        fixture.release(&chain);
+
+        // A failed gate pauses the chain with an unread exception —
+        // genuine stalled work awaiting a decision.
+        let mut failing = verified();
+        failing.successor_access = false;
+        fixture.seal(&chain, &failing).unwrap();
+        let chain = fixture.read(chain.id);
+        assert_eq!(chain.status, ChainStatus::Paused);
+        assert!(
+            chain
+                .attention
+                .as_ref()
+                .is_some_and(|attention| attention.handled_at.is_none())
+        );
+
+        let paused_at = now + 3600;
         assert!(
             fixture
                 .service
@@ -3173,20 +3260,35 @@ mod tests {
                 .scan_outcome_reminders(paused_at + grace + 1)
                 .unwrap(),
             vec![outcome],
-            "a paused chain must not hide stalled work"
+            "an unhandled exception pause still reminds"
         );
 
-        // Cancel releases ownership entirely — the outcome stays eligible.
-        let cancelled = fixture.control(chain.id, ChainControl::Cancel).unwrap();
-        assert_eq!(cancelled.status, ChainStatus::Cancelled);
+        // Pausing over the exception is not a decision about it — the
+        // outcome keeps its reminder.
+        let held = fixture.control(chain.id, ChainControl::Pause).unwrap();
+        assert_eq!(held.status, ChainStatus::Paused);
         assert_eq!(
             fixture
                 .service
                 .scan_outcome_reminders(paused_at + grace + 2)
                 .unwrap(),
             vec![outcome],
-            "a cancelled chain leaves the outcome unowned"
+            "an owner pause cannot hide an unhandled exception"
         );
+
+        // Handling the exception retires it — the deliberate hold that
+        // remains shields like a recorded wait.
+        let accepted = fixture.control(chain.id, ChainControl::Accept).unwrap();
+        assert_eq!(accepted.status, ChainStatus::Paused);
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(paused_at + grace + 3)
+                .unwrap()
+                .is_empty(),
+            "a handled exception reads as a deliberate hold"
+        );
+        assert_eq!(unattended_since(&fixture.service), None);
     }
 
     #[test]
