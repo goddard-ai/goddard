@@ -4828,29 +4828,18 @@ impl Waku {
         })
     }
 
-    /// ⌘-click: toggle `member` in the multi-selection without making it
-    /// the active surface. Creating the set seeds it with the active task —
-    /// ⌘-click extends the current selection rather than replacing it, like
-    /// Finder — so the viewed task joins the batch until ⌘-clicked back out,
-    /// when its row falls back to the neutral active highlight. The clicked
-    /// row becomes the range anchor either way — even when the toggle removed
-    /// it — matching Finder's pivot.
+    /// ⌘-click toggles a row without changing the active surface. The current
+    /// task can only join the batch through ⌘⇧-click range selection; a
+    /// subsequent ⌘-click can remove it. The clicked row becomes the range
+    /// anchor even when the toggle removes it.
     pub(super) fn toggle_sidebar_multi_selection(
         &mut self,
         member: SidebarSelection,
         cx: &mut Context<Self>,
     ) {
-        if self.sidebar_multi_selection.is_empty()
-            && let Some(active) = sidebar_multi_selection_seed(
-                &self.state.sessions,
-                self.state.selected_session,
-                member,
-            )
+        if !self.sidebar_multi_selection.remove(&member)
+            && Some(member) != self.state.selected_session.map(SidebarSelection::Session)
         {
-            self.sidebar_multi_selection
-                .insert(SidebarSelection::Session(active));
-        }
-        if !self.sidebar_multi_selection.remove(&member) {
             self.sidebar_multi_selection.insert(member);
         }
         self.sidebar_multi_selection_anchor = Some(member);
@@ -8177,23 +8166,6 @@ fn localized_session_title(session: &AgentSession) -> String {
     }
 }
 
-/// The task the current selection stands for when a ⌘-click creates the
-/// set — the viewed, started task unless the click landed on it directly.
-/// Deliverable clicks seed the same way: the active task is the selection
-/// being extended no matter which row kind was clicked.
-fn sidebar_multi_selection_seed(
-    sessions: &[AgentSession],
-    selected_session: Option<Uuid>,
-    clicked: SidebarSelection,
-) -> Option<Uuid> {
-    selected_session.filter(|active| {
-        SidebarSelection::Session(*active) != clicked
-            && sessions.iter().any(|session| {
-                session.id == *active && session.has_started() && session.archived_at.is_none()
-            })
-    })
-}
-
 pub(super) fn sidebar_session_selected(
     selected_session: Option<Uuid>,
     pending_session: Option<Uuid>,
@@ -9785,59 +9757,6 @@ mod tests {
             .unwrap();
         assert_eq!(badge.number, 4);
         assert_eq!(badge.others, 1);
-    }
-
-    #[test]
-    fn sidebar_multi_selection_skips_unstarted_and_archived_active_tasks() {
-        let mut active = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-        let clicked = SidebarSelection::Session(Uuid::new_v4());
-        assert_eq!(
-            sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), clicked),
-            None
-        );
-
-        active.begin_turn("Started task");
-        active.archived_at = Some(1);
-        assert_eq!(
-            sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), clicked),
-            None
-        );
-    }
-
-    #[test]
-    fn sidebar_multi_selection_seeds_a_started_active_task_once() {
-        let mut active = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-        active.begin_turn("Started task");
-        assert_eq!(
-            sidebar_multi_selection_seed(
-                std::slice::from_ref(&active),
-                Some(active.id),
-                SidebarSelection::Session(Uuid::new_v4())
-            ),
-            Some(active.id)
-        );
-        assert_eq!(
-            sidebar_multi_selection_seed(
-                std::slice::from_ref(&active),
-                Some(active.id),
-                SidebarSelection::Session(active.id)
-            ),
-            None
-        );
-    }
-
-    /// A ⌘-click that opens on a deliverable still extends the selection
-    /// the viewed task represents — the seed rule does not depend on the
-    /// clicked row's kind.
-    #[test]
-    fn sidebar_multi_selection_seeds_the_active_task_for_a_deliverable_click() {
-        let mut active = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-        active.begin_turn("Started task");
-        let clicked = SidebarSelection::Deliverable(waku_client::DaemonKey::Local, Uuid::new_v4());
-        assert_eq!(
-            sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), clicked),
-            Some(active.id)
-        );
     }
 
     #[test]

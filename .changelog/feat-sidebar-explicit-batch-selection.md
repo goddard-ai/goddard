@@ -1,0 +1,1 @@
+- Cmd-click in the sidebar selects tasks without adding the current task; use Cmd-Shift-click to include it in a range.
