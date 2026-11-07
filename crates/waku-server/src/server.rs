@@ -3413,6 +3413,7 @@ fn workspace_operation_kind(operation: &WorkspaceOperation) -> &'static str {
         WorkspaceOperation::CaptureTurnStart { .. } => "captureTurnStart",
         WorkspaceOperation::CaptureTurn { .. } => "captureTurn",
         WorkspaceOperation::CaptureRef { .. } => "captureRef",
+        WorkspaceOperation::CaptureCommittedRef { .. } => "captureCommittedRef",
         WorkspaceOperation::RestoreRef { .. } => "restoreRef",
         WorkspaceOperation::HasRef { .. } => "hasRef",
         WorkspaceOperation::SessionTurnRefs { .. } => "sessionTurnRefs",

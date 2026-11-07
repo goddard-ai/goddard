@@ -1,0 +1,1 @@
+- The dirty-worktree archive dialog now lets you discard uncommitted changes or ask the agent to clean up and request archiving.

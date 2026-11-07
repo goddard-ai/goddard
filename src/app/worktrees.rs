@@ -1181,6 +1181,17 @@ impl Waku {
                 continue;
             }
             if let SessionWorkspace::Worktree { path, .. } = &session.workspace {
+                // Sharing may have started after the destructive choice was made.
+                // Preserve the directory and warn rather than discard another task's work.
+                if self.clean_archive_workspaces.contains(&session_id)
+                    && self.state.sessions.iter().any(|other| {
+                        other.id != session_id
+                            && matches!(&other.workspace, SessionWorkspace::Worktree { path: other_path, .. } if other_path == path)
+                    })
+                {
+                    self.show_toast(tr!("archive.clean_failed"));
+                    continue;
+                }
                 // "New task in same worktree" clones the workspace into a
                 // second session; removing the directory while a sibling is
                 // still live would delete its uncommitted work. Defer until
@@ -1204,6 +1215,9 @@ impl Waku {
                 projectless_ready.push((session_id, path));
             }
         }
+        self.clean_archive_workspaces.retain(|id| {
+            deferred.contains(id) || ready.iter().any(|(session_id, _)| session_id == id)
+        });
         self.pending_workspace_cleanups = deferred;
         for session_id in archived_codex_runtimes {
             self.reset_session_runtime(session_id);
@@ -1239,7 +1253,11 @@ impl Waku {
             .detach();
         }
         for (session_id, path) in ready {
+            let committed_only = self.clean_archive_workspaces.remove(&session_id);
             let Some(workspace) = self.workspace_client_for_session(session_id) else {
+                if committed_only {
+                    self.show_toast(tr!("archive.clean_failed"));
+                }
                 continue;
             };
             let local = !self.is_remote_session(session_id);
@@ -1249,11 +1267,19 @@ impl Waku {
                     .background_executor()
                     .spawn(async move {
                         let git_ref = checkpoint::archive_ref(session_id);
-                        let verified = workspace
-                            .request(waku_client::WorkspaceOperation::CaptureRef {
+                        let capture = if committed_only {
+                            waku_client::WorkspaceOperation::CaptureCommittedRef {
                                 cwd: path.clone(),
                                 git_ref: git_ref.clone(),
-                            })
+                            }
+                        } else {
+                            waku_client::WorkspaceOperation::CaptureRef {
+                                cwd: path.clone(),
+                                git_ref: git_ref.clone(),
+                            }
+                        };
+                        let verified = workspace
+                            .request(capture)
                             .and_then(|_| {
                                 workspace.request(waku_client::WorkspaceOperation::HasRef {
                                     cwd: path.clone(),
@@ -1279,6 +1305,10 @@ impl Waku {
                 if removed {
                     let _ = waku.update(cx, move |waku, cx| {
                         waku.close_workspace_terminals(session_id, &worktree_path, cx);
+                    });
+                } else if committed_only {
+                    let _ = waku.update(cx, |waku, _| {
+                        waku.show_toast(tr!("archive.clean_failed"));
                     });
                 }
             })

@@ -1477,6 +1477,52 @@ mod tests {
     }
 
     #[test]
+    fn a_clean_archive_restores_commits_without_discarded_changes() {
+        let repository = repository();
+        let project = repository.join("packages/app");
+        let created = create(&project, Some("Clean archive"), Some("feature"), false, &[]).unwrap();
+        let original = fs::read(created.path.join("README.md")).unwrap();
+        fs::write(created.path.join("README.md"), "dirty\n").unwrap();
+        fs::write(created.path.join("staged.txt"), "staged\n").unwrap();
+        git_stdout(&created.path, &["add", "staged.txt"]).unwrap();
+        fs::write(created.path.join("notes.txt"), "untracked\n").unwrap();
+        let status_before = git_stdout(&created.path, &["status", "--porcelain"]).unwrap();
+
+        let git_ref = crate::checkpoint::archive_ref(Uuid::new_v4());
+        crate::checkpoint::capture_committed_ref(&created.path, &git_ref).unwrap();
+        assert!(crate::checkpoint::has_ref(&created.path, &git_ref));
+        // Capturing must not mutate files or the real index before removal.
+        assert_eq!(
+            git_stdout(&created.path, &["status", "--porcelain"]).unwrap(),
+            status_before
+        );
+        assert_eq!(
+            fs::read_to_string(created.path.join("README.md")).unwrap(),
+            "dirty\n"
+        );
+        remove(&created.path, true).unwrap();
+
+        ensure(&project, &created.path, None, Some(&git_ref)).unwrap();
+        assert_eq!(fs::read(created.path.join("README.md")).unwrap(), original);
+        assert!(!created.path.join("staged.txt").exists());
+        assert!(!created.path.join("notes.txt").exists());
+        assert!(
+            git_stdout(&created.path, &["status", "--porcelain"])
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            git_stdout(&created.path, &["rev-parse", "HEAD"]).unwrap(),
+            git_stdout(&repository, &["rev-parse", "feature"]).unwrap()
+        );
+        assert_eq!(
+            git_stdout(&created.path, &["log", "--format=%s", "HEAD"]).unwrap(),
+            "feature\ninitial"
+        );
+        fs::remove_dir_all(repository.parent().unwrap()).ok();
+    }
+
+    #[test]
     fn a_removed_worktree_on_a_branch_restores_its_dirty_state() {
         let repository = repository();
         let project = repository.join("packages/app");

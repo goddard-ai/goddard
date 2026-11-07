@@ -342,6 +342,18 @@ pub fn capture_ref(cwd: &Path, git_ref: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Save a clean archive snapshot without changing the checkout or its index.
+/// The first parent remains HEAD so restoring the archive preserves history.
+/// Callers may remove the checkout only after verifying this ref exists.
+pub fn capture_committed_ref(cwd: &Path, git_ref: &str) -> anyhow::Result<()> {
+    let head =
+        resolve_ref(cwd, "HEAD").ok_or_else(|| anyhow!("a committed archive requires HEAD"))?;
+    let tree = git_output(cwd, ["rev-parse", &format!("{head}^{{tree}}")])?;
+    let commit = commit_tree(cwd, tree.trim(), "Goddard clean archive", &[head])?;
+    git_output(cwd, ["update-ref", git_ref, &commit])?;
+    Ok(())
+}
+
 /// Capture the current worktree and untracked files as a dangling commit.
 ///
 /// This shares the checkpoint path's isolated per-worktree index, so it

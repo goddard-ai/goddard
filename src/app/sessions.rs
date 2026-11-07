@@ -2903,6 +2903,7 @@ impl Waku {
         self.drop_session_briefing(session_id);
         self.undoable_archive.retain(|id| *id != session_id);
         self.pending_workspace_cleanups.remove(&session_id);
+        self.clean_archive_workspaces.remove(&session_id);
         self.project_switch_pending.remove(&session_id);
         self.reset_session_runtime(session_id);
         self.background_work.remove(&session_id);
@@ -3482,6 +3483,7 @@ impl Waku {
         // An unarchived session keeps its worktree: a queued cleanup must
         // not fire after the task is back.
         self.pending_workspace_cleanups.remove(&session_id);
+        self.clean_archive_workspaces.remove(&session_id);
         // If cleanup already removed the worktree, bring it back now —
         // waiting for the next prompt's restore leaves terminals and file
         // surfaces pointing at a directory that does not exist. A

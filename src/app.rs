@@ -3461,6 +3461,8 @@ pub struct Waku {
     /// detached work, or a queued turn-checkpoint capture — and drain once it
     /// goes quiet. Unarchived or removed sessions drop out on the next pass.
     pending_workspace_cleanups: HashSet<Uuid>,
+    /// Explicit clean-and-archive choices; lost intent defaults to preserving work.
+    clean_archive_workspaces: HashSet<Uuid>,
     archive_cleanup_wake_scheduled: bool,
     stream_state_dirty: bool,
     last_stream_save: Instant,
@@ -7825,6 +7827,7 @@ impl Waku {
                 pending_queue_drains: Vec::new(),
                 cancel_drains: HashMap::new(),
                 pending_workspace_cleanups: intent_workspace_cleanups,
+                clean_archive_workspaces: HashSet::new(),
                 archive_cleanup_wake_scheduled: false,
                 stream_state_dirty: false,
                 last_stream_save: Instant::now(),

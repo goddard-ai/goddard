@@ -2328,6 +2328,14 @@ archive.confirm_description_busy:
   en: A turn is still in progress. Archiving stops it; unarchiving restores the task.
 archive.confirm_description_busy_worktree:
   en: A turn is still in progress and its checkout has work in progress. Archiving stops the turn, snapshots the checkout, and removes the worktree; unarchiving restores it.
+archive.clean_and_archive:
+  en: Clean worktree & archive
+archive.agent_clean_and_archive:
+  en: Ask agent to clean up & archive
+archive.clean_warning:
+  en: "Clean worktree & archive discards uncommitted changes. Unarchiving restores only committed work."
+archive.clean_failed:
+  en: Could not clean the archived worktree; its files were left on disk.
 archive.uncommitted:
   en: "%{count} uncommitted files"
 archive.unpushed:

@@ -1261,6 +1261,13 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         git_ref: String,
     },
+    /// Archive only committed content, preserving HEAD as the snapshot's
+    /// parent. Uncommitted files are intentionally excluded.
+    CaptureCommittedRef {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        git_ref: String,
+    },
     RestoreRef {
         #[ts(type = "string")]
         cwd: PathBuf,

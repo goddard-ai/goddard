@@ -47,6 +47,8 @@ pub(super) struct ArchiveDialogState {
     scroll: ScrollHandle,
     archive_focus: FocusHandle,
     cancel_focus: FocusHandle,
+    clean_focus: FocusHandle,
+    agent_cleanup_focus: FocusHandle,
     /// Confirmations from the same batch or overlapping background previews
     /// wait here instead of replacing the task currently being reviewed.
     pending: VecDeque<Self>,
@@ -154,6 +156,8 @@ impl Waku {
             preview,
             scroll: ScrollHandle::new(),
             cancel_focus: cx.focus_handle(),
+            clean_focus: cx.focus_handle(),
+            agent_cleanup_focus: cx.focus_handle(),
             archive_focus: archive_focus.clone(),
             pending: VecDeque::new(),
         };
@@ -186,6 +190,81 @@ impl Waku {
             }
         }
         self.focus_next_archive_dialog(window, cx);
+    }
+
+    /// Never offer destructive cleanup for a borrowed or shared checkout.
+    fn archive_worktree_can_be_cleaned(&self, session_id: Uuid) -> bool {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return false;
+        };
+        if session.workspace.is_borrowed() {
+            return false;
+        }
+        let SessionWorkspace::Worktree { path, .. } = &session.workspace else {
+            return false;
+        };
+        !self.state.sessions.iter().any(|other| {
+            other.id != session_id
+                && matches!(&other.workspace, SessionWorkspace::Worktree { path: other_path, .. } if other_path == path)
+        })
+    }
+
+    fn clean_and_archive_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(dialog) = self.archive_dialog.as_ref() else {
+            return;
+        };
+        if dialog.kind != ArchiveDialogKind::Archive
+            || !dialog.archive_intent.is_some_and(|token| {
+                self.sidebar_intents
+                    .preflight_current(dialog.session_id, token)
+            })
+            || !self.archive_worktree_can_be_cleaned(dialog.session_id)
+        {
+            return;
+        }
+        let session_id = dialog.session_id;
+        self.clean_archive_workspaces.insert(session_id);
+        self.confirm_archive_dialog(window, cx);
+        if !self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && session.archived_at.is_some())
+        {
+            self.clean_archive_workspaces.remove(&session_id);
+        }
+    }
+
+    fn ask_agent_to_clean_and_archive(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(dialog) = self.archive_dialog.as_ref() else {
+            return;
+        };
+        if dialog.kind != ArchiveDialogKind::Archive
+            || !dialog.archive_intent.is_some_and(|token| {
+                self.sidebar_intents
+                    .preflight_current(dialog.session_id, token)
+            })
+        {
+            return;
+        }
+        let session_id = dialog.session_id;
+        if !self.qa_accepts_submission(session_id) {
+            return;
+        }
+        // Cancel the archive preflight so the agent's new turn remains live.
+        self.close_archive_dialog(window, cx);
+        let prompt = format!(
+            "Prepare this task's worktree for archiving. Inspect uncommitted changes and unpushed commits, finish any necessary cleanup and verification, and commit useful work. Preserve unrelated work; do not discard changes or push without authorization. If cleanup is blocked, report the blocker and leave the task open. Once the worktree is ready, request archiving with `goddard-agent archive {session_id} --reason 'Worktree cleanup complete'`."
+        );
+        // Queue first: sidebar targets may still need hydration, and a live
+        // turn must finish before its cleanup follow-up starts.
+        self.enqueue_follow_up_submission(session_id, ComposerSubmission::plain(prompt), cx);
+        self.drain_queued_message(session_id, cx);
     }
 
     fn close_archive_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -236,6 +315,10 @@ impl Waku {
             .and_then(|session| self.workspace_path_for_session(session))
             .map(std::path::Path::to_path_buf);
         let has_checkout_work = !files.is_empty() || !commits.is_empty();
+        let can_clean = dialog.kind == ArchiveDialogKind::Archive
+            && !files.is_empty()
+            && self.archive_worktree_can_be_cleaned(dialog.session_id);
+        let can_ask_agent = dialog.kind == ArchiveDialogKind::Archive && has_checkout_work;
         let description = match (dialog.active_turn, has_checkout_work) {
             (true, true) => match dialog.kind {
                 ArchiveDialogKind::Archive => tr!("archive.confirm_description_busy_worktree"),
@@ -382,6 +465,28 @@ impl Waku {
             &theme,
             |waku, window, cx| waku.confirm_archive_dialog(window, cx),
         );
+        let clean_row = can_clean.then(|| {
+            render_archive_action_row(
+                "archive-dialog-clean",
+                &dialog.clean_focus,
+                "icons/broom.svg",
+                tr!("archive.clean_and_archive"),
+                weak.clone(),
+                &theme,
+                |waku, window, cx| waku.clean_and_archive_dialog(window, cx),
+            )
+        });
+        let agent_cleanup_row = can_ask_agent.then(|| {
+            render_archive_action_row(
+                "archive-dialog-agent-cleanup",
+                &dialog.agent_cleanup_focus,
+                "icons/bot.svg",
+                tr!("archive.agent_clean_and_archive"),
+                weak.clone(),
+                &theme,
+                |waku, window, cx| waku.ask_agent_to_clean_and_archive(window, cx),
+            )
+        });
         let cancel_row = render_archive_action_row(
             "archive-dialog-cancel",
             &dialog.cancel_focus,
@@ -396,7 +501,18 @@ impl Waku {
             .id("archive-dialog-card")
             .key_context(DIALOG_CONTEXT)
             .on_action(cx.listener(|waku, _: &ConfirmArchiveDialog, window, cx| {
-                waku.confirm_archive_dialog(window, cx)
+                let Some(dialog) = waku.archive_dialog.as_ref() else {
+                    return;
+                };
+                if dialog.clean_focus.is_focused(window) {
+                    waku.clean_and_archive_dialog(window, cx);
+                } else if dialog.agent_cleanup_focus.is_focused(window) {
+                    waku.ask_agent_to_clean_and_archive(window, cx);
+                } else if dialog.cancel_focus.is_focused(window) {
+                    waku.close_archive_dialog(window, cx);
+                } else {
+                    waku.confirm_archive_dialog(window, cx);
+                }
             }))
             .on_action(cx.listener(|waku, _: &DismissArchiveDialog, window, cx| {
                 waku.close_archive_dialog(window, cx)
@@ -433,7 +549,15 @@ impl Waku {
                             .line_height(sp(17.0))
                             .text_color(theme.text_secondary)
                             .child(description),
-                    ),
+                    )
+                    .when(can_clean, |header| {
+                        header.child(
+                            div()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("archive.clean_warning")),
+                        )
+                    }),
             )
             .child(
                 div()
@@ -456,6 +580,8 @@ impl Waku {
                     .flex_col()
                     .gap(px(2.0))
                     .child(archive_row)
+                    .children(clean_row)
+                    .children(agent_cleanup_row)
                     .child(cancel_row),
             );
 
@@ -545,6 +671,8 @@ mod tests {
             scroll: ScrollHandle::new(),
             archive_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
+            clean_focus: cx.focus_handle(),
+            agent_cleanup_focus: cx.focus_handle(),
             pending: VecDeque::new(),
         })
     }

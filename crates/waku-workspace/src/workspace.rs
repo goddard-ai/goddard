@@ -519,6 +519,10 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
             crate::checkpoint::capture_ref(&cwd, &git_ref)?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::CaptureCommittedRef { cwd, git_ref } => {
+            crate::checkpoint::capture_committed_ref(&cwd, &git_ref)?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::RestoreRef { cwd, git_ref } => {
             crate::checkpoint::restore_ref(&cwd, &git_ref)?;
             WorkspaceResult::Ack
