@@ -6811,12 +6811,16 @@ impl Waku {
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
             .debug_selector(|| format!("session-row-{}", session.id))
+            .relative()
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 this.set_transcript_preload_hover(session_id, *hovered, cx);
             }))
             .w_full()
             .min_w_0()
             .pl(px(left_padding))
+            .when(self.session_is_rushed(session_id), |element| {
+                element.pl(px(left_padding + 19.0))
+            })
             .pr(px(8.0))
             .py(px(7.0))
             .rounded(px(9.0))
@@ -6844,6 +6848,7 @@ impl Waku {
                     theme.sidebar_item_background
                 })
             })
+            .children(self.render_sidebar_rush_indicator(session_id, left_padding))
             .child(self.render_session_row_body(
                 session_id,
                 grouped_by_project,

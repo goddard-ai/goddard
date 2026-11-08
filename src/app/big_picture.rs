@@ -172,7 +172,7 @@ pub(super) struct BigPictureUi {
     open: bool,
     /// Rush is local to this window and lasts until explicitly switched off.
     rushed: HashSet<Uuid>,
-    rush_header_indicator: Entity<RushIndicator>,
+    rush_sidebar_indicators: HashMap<Uuid, Entity<RushIndicator>>,
     rush_modal_indicator: Entity<RushIndicator>,
     rush_pending: VecDeque<Uuid>,
     rush_session: Option<Uuid>,
@@ -251,7 +251,7 @@ impl BigPictureUi {
         Self {
             open: false,
             rushed: HashSet::new(),
-            rush_header_indicator: cx.new(|_| RushIndicator),
+            rush_sidebar_indicators: HashMap::new(),
             rush_modal_indicator: cx.new(|_| RushIndicator),
             rush_pending: VecDeque::new(),
             rush_session: None,
@@ -2218,8 +2218,12 @@ impl Waku {
     pub(super) fn toggle_rush(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.big_picture.rushed.remove(&session_id) {
             self.big_picture.rush_pending.retain(|id| *id != session_id);
+            self.big_picture.rush_sidebar_indicators.remove(&session_id);
         } else {
             self.big_picture.rushed.insert(session_id);
+            self.big_picture
+                .rush_sidebar_indicators
+                .insert(session_id, cx.new(|_| RushIndicator));
             let enable_fast = self
                 .state
                 .sessions
@@ -2267,21 +2271,39 @@ impl Waku {
         cx.notify();
     }
 
+    pub(super) fn render_sidebar_rush_indicator(
+        &self,
+        session_id: Uuid,
+        left_padding: f32,
+    ) -> Option<AnyElement> {
+        let indicator = self.big_picture.rush_sidebar_indicators.get(&session_id)?;
+        Some(
+            div()
+                .id(SharedString::from(format!("sidebar-rush-{session_id}")))
+                .absolute()
+                .left(px(left_padding))
+                .top(px(9.5))
+                .size(px(13.0))
+                .tooltip(Tooltip::text(tr!("rush.enabled")))
+                .child(
+                    indicator
+                        .clone()
+                        .cached(StyleRefinement::default().w(px(13.0)).h(px(13.0))),
+                )
+                .into_any_element(),
+        )
+    }
+
     pub(super) fn render_rush_toggle(
         &self,
         session_id: Uuid,
-        modal: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let enabled = self.big_picture.rushed.contains(&session_id);
         let focus = self.transcript_control_focus(format!("rush-{session_id}"), cx);
         let indicator = if enabled {
-            let indicator = if modal {
-                self.big_picture.rush_modal_indicator.clone()
-            } else {
-                self.big_picture.rush_header_indicator.clone()
-            };
+            let indicator = self.big_picture.rush_modal_indicator.clone();
             indicator
                 .cached(StyleRefinement::default().w(px(13.0)).h(px(13.0)))
                 .into_any_element()
@@ -2390,7 +2412,7 @@ impl Waku {
                             .text_color(theme.text_secondary)
                             .child(status),
                     )
-                    .child(self.render_rush_toggle(session_id, true, cx))
+                    .child(self.render_rush_toggle(session_id, cx))
                     .child(
                         div()
                             .id("rush-close")
