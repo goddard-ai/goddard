@@ -282,6 +282,7 @@ enum PaletteAction {
     ChooseSyncBranchProject(Uuid),
     ChooseCodeBlockProject(Uuid),
     CompactContext,
+    ToggleRush(Uuid),
     GenerateVoiceBriefing,
     CancelVoiceBriefing,
     ToggleUsage,
@@ -3279,6 +3280,22 @@ impl Waku {
                 None,
                 PaletteAction::CompactContext,
                 "compact compress context window tokens reduce shrink summarize",
+                next(),
+            ));
+        }
+
+        if let Some(session) = self.selected_session() {
+            commands.push(CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!(if self.session_is_rushed(session.id) {
+                    "command_palette.stop_rushing_current_task"
+                } else {
+                    "command_palette.rush_current_task"
+                }),
+                "icons/zap.svg",
+                None,
+                PaletteAction::ToggleRush(session.id),
+                "rush current task fast priority attention stop disable",
                 next(),
             ));
         }
@@ -6588,6 +6605,7 @@ impl Waku {
                     self.compact_session(session_id, cx);
                 }
             }
+            PaletteAction::ToggleRush(session_id) => self.toggle_rush(session_id, cx),
             PaletteAction::GenerateVoiceBriefing => {
                 if let Some(session_id) = self.state.selected_session
                     && let Some(message_id) = self.voice_briefing_last_reply(session_id)

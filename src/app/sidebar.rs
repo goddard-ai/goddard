@@ -6917,6 +6917,10 @@ impl Waku {
                 &menu,
                 move |cx| {
                     let rename_waku = waku.clone();
+                    let rush_waku = waku.clone();
+                    let rush_enabled = waku
+                        .read_with(cx, |waku, _| waku.session_is_rushed(session_id))
+                        .unwrap_or(false);
                     let pin_waku = waku.clone();
                     let unread_waku = waku.clone();
                     let copy_waku = waku.clone();
@@ -7016,6 +7020,13 @@ impl Waku {
                             });
                         })
                         .icon("icons/pencil.svg"),
+                        MenuItem::new(tr!("rush.toggle"), move |_, cx| {
+                            let _ = rush_waku.update(cx, |waku, cx| {
+                                waku.toggle_rush(session_id, cx);
+                            });
+                        })
+                        .icon("icons/zap.svg")
+                        .selected(rush_enabled),
                         MenuItem::new(
                             if all_pinned {
                                 item_label("session.unpin", "session.unpin_many", pin_targets.len())
@@ -8323,7 +8334,6 @@ impl Waku {
                     cx,
                 ),
             )
-            .children(session.map(|session| self.render_rush_toggle(session.id, false, cx)))
             .child(self.render_background_work_summary(cx))
             .children(self.render_reclaim_indicator(window, cx))
             .when(!self.right_panel_slot_visible(), |element| {

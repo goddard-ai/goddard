@@ -2211,7 +2211,11 @@ impl Waku {
         }
     }
 
-    fn toggle_rush(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn session_is_rushed(&self, session_id: Uuid) -> bool {
+        self.big_picture.rushed.contains(&session_id)
+    }
+
+    pub(super) fn toggle_rush(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.big_picture.rushed.remove(&session_id) {
             self.big_picture.rush_pending.retain(|id| *id != session_id);
         } else {
