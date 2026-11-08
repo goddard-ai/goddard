@@ -530,8 +530,8 @@ impl Waku {
     // ── Permission ─────────────────────────────────────────────────────────
 
     pub(super) fn render_permission(&self, cx: &mut Context<Self>) -> Option<Div> {
-        let session_id = self.state.selected_session?;
-        let runtime = self.selected_runtime()?;
+        let session_id = self.attention_session_id()?;
+        let runtime = self.attention_runtime()?;
         if let Some(input) = runtime.pending_user_input.clone() {
             return Some(div().px(px(20.0)).pb(px(8.0)).child(self.render_user_input(
                 session_id,

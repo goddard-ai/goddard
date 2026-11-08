@@ -8254,6 +8254,7 @@ impl Waku {
                     cx,
                 ),
             )
+            .children(session.map(|session| self.render_rush_toggle(session.id, false, cx)))
             .child(self.render_background_work_summary(cx))
             .children(self.render_reclaim_indicator(window, cx))
             .when(!self.right_panel_slot_visible(), |element| {
@@ -8469,7 +8470,7 @@ fn sidebar_planning_session_visible(
         })
 }
 
-fn localized_session_title(session: &AgentSession) -> String {
+pub(super) fn localized_session_title(session: &AgentSession) -> String {
     let title = session.display_title();
     if title == AgentSession::DEFAULT_TITLE {
         tr!("session.new_task")

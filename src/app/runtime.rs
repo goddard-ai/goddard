@@ -6560,6 +6560,17 @@ impl Waku {
     /// that carry these per turn absorb the change and keep running; the rest
     /// are torn down so the next prompt starts with the new options.
     pub(super) fn apply_session_options(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let resume = self.pending_rush_resume(session_id);
+        self.apply_session_options_with_rush_resume(session_id, resume, cx);
+    }
+
+    /// Rush resumes only after the provider has received the new tier.
+    pub(super) fn apply_session_options_with_rush_resume(
+        &mut self,
+        session_id: Uuid,
+        resume: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(options) = self
             .state
             .sessions
@@ -6570,6 +6581,11 @@ impl Waku {
             return;
         };
         let Some(runtime) = self.runtimes.get_mut(&session_id) else {
+            if let Some(resume) = resume
+                && self.take_rush_resume(session_id, resume)
+            {
+                self.resume_rushed_session(session_id, cx);
+            }
             return;
         };
         runtime.options_generation = Uuid::new_v4();
@@ -6588,6 +6604,12 @@ impl Waku {
                 if is_current && !applied {
                     waku.reset_session_runtime(session_id);
                     cx.notify();
+                }
+                if is_current
+                    && let Some(resume) = resume
+                    && waku.take_rush_resume(session_id, resume)
+                {
+                    waku.resume_rushed_session(session_id, cx);
                 }
             });
         })

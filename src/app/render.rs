@@ -648,6 +648,7 @@ impl Render for Waku {
         // Before anything can early-return (the settings page below), settle
         // whether each native browser webview belongs on screen this frame —
         // it floats above everything GPUI paints.
+        self.show_pending_rush(window, cx);
         self.sync_browser_webviews(cx);
         if self.fps_counter_visible {
             self.tick_fps(window);
@@ -761,7 +762,12 @@ impl Render for Waku {
 
         let theme = Theme::current(cx);
         let empty = should_render_empty_state(self.selected_session());
-        let permission = self.render_permission(cx);
+        let permission = self
+            .big_picture
+            .rush_session_id()
+            .is_none()
+            .then(|| self.render_permission(cx))
+            .flatten();
         let approval_visible = permission.is_some();
         // A started Antigravity session shows its TUI terminal as the whole
         // surface — no transcript, no composer.

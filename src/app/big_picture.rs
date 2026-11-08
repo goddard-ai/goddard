@@ -23,6 +23,7 @@ use gpui::{KeyBinding, actions};
 use crate::persistence::ComposerDraftKey;
 
 use super::*;
+use crate::ui::ActivationExt;
 
 pub const MAX_CARDS: usize = 8;
 const CARD_GAP: f32 = 16.0;
@@ -87,6 +88,7 @@ pub struct SelectBigPictureCard {
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("escape", DismissBigPicture, Some("BigPicture")),
+        KeyBinding::new("escape", DismissBigPicture, Some("RushModal")),
         KeyBinding::new("left", BigPictureLeft, Some("BigPicture")),
         KeyBinding::new("right", BigPictureRight, Some("BigPicture")),
         KeyBinding::new("enter", BigPictureConfirm, Some("BigPicture")),
@@ -149,9 +151,35 @@ struct BigPictureSlot {
     anim_seq: u64,
 }
 
+/// Keep a persistent rush pulse out of the workspace's render cadence.
+struct RushIndicator;
+
+impl Render for RushIndicator {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let color = Theme::current(cx).accent;
+        motion::pulse(Duration::from_millis(1800), move |phase| {
+            let opacity = 0.55 + 0.45 * (0.5 + 0.5 * (phase * std::f32::consts::TAU).cos());
+            icon("icons/zap.svg", 13.0, color)
+                .opacity(opacity)
+                .into_any_element()
+        })
+        .every(2)
+    }
+}
+
 /// Runtime-only overlay state; nothing here persists across windows.
 pub(super) struct BigPictureUi {
     open: bool,
+    /// Rush is local to this window and lasts until explicitly switched off.
+    rushed: HashSet<Uuid>,
+    rush_header_indicator: Entity<RushIndicator>,
+    rush_modal_indicator: Entity<RushIndicator>,
+    rush_pending: VecDeque<Uuid>,
+    rush_session: Option<Uuid>,
+    rush_resumes: HashMap<Uuid, Uuid>,
+    rush_queued_resumes: HashMap<Uuid, Uuid>,
+    rush_activities: HashMap<(Uuid, usize), bool>,
+    rush_footers: RefCell<HashMap<Uuid, (SharedString, u64)>>,
     slots: Vec<BigPictureSlot>,
     /// Arrow-key position — the card Enter or a click arms as the target.
     highlighted: Option<Uuid>,
@@ -219,9 +247,18 @@ struct CardTranscript {
 }
 
 impl BigPictureUi {
-    pub(super) fn new(focus: FocusHandle) -> Self {
+    pub(super) fn new(focus: FocusHandle, cx: &mut App) -> Self {
         Self {
             open: false,
+            rushed: HashSet::new(),
+            rush_header_indicator: cx.new(|_| RushIndicator),
+            rush_modal_indicator: cx.new(|_| RushIndicator),
+            rush_pending: VecDeque::new(),
+            rush_session: None,
+            rush_resumes: HashMap::new(),
+            rush_queued_resumes: HashMap::new(),
+            rush_activities: HashMap::new(),
+            rush_footers: RefCell::new(HashMap::new()),
             slots: Vec::new(),
             highlighted: None,
             window_start: 0,
@@ -253,7 +290,31 @@ impl BigPictureUi {
     /// Sessions whose cards are mounted — including ones mid-leave — so the
     /// transcript trim never releases a row a visible card still reads.
     pub(super) fn slot_session_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
-        self.slots.iter().map(|slot| slot.session_id)
+        self.slots
+            .iter()
+            .map(|slot| slot.session_id)
+            .chain(self.rush_session)
+    }
+
+    fn queue_rush_attention(&mut self, session_id: Uuid) {
+        if self.rushed.contains(&session_id)
+            && self.rush_session != Some(session_id)
+            && !self.rush_pending.contains(&session_id)
+        {
+            self.rush_pending.push_back(session_id);
+        }
+    }
+
+    fn take_rush_resume(&mut self, session_id: Uuid, generation: Uuid) -> bool {
+        if self.rush_resumes.get(&session_id) != Some(&generation) {
+            return false;
+        }
+        self.rush_resumes.remove(&session_id);
+        true
+    }
+
+    pub(super) fn rush_session_id(&self) -> Option<Uuid> {
+        self.rush_session
     }
 
     /// The card the docked composer follows up on; `None` starts a task.
@@ -412,6 +473,15 @@ impl Waku {
     }
 
     fn open_big_picture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_big_picture_mode(None, window, cx);
+    }
+
+    fn open_big_picture_mode(
+        &mut self,
+        rush_session: Option<Uuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.command_palette.is_open() {
             self.toggle_command_palette_action(&ToggleCommandPalette, window, cx);
         }
@@ -432,10 +502,20 @@ impl Waku {
         // takes the composer over — capture resolves against the selection
         // only while `open` is still false.
         self.capture_and_save_current_composer_draft(cx);
+        // Stop typing in the covered task before retargeting the shared input.
+        // The deferred focus below establishes the modal's final dispatch path.
+        if rush_session.is_some() {
+            window.focus(&self.big_picture.focus, cx);
+        }
         self.big_picture.open = true;
+        self.big_picture.rush_session = rush_session;
+        self.big_picture.rush_footers.borrow_mut().clear();
+        if let Some(session_id) = rush_session {
+            self.big_picture.card_kinds.borrow_mut().remove(&session_id);
+        }
         self.big_picture.slots.clear();
         self.big_picture.window_start = 0;
-        self.big_picture.target = None;
+        self.big_picture.target = rush_session;
         self.big_picture.hydrate_requested.clear();
         // Card scroll state survives opens so a card the reader scrolled
         // keeps its place — but only for sessions that still exist.
@@ -477,7 +557,9 @@ impl Waku {
         self.big_picture.backdrop = None;
         // Snapshot the frame before the scrim covers it — capture, repack,
         // and blur all run on the background executor.
-        if let Some(window_id) = crate::platform::window_capture_id(window) {
+        if rush_session.is_none()
+            && let Some(window_id) = crate::platform::window_capture_id(window)
+        {
             cx.spawn(async move |waku, cx| {
                 let backdrop = cx
                     .background_executor()
@@ -536,6 +618,7 @@ impl Waku {
             }
         }
         self.big_picture.open = false;
+        self.big_picture.rush_session = None;
         self.big_picture.slots.clear();
         self.big_picture.highlighted = None;
         self.big_picture.target = None;
@@ -546,6 +629,9 @@ impl Waku {
             composer.set_placeholder(tr!("input.do_anything"), cx);
         });
         self.restore_selected_composer_draft(cx);
+        if let Some(session_id) = self.attention_session_id() {
+            self.sync_user_input_answer(session_id, cx);
+        }
         if let Some(previous_focus) = self.big_picture.previous_focus.take() {
             window.focus(&previous_focus, cx);
         }
@@ -571,6 +657,7 @@ impl Waku {
             }
         }
         self.big_picture.open = false;
+        self.big_picture.rush_session = None;
         self.big_picture.slots.clear();
         self.big_picture.highlighted = None;
         self.big_picture.target = None;
@@ -582,6 +669,9 @@ impl Waku {
             composer.set_placeholder(tr!("input.do_anything"), cx);
         });
         self.restore_selected_composer_draft(cx);
+        if let Some(session_id) = self.attention_session_id() {
+            self.sync_user_input_answer(session_id, cx);
+        }
     }
 
     /// Keep the composer hint honest about where Enter sends: a follow-up on
@@ -689,6 +779,8 @@ impl Waku {
     }
 
     pub(super) fn set_big_picture_target(&mut self, target: Option<Uuid>, cx: &mut Context<Self>) {
+        // Task-sweep shortcuts must not retarget a rushed task's composer.
+        let target = self.big_picture.rush_session.or(target);
         if self.big_picture.target == target {
             return;
         }
@@ -810,7 +902,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.big_picture.target.is_some() {
+        if self.big_picture.rush_session.is_some() {
+            self.close_big_picture(window, cx);
+        } else if self.big_picture.target.is_some() {
             self.set_big_picture_target(None, cx);
         } else {
             self.close_big_picture(window, cx);
@@ -1019,7 +1113,9 @@ impl Waku {
         match self.big_picture.target {
             Some(session_id) => {
                 self.submit_composer_submission_to(session_id, submission, cx);
-                self.set_big_picture_target(None, cx);
+                if self.big_picture.rush_session.is_none() {
+                    self.set_big_picture_target(None, cx);
+                }
             }
             None => {
                 let project = self
@@ -1269,10 +1365,8 @@ impl Waku {
             .is_some_and(|card| card.scrollbar.engaged())
     }
 
-    /// A card's transcript: the lane's folded row kinds on a virtualized,
-    /// bottom-pinned list rendered at `CARD_TEXT_SCALE`. Footer and
-    /// changed-files rows are dropped — a card shows conversation and
-    /// activity, not actions.
+    /// A virtualized, bottom-pinned transcript. Overview cards use compact
+    /// rows; rush keeps normal text size, activity disclosures, and footers.
     fn render_big_picture_transcript(
         &self,
         session: &AgentSession,
@@ -1295,7 +1389,9 @@ impl Waku {
                 .clone()
         };
         let pending_turn = self.blocked_checkpoint_turn(session.id);
-        let fingerprint = transcript_rows_fingerprint(session, &self.expanded_turns, pending_turn);
+        let rushed = self.big_picture.rush_session == Some(session_id);
+        let fingerprint = transcript_rows_fingerprint(session, &self.expanded_turns, pending_turn)
+            ^ u64::from(rushed);
         let (kinds, refolded) = {
             let mut cache = self.big_picture.card_kinds.borrow_mut();
             let entry = cache
@@ -1307,7 +1403,7 @@ impl Waku {
                 // Cards have no footer or file summary, but a capture
                 // holding a queued prompt still marks the settled turn.
                 folded.retain(|kind| match kind {
-                    TranscriptRowKind::ResponseFooter(..) => false,
+                    TranscriptRowKind::ResponseFooter(..) => rushed,
                     TranscriptRowKind::ChangedFiles(turn_id) => pending_turn == Some(*turn_id),
                     _ => true,
                 });
@@ -1317,6 +1413,22 @@ impl Waku {
                     && !folded.contains(&TranscriptRowKind::ChangedFiles(turn_id))
                 {
                     folded.push(TranscriptRowKind::ChangedFiles(turn_id));
+                }
+                if rushed {
+                    let mut footers = self.big_picture.rush_footers.borrow_mut();
+                    footers.clear();
+                    for kind in &folded {
+                        if let TranscriptRowKind::ResponseFooter(_, index) = *kind
+                            && let Some(message) = session.messages.get(index)
+                            && let Some(content) =
+                                super::transcript::assistant_response_footer(session, index)
+                        {
+                            let time =
+                                super::transcript::assistant_response_footer_time(session, index)
+                                    .unwrap_or(message.created_at);
+                            footers.insert(message.id, (SharedString::from(content), time));
+                        }
+                    }
                 }
                 *entry = (fingerprint, Rc::new(folded));
                 (entry.1.clone(), true)
@@ -1361,7 +1473,7 @@ impl Waku {
             .size_full()
             .relative()
             .child(
-                rem_scale(CARD_TEXT_SCALE).size_full().child(
+                rem_scale(self.big_picture_text_scale()).size_full().child(
                     list(card.rows.clone(), move |index, window, cx| {
                         entity
                             .upgrade()
@@ -1417,8 +1529,8 @@ impl Waku {
     /// cannot reach them — they scale here instead.
     fn card_markdown_metrics(&self, metrics: MarkdownMetrics) -> MarkdownMetrics {
         metrics.scaled(
-            self.state.ui_font_size * CARD_TEXT_SCALE,
-            self.state.code_font_size * CARD_TEXT_SCALE,
+            self.state.ui_font_size * self.big_picture_text_scale(),
+            self.state.code_font_size * self.big_picture_text_scale(),
         )
     }
 
@@ -1578,10 +1690,28 @@ impl Waku {
                 })
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::TurnBlock(block_index) => {
-                self.render_card_activities_row(session, block_index, &theme)
+                if self.big_picture.rush_session == Some(session_id) {
+                    session.transcript_blocks.get(block_index).map(|block| {
+                        self.render_activities_row(session_id, &block.activities, block_index, &theme, window, cx)
+                    }).unwrap_or_else(|| div().into_any_element())
+                } else {
+                    self.render_card_activities_row(session, block_index, &theme)
+                }
             }
             TranscriptRowKind::TurnFold(turn_id) => {
-                self.render_card_turn_fold_row(session, turn_id, &theme)
+                let row = self.render_card_turn_fold_row(session, turn_id, &theme);
+                if self.big_picture.rush_session == Some(session_id) {
+                    let focus = self.transcript_control_focus(format!("rush-turn-{turn_id}"), cx);
+                    div().id(SharedString::from(format!("rush-turn-{turn_id}")))
+                        .track_focus(&focus).tab_index(0).cursor_default()
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .child(row).on_activation(cx, move |this, _, cx| {
+                            if !this.expanded_turns.remove(&turn_id) {
+                                this.expanded_turns.insert(turn_id);
+                            }
+                            cx.notify();
+                        }).into_any_element()
+                } else { row }
             }
             TranscriptRowKind::BossHistory(..)
             | TranscriptRowKind::BossHistoryBoundary(_)
@@ -1631,6 +1761,31 @@ impl Waku {
             {
                 self.render_card_checkpoint_pending_row(turn_id, &theme)
             }
+            TranscriptRowKind::ResponseFooter(turn_id, message_index)
+                if self.big_picture.rush_session == Some(session_id) =>
+            {
+                let Some(message) = session.messages.get(message_index) else {
+                    return div().into_any_element();
+                };
+                let Some((content, timestamp)) = self.big_picture.rush_footers.borrow().get(&message.id).cloned() else {
+                    return div().into_any_element();
+                };
+                super::components::render_message_footer(
+                    &theme,
+                    message,
+                    timestamp,
+                    content,
+                    self.copied_message_feedback.contains_key(&message.id),
+                    self.state.show_response_token_speed,
+                    SharedString::from(format!("rush-footer-{turn_id}")),
+                    true,
+                    false,
+                    None,
+                    None,
+                    None,
+                    cx.entity().downgrade(),
+                )
+            }
             // Folded out of `card_kinds` entirely; the fallback renders nothing.
             TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_) => {
                 div().into_any_element()
@@ -1644,7 +1799,7 @@ impl Waku {
             .py(px(4.0))
             .when(index == 0, |element| element.pt(px(6.0)))
             .when(starts_followup_turn, |element| {
-                element.pt(px(FOLLOWUP_TURN_TOP_GAP * CARD_TEXT_SCALE))
+                element.pt(px(FOLLOWUP_TURN_TOP_GAP * self.big_picture_text_scale()))
             })
             .when(index + 1 == row_count, |element| element.pb(px(6.0)))
             .child(inner)
@@ -1852,7 +2007,7 @@ impl Waku {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.big_picture.is_open() {
+        if !self.big_picture.is_open() || self.big_picture.rush_session.is_some() {
             return None;
         }
         let theme = Theme::current(cx);
@@ -1929,6 +2084,423 @@ impl Waku {
             .child(self.render_workspace_footer(cx))
     }
 
+    fn big_picture_text_scale(&self) -> f32 {
+        if self.big_picture.rush_session.is_some() {
+            1.0
+        } else {
+            CARD_TEXT_SCALE
+        }
+    }
+
+    /// Permission controls must answer the foreground modal, never the covered task.
+    pub(super) fn attention_session_id(&self) -> Option<Uuid> {
+        self.big_picture
+            .rush_session
+            .or(self.state.selected_session)
+    }
+
+    pub(super) fn attention_runtime(&self) -> Option<&SessionRuntime> {
+        self.runtimes.get(&self.attention_session_id()?)
+    }
+
+    pub(super) fn rush_activity_expanded(
+        &self,
+        session_id: Uuid,
+        block_index: usize,
+    ) -> Option<bool> {
+        self.big_picture
+            .rush_activities
+            .get(&(session_id, block_index))
+            .copied()
+    }
+
+    pub(super) fn set_rush_activity_expanded(
+        &mut self,
+        session_id: Uuid,
+        block_index: usize,
+        expanded: bool,
+    ) {
+        self.big_picture
+            .rush_activities
+            .insert((session_id, block_index), expanded);
+        self.remeasure_rush_block(session_id, block_index);
+    }
+
+    pub(super) fn remeasure_rush_block(&self, session_id: Uuid, block_index: usize) {
+        let kinds = self.big_picture.card_kinds.borrow();
+        let cards = self.big_picture.card_transcripts.borrow();
+        if let Some((_, kinds)) = kinds.get(&session_id)
+            && let Some(index) = kinds
+                .iter()
+                .position(|kind| *kind == TranscriptRowKind::TurnBlock(block_index))
+            && let Some(card) = cards.get(&session_id)
+        {
+            let top = card.rows.logical_scroll_top();
+            card.rows.remeasure_items(index..index + 1);
+            card.rows.scroll_to(top);
+        }
+    }
+
+    pub(super) fn pending_rush_resume(&self, session_id: Uuid) -> Option<Uuid> {
+        self.big_picture.rush_resumes.get(&session_id).copied()
+    }
+
+    pub(super) fn cancel_rush_resume(&mut self, session_id: Uuid) {
+        self.big_picture.rush_resumes.remove(&session_id);
+        if let Some(message_id) = self.big_picture.rush_queued_resumes.remove(&session_id)
+            && let Some(session) = self.state.session_mut(session_id)
+        {
+            session
+                .queued_messages
+                .retain(|message| message.id != message_id);
+        }
+    }
+
+    pub(super) fn resume_rushed_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let queued_continue = |state: &PersistedState| {
+            state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| {
+                    session
+                        .queued_messages
+                        .iter()
+                        .find(|message| composer::queued_message_is_continue(message))
+                })
+                .map(|message| message.id)
+        };
+        let before = queued_continue(&self.state);
+        self.continue_interrupted_session_to(session_id, cx);
+        // A stop must also cancel a rush continuation parked behind the old
+        // turn's drain, while preserving any continuation the user queued.
+        if let Some(message_id) = queued_continue(&self.state)
+            && Some(message_id) != before
+        {
+            self.big_picture
+                .rush_queued_resumes
+                .insert(session_id, message_id);
+        }
+    }
+
+    pub(super) fn take_rush_resume(&mut self, session_id: Uuid, generation: Uuid) -> bool {
+        self.big_picture.take_rush_resume(session_id, generation)
+    }
+
+    pub(super) fn queue_rush_attention(&mut self, session_id: Uuid) {
+        self.big_picture.queue_rush_attention(session_id);
+    }
+
+    pub(super) fn show_pending_rush(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.big_picture.is_open() {
+            return;
+        }
+        while let Some(session_id) = self.big_picture.rush_pending.pop_front() {
+            if self.big_picture.rushed.contains(&session_id)
+                && self
+                    .state
+                    .sessions
+                    .iter()
+                    .any(|session| session.id == session_id && session.archived_at.is_none())
+            {
+                self.open_big_picture_mode(Some(session_id), window, cx);
+                self.ensure_session_loaded(session_id, cx);
+                self.sync_user_input_answer(session_id, cx);
+                break;
+            }
+        }
+    }
+
+    fn toggle_rush(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if self.big_picture.rushed.remove(&session_id) {
+            self.big_picture.rush_pending.retain(|id| *id != session_id);
+        } else {
+            self.big_picture.rushed.insert(session_id);
+            let enable_fast = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .is_some_and(|session| {
+                    let Some(model) = self.model_metadata_for_session(session) else {
+                        return false;
+                    };
+                    model.service_tiers.iter().any(|tier| tier.id == "fast")
+                        && self
+                            .session_options(session)
+                            .service_tier
+                            .as_deref()
+                            .or(model.default_service_tier.as_deref())
+                            != Some("fast")
+                });
+            if enable_fast {
+                if let Some(session) = self.state.session_mut(session_id) {
+                    session.service_tier = Some("fast".to_owned());
+                }
+                let interrupt = self.state.sessions.iter().any(|session| {
+                    session.id == session_id
+                        && session.status == SessionStatus::Working
+                        && session.active_turn_id().is_some()
+                }) && self.runtimes.contains_key(&session_id)
+                    && !self.submission_preparations.contains(&session_id);
+                let resume = interrupt.then(Uuid::new_v4);
+                if let Some(generation) = resume {
+                    self.cancel_session_turn(session_id, cx);
+                    self.big_picture.rush_resumes.insert(session_id, generation);
+                }
+                self.apply_session_options_with_rush_resume(session_id, resume, cx);
+                self.save();
+            }
+            if self
+                .state
+                .sessions
+                .iter()
+                .any(|session| session.id == session_id && session.status == SessionStatus::Waiting)
+            {
+                self.queue_rush_attention(session_id);
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn render_rush_toggle(
+        &self,
+        session_id: Uuid,
+        modal: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let enabled = self.big_picture.rushed.contains(&session_id);
+        let focus = self.transcript_control_focus(format!("rush-{session_id}"), cx);
+        let indicator = if enabled {
+            let indicator = if modal {
+                self.big_picture.rush_modal_indicator.clone()
+            } else {
+                self.big_picture.rush_header_indicator.clone()
+            };
+            indicator
+                .cached(StyleRefinement::default().w(px(13.0)).h(px(13.0)))
+                .into_any_element()
+        } else {
+            icon("icons/zap.svg", 13.0, theme.text_secondary).into_any_element()
+        };
+        div()
+            .id(SharedString::from(format!("rush-{session_id}")))
+            .track_focus(&focus)
+            .tab_index(0)
+            .h(px(28.0))
+            .px(px(9.0))
+            .rounded(px(9.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .flex_none()
+            .cursor_default()
+            .bg(if enabled {
+                theme.accent.opacity(0.12)
+            } else {
+                theme.overlay
+            })
+            .text_size(sp(12.0))
+            .text_color(theme.text)
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .tooltip(Tooltip::text(tr!("rush.tooltip")))
+            .child(indicator)
+            .child(tr!(if enabled {
+                "rush.enabled"
+            } else {
+                "rush.toggle"
+            }))
+            .on_activation(cx, move |this, _, cx| this.toggle_rush(session_id, cx))
+            .into_any_element()
+    }
+
+    fn render_rush_modal(
+        &mut self,
+        session_id: Uuid,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return div().into_any_element();
+        };
+        let title = super::sidebar::localized_session_title(session);
+        let status = match session.status {
+            SessionStatus::Waiting => tr!("session.waiting_for_answer"),
+            SessionStatus::Idle => tr!("session.turn_completed"),
+            SessionStatus::Failed => tr!("session.stopped"),
+            _ => String::new(),
+        };
+        let body = if session.detail_loaded {
+            self.render_big_picture_transcript(session, cx)
+        } else {
+            div()
+                .p(px(24.0))
+                .child(tr!("sessions.loading"))
+                .into_any_element()
+        };
+        let permission = self.render_permission(cx);
+        let daemon_request = self.render_daemon_request(cx);
+        let close_focus = self.transcript_control_focus("rush-close", cx);
+        let card = div()
+            .id("rush-task-page")
+            .occlude()
+            .w_full()
+            .h_full()
+            .max_w(px(1100.0))
+            .rounded(px(16.0))
+            .border(hairline())
+            .border_color(theme.border_strong)
+            .bg(theme.surface)
+            .shadow_lg()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .flex_none()
+                    .h(px(48.0))
+                    .px(px(16.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_color(theme.text)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_secondary)
+                            .child(status),
+                    )
+                    .child(self.render_rush_toggle(session_id, true, cx))
+                    .child(
+                        div()
+                            .id("rush-close")
+                            .track_focus(&close_focus)
+                            .tab_index(0)
+                            .h(px(28.0))
+                            .px(px(10.0))
+                            .rounded(px(8.0))
+                            .cursor_default()
+                            .text_color(theme.text_secondary)
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .child(tr!("rush.dismiss"))
+                            .on_activation(cx, |this, window, cx| {
+                                this.close_big_picture(window, cx)
+                            }),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .child(md::render::frame_reset(
+                        self.big_picture.card_selection.clone(),
+                    ))
+                    .child(body),
+            )
+            .children(daemon_request)
+            .children(permission)
+            .child(self.render_big_picture_composer(window, cx));
+        deferred(
+            div()
+                .id("rush-modal")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .key_context("RushModal")
+                .on_action(cx.listener(|_, _: &ToggleSidebar, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ToggleRightPanel, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ToggleGitPanel, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ToggleTerminals, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &NewTerminal, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ToggleUsagePanel, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ToggleProjectsPage, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &SelectProjectsTab, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &NewProject, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &OpenSettings, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ToggleCommandPalette, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ToggleFileFinder, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &OpenResumePicker, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &RunProjectScript, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &FocusTerminal, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &OpenFind, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &OpenFindReplace, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &FindNext, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &FindPrevious, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &CloseFind, _, cx| cx.stop_propagation()))
+                .on_action(
+                    cx.listener(|_, _: &ToggleFindCaseSensitive, _, cx| cx.stop_propagation()),
+                )
+                .on_action(cx.listener(|_, _: &ToggleFindWholeWord, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ToggleFindRegex, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ReplaceAllMatches, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &CopySelection, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &AddToChat, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &NavigateBack, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &NavigateForward, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &SwitchTaskForward, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &SwitchTaskBackward, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &SelectFirstTask, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &SelectLastTask, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ConfirmTaskSwitch, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &CancelTaskSwitch, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &SelectSidebarSession, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &GoToPreviousTurn, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &GoToNextTurn, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ArchiveSession, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &PushBaseBranch, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &SyncBranch, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &CopyWorkingDirectory, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &NewSession, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &NewTaskIn, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ToggleAutomationsPage, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &ToggleInboxPage, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &SessionSweepBackward, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|_, _: &SessionSweepForward, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(Self::dismiss_big_picture_action))
+                .track_focus(&self.big_picture.focus)
+                .tab_group()
+                .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.key == "escape" {
+                        this.close_big_picture(window, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| this.close_big_picture(window, cx)),
+                )
+                .bg(gpui::black().opacity(0.55))
+                .p(px(36.0))
+                .pt(px(58.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(motion::fade_in(
+                    SharedString::from(format!("rush-open-{}", self.big_picture.open_seq)),
+                    card,
+                )),
+        )
+        .with_priority(1)
+        .into_any_element()
+    }
+
     pub(super) fn render_big_picture(
         &mut self,
         window: &mut Window,
@@ -1936,6 +2508,18 @@ impl Waku {
     ) -> Option<AnyElement> {
         if !self.big_picture.open {
             return None;
+        }
+        if let Some(session_id) = self.big_picture.rush_session {
+            if !self
+                .state
+                .sessions
+                .iter()
+                .any(|session| session.id == session_id && session.archived_at.is_none())
+            {
+                self.close_big_picture(window, cx);
+                return None;
+            }
+            return Some(self.render_rush_modal(session_id, window, cx));
         }
         let theme = Theme::current(cx);
         let viewport = window.viewport_size();
@@ -2185,6 +2769,51 @@ mod tests {
         let mut project = Project::from_path(std::path::PathBuf::from("/tmp/waku-big-picture"));
         project.starred = starred;
         project
+    }
+
+    #[gpui::test]
+    fn rush_attention_is_opt_in_ordered_and_does_not_reopen_dismissed_events(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let mut ui = cx.update(|cx| BigPictureUi::new(cx.focus_handle(), cx));
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        ui.queue_rush_attention(first);
+        assert!(ui.rush_pending.is_empty());
+        ui.rushed.extend([first, second]);
+        ui.queue_rush_attention(first);
+        ui.queue_rush_attention(second);
+        ui.queue_rush_attention(first);
+        assert_eq!(
+            ui.rush_pending.iter().copied().collect::<Vec<_>>(),
+            vec![first, second]
+        );
+        ui.rush_session = ui.rush_pending.pop_front();
+        ui.queue_rush_attention(first);
+        assert_eq!(
+            ui.rush_pending.iter().copied().collect::<Vec<_>>(),
+            vec![second]
+        );
+        ui.rush_session = None; // Dismissing does not requeue the old event.
+        assert_eq!(ui.rush_pending.pop_front(), Some(second));
+        assert!(ui.rush_pending.is_empty());
+        ui.queue_rush_attention(first); // A new event still raises the rushed task.
+        assert_eq!(ui.rush_pending.pop_front(), Some(first));
+    }
+
+    #[gpui::test]
+    fn a_stale_rush_resume_cannot_consume_a_newer_resume(cx: &mut gpui::TestAppContext) {
+        let mut ui = cx.update(|cx| BigPictureUi::new(cx.focus_handle(), cx));
+        let session = Uuid::new_v4();
+        let older = Uuid::new_v4();
+        let newer = Uuid::new_v4();
+        ui.rush_resumes.insert(session, older);
+        ui.rush_resumes.remove(&session); // A later Stop cancels the resume.
+        assert!(!ui.take_rush_resume(session, older));
+        ui.rush_resumes.insert(session, newer);
+        assert!(!ui.take_rush_resume(session, older));
+        assert!(ui.take_rush_resume(session, newer));
+        assert!(!ui.take_rush_resume(session, newer));
     }
 
     #[test]

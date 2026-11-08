@@ -1,0 +1,1 @@
+- Turn on “Rush this” in a task header to enable fast service where available, briefly interrupting and resuming active work. A repeating indicator marks rush mode; input requests and completed turns open a floating task modal. Click outside or press Escape to dismiss without responding.

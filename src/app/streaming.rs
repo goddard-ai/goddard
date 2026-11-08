@@ -792,6 +792,7 @@ impl Waku {
                     }
                     if new_request {
                         self.play_attention_sound(session_id);
+                        self.queue_rush_attention(session_id);
                     }
                     self.notify_waiting_input(session_id, tr!("session.waiting_for_approval"), cx);
                 } else if self.accepts_turn_output(session_id) {
@@ -824,6 +825,7 @@ impl Waku {
                         }
                         if new_request {
                             self.play_attention_sound(session_id);
+                            self.queue_rush_attention(session_id);
                         }
                         self.notify_waiting_input(
                             session_id,
@@ -838,7 +840,14 @@ impl Waku {
                 questions,
             } => {
                 if self.accepts_turn_output(session_id) && !questions.is_empty() {
+                    let new_request = runtime
+                        .pending_user_input
+                        .as_ref()
+                        .is_none_or(|pending| pending.request_id != request_id);
                     runtime.pending_user_input = Some(PendingUserInput::new(request_id, questions));
+                    if new_request {
+                        self.queue_rush_attention(session_id);
+                    }
                     // A fresh request starts its answer field empty —
                     // the selected session's shared input or an employee
                     // card's own, whichever this session edits through.
@@ -1397,6 +1406,9 @@ impl Waku {
                 }
                 // A turn settling off screen is an away-completion
                 // candidate; on screen it is simply read.
+                if allow_queue_drain {
+                    self.queue_rush_attention(session_id);
+                }
                 self.note_voice_briefing_completion(session_id, cx);
                 if let Some((title, body)) = task_notification
                     && inside_focus

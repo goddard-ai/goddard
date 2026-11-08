@@ -7689,3 +7689,13 @@ git_panel.land_result_unknown:
 
 git_panel.land_queue_more:
   en: '%{count} more queued'
+
+
+rush.toggle:
+  en: Rush this
+rush.enabled:
+  en: Rush mode enabled
+rush.dismiss:
+  en: Dismiss
+rush.tooltip:
+  en: Enable fast service where available, briefly interrupting active work to apply it, and bring this task forward when it needs you or finishes a turn. Rush lasts until switched off or this window closes. Turning it off keeps your service tier.

@@ -6553,7 +6553,7 @@ impl Waku {
             .detach();
             let project_switcher = project_switcher::ProjectSwitcherUi::new(project_switcher_focus);
             let keyboard_options = keyboard_options::KeyboardOptionsUi::new(cx.focus_handle());
-            let big_picture = big_picture::BigPictureUi::new(cx.focus_handle());
+            let big_picture = big_picture::BigPictureUi::new(cx.focus_handle(), cx);
 
             cx.on_focus(&updater_button_focus, window, |this: &mut Self, _, cx| {
                 this.set_updater_button_focused(true, cx);

@@ -5671,6 +5671,16 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The modal can appear over any page. Escape dismisses even before
+        // its deferred focus lands; an explicit stop still targets its task.
+        if self.big_picture.rush_session_id().is_some() {
+            if action.immediate {
+                self.cancel_turn(cx);
+            } else {
+                self.close_big_picture(window, cx);
+            }
+            return;
+        }
         // The switcher focus lands after its deferred overlay is painted.
         // Route the root Escape action here too so an immediate press always
         // cancels the provisional selection instead of reaching the session
@@ -7538,6 +7548,7 @@ impl Waku {
     }
 
     pub(super) fn cancel_session_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        self.cancel_rush_resume(session_id);
         self.escape_stop_confirmation.clear();
         if !self.runtimes.contains_key(&session_id)
             && self.state.sessions.iter().any(|session| {
@@ -7783,7 +7794,9 @@ impl Waku {
     /// shared composer-adjacent input for the selected session, the card's
     /// own entity for a supervisor-surfaced employee request.
     fn user_input_answer_for(&self, session_id: Uuid) -> Option<Entity<TextInput>> {
-        if self.state.selected_session == Some(session_id) {
+        if self.state.selected_session == Some(session_id)
+            || self.big_picture.rush_session_id() == Some(session_id)
+        {
             Some(self.user_input_answer.clone())
         } else {
             self.employee_input_answers.get(&session_id).cloned()

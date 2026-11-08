@@ -325,7 +325,12 @@ impl Waku {
         let annotation_ref_tooltip = self.render_annotation_ref_tooltip(cx);
         let commit_popover = self.render_transcript_commit_popover(cx);
         let boss_lifecycle = self.render_boss_lifecycle_status(cx);
-        let daemon_request = self.render_daemon_request(cx);
+        let daemon_request = self
+            .big_picture
+            .rush_session_id()
+            .is_none()
+            .then(|| self.render_daemon_request(cx))
+            .flatten();
         let employee_requests = self.render_employee_requests(window, cx);
         let transcript_rows = self.active_transcript_rows().clone();
         // A scrollbar drag owns the position for as long as it lasts, and the
@@ -596,10 +601,10 @@ impl Waku {
     /// row — scrolling and turn folds can never hide it — and it stays until
     /// the user answers or the daemon settles the request, whichever happens
     /// first.
-    fn render_daemon_request(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session_id = self.state.selected_session?;
+    pub(super) fn render_daemon_request(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session_id = self.attention_session_id()?;
         let permission = self
-            .selected_runtime()?
+            .attention_runtime()?
             .pending_daemon_request
             .as_ref()?
             .clone();
@@ -1689,6 +1694,11 @@ impl Waku {
         current: bool,
         cx: &mut Context<Self>,
     ) {
+        if self.big_picture.rush_session_id() == Some(session_id) {
+            self.set_rush_activity_expanded(session_id, block_index, !current);
+            cx.notify();
+            return;
+        }
         if self.boss_history_session(session_id).is_some() {
             self.pin_transcript_for_disclosure();
             for history in self.boss_ui.chat_history.values_mut() {
@@ -1762,6 +1772,16 @@ impl Waku {
         let Some(block_index) = block_index else {
             return;
         };
+        if self.big_picture.rush_session_id() == Some(session_id) {
+            self.expanded_activity_items.insert(id, !current);
+            if current {
+                self.activity_diffs.borrow_mut().remove(&id);
+                self.activity_diff_viewports.borrow_mut().remove(&id);
+            }
+            self.remeasure_rush_block(session_id, block_index);
+            cx.notify();
+            return;
+        }
         if self.boss_history_session(session_id).is_some() {
             self.pin_transcript_for_disclosure();
             self.expanded_activity_items.insert(id, !current);
@@ -4586,7 +4606,9 @@ impl Waku {
                     )
                 })
         });
-        let expanded = if let Some(entry) = self.boss_history_session(session_id) {
+        let expanded = if self.big_picture.rush_session_id() == Some(session_id) {
+            self.rush_activity_expanded(session_id, block_index)
+        } else if let Some(entry) = self.boss_history_session(session_id) {
             entry.expanded_blocks.get(&block_index).copied()
         } else if self.state.selected_session == Some(session_id) {
             self.activities_expanded.get(&block_index).copied()

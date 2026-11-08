@@ -8221,6 +8221,7 @@ impl Waku {
                         && preview.phase != ComputerUsePhase::AwaitingApproval
                 })
             })
+            || self.big_picture.is_open()
             || self.command_palette.is_open()
             || self.task_switcher.is_open()
             || self.project_switcher.is_open()
