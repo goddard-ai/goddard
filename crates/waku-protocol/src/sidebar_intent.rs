@@ -20,6 +20,7 @@ impl SidebarEdit {
                     crate::task_metadata::TaskMetadataField::Title => "title",
                     crate::task_metadata::TaskMetadataField::Placement => "placement",
                     crate::task_metadata::TaskMetadataField::Archive => "archive",
+                    crate::task_metadata::TaskMetadataField::Workspace => "workspace",
                 };
                 format!("task:{id}:{field}")
             }
