@@ -21268,6 +21268,83 @@ fn chain_local_artifact_retry_binds_and_dispatches_at_current_source() {
     }
 }
 
+/// A human's direct prompt to an expired chain-bound employee binds no
+/// recorded retry source — resume means continue in the same checkout, so
+/// dispatch verifies the shared workspace and resolves the live HEAD
+/// rather than demanding a pin the direct-prompt path never records.
+#[test]
+fn chain_local_direct_prompt_resume_dispatches_at_live_head() {
+    use waku_protocol::chains::ChainBaseSource;
+    let root = std::env::temp_dir().join(format!("waku-chain-resume-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    let project = backend.task_state.lock().projects[0].clone();
+    let outcome = backend
+        .boss
+        .create_outcome(Some(boss), "Direct resume", "Evidence verified")
+        .unwrap();
+    let mut definition = chain_test_definition(
+        project.id,
+        outcome.id,
+        backend.boss.document().personas[0].id,
+        1,
+        head.clone(),
+    );
+    definition.steps[0].workspace = waku_protocol::AgentWorkspace::Local;
+    definition.steps[0].base_revision = Some(ChainBaseSource::Bare("main".into()));
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Chain {
+                action: ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    backend.run_summon_scheduler();
+    let first = backend.boss.document().chains[0].steps[0].attempts[0]
+        .employee_id
+        .unwrap();
+    backend
+        .finish_boss_employee(
+            first,
+            false,
+            waku_protocol::boss::EmployeeSettle::ProcessExited { mid_turn: true },
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.status, ChainStatus::Paused);
+    // The human's direct prompt re-admits the employee — the fresh attempt
+    // binds the session but records no source revision.
+    backend
+        .handle_boss_operation(
+            None,
+            BossOperation::Control {
+                session_id: first,
+                action: waku_protocol::boss::EmployeeControl::Prompt {
+                    prompt: "continue".into(),
+                    delivery: None,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.steps[0].attempts.len(), 2);
+    assert!(chain.steps[0].attempts[1].starting_revision.is_none());
+    backend.run_summon_scheduler();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.steps[0].attempts[1].status, StepStatus::Working);
+    assert_eq!(
+        chain.steps[0].attempts[1].starting_revision.as_deref(),
+        Some(head.as_str())
+    );
+    assert!(!backend.boss.employee(first).unwrap().expired());
+    remove_tree(root);
+}
+
 #[test]
 fn chain_terminal_failure_pauses_once_and_retry_continues() {
     let root = std::env::temp_dir().join(format!("waku-chain-fail-{}", Uuid::new_v4()));

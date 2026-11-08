@@ -1221,12 +1221,12 @@ impl WakuBackend {
     }
 
     /// Local artifact retries retain the shared checkout, including dirty work.
-    /// Releases fence prior attempts; HEAD must still match the captured source.
-    fn verify_local_retry_source(
+    /// Releases fence prior attempts; every recorded workspace must be the
+    /// project checkout itself, and no merge or rebase may be in flight.
+    fn verify_local_retry_workspace(
         &self,
         step: &ChainStep,
         prior: &[ChainAttempt],
-        revision: &str,
     ) -> anyhow::Result<PathBuf> {
         let project = self
             .task_state
@@ -1250,6 +1250,18 @@ impl WakuBackend {
             }
         }
         crate::agent_merge::no_operation(&workspace)?;
+        Ok(workspace)
+    }
+
+    /// The workspace checks above, plus the captured source must still equal
+    /// the checkout's HEAD.
+    fn verify_local_retry_source(
+        &self,
+        step: &ChainStep,
+        prior: &[ChainAttempt],
+        revision: &str,
+    ) -> anyhow::Result<PathBuf> {
+        let workspace = self.verify_local_retry_workspace(step, prior)?;
         ensure!(
             git_revision(&workspace, "HEAD")? == revision,
             "local retry source must equal current project HEAD; retry explicitly at the current source"
@@ -1258,7 +1270,11 @@ impl WakuBackend {
     }
 
     /// A queued local retry must not launch at a different source after waiting
-    /// for capacity or recovering from restart.
+    /// for capacity or recovering from restart. An explicit retry pins the
+    /// source it verified at; a human's direct resume binds no pin — resume
+    /// means continue in the same checkout, so the dispatch check resolves
+    /// the live HEAD instead of demanding a recorded one. The launch's
+    /// Working observation stamps that HEAD onto the attempt.
     pub(super) fn verify_local_retry_dispatch(&self, employee_id: Uuid) -> anyhow::Result<()> {
         let document = self.boss.document();
         for chain in &document.chains {
@@ -1273,14 +1289,11 @@ impl WakuBackend {
                 continue;
             }
             if attempt.employee_id == Some(employee_id) {
-                self.verify_local_retry_source(
-                    step,
-                    prior,
-                    attempt
-                        .starting_revision
-                        .as_deref()
-                        .ok_or_else(|| anyhow!("local retry source is missing"))?,
-                )?;
+                if let Some(revision) = attempt.starting_revision.as_deref() {
+                    self.verify_local_retry_source(step, prior, revision)?;
+                } else {
+                    git_revision(&self.verify_local_retry_workspace(step, prior)?, "HEAD")?;
+                }
             }
         }
         Ok(())
