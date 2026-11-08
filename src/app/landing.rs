@@ -7,7 +7,6 @@ use waku_client::landing::{
 use waku_client::workspace::{WorkspaceOperation, WorkspaceResult};
 
 pub(super) struct NativeLanding {
-    pub task: Option<Uuid>,
     pub initiated_here: bool,
     pub cancel_focus: FocusHandle,
     pub operation: git_panel::GitPanelOperation,
@@ -16,12 +15,46 @@ pub(super) struct NativeLanding {
 }
 
 impl Waku {
+    pub(super) fn start_landing_transcript(&mut self, session_id: Uuid, id: Uuid, content: String) {
+        let Some(session) = self.state.session_mut(session_id) else {
+            return;
+        };
+        let mut message = Message::new(MessageRole::System, content);
+        message.id = id;
+        session.messages.push(message);
+        self.state.mark_session_dirty(session_id);
+        self.save();
+    }
+
+    pub(super) fn update_landing_transcript(
+        &mut self,
+        session_id: Uuid,
+        id: Uuid,
+        content: String,
+        notice: Option<TranscriptNotice>,
+    ) {
+        let Some(message) = self
+            .state
+            .session_mut(session_id)
+            .and_then(|session| session.messages.iter_mut().find(|message| message.id == id))
+        else {
+            return;
+        };
+        if message.content == content && message.notice.is_none() && notice.is_none() {
+            return;
+        }
+        message.content = content;
+        message.notice = notice;
+        self.state.mark_session_dirty(session_id);
+        self.save();
+    }
+
     pub(super) fn start_queued_landing(
         &mut self,
         workspace: PathBuf,
         base: Option<String>,
         strategy: waku_client::git::PullStrategy,
-        progress_toast: bool,
+        transcript_progress: bool,
         cx: &mut Context<Self>,
     ) {
         if self.git_panel_operation.is_some()
@@ -33,20 +66,24 @@ impl Waku {
             return;
         }
         let id = Uuid::new_v4();
-        let toast_id = progress_toast.then(|| {
-            self.show_progress_toast(tr!("git_panel.land_requesting"), PROGRESS_TOAST_DURATION)
-        });
+        let transcript_session = transcript_progress
+            .then(|| self.composer_session_id())
+            .flatten();
+        if let Some(session) = transcript_session {
+            self.start_landing_transcript(session, id, tr!("git_panel.land_requesting"));
+        }
         let operation = git_panel::GitPanelOperation {
             id,
             workspace: workspace.clone(),
             pending: git_panel::GitPanelPending::Landing,
-            toast_id,
+            toast_id: None,
+            transcript_session,
             sync_branch: false,
             sync_branch_name: None,
             base: base.clone(),
             archive_follow_up: None,
         };
-        let task = if progress_toast {
+        let task = if transcript_progress {
             self.composer_session_id()
         } else {
             self.journal_session_for_workspace(&workspace)
@@ -55,7 +92,6 @@ impl Waku {
             id,
             NativeLanding {
                 initiated_here: true,
-                task,
                 cancel_focus: cx.focus_handle(),
                 operation,
                 job: None,
@@ -166,7 +202,7 @@ impl Waku {
         if let Some(entry) = self.landing_operations.get_mut(&id) {
             entry.unavailable = true;
         }
-        self.update_landing_toast(id);
+        self.update_landing_status(id);
         cx.notify();
     }
     fn apply_landing_job(
@@ -193,36 +229,52 @@ impl Waku {
         if job.state != LandingState::Queued {
             self.landing_cancellations.remove(&id);
         }
-        self.update_landing_toast(id);
+        if job.state != LandingState::Finished {
+            self.update_landing_status(id);
+        }
         match job.state {
             LandingState::Canceled => {
                 if let Some(entry) = self.landing_operations.remove(&id) {
                     self.clear_landing_toast_action(entry.operation.toast_id);
-                    self.settle_operation_toast(
-                        entry.operation.toast_id,
-                        tr!("git_panel.land_canceled"),
-                        ToastTone::Notice,
-                    );
+                    if entry.operation.transcript_session.is_none() {
+                        self.settle_operation_toast(
+                            entry.operation.toast_id,
+                            tr!("git_panel.land_canceled"),
+                            ToastTone::Notice,
+                        );
+                    }
                 }
                 cx.notify();
                 true
             }
             LandingState::Finished => {
+                let result = match job.result.clone() {
+                    Some(LandingResult::Land { outcome }) => Ok(WorkspaceResult::Land { outcome }),
+                    Some(LandingResult::Failed { message }) => Err(anyhow::anyhow!(message)),
+                    _ => Err(anyhow::anyhow!("unexpected landing result")),
+                };
                 // Observers and duplicate callers may display the outcome,
-                // but only the originating operation writes transcript notices
-                // and action history. Reattachment must not duplicate them.
+                // but only the originating operation appends workspace-wide
+                // notices and action history. Each caller can settle its own
+                // existing receipt without duplicating those side effects.
                 let originator = self
                     .landing_operations
                     .get(&id)
                     .is_some_and(|entry| entry.initiated_here && job.id == id);
                 if !originator {
+                    if let Some(session) = self
+                        .landing_operations
+                        .get(&id)
+                        .and_then(|entry| entry.operation.transcript_session)
+                    {
+                        let (content, notice) = landing_transcript_outcome(&result);
+                        self.update_landing_transcript(session, id, content, notice);
+                    }
                     if let Some(entry) = self.landing_operations.remove(&id) {
                         self.clear_landing_toast_action(entry.operation.toast_id);
-                        let (message, tone) = match &job.result {
-                            Some(LandingResult::Failed { message }) => {
-                                (message.clone(), ToastTone::Failure)
-                            }
-                            Some(LandingResult::Land {
+                        let (message, tone) = match &result {
+                            Err(error) => (error.to_string(), ToastTone::Failure),
+                            Ok(WorkspaceResult::Land {
                                 outcome: waku_client::git::LandOutcome::Conflict { base, .. },
                             }) => (
                                 tr!("git_panel.land_conflict_description", base = base),
@@ -246,11 +298,6 @@ impl Waku {
                         .get(&id)
                         .and_then(|entry| entry.operation.toast_id),
                 );
-                let result = match job.result {
-                    Some(LandingResult::Land { outcome }) => Ok(WorkspaceResult::Land { outcome }),
-                    Some(LandingResult::Failed { message }) => Err(anyhow::anyhow!(message)),
-                    _ => Err(anyhow::anyhow!("unexpected landing result")),
-                };
                 self.finish_git_panel_op(id, result, cx);
                 true
             }
@@ -269,11 +316,18 @@ impl Waku {
             toast.action = None;
         }
     }
-    fn update_landing_toast(&mut self, id: Uuid) {
+    fn update_landing_status(&mut self, id: Uuid) {
+        let label = self.landing_label(id);
+        if let Some(session) = self
+            .landing_operations
+            .get(&id)
+            .and_then(|entry| entry.operation.transcript_session)
+        {
+            self.update_landing_transcript(session, id, label.clone(), None);
+        }
         let Some(entry) = self.landing_operations.get(&id) else {
             return;
         };
-        let label = self.landing_label(id);
         let can_cancel = !entry.unavailable
             && !self.landing_cancellations.contains(&id)
             && entry
@@ -342,7 +396,7 @@ impl Waku {
             return;
         };
         self.landing_cancellations.insert(id);
-        self.update_landing_toast(id);
+        self.update_landing_status(id);
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -457,11 +511,18 @@ impl Waku {
                         })
                     {
                         let id = job.id;
+                        let transcript_session = job.task_id.filter(|task| {
+                            this.state.sessions.iter().any(|session| {
+                                session.id == *task
+                                    && session.messages.iter().any(|message| message.id == id)
+                            })
+                        });
                         let operation = git_panel::GitPanelOperation {
                             id,
                             workspace: workspace.clone(),
                             pending: git_panel::GitPanelPending::Landing,
                             toast_id: None,
+                            transcript_session,
                             sync_branch: false,
                             sync_branch_name: None,
                             base: job.base.clone(),
@@ -471,7 +532,6 @@ impl Waku {
                             id,
                             NativeLanding {
                                 initiated_here: false,
-                                task: job.task_id,
                                 cancel_focus: cx.focus_handle(),
                                 operation,
                                 job: Some(job),
@@ -568,18 +628,10 @@ impl Waku {
         cx.notify();
     }
 
-    pub(super) fn render_current_landing_status(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(task) = self.composer_session_id() else {
+    pub(super) fn render_landing_status(&self, id: Uuid, cx: &mut Context<Self>) -> AnyElement {
+        let Some(entry) = self.landing_operations.get(&id) else {
             return div().into_any_element();
         };
-        let Some((id, entry)) = self
-            .landing_operations
-            .iter()
-            .find(|(_, entry)| entry.task == Some(task))
-        else {
-            return div().into_any_element();
-        };
-        let id = *id;
         let theme = Theme::current(cx);
         let queued = !entry.unavailable
             && !self.landing_cancellations.contains(&id)
@@ -603,7 +655,9 @@ impl Waku {
         if queued {
             row = row.child(
                 div()
-                    .id("composer-cancel-landing")
+                    .id(SharedString::from(format!(
+                        "transcript-cancel-landing-{id}"
+                    )))
                     .track_focus(&entry.cancel_focus)
                     .tab_index(0)
                     .px(px(6.0))
@@ -733,6 +787,46 @@ impl Waku {
         section.into_any_element()
     }
 }
+/// The final receipt replaces progress before a conflict prompt can be sent.
+/// It remains a normal persisted system message, including the stopped files.
+pub(super) fn landing_transcript_outcome(
+    result: &anyhow::Result<WorkspaceResult>,
+) -> (String, Option<TranscriptNotice>) {
+    use waku_client::git::LandOutcome;
+    match result {
+        Ok(WorkspaceResult::Land {
+            outcome:
+                LandOutcome::Landed {
+                    base,
+                    commits,
+                    ahead,
+                },
+        }) => (
+            tr!("transcript.landed", base = base),
+            Some(TranscriptNotice::Landed {
+                base: base.clone(),
+                commits: commits.clone(),
+                ahead: *ahead,
+            }),
+        ),
+        Ok(WorkspaceResult::Land {
+            outcome: LandOutcome::AlreadyLanded { base },
+        }) => (tr!("git_panel.already_landed", base = base), None),
+        Ok(WorkspaceResult::Land {
+            outcome: LandOutcome::Conflict { base, files, .. },
+        }) => {
+            let mut content = tr!("git_panel.land_conflict_description", base = base);
+            for file in files {
+                content.push('\n');
+                content.push_str(file);
+            }
+            (content, None)
+        }
+        Err(error) => (error.to_string(), None),
+        _ => (tr!("git_panel.land_result_unknown"), None),
+    }
+}
+
 fn landing_job_label(job: &LandingJob) -> String {
     match job.state {
         LandingState::Queued if job.position == Some(1) => tr!("git_panel.land_queued_next"),
@@ -750,5 +844,42 @@ fn landing_job_label(job: &LandingJob) -> String {
             "git_panel.landed",
             base = job.base.clone().unwrap_or_default()
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use waku_client::git::{LandOutcome, SyncInProgress};
+
+    #[test]
+    fn landing_conflict_receipt_retains_evidence_after_reload() {
+        for in_progress in [SyncInProgress::Rebase, SyncInProgress::Merge] {
+            let files = vec!["src/first.rs".to_owned(), "src/second file.rs".to_owned()];
+            let (content, notice) = landing_transcript_outcome(&Ok(WorkspaceResult::Land {
+                outcome: LandOutcome::Conflict {
+                    base: "release/next".to_owned(),
+                    in_progress,
+                    files: files.clone(),
+                },
+            }));
+            let mut receipt = Message::new(MessageRole::System, content);
+            receipt.notice = notice;
+            let restored: Message =
+                serde_json::from_str(&serde_json::to_string(&receipt).unwrap()).unwrap();
+
+            assert!(restored.content.contains("release/next"));
+            for file in &files {
+                assert!(restored.content.lines().any(|line| line == file));
+            }
+            assert!(!matches!(
+                restored.notice,
+                Some(TranscriptNotice::Landed { .. })
+            ));
+            assert!(
+                restored.turn_id.is_none(),
+                "conflict evidence survives rewinds"
+            );
+        }
     }
 }

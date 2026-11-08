@@ -157,6 +157,8 @@ pub(super) enum SyncConflict {
         workspace: PathBuf,
         /// Working-tree paths still carrying conflict markers.
         files: Vec<String>,
+        /// The originating `/land` receipt: (session, message/operation).
+        transcript: Option<(Uuid, Uuid)>,
     },
     /// A "Change base branch" rebase that stopped midway. `base` is the new
     /// base being moved onto — it becomes the session's recorded base only
@@ -241,6 +243,8 @@ pub(super) struct GitPanelOperation {
     /// The spinner toast raised on the operation's behalf. `finish_git_panel_op`
     /// settles it to the outcome, or retires it when a modal takes over.
     pub toast_id: Option<u64>,
+    /// Composer `/land` updates the message with this operation's ID in place.
+    pub transcript_session: Option<Uuid>,
     /// This operation came from the "Sync branch…" command — its pull chains
     /// a push, and pull conflicts resolve in a fresh chat on the checkout.
     pub sync_branch: bool,
@@ -1286,6 +1290,7 @@ impl Waku {
             workspace: workspace.clone(),
             pending,
             toast_id: None,
+            transcript_session: None,
             sync_branch: false,
             sync_branch_name: None,
             base: None,
@@ -1532,8 +1537,8 @@ impl Waku {
     }
 
     /// `/land` in the composer: land the session the composer answers to —
-    /// the big-picture target while that overlay is open. With no button to
-    /// show the pending label, the run reports through a spinner toast.
+    /// the big-picture target while that overlay is open. One transcript row
+    /// carries progress and remains as the outcome or conflict receipt.
     pub(super) fn land_composer_session(&mut self, strategy: PullStrategy, cx: &mut Context<Self>) {
         let Some(session) = self.composer_session() else {
             self.show_toast(tr!("git_panel.no_task"));
@@ -1577,23 +1582,21 @@ impl Waku {
     /// fast-forward the base to the result. A conflict raises the same modal
     /// a conflicted pull does.
     ///
-    /// `progress_toast` raises a spinner toast that resolves to the outcome —
-    /// how `/land` reports from the composer, where no button shows the
-    /// pending label. The panel's land button renders it inline and passes
-    /// `false`.
+    /// `transcript_progress` keeps composer-started progress and its outcome
+    /// in one transcript row. The panel's button uses its own pending label.
     fn start_git_panel_land(
         &mut self,
         workspace: PathBuf,
         base: Option<String>,
         strategy: PullStrategy,
-        progress_toast: bool,
+        transcript_progress: bool,
         cx: &mut Context<Self>,
     ) {
         if self
             .workspace_client_for_path(&workspace)
             .is_some_and(|client| client.landing_queue_available())
         {
-            self.start_queued_landing(workspace, base, strategy, progress_toast, cx);
+            self.start_queued_landing(workspace, base, strategy, transcript_progress, cx);
             return;
         }
         let Some((op_id, workspace)) =
@@ -1601,6 +1604,16 @@ impl Waku {
         else {
             return;
         };
+        if transcript_progress && let Some(session) = self.composer_session_id() {
+            let label = base
+                .as_ref()
+                .map(|base| tr!("git_panel.landing_onto", base = base))
+                .unwrap_or_else(|| tr!("git_panel.landing"));
+            self.start_landing_transcript(session, op_id, label);
+            if let Some(operation) = self.git_panel_operation.as_mut() {
+                operation.transcript_session = Some(session);
+            }
+        }
         let Some(client) = self.workspace_client_for_path(&workspace) else {
             self.finish_git_panel_op(
                 op_id,
@@ -1609,17 +1622,6 @@ impl Waku {
             );
             return;
         };
-        if progress_toast {
-            let message = match &base {
-                Some(base) => tr!("git_panel.landing_onto", base = base.clone()),
-                None => tr!("git_panel.landing"),
-            };
-            let toast_id = self.show_progress_toast(message, PROGRESS_TOAST_DURATION);
-            if let Some(operation) = self.git_panel_operation.as_mut() {
-                operation.toast_id = Some(toast_id);
-            }
-            cx.notify();
-        }
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1729,13 +1731,36 @@ impl Waku {
         // A picker-origin conflict that stops the merge retry too still
         // resolves in a fresh chat on the checkout.
         let sync_branch = matches!(&conflict, SyncConflict::Pull { new_chat: true, .. });
-        let Some((op_id, workspace)) =
+        let Some((mut op_id, workspace)) =
             self.begin_workspace_op(GitPanelPending::AbortingSync, conflict.workspace(), cx)
         else {
             return;
         };
         if let Some(operation) = self.git_panel_operation.as_mut() {
             operation.sync_branch = sync_branch;
+            if let SyncConflict::Land {
+                transcript: Some((session, message)),
+                ..
+            } = &conflict
+            {
+                operation.id = *message;
+                operation.transcript_session = Some(*session);
+                operation.pending = GitPanelPending::Landing;
+                op_id = *message;
+            }
+        }
+        if let SyncConflict::Land {
+            transcript: Some((session, message)),
+            base,
+            ..
+        } = &conflict
+        {
+            self.update_landing_transcript(
+                *session,
+                *message,
+                tr!("git_panel.landing_onto", base = base),
+                None,
+            );
         }
         let Some(client) = self.workspace_client_for_path(&workspace) else {
             self.finish_git_panel_op(
@@ -1895,6 +1920,7 @@ impl Waku {
     fn send_land_conflict_to_chat(
         &mut self,
         conflict: &SyncConflict,
+        show_toast: bool,
         cx: &mut Context<Self>,
     ) -> bool {
         let (base, workspace, toast) = match conflict {
@@ -1925,7 +1951,9 @@ impl Waku {
         if matches!(conflict, SyncConflict::Rebase { .. }) {
             self.set_workspace_base_branch(workspace, base, cx);
         }
-        self.show_toast(toast);
+        if show_toast {
+            self.show_toast(toast);
+        }
         true
     }
 
@@ -2031,6 +2059,10 @@ impl Waku {
         else {
             return;
         };
+        if let Some(session) = op.transcript_session {
+            let (content, notice) = landing::landing_transcript_outcome(&result);
+            self.update_landing_transcript(session, op.id, content, notice);
+        }
         if let Some(follow_up) = op.archive_follow_up
             && !matches!(
                 &result,
@@ -2140,13 +2172,18 @@ impl Waku {
                         base,
                         workspace: op.workspace.clone(),
                         files,
+                        transcript: op.transcript_session.map(|session| (session, op.id)),
                     };
                     // The land-specific setting wins first — it hands the
                     // conflict to the session that owns the worktree. The
                     // broader sync setting — or no session owning the path —
                     // falls back to a fresh chat on the checkout.
                     let sent_to_owner = self.state.auto_resolve_land_conflicts
-                        && self.send_land_conflict_to_chat(&conflict, cx);
+                        && self.send_land_conflict_to_chat(
+                            &conflict,
+                            op.transcript_session.is_none(),
+                            cx,
+                        );
                     if !sent_to_owner {
                         if self.state.auto_resolve_in_chat {
                             // Same trade as a pull conflict: the modal gives
@@ -2164,12 +2201,20 @@ impl Waku {
                     commits,
                     ahead,
                 } => {
-                    self.settle_operation_toast(
-                        op.toast_id,
-                        tr!("git_panel.landed", base = base),
-                        ToastTone::Success,
+                    if op.transcript_session.is_none() {
+                        self.settle_operation_toast(
+                            op.toast_id,
+                            tr!("git_panel.landed", base = base),
+                            ToastTone::Success,
+                        );
+                    }
+                    self.record_landed_transcript_notice(
+                        &op.workspace,
+                        &base,
+                        commits,
+                        ahead,
+                        op.transcript_session,
                     );
-                    self.record_landed_transcript_notice(&op.workspace, &base, commits, ahead);
                     self.mark_workspace_sessions_landed(&op.workspace, cx);
                     if let Some(session_id) = self.journal_session_for_workspace(&op.workspace) {
                         self.set_action_follow_up(session_id, "push-base", Some(base.clone()));
@@ -2183,11 +2228,13 @@ impl Waku {
                     self.refresh_git_panel_commits(cx);
                 }
                 LandOutcome::AlreadyLanded { base } => {
-                    self.settle_operation_toast(
-                        op.toast_id,
-                        tr!("git_panel.already_landed", base = base),
-                        ToastTone::Notice,
-                    );
+                    if op.transcript_session.is_none() {
+                        self.settle_operation_toast(
+                            op.toast_id,
+                            tr!("git_panel.already_landed", base = base),
+                            ToastTone::Notice,
+                        );
+                    }
                     self.mark_workspace_sessions_landed(&op.workspace, cx);
                     if self.state.auto_commit_reminder_on_land {
                         self.remind_land_session_to_commit(&op.workspace, cx);
@@ -2211,7 +2258,11 @@ impl Waku {
                         files,
                     };
                     let sent_to_owner = self.state.auto_resolve_land_conflicts
-                        && self.send_land_conflict_to_chat(&conflict, cx);
+                        && self.send_land_conflict_to_chat(
+                            &conflict,
+                            op.transcript_session.is_none(),
+                            cx,
+                        );
                     if !sent_to_owner {
                         if self.state.auto_resolve_in_chat {
                             self.auto_resolve_sync_conflict(conflict, cx);
@@ -2319,15 +2370,15 @@ impl Waku {
                         cx,
                     );
                 } else {
-                    // A composer-started land can fail with the panel closed;
-                    // its errors need a surface the panel doesn't provide. When
-                    // the panel shows the failed workspace it carries the error
-                    // inline — a run that raised a toast still resolves it, and
-                    // the picker's runs always toast since its card is gone.
+                    // Transcript-owned lands already carry their error. Other
+                    // operations still need a toast when the panel is closed,
+                    // or when they originally reported progress through one.
                     if same_panel && let Some(panel) = self.git_panel.as_mut() {
                         panel.error = Some(error.to_string());
                     }
-                    if op.toast_id.is_some() || !same_panel || op.sync_branch {
+                    if op.transcript_session.is_none()
+                        && (op.toast_id.is_some() || !same_panel || op.sync_branch)
+                    {
                         self.settle_operation_toast(
                             op.toast_id,
                             error.to_string(),
@@ -2410,12 +2461,14 @@ impl Waku {
     /// except the row is written per land rather than once: a repeat land
     /// after new commits appends another. The message keeps `content` as the
     /// pill fallback and `turn_id` unset so a rewind never drops it.
+    /// `exclude_session` already has its operation's progress row updated.
     fn record_landed_transcript_notice(
         &mut self,
         workspace: &Path,
         base: &str,
         commits: Vec<CommitEntry>,
         ahead: u64,
+        exclude_session: Option<Uuid>,
     ) {
         let notice = TranscriptNotice::Landed {
             base: base.to_owned(),
@@ -2427,7 +2480,10 @@ impl Waku {
             .state
             .sessions
             .iter()
-            .filter(|session| self.workspace_path_for_session(session) == Some(workspace))
+            .filter(|session| {
+                Some(session.id) != exclude_session
+                    && self.workspace_path_for_session(session) == Some(workspace)
+            })
             .map(|session| session.id)
             .collect::<Vec<_>>()
         {

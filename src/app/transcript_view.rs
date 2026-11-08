@@ -2391,6 +2391,13 @@ impl Waku {
                         .map(|message| (message, session.provider))
                 })
                 .map(|(message, provider)| {
+                    if self
+                        .landing_operations
+                        .get(&message.id)
+                        .is_some_and(|entry| entry.operation.transcript_session.is_some())
+                    {
+                        return self.render_landing_status(message.id, cx);
+                    }
                     let display_content = super::transcript::display_message_content(&message);
                     let copied = self.copied_message_feedback.contains_key(&message.id);
                     let (assistant_footer_copy_content, assistant_footer_time) =

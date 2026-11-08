@@ -5986,6 +5986,17 @@ impl Waku {
         pinned.extend(self.provider_switch_in_flight.iter().copied());
         pinned.extend(self.control_runtime_starts.iter().copied());
         pinned.extend(self.worktree_move_pending.iter().copied());
+        // Pending lands mutate their original transcript row even off screen.
+        pinned.extend(
+            self.landing_operations
+                .values()
+                .filter_map(|entry| entry.operation.transcript_session),
+        );
+        pinned.extend(
+            self.git_panel_operation
+                .as_ref()
+                .and_then(|operation| operation.transcript_session),
+        );
         let released = self
             .state
             .trim_idle_transcripts(&pinned, RESIDENT_TRANSCRIPT_WINDOW);
