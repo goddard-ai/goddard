@@ -309,6 +309,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "terminal-square",
     "trash",
     "type",
+    "ungroup",
     "unplug",
     "user-round",
     "user-round-plus",

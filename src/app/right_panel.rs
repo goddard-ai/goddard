@@ -3553,10 +3553,11 @@ mod tests {
             project_root: Path::new(source).parent().unwrap().to_path_buf(),
             worktree: None,
         };
-        // A published Boss review link used to take the Finder route.
+        // A published Boss review link used to take the Finder route; Markdown
+        // previews now open in the panel even without the deliverable match.
         assert_eq!(
             transcript_link_route(stored, None),
-            TranscriptLinkRoute::Finder(PathBuf::from(stored))
+            TranscriptLinkRoute::PanelFile(stored.clone(), None)
         );
         for target in [
             stored.clone(),
