@@ -3563,9 +3563,9 @@ pub struct Waku {
     sidebar_alt_held: bool,
     sidebar_alt_modifier_down: bool,
     sidebar_alt_generation: u64,
-    /// Group-local Option: the sidebar group header whose hover control is
+    /// Group-local Option: the sidebar group header whose eye control is
     /// engaged — its member rows render exactly as if Option/Alt were held.
-    /// Hover arms it; click or a keyboard press pins it.
+    /// Click toggles it until group exit; keyboard activation pins it.
     sidebar_group_alt: Cell<Option<sidebar::SidebarGroupAlt>>,
     /// Dormant sessions whose clean worktrees the background sweep has
     /// already snapshotted and removed — re-checked only when a session

@@ -239,8 +239,8 @@ pub(super) struct SidebarGroupAlt {
     /// once per host, so `row` and `group` alone cannot tell a rebuild's
     /// identical-named section apart from the one that armed.
     pub(super) boss: Option<waku_client::DaemonKey>,
-    /// Pinned engagement (click or keyboard) survives the pointer leaving
-    /// the group; a hover arm ends at the group's edge.
+    /// Keyboard engagement survives the pointer leaving the group; a mouse
+    /// click engagement ends at the group's edge.
     pub(super) sticky: bool,
 }
 
@@ -3822,9 +3822,9 @@ impl Waku {
                     .on_scroll_wheel(cx.listener(|this, _, _, _| {
                         this.transcript_preloads.cancel_hover();
                     }))
-                    // Leaving the history region ends a hover-armed
+                    // Leaving the history region ends a mouse-activated
                     // group-local Option the same way entering a foreign row
-                    // does; pinned (click/keyboard) engagement is untouched.
+                    // does; keyboard engagement is untouched.
                     .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                         this.sidebar_group_alt_pointer_enter(!*hovered, cx);
                     }))
@@ -4166,41 +4166,29 @@ impl Waku {
         Some(engaged)
     }
 
-    /// Hover the header's Option control: arm the group-local modifier for
-    /// its rows. Re-entering a pinned (click or keyboard) engagement keeps
-    /// the pin instead of demoting it to a hover arm.
-    fn arm_sidebar_group_alt(&mut self, row: usize, group: SidebarGroup, cx: &mut Context<Self>) {
-        let current = self.sidebar_group_alt.get();
-        if current.is_some_and(|alt| alt.row == row && alt.group == group) {
-            return;
-        }
-        let rows = self.sidebar_rows_snapshot.borrow().clone();
-        let boss = sidebar_group_alt_boss(&rows, row, group);
-        self.sidebar_group_alt.set(Some(SidebarGroupAlt {
-            row,
-            group,
-            boss,
-            sticky: false,
-        }));
-        cx.notify();
-    }
-
-    /// Click or keyboard activation pins the engagement: it survives the
-    /// pointer leaving the group until the same activation releases it, the
-    /// header goes away, or a selection change clears it.
-    fn toggle_sidebar_group_alt(&mut self, row: usize, group: SidebarGroup, cx: &mut Context<Self>) {
-        let pinned = self
+    /// Toggle the group-local modifier. Mouse activation lasts until the
+    /// pointer leaves the group; keyboard activation stays engaged until
+    /// explicitly released so its controls remain reachable without a mouse.
+    fn toggle_sidebar_group_alt(
+        &mut self,
+        row: usize,
+        group: SidebarGroup,
+        sticky: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let active = self
             .sidebar_group_alt
             .get()
-            .is_some_and(|alt| alt.row == row && alt.group == group && alt.sticky);
+            .is_some_and(|alt| alt.row == row && alt.group == group);
         let rows = self.sidebar_rows_snapshot.borrow().clone();
         let boss = sidebar_group_alt_boss(&rows, row, group);
-        self.sidebar_group_alt.set((!pinned).then_some(SidebarGroupAlt {
-            row,
-            group,
-            boss,
-            sticky: true,
-        }));
+        self.sidebar_group_alt
+            .set((!active).then_some(SidebarGroupAlt {
+                row,
+                group,
+                boss,
+                sticky,
+            }));
         cx.notify();
     }
 
@@ -4212,7 +4200,7 @@ impl Waku {
         }
     }
 
-    /// A pointer entering a row outside a hover-armed group ends the arm:
+    /// A pointer entering a row outside a mouse-activated group ends the arm:
     /// the arm lives while the pointer stays inside the engaged header and
     /// its member rows, so the controls the modifier reveals stay reachable
     /// after the pointer leaves the small header control itself.
@@ -5315,9 +5303,9 @@ impl Waku {
                 }))
                 .into_any_element(),
         };
-        // While a hover arm is live, any row outside the armed group ends it
+        // While a mouse activation is live, any row outside the armed group ends it
         // on entry — the arm survives only inside the group's own header and
-        // member rows. A pinned engagement ignores the pointer entirely.
+        // member rows. A keyboard engagement ignores the pointer entirely.
         if engaged.is_some_and(|alt| !alt.sticky && Some(alt.row) != group_header) {
             return div()
                 .id(SharedString::from(format!("sidebar-alt-clear-{index}")))
@@ -5755,11 +5743,9 @@ impl Waku {
                     )
             });
 
-        // The group-local Option control: hovering it arms the group's rows
-        // as if Option were held — model and date details swap in, the pin
-        // control becomes the sweep. The arm survives while the pointer
-        // stays inside the group so the revealed controls remain reachable;
-        // a click or a keyboard press pins it instead.
+        // The group-local Option control: clicking toggles the group's rows
+        // as if Option were held, until the pointer leaves the group. Keyboard
+        // activation pins it so the revealed controls remain reachable.
         let alt_toggle = sidebar_group_has_alt_toggle(group).then(|| {
             let alt_focus = self
                 .sidebar_group_alt_focuses
@@ -5829,20 +5815,15 @@ impl Waku {
                             },
                         ))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                            if *hovered {
-                                this.arm_sidebar_group_alt(index, group, cx);
-                            }
-                        }))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();
-                            this.toggle_sidebar_group_alt(index, group, cx);
+                            this.toggle_sidebar_group_alt(index, group, false, cx);
                         }))
                         .on_key_down(cx.listener(
                             move |this, event: &KeyDownEvent, _, cx| {
                                 match event.keystroke.key.as_str() {
                                     "enter" | "space" => {
-                                        this.toggle_sidebar_group_alt(index, group, cx);
+                                        this.toggle_sidebar_group_alt(index, group, true, cx);
                                         cx.stop_propagation();
                                     }
                                     "escape"

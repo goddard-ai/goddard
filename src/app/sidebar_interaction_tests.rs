@@ -612,7 +612,7 @@ fn move_pointer(cx: &mut gpui::VisualTestContext, point: gpui::Point<gpui::Pixel
 
 /// The eye only measures open once the header group is hovered — hover the
 /// header first, then the revealed control.
-fn arm_via_eye(
+fn click_eye(
     cx: &mut gpui::VisualTestContext,
     group: SidebarGroup,
     occurrence: usize,
@@ -622,10 +622,12 @@ fn arm_via_eye(
     move_pointer(cx, header);
     let eye = eye_center(cx, group, index);
     move_pointer(cx, eye);
+    cx.simulate_click(eye, Modifiers::none());
+    cx.run_until_parked();
 }
 
 #[gpui::test]
-fn hover_arm_survives_member_rows_and_drops_on_foreign_and_outside(
+fn click_engagement_survives_member_rows_and_drops_on_foreign_and_outside(
     cx: &mut gpui::TestAppContext,
 ) {
     let (fixture, cx) = open_waku_fixture(cx);
@@ -633,9 +635,22 @@ fn hover_arm_survives_member_rows_and_drops_on_foreign_and_outside(
     let outcomes = header_row_indexes(&rows, SidebarGroup::Outcomes);
     assert_eq!(outcomes.len(), 2, "fixture rows: {rows:?}");
 
-    // Hover arms the engagement; it is not sticky.
-    arm_via_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
-    let engaged = engaged_alt(&fixture.view, cx).expect("eye hover did not arm");
+    // Hover alone must not engage the group, even on repeated entry.
+    for _ in 0..2 {
+        let header = header_center(cx, SidebarGroup::Outcomes, 0);
+        move_pointer(cx, header);
+        let eye = eye_center(cx, SidebarGroup::Outcomes, outcomes[0]);
+        move_pointer(cx, eye);
+        assert_eq!(
+            engaged_alt(&fixture.view, cx),
+            None,
+            "hover engaged the eye"
+        );
+        move_pointer(cx, header);
+    }
+    // Clicking engages until the pointer leaves the group.
+    click_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
+    let engaged = engaged_alt(&fixture.view, cx).expect("eye click did not engage");
     assert_eq!(engaged.row, outcomes[0]);
     assert_eq!(engaged.group, SidebarGroup::Outcomes);
     assert!(!engaged.sticky);
@@ -665,7 +680,7 @@ fn hover_arm_survives_member_rows_and_drops_on_foreign_and_outside(
     );
 
     // Re-arm, then leave the history region entirely — same release.
-    arm_via_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
+    click_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
     assert!(engaged_alt(&fixture.view, cx).is_some());
     move_pointer(cx, point(px(800.0), px(500.0)));
     assert_eq!(
@@ -676,45 +691,31 @@ fn hover_arm_survives_member_rows_and_drops_on_foreign_and_outside(
 }
 
 #[gpui::test]
-fn click_pins_engagement_until_a_second_activation(cx: &mut gpui::TestAppContext) {
+fn second_click_releases_engagement_and_hover_does_not_rearm(cx: &mut gpui::TestAppContext) {
     let (fixture, cx) = open_waku_fixture(cx);
     let rows = painted_rows(&fixture.view, cx);
     let outcomes = header_row_indexes(&rows, SidebarGroup::Outcomes);
     assert_eq!(outcomes.len(), 2, "fixture rows: {rows:?}");
 
-    arm_via_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
-    let eye = eye_center(cx, SidebarGroup::Outcomes, outcomes[0]);
-    cx.simulate_click(eye, Modifiers::none());
-    cx.run_until_parked();
-    let engaged = engaged_alt(&fixture.view, cx).expect("click did not pin");
-    assert!(engaged.sticky, "click produced a non-sticky arm");
-
-    // A pinned engagement ignores the pointer: foreign rows and the region
-    // edge keep it.
-    {
-        let p = session_row_center(cx, fixture.sessions.today.id);
-        move_pointer(cx, p);
-    }
-    assert_eq!(
-        engaged_alt(&fixture.view, cx),
-        Some(engaged),
-        "pinned engagement followed the pointer's foreign row"
-    );
-    move_pointer(cx, point(px(800.0), px(500.0)));
-    assert_eq!(engaged_alt(&fixture.view, cx), Some(engaged));
-
-    // The same activation releases it.
-    {
-        let p = eye_center(cx, SidebarGroup::Outcomes, outcomes[0]);
-        move_pointer(cx, p);
-    }
+    click_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
+    assert!(engaged_alt(&fixture.view, cx).is_some());
     let eye = eye_center(cx, SidebarGroup::Outcomes, outcomes[0]);
     cx.simulate_click(eye, Modifiers::none());
     cx.run_until_parked();
     assert_eq!(
         engaged_alt(&fixture.view, cx),
         None,
-        "second click did not release the pin"
+        "second click kept engagement"
+    );
+
+    let header = header_center(cx, SidebarGroup::Outcomes, 0);
+    move_pointer(cx, header);
+    let eye = eye_center(cx, SidebarGroup::Outcomes, outcomes[0]);
+    move_pointer(cx, eye);
+    assert_eq!(
+        engaged_alt(&fixture.view, cx),
+        None,
+        "hover rearmed after toggle off"
     );
 }
 
@@ -822,8 +823,11 @@ fn physical_option_applies_every_group_while_a_local_arm_scopes(cx: &mut gpui::T
     let outcomes = header_row_indexes(&rows, SidebarGroup::Outcomes);
     let index = *today_headers.first().unwrap();
     let group = SidebarGroup::Date(SessionDateGroup::Today);
-    arm_via_eye(cx, group, 0, index);
-    assert_eq!(engaged_alt(&fixture.view, cx).map(|alt| alt.row), Some(index));
+    click_eye(cx, group, 0, index);
+    assert_eq!(
+        engaged_alt(&fixture.view, cx).map(|alt| alt.row),
+        Some(index)
+    );
     assert!(
         cx.debug_bounds(leaked(format!("session-time-{today}-date")))
             .is_some(),
@@ -846,18 +850,19 @@ fn each_boss_section_arms_independently(cx: &mut gpui::TestAppContext) {
 
     // Boss two's eye engages boss two's header — the fix's occurrence
     // identity means the twin's handle and hover group are distinct.
-    arm_via_eye(cx, SidebarGroup::Outcomes, 1, outcomes[1]);
+    click_eye(cx, SidebarGroup::Outcomes, 1, outcomes[1]);
     let engaged = engaged_alt(&fixture.view, cx).expect("second boss's eye did not arm");
     assert_eq!(
         engaged.row, outcomes[1],
         "engagement landed on the first boss's header row instead"
     );
 
+    click_eye(cx, SidebarGroup::Outcomes, 1, outcomes[1]);
+    assert_eq!(engaged_alt(&fixture.view, cx), None);
+
     // Each boss's focus handle is a distinct registration — keyboard focus
     // on the second must pin the second.
-    let focus = cx.read(|app| {
-        view_focus_for(&fixture.view, app, SidebarGroup::Outcomes, 1)
-    });
+    let focus = cx.read(|app| view_focus_for(&fixture.view, app, SidebarGroup::Outcomes, 1));
     cx.update(|window, cx| window.focus(&focus, cx));
     cx.run_until_parked();
     cx.simulate_keystrokes("enter");
@@ -875,12 +880,9 @@ fn selection_rebuild_and_deactivation_each_end_the_engagement(cx: &mut gpui::Tes
     let outcomes = header_row_indexes(&rows, SidebarGroup::Outcomes);
     assert_eq!(outcomes.len(), 2, "fixture rows: {rows:?}");
 
-    // Selection change: pin, then choose a task — the engagement ends.
-    arm_via_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
-    let eye = eye_center(cx, SidebarGroup::Outcomes, outcomes[0]);
-    cx.simulate_click(eye, Modifiers::none());
-    cx.run_until_parked();
-    assert!(engaged_alt(&fixture.view, cx).is_some_and(|alt| alt.sticky));
+    // Selection change: engage, then choose a task — the engagement ends.
+    click_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
+    assert!(engaged_alt(&fixture.view, cx).is_some());
     let today_row = session_row_center(cx, fixture.sessions.today.id);
     cx.simulate_click(today_row, Modifiers::none());
     cx.run_until_parked();
@@ -892,10 +894,7 @@ fn selection_rebuild_and_deactivation_each_end_the_engagement(cx: &mut gpui::Tes
 
     // A rebuilt snapshot that no longer has the header at the stored index
     // drops the engagement rather than drifting onto a row it did not arm.
-    arm_via_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
-    let eye = eye_center(cx, SidebarGroup::Outcomes, outcomes[0]);
-    cx.simulate_click(eye, Modifiers::none());
-    cx.run_until_parked();
+    click_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
     assert!(engaged_alt(&fixture.view, cx).is_some());
     fixture.view.update(cx, |this, cx| {
         // Dropping the Local boss removes its whole section — the armed
@@ -917,7 +916,7 @@ fn selection_rebuild_and_deactivation_each_end_the_engagement(cx: &mut gpui::Tes
     cx.run_until_parked();
     let rows = painted_rows(&fixture.view, cx);
     let outcomes = header_row_indexes(&rows, SidebarGroup::Outcomes);
-    arm_via_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
+    click_eye(cx, SidebarGroup::Outcomes, 0, outcomes[0]);
     cx.simulate_modifiers_change(Modifiers {
         alt: true,
         ..Modifiers::none()
