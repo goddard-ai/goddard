@@ -231,7 +231,11 @@ pub(crate) fn prompt_answer_index(answer: usize) -> usize {
     answer.checked_sub(1000).unwrap_or(answer)
 }
 
-fn signal_event_pump(wake: &smol::channel::Sender<()>) {
+fn signal_event_pump(#[cfg_attr(test, allow(unused_variables))] wake: &smol::channel::Sender<()>) {
+    // Waking the pump task from a provider thread is normal in the app but
+    // forbidden under the deterministic test scheduler; tests drive
+    // `drain_event_pump` directly instead.
+    #[cfg(not(test))]
     let _ = wake.try_send(());
 }
 
@@ -6252,6 +6256,7 @@ impl Waku {
             window,
             cx,
         );
+        #[cfg(not(test))]
         crate::platform::set_sidebar_material_width(window, sidebar_width);
         crate::platform::set_trackpad_navigation_swipe_enabled(
             window,

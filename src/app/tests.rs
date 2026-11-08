@@ -8983,3 +8983,1126 @@ fn compact_task_view_snapshot_preserves_detail_and_merges_control_state() {
             .any(|queued| !queued.is_agent_owned())
     );
 }
+
+/// Live-daemon coverage for the inline employee approval cards: a real
+/// `Waku` window connected to a minimal in-process daemon over the client
+/// WebSocket, so the evidence covers the whole path — roster, painted
+/// card, click, and the session-bound command that reaches the daemon.
+mod live_employee_approvals {
+    use super::super::{SessionRuntime, Waku};
+    use super::*;
+    use gpui::{Bounds, Entity, VisualTestContext, WindowBounds, WindowOptions, point, px, size};
+    use parking_lot::Mutex;
+    use std::net::TcpListener;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use crate::model::{PendingPermission, PermissionOption, UserInputAnswer};
+    use gpui::Focusable;
+    use waku_client::{
+        ClientMessage, Command, DaemonSettings, DaemonSupervisor, PROTOCOL_VERSION,
+        ResponseOutcome, ResponsePayload, ServerMessage,
+    };
+
+    /// `Waku::new` writes app state under `GODDARD_DATA_DIR` and reads
+    /// process-global settings; app-level tests serialize on this lock and
+    /// point the variable at a scratch directory so a run can never touch
+    /// the development data dir this session inherited.
+    static APP_ENV: Mutex<()> = Mutex::new(());
+
+    struct RecordedCommand {
+        session_id: Uuid,
+        runtime_id: Uuid,
+        command: Command,
+    }
+
+    /// The smallest daemon the desktop can live against: answers the
+    /// catalog/settings/boss reads made during startup and hydration,
+    /// records every session-scoped command so tests see exactly which
+    /// runtime an answer landed on, and can push sequenced runtime events
+    /// for reconnect-replay checks.
+    struct FakeDaemon {
+        address: String,
+        commands: Arc<Mutex<Vec<RecordedCommand>>>,
+        sockets: Arc<Mutex<Vec<Arc<Mutex<tungstenite::WebSocket<std::net::TcpStream>>>>>>,
+        sessions: Arc<Mutex<Vec<AgentSession>>>,
+        project: Project,
+        boss: Arc<Mutex<waku_client::boss::BossState>>,
+    }
+
+    impl FakeDaemon {
+        fn start(
+            default_cwd: PathBuf,
+            project: Project,
+            sessions: Vec<AgentSession>,
+            boss: waku_client::boss::BossState,
+        ) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap().to_string();
+            let daemon = Self {
+                address,
+                commands: Arc::new(Mutex::new(Vec::new())),
+                sockets: Arc::new(Mutex::new(Vec::new())),
+                sessions: Arc::new(Mutex::new(sessions)),
+                project,
+                boss: Arc::new(Mutex::new(boss)),
+            };
+            let commands = daemon.commands.clone();
+            let sockets = daemon.sockets.clone();
+            let sessions = daemon.sessions.clone();
+            let project = daemon.project.clone();
+            let boss = daemon.boss.clone();
+            std::thread::Builder::new()
+                .name("waku-test-fake-daemon".into())
+                .spawn(move || {
+                    for stream in listener.incoming() {
+                        let Ok(stream) = stream else {
+                            break;
+                        };
+                        let Ok(mut socket) = tungstenite::accept(stream) else {
+                            continue;
+                        };
+                        // The accept above must finish its blocking read
+                        // before the timeout exists, or a slow client
+                        // handshake resets the connection.
+                        socket
+                            .get_mut()
+                            .set_read_timeout(Some(Duration::from_millis(20)))
+                            .ok();
+                        let socket = Arc::new(Mutex::new(socket));
+                        sockets.lock().push(socket.clone());
+                        let commands = commands.clone();
+                        let sockets = sockets.clone();
+                        let sessions = sessions.clone();
+                        let project = project.clone();
+                        let boss = boss.clone();
+                        let cwd = default_cwd.clone();
+                        let connection = socket.clone();
+                        std::thread::Builder::new()
+                            .name("waku-test-fake-daemon-conn".into())
+                            .spawn(move || {
+                                loop {
+                                    let read = connection.lock().read();
+                                    let incoming = match read {
+                                        Ok(tungstenite::Message::Text(text)) => text,
+                                        Ok(tungstenite::Message::Close(_)) => break,
+                                        Ok(_) => continue,
+                                        Err(tungstenite::Error::Io(error))
+                                            if matches!(
+                                                error.kind(),
+                                                std::io::ErrorKind::WouldBlock
+                                                    | std::io::ErrorKind::TimedOut
+                                            ) =>
+                                        {
+                                            continue;
+                                        }
+                                        Err(_) => break,
+                                    };
+                                    let Ok(message) =
+                                        serde_json::from_str::<ClientMessage>(&incoming)
+                                    else {
+                                        continue;
+                                    };
+                                    let response = match message {
+                                        ClientMessage::Hello { .. } => {
+                                            Some(ServerMessage::Hello {
+                                                protocol_version: PROTOCOL_VERSION,
+                                                daemon_version: "test-daemon".into(),
+                                                daemon_commit: None,
+                                                agent_cli_available: false,
+                                                task_views_available: false,
+                                                transcript_windows_available: false,
+                                                landing_queue_available: false,
+                                            })
+                                        }
+                                        ClientMessage::Request(request) => {
+                                            commands.lock().push(RecordedCommand {
+                                                session_id: request.session_id,
+                                                runtime_id: request.runtime_id,
+                                                command: request.command.clone(),
+                                            });
+                                            if request.request_id.is_nil() {
+                                                None
+                                            } else {
+                                                Some(ServerMessage::Response {
+                                                    request_id: request.request_id,
+                                                    outcome: ResponseOutcome::Ok {
+                                                        payload: response_payload(
+                                                            &request.command,
+                                                            &sessions,
+                                                            &project,
+                                                            &boss,
+                                                            &cwd,
+                                                        ),
+                                                    },
+                                                })
+                                            }
+                                        }
+                                        _ => None,
+                                    };
+                                    if let Some(response) = response {
+                                        let text = serde_json::to_string(&response).unwrap();
+                                        if connection
+                                            .lock()
+                                            .send(tungstenite::Message::Text(text.into()))
+                                            .is_err()
+                                        {
+                                            break;
+                                        }
+                                    }
+                                }
+                                sockets.lock().retain(|live| !Arc::ptr_eq(live, &socket));
+                            })
+                            .ok();
+                    }
+                })
+                .ok();
+            daemon
+        }
+
+        fn send_event(
+            &self,
+            session_id: Uuid,
+            runtime_id: Uuid,
+            sequence: u64,
+            event: waku_client::WireDriverEvent,
+        ) {
+            let message = ServerMessage::Event(waku_client::SequencedEvent {
+                session_id,
+                runtime_id,
+                epoch: Uuid::new_v4(),
+                sequence,
+                event,
+            });
+            let text = serde_json::to_string(&message).unwrap();
+            for socket in self.sockets.lock().iter() {
+                let _ = socket
+                    .lock()
+                    .send(tungstenite::Message::Text(text.clone().into()));
+            }
+        }
+
+        /// Session-scoped commands one runtime received, in order.
+        fn commands_for(&self, session_id: Uuid) -> Vec<Command> {
+            self.commands
+                .lock()
+                .iter()
+                .filter(|recorded| recorded.session_id == session_id)
+                .map(|recorded| recorded.command.clone())
+                .collect()
+        }
+
+        /// The approval commands only — catalog/hydration reads a session
+        /// performs for its own bookkeeping never authorize anything.
+        fn wire_responses(&self, session_id: Uuid) -> Vec<Command> {
+            self.commands_for(session_id)
+                .into_iter()
+                .filter(|command| {
+                    matches!(
+                        command,
+                        Command::Respond { .. }
+                            | Command::RespondUserInput { .. }
+                            | Command::ClarifyUserInput { .. }
+                            | Command::CancelUserInput { .. }
+                    )
+                })
+                .collect()
+        }
+    }
+
+    fn response_payload(
+        command: &Command,
+        sessions: &Mutex<Vec<AgentSession>>,
+        project: &Project,
+        boss: &Mutex<waku_client::boss::BossState>,
+        default_cwd: &PathBuf,
+    ) -> ResponsePayload {
+        match command {
+            Command::GetSettings => ResponsePayload::Settings {
+                settings: DaemonSettings {
+                    boss_experiment_enabled: true,
+                    ..Default::default()
+                },
+            },
+            Command::LoadTaskState => ResponsePayload::TaskState {
+                projects: vec![project.clone()],
+                sessions: sessions
+                    .lock()
+                    .iter()
+                    .map(AgentSession::list_projection)
+                    .collect(),
+                default_cwd: default_cwd.clone(),
+                projectless_root: waku_client::projectless::workspace_root(),
+            },
+            Command::HydrateSession { session_id } => ResponsePayload::Session {
+                session: sessions
+                    .lock()
+                    .iter()
+                    .find(|session| session.id == *session_id)
+                    .cloned(),
+            },
+            Command::GetFriends => ResponsePayload::Friends {
+                state: Default::default(),
+            },
+            Command::GetPairing => ResponsePayload::Pairing {
+                state: Default::default(),
+            },
+            Command::GetAutomations => ResponsePayload::Automations {
+                state: Default::default(),
+            },
+            Command::Boss {
+                operation: waku_client::boss::BossOperation::View,
+            } => ResponsePayload::Boss {
+                result: waku_client::boss::BossResult::State {
+                    state: boss.lock().clone(),
+                },
+            },
+            Command::LoadSkills { .. } => ResponsePayload::SkillsCatalog {
+                catalog: Default::default(),
+            },
+            _ => ResponsePayload::Ack,
+        }
+    }
+
+    /// A windowed `Waku` on the fake daemon. Returns the root view plus a
+    /// window context for frame-level assertions and input simulation.
+    fn test_app(
+        cx: &mut gpui::TestAppContext,
+        supervisor: DaemonSupervisor,
+    ) -> (Entity<Waku>, &'static mut VisualTestContext) {
+        cx.update(|app| {
+            // `run` installs these before any window opens; the test app
+            // needs the same prelude with stubbed native hooks.
+            waku_ui::host::install_host_platform(waku_ui::host::HostPlatform {
+                increase_contrast: || false,
+                reduce_transparency: || false,
+                set_window_appearance: |_, _| {},
+                configure_sidebar_material: |_, _, _, _| {},
+            });
+            crate::theme::init(app);
+            crate::fonts::install(None, None, app);
+            crate::platform::init_reduce_motion(app);
+        });
+        let window = cx
+            .update(|app| {
+                app.open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds {
+                            origin: point(px(0.0), px(0.0)),
+                            size: size(px(1280.0), px(800.0)),
+                        })),
+                        ..Default::default()
+                    },
+                    |window, cx| Waku::new(window, cx, supervisor),
+                )
+                .unwrap()
+            });
+        let view = window.root(cx).unwrap();
+        (
+            view,
+            VisualTestContext::from_window(*window, cx).into_mut(),
+        )
+    }
+
+    /// Scratch data dir + env, held for the length of one test.
+    fn isolated_env() -> (parking_lot::MutexGuard<'static, ()>, PathBuf) {
+        let guard = APP_ENV.lock();
+        let dir = std::env::temp_dir().join(format!("waku-approvals-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        unsafe {
+            std::env::set_var("GODDARD_DATA_DIR", &dir);
+            std::env::remove_var("GODDARD_DEV_STATE");
+            std::env::remove_var("GODDARD_DAEMON_ADDRESS");
+            std::env::remove_var("GODDARD_DAEMON_BIND");
+            std::env::remove_var("GODDARD_APP_EXECUTABLE");
+        }
+        (guard, dir)
+    }
+
+    fn pending_permission(request_id: &str) -> PendingPermission {
+        PendingPermission {
+            request_id: request_id.into(),
+            title: format!("Allow command {request_id}?"),
+            title_i18n: None,
+            detail: "rm -rf ./build".into(),
+            detail_i18n: None,
+            options: vec![
+                PermissionOption {
+                    id: "allow".into(),
+                    label: "Allow".into(),
+                    label_i18n: None,
+                    allow: true,
+                },
+                PermissionOption {
+                    id: "deny".into(),
+                    label: "Deny".into(),
+                    label_i18n: None,
+                    allow: false,
+                },
+            ],
+        }
+    }
+
+    /// A full-detail employee session with a running turn, so its provider
+    /// events pass the turn-output gate once hydrated.
+    fn employee_session(id: Uuid, project_id: Uuid) -> AgentSession {
+        let mut session = AgentSession::new(project_id, ProviderKind::Codex);
+        session.id = id;
+        session.boss_managed = true;
+        session.detail_loaded = true;
+        session.begin_turn("do the job");
+        session.status = SessionStatus::Working;
+        session
+    }
+
+    fn employee_record(
+        session_id: Uuid,
+        supervisor_id: Uuid,
+        name: &str,
+        job_title: &str,
+    ) -> waku_client::boss::BossEmployee {
+        waku_client::boss::BossEmployee {
+            purpose: None,
+            assignment_kind: Default::default(),
+            plan_binding: None,
+            plan_readiness: None,
+            plan_blockers: Vec::new(),
+            session_id,
+            supervisor_id,
+            identity: waku_client::boss::BossIdentity {
+                id: session_id,
+                name: name.into(),
+                avatar_seed: String::new(),
+                avatar_style: Default::default(),
+            },
+            job_title: job_title.into(),
+            persona_id: Uuid::new_v4(),
+            work_goal: waku_client::boss::EmployeeGoal::Errand,
+            created_at: Some(1),
+            icon: None,
+            permissions: Default::default(),
+            boss_authority: false,
+            pinned_files: Vec::new(),
+            workspace_transition: false,
+            expired_at: None,
+            needs_attention: false,
+            attention_viewed_at: None,
+            blocker: None,
+            cancelled: false,
+            expiry: None,
+            state: waku_client::boss::EmployeeLifecycle::Working.into(),
+            ticket: None,
+            queued_at: None,
+            request_id: None,
+            request_fingerprint: None,
+            plan_id: None,
+            item_id: None,
+            assignment: None,
+        }
+    }
+
+    /// A runtime bound to the fake daemon through the production
+    /// `RemoteDriverControl`, so card answers surface as recorded wire
+    /// commands on the exact session/runtime pair.
+    fn attach_runtime(
+        _waku: &Waku,
+        supervisor: &DaemonSupervisor,
+        session_id: Uuid,
+        runtime_id: Uuid,
+    ) -> SessionRuntime {
+        // A dead wake channel keeps the driver's foreground wake edge out
+        // of the deterministic scheduler; `drain_event_pump` is driven
+        // directly in tests.
+        let (dead_wake, _dead_rx) = smol::channel::bounded(1);
+        let (events, receiver) = crate::driver::event_channel(dead_wake);
+        let driver = crate::driver::attach_remote(
+            supervisor.clone(),
+            supervisor.client(),
+            session_id,
+            runtime_id,
+            true,
+            true,
+            None,
+            events,
+        )
+        .unwrap();
+        SessionRuntime {
+            driver,
+            options_generation: Uuid::nil(),
+            events: receiver,
+            pending_events: VecDeque::new(),
+            pending_steers: VecDeque::new(),
+            deferred_steers: VecDeque::new(),
+            stream_phase: None,
+            detail_visible: None,
+            pending_reasoning_newlines: 0,
+            stream_remeasure_pending: false,
+            pending_permission: None,
+            pending_daemon_request: None,
+            pending_user_input: None,
+            pending_computer_approval: None,
+            computer_use_previews: Vec::new(),
+            computer_session_grants: HashSet::new(),
+            last_driver_error: None,
+            last_active_at: Instant::now(),
+            last_background_refresh_at: Instant::now(),
+            sandbox_setup: None,
+        }
+    }
+
+    fn update_app<R>(
+        vcx: &mut VisualTestContext,
+        view: &Entity<Waku>,
+        f: impl FnOnce(&mut Waku, &mut gpui::Window, &mut gpui::Context<Waku>) -> R,
+    ) -> R {
+        vcx.update(|window, app| view.update(app, |waku, cx| f(waku, window, cx)))
+    }
+
+    fn read_app<R>(vcx: &mut VisualTestContext, view: &Entity<Waku>, f: impl FnOnce(&Waku) -> R) -> R {
+        vcx.update(|_, app| f(view.read(app)))
+    }
+
+    /// Pump frames and tasks until `predicate` holds or the wall-clock
+    /// budget ends — real threads deliver socket traffic asynchronously.
+    fn wait_for(
+        vcx: &mut VisualTestContext,
+        view: &Entity<Waku>,
+        predicate: impl Fn(&Waku) -> bool,
+    ) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            // The foreground pump never wakes under the test scheduler —
+            // drain its queues inline so sync, hydrate, and driver edges
+            // still land.
+            update_app(vcx, view, |waku, _, cx| {
+                waku.drain_event_pump(cx);
+                cx.notify();
+            });
+            if read_app(vcx, view, &predicate) {
+                return;
+            }
+            assert!(Instant::now() < deadline, "condition not met in time");
+            std::thread::sleep(Duration::from_millis(10));
+            vcx.run_until_parked();
+        }
+    }
+
+    /// A boss chat with two live employees, served through the fake
+    /// daemon's catalog and boss document — the roster lands through the
+    /// same task-state/boss sync the production client uses.
+    struct TwoEmployees {
+        boss: Uuid,
+        first: Uuid,
+        first_runtime: Uuid,
+        second: Uuid,
+        second_runtime: Uuid,
+        project: Project,
+    }
+
+    fn two_employee_app(
+        cx: &mut gpui::TestAppContext,
+    ) -> (
+        parking_lot::MutexGuard<'static, ()>,
+        FakeDaemon,
+        Entity<Waku>,
+        &'static mut VisualTestContext,
+        DaemonSupervisor,
+        TwoEmployees,
+    ) {
+        let (env, dir) = isolated_env();
+        let ids = TwoEmployees {
+            boss: Uuid::new_v4(),
+            first: Uuid::new_v4(),
+            first_runtime: Uuid::new_v4(),
+            second: Uuid::new_v4(),
+            second_runtime: Uuid::new_v4(),
+            project: Project::from_path(PathBuf::from("/tmp/waku-test-project")),
+        };
+        let sessions = vec![
+            {
+                let mut session = AgentSession::new(ids.project.id, ProviderKind::Codex);
+                session.id = ids.boss;
+                session.boss_managed = true;
+                session.detail_loaded = true;
+                // An empty boss chat renders the empty-state hero, not the
+                // transcript pane — a turn keeps the pinned strip's host
+                // mounted, the same shape a supervising chat has.
+                session.begin_turn("supervise the crew");
+                session
+            },
+            employee_session(ids.first, ids.project.id),
+            employee_session(ids.second, ids.project.id),
+        ];
+        let roster = {
+            let mut state = boss_state(Some(ids.boss), Vec::new());
+            state.employees = vec![
+                employee_record(ids.first, ids.boss, "Ana", "Qualify the feature"),
+                employee_record(ids.second, ids.boss, "Bruno", "Review the diff"),
+            ];
+            state
+        };
+        let daemon = FakeDaemon::start(dir, ids.project.clone(), sessions, roster);
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor.clone());
+        // The boss sync delivers the roster; the catalog merge delivers
+        // the sessions. Both are prerequisites for employee cards.
+        wait_for(vcx, &view, |waku| {
+            waku.boss_ui
+                .states
+                .values()
+                .any(|state| state.employees.len() == 2)
+                && waku.state.sessions.iter().any(|session| session.id == ids.first)
+        });
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.state.selected_session = Some(ids.boss);
+            for session_id in [ids.boss, ids.first, ids.second] {
+                waku.ensure_session_loaded(session_id, cx);
+            }
+            for (session_id, runtime_id) in
+                [(ids.first, ids.first_runtime), (ids.second, ids.second_runtime)]
+            {
+                let runtime = attach_runtime(waku, &supervisor, session_id, runtime_id);
+                waku.runtimes.insert(session_id, runtime);
+            }
+            cx.notify();
+        });
+        // Hydrated detail is what lifts the transcript's loading gate —
+        // and what lets provider asks pass the turn-output gate.
+        wait_for(vcx, &view, |waku| {
+            waku
+                .state
+                .sessions
+                .iter()
+                .filter(|session| {
+                    [ids.boss, ids.first, ids.second].contains(&session.id)
+                })
+                .all(|session| session.detail_loaded)
+        });
+        (env, daemon, view, vcx, supervisor, ids)
+    }
+
+    /// Real frames render `render_employee_requests`; the card buttons
+    /// carry debug selectors for bounds lookup.
+    fn card_painted(vcx: &mut VisualTestContext, selector: &'static str) -> bool {
+        vcx.run_until_parked();
+        vcx.debug_bounds(selector).is_some()
+    }
+
+    fn click(vcx: &mut VisualTestContext, selector: &'static str) {
+        vcx.run_until_parked();
+        let bounds = vcx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("no painted element for {selector}"));
+        vcx.simulate_click(bounds.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+    }
+
+    fn selector(text: String) -> &'static str {
+        Box::leak(text.into_boxed_str())
+    }
+
+    /// Two employees pinned atop the boss transcript: each card's click
+    /// resolves its own session's request on its own runtime — the same
+    /// named request id on a sibling is never touched.
+    #[gpui::test]
+    fn supervisor_card_answers_the_employee_session_it_names(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (_env, daemon, view, vcx, _supervisor, ids) = two_employee_app(cx);
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.runtimes.get_mut(&ids.first).unwrap().pending_permission =
+                Some(pending_permission("req-shared"));
+            waku.runtimes.get_mut(&ids.second).unwrap().pending_permission =
+                Some(pending_permission("req-shared"));
+            cx.notify();
+        });
+        // The roster resolves the supervisor chat and each employee's
+        // pending ask builds exactly one card before paint is involved.
+        let built = update_app(vcx, &view, |waku, window, cx| {
+            assert_eq!(waku.resolve_boss_chat_session(ids.boss), ids.boss);
+            assert!(matches!(
+                waku.main_screen(false),
+                super::super::render::MainScreen::Session
+            ));
+            waku.render_employee_requests(window, cx).len()
+        });
+        assert_eq!(built, 2);
+        assert!(
+            card_painted(vcx, "transcript-top-strip"),
+            "the pinned strip itself should paint when cards exist"
+        );
+        assert!(card_painted(
+            vcx,
+            selector(format!("permission-option-{}-req-shared-allow", ids.first))
+        ));
+        assert!(card_painted(
+            vcx,
+            selector(format!("permission-option-{}-req-shared-allow", ids.second))
+        ));
+        click(
+            vcx,
+            selector(format!("permission-option-{}-req-shared-allow", ids.first)),
+        );
+        wait_for(vcx, &view, |_| {
+            daemon.wire_responses(ids.first).iter().any(|command| matches!(
+                command,
+                Command::Respond { request_id, option_id }
+                    if request_id == "req-shared" && option_id == "allow"
+            ))
+        });
+        // The response rode the employee's runtime, not the selected boss
+        // session's — the recorded envelope proves the routing.
+        assert!(daemon.commands.lock().iter().any(|recorded| {
+            recorded.session_id == ids.first
+                && recorded.runtime_id == ids.first_runtime
+                && matches!(
+                    recorded.command,
+                    Command::Respond { ref request_id, .. } if request_id == "req-shared"
+                )
+        }));
+        assert!(daemon.wire_responses(ids.second).is_empty());
+        read_app(vcx, &view, |waku| {
+            assert!(waku.runtimes[&ids.first].pending_permission.is_none());
+            assert_eq!(
+                waku.runtimes[&ids.second]
+                    .pending_permission
+                    .as_ref()
+                    .map(|pending| pending.request_id.as_str()),
+                Some("req-shared")
+            );
+        });
+        // The settled card drops off the supervisor transcript while the
+        // sibling's identical ask still renders.
+        assert!(!card_painted(
+            vcx,
+            selector(format!("permission-option-{}-req-shared-allow", ids.first))
+        ));
+        assert!(card_painted(
+            vcx,
+            selector(format!("permission-option-{}-req-shared-allow", ids.second))
+        ));
+        // The second employee's own task surface resolves the same way —
+        // open it and click the sibling card's Deny.
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.state.selected_session = Some(ids.second);
+            cx.notify();
+        });
+        click(
+            vcx,
+            selector(format!("permission-option-{}-req-shared-deny", ids.second)),
+        );
+        wait_for(vcx, &view, |_| {
+            daemon.wire_responses(ids.second).iter().any(|command| matches!(
+                command,
+                Command::Respond { request_id, option_id }
+                    if request_id == "req-shared" && option_id == "deny"
+            ))
+        });
+    }
+
+    /// A card rendered for a request that settled or was superseded
+    /// between paint and click answers nothing, and duplicate answers
+    /// settle nothing twice.
+    #[gpui::test]
+    fn stale_and_duplicate_card_answers_settle_nothing(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, view, vcx, _supervisor, ids) = two_employee_app(cx);
+        update_app(vcx, &view, |waku, _, cx| {
+            let runtime = waku.runtimes.get_mut(&ids.first).unwrap();
+            runtime.pending_permission = Some(pending_permission("req-stale"));
+            cx.notify();
+        });
+        assert!(card_painted(
+            vcx,
+            selector(format!("permission-option-{}-req-stale-allow", ids.first))
+        ));
+        // A newer request lands before the click — the painted button
+        // still names the old request id and must not authorize it.
+        update_app(vcx, &view, |waku, _, _| {
+            waku.runtimes.get_mut(&ids.first).unwrap().pending_permission =
+                Some(pending_permission("req-current"));
+        });
+        let bounds = vcx
+            .debug_bounds(selector(format!(
+                "permission-option-{}-req-stale-allow",
+                ids.first
+            )))
+            .expect("the stale card is still painted");
+        vcx.simulate_click(bounds.center(), gpui::Modifiers::none());
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(daemon.wire_responses(ids.first).is_empty());
+        read_app(vcx, &view, |waku| {
+            assert_eq!(
+                waku.runtimes[&ids.first]
+                    .pending_permission
+                    .as_ref()
+                    .map(|pending| pending.request_id.as_str()),
+                Some("req-current")
+            );
+        });
+        // Stale ids across every card kind settle nothing either.
+        update_app(vcx, &view, |waku, _, cx| {
+            let runtime = waku.runtimes.get_mut(&ids.first).unwrap();
+            runtime.pending_daemon_request = Some(pending_permission("agent-rename-live"));
+            runtime.pending_user_input = Some(PendingUserInput::new(
+                "ask-live".into(),
+                vec![UserInputQuestion {
+                    id: "q1".into(),
+                    header: "H".into(),
+                    question: "Pick".into(),
+                    options: vec![UserInputOption {
+                        label: "A".into(),
+                        description: None,
+                    }],
+                    multi_select: false,
+                }],
+            ));
+            waku.respond_daemon_request(ids.first, "agent-rename-stale".into(), "deny".into(), cx);
+            waku.select_user_input_option(ids.first, "ask-stale".into(), "A".into(), cx);
+            waku.advance_user_input(ids.first, "ask-stale".into(), cx);
+            waku.dismiss_user_input(ids.first, "ask-stale".into(), cx);
+            waku.clarify_user_input(ids.first, "ask-stale".into(), cx);
+            // Another session's request id never answers this session.
+            waku.respond_permission(ids.second, "req-current".into(), "allow".into(), cx);
+        });
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(daemon.wire_responses(ids.second).is_empty());
+        read_app(vcx, &view, |waku| {
+            let runtime = &waku.runtimes[&ids.first];
+            assert!(runtime.pending_daemon_request.is_some());
+            assert!(runtime.pending_user_input.is_some());
+            assert!(runtime.pending_permission.is_some());
+        });
+        // A real answer lands once; a duplicate resolves nothing twice.
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.respond_permission(ids.first, "req-current".into(), "allow".into(), cx);
+            waku.respond_permission(ids.first, "req-current".into(), "allow".into(), cx);
+        });
+        wait_for(vcx, &view, |_| {
+            !daemon.wire_responses(ids.first).is_empty()
+        });
+        let responds = daemon
+            .commands_for(ids.first)
+            .iter()
+            .filter(|command| matches!(command, Command::Respond { .. }))
+            .count();
+        assert_eq!(responds, 1);
+    }
+
+    /// Employee question cards keep selections and typed custom answers on
+    /// the employee they belong to, and submit the full answer set to the
+    /// employee's runtime when the last question advances.
+    #[gpui::test]
+    fn employee_question_card_answers_stay_on_the_employee(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, view, vcx, _supervisor, ids) = two_employee_app(cx);
+        let questions = |request: &str| {
+            PendingUserInput::new(
+                request.into(),
+                vec![
+                    UserInputQuestion {
+                        id: "q1".into(),
+                        header: "H1".into(),
+                        question: "First?".into(),
+                        options: vec![UserInputOption {
+                            label: "A".into(),
+                            description: None,
+                        }],
+                        multi_select: false,
+                    },
+                    UserInputQuestion {
+                        id: "q2".into(),
+                        header: "H2".into(),
+                        question: "Second?".into(),
+                        options: Vec::new(),
+                        multi_select: false,
+                    },
+                ],
+            )
+        };
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.runtimes.get_mut(&ids.first).unwrap().pending_user_input =
+                Some(questions("ask-first"));
+            waku.runtimes.get_mut(&ids.second).unwrap().pending_user_input =
+                Some(questions("ask-second"));
+            cx.notify();
+        });
+        // Each employee card mounts its own answer field.
+        assert!(card_painted(
+            vcx,
+            selector(format!("user-input-option-{}-ask-first-0-0", ids.first))
+        ));
+        click(
+            vcx,
+            selector(format!("user-input-option-{}-ask-first-0-0", ids.first)),
+        );
+        click(
+            vcx,
+            selector(format!("user-input-continue-{}-ask-first-0", ids.first)),
+        );
+        // Type a custom answer into the employee card's own field — not
+        // the shared input the selected session's card would edit.
+        let input = read_app(vcx, &view, |waku| {
+            waku.employee_input_answers
+                .get(&ids.first)
+                .cloned()
+                .expect("the employee card mounted its answer field")
+        });
+        vcx.update(|window, app| {
+            let focus = input.read(app).focus_handle(app);
+            window.focus(&focus, app);
+        });
+        vcx.simulate_input("custom answer");
+        vcx.run_until_parked();
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.submit_user_input_custom_answer(ids.first, "custom answer".into(), cx);
+        });
+        wait_for(vcx, &view, |_| {
+            daemon
+                .wire_responses(ids.first)
+                .iter()
+                .any(|command| matches!(command, Command::RespondUserInput { .. }))
+        });
+        let answers = daemon
+            .commands_for(ids.first)
+            .iter()
+            .find_map(|command| match command {
+                Command::RespondUserInput { request_id, answers }
+                    if request_id == "ask-first" =>
+                {
+                    Some(answers.clone())
+                }
+                _ => None,
+            })
+            .expect("the employee's answers reached the daemon");
+        assert_eq!(
+            answers,
+            vec![
+                UserInputAnswer {
+                    question_id: "q1".into(),
+                    answers: vec!["A".into()]
+                },
+                UserInputAnswer {
+                    question_id: "q2".into(),
+                    answers: vec!["custom answer".into()]
+                },
+            ]
+        );
+        read_app(vcx, &view, |waku| {
+            assert!(waku.runtimes[&ids.first].pending_user_input.is_none());
+            let second = waku.runtimes[&ids.second]
+                .pending_user_input
+                .as_ref()
+                .unwrap();
+            assert!(second.selections.is_empty());
+            assert!(second.custom_answers.is_empty());
+            assert_eq!(second.question_index, 0);
+            assert!(daemon.wire_responses(ids.second).is_empty());
+        });
+    }
+
+    /// Daemon-owned asks surface on the supervisor transcript too, and
+    /// replayed pending asks repopulate a freshly attached runtime — the
+    /// reconnect path — while a settle for a different request clears
+    /// nothing and a matching one drops the card everywhere.
+    #[gpui::test]
+    fn daemon_requests_and_pending_state_replay_on_reconnect(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, view, vcx, supervisor, ids) = two_employee_app(cx);
+        // Hydrate the employee so provider asks pass the turn gate.
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.ensure_session_loaded(ids.first, cx);
+        });
+        wait_for(vcx, &view, |waku| {
+            waku.state
+                .sessions
+                .iter()
+                .any(|session| session.id == ids.first && session.detail_loaded)
+        });
+        daemon.send_event(
+            ids.first,
+            ids.first_runtime,
+            1,
+            waku_client::WireDriverEvent::new(
+                "permission",
+                serde_json::json!({
+                    "requestId": "agent-rename-req",
+                    "title": "Rename session?",
+                    "detail": "rename to worker-1",
+                    "options": [
+                        {"id": "allow", "label": "Allow", "allow": true},
+                        {"id": "deny", "label": "Deny", "allow": false}
+                    ]
+                }),
+            ),
+        );
+        wait_for(vcx, &view, |waku| {
+            waku
+                .runtimes
+                .get(&ids.first)
+                .is_some_and(|runtime| runtime.pending_daemon_request.is_some())
+        });
+        // The daemon ask builds a supervisor card for the employee, and the
+        // respond path the card's button invokes lands on its runtime.
+        let built = update_app(vcx, &view, |waku, window, cx| {
+            waku.render_employee_requests(window, cx).len()
+        });
+        assert_eq!(built, 1);
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.respond_daemon_request(
+                ids.first,
+                "agent-rename-req".into(),
+                "allow".into(),
+                cx,
+            );
+        });
+        wait_for(vcx, &view, |_| {
+            daemon.wire_responses(ids.first).iter().any(|command| {
+                matches!(
+                    command,
+                    Command::Respond { request_id, option_id }
+                        if request_id == "agent-rename-req" && option_id == "allow"
+                )
+            })
+        });
+        // Reconnect: a fresh runtime attach starts empty, and the daemon's
+        // replayed asks repopulate it. A settle naming a different request
+        // clears nothing; one naming a live ask drops its card.
+        let new_runtime = Uuid::new_v4();
+        update_app(vcx, &view, |waku, _, _| {
+            let runtime = attach_runtime(waku, &supervisor, ids.first, new_runtime);
+            waku.runtimes.insert(ids.first, runtime);
+        });
+        daemon.send_event(
+            ids.first,
+            new_runtime,
+            1,
+            waku_client::WireDriverEvent::new(
+                "permission",
+                serde_json::json!({
+                    "requestId": "req-replayed",
+                    "title": "Allow?",
+                    "detail": "replayed ask",
+                    "options": [
+                        {"id": "allow", "label": "Allow", "allow": true},
+                        {"id": "deny", "label": "Deny", "allow": false}
+                    ]
+                }),
+            ),
+        );
+        daemon.send_event(
+            ids.first,
+            new_runtime,
+            2,
+            waku_client::WireDriverEvent::new(
+                "userInputRequested",
+                serde_json::json!({
+                    "requestId": "ask-replayed",
+                    "questions": [{
+                        "id": "q1",
+                        "header": "H",
+                        "question": "Pick",
+                        "options": [{"label": "A"}]
+                    }]
+                }),
+            ),
+        );
+        daemon.send_event(
+            ids.first,
+            new_runtime,
+            3,
+            waku_client::WireDriverEvent::new(
+                "requestSettled",
+                serde_json::json!({ "requestId": "req-never-pending" }),
+            ),
+        );
+        wait_for(vcx, &view, |waku| {
+            waku.runtimes.get(&ids.first).is_some_and(|runtime| {
+                runtime.pending_permission.is_some() && runtime.pending_user_input.is_some()
+            })
+        });
+        // Questions outrank permissions for the card's primary lane.
+        assert!(card_painted(
+            vcx,
+            selector(format!("user-input-option-{}-ask-replayed-0-0", ids.first))
+        ));
+        daemon.send_event(
+            ids.first,
+            new_runtime,
+            4,
+            waku_client::WireDriverEvent::new(
+                "requestSettled",
+                serde_json::json!({ "requestId": "req-replayed" }),
+            ),
+        );
+        wait_for(vcx, &view, |waku| {
+            waku.runtimes
+                .get(&ids.first)
+                .is_some_and(|runtime| runtime.pending_permission.is_none())
+        });
+        // The settle drops the supervisor card too — a live user-input ask
+        // stays up until its own answer or settle.
+        assert!(!card_painted(
+            vcx,
+            selector(format!("permission-option-{}-req-replayed-allow", ids.first))
+        ));
+        assert!(card_painted(
+            vcx,
+            selector(format!("user-input-option-{}-ask-replayed-0-0", ids.first))
+        ));
+    }
+
+    /// The encoded computer-use approval surfaces on the supervisor card
+    /// too — its decision rides the named employee's runtime, never the
+    /// boss session's.
+    #[gpui::test]
+    fn computer_approval_card_answers_the_employee_it_names(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, view, vcx, _supervisor, ids) = two_employee_app(cx);
+        update_app(vcx, &view, |waku, _, cx| {
+            waku
+                .runtimes
+                .get_mut(&ids.first)
+                .unwrap()
+                .pending_computer_approval = Some(crate::computer_use::PendingComputerApproval {
+                request: crate::computer_use::ComputerToolRequest {
+                    call_id: "call-1".into(),
+                    tool: "use".into(),
+                    arguments: serde_json::json!({"action": "click"}),
+                },
+                target: crate::computer_use::ComputerTarget {
+                    window_id: 1,
+                    bundle_id: "com.example.app".into(),
+                    team_id: None,
+                    app_name: "Example".into(),
+                    window_title: "Window".into(),
+                    width: 100,
+                    height: 100,
+                },
+                sensitive: false,
+            });
+            cx.notify();
+        });
+        assert!(card_painted(
+            vcx,
+            selector(format!("computer-option-{}-call-1-task", ids.first))
+        ));
+        click(
+            vcx,
+            selector(format!("computer-option-{}-call-1-task", ids.first)),
+        );
+        wait_for(vcx, &view, |_| {
+            daemon
+                .commands_for(ids.first)
+                .iter()
+                .any(|command| matches!(
+                    command,
+                    Command::RunComputerTool { request } if request.call_id == "call-1"
+                ))
+        });
+        read_app(vcx, &view, |waku| {
+            assert!(waku.runtimes[&ids.first]
+                .pending_computer_approval
+                .is_none());
+            assert!(daemon
+                .commands_for(ids.second)
+                .iter()
+                .all(|command| !matches!(command, Command::RunComputerTool { .. })));
+        });
+    }
+}

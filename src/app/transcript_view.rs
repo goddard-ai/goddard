@@ -564,6 +564,7 @@ impl Waku {
                 (!strip.is_empty()).then(|| {
                     div()
                         .id("transcript-top-strip")
+                        .debug_selector(|| "transcript-top-strip".into())
                         .absolute()
                         .top(px(8.0))
                         .left_0()
@@ -654,6 +655,12 @@ impl Waku {
                         "daemon-request-{session_id}-{}-{}",
                         permission.request_id, option.id
                     )))
+                    .debug_selector(|| {
+                        format!(
+                            "daemon-option-{session_id}-{}-{}",
+                            permission.request_id, option.id
+                        )
+                    })
                     .track_focus(&focus)
                     .tab_index(0)
                     .h(px(28.0))
@@ -818,7 +825,7 @@ impl Waku {
     /// task switch. Each card names its employee and binds its actions to
     /// the employee session's own runtime, so the answer resolves the
     /// original request wherever it was raised.
-    fn render_employee_requests(
+    pub(super) fn render_employee_requests(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -917,6 +924,7 @@ impl Waku {
             cards.push(
                 div()
                     .id(SharedString::from(format!("employee-request-{session_id}")))
+                    .debug_selector(|| format!("employee-request-{session_id}"))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(card)
                     .into_any_element(),

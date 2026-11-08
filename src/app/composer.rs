@@ -630,6 +630,12 @@ impl Waku {
                         "permission-{session_id}-{}-{}",
                         permission.request_id, option.id
                     )))
+                    .debug_selector(|| {
+                        format!(
+                            "permission-option-{session_id}-{}-{}",
+                            permission.request_id, option.id
+                        )
+                    })
                     .track_focus(&focus)
                     .tab_index(0)
                     .h(px(28.0))
@@ -785,6 +791,11 @@ impl Waku {
                     .id(SharedString::from(format!(
                         "user-input-{session_id}-{request_id}-{question_index}-option-{index}"
                     )))
+                    .debug_selector(|| {
+                        format!(
+                            "user-input-option-{session_id}-{request_id}-{question_index}-{index}"
+                        )
+                    })
                     .track_focus(&focus)
                     .tab_index(0)
                     .tab_stop(true)
@@ -998,6 +1009,9 @@ impl Waku {
             .id(SharedString::from(format!(
                 "user-input-{session_id}-{request_id}-{question_index}-continue"
             )))
+            .debug_selector(|| {
+                format!("user-input-continue-{session_id}-{request_id}-{question_index}")
+            })
             .track_focus(&next_focus)
             .tab_index(0)
             .tab_stop(can_continue)
@@ -1185,6 +1199,12 @@ impl Waku {
                         "computer-permission-{session_id}-{}-{decision}",
                         permission.request.call_id
                     )))
+                    .debug_selector(|| {
+                        format!(
+                            "computer-option-{session_id}-{}-{decision}",
+                            permission.request.call_id
+                        )
+                    })
                     .track_focus(&focus)
                     .tab_index(0)
                     .h(px(29.0))
