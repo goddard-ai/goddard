@@ -1,0 +1,1 @@
+- Fixed tasks briefly (or indefinitely, on failure) falling back to the loading state after opening, where a control-only task view snapshot could wipe the loaded transcript; tasks deleted elsewhere now leave the list instead of loading forever.

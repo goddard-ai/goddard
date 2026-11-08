@@ -516,7 +516,7 @@ pub(super) fn apply_transcript_payload(
 
 /// Newer turn data replaces the stored copy; window pages add turns the
 /// slice hasn't seen.
-fn merge_turns(turns: &mut Vec<AgentTurn>, arriving: &[AgentTurn]) {
+pub(super) fn merge_turns(turns: &mut Vec<AgentTurn>, arriving: &[AgentTurn]) {
     let mut known: HashSet<Uuid> = turns.iter().map(|turn| turn.id).collect();
     for turn in arriving {
         if let Some(existing) = turns.iter_mut().find(|existing| existing.id == turn.id) {

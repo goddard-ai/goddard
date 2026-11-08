@@ -25,7 +25,7 @@ use super::sessions::{
 };
 use super::settings::{filter_archived_sessions, visible_settings_pages};
 use super::sidebar::SidebarRow;
-use super::streaming::session_accepts_steer_result;
+use super::streaming::{apply_compact_task_view_snapshot, session_accepts_steer_result};
 use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     CONTINUE_PROMPT, ComposerSubmission, ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation,
@@ -8940,4 +8940,46 @@ fn pending_approval_is_a_bell_target_without_an_unread_completion() {
             }
         );
     }
+}
+
+/// A compact detail-view snapshot carries control state, not the transcript.
+/// Merging it must not skeletonize the resident session — that flips the
+/// open task back to the loading facade and forces a full re-hydration on
+/// every runtime attach and daemon reconnect.
+#[test]
+fn compact_task_view_snapshot_preserves_detail_and_merges_control_state() {
+    let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    existing.detail_loaded = true;
+    existing.begin_turn("prompt");
+    existing.push_message(MessageRole::Assistant, "answer");
+    existing.status = SessionStatus::Working;
+    existing.queued_messages.push(QueuedMessage::new("mine"));
+
+    // The daemon's compact snapshot is a list projection plus the last turn
+    // and the send queue: `detail_loaded` stays false and the transcript
+    // fields are empty.
+    let mut summary = existing.list_projection();
+    assert!(!summary.detail_loaded && summary.messages.is_empty());
+    let mut settled_turn = existing.turns.last().unwrap().clone();
+    settled_turn.status = TurnStatus::Completed;
+    summary.turns = vec![settled_turn];
+    summary.queued_messages = vec![QueuedMessage::agent("daemon parked", None)];
+
+    apply_compact_task_view_snapshot(&mut existing, &summary);
+
+    assert!(existing.detail_loaded);
+    assert_eq!(existing.messages.len(), 2);
+    assert_eq!(existing.turns.last().unwrap().status, TurnStatus::Completed);
+    assert!(
+        existing
+            .queued_messages
+            .iter()
+            .any(|queued| queued.is_agent_owned())
+    );
+    assert!(
+        existing
+            .queued_messages
+            .iter()
+            .any(|queued| !queued.is_agent_owned())
+    );
 }

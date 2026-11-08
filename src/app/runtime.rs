@@ -632,7 +632,7 @@ pub(super) fn merge_hydrated_session(
     true
 }
 
-fn merge_session_catalog_row(
+pub(super) fn merge_session_catalog_row(
     local: &mut AgentSession,
     remote: AgentSession,
     has_local_runtime: bool,

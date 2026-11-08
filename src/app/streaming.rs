@@ -26,6 +26,29 @@ fn attention_sound(
     })
 }
 
+/// A compact view's detail snapshot carries control state — list columns,
+/// the last turn, the send queue — but no transcript. Merge those fields
+/// into the resident session without touching materialized detail, so a
+/// detail-interest flip or daemon reconnect cannot blank an open transcript
+/// back into the loading facade.
+pub(super) fn apply_compact_task_view_snapshot(
+    existing: &mut AgentSession,
+    snapshot: &AgentSession,
+) {
+    super::runtime::merge_session_catalog_row(existing, snapshot.clone(), true);
+    super::transcript_window::merge_turns(&mut existing.turns, &snapshot.turns);
+    let mut queued = snapshot.queued_messages.clone();
+    queued.retain(|queued| queued.is_agent_owned());
+    queued.extend(
+        existing
+            .queued_messages
+            .iter()
+            .filter(|queued| !queued.is_agent_owned())
+            .cloned(),
+    );
+    existing.queued_messages = queued;
+}
+
 impl Waku {
     pub(super) fn finish_streaming_assistant(&mut self, session_id: Uuid) {
         if let Some(session) = self.state.session_mut(session_id) {
@@ -330,7 +353,7 @@ impl Waku {
                 } else {
                     self.stale_task_details.insert(session_id);
                 }
-                if detail || session.detail_loaded {
+                if session.detail_loaded {
                     // A detail snapshot carries the complete transcript —
                     // any bounded slice materialized for this session is
                     // superseded wholesale.
@@ -377,6 +400,20 @@ impl Waku {
                         self.reset_visible_state();
                         self.reset_transcript_rows(self.transcript_row_count());
                         self.reapply_transcript_landing(session_id, cx);
+                    }
+                } else if detail {
+                    // A compact view's detail snapshot carries control state —
+                    // list columns, the last turn, the send queue — but no
+                    // transcript. The resident detail, materialized window and
+                    // loading facade survive; only the control fields merge.
+                    let previous_kinds = (self.state.selected_session == Some(session_id))
+                        .then(|| self.snapshot_selected_transcript_rows(session_id))
+                        .flatten();
+                    if let Some(existing) = self.state.session_mut(session_id) {
+                        apply_compact_task_view_snapshot(existing, &session);
+                    }
+                    if let Some(previous_kinds) = previous_kinds.as_deref() {
+                        self.splice_transcript_rows_after_visibility_change(previous_kinds);
                     }
                 } else {
                     self.stale_task_details.insert(session_id);

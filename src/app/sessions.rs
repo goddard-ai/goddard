@@ -1264,8 +1264,20 @@ impl Waku {
                             }
                         }
                         Err(error) => {
-                            eprintln!("could not hydrate task {session_id}; retrying: {error}");
-                            waku.retry_session_hydration(session_id, cx);
+                            if error.kind() == std::io::ErrorKind::NotFound {
+                                // The owning daemon answered without the row:
+                                // the task is gone, not still loading — a retry
+                                // loop would hold the facade open forever.
+                                eprintln!("hydrating removed task {session_id}; dropping the row");
+                                waku.session_hydrations.complete(session_id);
+                                if waku.state.selected_session == Some(session_id) {
+                                    waku.show_toast(tr!("errors.open_session", error = error));
+                                }
+                                waku.remove_session_inner(session_id, None, false, cx);
+                            } else {
+                                eprintln!("could not hydrate task {session_id}; retrying: {error}");
+                                waku.retry_session_hydration(session_id, cx);
+                            }
                         }
                     }
                     waku.start_pending_session_hydrations(cx);
