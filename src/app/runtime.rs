@@ -4929,6 +4929,11 @@ impl Waku {
     /// model discovery and version probes for whatever the detection finds
     /// installed.
     pub(super) fn refresh_provider_detection(&mut self, scope: Option<ProviderKind>) {
+        // Headless fixtures cannot wake the test scheduler from the
+        // detection thread this spawns.
+        if cfg!(test) {
+            return;
+        }
         self.refresh_provider_detection_on(waku_client::DaemonKey::Local, scope);
     }
 

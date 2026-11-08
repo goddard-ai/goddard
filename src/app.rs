@@ -8436,4 +8436,6 @@ impl Waku {
 }
 
 #[cfg(test)]
+mod sidebar_interaction_tests;
+#[cfg(test)]
 mod tests;

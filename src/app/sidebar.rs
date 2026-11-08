@@ -7,7 +7,7 @@ use crate::ui::shortcut::ShortcutHint;
 use waku_client::friends::TransferStatus;
 use waku_client::persistence::SidebarProjectOrderEntry;
 
-actions!(waku_sidebar, [CancelSessionRename]);
+actions!(waku_sidebar, [CancelSessionRename, ReleaseSidebarGroupAlt]);
 
 #[derive(Clone)]
 struct SidebarProjectDrag {
@@ -42,15 +42,22 @@ impl gpui::Render for SidebarProjectDragView {
 
 pub(super) const SESSION_RENAME_PARENT_CONTEXT: &str = "SessionRename";
 const SESSION_RENAME_FIELD_CONTEXT: &str = "SessionRename > TextInput";
+const SIDEBAR_GROUP_ALT_CONTEXT: &str = "SidebarGroupAlt";
 
 /// Keep Escape inside the focused inline editor so it cancels the rename,
 /// rather than falling through to the window-wide Stop action.
 pub fn init(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new(
-        "escape",
-        CancelSessionRename,
-        Some(SESSION_RENAME_FIELD_CONTEXT),
-    )]);
+    cx.bind_keys([
+        KeyBinding::new(
+            "escape",
+            CancelSessionRename,
+            Some(SESSION_RENAME_FIELD_CONTEXT),
+        ),
+        // Workspace's `escape → CancelTurn` outranks element `on_key_down`
+        // handlers in this GPUI fork, so the focused Option control needs
+        // its own context to see the release key at all.
+        KeyBinding::new("escape", ReleaseSidebarGroupAlt, Some(SIDEBAR_GROUP_ALT_CONTEXT)),
+    ]);
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -126,7 +133,7 @@ pub(super) enum SidebarGroup {
 }
 
 impl SidebarGroup {
-    fn element_key(self) -> SharedString {
+    pub(super) fn element_key(self) -> SharedString {
         match self {
             Self::Pinned => "pinned".into(),
             Self::Terminals => "terminals".into(),
@@ -228,6 +235,10 @@ pub(super) struct SidebarGroupAlt {
     pub(super) row: usize,
     /// The group that header rendered.
     pub(super) group: SidebarGroup,
+    /// The Boss host whose section owns the header — employee groups repeat
+    /// once per host, so `row` and `group` alone cannot tell a rebuild's
+    /// identical-named section apart from the one that armed.
+    pub(super) boss: Option<waku_client::DaemonKey>,
     /// Pinned engagement (click or keyboard) survives the pointer leaving
     /// the group; a hover arm ends at the group's edge.
     pub(super) sticky: bool,
@@ -237,7 +248,34 @@ pub(super) struct SidebarGroupAlt {
 /// rebuild on every structural sidebar change, so the index alone is not
 /// proof — the row it lands on must still be that group's header.
 fn sidebar_group_alt_active(rows: &[SidebarRow], engaged: SidebarGroupAlt) -> bool {
-    rows.get(engaged.row) == Some(&SidebarRow::Header(engaged.group))
+    if rows.get(engaged.row) != Some(&SidebarRow::Header(engaged.group)) {
+        return false;
+    }
+    sidebar_group_alt_boss(rows, engaged.row, engaged.group) == engaged.boss
+}
+
+/// The Boss host whose block owns an employee-section header — the nearest
+/// `SidebarRow::Boss` above it. Session-side groups never sit in a boss
+/// block and return `None`.
+fn sidebar_group_alt_boss(
+    rows: &[SidebarRow],
+    index: usize,
+    group: SidebarGroup,
+) -> Option<waku_client::DaemonKey> {
+    if !matches!(
+        group,
+        SidebarGroup::Outcomes
+            | SidebarGroup::Errands
+            | SidebarGroup::Waiting
+            | SidebarGroup::Employees
+            | SidebarGroup::Planning
+    ) {
+        return None;
+    }
+    rows.get(..index)?.iter().rev().find_map(|row| match row {
+        SidebarRow::Boss(key) => Some(*key),
+        _ => None,
+    })
 }
 
 fn sidebar_purpose_group(
@@ -4119,9 +4157,12 @@ impl Waku {
         if current.is_some_and(|alt| alt.row == row && alt.group == group) {
             return;
         }
+        let rows = self.sidebar_rows_snapshot.borrow().clone();
+        let boss = sidebar_group_alt_boss(&rows, row, group);
         self.sidebar_group_alt.set(Some(SidebarGroupAlt {
             row,
             group,
+            boss,
             sticky: false,
         }));
         cx.notify();
@@ -4135,9 +4176,12 @@ impl Waku {
             .sidebar_group_alt
             .get()
             .is_some_and(|alt| alt.row == row && alt.group == group && alt.sticky);
+        let rows = self.sidebar_rows_snapshot.borrow().clone();
+        let boss = sidebar_group_alt_boss(&rows, row, group);
         self.sidebar_group_alt.set((!pinned).then_some(SidebarGroupAlt {
             row,
             group,
+            boss,
             sticky: true,
         }));
         cx.notify();
@@ -5712,6 +5756,22 @@ impl Waku {
                         .id(SharedString::from(format!(
                             "sidebar-group-alt-{group_key}-{index}"
                         )))
+                        .debug_selector(|| {
+                            format!("sidebar-group-alt-eye-{group_key}-{index}")
+                        })
+                        .key_context(SIDEBAR_GROUP_ALT_CONTEXT)
+                        .on_action(cx.listener(
+                            move |this, _: &ReleaseSidebarGroupAlt, _, cx| {
+                                if this
+                                    .sidebar_group_alt
+                                    .get()
+                                    .is_some_and(|alt| alt.row == index && alt.group == group)
+                                {
+                                    this.clear_sidebar_group_alt(cx);
+                                    cx.stop_propagation();
+                                }
+                            },
+                        ))
                         .track_focus(&alt_focus)
                         .tab_index(0)
                         .tab_stop(true)
@@ -5796,6 +5856,7 @@ impl Waku {
         .id(SharedString::from(format!(
             "sidebar-group-toggle-{group_key}-{occurrence}"
         )))
+        .debug_selector(|| format!("sidebar-group-toggle-{group_key}-{occurrence}"))
         .track_focus(&header_focus)
         .tab_index(0)
         .tab_group()
@@ -6749,6 +6810,7 @@ impl Waku {
         let keyboard_menu = menu.clone();
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
+            .debug_selector(|| format!("session-row-{}", session.id))
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 this.set_transcript_preload_hover(session_id, *hovered, cx);
             }))
@@ -7894,6 +7956,13 @@ impl Waku {
                             element.child(
                                 div()
                                     .flex_none()
+                                    .debug_selector(|| {
+                                        format!(
+                                            "session-time-{}-{}",
+                                            session.id,
+                                            if alt_effective { "date" } else { "age" }
+                                        )
+                                    })
                                     .text_size(sp(12.5))
                                     .text_color(theme.text_tertiary)
                                     .child(SharedString::from(label)),
@@ -10174,6 +10243,7 @@ mod tests {
         let engaged = SidebarGroupAlt {
             row: 7,
             group: SidebarGroup::Date(SessionDateGroup::Today),
+            boss: None,
             sticky: false,
         };
         assert!(sidebar_group_alt_active(&rows, engaged));

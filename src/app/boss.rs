@@ -5609,6 +5609,7 @@ impl Waku {
         };
         let row = div()
             .id(format!("boss-employee-{id}"))
+            .debug_selector(|| format!("employee-row-{id}"))
             .when(archivable, |row| row.group(group_name.clone()))
             .tab_index(0)
             .h(px(sidebar::SIDEBAR_SESSION_CARD_HEIGHT))
