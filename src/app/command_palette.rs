@@ -35,6 +35,7 @@ actions!(
 
 const SEARCH_CONTEXT: &str = "CommandPalette > TextInput";
 const MAX_TASK_RESULTS: usize = 12;
+const MAX_UNARCHIVE_RESULTS: usize = 20;
 const MIN_EXACT_COMMAND_SUBSTRING_CHARS: usize = 3;
 const MAX_RESUME_RESULTS: usize = 30;
 const PROVIDER_SESSION_CATALOG_LIMIT: usize = 250;
@@ -291,6 +292,8 @@ enum PaletteAction {
     GoToNextUnreadCompletion,
     MarkAllSessionsRead,
     UndoArchive,
+    OpenUnarchive,
+    UnarchiveTask(Uuid),
     ToggleSidebar,
     ToggleRightPanel,
     ToggleBigPicture,
@@ -373,6 +376,7 @@ enum CommandPaletteView {
     RemoveProject,
     /// The "Focus project…" project picker.
     FocusProject,
+    Unarchive,
     ShareFileFriends,
     SyncProjects(bool),
     SyncTargets(Uuid, bool),
@@ -1231,6 +1235,16 @@ impl Waku {
         self.command_palette.view = CommandPaletteView::RemoveProject;
         self.command_palette.search.update(cx, |input, cx| {
             input.set_placeholder(tr!("command_palette.remove_project_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    fn open_command_palette_unarchive_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::Unarchive;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.unarchive_placeholder"), cx);
             input.clear(cx);
         });
         self.refresh_command_palette_results("", false, cx);
@@ -2425,7 +2439,9 @@ impl Waku {
                 }
             }
             CommandPaletteView::RemoveProject => self.leave_command_palette_drill_in_view(cx),
-            CommandPaletteView::FocusProject => self.leave_command_palette_drill_in_view(cx),
+            CommandPaletteView::FocusProject | CommandPaletteView::Unarchive => {
+                self.leave_command_palette_drill_in_view(cx);
+            }
             CommandPaletteView::ShareFileFriends
             | CommandPaletteView::SyncProjects(_)
             | CommandPaletteView::SyncTargets(_, _)
@@ -2470,6 +2486,7 @@ impl Waku {
             }
             CommandPaletteView::RemoveProject => tr!("command_palette.remove_project_placeholder"),
             CommandPaletteView::FocusProject => tr!("command_palette.focus_project_placeholder"),
+            CommandPaletteView::Unarchive => tr!("command_palette.unarchive_placeholder"),
             CommandPaletteView::SyncProjects(_) => tr!("command_palette.share_project_placeholder"),
             CommandPaletteView::SyncTargets(_, true) => {
                 tr!("command_palette.share_friend_placeholder")
@@ -2550,6 +2567,7 @@ impl Waku {
                 | CommandPaletteView::RunScriptWorktrees
                 | CommandPaletteView::RemoveProject
                 | CommandPaletteView::FocusProject
+                | CommandPaletteView::Unarchive
                 | CommandPaletteView::ShareFileFriends
                 | CommandPaletteView::SyncProjects(_)
                 | CommandPaletteView::SyncTargets(_, _)
@@ -2892,6 +2910,16 @@ impl Waku {
                 next(),
             ),
         ];
+
+        commands.push(CommandPaletteItem::command(
+            display_section(PaletteSection::Suggested),
+            tr!("command_palette.unarchive"),
+            "icons/archive.svg",
+            None,
+            PaletteAction::OpenUnarchive,
+            "unarchive restore archived chats tasks sessions conversations",
+            next(),
+        ));
 
         // The toast's Undo survives dismissal here: the most recent archive
         // — a batch counts as one — stays restorable until it's used or the
@@ -4003,6 +4031,7 @@ impl Waku {
     fn command_palette_task_candidates(
         &self,
         search: &crate::persistence::SessionMessageSearchQuery,
+        scope_to_focused_project: bool,
     ) -> Vec<CommandPaletteItem> {
         let projects = self
             .state
@@ -4041,9 +4070,10 @@ impl Waku {
                     && !session.is_side_chat()
                     // A focused project scopes the palette's task results to
                     // it — the sidebar already shows nothing else.
-                    && self
-                        .focused_project_id()
-                        .is_none_or(|focused| session.project_id == focused)
+                    && (!scope_to_focused_project
+                        || self
+                            .focused_project_id()
+                            .is_none_or(|focused| session.project_id == focused))
                     && match scope {
                         crate::persistence::SessionMessageSearchScope::Active => {
                             session.archived_at.is_none()
@@ -4787,6 +4817,43 @@ impl Waku {
             selected_action.flatten(),
             Some(PaletteAction::RemoveProject),
         );
+    }
+
+    fn refresh_command_palette_unarchive_results(&mut self, query: &str, preserve_selection: bool) {
+        let selected = preserve_selection
+            .then(|| {
+                self.command_palette
+                    .results
+                    .get(self.command_palette.selected)
+            })
+            .flatten()
+            .map(|item| item.action.clone());
+        let search = crate::persistence::parse_session_message_search("archived:true");
+        let mut candidates = self.command_palette_task_candidates(&search, false);
+        let archived_at = self
+            .state
+            .sessions
+            .iter()
+            .filter_map(|session| session.archived_at.map(|at| (session.id, at)))
+            .collect::<HashMap<_, _>>();
+        for item in &mut candidates {
+            if let PaletteAction::SelectTask(id) = item.action {
+                item.action = PaletteAction::UnarchiveTask(id);
+                item.recency = archived_at.get(&id).copied().unwrap_or_default();
+            }
+            item.content_match = None;
+        }
+        candidates.sort_by_key(|item| std::cmp::Reverse(item.recency));
+        for (order, item) in candidates.iter_mut().enumerate() {
+            item.order = order;
+        }
+        let query = query.trim();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        candidates.truncate(MAX_UNARCHIVE_RESULTS);
+        self.command_palette.results = candidates;
+        self.finish_drill_in_refresh(selected, None);
     }
 
     fn refresh_command_palette_focus_project_results(
@@ -5572,6 +5639,10 @@ impl Waku {
                 self.refresh_command_palette_remove_project_results(query, preserve_selection);
                 return;
             }
+            CommandPaletteView::Unarchive => {
+                self.refresh_command_palette_unarchive_results(query, preserve_selection);
+                return;
+            }
             CommandPaletteView::FocusProject => {
                 self.refresh_command_palette_focus_project_results(query, preserve_selection);
                 return;
@@ -5644,7 +5715,7 @@ impl Waku {
             self.command_palette.message_matches_query.as_deref() == Some(query);
         let mut utf32 = Vec::new();
         let mut tasks = self
-            .command_palette_task_candidates(&search)
+            .command_palette_task_candidates(&search, true)
             .into_iter()
             .filter_map(|mut item| {
                 if needle.is_empty() {
@@ -6225,6 +6296,10 @@ impl Waku {
                 self.open_command_palette_remove_project_view(cx);
                 return;
             }
+            PaletteAction::OpenUnarchive => {
+                self.open_command_palette_unarchive_view(cx);
+                return;
+            }
             PaletteAction::OpenFocusProject => {
                 self.open_command_palette_focus_project_view(cx);
                 return;
@@ -6448,6 +6523,7 @@ impl Waku {
             }
             PaletteAction::MarkAllSessionsRead => self.mark_all_sessions_read(cx),
             PaletteAction::UndoArchive => self.undo_last_archive(cx),
+            PaletteAction::UnarchiveTask(id) => self.unarchive_session(id, true, cx),
             PaletteAction::CheckForUpdates => {
                 window.dispatch_action(CheckForUpdates.boxed_clone(), cx)
             }
@@ -6738,6 +6814,7 @@ impl Waku {
             | PaletteAction::ChooseRunScriptLocation { .. }
             | PaletteAction::OpenRemoveProject
             | PaletteAction::OpenFocusProject
+            | PaletteAction::OpenUnarchive
             | PaletteAction::ShareFileOrFolder
             | PaletteAction::SyncTo(_)
             | PaletteAction::ChooseSyncProject(_, _)
@@ -6831,6 +6908,7 @@ impl Waku {
             | CommandPaletteView::RunScriptProjects
             | CommandPaletteView::RemoveProject
             | CommandPaletteView::FocusProject
+            | CommandPaletteView::Unarchive
             | CommandPaletteView::ShareFileFriends
             | CommandPaletteView::SyncProjects(_)
             | CommandPaletteView::SyncTargets(_, _)

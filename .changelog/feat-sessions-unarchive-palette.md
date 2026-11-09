@@ -1,0 +1,1 @@
+- Restore archived chats with “Unarchive...” in the command palette; browse the 20 most recently archived chats or search older chats.

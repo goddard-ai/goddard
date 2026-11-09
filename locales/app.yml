@@ -7704,3 +7704,8 @@ command_palette.rush_current_task:
   en: Rush current task
 command_palette.stop_rushing_current_task:
   en: Stop rushing current task
+
+command_palette.unarchive:
+  en: Unarchive...
+command_palette.unarchive_placeholder:
+  en: Search archived chats to restore…
