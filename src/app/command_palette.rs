@@ -229,6 +229,7 @@ enum PaletteAction {
     SplitTerminalRight,
     SplitTerminalDown,
     NavigateTerminal(Uuid, terminals::TerminalCheckoutTarget),
+    CopyTerminalScrollback(Uuid),
     NewTaskInDirectory(PathBuf, bool),
     NewTaskProjectless(bool),
     NewTaskInSameWorktree,
@@ -3984,6 +3985,15 @@ impl Waku {
             });
         }
         if let Some(id) = self.command_palette.focused_terminal {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("terminal.copy_scrollback"),
+                "icons/copy.svg",
+                None,
+                PaletteAction::CopyTerminalScrollback(id),
+                "terminal copy scrollback history output clipboard text",
+                next(),
+            ));
             for (target, label, keywords) in [
                 (
                     terminals::TerminalCheckoutTarget::Primary,
@@ -6398,6 +6408,11 @@ impl Waku {
             }
             PaletteAction::NavigateTerminal(id, target) => {
                 self.navigate_terminal_checkout(id, target, cx);
+            }
+            PaletteAction::CopyTerminalScrollback(id) => {
+                if let Some(terminal) = self.right_panel_terminals.get(&id) {
+                    terminal.update(cx, |terminal, cx| terminal.copy_scrollback(cx));
+                }
             }
             PaletteAction::SplitTerminalRight => {
                 self.split_terminal_action(&SplitTerminal, window, cx)

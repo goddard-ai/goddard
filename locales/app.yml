@@ -7648,6 +7648,8 @@ command_palette.git_pull_rebase:
 
 terminal.go_to_primary_checkout:
   en: "Terminal: Go to primary .git checkout root"
+terminal.copy_scrollback:
+  en: "Terminal: Copy scrollback"
 terminal.go_to_previous_worktree:
   en: "Terminal: Go to previous worktree"
 terminal.go_to_default_checkout:

@@ -2553,6 +2553,29 @@ impl TerminalView {
         }
     }
 
+    pub fn copy_scrollback(&self, cx: &mut Context<Self>) {
+        let Some(session) = &self.session else {
+            return;
+        };
+        let term = session.term.clone();
+        cx.spawn(async move |_, cx| {
+            let text = cx
+                .background_executor()
+                .spawn(async move {
+                    let term = term.lock();
+                    term.bounds_to_string(
+                        TerminalPoint::new(term.topmost_line(), Column(0)),
+                        TerminalPoint::new(term.bottommost_line(), term.last_column()),
+                    )
+                })
+                .await;
+            let _ = cx.update(|cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            });
+        })
+        .detach();
+    }
+
     /// ⌘C reaches the view as an action, not a keystroke: the workspace
     /// binds it to `CopySelection` and the Edit menu sends `Copy`. The
     /// grid's own selection answers both before the workspace's

@@ -1,0 +1,1 @@
+- Copy the focused terminal’s retained history and current screen as plain text with “Terminal: Copy scrollback” in the command palette.
