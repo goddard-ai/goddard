@@ -1,0 +1,1 @@
+- Long waits near a full context window now show that the provider may be compacting; the context usage panel reports likely compaction when a large usage drop follows. These hints never interrupt or restart a task.

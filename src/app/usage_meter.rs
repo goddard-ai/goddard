@@ -274,6 +274,7 @@ impl Waku {
         let compact = (provider.supports_compact()
             || crate::composer_complete::has_compact_path(&self.slash_command_index))
         .then(|| (session.id, cx.entity().downgrade()));
+        let compaction_hint = session.compaction_hint(Instant::now());
         let percent = context.and_then(context_percent);
         let fill = match percent {
             Some(percent) if percent >= 95.0 => theme.danger,
@@ -317,6 +318,7 @@ impl Waku {
                     provider,
                     context,
                     plan.clone(),
+                    compaction_hint,
                     error.as_deref(),
                     plan_loading,
                     compact.clone(),
@@ -344,6 +346,7 @@ fn usage_panel(
     provider: ProviderKind,
     context: Option<ContextUsage>,
     plan: Option<PlanUsage>,
+    compaction_hint: Option<waku_protocol::compaction::CompactionHint>,
     error: Option<&str>,
     plan_loading: bool,
     compact: Option<(Uuid, WeakEntity<Waku>)>,
@@ -366,6 +369,14 @@ fn usage_panel(
         .flex_col()
         .gap(px(12.0))
         .text_size(sp(12.5));
+
+    if let Some(hint) = compaction_hint {
+        let label = match hint {
+            waku_protocol::compaction::CompactionHint::Possible => tr!("usage.possible_compaction"),
+            waku_protocol::compaction::CompactionHint::Likely => tr!("usage.likely_compaction"),
+        };
+        panel = panel.child(div().text_color(theme.text_secondary).child(label));
+    }
 
     // The context row always renders; a session with nothing measured yet
     // reads "0" over an empty track, exactly like the CLI's own panel.

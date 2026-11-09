@@ -310,6 +310,9 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> bool {
         runtime.last_active_at = Instant::now();
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.observe_compaction(&event, Instant::now());
+        }
         // Keyed errors render in the client's locale, then flow through the
         // same handling as any opaque provider error.
         let event = match event {

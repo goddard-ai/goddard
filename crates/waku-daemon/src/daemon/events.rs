@@ -68,6 +68,16 @@ pub(super) fn record_event_with_attachments(
             "Boss chat is archived; reopen the active Boss chat"
         );
     }
+    let now = std::time::Instant::now();
+    let previous_hint = session.compaction_hint(now);
+    session.observe_compaction(event, now);
+    if session.compaction_hint(now) == Some(waku_protocol::compaction::CompactionHint::Likely)
+        && previous_hint != Some(waku_protocol::compaction::CompactionHint::Likely)
+    {
+        eprintln!(
+            "likely silent compaction in session {session_id}: delayed first activity and context usage drop (advisory only)"
+        );
+    }
     let mut activity = None;
     match event {
         DriverEvent::AgentPresetSelected(preset) => session.agent_preset.clone_from(preset),

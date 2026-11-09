@@ -7709,3 +7709,10 @@ command_palette.unarchive:
   en: Unarchive...
 command_palette.unarchive_placeholder:
   en: Search archived chats to restore…
+
+transcript.possible_compaction:
+  en: Waiting · provider may be compacting
+usage.likely_compaction:
+  en: Context likely compacted — an unusually long wait was followed by a large drop in context usage.
+usage.possible_compaction:
+  en: Context is nearly full and the provider is taking unusually long to respond. It may be compacting.

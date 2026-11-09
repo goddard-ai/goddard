@@ -2925,6 +2925,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         available_commands: Vec::new(),
         thread_goal: None,
         context_usage: None,
+        compaction_monitor: Default::default(),
         runtime_event_cursor,
         // Same duplication story as `runtime_event_cursor`: merges and
         // replay dedup read the confirmed activation mark without a hydrate.

@@ -38,6 +38,7 @@ pub mod blob;
 pub mod boss;
 pub mod chains;
 pub mod checkpoint;
+pub mod compaction;
 pub mod composer;
 pub mod computer_use;
 pub mod custom_commands;

@@ -34,6 +34,12 @@ pub(super) fn working_indicator_label(
     if session.is_some_and(|session| session.status == SessionStatus::Background) {
         return tr!("transcript.waiting_background");
     }
+    if session.is_some_and(|session| {
+        session.compaction_hint(Instant::now())
+            == Some(waku_protocol::compaction::CompactionHint::Possible)
+    }) {
+        return tr!("transcript.possible_compaction");
+    }
     let turn = session.and_then(|session| session.turns.last());
     if turn.is_some_and(|turn| !turn.provider_turn_started) {
         return match stage {

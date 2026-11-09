@@ -532,6 +532,7 @@ pub(super) fn persist_agent_prompt(
         return Ok(PromptPersistence::Duplicate);
     }
     let session = &mut state.sessions[index];
+    session.observe_prompt_dispatch(turn_id, std::time::Instant::now());
     if session.adopt_submitted_prompt(
         message,
         turn_id,

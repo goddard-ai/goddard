@@ -1999,6 +1999,10 @@ pub struct AgentSession {
     /// session's meter starts where the conversation left off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_usage: Option<ContextUsage>,
+    /// Advisory live timing; never persisted or used as a recovery signal.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub compaction_monitor: crate::compaction::CompactionMonitor,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_event_cursor: Option<RuntimeEventCursor>,
     /// Read-only compatibility field for v1 state files. New saves omit it.
@@ -2146,6 +2150,7 @@ impl AgentSession {
             available_commands: Vec::new(),
             thread_goal: None,
             context_usage: None,
+            compaction_monitor: Default::default(),
             runtime_event_cursor: None,
             provider_session_id: None,
             messages: Vec::new(),
@@ -2228,6 +2233,7 @@ impl AgentSession {
             available_commands: Vec::new(),
             thread_goal: None,
             context_usage: None,
+            compaction_monitor: Default::default(),
             // A list column: attach resumes replay dedup from it without
             // hydrating the session.
             runtime_event_cursor: self.runtime_event_cursor,
