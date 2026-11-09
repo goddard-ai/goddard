@@ -1,1 +1,1 @@
-- Tasks and deliverables disappear from the sidebar immediately when archived, retain pending changes across restarts, and offer grouped Undo and recovery when synchronization fails.
+- Tasks and deliverables disappear immediately when archived, retain pending changes across restarts, and offer grouped Undo. Routine saves stay quiet; slow saves and failures appear above the sidebar footer without shifting rows, with Retry and expandable recovery details.

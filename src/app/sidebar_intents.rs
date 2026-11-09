@@ -1,6 +1,7 @@
 //! Client-owned desired sidebar state. The coordinator journals before dispatch,
 //! serializes each host independently, and retains failed intent for recovery.
 use super::*;
+use gpui::{Task, relative};
 use serde::{Deserialize, Serialize};
 use std::{fs, io::Write};
 use waku_client::DaemonKey;
@@ -8,6 +9,7 @@ use waku_protocol::boss::BossState;
 use waku_protocol::sidebar_intent::{SidebarEdit, SidebarIntent, SidebarIntentResult};
 
 const MAX_ATTEMPTS: u32 = 8;
+const SLOW_SAVE_DELAY: Duration = Duration::from_secs(2);
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 enum Phase {
     Queued,
@@ -86,6 +88,11 @@ pub(super) struct SidebarIntents {
     archives: HashSet<Uuid>,
     pending_count: usize,
     blocked_count: usize,
+    needs_attention: bool,
+    // UI-only clock: ordinary round trips never need a visible status.
+    pending_since: Option<Instant>,
+    status_delay: RefCell<Option<Task<()>>>,
+    status_details: bool,
     reason: Option<String>,
     hosts: Vec<DaemonKey>,
     bases: RefCell<HashMap<String, SidebarEdit>>,
@@ -204,6 +211,10 @@ impl SidebarIntents {
             archives: HashSet::new(),
             pending_count: 0,
             blocked_count: 0,
+            needs_attention: false,
+            pending_since: None,
+            status_delay: RefCell::new(None),
+            status_details: false,
             reason: None,
             hosts: Vec::new(),
             bases: RefCell::new(HashMap::new()),
@@ -575,6 +586,7 @@ impl SidebarIntents {
         }
         self.pending_count = 0;
         self.blocked_count = 0;
+        self.needs_attention = false;
         self.reason = None;
         self.hosts.clear();
         for e in self.entries.values().filter(|e| e.unresolved()) {
@@ -585,6 +597,8 @@ impl SidebarIntents {
             if self.reason.is_none() {
                 self.reason = e.reason.clone();
             }
+            self.needs_attention |=
+                e.phase == Phase::Blocked || (e.phase == Phase::Preflight && e.reason.is_some());
             if matches!(e.phase, Phase::Blocked | Phase::Preflight) {
                 self.blocked_count += 1;
             }
@@ -599,6 +613,23 @@ impl SidebarIntents {
                 self.archives.insert(id);
             }
         }
+        if self.pending_count == 0 {
+            self.pending_since = None;
+            *self.status_delay.get_mut() = None;
+            if self.error.is_none() {
+                self.status_details = false;
+            }
+        } else {
+            self.pending_since.get_or_insert_with(Instant::now);
+        }
+    }
+    fn status_visible(&self, now: Instant) -> bool {
+        self.error.is_some()
+            || self.needs_attention
+            || (self.pending_count() > 0
+                && self
+                    .pending_since
+                    .is_some_and(|since| now.duration_since(since) >= SLOW_SAVE_DELAY))
     }
     pub fn pending_count(&self) -> usize {
         self.pending_count
@@ -1068,17 +1099,34 @@ impl Waku {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let count = self.sidebar_intents.pending_count();
-        if count == 0 && self.sidebar_intents.error.is_none() {
+        let now = Instant::now();
+        if !self.sidebar_intents.status_visible(now) {
+            let delay_scheduled = self.sidebar_intents.status_delay.borrow().is_some();
+            if let Some(since) = self.sidebar_intents.pending_since
+                && !delay_scheduled
+            {
+                let delay = SLOW_SAVE_DELAY.saturating_sub(now.duration_since(since));
+                *self.sidebar_intents.status_delay.borrow_mut() =
+                    Some(cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(delay).await;
+                        let _ = this.update(cx, |_, cx| cx.notify());
+                    }));
+            }
             return None;
         }
+        let needs_attention =
+            self.sidebar_intents.error.is_some() || self.sidebar_intents.needs_attention;
+        let details_open = self.sidebar_intents.status_details;
         let theme = Theme::current(cx);
         let label = if self.sidebar_intents.error.is_some() {
             tr!("sidebar.changes_not_saved")
-        } else if self.sidebar_intents.blocked_count() > 0 {
-            tr!("sidebar.changes_blocked", count = count)
+        } else if self.sidebar_intents.needs_attention {
+            tr!(
+                "sidebar.changes_blocked",
+                count = self.sidebar_intents.blocked_count()
+            )
         } else {
-            tr!("sidebar.changes_syncing", count = count)
+            tr!("sidebar.changes_still_saving")
         };
         let detail = self
             .sidebar_intents
@@ -1086,22 +1134,26 @@ impl Waku {
             .clone()
             .or_else(|| self.sidebar_intents.reason.clone())
             .unwrap_or_else(|| tr!("sidebar.changes_detail"));
-        let hosts = self
-            .sidebar_intents
-            .hosts
-            .iter()
-            .map(|key| match key {
-                DaemonKey::Local => tr!("sidebar.changes_local_host"),
-                DaemonKey::Remote(id) => self
-                    .state
-                    .remote_hosts
-                    .iter()
-                    .find(|host| host.id == *id)
-                    .map(|host| host.name.clone())
-                    .unwrap_or_else(|| tr!("sidebar.changes_removed_host")),
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
+        let hosts = if details_open {
+            self.sidebar_intents
+                .hosts
+                .iter()
+                .map(|key| match key {
+                    DaemonKey::Local => tr!("sidebar.changes_local_host"),
+                    DaemonKey::Remote(id) => self
+                        .state
+                        .remote_hosts
+                        .iter()
+                        .find(|host| host.id == *id)
+                        .map(|host| host.name.clone())
+                        .unwrap_or_else(|| tr!("sidebar.changes_removed_host")),
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            String::new()
+        };
+        let details_focus = self.transcript_control_focus("sidebar-intent-details", cx);
         let retry_focus = self.transcript_control_focus("sidebar-intent-retry", cx);
         let undo_focus = self.transcript_control_focus("sidebar-intent-undo", cx);
         let adopt_focus = self.transcript_control_focus("sidebar-intent-adopt", cx);
@@ -1120,80 +1172,121 @@ impl Waku {
         };
         Some(
             div()
-                .px(px(12.0))
-                .py(px(5.0))
+                .id("sidebar-intent-status")
+                .absolute()
+                .bottom(relative(1.0))
+                .left(px(8.0))
+                .right(px(8.0))
+                .mb(px(8.0))
+                .p(px(8.0))
+                .rounded(px(8.0))
+                .bg(theme.sidebar)
+                .border_1()
+                .border_color(theme.separator)
+                .shadow_md()
+                .occlude()
                 .flex()
                 .flex_col()
                 .gap(px(3.0))
                 .text_size(sp(11.0))
                 .text_color(theme.text_secondary)
                 .child(div().id("sidebar-intent-summary").child(label))
-                .child(div().child(hosts))
-                .when(
-                    self.sidebar_intents.blocked_count() > 0
-                        || self.sidebar_intents.error.is_some(),
-                    |row| row.child(div().child(detail)),
-                )
+                .when(details_open, |row| {
+                    row.child(div().child(hosts)).child(div().child(detail))
+                })
                 .child(
                     div()
                         .flex()
                         .flex_wrap()
                         .gap(px(6.0))
-                        .child(
-                            button(
-                                "sidebar-intent-retry",
-                                tr!("sidebar.changes_retry"),
-                                &retry_focus,
+                        .when(needs_attention, |row| {
+                            row.child(
+                                button("sidebar-intent-retry", tr!("common.retry"), &retry_focus)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.retry_sidebar_changes(window, cx)
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        |this, event: &KeyDownEvent, window, cx| {
+                                            if matches!(
+                                                event.keystroke.key.as_str(),
+                                                "enter" | "space"
+                                            ) {
+                                                this.retry_sidebar_changes(window, cx);
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    )),
                             )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.retry_sidebar_changes(window, cx)
-                            }))
-                            .on_key_down(cx.listener(
-                                |this, event: &KeyDownEvent, window, cx| {
-                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                        this.retry_sidebar_changes(window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            )),
-                        )
+                        })
                         .child(
                             button(
-                                "sidebar-intent-undo",
-                                tr!("sidebar.changes_undo"),
-                                &undo_focus,
+                                "sidebar-intent-details",
+                                if details_open {
+                                    tr!("sidebar.changes_hide_details")
+                                } else {
+                                    tr!("sidebar.changes_show_details")
+                                },
+                                &details_focus,
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.undo_sidebar_archive(cx);
-                            }))
-                            .on_key_down(cx.listener(
-                                |this, event: &KeyDownEvent, _, cx| {
-                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                        this.undo_sidebar_archive(cx);
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            )),
-                        )
-                        .child(
-                            button(
-                                "sidebar-intent-adopt",
-                                tr!("sidebar.changes_adopt"),
-                                &adopt_focus,
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.sidebar_intents.recover(true);
+                                this.sidebar_intents.status_details =
+                                    !this.sidebar_intents.status_details;
                                 cx.notify();
                             }))
                             .on_key_down(cx.listener(
                                 |this, event: &KeyDownEvent, _, cx| {
                                     if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                        this.sidebar_intents.recover(true);
+                                        this.sidebar_intents.status_details =
+                                            !this.sidebar_intents.status_details;
+                                        cx.notify();
                                         cx.stop_propagation();
                                     }
                                 },
                             )),
-                        ),
+                        )
+                        .when(details_open && self.sidebar_archive_available(), |row| {
+                            row.child(
+                                button(
+                                    "sidebar-intent-undo",
+                                    tr!("sidebar.changes_undo"),
+                                    &undo_focus,
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.undo_sidebar_archive(cx);
+                                }))
+                                .on_key_down(cx.listener(
+                                    |this, event: &KeyDownEvent, _, cx| {
+                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
+                                        {
+                                            this.undo_sidebar_archive(cx);
+                                            cx.stop_propagation();
+                                        }
+                                    },
+                                )),
+                            )
+                        })
+                        .when(details_open, |row| {
+                            row.child(
+                                button(
+                                    "sidebar-intent-adopt",
+                                    tr!("sidebar.changes_adopt"),
+                                    &adopt_focus,
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.sidebar_intents.recover(true);
+                                    cx.notify();
+                                }))
+                                .on_key_down(cx.listener(
+                                    |this, event: &KeyDownEvent, _, cx| {
+                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
+                                        {
+                                            this.sidebar_intents.recover(true);
+                                            cx.stop_propagation();
+                                        }
+                                    },
+                                )),
+                            )
+                        }),
                 )
                 .into_any_element(),
         )
@@ -1214,6 +1307,10 @@ mod tests {
             archives: HashSet::new(),
             pending_count: 0,
             blocked_count: 0,
+            needs_attention: false,
+            pending_since: None,
+            status_delay: RefCell::new(None),
+            status_details: false,
             reason: None,
             hosts: Vec::new(),
             bases: RefCell::new(HashMap::new()),
@@ -1229,6 +1326,62 @@ mod tests {
             error: None,
         }
     }
+    #[test]
+    fn sidebar_feedback_is_delayed_until_slow_and_failures_stay_visible() {
+        let mut queue = queue();
+        let id = Uuid::new_v4();
+        queue.record(
+            DaemonKey::Local,
+            SidebarEdit::DeliverableArchive { id, archived: true },
+            None,
+            false,
+        );
+        // This test controls completions without a synchronization worker.
+        queue.error = None;
+        let started = queue.pending_since.unwrap();
+        assert!(!queue.status_visible(started));
+        assert!(!queue.status_visible(started + SLOW_SAVE_DELAY - Duration::from_millis(1)));
+        assert!(queue.status_visible(started + SLOW_SAVE_DELAY));
+
+        for entry in queue.entries.values_mut() {
+            entry.phase = Phase::Confirmed(1);
+        }
+        queue.reindex();
+        assert!(!queue.status_visible(started + SLOW_SAVE_DELAY));
+        assert!(queue.pending_since.is_none());
+
+        // A later archive gets its own quiet period, including its safety check.
+        queue.record(
+            DaemonKey::Local,
+            SidebarEdit::Task {
+                id,
+                edit: TaskMetadataEdit::Archive {
+                    archived_at: Some(unix_time()),
+                },
+            },
+            None,
+            true,
+        );
+        queue.error = None;
+        let restarted = queue.pending_since.unwrap();
+        assert!(!queue.status_visible(restarted));
+        queue.preflight_failed(id, "Offline".into());
+        assert!(queue.status_visible(restarted));
+        assert!(queue.status_visible(restarted + Duration::from_secs(60)));
+        for entry in queue.entries.values_mut().filter(|e| e.unresolved()) {
+            entry.phase = Phase::Blocked;
+        }
+        queue.reindex();
+        assert!(queue.status_visible(restarted));
+        queue.recover(false);
+        assert!(!queue.status_visible(restarted));
+
+        queue.entries.clear();
+        queue.reindex();
+        queue.error = Some("Changes could not be written to disk".into());
+        assert!(queue.status_visible(restarted));
+    }
+
     #[test]
     fn sidebar_journal_restart_preserves_latest_intent_budget_and_field_independence() {
         let mut queue = queue();

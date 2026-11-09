@@ -3799,7 +3799,6 @@ impl Waku {
                 theme.sidebar
             })
             .child(self.render_sidebar_titlebar(window, cx))
-            .children(self.render_sidebar_intent_status(cx))
             .child(
                 div()
                     .flex_none()
@@ -3868,6 +3867,7 @@ impl Waku {
                     .flex_none()
                     .relative()
                     .child(self.render_sidebar_footer(cx))
+                    .children(self.render_sidebar_intent_status(cx))
                     // Hovering anywhere across the bottom strip — not just
                     // the settings cog — raises the quick-action dock. The
                     // zone runs a quarter taller than the bar and reaches

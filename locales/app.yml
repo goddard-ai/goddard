@@ -7585,6 +7585,12 @@ command_palette.idle_task:
 command_palette.worktree_change_project:
   en: Change project…
 
+sidebar.changes_still_saving:
+  en: Still saving…
+sidebar.changes_show_details:
+  en: Details
+sidebar.changes_hide_details:
+  en: Hide details
 sidebar.changes_syncing:
   en: Syncing %{count} sidebar changes
 sidebar.changes_blocked:
