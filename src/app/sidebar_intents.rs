@@ -1717,13 +1717,32 @@ impl Waku {
         })
     }
     pub(super) fn show_sidebar_archive_toast(&mut self, batch: Uuid) {
-        let count = self
+        let mut tasks = 0;
+        let mut deliverables = 0;
+        for entry in self
             .sidebar_intents
             .entries
             .values()
             .filter(|e| e.batch == batch)
-            .count();
-        let message = tr!("sidebar.archived_many", count = count);
+        {
+            match &entry.intent.edit {
+                SidebarEdit::Task { .. } => tasks += 1,
+                SidebarEdit::DeliverableArchive { .. } => deliverables += 1,
+                _ => {}
+            }
+        }
+        let mut messages = Vec::new();
+        match tasks {
+            0 => {}
+            1 => messages.push(tr!("session.archived")),
+            count => messages.push(tr!("session.archived_many", count = count)),
+        }
+        match deliverables {
+            0 => {}
+            1 => messages.push(tr!("deliverable.archived")),
+            count => messages.push(tr!("deliverable.archived_many", count = count)),
+        }
+        let message = messages.join(" ");
         if let Some(toast) = self.toast.as_mut()
             && matches!(&toast.action, Some(ToastAction { kind: ToastActionKind::SidebarArchive(current), .. }) if *current == batch)
         {

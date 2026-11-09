@@ -6849,6 +6849,10 @@ deliverable.restore_many:
   en: "Restore %{count} deliverables"
 deliverable.archive_many:
   en: "Archive %{count} deliverables"
+deliverable.archived:
+  en: Deliverable archived.
+deliverable.archived_many:
+  en: "%{count} deliverables archived."
 deliverable.dismiss_many:
   en: "Remove %{count} deliverables"
 deliverable.pinned:
@@ -7609,8 +7613,6 @@ sidebar.archive_inspection_offline:
   en: Archive needs a connection to inspect the workspace.
 sidebar.archive_inspection_failed:
   en: Archive safety check failed. Retry from sidebar changes.
-sidebar.archived_many:
-  en: 'Hidden %{count} items from the sidebar'
 sidebar.archive_undo_detail:
   en: Undo restores archived items. It does not restart stopped turns or recover removed side chats.
 sidebar.changes_local_host:
