@@ -1,0 +1,1 @@
+- Fixed the usage panel showing `%{count}` instead of `1` when one reset credit is available.

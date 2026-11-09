@@ -603,7 +603,7 @@ fn reset_credits_section(
 ) -> AnyElement {
     let count = credits.available_count as usize;
     let mut summary = match count {
-        1 => tr!("usage.reset_credit_one"),
+        1 => tr!("usage.reset_credit_one", count = count),
         _ => tr!("usage.reset_credit_many", count = count),
     };
     if let Some(expires_at) = credits.next_expires_at {
