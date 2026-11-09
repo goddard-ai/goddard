@@ -1,0 +1,1 @@
+- Follow-up prompts sent into a running turn appear immediately and stay visible while awaiting provider acknowledgment, including across transcript refreshes.

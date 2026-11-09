@@ -45,6 +45,28 @@ pub fn merge_task_view_snapshot(
             .filter(|queued| !queued.is_agent_owned())
             .cloned(),
     );
+    // A provider snapshot can precede acknowledgment of a local steer.
+    // Preserve its visible preview until delivery consumes the queue entry;
+    // otherwise the refresh makes a sent prompt disappear while it waits.
+    let message_ids: std::collections::HashSet<_> =
+        snapshot.messages.iter().map(|message| message.id).collect();
+    let queued_ids: std::collections::HashSet<_> = snapshot
+        .queued_messages
+        .iter()
+        .filter(|queued| !queued.is_agent_owned())
+        .map(|queued| queued.id)
+        .collect();
+    snapshot.messages.extend(
+        existing
+            .messages
+            .iter()
+            .filter(|message| {
+                message.role == MessageRole::User
+                    && queued_ids.contains(&message.id)
+                    && !message_ids.contains(&message.id)
+            })
+            .cloned(),
+    );
     let presentations: std::collections::HashMap<_, _> = existing
         .messages
         .iter()
@@ -123,6 +145,52 @@ pub fn text_delta_rejoins(previous: &str, delta: &str) -> bool {
 mod tests {
     use super::*;
     use crate::model::{AgentSession, MessageRole, ProviderKind, QueuedMessage, TurnStatus};
+
+    #[test]
+    fn pending_steer_stays_visible_across_snapshots_until_delivered() {
+        let mut local = AgentSession::new(uuid::Uuid::new_v4(), ProviderKind::Codex);
+        local.begin_turn("initial prompt");
+        let baseline = local.clone();
+        let queued = QueuedMessage::new("provider follow up");
+        let mut preview = crate::model::Message::new(MessageRole::User, &queued.content)
+            .with_presentation(Some("shown follow up".into()), Vec::new(), Vec::new());
+        preview.id = queued.id;
+        local.messages.push(preview.clone());
+        local.queued_messages.push(queued.clone());
+
+        let mut refreshed = baseline.clone();
+        merge_task_view_snapshot(&local, &mut refreshed, false);
+        assert_eq!(refreshed.messages.last().unwrap().id, queued.id);
+        assert_eq!(
+            refreshed
+                .messages
+                .last()
+                .unwrap()
+                .display_content
+                .as_deref(),
+            Some("shown follow up")
+        );
+        assert_eq!(refreshed.queued_messages, vec![queued.clone()]);
+
+        // An acknowledged preview becomes the canonical message, once only.
+        let mut accepted = baseline.clone();
+        accepted.messages.push(preview);
+        merge_task_view_snapshot(&refreshed, &mut accepted, false);
+        assert_eq!(accepted.messages.len(), 2);
+        local = accepted;
+        local.queued_messages.clear();
+        let mut later = local.clone();
+        merge_task_view_snapshot(&local, &mut later, false);
+        assert_eq!(later.messages.len(), 2);
+        assert!(later.queued_messages.is_empty());
+
+        // Cancellation must not resurrect the preview on the next refresh.
+        local.messages.retain(|message| message.id != queued.id);
+        let mut cancelled = baseline;
+        merge_task_view_snapshot(&local, &mut cancelled, false);
+        assert_eq!(cancelled.messages.len(), 1);
+        assert!(cancelled.queued_messages.is_empty());
+    }
 
     #[test]
     fn completion_snapshot_keeps_the_turn_settleable_and_preserves_composer_state() {

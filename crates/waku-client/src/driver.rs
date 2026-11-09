@@ -102,7 +102,7 @@ impl DriverHandle {
         self.inner.steer(prompt, hidden);
     }
 
-    /// Deliver a visible steer with its durable Boss queue mirror.
+    /// Deliver a visible steer with its durable queue identity and presentation.
     pub fn steer_with_submission(&self, prompt: String, queued_message: QueuedMessage) {
         self.inner.steer_with_submission(prompt, queued_message);
     }

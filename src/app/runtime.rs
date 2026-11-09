@@ -7407,27 +7407,16 @@ impl Waku {
             self.enqueue_steer_follow_up_submission(session.id, submission, cx);
             return;
         }
-        let queued_message = if session.boss_managed {
-            if submission.queued_id.is_none() {
-                submission.queued_id = Some(Uuid::new_v4());
-            }
-            let queued = submission.clone().into_queued_message();
-            // The daemon also writes this same id before it calls the
-            // provider. The local mirror makes the pending steer visible
-            // immediately and gives rejection handling a stable row to keep.
-            self.enqueue_steer_follow_up_submission(session.id, submission.clone(), cx);
-            Some(queued)
-        } else {
-            None
-        };
+        // Keep every steer visible while the provider acknowledges it. The
+        // queued identity also lets acceptance replace the preview in place
+        // and rejection leave the same prompt available for the next turn.
+        submission.queued_id.get_or_insert_with(Uuid::new_v4);
+        let queued_message = submission.clone().into_queued_message();
+        self.enqueue_steer_follow_up_submission(session.id, submission.clone(), cx);
         if let Some(runtime) = self.runtimes.get_mut(&session.id) {
-            if let Some(queued_message) = queued_message {
-                runtime
-                    .driver
-                    .steer_with_submission(provider_prompt, queued_message);
-            } else {
-                runtime.driver.steer(provider_prompt, false);
-            }
+            runtime
+                .driver
+                .steer_with_submission(provider_prompt, queued_message);
             runtime.pending_steers.push_back(submission);
         }
         cx.notify();
