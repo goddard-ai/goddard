@@ -465,8 +465,8 @@ pub fn work_context(
             }
             if let Some(waiting) = task.waiting.as_ref().filter(|_| attention) {
                 let reason = match waiting {
-                    waku_protocol::boss::OutcomeWait::Until { at } => format!("until {at}"),
-                    waku_protocol::boss::OutcomeWait::Dependency { note } => {
+                    waku_protocol::boss::OutcomeWait::Until { at, .. } => format!("until {at}"),
+                    waku_protocol::boss::OutcomeWait::Dependency { note, .. } => {
                         truncate_chars(note, 200)
                     }
                 };
@@ -868,6 +868,7 @@ mod tests {
         urgent.created_at = u64::MAX;
         urgent.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
             note: "User restart confirmation".into(),
+            recorded_at: None,
         });
         urgent.completion_conflict = Some(waku_protocol::boss::CompletionConflict {
             assignment: Uuid::new_v4(),

@@ -2066,10 +2066,10 @@ fn boss_wait_time_label(at: u64) -> String {
 fn boss_outcome_wait_label(outcome: &waku_protocol::boss::BossOutcome, now: u64) -> Option<String> {
     let until = |at: u64| tr!("boss.goals_wait_until", time = boss_wait_time_label(at));
     match &outcome.waiting {
-        Some(waku_protocol::boss::OutcomeWait::Dependency { note }) => {
+        Some(waku_protocol::boss::OutcomeWait::Dependency { note, .. }) => {
             Some(tr!("boss.goals_wait_note", note = note.clone()))
         }
-        Some(waku_protocol::boss::OutcomeWait::Until { at }) if *at > now => Some(until(*at)),
+        Some(waku_protocol::boss::OutcomeWait::Until { at, .. }) if *at > now => Some(until(*at)),
         _ => outcome.snoozed_until.filter(|at| *at > now).map(until),
     }
 }
@@ -2096,7 +2096,10 @@ fn boss_expiry_cause_label(cause: waku_protocol::boss::ExpiryCause) -> Option<St
 /// owed decisions land in Blocked; a healthy live member owns In progress
 /// even when queued work or a wait stands beside it; everything else
 /// lands in Pending with its honest label — queued, waiting with its
-/// recorded reason, not started, or simply open.
+/// recorded reason, not started, or simply open. A recorded wait the
+/// boss wrote after the attention evidence is the newer truth and reads
+/// Waiting instead of Blocked — evidence newer than the wait still
+/// surfaces, and an owed review always does.
 fn boss_outcome_status(
     row: &boss::BossOutcomeRow,
     sessions: &HashMap<Uuid, &AgentSession>,
@@ -2136,8 +2139,10 @@ fn boss_outcome_status(
         return (bucket, status);
     }
     // Nothing is running — the Blocked precedence names the needs-
-    // attention signal first, then the Pending labels' own order.
-    if row.attention {
+    // attention signal first, then the Pending labels' own order. A
+    // recorded wait the boss wrote after the evidence supersedes it;
+    // anything the wait predates still blocks.
+    if row.attention && !row.outcome.wait_supersedes(now, row.attention_at) {
         return (BossGoalBucket::Blocked, BossGoalStatus::Blocked);
     }
     if row.outcome.pending_handoffs().next().is_some() {
@@ -4409,6 +4414,7 @@ mod tests {
                 })
                 .collect(),
             attention: false,
+            attention_at: None,
         }
     }
 
@@ -4684,13 +4690,19 @@ mod tests {
                 assigned_at: Some(10),
                 settled: None,
             });
-        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Until { at: now + 600 });
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Until {
+            at: now + 600,
+            recorded_at: None,
+        });
         assert_eq!(
             boss_outcome_status(&row, &sessions, now),
             (BossGoalBucket::Pending, BossGoalStatus::Waiting)
         );
         // An elapsed defer no longer explains the pause.
-        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Until { at: now - 1 });
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Until {
+            at: now - 1,
+            recorded_at: None,
+        });
         assert_eq!(
             boss_outcome_status(&row, &sessions, now),
             (BossGoalBucket::Pending, BossGoalStatus::Open)
@@ -4754,6 +4766,89 @@ mod tests {
         assert_eq!(
             boss_outcome_status(&row, &sessions, now),
             (BossGoalBucket::Pending, BossGoalStatus::Open)
+        );
+    }
+
+    /// A recorded wait the boss wrote after the attention evidence is
+    /// the newer truth — the row reads Pending · Waiting rather than
+    /// Blocked. Evidence stamped after the wait still surfaces, an owed
+    /// review always does, and an elapsed defer supersedes nothing.
+    #[test]
+    fn outcome_status_wait_supersedes_only_older_attention() {
+        use waku_protocol::boss::OutcomeState;
+        let sessions: HashMap<Uuid, &AgentSession> = HashMap::new();
+        let now = 1_000u64;
+
+        let mut row = outcome_row(OutcomeState::Open, Vec::new());
+        row.outcome
+            .assignments
+            .push(outcome_assignment(Uuid::new_v4(), 1));
+        row.attention = true;
+        row.attention_at = Some(10);
+
+        // A wait stamped after the failure acknowledges it.
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: Some(20),
+        });
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Pending, BossGoalStatus::Waiting)
+        );
+
+        // A failure stamped after the wait still surfaces.
+        row.attention_at = Some(30);
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Blocked, BossGoalStatus::Blocked)
+        );
+
+        // A wait persisted before the stamp existed stays the current
+        // truth over every record.
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: None,
+        });
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Pending, BossGoalStatus::Waiting)
+        );
+
+        // An elapsed defer supersedes nothing — the deferral already
+        // ended, and a reminder snooze is no acknowledgment either.
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Until {
+            at: now - 1,
+            recorded_at: Some(40),
+        });
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Blocked, BossGoalStatus::Blocked)
+        );
+        row.outcome.waiting = None;
+        row.outcome.snoozed_until = Some(now + 600);
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Blocked, BossGoalStatus::Blocked)
+        );
+
+        // An owed review never hides behind a superseding wait.
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: Some(40),
+        });
+        row.outcome
+            .handoffs
+            .push(waku_protocol::boss::OutcomeHandoff {
+                id: Uuid::new_v4(),
+                assignment: Uuid::new_v4(),
+                attempt: 1,
+                intent: "Review the result".into(),
+                created_at: 10,
+                resolution: None,
+            });
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Blocked, BossGoalStatus::FollowUp)
         );
     }
 
@@ -5023,6 +5118,7 @@ mod tests {
             });
         row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
             note: "upstream deploy".into(),
+            recorded_at: None,
         });
         let entries = boss_outcome_note_entries(&row, now);
         assert_eq!(entries.len(), 1, "follow-ups belong on employee rows");
@@ -5107,6 +5203,7 @@ mod tests {
         row.outcome.snoozed_until = Some(now + 600);
         row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
             note: "upstream deploy".into(),
+            recorded_at: None,
         });
         assert_eq!(
             boss_outcome_wait_label(&row.outcome, now).as_deref(),

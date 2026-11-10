@@ -1689,7 +1689,12 @@ impl BossService {
                 .iter_mut()
                 .find(|entry| entry.id == outcome)
                 .ok_or_else(|| anyhow!("unknown outcome {outcome}"))?;
-            entry.waiting = waiting;
+            entry.waiting = waiting.map(|mut wait| {
+                // The stamp is the persistence's own truth — a carried
+                // `recorded_at` never survives the write.
+                wait.stamp(now);
+                wait
+            });
             entry.snoozed_until = snoozed_until;
             entry.last_activity_at = now;
             updated = Some(entry.clone());
@@ -14130,10 +14135,21 @@ mod memory_op_tests {
             .set_outcome_waiting(
                 None,
                 task.id,
-                Some(OutcomeWait::Until { at: now + 7200 }),
+                Some(OutcomeWait::Until {
+                    at: now + 7200,
+                    recorded_at: None,
+                }),
                 None,
             )
             .unwrap();
+        assert_eq!(
+            outcome(&service, task.id)
+                .waiting
+                .as_ref()
+                .and_then(OutcomeWait::recorded_at),
+            Some(now),
+            "the write stamps the wait's own record time"
+        );
         assert!(
             service
                 .scan_outcome_reminders(now + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE + 60)

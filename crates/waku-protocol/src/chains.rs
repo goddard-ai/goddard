@@ -378,6 +378,11 @@ pub struct EmployeeChain {
 pub struct ChainAttention {
     pub id: Uuid,
     pub reason: String,
+    /// When the exception was raised — `None` on records that predate
+    /// the stamp, which are always older than any wait stamped since.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub raised_at: Option<u64>,
     pub handled_at: Option<u64>,
 }
 

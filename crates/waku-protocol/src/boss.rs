@@ -2984,10 +2984,54 @@ pub struct BossOutcome {
 pub enum OutcomeWait {
     /// Waiting until a point in time — a deliberate deferral, not an
     /// unattended task.
-    Until { at: u64 },
+    Until {
+        at: u64,
+        /// When the daemon persisted the wait — `None` on records that
+        /// predate the stamp. The write site stamps it so attention
+        /// evidence can order against the wait's own time.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        recorded_at: Option<u64>,
+    },
     /// Waiting on a tracked dependency described in `note` — another
     /// task or external event the boss can point at.
-    Dependency { note: String },
+    Dependency {
+        note: String,
+        /// When the daemon persisted the wait — `None` on records that
+        /// predate the stamp.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        recorded_at: Option<u64>,
+    },
+}
+
+impl OutcomeWait {
+    /// Whether the wait still explains the pause at `now` — an `until`
+    /// wait lapses at its timestamp; a dependency holds until cleared.
+    pub fn active(&self, now: u64) -> bool {
+        match self {
+            Self::Until { at, .. } => *at > now,
+            Self::Dependency { .. } => true,
+        }
+    }
+
+    /// When the daemon persisted the wait — `None` on records that
+    /// predate the stamp.
+    pub fn recorded_at(&self) -> Option<u64> {
+        match self {
+            Self::Until { recorded_at, .. } | Self::Dependency { recorded_at, .. } => *recorded_at,
+        }
+    }
+
+    /// Stamp the record time — the write site overwrites any carried
+    /// value so the stamp stays the persistence's own truth.
+    pub fn stamp(&mut self, at: u64) {
+        match self {
+            Self::Until { recorded_at, .. } | Self::Dependency { recorded_at, .. } => {
+                *recorded_at = Some(at)
+            }
+        }
+    }
 }
 
 /// One delivered unattended-task reminder: which unattended period it
@@ -3104,11 +3148,28 @@ impl BossOutcome {
         if self.snoozed_until.is_some_and(|until| until > now) {
             return true;
         }
-        match &self.waiting {
-            Some(OutcomeWait::Until { at }) => *at > now,
-            Some(OutcomeWait::Dependency { .. }) => true,
-            None => false,
-        }
+        self.waiting
+            .as_ref()
+            .is_some_and(|wait| wait.active(now))
+    }
+
+    /// Whether the recorded wait currently answers attention evidence
+    /// whose newest stamp is `evidence_at` — the panel's "the wait is
+    /// the newer truth" reading. Only a still-active wait supersedes: an
+    /// elapsed `until` defer explains nothing, and a reminder snooze is
+    /// not an acknowledgment. Waits persisted before `recorded_at`
+    /// existed carry no stamp and stay the current truth over every
+    /// record — the same reading the reminder scan has always given
+    /// them; evidence without a stamp predates the stamp fields, so a
+    /// stamped wait is always newer. Evidence stamped after the wait —
+    /// a failure or stall the boss could not have seen — still
+    /// surfaces.
+    pub fn wait_supersedes(&self, now: u64, evidence_at: Option<u64>) -> bool {
+        let Some(wait) = self.waiting.as_ref().filter(|wait| wait.active(now)) else {
+            return false;
+        };
+        wait.recorded_at()
+            .is_none_or(|recorded| evidence_at.is_none_or(|at| at <= recorded))
     }
 
     /// A assignment this task's reminders treat as live work — not expired
@@ -4736,5 +4797,84 @@ mod employee_lifecycle_tests {
             assert_eq!(resumed.lifecycle(), EmployeeLifecycle::Queued);
             assert!(!resumed.expired());
         }
+    }
+}
+
+#[cfg(test)]
+mod outcome_wait_tests {
+    use super::*;
+
+    fn outcome(waiting: Option<OutcomeWait>) -> BossOutcome {
+        BossOutcome {
+            id: Uuid::new_v4(),
+            outcome: "Ship it".into(),
+            success_criteria: String::new(),
+            state: OutcomeState::Open,
+            finishing_assignment: None,
+            handoffs: Vec::new(),
+            completion_conflict: None,
+            evidence: None,
+            plan_id: None,
+            waiting,
+            snoozed_until: None,
+            last_activity_at: 0,
+            unattended_since: None,
+            last_reminder: None,
+            created_at: 0,
+            completed_at: None,
+            history: Vec::new(),
+            assignments: Vec::new(),
+        }
+    }
+
+    /// The recorded wait's own stamp orders it against attention
+    /// evidence: only a still-active wait supersedes, evidence stamped
+    /// after it still surfaces, and records predating the stamp fields
+    /// keep the reminder scan's long-standing reading — an unstamped
+    /// wait is the current truth, and undated evidence is always the
+    /// older of the pair.
+    #[test]
+    fn wait_supersedes_only_evidence_it_postdates() {
+        let now = 1_000;
+        let stamped = outcome(Some(OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: Some(20),
+        }));
+        assert!(stamped.wait_supersedes(now, Some(10)));
+        assert!(stamped.wait_supersedes(now, Some(20)));
+        assert!(!stamped.wait_supersedes(now, Some(30)));
+        // Undated evidence predates the stamp fields — always older.
+        assert!(stamped.wait_supersedes(now, None));
+
+        // An unstamped wait is the current truth over every record.
+        let legacy = outcome(Some(OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: None,
+        }));
+        assert!(legacy.wait_supersedes(now, Some(30)));
+
+        // An elapsed defer supersedes nothing, and a snooze is no
+        // acknowledgment at all.
+        let elapsed = outcome(Some(OutcomeWait::Until {
+            at: now - 1,
+            recorded_at: Some(40),
+        }));
+        assert!(!elapsed.wait_supersedes(now, Some(10)));
+        let mut snoozed = outcome(None);
+        snoozed.snoozed_until = Some(now + 600);
+        assert!(!snoozed.wait_supersedes(now, Some(10)));
+        assert!(!outcome(None).wait_supersedes(now, Some(10)));
+
+        // Waits persisted before `recordedAt` existed still decode, and
+        // the write stamps the record's own time.
+        let decoded: OutcomeWait = serde_json::from_value(serde_json::json!({
+            "type": "dependency",
+            "note": "waiting on the human"
+        }))
+        .unwrap();
+        assert_eq!(decoded.recorded_at(), None);
+        let mut stamped_wait = decoded;
+        stamped_wait.stamp(50);
+        assert_eq!(stamped_wait.recorded_at(), Some(50));
     }
 }

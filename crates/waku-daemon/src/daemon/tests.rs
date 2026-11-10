@@ -14753,6 +14753,7 @@ fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
             task.id,
             Some(OutcomeWait::Dependency {
                 note: "awaiting review".into(),
+                recorded_at: None,
             }),
             None,
         )
@@ -14903,6 +14904,7 @@ fn outcome_reminder_revalidates_parked_batches_after_restart() {
                 tasks[1].id,
                 Some(OutcomeWait::Dependency {
                     note: "review pending".into(),
+                    recorded_at: None,
                 }),
                 None,
             )
@@ -15168,6 +15170,7 @@ fn outcome_reminder_stays_suppressed_while_wait_or_assignment_covers_it() {
             task.id,
             Some(OutcomeWait::Dependency {
                 note: "awaiting review".into(),
+                recorded_at: None,
             }),
             None,
         )

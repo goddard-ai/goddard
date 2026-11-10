@@ -3705,6 +3705,9 @@
             },
             "at": {
               "type": "integer"
+            },
+            "recordedAt": {
+              "type": "integer"
             }
           },
           "required": [
@@ -3721,6 +3724,9 @@
             },
             "note": {
               "type": "string"
+            },
+            "recordedAt": {
+              "type": "integer"
             }
           },
           "required": [

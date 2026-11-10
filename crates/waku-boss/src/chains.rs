@@ -136,6 +136,7 @@ fn pause(chain: &mut EmployeeChain, reason: impl Into<String>) {
         chain.attention = Some(ChainAttention {
             id: Uuid::new_v4(),
             reason,
+            raised_at: Some(waku_protocol::model::unix_time()),
             handled_at: None,
         });
     }
@@ -2356,6 +2357,7 @@ mod tests {
             .seal(&chain, &HandoffVerification::default())
             .unwrap();
         let paused = fixture.read(chain.id);
+        assert!(paused.attention.as_ref().unwrap().raised_at.is_some());
         let attention = paused.attention.unwrap().id;
         assert_eq!(paused.status, ChainStatus::Paused);
         fixture.seal(&chain, &verified()).unwrap();

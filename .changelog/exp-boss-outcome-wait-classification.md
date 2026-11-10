@@ -1,0 +1,1 @@
+- Boss Tasks no longer lists an outcome in Blocked when the wait the boss recorded afterward explains the pause, and it surfaces paused chains that stalled on an unhandled error.
