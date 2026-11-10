@@ -1,0 +1,1 @@
+- Devin sessions now get separate time for startup and a first response after sending a message. Timeouts identify the delayed stage and explain when message delivery remains uncertain.

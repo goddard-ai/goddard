@@ -4406,6 +4406,16 @@ impl Waku {
         let Some(turn_id) = turn_id else {
             return;
         };
+        // Devin owns separate startup and post-dispatch deadlines in its ACP
+        // driver. Absence of TurnStarted alone does not prove non-delivery.
+        if self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && session.provider == ProviderKind::Devin)
+        {
+            return;
+        }
         cx.spawn(async move |waku, cx| {
             cx.background_executor().timer(UNSTARTED_TURN_TIMEOUT).await;
             let _ = waku.update(cx, move |waku, cx| {

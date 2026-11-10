@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
@@ -233,7 +233,13 @@ impl AcpDriver {
                 ));
                 if let Err(error) = result {
                     let stderr = super::support::provider_stderr_error(stderr_lines.lock().clone());
-                    let detail = stderr.unwrap_or_else(|| error.to_string());
+                    let detail = if error.code
+                        == agent_client_protocol::Error::new(DEVIN_TIMEOUT_CODE, "").code
+                    {
+                        error.to_string()
+                    } else {
+                        stderr.unwrap_or_else(|| error.to_string())
+                    };
                     let _ = thread_events
                         .send(DriverEvent::Error(format!("{provider_name}: {detail}")));
                 }
@@ -576,6 +582,7 @@ struct PendingPrompt {
     request_id: RequestId,
     extension_id: Option<String>,
     session_id: String,
+    dispatched_at: Instant,
 }
 
 /// What the last settle of a prompt batch learned about how it ended.
@@ -599,7 +606,16 @@ impl PendingPrompts {
             request_id,
             extension_id,
             session_id,
+            dispatched_at: Instant::now(),
         });
+    }
+
+    fn awaiting_start_timed_out(&self, now: Instant) -> bool {
+        !self.turn_started
+            && !self.cancel_requested
+            && self.requests.first().is_some_and(|prompt| {
+                now.saturating_duration_since(prompt.dispatched_at) >= DEVIN_RESPONSE_TIMEOUT
+            })
     }
 
     fn is_empty(&self) -> bool {
@@ -732,6 +748,38 @@ fn permission_disposition(
         }
         RuntimeMode::Ask => PermissionDisposition::Prompt,
     }
+}
+
+// Startup is separate from the first-response budget: resuming a large
+// native session must not spend the time allowed after dispatch.
+const DEVIN_TIMEOUT_CODE: i32 = -32098;
+const DEVIN_STARTUP_PHASE_TIMEOUT: Duration = Duration::from_secs(120);
+const DEVIN_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+
+async fn acp_phase<T>(
+    provider: ProviderKind,
+    phase: &'static str,
+    timeout: Duration,
+    operation: impl std::future::Future<Output = agent_client_protocol::Result<T>>,
+) -> agent_client_protocol::Result<T> {
+    if provider != ProviderKind::Devin {
+        return operation.await;
+    }
+    let started = Instant::now();
+    eprintln!("Devin ACP phase={phase} started");
+    let result = smol::future::race(operation, async {
+        smol::Timer::after(timeout).await;
+        Err(agent_client_protocol::Error::new(
+            DEVIN_TIMEOUT_CODE,
+            format!("Devin timed out during {phase} after {} seconds; the queued prompt was not dispatched", timeout.as_secs()),
+        ))
+    }).await;
+    eprintln!(
+        "Devin ACP phase={phase} elapsed_ms={} success={}",
+        started.elapsed().as_millis(),
+        result.is_ok()
+    );
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -925,14 +973,15 @@ async fn run_sdk_connection(
                 meta.insert("parameterizedModelPicker".to_owned(), Value::Bool(true));
                 client_capabilities = client_capabilities.meta(meta);
             }
-            let initialize = connection
+            let initialize = acp_phase(provider, "initialization", DEVIN_STARTUP_PHASE_TIMEOUT, async { connection
                 .send_request(
                     InitializeRequest::new(ProtocolVersion::V1)
                         .client_capabilities(client_capabilities)
                         .client_info(Implementation::new("waku", env!("CARGO_PKG_VERSION"))),
                 )
                 .block_task()
-                .await?;
+                .await
+            }).await?;
             let http_mcp_supported = initialize.agent_capabilities.mcp_capabilities.http;
             if let Some(record_capability) = &http_mcp_capability_recorder {
                 record_capability(http_mcp_supported);
@@ -943,6 +992,7 @@ async fn run_sdk_connection(
             let (session_id, modes, mut config_options) = establish_session(
                 &connection,
                 &initialize,
+                provider,
                 resume_session_id.as_deref(),
                 &cwd,
                 &suppress_session_updates,
@@ -954,10 +1004,13 @@ async fn run_sdk_connection(
                 // Mode selection is opportunistic: an agent can advertise a
                 // mode but reject a later transition without invalidating the
                 // session itself.
-                let _ = connection
-                    .send_request(SetSessionModeRequest::new(session_id.clone(), mode_id))
-                    .block_task()
-                    .await;
+                acp_phase(provider, "access-mode configuration", DEVIN_STARTUP_PHASE_TIMEOUT, async {
+                    let _ = connection
+                        .send_request(SetSessionModeRequest::new(session_id.clone(), mode_id))
+                        .block_task()
+                        .await;
+                    Ok(())
+                }).await?;
             }
             let native_session_id = session_id.to_string();
             let _ = events.send(DriverEvent::Connected {
@@ -974,21 +1027,52 @@ async fn run_sdk_connection(
             let mut current_effort = reasoning_effort;
             let mut current_tier = service_tier;
             let mut current_window = context_window;
-            apply_model(
-                &connection,
-                provider,
-                &session_id,
-                &mut config_options,
-                current_model.as_deref(),
-                current_effort.as_deref(),
-                current_tier.as_deref(),
-                current_window.as_deref(),
-                allow_model_fallback,
-                &events,
-            )
-            .await;
+            acp_phase(provider, "model configuration", DEVIN_STARTUP_PHASE_TIMEOUT, async {
+                apply_model(
+                    &connection,
+                    provider,
+                    &session_id,
+                    &mut config_options,
+                    current_model.as_deref(),
+                    current_effort.as_deref(),
+                    current_tier.as_deref(),
+                    current_window.as_deref(),
+                    allow_model_fallback,
+                    &events,
+                )
+                .await;
+                Ok(())
+            }).await?;
             let mut fork_context = fork_context;
-            while let Ok(command) = commands.recv().await {
+            loop {
+                let command = if provider == ProviderKind::Devin && {
+                    let pending = prompt_requests.lock();
+                    !pending.is_empty() && !pending.turn_started && !pending.cancel_requested
+                } {
+                    smol::future::race(
+                        async { commands.recv().await.map(Some) },
+                        async {
+                            smol::Timer::after(Duration::from_secs(1)).await;
+                            Ok(None)
+                        },
+                    ).await
+                } else {
+                    commands.recv().await.map(Some)
+                };
+                // Check even under a busy command queue. Closing this connection
+                // fences late output; never resend a delivery with unknown acceptance.
+                if provider == ProviderKind::Devin
+                    && prompt_requests.lock().awaiting_start_timed_out(Instant::now())
+                {
+                    let _ = connection.send_notification(CancelNotification::new(session_id.clone()));
+                    return Err(agent_client_protocol::Error::new(DEVIN_TIMEOUT_CODE,
+                        "Devin did not confirm starting within 60 seconds after prompt dispatch; delivery may have succeeded; the connection was closed without retrying"));
+                }
+                let command = match command {
+                    Ok(Some(command)) => command,
+                    Ok(None) => continue,
+                    Err(_) => break,
+                };
                 match command {
                     CommandMessage::Prompt(text) => {
                         let text = fork_context
@@ -1175,6 +1259,7 @@ async fn run_sdk_connection(
 async fn establish_session(
     connection: &ConnectionTo<Agent>,
     initialize: &InitializeResponse,
+    provider: ProviderKind,
     resume_session_id: Option<&str>,
     cwd: &Path,
     suppress_session_updates: &AtomicBool,
@@ -1192,13 +1277,21 @@ async fn establish_session(
             .resume
             .is_some()
         {
-            match connection
-                .send_request(
-                    ResumeSessionRequest::new(existing.to_owned(), cwd)
-                        .mcp_servers(mcp_servers.to_vec()),
-                )
-                .block_task()
-                .await
+            match acp_phase(
+                provider,
+                "session resume",
+                DEVIN_STARTUP_PHASE_TIMEOUT,
+                async {
+                    connection
+                        .send_request(
+                            ResumeSessionRequest::new(existing.to_owned(), cwd)
+                                .mcp_servers(mcp_servers.to_vec()),
+                        )
+                        .block_task()
+                        .await
+                },
+            )
+            .await
             {
                 Ok(response) => {
                     return Ok((
@@ -1217,30 +1310,39 @@ async fn establish_session(
             // it — may still hold the provider-side session lock while its
             // process shuts down, so retry failures the agent flags as
             // retryable before giving up.
-            let mut response = connection
-                .send_request(
-                    LoadSessionRequest::new(existing.to_owned(), cwd)
-                        .mcp_servers(mcp_servers.to_vec()),
-                )
-                .block_task()
-                .await;
-            for _ in 0..ACP_SESSION_LOAD_RETRIES {
-                if response
-                    .as_ref()
-                    .err()
-                    .is_none_or(|e| !session_error_retryable(e))
-                {
-                    break;
-                }
-                smol::Timer::after(ACP_SESSION_LOAD_RETRY_DELAY).await;
-                response = connection
-                    .send_request(
-                        LoadSessionRequest::new(existing.to_owned(), cwd)
-                            .mcp_servers(mcp_servers.to_vec()),
-                    )
-                    .block_task()
-                    .await;
-            }
+            let response = acp_phase(
+                provider,
+                "session load",
+                DEVIN_STARTUP_PHASE_TIMEOUT,
+                async {
+                    let mut response = connection
+                        .send_request(
+                            LoadSessionRequest::new(existing.to_owned(), cwd)
+                                .mcp_servers(mcp_servers.to_vec()),
+                        )
+                        .block_task()
+                        .await;
+                    for _ in 0..ACP_SESSION_LOAD_RETRIES {
+                        if response
+                            .as_ref()
+                            .err()
+                            .is_none_or(|e| !session_error_retryable(e))
+                        {
+                            break;
+                        }
+                        smol::Timer::after(ACP_SESSION_LOAD_RETRY_DELAY).await;
+                        response = connection
+                            .send_request(
+                                LoadSessionRequest::new(existing.to_owned(), cwd)
+                                    .mcp_servers(mcp_servers.to_vec()),
+                            )
+                            .block_task()
+                            .await;
+                    }
+                    response
+                },
+            )
+            .await;
             suppress_session_updates.store(false, Ordering::Release);
             return match response {
                 Ok(response) => Ok((
@@ -1260,10 +1362,18 @@ async fn establish_session(
         }
     }
 
-    let response = connection
-        .send_request(NewSessionRequest::new(cwd).mcp_servers(mcp_servers.to_vec()))
-        .block_task()
-        .await?;
+    let response = acp_phase(
+        provider,
+        "session creation",
+        DEVIN_STARTUP_PHASE_TIMEOUT,
+        async {
+            connection
+                .send_request(NewSessionRequest::new(cwd).mcp_servers(mcp_servers.to_vec()))
+                .block_task()
+                .await
+        },
+    )
+    .await?;
     Ok((response.session_id, response.modes, response.config_options))
 }
 
@@ -2367,6 +2477,9 @@ fn dispatch_prompt(
     }
     let sent = dispatch.connection.send_request(request);
     let request_id = sent.id().clone();
+    if dispatch.provider == ProviderKind::Devin {
+        eprintln!("Devin ACP phase=awaiting_start dispatched");
+    }
     {
         let mut pending = dispatch.prompt_requests.lock();
         match supersedes {
@@ -3831,6 +3944,57 @@ mod tests {
         SessionConfigSelectOption, SessionMode, SessionModeState, ToolCallUpdate,
         ToolCallUpdateFields,
     };
+
+    #[test]
+    fn devin_startup_deadline_names_the_stalled_phase() {
+        let error = smol::block_on(acp_phase(
+            ProviderKind::Devin,
+            "session resume",
+            Duration::ZERO,
+            std::future::pending::<agent_client_protocol::Result<()>>(),
+        ))
+        .unwrap_err();
+        assert!(error.to_string().contains("session resume"));
+        assert!(error.to_string().contains("not dispatched"));
+        // Other providers keep their existing behavior, and a ready phase wins.
+        for provider in [ProviderKind::Devin, ProviderKind::Cursor] {
+            assert_eq!(
+                smol::block_on(acp_phase(
+                    provider,
+                    "initialization",
+                    Duration::ZERO,
+                    async { Ok(42) }
+                ))
+                .unwrap(),
+                42
+            );
+        }
+    }
+
+    #[test]
+    fn devin_response_budget_begins_at_dispatch_and_requires_no_acceptance() {
+        let before_resume = Instant::now();
+        let mut pending = PendingPrompts::default();
+        // Startup can exceed the response budget without timing out a prompt
+        // that has not been dispatched.
+        assert!(!pending.awaiting_start_timed_out(before_resume + Duration::from_secs(180)));
+        let id = RequestId::from("response-budget".to_owned());
+        pending.insert(id.clone(), None, "session".into());
+        let dispatched = pending.requests[0].dispatched_at;
+        assert!(!pending.awaiting_start_timed_out(dispatched + Duration::from_secs(59)));
+        assert!(pending.awaiting_start_timed_out(dispatched + DEVIN_RESPONSE_TIMEOUT));
+        assert!(pending.mark_turn_started());
+        assert!(!pending.awaiting_start_timed_out(dispatched + Duration::from_secs(180)));
+        pending.settle_request(&id, true);
+        pending.insert(
+            RequestId::from("next-turn".to_owned()),
+            None,
+            "session".into(),
+        );
+        assert!(!pending.awaiting_start_timed_out(Instant::now()));
+        pending.note_cancel_requested();
+        assert!(!pending.awaiting_start_timed_out(Instant::now() + Duration::from_secs(180)));
+    }
 
     fn select_config_option(
         id: &str,
