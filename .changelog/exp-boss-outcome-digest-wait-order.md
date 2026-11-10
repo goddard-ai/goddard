@@ -1,0 +1,1 @@
+- The Boss's work digest no longer reports an outcome as needing attention when the wait recorded after the evidence explains the pause, matching the Tasks panel — newer evidence and owed reviews still surface.

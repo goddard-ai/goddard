@@ -419,6 +419,11 @@ pub fn work_context(
         // Durable task records ride the digest so a rotated boss session
         // still discovers the handoffs it owes decisions on — the record
         // outlives whichever chat delivered the result.
+        // Attention reads like the panel's: the stamped evidence set —
+        // conflict, unresolved members, orphaned settled failures, a
+        // paused chain's unhandled exception — minus whatever an active
+        // recorded wait postdates. An owed handoff decision always
+        // surfaces.
         let mut tasks: Vec<_> = boss
             .outcomes
             .iter()
@@ -427,26 +432,27 @@ pub fn work_context(
                     || task.pending_handoffs().next().is_some()
                     || task.completion_conflict.is_some()
             })
+            .map(|task| {
+                let (evidence, evidence_at) = task.attention_evidence(
+                    boss.employees.iter().chain(boss.retired_employees.iter()),
+                    &boss.chains,
+                );
+                let attention = (evidence && !task.wait_supersedes(now, evidence_at))
+                    || task.pending_handoffs().next().is_some();
+                (task, attention)
+            })
             .collect();
-        tasks.sort_by_key(|task| {
-            (
-                !(task.needs_attention(&boss.employees)
-                    || task.pending_handoffs().next().is_some()),
-                std::cmp::Reverse(task.created_at),
-            )
-        });
+        tasks.sort_by_key(|entry| (!entry.1, std::cmp::Reverse(entry.0.created_at)));
         let employee_digest = std::mem::take(&mut digest);
         if !tasks.is_empty() {
             digest.push_str("## Tasks\n");
         }
-        for task in tasks {
-            let attention =
-                task.needs_attention(&boss.employees) || task.pending_handoffs().next().is_some();
+        for (task, attention) in tasks {
             let status = if task.terminal() {
                 task.state.label()
             } else if attention {
                 "needs attention"
-            } else if task.waiting.is_some() {
+            } else if task.waiting.as_ref().is_some_and(|wait| wait.active(now)) {
                 "waiting"
             } else {
                 "open"
@@ -868,13 +874,13 @@ mod tests {
         urgent.created_at = u64::MAX;
         urgent.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
             note: "User restart confirmation".into(),
-            recorded_at: None,
+            recorded_at: Some(0),
         });
         urgent.completion_conflict = Some(waku_protocol::boss::CompletionConflict {
             assignment: Uuid::new_v4(),
             attempt: 1,
             reason: "User restart confirmation still required".into(),
-            at: 0,
+            at: 1,
         });
         boss.outcomes.push(urgent.clone());
         for index in 0..100 {
@@ -1060,6 +1066,167 @@ mod tests {
             work.digest
                 .contains(&format!("## lib — /work/lib · id {}", lib.id))
         );
+    }
+
+    fn outcome(title: &str) -> waku_protocol::boss::BossOutcome {
+        waku_protocol::boss::BossOutcome {
+            id: Uuid::new_v4(),
+            outcome: title.into(),
+            success_criteria: String::new(),
+            state: waku_protocol::boss::OutcomeState::Open,
+            finishing_assignment: None,
+            handoffs: Vec::new(),
+            completion_conflict: None,
+            evidence: None,
+            plan_id: None,
+            waiting: None,
+            snoozed_until: None,
+            last_activity_at: 0,
+            unattended_since: None,
+            last_reminder: None,
+            created_at: 0,
+            completed_at: None,
+            history: Vec::new(),
+            assignments: Vec::new(),
+        }
+    }
+
+    fn paused_chain(outcome_id: Uuid, raised_at: u64) -> waku_protocol::chains::EmployeeChain {
+        use waku_protocol::chains::*;
+        EmployeeChain {
+            schema_version: 1,
+            id: Uuid::new_v4(),
+            request_id: Uuid::new_v4(),
+            request: ChainDefinition {
+                outcome_id,
+                finishes_outcome: false,
+                steps: Vec::new(),
+            },
+            supervisor_id: None,
+            definition_version: 1,
+            revision: 0,
+            current_step: 0,
+            status: ChainStatus::Paused,
+            reason: None,
+            finisher_reserved: false,
+            steps: Vec::new(),
+            attention: Some(ChainAttention {
+                id: Uuid::new_v4(),
+                reason: "gate failed".into(),
+                raised_at: Some(raised_at),
+                handled_at: None,
+            }),
+            history: Vec::new(),
+        }
+    }
+
+    /// The digest reads an outcome like the panel: a recorded wait the
+    /// boss wrote after the attention evidence is the newer truth and
+    /// the task lists as waiting, not needs attention. Evidence stamped
+    /// after the wait still surfaces, an owed review always does, an
+    /// unstamped legacy wait stays the current truth, and an elapsed
+    /// defer supersedes nothing.
+    #[test]
+    fn digest_wait_supersedes_only_older_attention() {
+        use waku_protocol::boss::{
+            AssignmentSettle, AssignmentVerdict, OutcomeAssignment, OutcomeHandoff, OutcomeWait,
+        };
+        let now = unix_time();
+        let mut task = outcome("Wait versus failure");
+        // A settled failure nothing answered — stamped evidence.
+        task.assignments.push(OutcomeAssignment {
+            session: Uuid::new_v4(),
+            generation: 1,
+            identity: None,
+            job_title: None,
+            finishes_outcome: None,
+            after_success: None,
+            prerequisites: Vec::new(),
+            assigned_at: Some(now - 200),
+            settled: Some(AssignmentSettle {
+                verdict: AssignmentVerdict::Failed,
+                cause: None,
+                blocked: false,
+                at: Some(now - 100),
+            }),
+        });
+        // The boss recorded a newer wait explaining the pause.
+        task.waiting = Some(OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: Some(now - 50),
+        });
+        let mut boss = boss_state();
+        boss.outcomes = vec![task.clone()];
+
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.digest.contains("— waiting ·"), "{}", work.digest);
+        assert!(!work.digest.contains("needs attention"));
+
+        // A failure stamped after the wait still surfaces.
+        boss.outcomes[0].assignments[0].settled.as_mut().unwrap().at = Some(now - 10);
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.digest.contains("— needs attention ·"));
+
+        // A wait persisted before the stamp existed stays the current
+        // truth over every record.
+        boss.outcomes[0].waiting = Some(OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: None,
+        });
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.digest.contains("— waiting ·"));
+
+        // An owed review never hides behind a superseding wait.
+        boss.outcomes[0].handoffs.push(OutcomeHandoff {
+            id: Uuid::new_v4(),
+            assignment: Uuid::new_v4(),
+            attempt: 1,
+            intent: "Review the result".into(),
+            created_at: now - 60,
+            resolution: None,
+        });
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.digest.contains("— needs attention ·"));
+        assert!(work.digest.contains("handoff"));
+        boss.outcomes[0].handoffs.clear();
+
+        // A paused chain's unhandled exception counts with its own
+        // stamp: raised before the wait it is superseded, after it the
+        // stall still surfaces. The settled row drops back under the
+        // wait so the chain's stamp is the deciding evidence.
+        boss.outcomes[0].assignments[0].settled.as_mut().unwrap().at = Some(now - 100);
+        let mut chain = paused_chain(boss.outcomes[0].id, now - 60);
+        boss.chains = vec![chain.clone()];
+        boss.outcomes[0].waiting = Some(OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: Some(now - 50),
+        });
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.digest.contains("— waiting ·"));
+        chain.attention.as_mut().unwrap().raised_at = Some(now - 10);
+        boss.chains = vec![chain.clone()];
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.digest.contains("— needs attention ·"));
+        // Handling the exception or unpausing the chain settles it.
+        chain.attention.as_mut().unwrap().handled_at = Some(now);
+        boss.chains = vec![chain.clone()];
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.digest.contains("— waiting ·"));
+        boss.chains.clear();
+
+        // An elapsed defer supersedes nothing — the deferral already
+        // ended — and no longer reads as waiting at all.
+        boss.outcomes[0].waiting = Some(OutcomeWait::Until {
+            at: now - 1,
+            recorded_at: Some(now + 10),
+        });
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.digest.contains("— needs attention ·"));
+
+        // A clean open outcome still reads open.
+        boss.outcomes = vec![outcome("Unblocked work")];
+        let work = work_context(&[], &[], &boss, &AutomationsState::default());
+        assert!(work.digest.contains("— open ·"));
     }
 
     #[test]

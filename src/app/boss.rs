@@ -1168,62 +1168,14 @@ pub(super) struct BossEmployeeRow {
 /// attention: the row surfaces them through its own follow-up state.
 /// `attention_at` stays `None` when every piece of evidence predates the
 /// stamp fields — such records are always older than any wait stamped
-/// since.
+/// since. Shared with the boss digest through
+/// [`waku_protocol::boss::BossOutcome::attention_evidence`].
 fn boss_outcome_attention(
     outcome: &waku_protocol::boss::BossOutcome,
     members: &[BossOutcomeMember],
     chains: &[waku_protocol::chains::EmployeeChain],
 ) -> (bool, Option<u64>) {
-    let mut attention = false;
-    let mut attention_at: Option<u64> = None;
-    let mut flag = |at: Option<u64>| {
-        attention = true;
-        if let Some(at) = at {
-            attention_at = Some(attention_at.map_or(at, |newest| newest.max(at)));
-        }
-    };
-    if let Some(conflict) = &outcome.completion_conflict {
-        flag(Some(conflict.at));
-    }
-    for member in members {
-        if waku_protocol::boss::BossOutcome::assignment_unresolved(&member.employee) {
-            flag(member.employee.expired_at);
-        }
-    }
-    // A session's latest recorded attempt still failed or blocked while
-    // its roster record is gone — the durable row is all that remembers
-    // the failure. A rostered member defers to the record's own verdict:
-    // a resume reopens its row, so a settled failure here is one nothing
-    // answered.
-    let mut latest: HashMap<Uuid, &waku_protocol::boss::OutcomeAssignment> = HashMap::new();
-    for row in &outcome.assignments {
-        latest.insert(row.session, row);
-    }
-    for row in latest.values() {
-        if row.settled.as_ref().is_some_and(|settle| {
-            matches!(
-                settle.verdict,
-                waku_protocol::boss::AssignmentVerdict::Failed
-            ) || settle.blocked
-        }) && !members
-            .iter()
-            .any(|member| member.employee.session_id == row.session)
-        {
-            flag(row.settled.as_ref().and_then(|settle| settle.at));
-        }
-    }
-    // A paused chain carrying an unhandled exception is stalled work
-    // awaiting a decision — the reminder scan surfaces it the same way.
-    for chain in chains {
-        if chain.request.outcome_id == outcome.id
-            && chain.status == waku_protocol::chains::ChainStatus::Paused
-            && let Some(chain_attention) = &chain.attention
-            && chain_attention.handled_at.is_none()
-        {
-            flag(chain_attention.raised_at);
-        }
-    }
-    (attention, attention_at)
+    outcome.attention_evidence(members.iter().map(|member| &member.employee), chains)
 }
 
 /// The Deliverables library rows under `filter`. A planning session's
@@ -13754,10 +13706,16 @@ mod tests {
 
         // A rostered member's clean record answers for its own settled
         // failure — the durable row defers to it.
-        let member = BossOutcomeMember {
+        let mut member = BossOutcomeMember {
             employee: employee(9, EmployeeLifecycle::Expired, None),
             queue_rank: None,
         };
+        member.employee.assignment = Some(waku_protocol::boss::Assignment {
+            outcome_id: task.id,
+            after_success: String::new(),
+            finishes_outcome: false,
+            prerequisites: Vec::new(),
+        });
         task.assignments[0].settled.as_mut().unwrap().verdict = AssignmentVerdict::Failed;
         assert!(!boss_outcome_attention(&task, &[member.clone()], &[]).0);
 

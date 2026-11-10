@@ -3172,6 +3172,82 @@ impl BossOutcome {
             .is_none_or(|recorded| evidence_at.is_none_or(|at| at <= recorded))
     }
 
+    /// The outcome's attention flag and the newest stamp among its
+    /// evidence — an open completion conflict, an unresolved roster
+    /// record assigned to the outcome, a settled history row whose
+    /// roster record is gone so a failure cannot lose attention when
+    /// the employee retires, and a paused chain's unhandled exception —
+    /// stalled work the owner still owes an answer, matching the
+    /// reminder scan's reading. `roster` is the full employee roster —
+    /// live and retired records; the method keeps the rows this outcome
+    /// owns. Pending handoffs are owed decisions, not attention. The
+    /// stamp is `None` when every piece predates the stamp fields —
+    /// always older than any wait stamped since — which is what
+    /// [`Self::wait_supersedes`] orders a recorded wait against.
+    pub fn attention_evidence<'a>(
+        &self,
+        roster: impl IntoIterator<Item = &'a BossEmployee>,
+        chains: &[crate::chains::EmployeeChain],
+    ) -> (bool, Option<u64>) {
+        let members: Vec<&BossEmployee> = roster
+            .into_iter()
+            .filter(|employee| {
+                employee
+                    .assignment
+                    .as_ref()
+                    .is_some_and(|assignment| assignment.outcome_id == self.id)
+            })
+            .collect();
+        let mut attention = false;
+        let mut attention_at: Option<u64> = None;
+        let mut flag = |at: Option<u64>| {
+            attention = true;
+            if let Some(at) = at {
+                attention_at = Some(attention_at.map_or(at, |newest| newest.max(at)));
+            }
+        };
+        if let Some(conflict) = &self.completion_conflict {
+            flag(Some(conflict.at));
+        }
+        for member in &members {
+            if Self::assignment_unresolved(*member) {
+                flag(member.expired_at);
+            }
+        }
+        // A session's latest recorded attempt still failed or blocked
+        // while its roster record is gone — the durable row is all that
+        // remembers the failure. A rostered member defers to the
+        // record's own verdict: a resume reopens its row, so a settled
+        // failure here is one nothing answered.
+        let mut latest = BTreeMap::new();
+        for row in &self.assignments {
+            latest.insert(row.session, row);
+        }
+        for row in latest.values() {
+            if row.settled.as_ref().is_some_and(|settle| {
+                matches!(settle.verdict, AssignmentVerdict::Failed) || settle.blocked
+            }) && !members
+                .iter()
+                .any(|member| member.session_id == row.session)
+            {
+                flag(row.settled.as_ref().and_then(|settle| settle.at));
+            }
+        }
+        // A paused chain carrying an unhandled exception is stalled work
+        // awaiting a decision — the reminder scan surfaces it the same
+        // way.
+        for chain in chains {
+            if chain.request.outcome_id == self.id
+                && chain.status == crate::chains::ChainStatus::Paused
+                && let Some(chain_attention) = &chain.attention
+                && chain_attention.handled_at.is_none()
+            {
+                flag(chain_attention.raised_at);
+            }
+        }
+        (attention, attention_at)
+    }
+
     /// A assignment this task's reminders treat as live work — not expired
     /// and not cancelled. Queued, dispatching, and working all count:
     /// capacity waiting is already-visible Waiting work.
