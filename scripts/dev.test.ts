@@ -307,6 +307,80 @@ test("dev --serve exits when the update feed cannot start", async () => {
   }
 });
 
+test("dev --no-build exits when no completed build exists", async () => {
+  const { root, env } = await makeWorkspace("goddard-dev-nobuild-test-");
+  try {
+    const child = Bun.spawn([process.execPath, devScript, "--no-build"], {
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect(code, stdout + stderr).toBe(1);
+    expect(stdout + stderr).toContain("no completed build to launch");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("dev --no-build launches the last completed build and never rebuilds", async () => {
+  const { root, bin, dataDir, env } = await makeWorkspace("goddard-dev-nobuild-test-");
+  const bundle = join(dataDir, "debug", "lanes", "b", "Goddard Debug.app");
+  const seed = Bun.spawn([join(bin, "bundle-stub")], {
+    env: { ...env, GODDARD_BUNDLE_DIR: bundle },
+  });
+  expect(await seed.exited).toBe(0);
+  await writeFile(join(dataDir, "debug", "lanes", "b", ".complete"), "seed\n");
+  // Any compile — initial or watcher-triggered — would create this marker.
+  await writeFile(join(bin, "mbx"), `#!${process.execPath}
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+writeFileSync(join(process.env.TEST_ROOT, "building"), "");
+`, { mode: 0o755 });
+  let output = "";
+  const decoder = new TextDecoder();
+  const terminal = new Bun.Terminal({
+    cols: 240,
+    rows: 40,
+    data(_terminal, bytes) {
+      output += decoder.decode(bytes, { stream: true });
+    },
+  });
+  const child = Bun.spawn([process.execPath, devScript, "--no-build"], { env, terminal });
+  try {
+    await waitFor(
+      () => output.includes("Daemon listening"),
+      15_000,
+      "daemon startup",
+    );
+    expect(output).toContain(
+      "--no-build: launching the last completed build (lane b)",
+    );
+    // A change under a watched directory must not schedule a build.
+    const probe = join(import.meta.dir, ".dev-test-probe");
+    await writeFile(probe, "");
+    try {
+      await Bun.sleep(2_500);
+      expect(existsSync(join(root, "building"))).toBe(false);
+    } finally {
+      await rm(probe, { force: true });
+    }
+    terminal.write("q\n");
+    expect(await child.exited).toBe(0);
+  } finally {
+    if (child.exitCode === null) {
+      child.kill();
+      await child.exited;
+    }
+    terminal.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
 test("dev exits when the initial build fails outside serve mode", async () => {
   const { root, env } = await makeWorkspace("goddard-dev-test-");
   try {

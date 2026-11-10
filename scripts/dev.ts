@@ -50,7 +50,7 @@ const devArgs = Bun.argv.slice(2);
 const serveMode = devArgs.includes("--serve");
 // --wait restores the old block-on-build startup: the app only opens once the
 // initial build finishes. --no-build launches the last completed build and
-// skips the initial build entirely (watchers still rebuild on change).
+// never compiles — it exits when no completed build exists.
 const waitForBuild = devArgs.includes("--wait");
 const noBuild = devArgs.includes("--no-build");
 if (serveMode && !isMacOS) {
@@ -1799,7 +1799,7 @@ function targetForChange(
 }
 
 function scheduleBuild(target: BuildTarget): void {
-  if (stopping) return;
+  if (noBuild || stopping) return;
   daemonChangeRevision += 1;
   if (target === "app") appChangeRevision += 1;
   debouncedBuild = mergedTarget(debouncedBuild, target);
@@ -1998,6 +1998,26 @@ async function cleanup(): Promise<void> {
 process.on("SIGINT", () => void cleanup());
 process.on("SIGTERM", () => void cleanup());
 
+if (laned) {
+  adoptAppLanes();
+}
+// What the last completed build left behind: on macOS the newest surviving
+// complete runtime lanes, elsewhere cargo's outputs at appPath/daemonPath.
+const completedAppAvailable = laned
+  ? latestLane !== undefined
+  : existsSync(appPath);
+const daemonBinaryAvailable =
+  externalDaemonAddress !== undefined ||
+  (laned ? latestLane !== undefined : existsSync(daemonPath));
+// --no-build never compiles, so it can only start when a completed build
+// exists to launch. Fail before the feed and watchers come up.
+const noBuildViable = noBuild && completedAppAvailable && daemonBinaryAvailable;
+if (noBuild && !noBuildViable) {
+  console.error(
+    "[goddard-dev] --no-build requested but there is no completed build to launch.",
+  );
+  process.exit(1);
+}
 startWatchers();
 if (serveMode) {
   try {
@@ -2013,26 +2033,7 @@ if (serveMode) {
     process.exit(1);
   }
 }
-if (laned) {
-  adoptAppLanes();
-}
-// What the last completed build left behind: on macOS the newest surviving
-// complete runtime lanes, elsewhere cargo's outputs at appPath/daemonPath.
-const completedAppAvailable = laned
-  ? latestLane !== undefined
-  : existsSync(appPath);
-const daemonBinaryAvailable =
-  externalDaemonAddress !== undefined ||
-  (laned ? latestLane !== undefined : existsSync(daemonPath));
-// --no-build only holds when there is a build to run — a first-ever checkout
-// has nothing to launch, so fall back to a normal initial build.
-const noBuildViable = noBuild && completedAppAvailable && daemonBinaryAvailable;
-if (noBuild && !noBuildViable) {
-  console.log(
-    "[goddard-dev] --no-build requested but there is no completed build to launch; building the current tree.",
-  );
-}
-const runInitialBuild = !noBuildViable;
+const runInitialBuild = !noBuild;
 building = true;
 // A previous session's completed bundle is usable during the very first
 // rebuild too. Start its daemon and accept commands while the initial build
@@ -2061,7 +2062,7 @@ if (
   console.log(
     runInitialBuild
       ? `[goddard-dev] Launching the last completed build${laneSuffix}; the fresh build continues in the background.`
-      : `[goddard-dev] --no-build: launching the last completed build${laneSuffix} and skipping the initial build.`,
+      : `[goddard-dev] --no-build: launching the last completed build${laneSuffix}; rebuilds are disabled.`,
   );
   await relaunchApp();
 } else if (runInitialBuild && interactive) {
