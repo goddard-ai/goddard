@@ -2960,6 +2960,14 @@ impl Backend for WakuBackend {
                         &submitted,
                         attachments,
                     )?;
+                    if let DriverEvent::PromptSubmitted {
+                        turn_id,
+                        message_id,
+                        ..
+                    } = &submitted
+                    {
+                        driver.trace_submission(*turn_id, *message_id);
+                    }
                     events.send(event_to_wire(submitted)?)?;
                     if !*hidden && self.boss.is_boss_principal(session_id) {
                         // A boss op reaching back to the user — a `terminal`

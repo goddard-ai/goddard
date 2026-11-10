@@ -296,6 +296,7 @@ pub(super) fn deliver_agent_prompt(
         }
     }
     automations.note_prompt_delivered(session_id, message_id, turn_id)?;
+    driver.trace_submission(turn_id, message_id);
     if automation_prompt {
         // Reserve the turn before the provider emits TurnStarted, so a queue
         // drain cannot deliver a second automation into the same runtime.

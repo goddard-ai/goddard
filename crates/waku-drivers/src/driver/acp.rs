@@ -760,13 +760,14 @@ async fn acp_phase<T>(
     provider: ProviderKind,
     phase: &'static str,
     timeout: Duration,
+    events: &DriverEventSender,
     operation: impl std::future::Future<Output = agent_client_protocol::Result<T>>,
 ) -> agent_client_protocol::Result<T> {
     if provider != ProviderKind::Devin {
         return operation.await;
     }
     let started = Instant::now();
-    eprintln!("Devin ACP phase={phase} started");
+    events.trace(super::timeline::Event::PhaseStarted { phase });
     let result = smol::future::race(operation, async {
         smol::Timer::after(timeout).await;
         Err(agent_client_protocol::Error::new(
@@ -774,11 +775,19 @@ async fn acp_phase<T>(
             format!("Devin timed out during {phase} after {} seconds; the queued prompt was not dispatched", timeout.as_secs()),
         ))
     }).await;
-    eprintln!(
-        "Devin ACP phase={phase} elapsed_ms={} success={}",
-        started.elapsed().as_millis(),
-        result.is_ok()
-    );
+    events.trace(super::timeline::Event::PhaseFinished {
+        phase,
+        elapsed_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+        outcome: match &result {
+            Ok(_) => super::timeline::Outcome::Succeeded,
+            Err(error)
+                if error.code == agent_client_protocol::Error::new(DEVIN_TIMEOUT_CODE, "").code =>
+            {
+                super::timeline::Outcome::TimedOut
+            }
+            Err(_) => super::timeline::Outcome::Failed,
+        },
+    });
     result
 }
 
@@ -821,6 +830,9 @@ async fn run_sdk_connection(
                 let first_prompt = first_prompt.clone();
                 let prompt_requests = prompt_requests.clone();
                 async move |notification: SessionNotification, _connection| {
+                    if provider == ProviderKind::Devin {
+                        events.trace_first_update(suppress_session_updates.load(Ordering::Acquire));
+                    }
                     handle_session_update(
                         provider,
                         notification,
@@ -850,6 +862,16 @@ async fn run_sdk_connection(
                         && let Some(cause) =
                             notification.params().get("cause").and_then(Value::as_str)
                     {
+                        if provider == ProviderKind::Devin {
+                            use super::timeline::{Event, StopCause};
+                            let cause = match cause {
+                                "complete" => StopCause::Complete,
+                                "cancelled" => StopCause::Cancelled,
+                                "interrupted_by_new_prompt" => StopCause::Preempted,
+                                _ => StopCause::External,
+                            };
+                            events.trace(Event::ProviderStopped { cause });
+                        }
                         prompt_requests.lock().note_agent_stop(cause);
                     }
                     if notification.method() == "_x.ai/session/update" {
@@ -973,7 +995,7 @@ async fn run_sdk_connection(
                 meta.insert("parameterizedModelPicker".to_owned(), Value::Bool(true));
                 client_capabilities = client_capabilities.meta(meta);
             }
-            let initialize = acp_phase(provider, "initialization", DEVIN_STARTUP_PHASE_TIMEOUT, async { connection
+            let initialize = acp_phase(provider, "initialization", DEVIN_STARTUP_PHASE_TIMEOUT, &events, async { connection
                 .send_request(
                     InitializeRequest::new(ProtocolVersion::V1)
                         .client_capabilities(client_capabilities)
@@ -993,6 +1015,7 @@ async fn run_sdk_connection(
                 &connection,
                 &initialize,
                 provider,
+                &events,
                 resume_session_id.as_deref(),
                 &cwd,
                 &suppress_session_updates,
@@ -1004,7 +1027,7 @@ async fn run_sdk_connection(
                 // Mode selection is opportunistic: an agent can advertise a
                 // mode but reject a later transition without invalidating the
                 // session itself.
-                acp_phase(provider, "access-mode configuration", DEVIN_STARTUP_PHASE_TIMEOUT, async {
+                acp_phase(provider, "access-mode configuration", DEVIN_STARTUP_PHASE_TIMEOUT, &events, async {
                     let _ = connection
                         .send_request(SetSessionModeRequest::new(session_id.clone(), mode_id))
                         .block_task()
@@ -1027,7 +1050,7 @@ async fn run_sdk_connection(
             let mut current_effort = reasoning_effort;
             let mut current_tier = service_tier;
             let mut current_window = context_window;
-            acp_phase(provider, "model configuration", DEVIN_STARTUP_PHASE_TIMEOUT, async {
+            acp_phase(provider, "model configuration", DEVIN_STARTUP_PHASE_TIMEOUT, &events, async {
                 apply_model(
                     &connection,
                     provider,
@@ -1064,6 +1087,7 @@ async fn run_sdk_connection(
                 if provider == ProviderKind::Devin
                     && prompt_requests.lock().awaiting_start_timed_out(Instant::now())
                 {
+                    events.trace(super::timeline::Event::CancellationRequested { source: super::timeline::CancelSource::ResponseTimeout });
                     let _ = connection.send_notification(CancelNotification::new(session_id.clone()));
                     return Err(agent_client_protocol::Error::new(DEVIN_TIMEOUT_CODE,
                         "Devin did not confirm starting within 60 seconds after prompt dispatch; delivery may have succeeded; the connection was closed without retrying"));
@@ -1260,6 +1284,7 @@ async fn establish_session(
     connection: &ConnectionTo<Agent>,
     initialize: &InitializeResponse,
     provider: ProviderKind,
+    events: &DriverEventSender,
     resume_session_id: Option<&str>,
     cwd: &Path,
     suppress_session_updates: &AtomicBool,
@@ -1281,6 +1306,7 @@ async fn establish_session(
                 provider,
                 "session resume",
                 DEVIN_STARTUP_PHASE_TIMEOUT,
+                events,
                 async {
                     connection
                         .send_request(
@@ -1314,6 +1340,7 @@ async fn establish_session(
                 provider,
                 "session load",
                 DEVIN_STARTUP_PHASE_TIMEOUT,
+                events,
                 async {
                     let mut response = connection
                         .send_request(
@@ -1366,6 +1393,7 @@ async fn establish_session(
         provider,
         "session creation",
         DEVIN_STARTUP_PHASE_TIMEOUT,
+        events,
         async {
             connection
                 .send_request(NewSessionRequest::new(cwd).mcp_servers(mcp_servers.to_vec()))
@@ -2478,7 +2506,9 @@ fn dispatch_prompt(
     let sent = dispatch.connection.send_request(request);
     let request_id = sent.id().clone();
     if dispatch.provider == ProviderKind::Devin {
-        eprintln!("Devin ACP phase=awaiting_start dispatched");
+        dispatch
+            .events
+            .trace(super::timeline::Event::PromptDispatched);
     }
     {
         let mut pending = dispatch.prompt_requests.lock();
@@ -3951,6 +3981,7 @@ mod tests {
             ProviderKind::Devin,
             "session resume",
             Duration::ZERO,
+            &crate::driver::test_event_channel().0,
             std::future::pending::<agent_client_protocol::Result<()>>(),
         ))
         .unwrap_err();
@@ -3963,6 +3994,7 @@ mod tests {
                     provider,
                     "initialization",
                     Duration::ZERO,
+                    &crate::driver::test_event_channel().0,
                     async { Ok(42) }
                 ))
                 .unwrap(),

@@ -618,7 +618,10 @@ impl WakuBackend {
                     let lifecycle = self.runtime_lifecycles.session(watch.session);
                     let _owner = lifecycle.lock();
                     let removed = self.remove_runtime(watch.session, Some(runtime), false);
-                    if removed.is_some() {
+                    if let Some(entry) = removed.as_ref() {
+                        entry.driver.trace(driver::timeline::Event::Evicted {
+                            reason: driver::timeline::EvictionReason::MemoryPressure,
+                        });
                         let sink = self.event_source().for_session(watch.session, runtime);
                         sink.notify_runtime_ended();
                         sink.end_session_runtime();

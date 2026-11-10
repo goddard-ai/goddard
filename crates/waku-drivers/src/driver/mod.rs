@@ -20,6 +20,7 @@ pub mod session_import;
 mod stable_projection;
 mod support;
 pub use stable_projection::NativeEventProjection;
+pub mod timeline;
 mod title_refresh;
 
 pub use computer_use::ComputerUseRuntime;
@@ -60,9 +61,21 @@ pub struct DriverEventSender {
     events: Sender<DriverEvent>,
     wake: smol::channel::Sender<()>,
     process_anchor: Option<Arc<PathBuf>>,
+    timeline: Option<timeline::RuntimeTimeline>,
 }
 
 impl DriverEventSender {
+    pub fn with_timeline(mut self, timeline: timeline::RuntimeTimeline) -> Self {
+        self.timeline = Some(timeline);
+        self
+    }
+
+    pub(crate) fn trace(&self, event: timeline::Event) {
+        if let Some(timeline) = &self.timeline {
+            timeline.record(event);
+        }
+    }
+
     /// The daemon supplies a unique path for this runtime's owned process.
     /// Shared provider services deliberately do not register a task owner.
     pub fn with_process_anchor(mut self, path: PathBuf) -> Self {
@@ -72,6 +85,12 @@ impl DriverEventSender {
 
     pub fn process_anchor(&self) -> Option<&std::path::Path> {
         self.process_anchor.as_deref().map(PathBuf::as_path)
+    }
+
+    pub(crate) fn trace_first_update(&self, replaying: bool) {
+        if let Some(timeline) = &self.timeline {
+            timeline.first_update(replaying);
+        }
     }
 
     pub fn record_process(&self, pid: u32) -> std::io::Result<()> {
@@ -86,6 +105,23 @@ impl DriverEventSender {
     }
 
     pub fn send(&self, event: DriverEvent) -> Result<(), SendError<DriverEvent>> {
+        let trace = match &event {
+            DriverEvent::Connected { .. } => Some(timeline::Event::Connected),
+            DriverEvent::TurnStarted => Some(timeline::Event::ProviderStarted),
+            DriverEvent::TurnFinished { success, .. } => {
+                Some(timeline::Event::TurnFinished { success: *success })
+            }
+            DriverEvent::ProcessExited | DriverEvent::RuntimeLost => {
+                Some(timeline::Event::ConnectionExited)
+            }
+            DriverEvent::Error(_) | DriverEvent::LocalizedError { .. } => {
+                Some(timeline::Event::ProviderError)
+            }
+            _ => None,
+        };
+        if let Some(trace) = trace {
+            self.trace(trace);
+        }
         self.events.send(event)?;
         let _ = self.wake.try_send(());
         Ok(())
@@ -118,6 +154,7 @@ pub fn event_channel(
             events,
             wake,
             process_anchor: None,
+            timeline: None,
         },
         receiver,
     )
@@ -132,11 +169,32 @@ pub fn test_event_channel() -> (DriverEventSender, Receiver<DriverEvent>) {
 #[derive(Clone)]
 pub struct DriverHandle {
     inner: Arc<dyn DriverControl>,
+    timeline: Option<timeline::RuntimeTimeline>,
 }
 
 impl DriverHandle {
     pub fn from_control(control: Arc<dyn DriverControl>) -> Self {
-        Self { inner: control }
+        Self {
+            inner: control,
+            timeline: None,
+        }
+    }
+
+    pub fn with_timeline(mut self, timeline: Option<timeline::RuntimeTimeline>) -> Self {
+        self.timeline = timeline;
+        self
+    }
+
+    pub fn trace_submission(&self, turn_id: uuid::Uuid, message_id: uuid::Uuid) {
+        if let Some(timeline) = &self.timeline {
+            timeline.submission(turn_id, message_id);
+        }
+    }
+
+    pub fn trace(&self, event: timeline::Event) {
+        if let Some(timeline) = &self.timeline {
+            timeline.record(event);
+        }
     }
 
     pub fn coordinator_control(&self) -> &dyn DriverControl {
@@ -167,6 +225,9 @@ impl DriverHandle {
     }
 
     pub fn cancel(&self) {
+        self.trace(timeline::Event::CancellationRequested {
+            source: timeline::CancelSource::Controller,
+        });
         self.inner.cancel();
     }
 
@@ -175,6 +236,7 @@ impl DriverHandle {
     }
 
     pub fn begin_shutdown(&self) {
+        self.trace(timeline::Event::ShutdownRequested);
         self.inner.begin_shutdown();
     }
 
@@ -472,6 +534,7 @@ pub fn start_cloud(
 ) -> anyhow::Result<DriverHandle> {
     Ok(DriverHandle {
         inner: Arc::new(cloud::CloudDriver::start(provider, options, events)?),
+        timeline: None,
     })
 }
 
@@ -523,7 +586,10 @@ pub fn start_local(
         // runtime since the SDK's process and transport code is Tokio-native.
         ProviderKind::Copilot => Arc::new(copilot::CopilotDriver::start(options, events)?),
     };
-    Ok(DriverHandle { inner })
+    Ok(DriverHandle {
+        inner,
+        timeline: None,
+    })
 }
 
 #[cfg(test)]

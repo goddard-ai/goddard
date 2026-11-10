@@ -38,6 +38,13 @@ pub(super) fn reap_idle_runtimes(
                 return None;
             }
             let entry = sessions.remove(&session_id)?;
+            entry.driver.trace(driver::timeline::Event::Evicted {
+                reason: if under_pressure {
+                    driver::timeline::EvictionReason::MemoryPressure
+                } else {
+                    driver::timeline::EvictionReason::Idle
+                },
+            });
             drop(sessions);
             drop(state);
             owner.set(None);
@@ -61,6 +68,9 @@ impl WakuBackend {
             return None;
         }
         let entry = sessions.remove(&session)?;
+        entry.driver.trace(driver::timeline::Event::Evicted {
+            reason: driver::timeline::EvictionReason::MemoryPressure,
+        });
         drop(sessions);
         drop(state);
         owner.set(None);

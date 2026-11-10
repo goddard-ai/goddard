@@ -536,6 +536,7 @@ pub struct WakuBackend {
     sidebar_intent_order: parking_lot::ReentrantMutex<()>,
     sidebar_intents: Mutex<sidebar_intents::Receipts>,
     task_store: Arc<StateStore>,
+    provider_timeline: driver::timeline::Timeline,
     task_state: Arc<Mutex<PersistedState>>,
     /// The hub's `task_state_changed` broadcast once `serve` installs it —
     /// daemon-side catalog mutations (boss project knobs) replay it so

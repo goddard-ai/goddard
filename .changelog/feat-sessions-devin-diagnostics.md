@@ -1,0 +1,1 @@
+- Devin failures now leave a local diagnostic timeline of runtime startup, submissions, and outcomes without message content. Logs rotate within 20 MB and expire after seven days while Goddard is running.

@@ -95,6 +95,9 @@ impl WakuBackend {
             integrations,
             inference_secrets,
             task_store,
+            provider_timeline: driver::timeline::Timeline::start(
+                data_dir.join("diagnostics/devin-timeline"),
+            ),
             task_state,
             task_notifier: Mutex::new(None),
             removed_session_ids: Mutex::new(HashSet::new()),

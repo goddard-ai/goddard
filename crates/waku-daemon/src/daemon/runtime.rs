@@ -97,6 +97,14 @@ impl WakuBackend {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         let event_sender = event_sender.with_process_anchor(self.memory_guard.anchor(runtime_id));
         let resumable = options.provider_cursor.is_some();
+        let timeline = (provider == ProviderKind::Devin).then(|| {
+            self.provider_timeline
+                .runtime(session_id, runtime_id, resumable)
+        });
+        let event_sender = match &timeline {
+            Some(timeline) => event_sender.with_timeline(timeline.clone()),
+            None => event_sender,
+        };
         let cwd = options.cwd.clone();
         let mut options = options;
         self.boss.require_active(session_id)?;
@@ -413,7 +421,10 @@ impl WakuBackend {
         let handle = plan_gate.as_ref().map_or(handle.clone(), |gate| {
             DriverHandle::from_control(gate.clone())
         });
-        let handle = self.boss_driver_boundary(session_id, runtime_id, handle);
+        let handle = self
+            .boss_driver_boundary(session_id, runtime_id, handle)
+            .with_timeline(timeline);
+        handle.trace(driver::timeline::Event::RuntimeCreated);
         let computer_use_available = handle.computer_use_available();
         if let Some(error) = computer_use_start_error {
             let error = format!("{error:#}");
