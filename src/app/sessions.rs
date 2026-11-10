@@ -3767,6 +3767,14 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let selected_archive = self.state.selected_session.map(|session_id| {
+            let row = sidebar::sidebar_session_row_index(&self.sidebar_rows_cached(), session_id);
+            (
+                session_id,
+                row,
+                self.attention_when_selected == Some(session_id),
+            )
+        });
         // A sidebar multi-selection archives as a batch; each member keeps
         // its own row position for the neighbor-selection fallback.
         // Selected deliverables archive through their daemon alongside the
@@ -3774,12 +3782,76 @@ impl Waku {
         let targets = self.sidebar_multi_selection_targets();
         let deliverables = self.sidebar_deliverable_multi_selection_targets();
         if !targets.is_empty() || !deliverables.is_empty() {
+            let selected_archive =
+                selected_archive.filter(|(session_id, _, _)| targets.contains(session_id));
             self.archive_sidebar_targets(targets, deliverables, window, cx);
+            self.focus_next_for_pending_archive(selected_archive, window, cx);
             return;
         }
         if let Some(session_id) = self.composer_session_id() {
+            let selected_archive =
+                selected_archive.filter(|(selected_id, _, _)| *selected_id == session_id);
             self.archive_session(session_id, window, cx);
+            self.focus_next_for_pending_archive(selected_archive, window, cx);
         }
+    }
+
+    /// A worktree archive has to inspect its checkout before it can finish.
+    /// The keyboard shortcut should still move away from the now-hidden task
+    /// while that inspection runs; the eventual archive then only persists
+    /// and cleans up the task in the background.
+    fn focus_next_for_pending_archive(
+        &mut self,
+        archived: Option<(Uuid, Option<usize>, bool)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((session_id, landing_row, attention_at_visit)) = archived else {
+            return;
+        };
+        if self.state.selected_session != Some(session_id)
+            || !self.archive_preview_pending.contains(&session_id)
+        {
+            return;
+        }
+        let Some((project_id, projectless)) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| {
+                (
+                    session.project_id,
+                    self.state
+                        .projects
+                        .iter()
+                        .find(|project| project.id == session.project_id)
+                        .is_some_and(Project::is_projectless)
+                        || self.session_is_boss_managed(session),
+                )
+            })
+        else {
+            return;
+        };
+
+        self.state.selected_session = None;
+        self.sync_voice_scratchpad_capture(cx);
+        self.settings_page = None;
+        self.sync_right_panel_owner(cx);
+        if attention_at_visit {
+            self.select_session_fallback(project_id, projectless, window, cx);
+        } else {
+            let next = self.next_sidebar_session_from_row(landing_row.unwrap_or(0));
+            if let Some(next_id) = next {
+                self.request_session_activation(next_id, SessionActivationTransition::Visit, cx);
+            } else {
+                self.compose_new_task(project_id, projectless, window, cx);
+            }
+        }
+        if let Some(session_id) = self.state.selected_session {
+            self.reveal_sidebar_session(session_id);
+        }
+        self.flash_sidebar_session(self.state.selected_session, cx);
     }
 
     pub(super) fn archive_sidebar_targets(

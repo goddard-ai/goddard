@@ -1,0 +1,1 @@
+- When you archive a task with the keyboard shortcut, Goddard focuses the next task while it checks the worktree for changes.
