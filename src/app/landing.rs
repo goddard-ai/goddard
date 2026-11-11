@@ -628,42 +628,71 @@ impl Waku {
         cx.notify();
     }
 
-    pub(super) fn render_landing_status(&self, id: Uuid, cx: &mut Context<Self>) -> AnyElement {
-        let Some(entry) = self.landing_operations.get(&id) else {
+    /// The in-flight `/land` receipt wears the landed card's chrome so the
+    /// transcript reads progress → outcome as one element changing state.
+    /// `fallback` is the receipt's persisted label for a "Merge instead"
+    /// retry — that op rides the git-panel slot, not the landing queue.
+    pub(super) fn render_landing_status(
+        &self,
+        id: Uuid,
+        fallback: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let entry = self.landing_operations.get(&id);
+        let retrying = self.git_panel_operation.as_ref().is_some_and(|op| {
+            op.id == id
+                && op.pending == git_panel::GitPanelPending::Landing
+                && op.transcript_session.is_some()
+        });
+        if entry.is_none() && !retrying {
             return div().into_any_element();
-        };
+        }
         let theme = Theme::current(cx);
-        let queued = !entry.unavailable
-            && !self.landing_cancellations.contains(&id)
-            && entry
-                .job
-                .as_ref()
-                .is_some_and(|job| job.state == LandingState::Queued);
-        let mut row = div()
-            .w_full()
-            .max_w(px(crate::app::CONTENT_MAX_WIDTH))
-            .mx_auto()
-            .mb(px(4.0))
+        let queued = entry.is_some_and(|entry| {
+            !entry.unavailable
+                && !self.landing_cancellations.contains(&id)
+                && entry
+                    .job
+                    .as_ref()
+                    .is_some_and(|job| job.state == LandingState::Queued)
+        });
+        let label = entry
+            .map(|_| self.landing_label(id))
+            .unwrap_or_else(|| fallback.to_owned());
+        let mut header = div()
+            .h(px(34.0))
             .px(px(12.0))
             .flex()
             .items_center()
             .gap(px(6.0))
-            .text_size(sp(11.5))
-            .text_color(theme.text_tertiary)
-            .child(icon("icons/git-merge.svg", 11.0, theme.text_tertiary))
-            .child(div().min_w_0().flex_1().child(self.landing_label(id)));
-        if queued {
-            row = row.child(
+            .child(icon("icons/git-merge.svg", 12.0, theme.text_tertiary))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .font_family(crate::fonts::current(cx).ui)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(label),
+            );
+        if queued && let Some(entry) = entry {
+            header = header.child(
                 div()
                     .id(SharedString::from(format!(
                         "transcript-cancel-landing-{id}"
                     )))
                     .track_focus(&entry.cancel_focus)
                     .tab_index(0)
-                    .px(px(6.0))
-                    .py(px(5.0))
+                    .h(px(22.0))
+                    .px(px(7.0))
                     .rounded(px(6.0))
-                    .text_color(theme.accent)
+                    .flex()
+                    .items_center()
+                    .cursor_default()
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_secondary)
+                    .hover(|style| style.bg(theme.overlay_strong).text_color(theme.text))
                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .child(tr!("git_panel.land_cancel_queued"))
                     .on_click(cx.listener(move |this, _, _, cx| this.cancel_queued_landing(id, cx)))
@@ -674,8 +703,25 @@ impl Waku {
                         }
                     })),
             );
+        } else if retrying || entry.is_some_and(|entry| !entry.unavailable) {
+            header = header.child(motion::spin(icon(
+                "icons/loader-circle.svg",
+                11.0,
+                theme.text_tertiary,
+            )));
         }
-        row.into_any_element()
+        div()
+            .w_full()
+            .min_w_0()
+            .rounded(px(15.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.overlay)
+            .text_size(sp(12.5))
+            .line_height(sp(16.0))
+            .overflow_hidden()
+            .child(header)
+            .into_any_element()
     }
 
     pub(super) fn render_landing_queue(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -788,7 +834,8 @@ impl Waku {
     }
 }
 /// The final receipt replaces progress before a conflict prompt can be sent.
-/// It remains a normal persisted system message, including the stopped files.
+/// It remains a normal persisted system message — the stopped paths stay in
+/// the working tree and the conflict modal, not the receipt.
 pub(super) fn landing_transcript_outcome(
     result: &anyhow::Result<WorkspaceResult>,
 ) -> (String, Option<TranscriptNotice>) {
@@ -813,15 +860,8 @@ pub(super) fn landing_transcript_outcome(
             outcome: LandOutcome::AlreadyLanded { base },
         }) => (tr!("git_panel.already_landed", base = base), None),
         Ok(WorkspaceResult::Land {
-            outcome: LandOutcome::Conflict { base, files, .. },
-        }) => {
-            let mut content = tr!("git_panel.land_conflict_description", base = base);
-            for file in files {
-                content.push('\n');
-                content.push_str(file);
-            }
-            (content, None)
-        }
+            outcome: LandOutcome::Conflict { base, .. },
+        }) => (tr!("git_panel.land_conflict_description", base = base), None),
         Err(error) => (error.to_string(), None),
         _ => (tr!("git_panel.land_result_unknown"), None),
     }
@@ -853,7 +893,7 @@ mod tests {
     use waku_client::git::{LandOutcome, SyncInProgress};
 
     #[test]
-    fn landing_conflict_receipt_retains_evidence_after_reload() {
+    fn landing_conflict_receipt_names_base_without_file_list() {
         for in_progress in [SyncInProgress::Rebase, SyncInProgress::Merge] {
             let files = vec!["src/first.rs".to_owned(), "src/second file.rs".to_owned()];
             let (content, notice) = landing_transcript_outcome(&Ok(WorkspaceResult::Land {
@@ -870,7 +910,7 @@ mod tests {
 
             assert!(restored.content.contains("release/next"));
             for file in &files {
-                assert!(restored.content.lines().any(|line| line == file));
+                assert!(!restored.content.contains(file.as_str()));
             }
             assert!(!matches!(
                 restored.notice,

@@ -2395,8 +2395,13 @@ impl Waku {
                         .landing_operations
                         .get(&message.id)
                         .is_some_and(|entry| entry.operation.transcript_session.is_some())
+                        || self.git_panel_operation.as_ref().is_some_and(|op| {
+                            op.id == message.id
+                                && op.pending == git_panel::GitPanelPending::Landing
+                                && op.transcript_session.is_some()
+                        })
                     {
-                        return self.render_landing_status(message.id, cx);
+                        return self.render_landing_status(message.id, &message.content, cx);
                     }
                     let display_content = super::transcript::display_message_content(&message);
                     let copied = self.copied_message_feedback.contains_key(&message.id);

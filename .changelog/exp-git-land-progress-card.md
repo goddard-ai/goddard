@@ -1,0 +1,1 @@
+- `/land` progress in the transcript now shares the “Landed” card's look, and a landing that stops on conflicts reports a single line — the conflicted files stay in the conflict dialog and the working tree instead of listing in the transcript.
