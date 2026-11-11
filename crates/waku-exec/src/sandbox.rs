@@ -829,12 +829,20 @@ fn ensure_os_image(
 }
 
 fn checkpoint_names(shuru: &Path) -> anyhow::Result<Vec<String>> {
-    let output = crate::command_env::plain_command(shuru)
-        .args(["checkpoint", "list"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .context("could not list shuru checkpoints")?;
+    let mut command = crate::command_env::plain_command(shuru);
+    command.args(["checkpoint", "list"]);
+    // Listing is read-only; a stuck helper must not hold a request worker.
+    // The existing capture owner bounds admission and pipe I/O and reaps on failure.
+    let output = crate::capture::capture(
+        &mut command,
+        crate::capture::CaptureOptions {
+            deadline: Instant::now() + Duration::from_secs(5),
+            stdout: crate::capture::OutputLimit::Exact(1024 * 1024),
+            stderr: crate::capture::OutputLimit::Prefix(4096),
+        },
+        None,
+    )
+    .context("could not list shuru checkpoints")?;
     if !output.status.success() {
         bail!("`shuru checkpoint list` failed");
     }
@@ -2436,3 +2444,7 @@ mod tests {
         assert!(sleeper.wait().is_ok());
     }
 }
+
+#[cfg(test)]
+#[path = "checkpoint_deadline_tests.rs"]
+mod checkpoint_deadline_tests;

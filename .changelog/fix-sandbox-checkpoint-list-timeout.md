@@ -1,0 +1,1 @@
+- A stalled sandbox checkpoint lookup now times out after five seconds, so sandbox sign-in reports an error and frees a daemon worker for other requests.
