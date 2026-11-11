@@ -1034,6 +1034,18 @@ impl Waku {
             self.sidebar_intents.last_archive = None;
         }
         let _ = self.sidebar_intents.tx.send(Control::ClearUndo(batch));
+        // Only the toast this batch raised retires on undo — the palette or
+        // the status panel can trigger this too, and a newer, unrelated
+        // toast stays.
+        let batch_toast = self.toast.as_ref().is_some_and(|toast| {
+            matches!(
+                &toast.action,
+                Some(ToastAction {
+                    kind: ToastActionKind::SidebarArchive(current),
+                    ..
+                }) if *current == batch
+            )
+        });
         let entries = self
             .sidebar_intents
             .entries
@@ -1041,6 +1053,7 @@ impl Waku {
             .filter(|e| e.batch == batch && e.phase != Phase::Removed)
             .cloned()
             .collect::<Vec<_>>();
+        let mut restored = Vec::new();
         for entry in entries {
             match entry.intent.edit {
                 SidebarEdit::Task {
@@ -1057,12 +1070,23 @@ impl Waku {
                     } else {
                         self.unarchive_session(id, false, cx);
                     }
+                    restored.push(id);
                 }
                 SidebarEdit::DeliverableArchive { id, archived: true } => {
                     self.set_deliverable_archived(entry.key, id, false, cx)
                 }
                 _ => {}
             }
+        }
+        // The same landing as the classic archive toast's Undo: a lone
+        // task reopens and takes focus, a group reports its count.
+        match restored.as_slice() {
+            [] if batch_toast => self.hide_toast(),
+            [session_id] => self.open_toast_session(*session_id, cx),
+            many if batch_toast => {
+                self.show_success_toast(tr!("session.unarchived_many", count = many.len()))
+            }
+            _ => {}
         }
         cx.notify();
     }
