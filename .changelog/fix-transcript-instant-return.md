@@ -1,0 +1,1 @@
+- Return to previously viewed tasks without waiting for their transcripts to reload; loaded content stays in memory for the lifetime of the window.

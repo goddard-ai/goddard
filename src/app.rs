@@ -239,7 +239,7 @@ fn signal_event_pump(#[cfg_attr(test, allow(unused_variables))] wake: &smol::cha
     let _ = wake.try_send(());
 }
 
-/// Source bytes of parsed messages kept across session switches.
+/// Source-byte budget for parsed messages from unvisited background transcripts.
 ///
 /// Measured at ~17x expansion into parsed structures, plus flattened text and
 /// shaped runs on top, so this is bounded by source size rather than entry
@@ -252,12 +252,12 @@ const MAX_CACHED_MESSAGE_SOURCE_BYTES: usize = 512 * 1024;
 /// practice. 8 is generous and caps the tree cache, the only large one, at a
 /// few hundred KB.
 const MAX_CACHED_WORKSPACES: usize = 8;
-/// How many hydrated session transcripts the app keeps resident. Hydration
+/// How many unvisited hydrated session transcripts the app keeps resident. Hydration
 /// is a cache — a released session rehydrates through the same async fetch
 /// a cold open already uses — so a session nobody can see gets skeletonized
 /// again rather than holding its messages, blocks, and turns for the life
 /// of the window. Smaller than the daemon's own window: the daemon serves
-/// every connected client, the app needs only its recent view history.
+/// every connected client. Viewed transcripts are pinned separately.
 const RESIDENT_TRANSCRIPT_WINDOW: usize = 12;
 const STREAM_REMEASURE_TAIL_ROWS: usize = 3;
 /// Top-level markdown blocks the live reasoning peek renders, counted from
@@ -4412,6 +4412,9 @@ pub struct Waku {
     /// back/forward history can restore where the transcript was instead of
     /// picking a fresh landing.
     transcript_scroll_positions: HashMap<Uuid, TranscriptScrollPosition>,
+    /// Tasks opened in this window retain their loaded transcript for instant returns.
+    /// Separate from scroll positions because a task parked at the tail has none.
+    viewed_transcripts: HashSet<Uuid>,
     /// The landing the current session's activation chose. A runtime attach
     /// that lands after activation resets the rows again, so the same landing
     /// is re-applied there rather than snapping the transcript to its tail.
@@ -8303,6 +8306,7 @@ impl Waku {
                 transcript_is_scrolled,
                 transcript_last_wheel_scroll,
                 transcript_scroll_positions: HashMap::new(),
+                viewed_transcripts: HashSet::new(),
                 transcript_landing: None,
                 pending_sidebar_scroll: Cell::new(None),
                 transcript_status_markers_floating: Cell::new(None),

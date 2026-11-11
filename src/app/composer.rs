@@ -2312,7 +2312,9 @@ impl Waku {
         match self.model_picker_target {
             ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_) => self
                 .model_picker_session()
-                .filter(|session| session.provider_locked() && !session.detail_loaded)
+                .filter(|session| {
+                    session.provider_locked() && !self.session_detail_is_ready(session)
+                })
                 .map(|session| session.provider),
             ModelPickerTarget::AutomationEditor | ModelPickerTarget::QaSetup => None,
         }
@@ -2802,7 +2804,9 @@ impl Waku {
         controls: &ComposerControls,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let session = controls.session.filter(|session| session.detail_loaded)?;
+        let session = controls
+            .session
+            .filter(|session| self.session_detail_is_ready(session))?;
         let selected_mode = session.runtime_mode;
         let theme = Theme::current(cx);
         let environment = session.environment();
@@ -6164,8 +6168,9 @@ impl Waku {
         preparing: bool,
         has_draft: bool,
     ) -> ComposerSubmitAction {
-        if preparing || session.is_some_and(|session| !session.detail_loaded) {
-            return composer_submit_action(session, preparing, has_draft);
+        let refreshing = session.is_some_and(|session| !self.session_detail_is_ready(session));
+        if preparing || refreshing {
+            return composer_submit_action(session, preparing || refreshing, has_draft);
         }
         if !has_draft
             && session.is_some_and(|session| {
@@ -6498,7 +6503,7 @@ impl Waku {
         // reads as unavailable and the submission path refuses too, so
         // `enter` cannot slip past a disabled control.
         let no_providers = self.model_picker_has_no_providers();
-        let detail_ready = session.is_none_or(|session| session.detail_loaded);
+        let detail_ready = session.is_none_or(|session| self.session_detail_is_ready(session));
         let can_send = has_draft && !no_providers && detail_ready && !prompt_blocked;
         // Continue needs no draft — an interrupted session is exactly what
         // makes it available — but it still needs a provider to run.
@@ -7101,7 +7106,7 @@ impl Waku {
             self.state
                 .sessions
                 .iter()
-                .any(|session| session.id == *id && !session.detail_loaded)
+                .any(|session| session.id == *id && !self.session_detail_is_ready(session))
         }) {
             self.ensure_session_loaded(session_id, cx);
             cx.notify();

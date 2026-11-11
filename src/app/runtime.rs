@@ -619,11 +619,14 @@ pub(super) fn merge_remote_project_catalog(
 }
 
 /// Preserve newer resident detail and list edits while installing a stored baseline.
+/// Only explicitly stale detail may be replaced while still visible. A live
+/// detail snapshot clears staleness, so a late read cannot overwrite that snapshot.
 pub(super) fn merge_hydrated_session(
     existing: &mut AgentSession,
     mut hydrated: AgentSession,
+    refresh_stale: bool,
 ) -> bool {
-    if existing.detail_loaded {
+    if existing.detail_loaded && !refresh_stale {
         return false;
     }
     let columns = existing.list_projection();
@@ -7122,7 +7125,7 @@ impl Waku {
         }
         if let Some(session_id) = self
             .selected_session()
-            .filter(|session| !session.detail_loaded)
+            .filter(|session| !self.session_detail_is_ready(session))
             .map(|session| session.id)
         {
             self.restore_composer_submission(session_id, submission, cx);
@@ -7243,7 +7246,7 @@ impl Waku {
             .state
             .sessions
             .iter()
-            .any(|session| session.id == session_id && !session.detail_loaded)
+            .any(|session| session.id == session_id && !self.session_detail_is_ready(session))
         {
             self.restore_composer_submission(session_id, submission, cx);
             self.ensure_session_loaded(session_id, cx);
@@ -7995,7 +7998,7 @@ impl Waku {
         // are parked — they land with the session detail (a rotation's
         // carried chips only exist there). Fetch it and stay armed; the
         // hydration completion re-runs this drain.
-        if !session.detail_loaded {
+        if !self.session_detail_is_ready(session) {
             self.ensure_session_loaded(session_id, cx);
             self.defer_queue_drain(session_id);
             return;
@@ -8050,7 +8053,7 @@ impl Waku {
             .state
             .sessions
             .iter()
-            .any(|session| session.id == session_id && !session.detail_loaded)
+            .any(|session| session.id == session_id && !self.session_detail_is_ready(session))
         {
             self.restore_composer_submission(session_id, submission, cx);
             self.ensure_session_loaded(session_id, cx);

@@ -962,6 +962,43 @@ pub(super) enum TranscriptRowKind {
     QueuedEmployee,
 }
 
+/// Translate a visible anchor when a retained window refreshes into full detail.
+/// Row indexes are local to the old slice; message/activity ids survive rebasing.
+pub(super) fn transcript_row_after_refresh(
+    row: TranscriptRowKind,
+    existing: &AgentSession,
+    refreshed: &AgentSession,
+) -> Option<TranscriptRowKind> {
+    let message_index = |index: usize| {
+        let id = existing.messages.get(index)?.id;
+        refreshed
+            .messages
+            .iter()
+            .position(|message| message.id == id)
+    };
+    Some(match row {
+        TranscriptRowKind::Message(index) => TranscriptRowKind::Message(message_index(index)?),
+        TranscriptRowKind::ResponseFooter(turn, index) => {
+            TranscriptRowKind::ResponseFooter(turn, message_index(index)?)
+        }
+        TranscriptRowKind::TurnBlock(index) => {
+            let id = existing
+                .transcript_blocks
+                .get(index)?
+                .activities
+                .first()?
+                .id;
+            TranscriptRowKind::TurnBlock(
+                refreshed
+                    .transcript_blocks
+                    .iter()
+                    .position(|block| block.activities.iter().any(|activity| activity.id == id))?,
+            )
+        }
+        row => row,
+    })
+}
+
 /// Session-local content keys keep disclosure anchors stable as historical
 /// rows are inserted and folded. The outer key adds the owning session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

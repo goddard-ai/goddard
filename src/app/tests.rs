@@ -4667,7 +4667,7 @@ fn startup_hydration_keeps_newer_list_edits_and_live_transcript_detail() {
         revision: 2,
     });
 
-    super::runtime::merge_hydrated_session(&mut current, stored.clone());
+    super::runtime::merge_hydrated_session(&mut current, stored.clone(), false);
     assert!(current.detail_loaded);
     assert_eq!(current.title, "Renamed while loading");
     assert_eq!(current.archived_at, Some(42));
@@ -4680,8 +4680,47 @@ fn startup_hydration_keeps_newer_list_edits_and_live_transcript_detail() {
 
     current.begin_turn("Newer live prompt");
     let before = serde_json::to_value(&current).unwrap();
-    super::runtime::merge_hydrated_session(&mut current, stored);
+    super::runtime::merge_hydrated_session(&mut current, stored, false);
     assert_eq!(serde_json::to_value(&current).unwrap(), before);
+}
+
+#[test]
+fn stale_resident_transcript_refreshes_without_discarding_newer_list_edits() {
+    let mut current = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    current.begin_turn("Already visible");
+    let mut refreshed = current.clone();
+    refreshed.push_message(MessageRole::Assistant, "Updated in the background");
+    current.title = "Local rename".into();
+    assert!(super::runtime::merge_hydrated_session(
+        &mut current,
+        refreshed,
+        true
+    ));
+    assert!(current.detail_loaded);
+    assert_eq!(current.title, "Local rename");
+    assert_eq!(
+        current.messages.last().unwrap().content,
+        "Updated in the background"
+    );
+}
+
+#[test]
+fn transcript_refresh_rebases_a_parked_window_anchor_by_message_id() {
+    let mut full = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    for index in 0..20 {
+        full.begin_turn(format!("Prompt {index}"));
+        full.finish_active_turn(TurnStatus::Completed);
+    }
+    let mut window = full.clone();
+    window.messages.drain(..15);
+    assert_eq!(
+        super::transcript::transcript_row_after_refresh(Message(2), &window, &full),
+        Some(Message(17)),
+    );
+    assert_eq!(
+        super::transcript::transcript_row_after_refresh(Message(20), &window, &full),
+        None,
+    );
 }
 
 #[test]
@@ -9316,6 +9355,82 @@ mod live_employee_approvals {
             std::env::remove_var("GODDARD_APP_EXECUTABLE");
         }
         (guard, dir)
+    }
+
+    // Headless state/navigation regression; no screenshots or visual assertions.
+    #[gpui::test]
+    fn viewed_transcripts_survive_idle_eviction_at_the_tail(cx: &mut gpui::TestAppContext) {
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.join("project"));
+        let daemon = FakeDaemon::start(
+            dir,
+            project.clone(),
+            Vec::new(),
+            boss_state(None, Vec::new()),
+        );
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor);
+        update_app(vcx, &view, |waku, _, cx| {
+            let sessions: Vec<_> = (0..30)
+                .map(|index| {
+                    let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+                    for turn in 0..if index == 0 { 20 } else { 1 } {
+                        session.begin_turn(format!("Prompt {index}/{turn}"));
+                        session.finish_active_turn(TurnStatus::Completed);
+                    }
+                    session.detail_loaded = true;
+                    session.updated_at = index;
+                    session
+                })
+                .collect();
+            let ids: Vec<_> = sessions.iter().map(|session| session.id).collect();
+            waku.state.projects = vec![project];
+            waku.state.sessions = sessions;
+            waku.state.selected_session = None;
+            for id in &ids[..14] {
+                waku.request_session_activation(
+                    *id,
+                    super::super::SessionActivationTransition::Visit,
+                    cx,
+                );
+                if *id == ids[0] {
+                    waku.active_transcript_rows().scroll_to(ListOffset {
+                        item_ix: 3,
+                        offset_in_item: px(7.0),
+                    });
+                }
+            }
+            // Deserialize a persisted baseline so dirty-save protection cannot
+            // accidentally make this pass instead of the viewed-task pins.
+            waku.state =
+                serde_json::from_value(serde_json::to_value(&waku.state).unwrap()).unwrap();
+            waku.trim_resident_transcripts();
+            assert!(
+                waku.state.sessions[..14]
+                    .iter()
+                    .all(|session| session.detail_loaded)
+            );
+            assert!(
+                !waku.state.sessions[14].detail_loaded,
+                "unvisited background data still evicts"
+            );
+            assert!(
+                !waku.transcript_scroll_positions.contains_key(&ids[1]),
+                "tail visits need no saved offset"
+            );
+            // Even a stale resident opens synchronously; its refresh keeps the
+            // transcript visible while control settings remain unavailable.
+            waku.stale_task_details.insert(ids[0]);
+            waku.navigate_to_session(ids[0], super::super::SessionActivationTransition::Visit, cx);
+            assert_eq!(waku.state.selected_session, Some(ids[0]));
+            assert!(waku.pending_session_activation.is_none());
+            let selected = waku.selected_session().unwrap();
+            assert!(selected.detail_loaded);
+            assert!(!waku.session_detail_is_ready(selected));
+            let offset = waku.active_transcript_rows().logical_scroll_top();
+            assert_eq!(offset.item_ix, 3);
+            assert_eq!(offset.offset_in_item, px(7.0));
+        });
     }
 
     fn pending_permission(request_id: &str) -> PendingPermission {

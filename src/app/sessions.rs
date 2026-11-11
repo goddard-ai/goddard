@@ -938,9 +938,7 @@ impl Waku {
         let can_wait = self.state.selected_session != Some(session_id)
             && self.live_boss_chat_target(session_id).is_none()
             && self.state.sessions.iter().any(|session| {
-                session.id == session_id
-                    && session.side_chat_of.is_none()
-                    && (!session.detail_loaded || self.stale_task_details.contains(&session_id))
+                session.id == session_id && session.side_chat_of.is_none() && !session.detail_loaded
             })
             && self
                 .qa_window
@@ -1122,22 +1120,21 @@ impl Waku {
         self.apply_deep_link_prompt(cx);
     }
 
+    /// A retained transcript can render during refresh, but controls must wait
+    /// for authoritative permissions and provider settings.
+    pub(super) fn session_detail_is_ready(&self, session: &AgentSession) -> bool {
+        session.detail_loaded
+            && !(self.stale_task_details.contains(&session.id)
+                && self.session_hydrations.contains(session.id))
+    }
+
     /// Queue detail reads off the UI thread. The selected task overtakes
     /// background warmup and the queue bounds concurrent transcript loads.
     pub(super) fn ensure_session_loaded(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.stale_task_details.contains(&session_id)
-            && !self.session_hydrations.contains(session_id)
-            && let Some(session) = self.state.session_mut(session_id)
-        {
-            session.detail_loaded = false;
-        }
-
-        if self
-            .state
-            .sessions
-            .iter()
-            .any(|session| session.id == session_id && !session.detail_loaded)
-        {
+        if self.state.sessions.iter().any(|session| {
+            session.id == session_id
+                && (!session.detail_loaded || self.stale_task_details.contains(&session_id))
+        }) {
             self.session_hydrations.enqueue(
                 session_id,
                 self.state.selected_session == Some(session_id)
@@ -1151,12 +1148,10 @@ impl Waku {
 
     fn start_pending_session_hydrations(&mut self, cx: &mut Context<Self>) {
         while let Some(session_id) = self.session_hydrations.next() {
-            if !self
-                .state
-                .sessions
-                .iter()
-                .any(|session| session.id == session_id && !session.detail_loaded)
-            {
+            if !self.state.sessions.iter().any(|session| {
+                session.id == session_id
+                    && (!session.detail_loaded || self.stale_task_details.contains(&session_id))
+            }) {
                 self.session_hydrations.complete(session_id);
                 continue;
             }
@@ -1203,14 +1198,33 @@ impl Waku {
                             waku.sidebar_intents.observe_task(&mut session);
                             waku.pending_task_metadata.overlay(&mut session);
                             waku.trim_resident_transcripts();
+                            let refreshing = waku.stale_task_details.contains(&session_id);
+                            let retained_detail = refreshing
+                                && waku.state.sessions.iter().any(|session| {
+                                    session.id == session_id && session.detail_loaded
+                                });
+                            let previous_rows = retained_detail
+                                .then(|| waku.snapshot_selected_transcript_rows(session_id))
+                                .flatten();
+                            let refresh_anchor = previous_rows.as_deref().and_then(|rows| {
+                                let offset = waku.active_transcript_rows().logical_scroll_top();
+                                let row = *rows.get(offset.item_ix)?;
+                                let existing =
+                                    waku.state.sessions.iter().find(|s| s.id == session_id)?;
+                                let row = super::transcript::transcript_row_after_refresh(
+                                    row, existing, &session,
+                                )?;
+                                Some((row, offset.offset_in_item))
+                            });
                             let applied = if let Some(existing) = waku
                                 .state
                                 .sessions
                                 .iter_mut()
                                 .find(|existing| existing.id == session_id)
                             {
-                                let merged =
-                                    super::runtime::merge_hydrated_session(existing, session);
+                                let merged = super::runtime::merge_hydrated_session(
+                                    existing, session, refreshing,
+                                );
                                 waku.pending_task_metadata.overlay(existing);
                                 if merged {
                                     waku.transcript_views.remove(&session_id);
@@ -1248,7 +1262,38 @@ impl Waku {
                             let selected_before_refresh = waku.state.selected_session;
                             waku.reconcile_boss_chat_refresh(cx);
                             if selected_before_refresh == waku.state.selected_session {
-                                waku.finish_selected_session_hydration(session_id, applied, cx);
+                                if applied && let Some(previous_rows) = previous_rows.as_deref() {
+                                    // Refresh the visible data without replaying the navigation landing:
+                                    // the reader may have scrolled since the request began.
+                                    waku.splice_transcript_rows_after_visibility_change(
+                                        previous_rows,
+                                    );
+                                    // A refresh can change text without changing row identities.
+                                    waku.remeasure_transcript_rows(0..waku.transcript_row_count());
+                                    if let Some((row, offset_in_item)) = refresh_anchor
+                                        && let Some(item_ix) = waku
+                                            .transcript_row_kinds
+                                            .borrow()
+                                            .iter()
+                                            .position(|candidate| *candidate == row)
+                                    {
+                                        waku.active_transcript_rows().scroll_to(ListOffset {
+                                            item_ix,
+                                            offset_in_item,
+                                        });
+                                    }
+                                    waku.store_transcript_scroll_position();
+                                    waku.transcript_landing = Some((
+                                        session_id,
+                                        waku.saved_transcript_landing(session_id)
+                                            .unwrap_or(TranscriptLanding::Tail),
+                                    ));
+                                }
+                                waku.finish_selected_session_hydration(
+                                    session_id,
+                                    applied && previous_rows.is_none(),
+                                    cx,
+                                );
                             }
                             if waku.pending_queue_drains.contains(&session_id) {
                                 waku.pending_queue_drains.retain(|id| *id != session_id);
@@ -1487,6 +1532,7 @@ impl Waku {
             }
         }
         self.state.selected_session = Some(session_id);
+        self.viewed_transcripts.insert(session_id);
         let detail_loaded = self
             .selected_session()
             .is_some_and(|session| session.detail_loaded);
@@ -1642,9 +1688,8 @@ impl Waku {
         if detail_loaded {
             self.refresh_codex_history(session_id, cx);
             self.maybe_voice_brief(session_id, cx);
-        } else {
-            self.ensure_session_loaded(session_id, cx);
         }
+        self.ensure_session_loaded(session_id, cx);
         cx.notify();
     }
 
@@ -2061,6 +2106,7 @@ impl Waku {
             self.remove_side_chat_surface(id, cx);
         }
         if let Some(session_id) = self.state.selected_session {
+            self.viewed_transcripts.insert(session_id);
             let panel_state = RightPanelSessionState::take_or_closed(
                 &mut self.right_panel_states,
                 RightPanelOwner::Session(session_id),
@@ -2861,6 +2907,13 @@ impl Waku {
         else {
             return;
         };
+        self.transcript_views.remove(&session_id);
+        {
+            let mut markdown = self.message_markdown.borrow_mut();
+            for message in &self.state.sessions[index].messages {
+                markdown.remove(&message.id);
+            }
+        }
         self.pending_task_metadata.remove(&session_id);
         let project_id = self.state.sessions[index].project_id;
         let composer_draft_key =
@@ -2972,6 +3025,7 @@ impl Waku {
             self.sidebar_multi_selection_anchor = None;
         }
         self.transcript_scroll_positions.remove(&session_id);
+        self.viewed_transcripts.remove(&session_id);
         if self
             .transcript_landing
             .as_ref()
@@ -3392,6 +3446,7 @@ impl Waku {
             self.sidebar_multi_selection_anchor = None;
         }
         self.transcript_scroll_positions.remove(&session_id);
+        self.viewed_transcripts.remove(&session_id);
         if self
             .transcript_landing
             .as_ref()
@@ -5989,15 +6044,22 @@ impl Waku {
         );
         // Parsed messages are keyed by message id, which is unique across
         // sessions, so they stay cached — switching back to a recent session
-        // then costs no re-parse. Bounded so a long-running window cannot grow
-        // without limit.
+        // then costs no re-parse. Only unvisited background transcripts obey
+        // the source-byte budget; viewed transcripts stay ready for a return.
         let mut message_markdown = self.message_markdown.borrow_mut();
         let cached_bytes: usize = message_markdown
             .values()
             .map(md::render::MarkdownView::source_len)
             .sum();
         if cached_bytes > MAX_CACHED_MESSAGE_SOURCE_BYTES {
-            message_markdown.clear();
+            let retained_messages: HashSet<_> = self
+                .state
+                .sessions
+                .iter()
+                .filter(|session| self.viewed_transcripts.contains(&session.id))
+                .flat_map(|session| session.messages.iter().map(|message| message.id))
+                .collect();
+            message_markdown.retain(|id, _| retained_messages.contains(id));
         }
         for id in streaming_messages {
             message_markdown
@@ -6027,7 +6089,8 @@ impl Waku {
     }
 
     /// Skeletonize hydrated transcripts nobody can see, bounded to the
-    /// recency window. The store's dirty set keeps unsaved work; the pin set
+    /// recency window. Viewed tasks remain resident alongside their parked
+    /// scroll positions. The store's dirty set keeps unsaved work; the pin set
     /// covers everything that can be observed or mutated while off screen —
     /// a released session rehydrates through `ensure_session_loaded` like a
     /// cold open. The released ids also drop their `message_markdown` views,
@@ -6039,6 +6102,7 @@ impl Waku {
             .filter(|(_, runtime)| runtime.detail_visible != Some(false))
             .map(|(id, _)| *id)
             .collect();
+        pinned.extend(self.viewed_transcripts.iter().copied());
         if let Some(id) = self.state.selected_session {
             pinned.insert(id);
         }
