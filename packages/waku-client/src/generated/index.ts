@@ -334,6 +334,7 @@ export type { RouteClassTarget } from "./RouteClassTarget";
 export type { RouteDecision } from "./RouteDecision";
 export type { RouteTarget } from "./RouteTarget";
 export type { RpcError } from "./RpcError";
+export type { RpcErrorCode } from "./RpcErrorCode";
 export type { RuntimeEventCursor } from "./RuntimeEventCursor";
 export type { RuntimeMode } from "./RuntimeMode";
 export type { ScratchEntry } from "./ScratchEntry";

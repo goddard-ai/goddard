@@ -91,8 +91,8 @@ pub use protocol::{
     DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonChildKind, DaemonChildSample, DaemonReady,
     DaemonSessionSample, DaemonStatsSample, MAX_WIRE_MESSAGE_BYTES, PLAN_FINALIZE_REQUEST_PREFIX,
     PROTOCOL_VERSION, RUNTIME_INGRESS_ENV, ReplayCursor, Request, RequestCommandSample,
-    RequestPoolSample, ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage,
-    SessionDetailTail, SubprocessLabelSample, TASK_LINK_PREFIX, WhistleWord,
+    RequestPoolSample, ResponseOutcome, ResponsePayload, RpcError, RpcErrorCode, SequencedEvent,
+    ServerMessage, SessionDetailTail, SubprocessLabelSample, TASK_LINK_PREFIX, WhistleWord,
     WireComputerToolRequest, WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
     is_daemon_request,
 };

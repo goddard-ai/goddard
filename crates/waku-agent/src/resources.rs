@@ -193,11 +193,34 @@ pub fn command(mut arguments: impl Iterator<Item = String>) -> Result<()> {
 }
 
 #[cfg(unix)]
+fn child_exited_without_reaping(pid: u32) -> std::io::Result<bool> {
+    // SAFETY: siginfo_t is C data made of integers and raw pointers. Zeroing
+    // it also distinguishes WNOHANG's no-change result on older platforms.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    // SAFETY: pid is our unreaped child and info is writable. WNOWAIT
+    // observes termination while retaining the PID for group cleanup.
+    let result = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid as libc::id_t,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    if result == -1 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(info.si_signo == libc::SIGCHLD)
+    }
+}
+
+#[cfg(unix)]
 fn run(id: Uuid, borrowed: bool, argv: Vec<String>) -> Result<()> {
     use std::{
         os::unix::{fs::DirBuilderExt, process::CommandExt},
         process::Command,
     };
+    use waku_protocol::{RpcError, RpcErrorCode};
     if borrowed {
         // The outer process group and supervisor already cover the nested command.
         let status = Command::new(&argv[0]).args(&argv[1..]).status()?;
@@ -224,40 +247,81 @@ fn run(id: Uuid, borrowed: bool, argv: Vec<String>) -> Result<()> {
             return Err(error);
         }
         std::fs::write(gate.join("go"), b"")?;
+        let mut admission_busy: Option<(Instant, anyhow::Error)> = None;
+        let mut admission_backoff = Duration::from_millis(50);
         loop {
             if let Some(status) = child.try_wait()? {
                 return Ok(status.code().unwrap_or(1));
             }
-            match request(ResourceOperation::Status { id: Some(id) })
-                .and_then(|s| Ok(interrupted() || reservation(&s, id)?.cancelled))
-            {
-                Ok(false) => {}
-                // Task credentials die with the provider; loss of authentication cancels owned work.
-                Ok(true) | Err(_) => {
-                    unsafe {
-                        libc::kill(-(pid as i32), libc::SIGTERM);
-                    }
-                    let deadline = Instant::now() + Duration::from_secs(2);
-                    let mut reaped = false;
-                    while Instant::now() < deadline {
-                        if child.try_wait()?.is_some() {
-                            reaped = true;
-                            break;
-                        }
-                        std::thread::sleep(Duration::from_millis(50));
-                    }
-                    // Keep the leader unreaped until escalation: its PID cannot
-                    // be reused by an unrelated process group in this interval.
-                    if !reaped {
-                        unsafe {
-                            libc::kill(-(pid as i32), libc::SIGKILL);
-                        }
-                        let _ = child.wait();
-                    }
-                    bail!("resource workload cancelled or task ownership lost");
+            let started = Instant::now();
+            let (admission_deadline, previous_error) = match admission_busy.take() {
+                Some((deadline, error)) => (deadline, Some(error)),
+                None => (started + Duration::from_secs(5), None),
+            };
+            let observation = if interrupted() {
+                Ok(true)
+            } else if let Some(error) = previous_error.filter(|_| started >= admission_deadline) {
+                Err(error)
+            } else {
+                request(ResourceOperation::Status { id: Some(id) })
+                    .and_then(|s| Ok(interrupted() || reservation(&s, id)?.cancelled))
+            };
+            let stop_error = match observation {
+                Ok(false) => {
+                    admission_backoff = Duration::from_millis(50);
+                    std::thread::sleep(Duration::from_millis(500));
+                    continue;
                 }
+                Err(error)
+                    if !interrupted()
+                        && Instant::now() < admission_deadline
+                        && error
+                            .downcast_ref::<RpcError>()
+                            .is_some_and(|rpc| rpc.code == Some(RpcErrorCode::AdmissionBusy)) =>
+                {
+                    // A pre-execution refusal is not loss of ownership. Keep
+                    // the old admission tolerance while checking completion
+                    // and interruption between bounded status-only retries.
+                    let remaining = admission_deadline.saturating_duration_since(Instant::now());
+                    std::thread::sleep(admission_backoff.min(remaining));
+                    admission_backoff = (admission_backoff * 2).min(Duration::from_millis(200));
+                    admission_busy = Some((admission_deadline, error));
+                    continue;
+                }
+                Ok(true) => None,
+                // Authentication, ownership and transport failures remain
+                // terminal; mutating resource operations are never retried.
+                Err(error) => Some(error),
+            };
+            // SAFETY: this is the child process group created above. Its
+            // leader remains unreaped, preventing PID reuse before the signal.
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGTERM);
             }
-            std::thread::sleep(Duration::from_millis(500));
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                match child_exited_without_reaping(pid) {
+                    Ok(true) => break,
+                    Ok(false) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(error) => {
+                        return Err(error)
+                            .context("could not observe supervised workload shutdown");
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            // A leader may exit while descendants are still running. Stop
+            // the whole group before reaping, while its PID cannot be reused.
+            // SAFETY: the same owned leader has not been reaped.
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+            child.wait().context("could not reap supervised workload")?;
+            if let Some(error) = stop_error {
+                return Err(error.context("resource supervision failed; workload stopped"));
+            }
+            bail!("resource workload cancelled");
         }
     })();
     let _ = std::fs::remove_dir_all(gate);

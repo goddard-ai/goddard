@@ -11,7 +11,7 @@ export type RequestCommandSample = {
  */
 submits: number,
 /**
- * Jobs of this command waiting in the queue right now.
+ * Jobs of this command waiting for a worker in either bounded queue.
  */
 queued: number,
 /**
@@ -37,6 +37,6 @@ runMs: number,
  */
 maxRunMs: number,
 /**
- * Submits of this command turned away after the capacity timeout.
+ * Submits of this command rejected when admission failed or timed out.
  */
 rejected: number, };

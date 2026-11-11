@@ -1,0 +1,1 @@
+- Slow operations waiting for daemon capacity no longer stall later actions on the same app connection. `goddard-agent resource run` survives brief overload and stops its whole process group when cancelled.

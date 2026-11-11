@@ -816,7 +816,7 @@ impl DaemonClient {
                 .recv()
                 .map_err(|error| anyhow!("Goddard daemon connection closed: {error}"))?,
         };
-        outcome.map_err(|error| anyhow!(error.localized_message()))
+        outcome.map_err(anyhow::Error::new)
     }
 
     pub fn notify(
@@ -1189,6 +1189,7 @@ fn fail_connection(inner: &ClientInner) {
         let _ = response.send(Err(RpcError {
             message: "Goddard daemon disconnected".into(),
             i18n: None,
+            code: None,
         }));
     }
     // Closing the desktop transport is not evidence that a daemon-owned

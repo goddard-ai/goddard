@@ -12,16 +12,15 @@ export type RequestPoolSample = {
  */
 submits: number,
 /**
- * Jobs sitting in the bounded queue right now — at or above the
- * worker count means every worker is busy.
+ * Jobs waiting for a worker in the execution or bounded admission queue.
  */
 queued: number,
 /**
- * Submits that blocked at all waiting for queue capacity.
+ * Submits that waited at least one millisecond for queue capacity.
  */
 waited: number,
 /**
- * Cumulative milliseconds submits spent waiting for capacity.
+ * Cumulative milliseconds submits spent waiting for queue capacity.
  */
 waitMs: number,
 /**
@@ -29,8 +28,8 @@ waitMs: number,
  */
 maxWaitMs: number,
 /**
- * Submits turned away after waiting out the capacity timeout — the
- * "daemon is busy" errors the client sees.
+ * Submits rejected because admission capacity was full, the deadline
+ * expired, or the pool workers were unavailable.
  */
 rejected: number,
 /**

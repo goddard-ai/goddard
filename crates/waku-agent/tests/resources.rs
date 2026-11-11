@@ -2,18 +2,19 @@
 //! Exercise the real agent binary and shell workloads through a simulated daemon.
 //! Scheduler correctness and cross-daemon persistence are tested in waku-core.
 use std::{
+    collections::VecDeque,
     net::TcpListener,
     process::{Command, Stdio},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use uuid::Uuid;
 use waku_protocol::{
     ClientMessage, Command as WireCommand, PROTOCOL_VERSION, ResponseOutcome, ResponsePayload,
-    ServerMessage, resources::*,
+    RpcError, ServerMessage, resources::*,
 };
 
 #[derive(Default)]
@@ -22,6 +23,7 @@ struct State {
     actions: Vec<String>,
     cancel: bool,
     deny_attach: bool,
+    status_errors: VecDeque<RpcError>,
 }
 struct Daemon {
     address: String,
@@ -87,6 +89,7 @@ impl Daemon {
                 let id;
                 let mut borrowed = false;
                 let mut refused = false;
+                let mut status_error = None;
                 match operation {
                     ResourceOperation::Acquire {
                         resources,
@@ -154,6 +157,7 @@ impl Daemon {
                     }
                     ResourceOperation::Status { id: requested } => {
                         state.actions.push("status".into());
+                        status_error = state.status_errors.pop_front();
                         id = requested;
                         if state.cancel {
                             for r in &mut state.reservations {
@@ -173,15 +177,19 @@ impl Daemon {
                 } else {
                     ServerMessage::Response {
                         request_id: request.request_id,
-                        outcome: ResponseOutcome::Ok {
-                            payload: ResponsePayload::AgentResources {
-                                status: ResourceStatus {
-                                    reservations: state.reservations.clone(),
-                                    request_id: id,
-                                    borrowed,
-                                    ..Default::default()
+                        outcome: if let Some(error) = status_error {
+                            ResponseOutcome::Error { error }
+                        } else {
+                            ResponseOutcome::Ok {
+                                payload: ResponsePayload::AgentResources {
+                                    status: ResourceStatus {
+                                        reservations: state.reservations.clone(),
+                                        request_id: id,
+                                        borrowed,
+                                        ..Default::default()
+                                    },
                                 },
-                            },
+                            }
                         },
                     }
                 };
@@ -204,7 +212,8 @@ impl Daemon {
             .env("GODDARD_DAEMON_ADDRESS", &self.address)
             .env("GODDARD_AGENT_TOKEN", "test-task-token")
             .env("GODDARD_TASK_ID", Uuid::new_v4().to_string())
-            .env_remove("GODDARD_RESOURCE_RESERVATION");
+            .env_remove("GODDARD_RESOURCE_RESERVATION")
+            .env_remove(waku_protocol::RUNTIME_INGRESS_ENV);
         command
     }
 }
@@ -215,6 +224,218 @@ impl Drop for Daemon {
     }
 }
 const PAYLOAD: &str = r#"{"resources":{"native_builds":1},"purpose":"simulated native build"}"#;
+
+#[test]
+fn supervision_retries_only_admission_busy_without_losing_the_workload() {
+    let busy = RpcError::admission_busy("daemon is busy; retry shortly");
+    for (name, errors, child_seconds, succeeds) in [
+        ("transient", vec![busy.clone()], 1, true),
+        (
+            "authentication",
+            vec![RpcError::from(anyhow::anyhow!("authentication failed"))],
+            10,
+            false,
+        ),
+        ("persistent", vec![busy.clone(); 100], 10, false),
+        ("completed_while_busy", vec![busy.clone(); 100], 1, true),
+    ] {
+        let daemon = Daemon::start();
+        daemon.state.lock().unwrap().status_errors = errors.into();
+        let script = format!("/bin/sleep {child_seconds}; printf survived");
+        let began = Instant::now();
+        let mut child = daemon
+            .cli()
+            .args([
+                "resource", "run", "--json", PAYLOAD, "--", "/bin/sh", "-c", &script,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        while child.try_wait().unwrap().is_none() {
+            if began.elapsed() >= Duration::from_secs(12) {
+                // The simulated workload ends on its own after at most ten
+                // seconds, so this timeout cannot strand its process group.
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("{name}: resource supervision did not settle");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let output = child.wait_with_output().unwrap();
+        let elapsed = began.elapsed();
+        assert_eq!(
+            output.status.success(),
+            succeeds,
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout == b"survived", succeeds, "{name}");
+        let state = daemon.state.lock().unwrap();
+        let statuses = state
+            .actions
+            .iter()
+            .filter(|action| *action == "status")
+            .count();
+        for action in ["acquire", "attach", "release"] {
+            assert_eq!(
+                state.actions.iter().filter(|seen| *seen == action).count(),
+                1,
+                "{name}: {action} retried"
+            );
+        }
+        assert!(state.reservations[0].released, "{name}");
+        let pid = state.reservations[0].workload_pid.unwrap();
+        assert!(running_group_members(pid).is_empty(), "{name}");
+        match name {
+            "authentication" => {
+                assert_eq!(statuses, 1);
+                assert!(elapsed < Duration::from_secs(2));
+            }
+            "persistent" => {
+                assert!((2..=30).contains(&statuses));
+                assert!(elapsed >= Duration::from_millis(4_500));
+                assert!(elapsed < Duration::from_secs(8));
+                assert!(String::from_utf8_lossy(&output.stderr).contains("busy"));
+            }
+            _ => {
+                assert!(statuses >= 2);
+                assert!(elapsed < Duration::from_secs(3));
+            }
+        }
+        eprintln!("supervision-proof {name} elapsed={elapsed:?} status_attempts={statuses}");
+    }
+}
+
+#[test]
+fn authentication_failure_stops_descendants_created_during_shutdown() {
+    use std::os::unix::fs::DirBuilderExt;
+    let daemon = Daemon::start();
+    let directory = std::env::temp_dir().join(format!("resource-shutdown-{}", Uuid::new_v4()));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&directory)
+        .unwrap();
+    let ready = directory.join("ready");
+    let descendant = directory.join("descendant");
+    let script = r#"
+trap '/bin/sleep 0.05; /bin/sleep 10 & printf "%s" "$!" > "$RESOURCE_TEST_DESCENDANT"; exit 0' TERM
+printf ready > "$RESOURCE_TEST_READY"
+/bin/sleep 10
+printf completed
+"#;
+    let mut child = daemon
+        .cli()
+        .env("RESOURCE_TEST_READY", &ready)
+        .env("RESOURCE_TEST_DESCENDANT", &descendant)
+        .args([
+            "resource", "run", "--json", PAYLOAD, "--", "/bin/sh", "-c", script,
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !ready.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "workload did not install its handler"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let (group, statuses_before) = {
+        let mut state = daemon.state.lock().unwrap();
+        let statuses = state
+            .actions
+            .iter()
+            .filter(|action| *action == "status")
+            .count();
+        state
+            .status_errors
+            .push_back(RpcError::from(anyhow::anyhow!("authentication failed")));
+        (state.reservations[0].workload_pid.unwrap(), statuses)
+    };
+    let began = Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if began.elapsed() >= Duration::from_secs(5) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("authentication failure did not stop supervision");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let descendant_record = match std::fs::read_to_string(&descendant) {
+        Ok(record) => record,
+        Err(error) => {
+            eprintln!(
+                "shutdown fixture did not create a child; group={:?}",
+                running_group_members(group)
+            );
+            let output = child.wait_with_output().unwrap();
+            std::fs::remove_dir_all(directory).unwrap();
+            panic!(
+                "termination handler did not record its child: {error}; {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    };
+    let descendant_pid: u32 = descendant_record.trim().parse().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while running_group_members(group).contains(&descendant_pid) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let leaked = running_group_members(group).contains(&descendant_pid);
+    if leaked {
+        // SAFETY: the fixture recorded this child's PID and verifies its
+        // owned group immediately before cleaning up the failed experiment.
+        unsafe {
+            if libc::getpgid(descendant_pid as i32) == group as i32 {
+                libc::kill(descendant_pid as i32, libc::SIGKILL);
+            }
+        }
+    }
+    let output = child.wait_with_output().unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("authentication failed"));
+    let state = daemon.state.lock().unwrap();
+    assert_eq!(
+        state
+            .actions
+            .iter()
+            .filter(|action| *action == "status")
+            .count(),
+        statuses_before + 1
+    );
+    assert!(state.reservations[0].released);
+    eprintln!(
+        "shutdown-descendant elapsed={:?} leaked={leaked}",
+        began.elapsed()
+    );
+    assert!(
+        !leaked,
+        "supervisor exited while a child in its owned group kept running"
+    );
+}
+
+fn running_group_members(group: u32) -> Vec<u32> {
+    let output = Command::new("/bin/ps")
+        .args(["-axo", "pid=,pgid=,stat="])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    std::str::from_utf8(&output.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid = fields.next()?.parse::<u32>().ok()?;
+            let owner = fields.next()?.parse::<u32>().ok()?;
+            let state = fields.next()?;
+            (owner == group && !state.starts_with('Z')).then_some(pid)
+        })
+        .collect()
+}
 
 #[test]
 fn run_preserves_standard_streams_exit_status_and_releases() {

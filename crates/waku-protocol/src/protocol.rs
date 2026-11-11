@@ -1493,17 +1493,16 @@ pub struct DaemonStatsSample {
 pub struct RequestPoolSample {
     /// Requests submitted to this pool since boot.
     pub submits: u64,
-    /// Jobs sitting in the bounded queue right now — at or above the
-    /// worker count means every worker is busy.
+    /// Jobs waiting for a worker in the execution or bounded admission queue.
     pub queued: u32,
-    /// Submits that blocked at all waiting for queue capacity.
+    /// Submits that waited at least one millisecond for queue capacity.
     pub waited: u64,
-    /// Cumulative milliseconds submits spent waiting for capacity.
+    /// Cumulative milliseconds submits spent waiting for queue capacity.
     pub wait_ms: u64,
     /// Longest single submit wait.
     pub max_wait_ms: u64,
-    /// Submits turned away after waiting out the capacity timeout — the
-    /// "daemon is busy" errors the client sees.
+    /// Submits rejected because admission capacity was full, the deadline
+    /// expired, or the pool workers were unavailable.
     pub rejected: u64,
     /// Per-command counters keyed by the command's wire `type` tag —
     /// `workspace:*` entries add the operation tag so a pinned queue names
@@ -1520,7 +1519,7 @@ pub struct RequestPoolSample {
 pub struct RequestCommandSample {
     /// Jobs of this command submitted since boot.
     pub submits: u64,
-    /// Jobs of this command waiting in the queue right now.
+    /// Jobs of this command waiting for a worker in either bounded queue.
     pub queued: u32,
     /// Jobs of this command a worker is running right now.
     pub running: u32,
@@ -1534,7 +1533,7 @@ pub struct RequestCommandSample {
     pub run_ms: u64,
     /// Longest single completed run.
     pub max_run_ms: u64,
-    /// Submits of this command turned away after the capacity timeout.
+    /// Submits of this command rejected when admission failed or timed out.
     pub rejected: u64,
 }
 
@@ -1929,6 +1928,15 @@ impl std::fmt::Debug for KeyedError {
 impl std::error::Error for KeyedError {}
 
 impl RpcError {
+    /// The daemon refused this request before executing its handler.
+    pub fn admission_busy(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            i18n: None,
+            code: Some(RpcErrorCode::AdmissionBusy),
+        }
+    }
+
     /// The message a client should show: the i18n semantic rendered in this
     /// process's locale when present, the daemon's fallback text otherwise.
     pub fn localized_message(&self) -> String {
@@ -1939,6 +1947,17 @@ impl RpcError {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub enum RpcErrorCode {
+    /// No handler ran; admission can be attempted again when capacity opens.
+    AdmissionBusy,
+    /// A newer daemon supplied a code this client does not recognize.
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct RpcError {
     pub message: String,
@@ -1946,7 +1965,19 @@ pub struct RpcError {
     /// `None` for provider text and opaque errors — render `message` as-is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub i18n: Option<WireTranslation>,
+    /// Machine-readable error semantics. Absent on older daemons and for
+    /// opaque/provider failures; those must not be assumed safe to retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<RpcErrorCode>,
 }
+
+impl std::fmt::Display for RpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.localized_message())
+    }
+}
+
+impl std::error::Error for RpcError {}
 
 impl From<anyhow::Error> for RpcError {
     fn from(error: anyhow::Error) -> Self {
@@ -1959,6 +1990,7 @@ impl From<anyhow::Error> for RpcError {
                 .chain()
                 .find_map(|cause| cause.downcast_ref::<KeyedError>())
                 .map(|keyed| keyed.i18n.clone()),
+            code: None,
         }
     }
 }
@@ -2004,6 +2036,28 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn rpc_error_codes_preserve_old_and_future_wire_errors() {
+        let legacy: RpcError = serde_json::from_value(serde_json::json!({
+            "message": "provider failed"
+        }))
+        .unwrap();
+        assert_eq!(legacy.code, None);
+        let future: RpcError = serde_json::from_value(serde_json::json!({
+            "message": "new failure",
+            "code": "futureError"
+        }))
+        .unwrap();
+        assert_eq!(future.code, Some(RpcErrorCode::Unknown));
+        let busy = RpcError::admission_busy("wait for capacity");
+        let wire = serde_json::to_value(&busy).unwrap();
+        assert_eq!(wire["code"], "admissionBusy");
+        assert_eq!(busy.to_string(), "wait for capacity");
+        let opaque = RpcError::from(anyhow::anyhow!("provider failed"));
+        assert_eq!(opaque.code, None);
+        assert!(serde_json::to_value(opaque).unwrap().get("code").is_none());
+    }
 
     #[test]
     fn binary_payloads_use_base64_json_strings() {

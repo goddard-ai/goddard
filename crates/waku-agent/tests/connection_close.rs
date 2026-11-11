@@ -127,6 +127,7 @@ fn cli_closes_cleanly_after_success_and_failure_without_waiting_for_a_stalled_pe
                     error: RpcError {
                         message: "diagnostic RPC failure".into(),
                         i18n: None,
+                        code: None,
                     },
                 }
             };

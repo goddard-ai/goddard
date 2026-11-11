@@ -58,11 +58,14 @@ const MAX_REQUEST_LINE_BYTES: usize = 1024;
 const MAX_CONNECTIONS: usize = 64;
 const HEAVY_REQUEST_WORKERS: usize = 4;
 const HEAVY_REQUEST_QUEUE: usize = 32;
-/// A dispatch waits this long for pool capacity before the request is
-/// turned away — long enough that a burst of slow subprocesses queues
-/// instead of erroring, short enough that a saturated daemon still fails
-/// fast. The wait stalls only the submitting connection's read loop.
+/// A request may wait this long for bounded pool capacity before receiving a
+/// busy response. While it waits, its connection keeps reading other requests.
 const POOL_SUBMIT_WAIT: Duration = Duration::from_secs(5);
+// Shared per-pool budget sized to the connection limit. One connection may
+// use the budget, preserving bursts without unbounded deferred requests.
+const POOL_DEFERRED_ADMISSIONS_PER_POOL: usize = MAX_CONNECTIONS;
+const POOL_DEFERRED_BYTES_PER_POOL: usize = MAX_WIRE_MESSAGE_BYTES;
+const MAX_PENDING_ADMISSION_ERRORS: usize = 80;
 const CONTROL_REQUEST_WORKERS: usize = 4;
 const CONTROL_REQUEST_QUEUE: usize = 64;
 const LONG_CONTROL_REQUEST_WORKERS: usize = 4;
@@ -113,6 +116,7 @@ struct RequestPoolStats {
     wait_ms: u64,
     max_wait_ms: u64,
     rejected: u64,
+    deferred: usize,
     commands: HashMap<String, CommandStats>,
     /// One row per worker's current job — a queue pinned at capacity is
     /// only diagnosable if the busy workers are named too.
@@ -126,7 +130,7 @@ impl RequestPoolStats {
 }
 
 /// Per-pool counters for the `daemon-stats.jsonl` sample — the entry holds
-/// the jobs channel so a snapshot can read live queue depth.
+/// the jobs channel so a snapshot can read live execution and deferred depth.
 static REQUEST_POOLS: OnceLock<Mutex<HashMap<String, (RequestPoolStats, Sender<PoolJob>)>>> =
     OnceLock::new();
 
@@ -178,7 +182,7 @@ pub fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::RequestPoolSam
                 name.clone(),
                 waku_protocol::RequestPoolSample {
                     submits: stats.submits,
-                    queued: jobs.len() as u32,
+                    queued: jobs.len().saturating_add(stats.deferred) as u32,
                     waited: stats.waited,
                     wait_ms: stats.wait_ms,
                     max_wait_ms: stats.max_wait_ms,
@@ -190,14 +194,16 @@ pub fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::RequestPoolSam
         .collect()
 }
 
-/// Fixed execution and queue bounds for independent daemon requests.
+/// Fixed execution, queue, and deferred-admission bounds for daemon requests.
 struct IndependentRequestPool {
-    name: String,
+    name: &'static str,
     jobs: Sender<PoolJob>,
+    deferred_count: Arc<AtomicUsize>,
+    deferred_bytes: Arc<AtomicUsize>,
 }
 
 impl IndependentRequestPool {
-    fn new(name: &str, workers: usize, queue_capacity: usize) -> Self {
+    fn new(name: &'static str, workers: usize, queue_capacity: usize) -> Self {
         let (jobs, receiver) = bounded::<PoolJob>(queue_capacity);
         for index in 0..workers {
             let receiver = receiver.clone();
@@ -261,53 +267,381 @@ impl IndependentRequestPool {
             .lock()
             .insert(name.to_owned(), (RequestPoolStats::default(), jobs.clone()));
         Self {
-            name: name.to_owned(),
+            name,
             jobs,
+            deferred_count: Arc::new(AtomicUsize::new(0)),
+            deferred_bytes: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     fn submit(&self, job: PoolJob) -> Result<(), crossbeam_channel::SendTimeoutError<PoolJob>> {
         let label = job.label.clone();
-        {
-            let mut pools = request_pools().lock();
-            let stats = &mut pools
-                .get_mut(&self.name)
-                .expect("a pool registers itself at construction")
-                .0;
-            stats.submits += 1;
-            let command = stats.command(&label);
-            command.submits += 1;
-            // Counted before the send so a worker that drains the job in
-            // the meantime still balances the pickup decrement.
-            command.queued += 1;
-        }
+        self.record_submission_start(&label);
         let started = Instant::now();
         let result = self.jobs.send_timeout(job, POOL_SUBMIT_WAIT);
-        let wait_ms = started.elapsed().as_millis() as u64;
-        let mut pools = request_pools().lock();
-        let stats = &mut pools
-            .get_mut(&self.name)
-            .expect("a pool registers itself at construction")
-            .0;
-        // A sub-millisecond send found queue room without blocking; only
-        // longer waits reflect real contention.
-        if wait_ms >= 1 {
-            stats.waited += 1;
-            stats.wait_ms += wait_ms;
-            stats.max_wait_ms = stats.max_wait_ms.max(wait_ms);
-        }
-        if result.is_err() {
-            stats.rejected += 1;
-            let command = stats.command(&label);
-            command.queued = command.queued.saturating_sub(1);
-            command.rejected += 1;
-        }
+        self.record_submission_result(&label, started, result.is_err());
         result
     }
 
     #[cfg(test)]
     fn try_submit(&self, job: PoolJob) -> Result<(), crossbeam_channel::TrySendError<PoolJob>> {
         self.jobs.try_send(job)
+    }
+
+    fn try_submit_deferred(
+        &self,
+        job: PoolJob,
+    ) -> Result<(), crossbeam_channel::TrySendError<PoolJob>> {
+        self.jobs.try_send(job)
+    }
+
+    fn record_submission_start(&self, label: &str) {
+        let mut pools = request_pools().lock();
+        let stats = &mut pools
+            .get_mut(self.name)
+            .expect("a pool registers itself at construction")
+            .0;
+        stats.submits += 1;
+        let command = stats.command(label);
+        command.submits += 1;
+        // Count before sending so a worker that receives immediately can
+        // balance the pickup decrement.
+        command.queued += 1;
+    }
+
+    fn record_submission_result(&self, label: &str, started: Instant, rejected: bool) {
+        let wait_ms = started.elapsed().as_millis() as u64;
+        let mut pools = request_pools().lock();
+        let stats = &mut pools
+            .get_mut(self.name)
+            .expect("a pool registers itself at construction")
+            .0;
+        // Sub-millisecond admission found queue capacity without observable
+        // waiting; longer admission time is accumulated for the sample.
+        if wait_ms >= 1 {
+            stats.waited += 1;
+            stats.wait_ms += wait_ms;
+            stats.max_wait_ms = stats.max_wait_ms.max(wait_ms);
+        }
+        if rejected {
+            stats.rejected += 1;
+            let command = stats.command(label);
+            command.queued = command.queued.saturating_sub(1);
+            command.rejected += 1;
+        }
+    }
+
+    fn reserve_deferred(&self, encoded_bytes: usize) -> Option<DeferredAdmissionSlot> {
+        self.deferred_count
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < POOL_DEFERRED_ADMISSIONS_PER_POOL).then_some(count + 1)
+            })
+            .ok()?;
+
+        let bytes_reserved = encoded_bytes <= POOL_DEFERRED_BYTES_PER_POOL
+            && self
+                .deferred_bytes
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |bytes| {
+                    bytes
+                        .checked_add(encoded_bytes)
+                        .filter(|next| *next <= POOL_DEFERRED_BYTES_PER_POOL)
+                })
+                .is_ok();
+        if !bytes_reserved {
+            self.deferred_count.fetch_sub(1, Ordering::AcqRel);
+            return None;
+        }
+
+        request_pools()
+            .lock()
+            .get_mut(self.name)
+            .expect("a pool registers itself at construction")
+            .0
+            .deferred += 1;
+        Some(DeferredAdmissionSlot {
+            pool_name: self.name,
+            count: self.deferred_count.clone(),
+            bytes: self.deferred_bytes.clone(),
+            encoded_bytes,
+        })
+    }
+}
+
+struct DeferredAdmissionSlot {
+    pool_name: &'static str,
+    count: Arc<AtomicUsize>,
+    bytes: Arc<AtomicUsize>,
+    encoded_bytes: usize,
+}
+
+impl Drop for DeferredAdmissionSlot {
+    fn drop(&mut self) {
+        self.count.fetch_sub(1, Ordering::AcqRel);
+        self.bytes.fetch_sub(self.encoded_bytes, Ordering::AcqRel);
+        if let Some((stats, _)) = request_pools().lock().get_mut(self.pool_name) {
+            stats.deferred = stats.deferred.saturating_sub(1);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum RequestPoolKind {
+    Heavy,
+    Control,
+    LongControl,
+    Health,
+    Navigation,
+}
+
+impl RequestPoolKind {
+    fn pool(self, dispatcher: &RequestDispatcher) -> &IndependentRequestPool {
+        match self {
+            Self::Heavy => &dispatcher.heavy_requests,
+            Self::Control => &dispatcher.control_requests,
+            Self::LongControl => &dispatcher.long_control_requests,
+            Self::Health => &dispatcher.health_requests,
+            Self::Navigation => &dispatcher.navigation_requests,
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            Self::Heavy => 0,
+            Self::Control => 1,
+            Self::LongControl => 2,
+            Self::Health => 3,
+            Self::Navigation => 4,
+        }
+    }
+
+    fn busy_message(self) -> &'static str {
+        match self {
+            Self::Heavy => "daemon is busy with subprocess-heavy work; retry shortly",
+            _ => "daemon is busy processing requests; retry shortly",
+        }
+    }
+
+    fn unavailable_message(self) -> &'static str {
+        match self {
+            Self::Heavy => "daemon subprocess request workers are unavailable",
+            _ => "daemon request workers are unavailable",
+        }
+    }
+}
+
+struct PendingPoolAdmission {
+    pool: RequestPoolKind,
+    job: Option<PoolJob>,
+    request_id: Uuid,
+    session_id: Uuid,
+    started: Instant,
+    deadline: Instant,
+    slot: DeferredAdmissionSlot,
+}
+
+#[derive(Default)]
+struct ConnectionDispatchState {
+    pending: VecDeque<PendingPoolAdmission>,
+    responses: VecDeque<ServerMessage>,
+}
+
+impl ConnectionDispatchState {
+    fn has_pending_pool(&self, pool: RequestPoolKind) -> bool {
+        self.pending.iter().any(|pending| pending.pool == pool)
+    }
+
+    fn submit_or_defer(
+        &mut self,
+        kind: RequestPoolKind,
+        pool: &IndependentRequestPool,
+        job: PoolJob,
+        request_id: Uuid,
+        session_id: Uuid,
+        encoded_bytes: usize,
+    ) -> Result<(), RpcError> {
+        let label = job.label.clone();
+        let started = Instant::now();
+        pool.record_submission_start(&label);
+
+        if self.has_pending_pool(kind) {
+            return self.defer(
+                kind,
+                pool,
+                job,
+                request_id,
+                session_id,
+                encoded_bytes,
+                started,
+            );
+        }
+
+        match pool.jobs.try_send(job) {
+            Ok(()) => {
+                pool.record_submission_result(&label, started, false);
+                Ok(())
+            }
+            Err(crossbeam_channel::TrySendError::Full(job)) => self.defer(
+                kind,
+                pool,
+                job,
+                request_id,
+                session_id,
+                encoded_bytes,
+                started,
+            ),
+            Err(crossbeam_channel::TrySendError::Disconnected(_job)) => {
+                pool.record_submission_result(&label, started, true);
+                Err(RpcError::from(anyhow::anyhow!(kind.unavailable_message())))
+            }
+        }
+    }
+
+    fn defer(
+        &mut self,
+        kind: RequestPoolKind,
+        pool: &IndependentRequestPool,
+        job: PoolJob,
+        request_id: Uuid,
+        session_id: Uuid,
+        encoded_bytes: usize,
+        started: Instant,
+    ) -> Result<(), RpcError> {
+        let label = job.label.clone();
+        let Some(slot) = pool.reserve_deferred(encoded_bytes) else {
+            pool.record_submission_result(&label, started, true);
+            return Err(RpcError::admission_busy(kind.busy_message()));
+        };
+        self.pending.push_back(PendingPoolAdmission {
+            pool: kind,
+            job: Some(job),
+            request_id,
+            session_id,
+            started,
+            deadline: started + POOL_SUBMIT_WAIT,
+            slot,
+        });
+        Ok(())
+    }
+
+    fn queue_error(
+        &mut self,
+        request_id: Uuid,
+        session_id: Uuid,
+        hub: &Arc<Hub>,
+        error: RpcError,
+    ) -> bool {
+        let response = dispatch_error_message(request_id, session_id, hub, error);
+        let Some(response) = response else {
+            return true;
+        };
+        if self.responses.len() >= MAX_PENDING_ADMISSION_ERRORS {
+            return false;
+        }
+        self.responses.push_back(response);
+        true
+    }
+
+    fn retry_pending(
+        &mut self,
+        dispatcher: &RequestDispatcher,
+        hub: &Arc<Hub>,
+        deliver_errors: bool,
+    ) -> bool {
+        let attempts = self.pending.len();
+        let mut blocked = [false; 5];
+        let mut can_continue = true;
+
+        for _ in 0..attempts {
+            if deliver_errors && self.responses.len() >= MAX_PENDING_ADMISSION_ERRORS {
+                break;
+            }
+            let Some(mut pending) = self.pending.pop_front() else {
+                break;
+            };
+            if !can_continue {
+                self.pending.push_back(pending);
+                continue;
+            }
+
+            let pool = pending.pool.pool(dispatcher);
+            let label = pending
+                .job
+                .as_ref()
+                .expect("pending admission owns a job until accepted")
+                .label
+                .clone();
+            if Instant::now() >= pending.deadline {
+                pool.record_submission_result(&label, pending.started, true);
+                drop(pending.slot);
+                if deliver_errors {
+                    can_continue = self.queue_error(
+                        pending.request_id,
+                        pending.session_id,
+                        hub,
+                        RpcError::admission_busy(pending.pool.busy_message()),
+                    );
+                } else {
+                    let _ = dispatch_error_message(
+                        pending.request_id,
+                        pending.session_id,
+                        hub,
+                        RpcError::admission_busy(pending.pool.busy_message()),
+                    );
+                }
+                continue;
+            }
+
+            if blocked[pending.pool.index()] {
+                self.pending.push_back(pending);
+                continue;
+            }
+
+            let job = pending
+                .job
+                .take()
+                .expect("pending admission owns a job until accepted");
+            match pool.try_submit_deferred(job) {
+                Ok(()) => {
+                    pool.record_submission_result(&label, pending.started, false);
+                    drop(pending.slot);
+                }
+                Err(crossbeam_channel::TrySendError::Full(job)) => {
+                    pending.job = Some(job);
+                    blocked[pending.pool.index()] = true;
+                    self.pending.push_back(pending);
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(_job)) => {
+                    pool.record_submission_result(&label, pending.started, true);
+                    drop(pending.slot);
+                    if deliver_errors {
+                        can_continue = self.queue_error(
+                            pending.request_id,
+                            pending.session_id,
+                            hub,
+                            RpcError::from(anyhow::anyhow!(pending.pool.unavailable_message())),
+                        );
+                    } else {
+                        let _ = dispatch_error_message(
+                            pending.request_id,
+                            pending.session_id,
+                            hub,
+                            RpcError::from(anyhow::anyhow!(pending.pool.unavailable_message())),
+                        );
+                    }
+                }
+            }
+        }
+
+        can_continue
+    }
+
+    fn finish_after_disconnect(&mut self, dispatcher: &RequestDispatcher, hub: &Arc<Hub>) {
+        while !self.pending.is_empty() {
+            self.retry_pending(dispatcher, hub, false);
+            if !self.pending.is_empty() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
     }
 }
 const MAX_REPLAY_EVENTS_PER_SESSION: usize = 2048;
@@ -1714,6 +2048,7 @@ impl RequestDispatcher {
         self.backend.trigger_automation_webhook(automation_id, key)
     }
 
+    #[cfg(test)]
     fn dispatch(
         &self,
         request: Request,
@@ -1721,6 +2056,37 @@ impl RequestDispatcher {
         source_subscriber_id: u64,
         agent: Option<Uuid>,
     ) {
+        let _ = self.dispatch_inner(request, outgoing, source_subscriber_id, agent, None, 0);
+    }
+
+    fn dispatch_from_connection(
+        &self,
+        request: Request,
+        outgoing: Sender<ServerMessage>,
+        source_subscriber_id: u64,
+        agent: Option<Uuid>,
+        state: &mut ConnectionDispatchState,
+        encoded_bytes: usize,
+    ) -> bool {
+        self.dispatch_inner(
+            request,
+            outgoing,
+            source_subscriber_id,
+            agent,
+            Some(state),
+            encoded_bytes,
+        )
+    }
+
+    fn dispatch_inner(
+        &self,
+        request: Request,
+        outgoing: Sender<ServerMessage>,
+        source_subscriber_id: u64,
+        agent: Option<Uuid>,
+        connection_state: Option<&mut ConnectionDispatchState>,
+        encoded_bytes: usize,
+    ) -> bool {
         if matches!(
             request.command,
             Command::AgentComputerUse { .. }
@@ -1728,10 +2094,19 @@ impl RequestDispatcher {
                 | Command::AgentComputerUseReset
         ) {
             self.dispatch_computer_use(request, outgoing, source_subscriber_id, agent);
+            true
         } else if command_targets_runtime(&request.command) {
             self.dispatch_runtime(request, outgoing, source_subscriber_id, agent);
+            true
         } else {
-            self.dispatch_independent(request, outgoing, source_subscriber_id, agent);
+            self.dispatch_independent(
+                request,
+                outgoing,
+                source_subscriber_id,
+                agent,
+                connection_state,
+                encoded_bytes,
+            )
         }
     }
 
@@ -1817,7 +2192,9 @@ impl RequestDispatcher {
         outgoing: Sender<ServerMessage>,
         source_subscriber_id: u64,
         agent: Option<Uuid>,
-    ) {
+        mut connection_state: Option<&mut ConnectionDispatchState>,
+        encoded_bytes: usize,
+    ) -> bool {
         let backend = self.backend.clone();
         let hub = self.hub.clone();
         let failed_request_id = request.request_id;
@@ -1849,7 +2226,7 @@ impl RequestDispatcher {
                     format!("could not start ask worker: {error}"),
                 );
             }
-            return;
+            return true;
         }
         // Compatibility RPCs await the queue's bounded executor. Park a
         // bounded number outside the heavy pool, leaving admission/control
@@ -1874,7 +2251,7 @@ impl RequestDispatcher {
                     &self.hub,
                     "too many synchronous landing waiters; retry shortly".into(),
                 );
-                return;
+                return true;
             }
             if let Err(error) = std::thread::Builder::new()
                 .name("landing-wait".into())
@@ -1892,22 +2269,22 @@ impl RequestDispatcher {
                     format!("could not wait for landing: {error}"),
                 );
             }
-            return;
+            return true;
         }
         let navigation = is_navigation_request(&request.command);
         let heavy = !navigation && is_subprocess_heavy(&request.command);
         let health = is_health_check(&request.command);
         let long_control = is_long_control_wait(&request.command);
-        let pool = if navigation {
-            &self.navigation_requests
+        let (pool_kind, pool) = if navigation {
+            (RequestPoolKind::Navigation, &self.navigation_requests)
         } else if long_control {
-            &self.long_control_requests
+            (RequestPoolKind::LongControl, &self.long_control_requests)
         } else if heavy {
-            &self.heavy_requests
+            (RequestPoolKind::Heavy, &self.heavy_requests)
         } else if health {
-            &self.health_requests
+            (RequestPoolKind::Health, &self.health_requests)
         } else {
-            &self.control_requests
+            (RequestPoolKind::Control, &self.control_requests)
         };
         let label = pool_job_label(&request.command);
         let job = PoolJob {
@@ -1916,30 +2293,37 @@ impl RequestDispatcher {
                 handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
             }),
         };
-        let error = match pool.submit(job) {
-            Ok(()) => return,
-            Err(crossbeam_channel::SendTimeoutError::Timeout(_)) if heavy => {
-                "daemon is busy with subprocess-heavy work; retry shortly".to_owned()
-            }
-            Err(crossbeam_channel::SendTimeoutError::Timeout(_)) => {
-                "daemon is busy processing requests; retry shortly".to_owned()
-            }
-            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) if heavy => {
-                "daemon subprocess request workers are unavailable".to_owned()
-            }
-            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => {
-                "daemon request workers are unavailable".to_owned()
-            }
-        };
-        {
-            send_dispatch_error(
+        if let Some(state) = connection_state.as_deref_mut() {
+            return match state.submit_or_defer(
+                pool_kind,
+                pool,
+                job,
                 failed_request_id,
                 failed_session_id,
-                failed_outgoing,
-                &self.hub,
-                error,
-            );
+                encoded_bytes,
+            ) {
+                Ok(()) => true,
+                Err(error) => {
+                    state.queue_error(failed_request_id, failed_session_id, &self.hub, error)
+                }
+            };
         }
+
+        let error = match pool.submit(job) {
+            Ok(()) => return true,
+            Err(crossbeam_channel::SendTimeoutError::Timeout(_)) => {
+                RpcError::admission_busy(pool_kind.busy_message())
+            }
+            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => {
+                RpcError::from(anyhow::anyhow!(pool_kind.unavailable_message()))
+            }
+        };
+        if let Some(response) =
+            dispatch_error_message(failed_request_id, failed_session_id, &self.hub, error)
+        {
+            let _ = failed_outgoing.send(response);
+        }
+        true
     }
 
     fn dispatch_runtime(
@@ -2568,193 +2952,226 @@ fn handle_connection(
         backend: dispatcher.backend.clone(),
         owner: Uuid::new_v4(),
     };
-    let mut read_timeout = SOCKET_POLL_INTERVAL;
-    let mut navigation_burst = 0;
-    'connection: while !shutdown.load(Ordering::Acquire) {
-        if kicked.try_recv().is_ok() {
-            break;
-        }
-        let started = Instant::now();
-        for _ in 0..SOCKET_WRITE_BATCH {
-            // Let bulk traffic make progress even during repeated navigation.
-            let message = if navigation_burst < NAVIGATION_REPLY_BURST {
-                navigation_rx.try_recv().ok().map(|message| {
-                    navigation_burst += 1;
-                    message
-                })
-            } else {
-                None
-            };
-            let message = message
-                .or_else(|| {
-                    outgoing_rx.try_recv().ok().map(|message| {
-                        navigation_burst = 0;
-                        message
-                    })
-                })
-                .or_else(|| navigation_rx.try_recv().ok());
-            let Some(message) = message else { break };
-            if write_json(&mut socket, &message).is_err() {
-                break 'connection;
-            }
-            if started.elapsed() >= SOCKET_WRITE_BUDGET {
+    let mut connection_dispatch = ConnectionDispatchState::default();
+    let loop_result = (|| -> anyhow::Result<()> {
+        let mut read_timeout = SOCKET_POLL_INTERVAL;
+        let mut navigation_burst = 0;
+        'connection: while !shutdown.load(Ordering::Acquire) {
+            if kicked.try_recv().is_ok() {
                 break;
             }
-        }
-        // A busy connection must not pay a 25ms idle poll after each batch.
-        let timeout = if outgoing_rx.is_empty() && navigation_rx.is_empty() {
-            SOCKET_POLL_INTERVAL
-        } else {
-            BUSY_SOCKET_POLL_INTERVAL
-        };
-        if timeout != read_timeout {
-            socket.get_mut().set_read_timeout(Some(timeout))?;
-            read_timeout = timeout;
-        }
-        match socket.read() {
-            Ok(Message::Text(text)) => match serde_json::from_str(text.as_ref()) {
-                Ok(ClientMessage::Request(request)) => {
-                    if agent.is_some() && !is_agent_command(&request.command) {
-                        let request_id = request.request_id;
-                        if !request_id.is_nil() {
+            if !connection_dispatch.retry_pending(&dispatcher, &hub, true) {
+                break;
+            }
+            let started = Instant::now();
+            for _ in 0..SOCKET_WRITE_BATCH {
+                // Let bulk traffic make progress even during repeated navigation.
+                let message = if navigation_burst < NAVIGATION_REPLY_BURST {
+                    navigation_rx.try_recv().ok().map(|message| {
+                        navigation_burst += 1;
+                        message
+                    })
+                } else {
+                    None
+                };
+                let message = message
+                    .or_else(|| {
+                        connection_dispatch.responses.pop_front().map(|message| {
+                            navigation_burst = 0;
+                            message
+                        })
+                    })
+                    .or_else(|| {
+                        outgoing_rx.try_recv().ok().map(|message| {
+                            navigation_burst = 0;
+                            message
+                        })
+                    })
+                    .or_else(|| navigation_rx.try_recv().ok());
+                let Some(message) = message else { break };
+                if write_json(&mut socket, &message).is_err() {
+                    break 'connection;
+                }
+                if started.elapsed() >= SOCKET_WRITE_BUDGET {
+                    break;
+                }
+            }
+            // A busy connection must not pay a 25ms idle poll after each batch.
+            let timeout = if outgoing_rx.is_empty()
+                && navigation_rx.is_empty()
+                && connection_dispatch.responses.is_empty()
+            {
+                SOCKET_POLL_INTERVAL
+            } else {
+                BUSY_SOCKET_POLL_INTERVAL
+            };
+            if timeout != read_timeout {
+                socket.get_mut().set_read_timeout(Some(timeout))?;
+                read_timeout = timeout;
+            }
+            match socket.read() {
+                Ok(Message::Text(text)) => match serde_json::from_str(text.as_ref()) {
+                    Ok(ClientMessage::Request(request)) => {
+                        if agent.is_some() && !is_agent_command(&request.command) {
+                            let request_id = request.request_id;
+                            if !request_id.is_nil() {
+                                let _ = outgoing.send(ServerMessage::Response {
+                                    request_id,
+                                    outcome: ResponseOutcome::Error {
+                                        error: RpcError::from(anyhow::anyhow!(
+                                            "an agent credential may only run agent commands"
+                                        )),
+                                    },
+                                });
+                            }
+                        } else if let Command::SetDaemonExposure { exposure } = &request.command {
+                            // Listener control lives here rather than in the
+                            // dispatch path because only this connection knows
+                            // whether the caller presented the primary token.
+                            let outcome = if primary {
+                                match dispatcher.set_daemon_exposure(exposure.clone()) {
+                                    Ok(payload) => ResponseOutcome::Ok { payload },
+                                    Err(error) => ResponseOutcome::Error {
+                                        error: RpcError::from(error),
+                                    },
+                                }
+                            } else {
+                                ResponseOutcome::Error {
+                                    error: RpcError::from(anyhow::anyhow!(
+                                        "daemon exposure requires the primary authentication token"
+                                    )),
+                                }
+                            };
+                            if !request.request_id.is_nil() {
+                                let _ = outgoing.send(ServerMessage::Response {
+                                    request_id: request.request_id,
+                                    outcome,
+                                });
+                            }
+                        } else {
+                            let replies = if is_navigation_request(&request.command) {
+                                navigation_outgoing.clone()
+                            } else {
+                                outgoing.clone()
+                            };
+                            if !dispatcher.dispatch_from_connection(
+                                request,
+                                replies,
+                                subscriber_id,
+                                agent,
+                                &mut connection_dispatch,
+                                text.len(),
+                            ) {
+                                break 'connection;
+                            }
+                        }
+                    }
+                    Ok(ClientMessage::PrepareIdleShutdown { request_id }) => {
+                        let fence = if primary && options.allow_shutdown {
+                            dispatcher
+                                .backend
+                                .prepare_idle_shutdown(idle_owner.owner, request_id)
+                        } else {
+                            None
+                        };
+                        write_json(
+                            &mut socket,
+                            &ServerMessage::IdleShutdown {
+                                request_id,
+                                fence,
+                                committed: false,
+                            },
+                        )?;
+                    }
+                    Ok(ClientMessage::CommitIdleShutdown { request_id, fence }) => {
+                        let committed = primary
+                            && options.allow_shutdown
+                            && dispatcher.backend.commit_idle_shutdown(
+                                idle_owner.owner,
+                                fence,
+                                &|| {
+                                    server_shutdown.store(true, Ordering::Release);
+                                    shutdown.store(true, Ordering::Release);
+                                },
+                            );
+                        write_json(
+                            &mut socket,
+                            &ServerMessage::IdleShutdown {
+                                request_id,
+                                fence: Some(fence),
+                                committed,
+                            },
+                        )?;
+                        if committed {
+                            break;
+                        }
+                    }
+                    Ok(ClientMessage::ReleaseIdleShutdown { fence }) => {
+                        if primary {
+                            dispatcher
+                                .backend
+                                .release_idle_shutdown(idle_owner.owner, fence);
+                        }
+                    }
+                    Ok(ClientMessage::Shutdown) => {
+                        if agent.is_none() && options.allow_shutdown {
+                            write_json(&mut socket, &ServerMessage::ShuttingDown)?;
+                            server_shutdown.store(true, Ordering::Release);
+                            shutdown.store(true, Ordering::Release);
+                            break;
+                        }
+                        write_json(
+                            &mut socket,
+                            &ServerMessage::Rejected {
+                                message: "daemon shutdown is managed by its service owner".into(),
+                            },
+                        )?;
+                    }
+                    // Late hellos and pair requests are protocol noise on an
+                    // authenticated connection — pairing only lives pre-hello.
+                    Ok(ClientMessage::Hello { .. } | ClientMessage::PairRequest { .. }) => {}
+                    Err(error) => {
+                        // A request that fails to decode — a client speaking a
+                        // protocol variant this daemon predates, for example —
+                        // still carries a request id worth answering; otherwise
+                        // the caller waits out its whole response timeout.
+                        if let Some(request_id) = undecodable_request_id(&text) {
                             let _ = outgoing.send(ServerMessage::Response {
                                 request_id,
                                 outcome: ResponseOutcome::Error {
                                     error: RpcError::from(anyhow::anyhow!(
-                                        "an agent credential may only run agent commands"
+                                        "daemon could not decode request: {error}"
                                     )),
                                 },
                             });
                         }
-                    } else if let Command::SetDaemonExposure { exposure } = &request.command {
-                        // Listener control lives here rather than in the
-                        // dispatch path because only this connection knows
-                        // whether the caller presented the primary token.
-                        let outcome = if primary {
-                            match dispatcher.set_daemon_exposure(exposure.clone()) {
-                                Ok(payload) => ResponseOutcome::Ok { payload },
-                                Err(error) => ResponseOutcome::Error {
-                                    error: RpcError::from(error),
-                                },
-                            }
-                        } else {
-                            ResponseOutcome::Error {
-                                error: RpcError::from(anyhow::anyhow!(
-                                    "daemon exposure requires the primary authentication token"
-                                )),
-                            }
-                        };
-                        if !request.request_id.is_nil() {
-                            let _ = outgoing.send(ServerMessage::Response {
-                                request_id: request.request_id,
-                                outcome,
-                            });
-                        }
-                    } else {
-                        let replies = if is_navigation_request(&request.command) {
-                            navigation_outgoing.clone()
-                        } else {
-                            outgoing.clone()
-                        };
-                        dispatcher.dispatch(request, replies, subscriber_id, agent);
+                        eprintln!("goddard-daemon ignored invalid message: {error}");
                     }
+                },
+                Ok(Message::Close(_)) => {
+                    let _ = socket.flush();
+                    break;
                 }
-                Ok(ClientMessage::PrepareIdleShutdown { request_id }) => {
-                    let fence = if primary && options.allow_shutdown {
-                        dispatcher
-                            .backend
-                            .prepare_idle_shutdown(idle_owner.owner, request_id)
-                    } else {
-                        None
-                    };
-                    write_json(
-                        &mut socket,
-                        &ServerMessage::IdleShutdown {
-                            request_id,
-                            fence,
-                            committed: false,
-                        },
-                    )?;
+                Ok(Message::Ping(_)) => {
+                    let _ = socket.flush();
                 }
-                Ok(ClientMessage::CommitIdleShutdown { request_id, fence }) => {
-                    let committed = primary
-                        && options.allow_shutdown
-                        && dispatcher.backend.commit_idle_shutdown(
-                            idle_owner.owner,
-                            fence,
-                            &|| {
-                                server_shutdown.store(true, Ordering::Release);
-                                shutdown.store(true, Ordering::Release);
-                            },
-                        );
-                    write_json(
-                        &mut socket,
-                        &ServerMessage::IdleShutdown {
-                            request_id,
-                            fence: Some(fence),
-                            committed,
-                        },
-                    )?;
-                    if committed {
-                        break;
-                    }
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(error)) if retryable_io(&error) => {}
+                Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
+                    break;
                 }
-                Ok(ClientMessage::ReleaseIdleShutdown { fence }) => {
-                    if primary {
-                        dispatcher
-                            .backend
-                            .release_idle_shutdown(idle_owner.owner, fence);
-                    }
-                }
-                Ok(ClientMessage::Shutdown) => {
-                    if agent.is_none() && options.allow_shutdown {
-                        write_json(&mut socket, &ServerMessage::ShuttingDown)?;
-                        server_shutdown.store(true, Ordering::Release);
-                        shutdown.store(true, Ordering::Release);
-                        break;
-                    }
-                    write_json(
-                        &mut socket,
-                        &ServerMessage::Rejected {
-                            message: "daemon shutdown is managed by its service owner".into(),
-                        },
-                    )?;
-                }
-                // Late hellos and pair requests are protocol noise on an
-                // authenticated connection — pairing only lives pre-hello.
-                Ok(ClientMessage::Hello { .. } | ClientMessage::PairRequest { .. }) => {}
-                Err(error) => {
-                    // A request that fails to decode — a client speaking a
-                    // protocol variant this daemon predates, for example —
-                    // still carries a request id worth answering; otherwise
-                    // the caller waits out its whole response timeout.
-                    if let Some(request_id) = undecodable_request_id(&text) {
-                        let _ = outgoing.send(ServerMessage::Response {
-                            request_id,
-                            outcome: ResponseOutcome::Error {
-                                error: RpcError::from(anyhow::anyhow!(
-                                    "daemon could not decode request: {error}"
-                                )),
-                            },
-                        });
-                    }
-                    eprintln!("goddard-daemon ignored invalid message: {error}");
-                }
-            },
-            Ok(Message::Close(_)) => {
-                let _ = socket.flush();
-                break;
+                Err(error) => return Err(error).context("Goddard daemon WebSocket failed"),
             }
-            Ok(Message::Ping(_)) => {
-                let _ = socket.flush();
-            }
-            Ok(_) => {}
-            Err(tungstenite::Error::Io(error)) if retryable_io(&error) => {}
-            Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => break,
-            Err(error) => return Err(error).context("Goddard daemon WebSocket failed"),
         }
-    }
-    Ok(())
+        Ok(())
+    })();
+    // A disconnected client cannot consume output. Drop its receivers before
+    // draining deferred admissions so completed handlers cannot block on a
+    // full response channel.
+    drop(outgoing_rx);
+    drop(navigation_rx);
+    connection_dispatch.finish_after_disconnect(&dispatcher, &hub);
+    loop_result
 }
 
 /// The daemon's one plain-HTTP route: `POST /automations/{id}/trigger?key=…`
@@ -3617,27 +4034,38 @@ fn send_dispatch_error(
     hub: &Arc<Hub>,
     message: String,
 ) {
+    let error = RpcError {
+        message,
+        i18n: None,
+        code: None,
+    };
+    if let Some(response) = dispatch_error_message(request_id, session_id, hub, error) {
+        let _ = outgoing.send(response);
+    }
+}
+
+fn dispatch_error_message(
+    request_id: Uuid,
+    session_id: Uuid,
+    hub: &Arc<Hub>,
+    error: RpcError,
+) -> Option<ServerMessage> {
     if request_id.is_nil() {
         // Fire-and-forget commands have no response channel — the log is
         // the only place this failure can surface.
         eprintln!(
-            "goddard-daemon: fire-and-forget command for session {session_id} failed to dispatch: {message}"
+            "goddard-daemon: fire-and-forget command for session {session_id} failed to dispatch: {error}"
         );
-        return;
+        return None;
     }
     let outcome = hub
         .cached_response(request_id)
-        .unwrap_or_else(|| ResponseOutcome::Error {
-            error: RpcError {
-                message,
-                i18n: None,
-            },
-        });
+        .unwrap_or(ResponseOutcome::Error { error });
     hub.cache_response(request_id, outcome.clone());
-    let _ = outgoing.send(ServerMessage::Response {
+    Some(ServerMessage::Response {
         request_id,
         outcome,
-    });
+    })
 }
 
 fn retryable_io(error: &io::Error) -> bool {
@@ -6380,3 +6808,7 @@ mod tests {
 #[cfg(test)]
 #[path = "request_queue_tests.rs"]
 mod request_queue_tests;
+
+#[cfg(test)]
+#[path = "queue_admission_tests.rs"]
+mod queue_admission_tests;
