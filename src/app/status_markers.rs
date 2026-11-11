@@ -19,7 +19,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
-use waku_protocol::model::{ActivityKind, AgentSession, MessageRole, TurnStatus};
+use waku_protocol::model::{
+    ActivityKind, AgentSession, GoalOperation, MessageRole, ThreadGoalStatus, TurnStatus,
+};
 
 use crate::ui::shortcut::ShortcutHint;
 
@@ -351,6 +353,27 @@ fn waiting_for_user_input(evaluation: &Evaluation) -> bool {
             "awaiting-input" | "go-ahead" | "decision" | "details" | "action-needed" | "aligned"
         )
     })
+}
+
+/// Old verdicts must not interrupt a newer turn or an already parked goal.
+fn should_pause_goal_for_decision(
+    session: &AgentSession,
+    turn_id: Uuid,
+    evaluation: &Evaluation,
+) -> bool {
+    !session.status.is_busy()
+        && session.queued_messages.is_empty()
+        && session
+            .turns
+            .last()
+            .is_some_and(|turn| turn.id == turn_id && turn.status == TurnStatus::Completed)
+        && session
+            .thread_goal
+            .as_ref()
+            .is_some_and(|goal| goal.status == ThreadGoalStatus::Active)
+        && cleared_markers(evaluation)
+            .iter()
+            .any(|(marker, _)| marker.id == "decision")
 }
 
 /// What the resolving action says about the verdict's markers — a coarse
@@ -1409,7 +1432,7 @@ impl Waku {
 
     /// Land answered evaluations. A failed call drops quietly — the turn's
     /// footer simply never gains chips, matching every other eval fallback.
-    pub(super) fn drain_status_marker_events(&mut self) -> bool {
+    pub(super) fn drain_status_marker_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         let mut changed_turns = BTreeSet::new();
         while let Ok((turn_id, result)) = self.status_marker_events.try_recv() {
@@ -1428,6 +1451,17 @@ impl Waku {
                             continue;
                         }
                         let session_id = session.id;
+                        if should_pause_goal_for_decision(session, turn_id, &evaluation) {
+                            self.dispatch_goal_operation(
+                                session_id,
+                                GoalOperation::Set {
+                                    objective: None,
+                                    status: Some(ThreadGoalStatus::Paused),
+                                    replace: false,
+                                },
+                                cx,
+                            );
+                        }
                         if self.state.selected_session == Some(session_id) {
                             changed_turns.insert(turn_id);
                         }
@@ -2102,6 +2136,68 @@ mod tests {
             cleared_markers(&answers("other", 0.90))[0].0.id,
             "awaiting-input"
         );
+    }
+
+    #[test]
+    fn decision_pauses_only_an_active_goal_on_the_latest_settled_turn() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("choose the next approach");
+        session.finish_active_turn(TurnStatus::Completed);
+        session.status = SessionStatus::Idle;
+        let turn_id = session.turns.last().unwrap().id;
+        let mut verdict = evaluation(BTreeMap::from([
+            (
+                ENDING_QUESTION.to_owned(),
+                ending_choice("awaiting-input", &[("awaiting-input", 0.88)]),
+            ),
+            (
+                INPUT_QUESTION.to_owned(),
+                ending_choice("decision", &[("decision", 0.82)]),
+            ),
+        ]));
+        assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        session.thread_goal = Some(crate::model::ThreadGoal {
+            objective: "finish the work".into(),
+            status: ThreadGoalStatus::Active,
+            managed_since_message: None,
+            managed_id: None,
+            managed_last_turn: None,
+            token_budget: None,
+            tokens_used: 0,
+            time_used_seconds: 0,
+        });
+        assert!(should_pause_goal_for_decision(&session, turn_id, &verdict));
+        for status in [
+            ThreadGoalStatus::Paused,
+            ThreadGoalStatus::Complete,
+            ThreadGoalStatus::Blocked,
+        ] {
+            session.thread_goal.as_mut().unwrap().status = status;
+            assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        }
+        session.thread_goal.as_mut().unwrap().status = ThreadGoalStatus::Active;
+        for (kind, score) in [("decision", 0.4), ("details", 0.9), ("go-ahead", 0.9)] {
+            verdict
+                .answers
+                .insert(INPUT_QUESTION.into(), ending_choice(kind, &[(kind, score)]));
+            assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        }
+        verdict.answers.insert(
+            INPUT_QUESTION.into(),
+            ending_choice("decision", &[("decision", 0.82)]),
+        );
+        session
+            .queued_messages
+            .push(crate::model::QueuedMessage::new("I choose option A"));
+        assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        session.queued_messages.clear();
+        session.begin_turn("I choose option A");
+        session.status = SessionStatus::Working;
+        assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        session.status = SessionStatus::Idle;
+        assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        session.finish_active_turn(TurnStatus::Completed);
+        assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
     }
 
     #[test]

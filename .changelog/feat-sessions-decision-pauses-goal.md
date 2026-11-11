@@ -1,0 +1,1 @@
+- Active task goals pause automatically when Jev marks the latest turn as “Awaiting decision”.
