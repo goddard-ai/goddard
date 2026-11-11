@@ -37,6 +37,7 @@ pub(super) struct ProviderSwitchDialogState {
     /// daemon's backend, so this UI's setup path can't repair it.
     pub eval_missing_remote: bool,
     switch_focus: FocusHandle,
+    jev_focus: FocusHandle,
     cancel_focus: FocusHandle,
 }
 
@@ -81,13 +82,18 @@ impl Waku {
             eval_missing,
             eval_missing_remote,
             cancel_focus: cx.focus_handle(),
+            jev_focus: cx.focus_handle(),
             switch_focus: switch_focus.clone(),
         });
         cx.notify();
         switch_focus
     }
 
-    fn close_provider_switch_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_provider_switch_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.provider_switch_dialog.take().is_none() {
             return;
         }
@@ -152,7 +158,7 @@ impl Waku {
         );
         let jev_row = render_provider_switch_action_row(
             "provider-switch-dialog-jev-settings",
-            &dialog.switch_focus,
+            &dialog.jev_focus,
             "icons/settings.svg",
             tr!("experiments.open_jev_settings"),
             weak.clone(),

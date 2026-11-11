@@ -5798,6 +5798,12 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The dialog's focus lands after its deferred overlay is painted.
+        // Bare Escape must dismiss it even while focus is still elsewhere.
+        if !action.immediate && self.provider_switch_dialog.is_some() {
+            self.close_provider_switch_dialog(window, cx);
+            return;
+        }
         // The modal can appear over any page. Escape dismisses even before
         // its deferred focus lands; an explicit stop still targets its task.
         if self.big_picture.rush_session_id().is_some() {

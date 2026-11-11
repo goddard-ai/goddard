@@ -1,0 +1,1 @@
+- Escape now dismisses the provider-switch confirmation even when keyboard focus has not reached the dialog.
