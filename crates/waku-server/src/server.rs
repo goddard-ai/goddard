@@ -65,6 +65,8 @@ const HEAVY_REQUEST_QUEUE: usize = 32;
 const POOL_SUBMIT_WAIT: Duration = Duration::from_secs(5);
 const CONTROL_REQUEST_WORKERS: usize = 4;
 const CONTROL_REQUEST_QUEUE: usize = 64;
+const LONG_CONTROL_REQUEST_WORKERS: usize = 4;
+const LONG_CONTROL_REQUEST_QUEUE: usize = 64;
 const HEALTH_REQUEST_WORKERS: usize = 2;
 const HEALTH_REQUEST_QUEUE: usize = 16;
 const NAVIGATION_REQUEST_WORKERS: usize = 2;
@@ -987,6 +989,7 @@ struct RequestDispatcher {
     computer_use_mailboxes: Arc<Mutex<HashMap<Uuid, RuntimeMailbox>>>,
     heavy_requests: IndependentRequestPool,
     control_requests: IndependentRequestPool,
+    long_control_requests: IndependentRequestPool,
     health_requests: IndependentRequestPool,
     navigation_requests: IndependentRequestPool,
     /// The runtime-controlled non-loopback listener, installed by `serve`
@@ -1659,6 +1662,11 @@ impl RequestDispatcher {
                 CONTROL_REQUEST_WORKERS,
                 CONTROL_REQUEST_QUEUE,
             ),
+            long_control_requests: IndependentRequestPool::new(
+                "long-control",
+                LONG_CONTROL_REQUEST_WORKERS,
+                LONG_CONTROL_REQUEST_QUEUE,
+            ),
             health_requests: IndependentRequestPool::new(
                 "health",
                 HEALTH_REQUEST_WORKERS,
@@ -1889,8 +1897,11 @@ impl RequestDispatcher {
         let navigation = is_navigation_request(&request.command);
         let heavy = !navigation && is_subprocess_heavy(&request.command);
         let health = is_health_check(&request.command);
+        let long_control = is_long_control_wait(&request.command);
         let pool = if navigation {
             &self.navigation_requests
+        } else if long_control {
+            &self.long_control_requests
         } else if heavy {
             &self.heavy_requests
         } else if health {
@@ -2995,6 +3006,19 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::WireframeComments { .. }
             | Command::StartIntegrationAuth { .. }
             | Command::ConnectIntegration { .. }
+    )
+}
+
+fn is_long_control_wait(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::SandboxSignIn { .. }
+            | Command::ProbeFriend { .. }
+            | Command::SendFriendRequest { .. }
+            | Command::SendFileToFriend { .. }
+            | Command::SendMessageToFriend { .. }
+            | Command::GetFriendSessions { .. }
+            | Command::WatchFriendSession { .. }
     )
 }
 
@@ -6352,3 +6376,7 @@ mod tests {
         server.join().unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "request_queue_tests.rs"]
+mod request_queue_tests;

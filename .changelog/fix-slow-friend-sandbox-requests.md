@@ -1,0 +1,1 @@
+- Goddard keeps responding to unrelated requests while friend operations or sandbox sign-in wait on a peer or VM preparation.
