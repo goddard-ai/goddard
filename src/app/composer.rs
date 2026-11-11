@@ -2242,7 +2242,7 @@ impl Waku {
                 )
                 .on_click(move |_, window, cx| {
                     let _ = select_weak.update(cx, |this, cx| {
-                        this.choose_model(kind, model_id.clone(), effort.clone(), fast, cx);
+                        this.choose_model(kind, model_id.clone(), effort.clone(), fast, window, cx);
                     });
                     select_popover.close(window, cx);
                 });
@@ -2290,8 +2290,8 @@ impl Waku {
                 on_move: Rc::new(|this, key, rows, cx| {
                     this.move_model_picker_highlight(key, rows, cx);
                 }),
-                on_confirm: Rc::new(|this, rows, cx| {
-                    this.choose_highlighted_model(rows, cx);
+                on_confirm: Rc::new(|this, rows, window, cx| {
+                    this.choose_highlighted_model(rows, window, cx);
                 }),
                 on_cycle_section: Some(Rc::new(|this, key, cx| {
                     this.cycle_model_picker_section(key, cx);
@@ -2473,7 +2473,12 @@ impl Waku {
 
     /// Take the row the selection is on, defaulting to the first so `enter`
     /// works the moment the panel opens.
-    fn choose_highlighted_model(&mut self, rows: &[PickerRow], cx: &mut Context<Self>) {
+    fn choose_highlighted_model(
+        &mut self,
+        rows: &[PickerRow],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(row) = rows.get(self.model_picker.highlight.unwrap_or(0)) else {
             return;
         };
@@ -2488,7 +2493,7 @@ impl Waku {
                     row.effort.clone(),
                     row.fast,
                 );
-                self.choose_model(kind, model_id, effort, fast, cx);
+                self.choose_model(kind, model_id, effort, fast, window, cx);
             }
             // The composer spec lists neither stance.
             PickerRow::Policy(PolicyRowId::NoOverride) | PickerRow::ProviderDefault(_) => {}

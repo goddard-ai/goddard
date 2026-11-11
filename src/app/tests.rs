@@ -9359,6 +9359,71 @@ mod live_employee_approvals {
 
     // Headless state/navigation regression; no screenshots or visual assertions.
     #[gpui::test]
+    fn provider_switch_takes_focus_from_the_active_window(cx: &mut gpui::TestAppContext) {
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.join("project"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        session.begin_turn("Start the task");
+        session.finish_active_turn(TurnStatus::Completed);
+        session.detail_loaded = true;
+        let session_id = session.id;
+        let daemon = FakeDaemon::start(
+            dir,
+            project.clone(),
+            vec![session.clone()],
+            boss_state(None, Vec::new()),
+        );
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor);
+        update_app(vcx, &view, |waku, window, cx| {
+            super::super::provider_switch_dialog::init(cx);
+            waku.state.projects = vec![project];
+            waku.state.sessions = vec![session];
+            waku.request_session_activation(
+                session_id,
+                super::super::SessionActivationTransition::Visit,
+                cx,
+            );
+            waku.refocus_composer(window, cx);
+            // Run in a window update, just like a picker click or key action.
+            waku.choose_model(
+                ProviderKind::Claude,
+                "test-model".into(),
+                None,
+                false,
+                window,
+                cx,
+            );
+            assert!(waku.provider_switch_dialog.is_some());
+        });
+        // Headless tests have no platform frame loop to deliver the two
+        // deferred-focus callbacks.
+        for _ in 0..2 {
+            vcx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                window.simulate_next_frame(cx);
+            });
+        }
+        vcx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert!(
+                window
+                    .context_stack()
+                    .iter()
+                    .any(|context| context.contains("ProviderSwitchDialog")),
+                "the dialog must own keyboard focus after opening"
+            );
+        });
+        vcx.simulate_keystrokes("escape");
+        update_app(vcx, &view, |waku, window, cx| {
+            assert!(waku.provider_switch_dialog.is_none());
+            assert_eq!(waku.state.sessions[0].provider, ProviderKind::Codex);
+            assert!(waku.composer_focus(cx).is_focused(window));
+        });
+    }
+
+    // Headless state/navigation regression; no screenshots or visual assertions.
+    #[gpui::test]
     fn viewed_transcripts_survive_idle_eviction_at_the_tail(cx: &mut gpui::TestAppContext) {
         let (_env, dir) = isolated_env();
         let project = Project::from_path(dir.join("project"));

@@ -1,1 +1,1 @@
-- Escape now dismisses the provider-switch confirmation even when keyboard focus has not reached the dialog.
+- The provider-switch confirmation now receives keyboard focus when it opens, and Escape dismisses it even before focus arrives.

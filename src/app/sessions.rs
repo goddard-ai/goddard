@@ -6314,6 +6314,7 @@ impl Waku {
         model: String,
         effort: Option<String>,
         fast: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.model_picker_target == model_picker::ModelPickerTarget::QaSetup {
@@ -6365,13 +6366,7 @@ impl Waku {
                 effort,
                 fast,
             };
-            let focus = self.open_provider_switch_dialog(session_id, pick, cx);
-            let window_handle = self.window_handle;
-            let _ = window_handle.update(cx, move |_, window, _| {
-                window.on_next_frame(move |window, _| {
-                    window.on_next_frame(move |window, cx| window.focus(&focus, cx));
-                });
-            });
+            self.open_provider_switch_dialog(session_id, pick, window, cx);
             return;
         }
         // Picking a concrete model exits an Auto draft even when provider and
@@ -6946,7 +6941,7 @@ impl Waku {
             return;
         }
         let (provider, model, effort, fast) = self.favorite_model_combo(&favorite);
-        self.choose_model(provider, model, effort, fast, cx);
+        self.choose_model(provider, model, effort, fast, window, cx);
     }
 
     /// A starred selection in combo terms: packed aliases (`swe-2-high`,

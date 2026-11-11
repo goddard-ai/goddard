@@ -1273,7 +1273,7 @@ pub(super) struct ModelPickerPanel {
     /// Arrow keys — move the drawn cursor and scroll its row into view.
     pub on_move: Rc<dyn Fn(&mut Waku, &str, &[PickerRow], &mut Context<Waku>)>,
     /// `enter` — take the highlighted row, defaulting to the first.
-    pub on_confirm: Rc<dyn Fn(&mut Waku, &[PickerRow], &mut Context<Waku>)>,
+    pub on_confirm: Rc<dyn Fn(&mut Waku, &[PickerRow], &mut Window, &mut Context<Waku>)>,
     /// Tab / shift-tab section cycling, when the site has sections.
     pub on_cycle_section: Option<Rc<dyn Fn(&mut Waku, &str, &mut Context<Waku>)>>,
 }
@@ -1459,7 +1459,7 @@ pub(super) fn model_picker_panel(
         })
         .on_action(move |_: &ConfirmEntry, window, cx| {
             let rows = confirm_rows.clone();
-            let _ = confirm_weak.update(cx, |this, cx| on_confirm(this, &rows, cx));
+            let _ = confirm_weak.update(cx, |this, cx| on_confirm(this, &rows, window, cx));
             confirm_popover.close(window, cx);
             window.refresh();
         });

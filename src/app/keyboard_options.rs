@@ -1021,7 +1021,7 @@ impl Waku {
                 model,
                 effort,
                 fast,
-            } => self.choose_model(provider, model, effort, fast, cx),
+            } => self.choose_model(provider, model, effort, fast, window, cx),
             KeyboardOptionAction::AutoRoute => self.choose_auto_route(cx),
             KeyboardOptionAction::ReasoningEffort(Some(effort)) => {
                 self.set_reasoning_effort(effort, cx)

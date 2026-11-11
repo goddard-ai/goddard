@@ -10619,7 +10619,7 @@ impl Waku {
                                 cx.notify();
                             }
                         }),
-                        on_confirm: Rc::new(move |this, rows, cx| {
+                        on_confirm: Rc::new(move |this, rows, _, cx| {
                             if let Some(row) = rows
                                 .get(this.route_class_picker.highlight.unwrap_or(0))
                                 .cloned()
@@ -14432,7 +14432,7 @@ impl Waku {
                                     cx.notify();
                                 }
                             }),
-                            on_confirm: Rc::new(move |this, rows, cx| {
+                            on_confirm: Rc::new(move |this, rows, _, cx| {
                                 if let Some(row) =
                                     rows.get(this.route_class_picker.highlight.unwrap_or(0))
                                 {
