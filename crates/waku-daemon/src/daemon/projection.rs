@@ -20,6 +20,22 @@ pub(super) fn preserve_task_view_projection(existing: &AgentSession, incoming: &
         .collect();
     let mut messages = existing.messages.clone();
     for message in &mut messages {
+        // Landing settles its existing progress row. Accept the terminal
+        // banner once; a delayed progress save must never restore the old text.
+        if message.role == MessageRole::System
+            && message.turn_id.is_none()
+            && message.notice.is_none()
+            && let Some(completed) = presentations.get(&message.id)
+            && completed.role == MessageRole::System
+            && completed.turn_id.is_none()
+            && matches!(
+                completed.notice,
+                Some(crate::model::TranscriptNotice::Landed { .. })
+            )
+        {
+            message.content.clone_from(&completed.content);
+            message.notice.clone_from(&completed.notice);
+        }
         if message.role == MessageRole::User
             && let Some(presentation) = presentations.get(&message.id)
             && presentation.role == message.role

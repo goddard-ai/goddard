@@ -1,5 +1,44 @@
 use super::*;
 
+#[test]
+fn landing_receipt_settles_in_place_and_stale_progress_cannot_restore_it() {
+    use crate::model::{Message, TranscriptNotice};
+
+    let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    existing.push_message(MessageRole::Assistant, "provider output");
+    let progress = Message::new(MessageRole::System, "Landing onto dev…");
+    existing.messages.push(progress.clone());
+    let stale = existing.clone();
+    let mut completed = existing.clone();
+    // A filtered client must neither erase nor overwrite provider output.
+    completed.messages.remove(0);
+    completed.messages[0].content = "Landed onto dev".into();
+    completed.messages[0].notice = Some(TranscriptNotice::Landed {
+        base: "dev".into(),
+        commits: Vec::new(),
+        ahead: 1,
+    });
+
+    preserve_task_view_projection(&existing, &mut completed);
+    let restored: AgentSession =
+        serde_json::from_str(&serde_json::to_string(&completed).unwrap()).unwrap();
+    assert_eq!(restored.messages.len(), 2);
+    assert_eq!(restored.messages[0].content, "provider output");
+    assert_eq!(restored.messages[1].id, progress.id);
+    assert_eq!(restored.messages[1].content, "Landed onto dev");
+    assert!(matches!(
+        &restored.messages[1].notice,
+        Some(TranscriptNotice::Landed { base, ahead: 1, .. }) if base == "dev"
+    ));
+
+    let mut delayed = stale;
+    preserve_task_view_projection(&restored, &mut delayed);
+    assert_eq!(
+        serde_json::to_value(&delayed.messages).unwrap(),
+        serde_json::to_value(&restored.messages).unwrap()
+    );
+}
+
 fn next(events: &crossbeam_channel::Receiver<waku_protocol::ServerMessage>) -> DriverEvent {
     loop {
         if let waku_protocol::ServerMessage::Event(event) = events

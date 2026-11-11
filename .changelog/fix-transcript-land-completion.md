@@ -1,0 +1,1 @@
+- Fixed `/land` leaving its “Landing onto…” message behind after a successful landing instead of showing the Landed banner.
