@@ -9018,11 +9018,16 @@ impl Waku {
                     || self.summon_card_employees().contains(&session_id)))
     }
 
+    /// Retained visits receive data without becoming visible render surfaces.
+    pub(super) fn task_detail_interested(&self, session_id: Uuid) -> bool {
+        self.task_detail_visible(session_id) || self.viewed_transcripts.contains(&session_id)
+    }
+
     pub(super) fn sync_task_views(&self) {
         for (id, runtime) in &self.runtimes {
             runtime
                 .driver
-                .set_detail_visible(self.task_detail_visible(*id));
+                .set_detail_visible(self.task_detail_interested(*id));
         }
     }
 
@@ -9188,6 +9193,7 @@ impl Waku {
         let mut persisted_state_changed = false;
         let mut force_save = false;
         let mut selected_changed = false;
+        let mut detail_released = false;
         while Instant::now() < deadline {
             let Some(session_id) = self.driver_event_round.pop_front() else {
                 break;
@@ -9226,6 +9232,8 @@ impl Waku {
                 let Some(event) = event else {
                     break;
                 };
+                detail_released |=
+                    matches!(event, DriverEvent::TaskViewSnapshot { detail: false, .. });
                 let background_event = matches!(event, DriverEvent::BackgroundWork(_));
                 let background_output_delta = matches!(
                     event,
@@ -9233,7 +9241,8 @@ impl Waku {
                 );
                 force_save |= matches!(
                     event,
-                    DriverEvent::Connected { .. }
+                    DriverEvent::TaskViewSnapshot { detail: false, .. }
+                        | DriverEvent::Connected { .. }
                         | DriverEvent::AgentPresetSelected(_)
                         | DriverEvent::AutoTitleUpdated(_)
                         | DriverEvent::Permission { .. }
@@ -9314,6 +9323,11 @@ impl Waku {
             && (force_save || self.last_stream_save.elapsed() >= STREAM_SAVE_INTERVAL)
         {
             self.save();
+        }
+        if detail_released {
+            // Wait for the daemon's ordered hide snapshot before releasing data:
+            // detail events queued before the interest change still need a target.
+            self.trim_resident_transcripts();
         }
         changed || selected_changed
     }

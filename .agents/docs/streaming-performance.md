@@ -79,10 +79,16 @@ it executes while the element is *constructed*, it's under the lease.
 
 Desktop connections negotiate `task_views_available` and use `SetTaskView`
 for connection-scoped transcript interests. Primary transcripts, visible side
-chats, Big Picture cards, and live summon cards receive detail. Hidden tasks
-keep control attachments for permissions, notifications, and existing follow-up
-orchestration, but text, reasoning, tool detail, usage deltas, and process log
-chunks are filtered before delivery. Local `unsubscribe` alone does not filter
+chats, Big Picture cards, live summon cards, and retained recent task visits
+receive detail. General → Sessions controls recent transcript retention (three
+per window by default, including the current task; zero disables visit retention).
+Visits are ordered by last opening, independently of transcript update time. Retained
+background streams update data without parsing or rendering their offscreen
+transcripts. Eviction waits for the ordered hide snapshot before releasing
+transcript data and parsed message caches; scroll positions survive. Hidden
+tasks outside the retained set keep control attachments for permissions,
+notifications, and existing follow-up orchestration, but text, reasoning, tool
+detail, usage deltas, and process log chunks are filtered before delivery. Local `unsubscribe` alone does not filter
 WebSocket traffic. Legacy daemons retain the previous full-stream behavior.
 Navigation observers queue interest changes directly to the transport worker;
 they must not wake the pump after every root notification, which can feed an

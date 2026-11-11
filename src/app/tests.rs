@@ -9075,6 +9075,16 @@ mod live_employee_approvals {
             sessions: Vec<AgentSession>,
             boss: waku_client::boss::BossState,
         ) -> Self {
+            Self::start_with_task_views(default_cwd, project, sessions, boss, false)
+        }
+
+        fn start_with_task_views(
+            default_cwd: PathBuf,
+            project: Project,
+            sessions: Vec<AgentSession>,
+            boss: waku_client::boss::BossState,
+            task_views_available: bool,
+        ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let address = listener.local_addr().unwrap().to_string();
             let daemon = Self {
@@ -9148,7 +9158,7 @@ mod live_employee_approvals {
                                                 daemon_version: "test-daemon".into(),
                                                 daemon_commit: None,
                                                 agent_cli_available: false,
-                                                task_views_available: false,
+                                                task_views_available,
                                                 transcript_windows_available: false,
                                                 landing_queue_available: false,
                                             })
@@ -9424,7 +9434,7 @@ mod live_employee_approvals {
 
     // Headless state/navigation regression; no screenshots or visual assertions.
     #[gpui::test]
-    fn viewed_transcripts_survive_idle_eviction_at_the_tail(cx: &mut gpui::TestAppContext) {
+    fn recent_transcripts_follow_visit_order_and_release_older_data(cx: &mut gpui::TestAppContext) {
         let (_env, dir) = isolated_env();
         let project = Project::from_path(dir.join("project"));
         let daemon = FakeDaemon::start(
@@ -9444,6 +9454,7 @@ mod live_employee_approvals {
                         session.finish_active_turn(TurnStatus::Completed);
                     }
                     session.detail_loaded = true;
+                    session.incognito = index == 29;
                     session.updated_at = index;
                     session
                 })
@@ -9452,50 +9463,183 @@ mod live_employee_approvals {
             waku.state.projects = vec![project];
             waku.state.sessions = sessions;
             waku.state.selected_session = None;
-            for id in &ids[..14] {
-                waku.request_session_activation(
-                    *id,
-                    super::super::SessionActivationTransition::Visit,
-                    cx,
-                );
-                if *id == ids[0] {
-                    waku.active_transcript_rows().scroll_to(ListOffset {
+            assert_eq!(waku.state.recent_transcript_limit, 3);
+            waku.viewed_transcripts.clear();
+            for id in &ids[..4] {
+                waku.remember_transcript_visit(*id);
+            }
+            waku.transcript_scroll_positions.insert(
+                ids[0],
+                TranscriptScrollPosition {
+                    offset: ListOffset {
                         item_ix: 3,
                         offset_in_item: px(7.0),
-                    });
-                }
-            }
+                    },
+                    tail_while_busy: false,
+                },
+            );
+            // Reopening an older task changes visit order, regardless of updated_at.
+            waku.remember_transcript_visit(ids[1]);
+            waku.state.selected_session = Some(ids[3]);
+            assert_eq!(
+                waku.viewed_transcripts,
+                VecDeque::from([ids[1], ids[3], ids[2]])
+            );
+            waku.settings_page = Some(super::super::SettingsPage::General);
+            assert!(!waku.task_detail_visible(ids[1]));
+            assert!(waku.task_detail_interested(ids[1]));
+            assert!(!waku.task_detail_interested(ids[0]));
+            waku.settings_page = None;
             // Deserialize a persisted baseline so dirty-save protection cannot
             // accidentally make this pass instead of the viewed-task pins.
-            waku.state =
-                serde_json::from_value(serde_json::to_value(&waku.state).unwrap()).unwrap();
+            waku.state = serde_json::from_value(serde_json::to_value(&waku.state).unwrap()).unwrap();
             waku.trim_resident_transcripts();
             assert!(
-                waku.state.sessions[..14]
+                waku.state.sessions[1..4]
                     .iter()
                     .all(|session| session.detail_loaded)
             );
             assert!(
-                !waku.state.sessions[14].detail_loaded,
-                "unvisited background data still evicts"
+                !waku.state.sessions[0].detail_loaded && !waku.state.sessions[4].detail_loaded,
+                "older visits and unvisited background data release"
             );
+            assert!(
+                waku.state.sessions[29].detail_loaded,
+                "incognito content has no disk copy to reload"
+            );
+            let parked = waku.transcript_scroll_positions[&ids[0]];
+            assert_eq!(parked.offset.item_ix, 3);
+            assert_eq!(parked.offset.offset_in_item, px(7.0));
             assert!(
                 !waku.transcript_scroll_positions.contains_key(&ids[1]),
                 "tail visits need no saved offset"
             );
             // Even a stale resident opens synchronously; its refresh keeps the
             // transcript visible while control settings remain unavailable.
-            waku.stale_task_details.insert(ids[0]);
-            waku.navigate_to_session(ids[0], super::super::SessionActivationTransition::Visit, cx);
-            assert_eq!(waku.state.selected_session, Some(ids[0]));
+            waku.stale_task_details.insert(ids[1]);
+            waku.navigate_to_session(ids[1], super::super::SessionActivationTransition::Visit, cx);
+            assert_eq!(waku.state.selected_session, Some(ids[1]));
             assert!(waku.pending_session_activation.is_none());
             let selected = waku.selected_session().unwrap();
             assert!(selected.detail_loaded);
             assert!(!waku.session_detail_is_ready(selected));
-            let offset = waku.active_transcript_rows().logical_scroll_top();
-            assert_eq!(offset.item_ix, 3);
-            assert_eq!(offset.offset_in_item, px(7.0));
+            waku.set_recent_transcript_limit(0, cx);
+            assert!(waku.viewed_transcripts.is_empty());
+            assert!(
+                waku.state.sessions[1].detail_loaded,
+                "selected task stays resident"
+            );
+            assert!(!waku.state.sessions[2].detail_loaded);
+            assert!(!waku.state.sessions[3].detail_loaded);
+            assert!(!waku.task_detail_interested(ids[3]));
         });
+    }
+
+    #[gpui::test]
+    fn recent_transcripts_stream_in_background_without_stopping_evicted_runtime(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.join("project"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        session.begin_turn("Background prompt");
+        session.status = SessionStatus::Working;
+        session.detail_loaded = true;
+        let id = session.id;
+        // Keep the daemon catalog consistent with the controlled runtime: startup's
+        // asynchronous catalog refresh must not report this task as deleted.
+        let daemon = FakeDaemon::start_with_task_views(
+            dir,
+            project.clone(),
+            vec![session.clone()],
+            boss_state(None, Vec::new()),
+            true,
+        );
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor.clone());
+        let runtime_id = Uuid::new_v4();
+        update_app(vcx, &view, |waku, _, _| {
+            waku.state.projects = vec![project];
+            waku.state.sessions = vec![session.clone()];
+            waku.state.selected_session = None;
+            waku.remember_transcript_visit(id);
+            let mut runtime = attach_runtime(waku, &supervisor, id, runtime_id);
+            runtime.detail_visible = Some(true);
+            waku.runtimes.insert(id, runtime);
+            assert!(!waku.task_detail_visible(id));
+            waku.sync_task_views();
+        });
+        wait_for(vcx, &view, |_| {
+            daemon.commands.lock().iter().any(|record| {
+                record.session_id == id
+                    && matches!(record.command, Command::SetTaskView { detail: true, .. })
+            })
+        });
+        daemon.send_event(
+            id,
+            runtime_id,
+            1,
+            waku_protocol::event_to_wire(DriverEvent::TextDelta("Still working".into())).unwrap(),
+        );
+        wait_for(vcx, &view, |waku| {
+            waku.state.sessions.iter().any(|session| {
+                session.id == id
+                    && session
+                        .messages
+                        .iter()
+                        .any(|message| message.content == "Still working")
+            })
+        });
+        update_app(vcx, &view, |waku, _, cx| {
+            assert!(
+                waku.message_markdown.borrow().is_empty(),
+                "offscreen output is not parsed"
+            );
+            waku.set_recent_transcript_limit(0, cx);
+            assert!(
+                waku.state.sessions[0].detail_loaded,
+                "wait for ordered hide acknowledgement"
+            );
+        });
+        wait_for(vcx, &view, |_| {
+            daemon
+                .commands
+                .lock()
+                .iter()
+                .rev()
+                .find(|record| {
+                    record.session_id == id && matches!(record.command, Command::SetTaskView { .. })
+                })
+                .is_some_and(|record| {
+                    matches!(record.command, Command::SetTaskView { detail: false, .. })
+                })
+        });
+        daemon.send_event(
+            id,
+            runtime_id,
+            2,
+            waku_protocol::event_to_wire(DriverEvent::TaskViewSnapshot {
+                session: Box::new(session.list_projection()),
+                detail: false,
+                settle: false,
+            })
+            .unwrap(),
+        );
+        wait_for(vcx, &view, |waku| !waku.state.sessions[0].detail_loaded);
+        read_app(vcx, &view, |waku| {
+            assert!(
+                waku.runtimes.contains_key(&id),
+                "eviction preserves the runtime attachment"
+            );
+        });
+        assert!(
+            !daemon
+                .commands
+                .lock()
+                .iter()
+                .any(|record| record.session_id == id
+                    && matches!(record.command, Command::Cancel | Command::CloseSession))
+        );
     }
 
     fn pending_permission(request_id: &str) -> PendingPermission {
@@ -9643,6 +9787,7 @@ mod live_employee_approvals {
 
     /// Pump frames and tasks until `predicate` holds or the wall-clock
     /// budget ends — real threads deliver socket traffic asynchronously.
+    #[track_caller]
     fn wait_for(
         vcx: &mut VisualTestContext,
         view: &Entity<Waku>,

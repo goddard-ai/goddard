@@ -2074,6 +2074,10 @@ common.retry:
 common.creating:
   en: Creating…
 
+settings.recent_transcript_limit:
+  en: Keep recent task transcripts in memory
+settings.recent_transcript_limit_description:
+  en: "Reopen recent tasks faster and keep their running transcripts updated. Includes the current task; 0 disables recent-task retention. Higher values use more memory."
 settings.local_by_default:
   en: Local by default
 settings.local_by_default_description:

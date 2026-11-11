@@ -1,0 +1,1 @@
+- Choose how many recent task transcripts stay in memory under General → Sessions, defaulting to three. Retained tasks receive background transcript updates; older tasks reload when reopened without stopping their agents.

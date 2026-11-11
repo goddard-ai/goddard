@@ -1532,7 +1532,7 @@ impl Waku {
             }
         }
         self.state.selected_session = Some(session_id);
-        self.viewed_transcripts.insert(session_id);
+        self.remember_transcript_visit(session_id);
         let detail_loaded = self
             .selected_session()
             .is_some_and(|session| session.detail_loaded);
@@ -1690,6 +1690,7 @@ impl Waku {
             self.maybe_voice_brief(session_id, cx);
         }
         self.ensure_session_loaded(session_id, cx);
+        self.trim_resident_transcripts();
         cx.notify();
     }
 
@@ -2106,7 +2107,7 @@ impl Waku {
             self.remove_side_chat_surface(id, cx);
         }
         if let Some(session_id) = self.state.selected_session {
-            self.viewed_transcripts.insert(session_id);
+            self.remember_transcript_visit(session_id);
             let panel_state = RightPanelSessionState::take_or_closed(
                 &mut self.right_panel_states,
                 RightPanelOwner::Session(session_id),
@@ -3025,7 +3026,7 @@ impl Waku {
             self.sidebar_multi_selection_anchor = None;
         }
         self.transcript_scroll_positions.remove(&session_id);
-        self.viewed_transcripts.remove(&session_id);
+        self.viewed_transcripts.retain(|id| *id != session_id);
         if self
             .transcript_landing
             .as_ref()
@@ -3446,7 +3447,7 @@ impl Waku {
             self.sidebar_multi_selection_anchor = None;
         }
         self.transcript_scroll_positions.remove(&session_id);
-        self.viewed_transcripts.remove(&session_id);
+        self.viewed_transcripts.retain(|id| *id != session_id);
         if self
             .transcript_landing
             .as_ref()
@@ -6094,14 +6095,23 @@ impl Waku {
         self.transcript_anchor_following.set(false);
     }
 
-    /// Skeletonize hydrated transcripts nobody can see, bounded to the
-    /// recency window. Viewed tasks remain resident alongside their parked
-    /// scroll positions. The store's dirty set keeps unsaved work; the pin set
+    pub(super) fn remember_transcript_visit(&mut self, session_id: Uuid) {
+        self.viewed_transcripts.retain(|id| *id != session_id);
+        self.viewed_transcripts.push_front(session_id);
+        self.viewed_transcripts
+            .truncate(self.state.recent_transcript_limit);
+    }
+
+    /// Release transcripts outside the retained visits and observable surfaces.
+    /// Scroll positions survive eviction so a reload can restore the reader's place.
+    /// The store's dirty set keeps unsaved work; the pin set
     /// covers everything that can be observed or mutated while off screen —
     /// a released session rehydrates through `ensure_session_loaded` like a
     /// cold open. The released ids also drop their `message_markdown` views,
     /// the one transcript cache that deliberately survives session switches.
     pub(super) fn trim_resident_transcripts(&mut self) {
+        self.viewed_transcripts
+            .truncate(self.state.recent_transcript_limit);
         let mut pinned: HashSet<Uuid> = self
             .runtimes
             .iter()
@@ -6109,6 +6119,14 @@ impl Waku {
             .map(|(id, _)| *id)
             .collect();
         pinned.extend(self.viewed_transcripts.iter().copied());
+        // Incognito transcripts have no persisted copy to reload after eviction.
+        pinned.extend(
+            self.state
+                .sessions
+                .iter()
+                .filter(|session| session.incognito)
+                .map(|session| session.id),
+        );
         if let Some(id) = self.state.selected_session {
             pinned.insert(id);
         }
@@ -6139,9 +6157,7 @@ impl Waku {
                 .as_ref()
                 .and_then(|operation| operation.transcript_session),
         );
-        let released = self
-            .state
-            .trim_idle_transcripts(&pinned, RESIDENT_TRANSCRIPT_WINDOW);
+        let released = self.state.trim_idle_transcripts(&pinned, 0);
         if released.is_empty() {
             return;
         }

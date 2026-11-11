@@ -644,6 +644,10 @@ fn default_code_font_size() -> f32 {
     DEFAULT_CODE_FONT_SIZE
 }
 
+fn default_recent_transcript_limit() -> usize {
+    3
+}
+
 fn default_render_math() -> bool {
     true
 }
@@ -1403,6 +1407,10 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_font_family: Option<String>,
     pub render_math: bool,
+    /// Most recently visited desktop transcripts retained, including the current task.
+    /// Zero disables retention of previously visited tasks.
+    #[serde(default = "default_recent_transcript_limit")]
+    pub recent_transcript_limit: usize,
     /// Append an estimated "N tok/s" readout to settled response footers.
     pub show_response_token_speed: bool,
     /// Last reading speed selected in the transient speed reader.
@@ -1740,6 +1748,7 @@ impl Default for AppSettings {
             ui_font_family: None,
             code_font_family: None,
             render_math: true,
+            recent_transcript_limit: default_recent_transcript_limit(),
             show_response_token_speed: false,
             speed_reader_wpm: default_speed_reader_wpm(),
             sync_with_merge: false,
@@ -2282,6 +2291,10 @@ pub struct PersistedState {
     pub code_font_family: Option<String>,
     #[serde(default = "default_render_math")]
     pub render_math: bool,
+    /// Most recently visited desktop transcripts retained, including the current task.
+    /// Zero disables retention of previously visited tasks.
+    #[serde(default = "default_recent_transcript_limit")]
+    pub recent_transcript_limit: usize,
     /// Append an estimated "N tok/s" readout to settled response footers.
     #[serde(default)]
     pub show_response_token_speed: bool,
@@ -2948,6 +2961,7 @@ impl PersistedState {
             ui_font_family: None,
             code_font_family: None,
             render_math: true,
+            recent_transcript_limit: default_recent_transcript_limit(),
             show_response_token_speed: false,
             speed_reader_wpm: default_speed_reader_wpm(),
             sync_with_merge: false,
@@ -3544,6 +3558,7 @@ impl PersistedState {
             ui_font_family: self.ui_font_family.clone(),
             code_font_family: self.code_font_family.clone(),
             render_math: self.render_math,
+            recent_transcript_limit: self.recent_transcript_limit,
             show_response_token_speed: self.show_response_token_speed,
             speed_reader_wpm: self.speed_reader_wpm,
             sync_with_merge: self.sync_with_merge,
@@ -3742,6 +3757,7 @@ impl PersistedState {
         self.ui_font_family = sanitized_font_family(settings.ui_font_family);
         self.code_font_family = sanitized_font_family(settings.code_font_family);
         self.render_math = settings.render_math;
+        self.recent_transcript_limit = settings.recent_transcript_limit.min(100);
         self.show_response_token_speed = settings.show_response_token_speed;
         self.speed_reader_wpm = settings.speed_reader_wpm.clamp(100, 1200);
         self.sync_with_merge = settings.sync_with_merge;
@@ -5519,6 +5535,31 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(restored.border_intensity, MAX_BORDER_INTENSITY);
+    }
+
+    #[test]
+    fn recent_transcript_limit_defaults_and_persists_locally() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.recent_transcript_limit, 3);
+        let mut state = PersistedState::empty();
+        assert_eq!(state.recent_transcript_limit, 3);
+        state.recent_transcript_limit = 0;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["recent_transcript_limit"], 0);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("recent_transcript_limit")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.recent_transcript_limit, 0);
+        restored.apply_app_settings(AppSettings {
+            recent_transcript_limit: usize::MAX,
+            ..Default::default()
+        });
+        assert_eq!(restored.recent_transcript_limit, 100);
     }
 
     #[test]

@@ -2134,6 +2134,27 @@ impl Waku {
             },
             self.sandbox_default_card(theme, search, cx),
             setting_card(
+                "icons/folder-clock.svg",
+                tr!("settings.recent_transcript_limit"),
+                tr!("settings.recent_transcript_limit_description"),
+                self.setting_selector(
+                    "recent-transcript-limit-selector",
+                    (0..=20)
+                        .chain([50, 100])
+                        .chain([self.state.recent_transcript_limit])
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .into_iter()
+                        .map(|count| (count, count.to_string()))
+                        .collect(),
+                    self.state.recent_transcript_limit,
+                    100.0,
+                    cx,
+                    |this, count, _, cx| this.set_recent_transcript_limit(count, cx),
+                ),
+                theme,
+                search,
+            ),
+            setting_card(
                 "icons/hourglass.svg",
                 tr!("settings.sidebar_day_start"),
                 tr!("settings.sidebar_day_start_description"),
@@ -12898,6 +12919,19 @@ impl Waku {
         self.remeasure_font_sized_surfaces();
         self.save();
         window.refresh();
+        cx.notify();
+    }
+
+    pub(super) fn set_recent_transcript_limit(&mut self, count: usize, cx: &mut Context<Self>) {
+        self.state.recent_transcript_limit = count.min(100);
+        if let Some(id) = self.state.selected_session {
+            self.remember_transcript_visit(id);
+        }
+        self.viewed_transcripts
+            .truncate(self.state.recent_transcript_limit);
+        self.sync_task_views();
+        self.save();
+        self.trim_resident_transcripts();
         cx.notify();
     }
 
