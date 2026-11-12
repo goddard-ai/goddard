@@ -1,0 +1,1 @@
+- Fix mobile app startup when built with the iOS 27 SDK.
