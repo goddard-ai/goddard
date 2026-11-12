@@ -514,8 +514,17 @@ impl WakuBackend {
         driver: &DriverHandle,
         _sink: &EventSink,
     ) {
+        let _ = self.steer_first_prompt_context_with_cancellation(session_id, driver, None);
+    }
+
+    pub(super) fn steer_first_prompt_context_with_cancellation(
+        &self,
+        session_id: Uuid,
+        driver: &DriverHandle,
+        cancellation: Option<&crate::server::RuntimeCancellation>,
+    ) -> anyhow::Result<()> {
         if self.agent.context_steer_pending(session_id) {
-            return;
+            return Ok(());
         }
         let parent_index = self.side_chat_parent_block(session_id);
         let memory = self.session_memory_block(session_id, driver);
@@ -542,41 +551,48 @@ impl WakuBackend {
         .collect::<Vec<_>>()
         .join("\n\n");
         if block.is_empty() {
-            return;
-        }
-        // The index rides this steer — an accept settles it, a rejection
-        // leaves the flag so the next prompt retries.
-        if parent_index.is_some() {
-            self.agent.note_index_steer(session_id);
-        }
-        // Same for the project-memory block.
-        if memory.is_some() {
-            self.agent.note_memory_steer(session_id);
+            return Ok(());
         }
         // The steer lands as a user message mid-turn — frame the blocks as
         // context so the provider does not read them as a new instruction.
         let steer = format!(
             "Session context — background information only, not a new \
-             instruction. Continue the task you are already working on.\n\n{block}"
+         instruction. Continue the task you are already working on.\n\n{block}"
         );
-        self.agent.record_pending_steer(
-            session_id,
-            crate::agent::AgentPrompt {
-                prompt: steer.clone(),
-                transport: None,
-                sender: None,
-                queued_id: None,
-                submission_id: None,
-                context: Some(if memory.is_some() {
-                    crate::agent::ContextSteer::Memory
-                } else {
-                    crate::agent::ContextSteer::Blocks
-                }),
-                hidden: false,
-                report_trigger: None,
-            },
-        );
-        driver.steer(steer);
+        let enqueue = || {
+            // The index rides this steer — an accept settles it, a rejection
+            // leaves the flag so the next prompt retries.
+            if parent_index.is_some() {
+                self.agent.note_index_steer(session_id);
+            }
+            // Same for the project-memory block.
+            if memory.is_some() {
+                self.agent.note_memory_steer(session_id);
+            }
+            self.agent.record_pending_steer(
+                session_id,
+                crate::agent::AgentPrompt {
+                    prompt: steer.clone(),
+                    transport: None,
+                    sender: None,
+                    queued_id: None,
+                    submission_id: None,
+                    context: Some(if memory.is_some() {
+                        crate::agent::ContextSteer::Memory
+                    } else {
+                        crate::agent::ContextSteer::Blocks
+                    }),
+                    hidden: false,
+                    report_trigger: None,
+                },
+            );
+            driver.steer(steer);
+            Ok(())
+        };
+        match cancellation {
+            Some(cancellation) => cancellation.deliver(enqueue),
+            None => enqueue(),
+        }
     }
 
     /// The daemon-owned memory store: session transcript indexes and

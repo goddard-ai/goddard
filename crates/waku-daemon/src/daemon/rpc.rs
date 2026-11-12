@@ -347,6 +347,21 @@ impl Backend for WakuBackend {
         events: EventSink,
         agent: Option<Uuid>,
     ) -> anyhow::Result<ResponsePayload> {
+        self.handle_with_cancellation(
+            request,
+            events,
+            agent,
+            &crate::server::RuntimeCancellation::default(),
+        )
+    }
+
+    fn handle_with_cancellation(
+        &self,
+        request: Request,
+        events: EventSink,
+        agent: Option<Uuid>,
+        cancellation: &crate::server::RuntimeCancellation,
+    ) -> anyhow::Result<ResponsePayload> {
         let _admission = self.idle_shutdown.enter()?;
         if agent.is_some_and(|id| self.boss.is_counsel(id)) {
             anyhow::ensure!(
@@ -2845,7 +2860,7 @@ impl Backend for WakuBackend {
                 // automations) out until the user trusts the transfer.
                 let lifecycle = self.runtime_lifecycles.session(session_id);
                 let _cancel_owner = matches!(command, Command::Cancel).then(|| lifecycle.lock());
-                let driver = {
+                let (driver, immediate_cancel) = {
                     let mut sessions = self.sessions.lock();
                     let entry = sessions
                         .get_mut(&session_id)
@@ -2872,8 +2887,18 @@ impl Backend for WakuBackend {
                     if let Some(link) = &entry.stable {
                         link.require_available()?;
                     }
-                    entry.driver.clone()
+                    (
+                        entry.driver.clone(),
+                        entry.stable.is_none()
+                            && matches!(entry.provider, ProviderKind::Codex | ProviderKind::Claude),
+                    )
                 };
+                // These native controls only enqueue the interrupt. Stable
+                // control performs synchronous IPC and keeps its ordered path.
+                if immediate_cancel && !matches!(command, Command::Cancel) {
+                    let owner = driver.clone();
+                    cancellation.bind_runtime(runtime_id, move || owner.cancel_from_user());
+                }
                 if let Command::ApplyOptions { options } = &command {
                     let mode = decode_enum(&options.mode)?;
                     let result = handle_driver_command(&driver, command)?;
@@ -2887,6 +2912,9 @@ impl Backend for WakuBackend {
                     return Ok(result);
                 }
                 if matches!(command, Command::Cancel) {
+                    // This gate excludes the forwarder until the normal Stop
+                    // record below is visible, including any late settlement.
+                    driver.clear_user_cancel();
                     self.agent.cancel_resources(session_id);
                     // Hold parked Boss deliveries until the user's next
                     // prompt, and publish Stop before the provider can settle.
@@ -3032,11 +3060,18 @@ impl Backend for WakuBackend {
                         // title generation and first-prompt echoes stay
                         // clean — and the session's context blocks follow as
                         // a hidden steer.
-                        let task = prompt.clone();
                         *prompt = self.boss_outbound_prompt(session_id, std::mem::take(prompt));
-                        let result = handle_driver_command(&driver, command);
-                        self.steer_first_prompt_context(session_id, &task, &driver, &events);
-                        return result;
+                        let result = if immediate_cancel {
+                            cancellation.deliver(|| handle_driver_command(&driver, command))
+                        } else {
+                            handle_driver_command(&driver, command)
+                        }?;
+                        self.steer_first_prompt_context_with_cancellation(
+                            session_id,
+                            &driver,
+                            immediate_cancel.then_some(cancellation),
+                        )?;
+                        return Ok(result);
                     }
                     // The agent-surface note, a side chat's parent index,
                     // and project memory ride the first
@@ -3097,7 +3132,11 @@ impl Backend for WakuBackend {
                         crate::model::unix_time(),
                     );
                 }
-                handle_driver_command(&driver, command)
+                if immediate_cancel && matches!(command, Command::Prompt { .. }) {
+                    cancellation.deliver(|| handle_driver_command(&driver, command))
+                } else {
+                    handle_driver_command(&driver, command)
+                }
             }
         }
     }

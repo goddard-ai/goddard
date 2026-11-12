@@ -43,6 +43,7 @@ pub fn revoke_computer_app_grants_for_runtimes() {
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam_channel::{Receiver, SendError, Sender, unbounded};
 
@@ -170,6 +171,7 @@ pub fn test_event_channel() -> (DriverEventSender, Receiver<DriverEvent>) {
 pub struct DriverHandle {
     inner: Arc<dyn DriverControl>,
     timeline: Option<timeline::RuntimeTimeline>,
+    pending_user_cancel: Arc<AtomicBool>,
 }
 
 impl DriverHandle {
@@ -177,6 +179,7 @@ impl DriverHandle {
         Self {
             inner: control,
             timeline: None,
+            pending_user_cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -229,6 +232,21 @@ impl DriverHandle {
             source: timeline::CancelSource::Controller,
         });
         self.inner.cancel();
+    }
+
+    /// Carry the user's intent with this driver owner until its forwarder or
+    /// ordered Cancel handler records it. Set it before the provider can settle.
+    pub fn cancel_from_user(&self) {
+        self.pending_user_cancel.store(true, Ordering::Release);
+        self.cancel();
+    }
+
+    pub fn take_user_cancel(&self) -> bool {
+        self.pending_user_cancel.swap(false, Ordering::AcqRel)
+    }
+
+    pub fn clear_user_cancel(&self) {
+        self.pending_user_cancel.store(false, Ordering::Release);
     }
 
     pub fn computer_use_available(&self) -> bool {
@@ -532,10 +550,9 @@ pub fn start_cloud(
     options: DriverStartOptions,
     events: DriverEventSender,
 ) -> anyhow::Result<DriverHandle> {
-    Ok(DriverHandle {
-        inner: Arc::new(cloud::CloudDriver::start(provider, options, events)?),
-        timeline: None,
-    })
+    Ok(DriverHandle::from_control(Arc::new(
+        cloud::CloudDriver::start(provider, options, events)?,
+    )))
 }
 
 pub fn start_local(
@@ -586,10 +603,7 @@ pub fn start_local(
         // runtime since the SDK's process and transport code is Tokio-native.
         ProviderKind::Copilot => Arc::new(copilot::CopilotDriver::start(options, events)?),
     };
-    Ok(DriverHandle {
-        inner,
-        timeline: None,
-    })
+    Ok(DriverHandle::from_control(inner))
 }
 
 #[cfg(test)]

@@ -13,6 +13,12 @@ fn next_event(events: &crossbeam_channel::Receiver<waku_protocol::ServerMessage>
 
 #[test]
 fn clients_follow_stop_and_the_next_turn_on_retained_and_replaced_runtimes() {
+    for early_signal in [false, true] {
+        check_stop_and_next_turn(early_signal);
+    }
+}
+
+fn check_stop_and_next_turn(early_signal: bool) {
     for replace in [false, true] {
         let root = std::env::temp_dir().join(format!("client-stop-{}", Uuid::new_v4()));
         let (backend, session_id, _) = read_scope_test_backend(&root);
@@ -30,14 +36,35 @@ fn clients_follow_stop_and_the_next_turn_on_retained_and_replaced_runtimes() {
         let clients = [sink.tapped_events(), sink.tapped_events()];
         let capture = Arc::new(CaptureDriver::default());
         let (mut sender, receiver) = driver::test_event_channel();
+        let entry = runtime_generation_entry(old_runtime, capture.clone(), &root);
+        let immediate = entry.driver.clone();
         let mut forwarder = backend
-            .register_runtime_forwarder(
-                session_id,
-                runtime_generation_entry(old_runtime, capture.clone(), &root),
-                receiver,
-                sink.clone(),
-            )
+            .register_runtime_forwarder(session_id, entry, receiver, sink.clone())
             .unwrap();
+        if early_signal {
+            immediate.cancel_from_user();
+            sender
+                .send(DriverEvent::TurnFinished {
+                    success: false,
+                    summary: Some("provider acknowledged interrupt".into()),
+                    summary_i18n: None,
+                })
+                .unwrap();
+            for client in &clients {
+                assert!(matches!(next_event(client), DriverEvent::TurnCancelled));
+            }
+            let state = backend.task_state.lock();
+            let turn = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .unwrap()
+                .turns
+                .last()
+                .unwrap();
+            assert_eq!(turn.status, TurnStatus::Interrupted);
+            assert_eq!(turn.interruption, Some(crate::model::TurnInterruption::You));
+        }
         backend
             .handle(
                 Request {
@@ -50,9 +77,15 @@ fn clients_follow_stop_and_the_next_turn_on_retained_and_replaced_runtimes() {
                 None,
             )
             .unwrap();
-        assert_eq!(*capture.cancels.lock(), 1);
+        assert_eq!(*capture.cancels.lock(), if early_signal { 2 } else { 1 });
         for client in &clients {
-            assert!(matches!(next_event(client), DriverEvent::TurnCancelled));
+            loop {
+                match next_event(client) {
+                    DriverEvent::TurnCancelled => break,
+                    DriverEvent::TurnFinished { success: false, .. } if early_signal => {}
+                    event => panic!("unexpected event before ordered Stop: {event:?}"),
+                }
+            }
         }
         // A late provider start/output/settle cannot rewrite the durable
         // user interruption or append output to a turn with no owner.
@@ -129,7 +162,7 @@ fn clients_follow_stop_and_the_next_turn_on_retained_and_replaced_runtimes() {
                     )
                     .is_err()
             );
-            assert_eq!(*capture.cancels.lock(), 1);
+            assert_eq!(*capture.cancels.lock(), if early_signal { 2 } else { 1 });
             new_runtime
         } else {
             old_runtime

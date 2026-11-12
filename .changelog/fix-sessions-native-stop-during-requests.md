@@ -1,0 +1,1 @@
+- Improve Stop response during native Codex and Claude operations while preserving the stopped turn's history.

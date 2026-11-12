@@ -805,6 +805,26 @@ pub(super) fn forward_driver_events(
             continue;
         }
         owner.set(Some(runtime_id));
+        // The socket can signal this exact driver while its mailbox is busy.
+        // Record that intent before the provider's resulting event, under the
+        // same ownership gate as ordinary Stop. A retired driver's latch never
+        // reaches this point, so it cannot stop a replacement's turn.
+        if driver.take_user_cancel() {
+            if boss.is_boss_principal(session_id) {
+                agent.note_user_stop(session_id);
+            }
+            let cancelled = DriverEvent::TurnCancelled;
+            if let Err(error) = record_boss_event(&task_state, &task_store, session_id, &cancelled)
+            {
+                eprintln!("could not record user Stop {session_id}: {error:#}");
+            }
+            match event_to_wire(cancelled) {
+                Ok(event) => {
+                    let _ = events.send(event);
+                }
+                Err(error) => eprintln!("could not publish user Stop {session_id}: {error:#}"),
+            }
+        }
         let stable = sessions
             .lock()
             .get(&session_id)

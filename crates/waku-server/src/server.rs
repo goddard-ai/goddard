@@ -684,6 +684,62 @@ impl Drop for ConnectionPermit {
     }
 }
 
+/// Cancellation of one executing mailbox request. The binding captures the
+/// validated driver owner; it must only enqueue a signal, never wait for I/O or
+/// mutate lifecycle state. Cleanup and replies still run in mailbox order.
+#[derive(Default)]
+pub struct RuntimeCancellation {
+    cancelled: AtomicBool,
+    interrupt: Mutex<Option<RuntimeInterrupt>>,
+}
+
+struct RuntimeInterrupt {
+    runtime_id: Uuid,
+    signal: Arc<dyn Fn() + Send + Sync>,
+}
+
+impl RuntimeCancellation {
+    pub fn bind_runtime(&self, runtime_id: Uuid, signal: impl Fn() + Send + Sync + 'static) {
+        let mut interrupt = self.interrupt.lock();
+        debug_assert!(interrupt.is_none(), "one request binds one driver owner");
+        *interrupt = Some(RuntimeInterrupt {
+            runtime_id,
+            signal: Arc::new(signal),
+        });
+    }
+
+    /// Serialize only the final nonblocking provider enqueue with Stop.
+    /// Preparation and synchronous provider waits must stay outside this gate.
+    pub fn deliver<T>(&self, enqueue: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
+        let _interrupt = self.interrupt.lock();
+        self.check()?;
+        enqueue()
+    }
+
+    fn check(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.cancelled.load(Ordering::Acquire),
+            "this request was stopped before provider execution"
+        );
+        Ok(())
+    }
+
+    fn signal(&self, runtime_id: Uuid) {
+        let signal = {
+            let interrupt = self.interrupt.lock();
+            let Some(interrupt) = interrupt.as_ref() else {
+                return;
+            };
+            if interrupt.runtime_id != runtime_id {
+                return;
+            }
+            self.cancelled.store(true, Ordering::Release);
+            interrupt.signal.clone()
+        };
+        signal();
+    }
+}
+
 pub trait Backend: Send + Sync + 'static {
     /// Resolve a scoped agent credential to the Waku task that owns it. The
     /// default answers for backends without an agent surface.
@@ -742,6 +798,16 @@ pub trait Backend: Send + Sync + 'static {
         events: EventSink,
         agent: Option<Uuid>,
     ) -> anyhow::Result<ResponsePayload>;
+
+    fn handle_with_cancellation(
+        &self,
+        request: Request,
+        events: EventSink,
+        agent: Option<Uuid>,
+        _cancellation: &RuntimeCancellation,
+    ) -> anyhow::Result<ResponsePayload> {
+        self.handle(request, events, agent)
+    }
 
     /// Unsupported backends refuse owner-requested idle shutdown by default.
     fn prepare_idle_shutdown(&self, _owner: Uuid, _request: Uuid) -> Option<Uuid> {
@@ -1310,6 +1376,7 @@ struct DispatchedRequest {
 struct RuntimeMailbox {
     id: Uuid,
     sender: Sender<DispatchedRequest>,
+    active: Option<Arc<Mutex<Option<Arc<RuntimeCancellation>>>>>,
 }
 
 struct RequestDispatcher {
@@ -2152,6 +2219,7 @@ impl RequestDispatcher {
             RuntimeMailbox {
                 id: mailbox_id,
                 sender,
+                active: None,
             },
         );
         let registry = Arc::downgrade(&self.computer_use_mailboxes);
@@ -2345,6 +2413,23 @@ impl RequestDispatcher {
         loop {
             let mut mailboxes = self.runtime_mailboxes.lock();
             if let Some(mailbox) = mailboxes.get(&session_id) {
+                // Signal only the captured owner, after the same credential
+                // and completed-request checks used by execution. Keeping
+                // this under the active gate prevents a late callback from
+                // crossing into the next request. The Cancel itself remains
+                // ordered, including persistence, terminal events and reply.
+                if matches!(dispatched.request.command, Command::Cancel)
+                    && dispatched.agent.is_none()
+                    && (dispatched.request.request_id.is_nil()
+                        || self
+                            .hub
+                            .cached_response(dispatched.request.request_id)
+                            .is_none())
+                    && let Some(active) = &mailbox.active
+                    && let Some(active) = active.lock().as_ref()
+                {
+                    active.signal(dispatched.request.runtime_id);
+                }
                 match mailbox.sender.send(dispatched) {
                     Ok(()) => return,
                     Err(error) => {
@@ -2357,6 +2442,7 @@ impl RequestDispatcher {
 
             let mailbox_id = Uuid::new_v4();
             let (sender, requests) = unbounded();
+            let active = Arc::new(Mutex::new(None));
             sender
                 .send(dispatched)
                 .expect("a new runtime mailbox still has its receiver");
@@ -2365,6 +2451,7 @@ impl RequestDispatcher {
                 RuntimeMailbox {
                     id: mailbox_id,
                     sender,
+                    active: Some(active.clone()),
                 },
             );
 
@@ -2381,6 +2468,7 @@ impl RequestDispatcher {
                         mailbox_registry,
                         backend,
                         hub,
+                        active,
                     );
                 });
             if let Err(error) = worker {
@@ -3473,6 +3561,7 @@ fn run_runtime_mailbox(
     mailbox_registry: Weak<Mutex<HashMap<Uuid, RuntimeMailbox>>>,
     backend: Arc<dyn Backend>,
     hub: Arc<Hub>,
+    active: Arc<Mutex<Option<Arc<RuntimeCancellation>>>>,
 ) {
     let mut active_runtime_id = None;
     let mut pending = None;
@@ -3496,14 +3585,18 @@ fn run_runtime_mailbox(
             Command::CloseSession | Command::CloseTerminal | Command::RemoveSession
         );
         let removes_session = matches!(&dispatched.request.command, Command::RemoveSession);
-        let handled = handle_request(
+        let cancellation = Arc::new(RuntimeCancellation::default());
+        *active.lock() = Some(cancellation.clone());
+        let handled = handle_request_with_cancellation(
             dispatched.request,
             dispatched.outgoing,
             dispatched.source_subscriber_id,
             dispatched.agent,
             backend.clone(),
             hub.clone(),
+            Some(&cancellation),
         );
+        active.lock().take();
 
         if handled.executed {
             if starts_runtime {
@@ -3601,6 +3694,26 @@ fn handle_request(
     backend: Arc<dyn Backend>,
     hub: Arc<Hub>,
 ) -> HandledRequest {
+    handle_request_with_cancellation(
+        request,
+        outgoing,
+        source_subscriber_id,
+        agent,
+        backend,
+        hub,
+        None,
+    )
+}
+
+fn handle_request_with_cancellation(
+    request: Request,
+    outgoing: Sender<ServerMessage>,
+    source_subscriber_id: u64,
+    agent: Option<Uuid>,
+    backend: Arc<dyn Backend>,
+    hub: Arc<Hub>,
+    cancellation: Option<&RuntimeCancellation>,
+) -> HandledRequest {
     let request_id = request.request_id;
     let notification = request_id.is_nil();
     let session_id = request.session_id;
@@ -3638,12 +3751,16 @@ fn handle_request(
         if starts_runtime {
             hub.begin_runtime(session_id, runtime_id);
         }
-        let outcome = match backend.handle(
-            request,
-            hub.event_sink(session_id, runtime_id)
-                .with_source_subscriber(source_subscriber_id),
-            agent,
-        ) {
+        let events = hub
+            .event_sink(session_id, runtime_id)
+            .with_source_subscriber(source_subscriber_id);
+        let result = match cancellation {
+            Some(cancellation) => {
+                backend.handle_with_cancellation(request, events, agent, cancellation)
+            }
+            None => backend.handle(request, events, agent),
+        };
+        let outcome = match result {
             Ok(payload) => ResponseOutcome::Ok { payload },
             Err(error) => ResponseOutcome::Error {
                 error: RpcError::from(error),
@@ -6812,3 +6929,7 @@ mod request_queue_tests;
 #[cfg(test)]
 #[path = "queue_admission_tests.rs"]
 mod queue_admission_tests;
+
+#[cfg(test)]
+#[path = "runtime_cancel_tests.rs"]
+mod runtime_cancel_tests;
