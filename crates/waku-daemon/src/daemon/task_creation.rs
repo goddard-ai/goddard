@@ -559,39 +559,46 @@ impl WakuBackend {
             "Session context — background information only, not a new \
          instruction. Continue the task you are already working on.\n\n{block}"
         );
-        let enqueue = || {
-            // The index rides this steer — an accept settles it, a rejection
-            // leaves the flag so the next prompt retries.
+        let pending = std::cell::RefCell::new(Some(crate::agent::AgentPrompt {
+            prompt: steer.clone(),
+            transport: None,
+            sender: None,
+            queued_id: None,
+            submission_id: None,
+            context: Some(if memory.is_some() {
+                crate::agent::ContextSteer::Memory
+            } else {
+                crate::agent::ContextSteer::Blocks
+            }),
+            hidden: false,
+            report_trigger: None,
+        }));
+        let enqueue = |send: &mut dyn FnMut()| {
+            // Bookkeeping and the native send cross the same Stop boundary.
             if parent_index.is_some() {
                 self.agent.note_index_steer(session_id);
             }
-            // Same for the project-memory block.
             if memory.is_some() {
                 self.agent.note_memory_steer(session_id);
             }
             self.agent.record_pending_steer(
                 session_id,
-                crate::agent::AgentPrompt {
-                    prompt: steer.clone(),
-                    transport: None,
-                    sender: None,
-                    queued_id: None,
-                    submission_id: None,
-                    context: Some(if memory.is_some() {
-                        crate::agent::ContextSteer::Memory
-                    } else {
-                        crate::agent::ContextSteer::Blocks
-                    }),
-                    hidden: false,
-                    report_trigger: None,
-                },
+                pending
+                    .borrow_mut()
+                    .take()
+                    .expect("one context steer enqueue"),
             );
-            driver.steer(steer);
+            send();
             Ok(())
         };
         match cancellation {
-            Some(cancellation) => cancellation.deliver(enqueue),
-            None => enqueue(),
+            Some(cancellation) => {
+                driver.steer_with_gate(steer, &|send| cancellation.deliver(|| enqueue(send)))
+            }
+            None => {
+                let mut steer = Some(steer);
+                enqueue(&mut || driver.steer(steer.take().expect("one context steer enqueue")))
+            }
         }
     }
 

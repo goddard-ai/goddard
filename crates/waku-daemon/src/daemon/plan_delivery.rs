@@ -181,10 +181,30 @@ struct Review {
 }
 
 type AuthorizedDispatch = Box<
-    dyn Fn(&DriverHandle, String, Vec<crate::model::MessageAttachment>) -> anyhow::Result<()>
+    dyn Fn(
+            &DriverHandle,
+            String,
+            Vec<crate::model::MessageAttachment>,
+            Option<&driver::EnqueueGate<'_>>,
+        ) -> anyhow::Result<()>
         + Send
         + Sync,
 >;
+
+fn submit_plan_prompt(
+    driver: &DriverHandle,
+    prompt: String,
+    attachments: Vec<crate::model::MessageAttachment>,
+    gate: Option<&driver::EnqueueGate<'_>>,
+) -> anyhow::Result<()> {
+    match gate {
+        Some(gate) => driver.prompt_with_gate(prompt, attachments, gate),
+        None => {
+            driver.prompt_with_attachments(prompt, attachments);
+            Ok(())
+        }
+    }
+}
 
 /// Owns the exact artifact and all outbound briefs for one runtime generation.
 /// The validation closure checks current principal, binding, grants and project.
@@ -320,22 +340,46 @@ impl PlanGate {
     }
 
     fn block(&self, review: &mut Review, error: anyhow::Error) {
+        let _ = self.withhold(review, &error, true);
+    }
+
+    fn withhold(
+        &self,
+        review: &mut Review,
+        error: &anyhow::Error,
+        report: bool,
+    ) -> anyhow::Result<()> {
         review.receipt.phase = Phase::Blocked;
         review.receipt.failure = Some(format!("{error:#}"));
         self.driver.cancel();
         let persisted = self.save(review);
-        let detail = match persisted {
-            Ok(()) => format!(
-                "required-plan execution withheld: {error:#}; restart this attempt after repairing the cause"
-            ),
-            Err(save) => format!(
-                "required-plan execution withheld: {error:#}; delivery state persistence failed: {save:#}"
-            ),
-        };
-        let _ = self.events.send(
-            event_to_wire(DriverEvent::Error(detail))
-                .unwrap_or_else(|_| WireDriverEvent::new("error", Value::Null)),
-        );
+        if report || persisted.is_err() {
+            let detail = match &persisted {
+                Ok(()) => format!(
+                    "required-plan execution withheld: {error:#}; restart this attempt after repairing the cause"
+                ),
+                Err(save) => format!(
+                    "required-plan execution withheld: {error:#}; delivery state persistence failed: {save:#}"
+                ),
+            };
+            let _ = self.events.send(
+                event_to_wire(DriverEvent::Error(detail))
+                    .unwrap_or_else(|_| WireDriverEvent::new("error", Value::Null)),
+            );
+        }
+        persisted
+    }
+
+    fn stopped_before_enqueue(
+        &self,
+        review: &mut Review,
+        error: anyhow::Error,
+    ) -> anyhow::Result<()> {
+        let error = error.context("plan runtime paused before provider input");
+        // Retain the accepted brief without claiming native submission or
+        // broadcasting an ordinary failure before the ordered user Stop.
+        self.withhold(review, &error, false)?;
+        Err(error)
     }
 
     /// The adapter contract reports input acceptance as a real turn boundary:
@@ -350,29 +394,40 @@ impl PlanGate {
     /// as ordinary follow-ups once this attempt's input is already delivered.
     /// Returns early when a submission is in flight — its acceptance lands
     /// through `observe`, and late briefs drain as follow-ups at that point.
-    fn drive(&self, review: &mut Review) {
+    fn drive(
+        &self,
+        review: &mut Review,
+        gate: Option<&driver::EnqueueGate<'_>>,
+    ) -> anyhow::Result<()> {
         if review.receipt.phase == Phase::Blocked || review.submitted != 0 {
-            return;
+            return Ok(());
         }
         if let Err(error) = self.check(review) {
             self.block(review, error);
-            return;
+            return Ok(());
         }
         if Self::delivered_phase(review.receipt.phase) {
             let pending = review.pending.clone();
             for (prompt, attachments) in pending {
-                let sent =
-                    (self.dispatch)(&self.driver, review.followup_input(&prompt), attachments);
+                let sent = (self.dispatch)(
+                    &self.driver,
+                    review.followup_input(&prompt),
+                    attachments,
+                    gate,
+                );
                 if let Err(error) = sent {
+                    if error.is::<driver::EnqueueStopped>() {
+                        return self.stopped_before_enqueue(review, error);
+                    }
                     self.block(review, error);
-                    return;
+                    return Ok(());
                 }
             }
             review.pending.clear();
             if let Err(error) = self.save(review) {
                 self.block(review, error);
             }
-            return;
+            return Ok(());
         }
         let brief = review
             .pending
@@ -386,7 +441,10 @@ impl PlanGate {
             .flat_map(|(_, files)| files.clone())
             .collect();
         let input = review.execution_input(&brief);
-        if let Err(error) = (self.dispatch)(&self.driver, input, attachments) {
+        if let Err(error) = (self.dispatch)(&self.driver, input, attachments, gate) {
+            if error.is::<driver::EnqueueStopped>() {
+                return self.stopped_before_enqueue(review, error);
+            }
             // Acceptance is uncertain — the provider may hold the input.
             // Hold the withheld briefs; retry excludes overlap through a
             // fresh attempt on a runtime that cannot keep executing.
@@ -394,9 +452,10 @@ impl PlanGate {
                 review,
                 anyhow!("plan delivery unconfirmed: execution input submission failed through the runtime: {error:#}"),
             );
-            return;
+            return Ok(());
         }
         review.submitted = review.pending.len();
+        Ok(())
     }
 
     /// Acceptance confirmed for the submitted complete input: mark delivery
@@ -415,10 +474,19 @@ impl PlanGate {
             self.block(review, error);
             return;
         }
-        self.drive(review);
+        let _ = self.drive(review, None);
     }
 
     fn submit(&self, prompt: String, attachments: Vec<crate::model::MessageAttachment>) {
+        let _ = self.submit_with_gate(prompt, attachments, None);
+    }
+
+    fn submit_with_gate(
+        &self,
+        prompt: String,
+        attachments: Vec<crate::model::MessageAttachment>,
+        gate: Option<&driver::EnqueueGate<'_>>,
+    ) -> anyhow::Result<()> {
         let _owner = self.lifecycle.lock();
         let mut review = self.review.lock();
         // Persist each withheld command before checking authority, so failures
@@ -426,12 +494,12 @@ impl PlanGate {
         review.pending.push((prompt, attachments));
         if let Err(error) = self.save(&review) {
             self.block(&mut review, error);
-            return;
+            return Ok(());
         }
         if review.receipt.phase == Phase::Blocked {
-            return;
+            return Ok(());
         }
-        self.drive(&mut review);
+        self.drive(&mut review, gate)
     }
 
     /// A recovered attempt keeps withheld briefs durable; release them through
@@ -442,7 +510,7 @@ impl PlanGate {
         if review.pending.is_empty() {
             return;
         }
-        self.drive(&mut review);
+        let _ = self.drive(&mut review, None);
     }
 
     /// An intentional interrupt mid-submission leaves acceptance uncertain —
@@ -748,11 +816,12 @@ impl WakuBackend {
         let assignment = serde_json::to_value(&employee.assignment)?;
         let dispatch_boss = self.boss.clone();
         let dispatch_employee = employee.clone();
-        let dispatch: AuthorizedDispatch = Box::new(move |driver, prompt, attachments| {
+        let dispatch: AuthorizedDispatch = Box::new(move |driver, prompt, attachments, gate| {
+            let mut sent = Ok(());
             dispatch_boss.with_validated_plan_dispatch(&dispatch_employee, || {
-                driver.prompt_with_attachments(prompt, attachments)
+                sent = submit_plan_prompt(driver, prompt, attachments, gate);
             })?;
-            Ok(())
+            sent
         });
         let boss = self.boss.clone();
         let agent = self.agent.clone();
@@ -1003,6 +1072,16 @@ impl driver::DriverControl for PlanGate {
     ) {
         self.submit(prompt, attachments);
     }
+    fn prompt_with_gate(
+        &self,
+        prompt: String,
+        attachments: Vec<crate::model::MessageAttachment>,
+        gate: &driver::EnqueueGate<'_>,
+    ) -> anyhow::Result<()> {
+        // Preparation failures retain the brief and publish the existing
+        // blocked-delivery state; they never imply native acceptance.
+        self.submit_with_gate(prompt, attachments, Some(gate))
+    }
     // Queue follow-ups throughout required-plan execution. Hidden context
     // steers must not bypass the verified delivery boundary.
     fn supports_steer(&self) -> bool {
@@ -1153,10 +1232,7 @@ mod tests {
                     response: String::new(),
                 },
                 publish: Box::new(|_, _| Ok(())),
-                dispatch: Box::new(|driver, prompt, attachments| {
-                    driver.prompt_with_attachments(prompt, attachments);
-                    Ok(())
-                }),
+                dispatch: Box::new(submit_plan_prompt),
                 validate: Box::new(move || {
                     anyhow::ensure!(
                         current.load(Ordering::Acquire),
@@ -1192,6 +1268,104 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn plan_preparation_keeps_the_native_enqueue_gate_available_to_stop() {
+        let mut fixture = Fixture::new("complete approved plan");
+        let session = fixture.gate.review.lock().receipt.assignment;
+        let sink = EventSink::detached().begin_session_runtime(session, fixture.gate.runtime_id);
+        let events = sink.tapped_events();
+        Arc::get_mut(&mut fixture.gate).unwrap().events = sink;
+        let (started, preparation) = crossbeam_channel::bounded(1);
+        let (release, released) = crossbeam_channel::bounded(1);
+        Arc::get_mut(&mut fixture.gate).unwrap().validate = Box::new(move || {
+            started.send(()).unwrap();
+            released
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            Ok(())
+        });
+        let entered = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::new(AtomicBool::new(false));
+        let worker_entered = entered.clone();
+        let worker_stopped = stopped.clone();
+        let driver = DriverHandle::from_control(fixture.gate.clone());
+        let worker = std::thread::spawn(move || {
+            driver.prompt_with_gate("retain this brief".into(), Vec::new(), &|enqueue| {
+                worker_entered.store(true, Ordering::Release);
+                if worker_stopped.load(Ordering::Acquire) {
+                    return Err(driver::EnqueueStopped.into());
+                }
+                enqueue();
+                Ok(())
+            })
+        });
+        preparation
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let gate_held_during_preparation = entered.load(Ordering::Acquire);
+        stopped.store(true, Ordering::Release);
+        release.send(()).unwrap();
+        let result = worker.join().unwrap();
+        assert!(
+            !gate_held_during_preparation,
+            "plan validation held the native enqueue gate"
+        );
+        assert!(
+            fixture.capture.0.lock().is_empty(),
+            "stopped plan input reached the provider"
+        );
+        assert_eq!(
+            fixture.stored().withheld.len(),
+            1,
+            "accepted brief was lost"
+        );
+        assert!(result.unwrap_err().is::<driver::EnqueueStopped>());
+        assert_eq!(fixture.gate.review.lock().submitted, 0);
+        assert!(!fixture.stored().receipt.delivered);
+        assert!(
+            !events.try_iter().any(|message| matches!(message,
+                waku_protocol::ServerMessage::Event(event) if event.event.kind == "error"
+            )),
+            "a user-cancelled enqueue was broadcast as a failed turn"
+        );
+    }
+
+    #[test]
+    fn stopped_plan_enqueue_still_reports_readiness_persistence_failure() {
+        let mut fixture = Fixture::new("approved bytes remain intact");
+        let session = fixture.gate.review.lock().receipt.assignment;
+        let sink = EventSink::detached().begin_session_runtime(session, fixture.gate.runtime_id);
+        let events = sink.tapped_events();
+        let plan = Arc::get_mut(&mut fixture.gate).unwrap();
+        plan.events = sink;
+        plan.publish = Box::new(|receipt, _| {
+            anyhow::ensure!(
+                receipt.phase != Phase::Blocked,
+                "readiness projection unavailable"
+            );
+            Ok(())
+        });
+        let driver = DriverHandle::from_control(fixture.gate.clone());
+        let error = driver
+            .prompt_with_gate("keep this brief".into(), Vec::new(), &|_| {
+                Err(driver::EnqueueStopped.into())
+            })
+            .unwrap_err();
+        assert!(
+            !error.is::<driver::EnqueueStopped>(),
+            "a persistence failure was hidden as successful cancellation"
+        );
+        assert!(error.to_string().contains("projection unavailable"));
+        assert!(fixture.capture.0.lock().is_empty());
+        assert_eq!(fixture.stored().withheld.len(), 1);
+        assert!(
+            events.try_iter().any(|message| matches!(message,
+                waku_protocol::ServerMessage::Event(event) if event.event.kind == "error"
+            )),
+            "the persistence failure was not surfaced to clients"
+        );
     }
 
     mod acceptance;

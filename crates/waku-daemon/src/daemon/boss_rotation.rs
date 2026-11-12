@@ -1592,6 +1592,25 @@ impl crate::driver::DriverControl for RotationObservedDriver {
         self.inner.prompt_with_attachments(prompt, attachments);
     }
 
+    fn prompt_with_gate(
+        &self,
+        prompt: String,
+        attachments: Vec<crate::model::MessageAttachment>,
+        gate: &crate::driver::EnqueueGate<'_>,
+    ) -> anyhow::Result<()> {
+        self.admit(AdmissionBoundary::Request);
+        self.inner.prompt_with_gate(prompt, attachments, gate)
+    }
+
+    fn steer_with_gate(
+        &self,
+        prompt: String,
+        gate: &crate::driver::EnqueueGate<'_>,
+    ) -> anyhow::Result<()> {
+        self.admit(AdmissionBoundary::Continuation);
+        self.inner.steer_with_gate(prompt, gate)
+    }
+
     fn supports_steer(&self) -> bool {
         self.inner.supports_steer()
     }
@@ -2001,6 +2020,35 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
         self.inner.prompt_with_attachments(prompt, attachments);
         #[cfg(test)]
         self.observe_delivery_submitted();
+    }
+
+    fn prompt_with_gate(
+        &self,
+        prompt: String,
+        attachments: Vec<crate::model::MessageAttachment>,
+        gate: &crate::driver::EnqueueGate<'_>,
+    ) -> anyhow::Result<()> {
+        if !self.admit("prompt") {
+            self.hold_prompt(&prompt);
+            return Ok(());
+        }
+        self.inner.prompt_with_gate(prompt, attachments, gate)?;
+        #[cfg(test)]
+        self.observe_delivery_submitted();
+        Ok(())
+    }
+
+    fn steer_with_gate(
+        &self,
+        prompt: String,
+        gate: &crate::driver::EnqueueGate<'_>,
+    ) -> anyhow::Result<()> {
+        if self.admit("steer") {
+            self.inner.steer_with_gate(prompt, gate)
+        } else {
+            self.hold_prompt(&prompt);
+            Ok(())
+        }
     }
 
     fn supports_steer(&self) -> bool {

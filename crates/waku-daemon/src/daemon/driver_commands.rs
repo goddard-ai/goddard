@@ -1,5 +1,42 @@
 use super::*;
 
+pub(super) fn handle_driver_prompt_with_gate(
+    driver: &DriverHandle,
+    command: Command,
+    cancellation: &crate::server::RuntimeCancellation,
+) -> anyhow::Result<ResponsePayload> {
+    let Command::Prompt {
+        prompt,
+        attachments,
+        ..
+    } = command
+    else {
+        bail!("expected a prompt at the native enqueue boundary");
+    };
+    let result = driver.prompt_with_gate(prompt, attachments, &|enqueue| {
+        cancellation.deliver(|| {
+            enqueue();
+            Ok(())
+        })
+    });
+    if let Err(error) = result {
+        if !user_stopped_enqueue(&error, cancellation) {
+            return Err(error);
+        }
+    }
+    // The request was accepted, then cancelled by the queued user Stop.
+    // Its ordered terminal event closes the turn; a failure reply would make
+    // request-based clients replace that interruption with a failed turn.
+    Ok(ResponsePayload::Ack)
+}
+
+pub(super) fn user_stopped_enqueue(
+    error: &anyhow::Error,
+    cancellation: &crate::server::RuntimeCancellation,
+) -> bool {
+    cancellation.is_cancelled() && error.is::<driver::EnqueueStopped>()
+}
+
 pub(super) fn handle_driver_command(
     driver: &DriverHandle,
     command: Command,

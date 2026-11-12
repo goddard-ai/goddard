@@ -3062,15 +3062,19 @@ impl Backend for WakuBackend {
                         // a hidden steer.
                         *prompt = self.boss_outbound_prompt(session_id, std::mem::take(prompt));
                         let result = if immediate_cancel {
-                            cancellation.deliver(|| handle_driver_command(&driver, command))
+                            handle_driver_prompt_with_gate(&driver, command, cancellation)
                         } else {
                             handle_driver_command(&driver, command)
                         }?;
-                        self.steer_first_prompt_context_with_cancellation(
+                        if let Err(error) = self.steer_first_prompt_context_with_cancellation(
                             session_id,
                             &driver,
                             immediate_cancel.then_some(cancellation),
-                        )?;
+                        ) {
+                            if !user_stopped_enqueue(&error, cancellation) {
+                                return Err(error);
+                            }
+                        }
                         return Ok(result);
                     }
                     // The agent-surface note, a side chat's parent index,
@@ -3133,7 +3137,7 @@ impl Backend for WakuBackend {
                     );
                 }
                 if immediate_cancel && matches!(command, Command::Prompt { .. }) {
-                    cancellation.deliver(|| handle_driver_command(&driver, command))
+                    handle_driver_prompt_with_gate(&driver, command, cancellation)
                 } else {
                     handle_driver_command(&driver, command)
                 }

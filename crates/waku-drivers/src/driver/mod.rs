@@ -212,6 +212,19 @@ impl DriverHandle {
         self.inner.prompt_with_attachments(prompt, attachments);
     }
 
+    pub fn prompt_with_gate(
+        &self,
+        prompt: String,
+        attachments: Vec<MessageAttachment>,
+        gate: &EnqueueGate<'_>,
+    ) -> anyhow::Result<()> {
+        self.inner.prompt_with_gate(prompt, attachments, gate)
+    }
+
+    pub fn steer_with_gate(&self, prompt: String, gate: &EnqueueGate<'_>) -> anyhow::Result<()> {
+        self.inner.steer_with_gate(prompt, gate)
+    }
+
     /// Whether this transport can inject a user message into the currently
     /// running turn (steering) instead of starting a new one.
     pub fn supports_steer(&self) -> bool {
@@ -354,6 +367,25 @@ pub enum AgentSurfaceDelivery {
     Announced,
 }
 
+/// Called synchronously around one final, nonblocking native enqueue. Driver
+/// decorators must complete their preparation before forwarding this gate.
+/// A successful gate invokes the supplied action exactly once; rejection
+/// returns an error without invoking it. Neither callback may be retained.
+pub type EnqueueGate<'a> = dyn Fn(&mut dyn FnMut()) -> anyhow::Result<()> + 'a;
+
+/// The user stopped this request before its native input was submitted.
+/// Decorators must preserve this distinction from an uncertain send failure.
+#[derive(Debug)]
+pub struct EnqueueStopped;
+
+impl std::fmt::Display for EnqueueStopped {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("this request was stopped before provider execution")
+    }
+}
+
+impl std::error::Error for EnqueueStopped {}
+
 pub trait DriverControl: Send + Sync {
     /// Default adapters cannot deliver exact persistent Boss instructions.
     /// This must never fall back to `prompt` or synthesize a receipt.
@@ -407,6 +439,22 @@ pub trait DriverControl: Send + Sync {
     /// rest fall back to the mention text alone.
     fn prompt_with_attachments(&self, prompt: String, _attachments: Vec<MessageAttachment>) {
         self.prompt(prompt);
+    }
+    fn prompt_with_gate(
+        &self,
+        prompt: String,
+        attachments: Vec<MessageAttachment>,
+        gate: &EnqueueGate<'_>,
+    ) -> anyhow::Result<()> {
+        let mut input = Some((prompt, attachments));
+        gate(&mut || {
+            let (prompt, attachments) = input.take().expect("one native prompt enqueue");
+            self.prompt_with_attachments(prompt, attachments);
+        })
+    }
+    fn steer_with_gate(&self, prompt: String, gate: &EnqueueGate<'_>) -> anyhow::Result<()> {
+        let mut input = Some(prompt);
+        gate(&mut || self.steer(input.take().expect("one native steer enqueue")))
     }
     fn supports_steer(&self) -> bool {
         false

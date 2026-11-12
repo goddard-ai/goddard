@@ -88,20 +88,19 @@ fn plan_acceptance_dispatch_and_projection_failures_preserve_work() {
             let accepted_first = fault == "accept-then-uncertain";
             let sent = AtomicBool::new(false);
             Arc::get_mut(&mut fixture.gate).unwrap().dispatch =
-                Box::new(move |driver, prompt, files| {
+                Box::new(move |driver, prompt, files, gate| {
                     // Fail the first complete-input submission only; the
                     // uncertain leg hands the bytes to the provider first so
                     // physical effects record separately from authorization.
                     if !sent.swap(true, Ordering::AcqRel) {
                         if accepted_first {
-                            driver.prompt_with_attachments(prompt, files);
+                            submit_plan_prompt(driver, prompt, files, gate)?;
                         }
                         anyhow::bail!(
                             "plan delivery unconfirmed: injected runtime submission failure"
                         );
                     }
-                    driver.prompt_with_attachments(prompt, files);
-                    Ok(())
+                    submit_plan_prompt(driver, prompt, files, gate)
                 });
         }
         fixture.gate.submit(BRIEF.into(), Vec::new());

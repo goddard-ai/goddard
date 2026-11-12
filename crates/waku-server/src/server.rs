@@ -716,12 +716,16 @@ impl RuntimeCancellation {
         enqueue()
     }
 
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
     fn check(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            !self.cancelled.load(Ordering::Acquire),
-            "this request was stopped before provider execution"
-        );
-        Ok(())
+        if self.is_cancelled() {
+            Err(waku_drivers::driver::EnqueueStopped.into())
+        } else {
+            Ok(())
+        }
     }
 
     fn signal(&self, runtime_id: Uuid) {

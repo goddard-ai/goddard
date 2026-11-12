@@ -1,1 +1,1 @@
-- Improve Stop response during native Codex and Claude operations while preserving the stopped turn's history.
+- Improve Stop response during native Codex and Claude operations while preserving the stopped turn's history. Stops during Boss or required-plan preparation no longer appear as prompt failures.
