@@ -28,6 +28,11 @@ export type AgentSession = { id: string,
  */
 metadata_revision?: number,
 /**
+ * Daemon-owned history lineage. A destructive rewind advances it so
+ * projections captured before that rewind cannot replace its result.
+ */
+history_generation?: number,
+/**
  * A title explicitly chosen by the user. [`Self::DEFAULT_TITLE`] means
  * no explicit title has been set, so [`Self::auto_title`] may be shown.
  */

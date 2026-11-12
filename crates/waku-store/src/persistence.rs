@@ -1888,7 +1888,7 @@ impl StateStore {
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
                         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
                         agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-                        friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision
+                        friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision, history_generation
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1922,6 +1922,7 @@ impl StateStore {
                     row.get::<_, Option<String>>(23)?,
                     row.get::<_, Option<String>>(24)?,
                     row.get::<_, i64>(25)?,
+                    row.get::<_, i64>(26)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -2648,6 +2649,23 @@ impl StateStore {
         let mut written_messages = Vec::new();
         let mut persisted_checkpoints = Vec::new();
         for session in &batch.sessions {
+            // A batch can be prepared before rewind and acquire this writer
+            // after its commit. Fence the detail/message/index write in this
+            // same transaction, including after daemon restart.
+            let stored_generation: Option<u64> = transaction
+                .query_row(
+                    "SELECT history_generation FROM sessions WHERE id = ?1",
+                    params![session.id.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(to_io_error)?;
+            if stored_generation.is_some_and(|generation| {
+                generation > session.history_generation
+                    || (!session.detail_loaded && generation != session.history_generation)
+            }) {
+                continue;
+            }
             // A skeleton's empty transcript means "not fetched", not "empty".
             // Its promoted list columns may still have changed (for example,
             // an inactive sidebar row was renamed), so update only those and
@@ -2822,6 +2840,7 @@ type SessionColumns = (
     Option<String>,
     Option<String>,
     i64,
+    i64,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -2857,6 +2876,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         reasoning_effort,
         config_activation,
         metadata_revision,
+        history_generation,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
     // it. Rows migrated before the column existed or whose JSON fails to parse
@@ -2876,6 +2896,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
     Some(AgentSession {
         id: Uuid::parse_str(&id).ok()?,
         metadata_revision: u64::try_from(metadata_revision).ok()?,
+        history_generation: u64::try_from(history_generation).ok()?,
         title,
         auto_title,
         auto_title_is_prompt: false,
@@ -2970,6 +2991,8 @@ pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
     session.context_window = stored.context_window;
     session.context_usage = stored.context_usage;
     session.runtime_event_cursor = stored.runtime_event_cursor;
+    // The lineage belongs to these details, never to a newer list-row echo.
+    session.history_generation = stored.history_generation;
     // The mark is monotonic like `boss_managed`: a column-only save may be
     // ahead of the blob — merge forward only so a stale blob cannot lower
     // it and reopen stale redeliveries.
@@ -3031,18 +3054,25 @@ pub(crate) fn read_session_detail(
 ) -> io::Result<Option<AgentSession>> {
     let id = session_id.to_string();
 
-    let data: Option<String> = connection
+    let data: Option<(String, u64)> = connection
         .query_row(
-            "SELECT data FROM session_details WHERE session_id = ?1",
+            "SELECT d.data, s.history_generation FROM session_details d
+             INNER JOIN sessions s ON s.id = d.session_id WHERE s.id = ?1",
             params![id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(to_io_error)?;
-    let Some(data) = data else {
+    let Some((data, generation)) = data else {
         return Ok(None);
     };
     let mut stored = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
+    if stored.history_generation != generation {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "task history header and detail generations disagree",
+        ));
+    }
     // Detail rows predate worktree names; the list row's migration is
     // overwritten when the stored workspace is copied over it.
     stored.workspace.backfill_worktree_name();
@@ -3667,8 +3697,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
          dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
          agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-         friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+         friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision, history_generation
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.title ELSE sessions.title END,
@@ -3694,7 +3724,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          friend_peer_name = excluded.friend_peer_name,
          reasoning_effort = excluded.reasoning_effort,
          config_activation = excluded.config_activation,
-         metadata_revision = MAX(sessions.metadata_revision, excluded.metadata_revision)";
+         metadata_revision = MAX(sessions.metadata_revision, excluded.metadata_revision),
+         history_generation = MAX(sessions.history_generation, excluded.history_generation)";
 
 const INSERT_PROJECT: &str =
     "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred, submissions_enabled, qa_branch, friend_peer_id, kind)
@@ -3804,6 +3835,9 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
             .map_or(Value::Null, Value::Text),
         Value::Integer(
             i64::try_from(session.metadata_revision).expect("metadata revision fits SQLite"),
+        ),
+        Value::Integer(
+            i64::try_from(session.history_generation).expect("history generation fits SQLite"),
         ),
     ]
 }
@@ -5057,6 +5091,63 @@ mod tests {
         assert_eq!(restored.sessions[0].queued_messages, vec![pending]);
 
         fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn a_prepared_batch_cannot_restore_an_older_history_generation() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let id = state.sessions[0].id;
+        for prompt in ["keep this request", "removed request"] {
+            state.sessions[0].begin_turn(prompt);
+            state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        }
+        state.sessions[0].provider_cursor = Some(crate::model::ProviderResumeCursor::Codex {
+            thread_id: "original".into(),
+        });
+        store.save(&mut state).unwrap();
+        state.mark_session_dirty(id);
+        let old = store.save_batch(&mut state);
+        state.sessions[0].truncate_after_turn(1);
+        state.sessions[0].history_generation = 1;
+        state.sessions[0].provider_cursor = Some(crate::model::ProviderResumeCursor::Codex {
+            thread_id: "retained-copy".into(),
+        });
+        state.mark_session_dirty(id);
+        store.save(&mut state).unwrap();
+        let index_revision = store.transcript_revision(id).unwrap();
+        store.write_batch(&old).unwrap();
+        assert_eq!(store.transcript_revision(id).unwrap(), index_revision);
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        assert_eq!(restored.sessions[0].history_generation, 1);
+        reopened.hydrate(&mut restored.sessions[0]).unwrap();
+        assert_eq!(restored.sessions[0].history_generation, 1);
+        assert_eq!(restored.sessions[0].turns.len(), 1);
+        assert_eq!(
+            restored.sessions[0].provider_cursor,
+            state.sessions[0].provider_cursor
+        );
+        restored.sessions[0].begin_turn("new request");
+        restored.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        restored.mark_session_dirty(id);
+        reopened.save(&mut restored).unwrap();
+        // Even the other store's already prepared batch cannot lower the
+        // generation or replace the current-generation appended turn.
+        store.write_batch(&old).unwrap();
+        let saved = reopened.load_session_detail(id).unwrap().unwrap();
+        assert_eq!(saved.history_generation, 1);
+        assert_eq!(saved.turns.len(), 2);
+        assert!(saved.messages.iter().any(|m| m.content == "new request"));
+        assert!(
+            !saved
+                .messages
+                .iter()
+                .any(|m| m.content == "removed request")
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

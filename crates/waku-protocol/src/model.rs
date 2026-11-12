@@ -1810,6 +1810,10 @@ pub struct AgentSession {
     /// replace metadata from a newer acknowledged edit.
     #[serde(default, skip_serializing_if = "metadata_revision_is_zero")]
     pub metadata_revision: u64,
+    /// Daemon-owned history lineage. A destructive rewind advances it so
+    /// projections captured before that rewind cannot replace its result.
+    #[serde(default, skip_serializing_if = "metadata_revision_is_zero")]
+    pub history_generation: u64,
     /// A title explicitly chosen by the user. [`Self::DEFAULT_TITLE`] means
     /// no explicit title has been set, so [`Self::auto_title`] may be shown.
     pub title: String,
@@ -2127,6 +2131,7 @@ impl AgentSession {
             context_window: None,
             config_activation: None,
             metadata_revision: 0,
+            history_generation: 0,
             agent_preset: None,
             auto_route: false,
             route_decision: None,
@@ -2172,6 +2177,7 @@ impl AgentSession {
         Self {
             id: self.id,
             metadata_revision: self.metadata_revision,
+            history_generation: self.history_generation,
             title: self.title.clone(),
             auto_title: self.auto_title.clone(),
             auto_title_is_prompt: self.auto_title_is_prompt,

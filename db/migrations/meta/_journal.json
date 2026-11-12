@@ -246,6 +246,13 @@
       "when": 1793913800087,
       "tag": "0034_smooth_kingpin",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1794489388169,
+      "tag": "0035_wealthy_genesis",
+      "breakpoints": true
     }
   ]
 }

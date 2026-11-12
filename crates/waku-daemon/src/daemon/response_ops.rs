@@ -123,6 +123,11 @@ impl WakuBackend {
             (source, cwd)
         };
         validate_message_rewind(&source, turn_count)?;
+        let next_history_generation = source
+            .history_generation
+            .checked_add(1)
+            .filter(|generation| *generation <= i64::MAX as u64)
+            .ok_or_else(|| anyhow!("task history generation exhausted"))?;
 
         let cancellation = if source.provider == ProviderKind::Codex {
             let sessions = self.sessions.lock();
@@ -248,6 +253,7 @@ impl WakuBackend {
         drop_detached(removed);
 
         let mut rewound = source.clone();
+        rewound.history_generation = next_history_generation;
         if !message_ids.is_empty() {
             for turn in rewound.turns.iter_mut().take(retained_turn_count) {
                 if let Some(remapped) = turn

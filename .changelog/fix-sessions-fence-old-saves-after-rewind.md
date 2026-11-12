@@ -1,0 +1,1 @@
+- Prevent delayed task saves from restoring messages removed by a successful rewind.

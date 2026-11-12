@@ -1455,6 +1455,14 @@ impl Backend for WakuBackend {
                         .iter_mut()
                         .find(|existing| existing.id == session_id)
                     {
+                        // Timestamps and event cursors cannot revive a projection
+                        // from before a destructive history change. Return the
+                        // canonical row; explicit metadata edits stay independent.
+                        if session.detail_loaded
+                            && session.history_generation != existing.history_generation
+                        {
+                            session = existing.clone();
+                        }
                         let employee = self.boss.employee_including_retired(session_id);
                         // Boss chat archival belongs to rotation, never a client
                         // projection. Preserve both the active and retired flags.
@@ -1604,6 +1612,9 @@ impl Backend for WakuBackend {
                         // its transcript. A counter outside SQLite's range is invalid.
                         if session.metadata_revision >= i64::MAX as u64 {
                             bail!("invalid task metadata revision");
+                        }
+                        if session.history_generation > i64::MAX as u64 {
+                            bail!("invalid task history generation");
                         }
                         state.sessions.push(session);
                         true

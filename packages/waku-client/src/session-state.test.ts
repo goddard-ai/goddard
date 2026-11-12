@@ -41,6 +41,26 @@ test("list-only save replies retain loaded detail and advance metadata without a
   expect(older.pinned_at).toBe(10);
 });
 
+test("a newer history generation only travels with its authoritative detail", () => {
+  const local = session({
+    history_generation: 0, metadata_revision: 2,
+    messages: [{ role: "user", content: "Removed by rewind" } as never],
+  });
+  const row = session({
+    detail_loaded: false, history_generation: 1, metadata_revision: 3,
+  });
+  const merged = reconcileSavedSession(local, row);
+  expect(merged.history_generation).toBe(0);
+  expect(merged.messages).toBe(local.messages);
+  const authoritative = session({
+    history_generation: 1, metadata_revision: 3,
+    messages: [{ role: "system", content: "Rewind completed." } as never],
+  });
+  const refreshed = reconcileSavedSession(merged, authoritative);
+  expect(refreshed.history_generation).toBe(1);
+  expect(refreshed.messages).toBe(authoritative.messages);
+});
+
 test("assistant-only receipts do not lock the session provider", () => {
   const transfer = session({
     messages: [{ role: "assistant" } as never],
