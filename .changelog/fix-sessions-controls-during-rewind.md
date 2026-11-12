@@ -1,0 +1,1 @@
+- Fixed a slow task rewind or fork delaying controls in other tasks.

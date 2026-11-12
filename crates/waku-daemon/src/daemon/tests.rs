@@ -1,6 +1,8 @@
 #[cfg(unix)]
 mod codex_history;
 
+mod cancellation;
+
 use super::*;
 use crate::model::{ActivityItem, MessageRole, TranscriptBlock};
 use waku_protocol::boss::{BossOperation, BossResult};

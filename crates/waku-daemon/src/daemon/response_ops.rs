@@ -366,12 +366,12 @@ impl WakuBackend {
         cwd: &Path,
         turns_to_remove: usize,
     ) -> anyhow::Result<ProviderResumeCursor> {
-        if let Some(driver) = self
+        let driver = self
             .sessions
             .lock()
             .get(&source.id)
-            .map(|entry| entry.driver.clone())
-        {
+            .map(|entry| entry.driver.clone());
+        if let Some(driver) = driver {
             return driver.fork(turns_to_remove);
         }
 
@@ -500,12 +500,12 @@ impl WakuBackend {
                 Ok((Some(fork.cursor), fork.message_ids, false))
             }
             ProviderKind::OpenCode => {
-                let cursor = if let Some(driver) = self
+                let driver = self
                     .sessions
                     .lock()
                     .get(&source.id)
-                    .map(|entry| entry.driver.clone())
-                {
+                    .map(|entry| entry.driver.clone());
+                let cursor = if let Some(driver) = driver {
                     driver
                         .rollback(rollback_turns)?
                         .ok_or_else(|| anyhow!("OpenCode returned no rewound-session cursor"))?
@@ -582,12 +582,12 @@ impl WakuBackend {
                 Ok((Some(cursor), HashMap::new(), false))
             }
             ProviderKind::Muse => {
-                let cursor = if let Some(driver) = self
+                let driver = self
                     .sessions
                     .lock()
                     .get(&source.id)
-                    .map(|entry| entry.driver.clone())
-                {
+                    .map(|entry| entry.driver.clone());
+                let cursor = if let Some(driver) = driver {
                     driver
                         .rollback(rollback_turns)?
                         .ok_or_else(|| anyhow!("Muse Code returned no rewound-session cursor"))?
@@ -637,12 +637,12 @@ impl WakuBackend {
         binary: &Path,
         rollback_turns: usize,
     ) -> anyhow::Result<Option<ProviderResumeCursor>> {
-        if let Some(driver) = self
+        let driver = self
             .sessions
             .lock()
             .get(&source.id)
-            .map(|entry| entry.driver.clone())
-        {
+            .map(|entry| entry.driver.clone());
+        if let Some(driver) = driver {
             return driver.rollback(rollback_turns);
         }
 
