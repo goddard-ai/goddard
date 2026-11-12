@@ -2,6 +2,8 @@
 mod codex_history;
 
 mod cancellation;
+#[cfg(unix)]
+mod rewind_persistence;
 
 use super::*;
 use crate::model::{ActivityItem, MessageRole, TranscriptBlock};

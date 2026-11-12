@@ -1,0 +1,1 @@
+- Keep tasks and their model settings after rewinding to the beginning and restarting Goddard.

@@ -1799,6 +1799,7 @@ attachments.preview_unavailable: 画像を表示できません
 common.copy_named: "%{name} をコピー"
 
 transcript.worked: 完了
+transcript.rewind_completed: 巻き戻しが完了しました。
 transcript.worked_for: 作業時間 %{duration}
 transcript.you_stopped_after: "%{duration} 後にタスクを停止しました"
 transcript.working_for: 作業中 · %{duration}

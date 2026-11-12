@@ -1755,6 +1755,7 @@ attachments.open_preview: 打开%{name}
 attachments.preview_unavailable: 无法显示图片
 common.copy_named: 复制%{name}
 transcript.worked: 已完成
+transcript.rewind_completed: 回退已完成。
 transcript.worked_for: 用时 %{duration}
 transcript.you_stopped_after: 你在工作 %{duration} 后停止了
 transcript.working_for: 工作中 · %{duration}

@@ -218,11 +218,20 @@ impl WakuBackend {
         }
         if reset_native_session {
             rewound.provider_cursor = None;
+            rewound.provider_session_id = None;
         } else if let Some(cursor) = provider_cursor {
             rewound.provider_cursor = Some(cursor);
         }
         rewound.truncate_after_turn(retained_turn_count);
         rewound.status = SessionStatus::Idle;
+        if retained_turn_count == 0 {
+            // A completed user action is a durable task, even when no provider
+            // turns or cursor remain. Keep a real receipt rather than a draft.
+            rewound.push_message(
+                crate::model::MessageRole::System,
+                tr!("transcript.rewind_completed"),
+            );
+        }
 
         let pinned = self.sessions.lock().keys().copied().collect();
         let mut state = self.task_state.lock();

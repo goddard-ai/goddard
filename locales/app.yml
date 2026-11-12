@@ -5002,6 +5002,8 @@ transcript.future_loading:
   en: Loading newer messages…
 transcript.worked:
   en: Worked
+transcript.rewind_completed:
+  en: Rewind completed.
 transcript.worked_for:
   en: Worked for %{duration}
 transcript.you_stopped_after:
