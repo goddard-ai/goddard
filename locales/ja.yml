@@ -1474,6 +1474,7 @@ errors.session_not_found: タスクが見つかりません
 errors.task_not_found: タスクが見つかりません
 errors.task_not_loaded: このタスクは読み込まれていません
 errors.task_already_forking: このタスクはすでにフォーク中です
+errors.task_changed_during_prompt: プロンプトの準備中にタスクが変更されました。現在の変更が完了してから再試行してください。
 errors.task_already_rewinding: このタスクはすでに巻き戻し中です
 errors.no_live_runtime: このタスクには実行中のエージェントがありません
 errors.unexpected_daemon_response: "デーモンから %{expected} が返るはずでしたが、%{actual} を受信しました"

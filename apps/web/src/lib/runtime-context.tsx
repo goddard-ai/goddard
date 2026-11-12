@@ -22,6 +22,7 @@ import {
   MANAGED_GOAL_QUESTION,
   queuedMessageIsManagedGoal,
   sessionAcceptsImmediateSteer,
+  sameSessionRuntimeOptions,
 } from '@waku/client'
 import {
   createContext,
@@ -43,6 +44,7 @@ import {
   daemonKeys,
   loadDaemonSettings,
   loadTaskState,
+  hydrateSession,
   materializeWorktree,
   persistSession,
   probeProvider,
@@ -738,9 +740,49 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             .filter(Boolean)
             .join(' ')
         : providerPromptOverride.trim()
-      const currentSession = queryClient.getQueryData<AgentSession>(
+      let currentSession = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(config.address, inputSession.id),
       ) ?? inputSession
+      const cachedRuntime = entries.current.get(currentSession.id)
+      if (cachedRuntime) {
+        const previous = queryClient.getQueryData<AgentSession>(
+          daemonKeys.session(config.address, currentSession.id),
+        )
+        const attached = await attachDaemonSession(client, currentSession.id)
+        if (entries.current.get(currentSession.id) !== cachedRuntime) {
+          throw new Error(translate(localeRef.current, 'errors.task_changed_during_prompt'))
+        }
+        if (attached?.runtimeId === cachedRuntime.runtimeId) {
+          const latest = queryClient.getQueryData<AgentSession>(
+            daemonKeys.session(config.address, currentSession.id),
+          ) ?? currentSession
+          if (!sameSessionRuntimeOptions(currentSession, latest)) {
+            throw new Error(translate(localeRef.current, 'errors.task_changed_during_prompt'))
+          }
+          currentSession = latest
+        } else {
+          cachedRuntime.unsubscribe()
+          const timer = projectionPersistTimers.current.get(currentSession.id)
+          if (timer !== undefined) window.clearTimeout(timer)
+          projectionPersistTimers.current.delete(currentSession.id)
+          await persistenceTails.current.get(currentSession.id)
+          const fresh = await hydrateSession(client, currentSession.id)
+          if (!fresh) throw new Error(translate(localeRef.current, 'errors.task_not_found'))
+          // A picker edit or a newer event must not be replaced by this read.
+          if (entries.current.get(currentSession.id) !== cachedRuntime
+            || saveGenerations.current.has(currentSession.id)
+            || queryClient.getQueryData(daemonKeys.session(config.address, currentSession.id)) !== previous) {
+            throw new Error(translate(localeRef.current, 'errors.task_changed_during_prompt'))
+          }
+          const optionsChanged = !sameSessionRuntimeOptions(currentSession, fresh)
+          removeRuntime(currentSession.id)
+          currentSession = fresh
+          cacheSession(currentSession)
+          if (optionsChanged) {
+            throw new Error(translate(localeRef.current, 'errors.task_changed_during_prompt'))
+          }
+        }
+      }
       if (
         currentSession.status === 'connecting' ||
         currentSession.status === 'working' ||
@@ -769,6 +811,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       let project: Project
       let runtime = entries.current.get(currentSession.id)
       let startup: { probe: ProviderProbe; settings: DaemonSettings } | null = null
+      let acknowledgedIntentChanged = false
+      const optimisticSession = session
       try {
         const state = await loadTaskState(client)
         const foundProject = state.projects.find((item) => item.id === currentSession.project_id)
@@ -821,11 +865,28 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             }))
           }
         }
+        const prepared = session
+        const beforeSave = queryClient.getQueryData<AgentSession>(
+          daemonKeys.session(config.address, session.id),
+        )
         session = await persistOrdered(session)
-        cacheSession(session)
+        const latest = queryClient.getQueryData<AgentSession>(
+          daemonKeys.session(config.address, session.id),
+        ) ?? session
+        acknowledgedIntentChanged = (prepared.history_generation ?? 0) !== (session.history_generation ?? 0)
+          || !sameSessionRuntimeOptions(prepared, session)
+          || !sameSessionRuntimeOptions(prepared, latest)
+          || entries.current.get(session.id) !== runtime
+        if (latest === beforeSave && !saveGenerations.current.has(session.id)) cacheSession(session)
       } catch (error) {
-        cacheSession(currentSession)
+        if (queryClient.getQueryData(daemonKeys.session(config.address, currentSession.id)) === optimisticSession) {
+          cacheSession(currentSession)
+        }
         throw error
+      }
+      if (acknowledgedIntentChanged) {
+        if (entries.current.get(session.id) === runtime) removeRuntime(session.id)
+        throw new Error(translate(localeRef.current, 'errors.task_changed_during_prompt'))
       }
 
       try {

@@ -22,6 +22,17 @@ export function reconcileSavedSession(local: AgentSession, saved?: AgentSession)
   }
 }
 
+/** Refresh live transcript state without silently changing a prompt's selected options. */
+export function sameSessionRuntimeOptions(left: AgentSession, right: AgentSession): boolean {
+  return left.provider === right.provider
+    && left.runtime_mode === right.runtime_mode
+    && (left.model ?? null) === (right.model ?? null)
+    && (left.reasoning_effort ?? null) === (right.reasoning_effort ?? null)
+    && (left.service_tier ?? null) === (right.service_tier ?? null)
+    && (left.context_window ?? null) === (right.context_window ?? null)
+    && (left.agent_preset ?? null) === (right.agent_preset ?? null)
+}
+
 /** Whether the session has a provider conversation whose provider must be preserved. */
 export function sessionProviderLocked(session: AgentSession): boolean {
   return session.detail_loaded === false

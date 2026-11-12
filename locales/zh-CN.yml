@@ -1443,6 +1443,7 @@ errors.session_not_found: 找不到任务
 errors.task_not_found: 找不到任务
 errors.task_not_loaded: 此任务尚未加载
 errors.task_already_forking: 此任务正在派生
+errors.task_changed_during_prompt: 准备此提示时任务发生了变化。请等待当前更改完成后重试。
 errors.task_already_rewinding: 此任务正在回退
 errors.no_live_runtime: 此任务没有正在运行的智能体
 errors.unexpected_daemon_response: "预期守护进程返回 %{expected}，实际收到 %{actual}"

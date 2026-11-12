@@ -18,6 +18,7 @@ import {
   managedGoalOperation,
   MANAGED_GOAL_QUESTION,
   sessionAcceptsImmediateSteer,
+  sameSessionRuntimeOptions,
 } from '@waku/client';
 import { isAgentQueuedMessage, reduceRuntimeEvent } from '@waku/client/event-reducer';
 import { writeProviderProbeCache } from '@waku/client/provider-probe-cache';
@@ -264,6 +265,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const profileId = daemon.activeProfile?.id;
     if (!client || !profileId) return Promise.reject(new Error('Goddard daemon is disconnected'));
     const generation = cacheGenerations.current.get(session.id);
+    const cached = queryClient.getQueryData<AgentSession>(daemonKeys.session(profileId, session.id));
     const previous = persistTails.current.get(session.id);
     const operation = (previous ?? Promise.resolve(session))
       .catch(() => session)
@@ -273,7 +275,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // committed while it was in flight are newer than that snapshot, so
         // once the cache has moved on keep it and take only what the daemon
         // owns — turn checkpoints — from the reply.
-        if (cacheGenerations.current.get(session.id) === generation) {
+        if (cacheGenerations.current.get(session.id) === generation
+          && queryClient.getQueryData(daemonKeys.session(profileId, session.id)) === cached) {
           writeSessionCache(saved);
         } else {
           const latest = queryClient.getQueryData<AgentSession>(
@@ -641,6 +644,44 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     // still in flight; building the turn on that would persist a transcript
     // with only the new messages. Always start from the full session.
     let current = await loadFullSession(inputSession.id);
+    const cachedRuntime = entries.current.get(current.id);
+    if (cachedRuntime) {
+      const generation = cacheGenerations.current.get(current.id);
+      const attached = await attachDaemonSession(client, current.id);
+      if (entries.current.get(current.id) !== cachedRuntime) {
+        throw new Error('The task changed while preparing this prompt. Retry after its current changes finish.');
+      }
+      if (attached?.runtimeId === cachedRuntime.runtimeId) {
+        const latest = queryClient.getQueryData<AgentSession>(
+          daemonKeys.session(profileId, current.id),
+        ) ?? cachedRuntime.session;
+        if (!sameSessionRuntimeOptions(current, latest)) {
+          throw new Error('The task changed while preparing this prompt. Retry after its current changes finish.');
+        }
+        current = latest;
+      } else {
+        // A stopped rewind can retire its runtime without an exit event.
+        // Quiesce this projection before loading the authoritative history.
+        cachedRuntime.unsubscribe();
+        const timer = persistTimers.current.get(current.id);
+        if (timer !== undefined) clearTimeout(timer);
+        persistTimers.current.delete(current.id);
+        await persistTails.current.get(current.id);
+        const fresh = await hydrateSession(client, current.id);
+        if (!fresh) throw new Error('This task no longer exists on the daemon');
+        if (entries.current.get(current.id) !== cachedRuntime
+          || cacheGenerations.current.get(current.id) !== generation) {
+          throw new Error('The task changed while preparing this prompt. Retry after its current changes finish.');
+        }
+        const optionsChanged = !sameSessionRuntimeOptions(current, fresh);
+        removeRuntime(current.id);
+        current = fresh;
+        cacheSession(current);
+        if (optionsChanged) {
+          throw new Error('The task changed while preparing this prompt. Retry after its current changes finish.');
+        }
+      }
+    }
     if (sessionBusy(current)) {
       const queued = queueSubmission(current, prompt, clock, attachments, providerPrompt, hidden);
       cacheSession(queued);
@@ -682,7 +723,20 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     // same rows instead of minting its own.
     const submitted = submittedTurnIdentity(current);
     cacheSession(current);
+    const prepared = current;
     current = await persistOrdered(current);
+    const latestPrepared = queryClient.getQueryData<AgentSession>(
+      daemonKeys.session(profileId, current.id),
+    ) ?? current;
+    if ((prepared.history_generation ?? 0) !== (current.history_generation ?? 0)
+      || !sameSessionRuntimeOptions(prepared, current)
+      || !sameSessionRuntimeOptions(prepared, latestPrepared)
+      || entries.current.get(current.id) !== runtime) {
+      // The canonical acknowledgement did not admit this prepared intent.
+      // Keep newer selections/owners and require retry before provider work.
+      if (entries.current.get(current.id) === runtime) removeRuntime(current.id);
+      throw new Error('The task changed while preparing this prompt. Retry after its current changes finish.');
+    }
     try {
       if (!runtime) {
         const runtimeId = Crypto.randomUUID();

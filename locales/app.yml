@@ -4124,6 +4124,8 @@ errors.task_not_loaded:
   en: This task is not loaded
 errors.task_already_forking:
   en: This task is already being forked
+errors.task_changed_during_prompt:
+  en: The task changed while preparing this prompt. Retry after its current changes finish.
 errors.task_already_rewinding:
   en: This task is already being rewound
 errors.no_live_runtime:
