@@ -98,6 +98,8 @@ impl WakuBackend {
         &self,
         session_id: Uuid,
         turn_count: usize,
+        runtime_id: Uuid,
+        cancellation: &crate::server::RuntimeCancellation,
     ) -> anyhow::Result<(AgentSession, Option<String>)> {
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let _owner = lifecycle.lock();
@@ -121,6 +123,28 @@ impl WakuBackend {
             (source, cwd)
         };
         validate_message_rewind(&source, turn_count)?;
+
+        let cancellation = if source.provider == ProviderKind::Codex {
+            let sessions = self.sessions.lock();
+            let owner = match sessions.get(&session_id) {
+                Some(entry) => {
+                    anyhow::ensure!(
+                        runtime_id.is_nil() || entry.runtime_id == runtime_id,
+                        "rewind belongs to a stale runtime"
+                    );
+                    entry.stable.is_none().then_some(entry.runtime_id)
+                }
+                // The lifecycle lock excludes a replacement. Stop can target
+                // this cold request's identity without controlling a resident.
+                None => Some(runtime_id),
+            };
+            owner.map(|runtime_id| {
+                cancellation.bind_runtime(runtime_id, || {});
+                cancellation
+            })
+        } else {
+            None
+        };
 
         // Resolve the executable before touching the worktree. Even native
         // transcript operations are immediately followed by a replacement
@@ -164,18 +188,38 @@ impl WakuBackend {
             ));
         }
 
-        let provider_rewind = self.rewind_provider_response(
-            &source,
-            &cwd,
-            &binary,
-            retained_turn_count,
-            rollback_turns,
-            provider_turn_count,
-            provider_resume_at,
-        );
+        let provider_rewind = self
+            .rewind_provider_response(
+                &source,
+                &cwd,
+                &binary,
+                retained_turn_count,
+                rollback_turns,
+                provider_turn_count,
+                provider_resume_at,
+                cancellation,
+            )
+            .and_then(|result| {
+                anyhow::ensure!(
+                    !cancellation.is_some_and(|cancellation| cancellation.is_cancelled()),
+                    "rewind stopped before selecting new provider history"
+                );
+                Ok(result)
+            });
         let (provider_cursor, message_ids, reset_native_session) = match provider_rewind {
             Ok(result) => result,
             Err(error) => {
+                if let Some(cancellation) =
+                    cancellation.filter(|cancellation| cancellation.is_cancelled())
+                {
+                    // This path only uses a source-preserving native operation.
+                    // Settle Stop after the owned peer and original files settle.
+                    crate::checkpoint::restore_ref(&cwd, &safety_ref).with_context(||
+                        format!("stopped rewind could not restore the original worktree; safety snapshot: {safety_ref}"))?;
+                    let _ = crate::checkpoint::delete_ref(&cwd, &safety_ref);
+                    cancellation.settle_operation();
+                    return Err(error.context("rewind stopped; the original worktree was restored"));
+                }
                 return Err(restore_rewind_safety(
                     &cwd,
                     &safety_ref,
@@ -246,6 +290,16 @@ impl WakuBackend {
             .save(&mut state)
             .context("could not save the rewound task")?;
         trim_resident_transcripts(&mut state, &pinned);
+        drop(state);
+        if let Some(cancellation) = cancellation {
+            cancellation.settle_operation();
+            if cancellation.is_cancelled() {
+                self.notify_task_state();
+                bail!(
+                    "rewind completed before Stop; task history and files reflect the rewind; its follow-up prompt was withheld"
+                );
+            }
+        }
         Ok((rewound, cleanup_warning))
     }
 
@@ -477,6 +531,7 @@ impl WakuBackend {
         rollback_turns: usize,
         provider_turn_count: usize,
         provider_resume_at: Option<String>,
+        cancellation: Option<&crate::server::RuntimeCancellation>,
     ) -> anyhow::Result<(Option<ProviderResumeCursor>, HashMap<String, String>, bool)> {
         if rollback_turns == 0 {
             return Ok((None, HashMap::new(), false));
@@ -504,11 +559,14 @@ impl WakuBackend {
                 else {
                     bail!("Codex's native thread is unavailable");
                 };
+                let stopped =
+                    || cancellation.is_some_and(|cancellation| cancellation.is_cancelled());
                 let cursor = crate::codex_session::fork_session_without_recent_turns(
                     binary,
                     cwd,
                     thread_id,
                     rollback_turns,
+                    cancellation.map(|_| &stopped as &dyn Fn() -> bool),
                 )?;
                 Ok((Some(cursor), HashMap::new(), false))
             }

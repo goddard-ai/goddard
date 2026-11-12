@@ -108,7 +108,7 @@ fn probe_unrelated_cancellation(operation: ResponseOperation) {
                 .fork_response_with_driver(&source, &root, 1)
                 .map(|_| ()),
             ResponseOperation::OpenCodeRewind | ResponseOperation::MuseRewind => backend
-                .rewind_provider_response(&source, &root, &root.join("unused"), 1, 1, 1, None)
+                .rewind_provider_response(&source, &root, &root.join("unused"), 1, 1, 1, None, None)
                 .map(|_| ()),
         })
     };

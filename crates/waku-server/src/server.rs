@@ -691,6 +691,8 @@ impl Drop for ConnectionPermit {
 pub struct RuntimeCancellation {
     cancelled: AtomicBool,
     interrupt: Mutex<Option<RuntimeInterrupt>>,
+    operation_settled: AtomicBool,
+    signalled_operation: Option<Arc<RuntimeCancellation>>,
 }
 
 struct RuntimeInterrupt {
@@ -720,6 +722,20 @@ impl RuntimeCancellation {
         self.cancelled.load(Ordering::Acquire)
     }
 
+    /// Called only after this operation has reconciled its result and cleanup.
+    /// The queued Stop may then succeed even if that exact runtime retired.
+    pub fn settle_operation(&self) {
+        // Record completion even when Stop arrives in the final interval
+        // before the mailbox releases this active request.
+        self.operation_settled.store(true, Ordering::Release);
+    }
+
+    pub fn signalled_operation_settled(&self) -> bool {
+        self.signalled_operation
+            .as_ref()
+            .is_some_and(|operation| operation.operation_settled.load(Ordering::Acquire))
+    }
+
     fn check(&self) -> anyhow::Result<()> {
         if self.is_cancelled() {
             Err(waku_drivers::driver::EnqueueStopped.into())
@@ -728,19 +744,20 @@ impl RuntimeCancellation {
         }
     }
 
-    fn signal(&self, runtime_id: Uuid) {
+    fn signal(&self, runtime_id: Uuid) -> bool {
         let signal = {
             let interrupt = self.interrupt.lock();
             let Some(interrupt) = interrupt.as_ref() else {
-                return;
+                return false;
             };
             if interrupt.runtime_id != runtime_id {
-                return;
+                return false;
             }
             self.cancelled.store(true, Ordering::Release);
             interrupt.signal.clone()
         };
         signal();
+        true
     }
 }
 
@@ -1375,6 +1392,7 @@ struct DispatchedRequest {
     /// `Some` when the sending connection authenticated with a scoped agent
     /// credential; the id names the Waku task that credential belongs to.
     agent: Option<Uuid>,
+    signalled_operation: Option<Arc<RuntimeCancellation>>,
 }
 
 struct RuntimeMailbox {
@@ -2197,6 +2215,7 @@ impl RequestDispatcher {
             outgoing,
             source_subscriber_id,
             agent,
+            signalled_operation: None,
         };
         let mut mailboxes = self.computer_use_mailboxes.lock();
         if let Some(mailbox) = mailboxes.get(&task) {
@@ -2413,6 +2432,7 @@ impl RequestDispatcher {
             outgoing,
             source_subscriber_id,
             agent,
+            signalled_operation: None,
         };
         loop {
             let mut mailboxes = self.runtime_mailboxes.lock();
@@ -2432,7 +2452,9 @@ impl RequestDispatcher {
                     && let Some(active) = &mailbox.active
                     && let Some(active) = active.lock().as_ref()
                 {
-                    active.signal(dispatched.request.runtime_id);
+                    if active.signal(dispatched.request.runtime_id) {
+                        dispatched.signalled_operation = Some(active.clone());
+                    }
                 }
                 match mailbox.sender.send(dispatched) {
                     Ok(()) => return,
@@ -3589,7 +3611,10 @@ fn run_runtime_mailbox(
             Command::CloseSession | Command::CloseTerminal | Command::RemoveSession
         );
         let removes_session = matches!(&dispatched.request.command, Command::RemoveSession);
-        let cancellation = Arc::new(RuntimeCancellation::default());
+        let cancellation = Arc::new(RuntimeCancellation {
+            signalled_operation: dispatched.signalled_operation,
+            ..RuntimeCancellation::default()
+        });
         *active.lock() = Some(cancellation.clone());
         let handled = handle_request_with_cancellation(
             dispatched.request,

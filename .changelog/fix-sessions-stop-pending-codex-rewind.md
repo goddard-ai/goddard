@@ -1,0 +1,1 @@
+- Stop can now cancel a pending Codex message rewind without waiting for the provider reply.

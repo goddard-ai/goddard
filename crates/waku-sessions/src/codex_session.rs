@@ -46,14 +46,23 @@ fn app_server_request(binary: &Path, request: Value) -> anyhow::Result<Value> {
 }
 
 fn app_server_request_in(binary: &Path, cwd: &Path, request: Value) -> anyhow::Result<Value> {
-    with_app_server_in(binary, cwd, |rpc| rpc(request))
+    with_app_server_in(binary, cwd, None, |rpc| rpc(request))
 }
 
 fn with_app_server_in<T>(
     binary: &Path,
     cwd: &Path,
+    cancelled: Option<&dyn Fn() -> bool>,
     operation: impl FnOnce(&mut dyn FnMut(Value) -> anyhow::Result<Value>) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
+    let check_cancelled = || -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !cancelled.is_some_and(|cancelled| cancelled()),
+            "rewind stopped before selecting new provider history"
+        );
+        Ok(())
+    };
+    check_cancelled()?;
     let mut command = crate::command_env::command(binary);
     let command = command
         .args(["app-server", "--stdio"])
@@ -92,12 +101,22 @@ fn with_app_server_in<T>(
     let deadline = Instant::now() + RPC_TIMEOUT;
     let receive_response = |id| -> anyhow::Result<Value> {
         loop {
+            check_cancelled()?;
             let remaining = deadline
                 .checked_duration_since(Instant::now())
                 .ok_or_else(|| anyhow!("Codex app-server session request timed out"))?;
-            let value = rx
-                .recv_timeout(remaining)
-                .map_err(|_| anyhow!("Codex app-server session request timed out"))?;
+            let wait = if cancelled.is_some() {
+                remaining.min(Duration::from_millis(10))
+            } else {
+                remaining
+            };
+            let value = match rx.recv_timeout(wait) {
+                Ok(value) => value,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    bail!("Codex app-server disconnected before its session reply");
+                }
+            };
             if value.get("method").is_none() && value.get("id").and_then(Value::as_u64) == Some(id)
             {
                 if let Some(error) = value.pointer("/error/message").and_then(Value::as_str) {
@@ -130,6 +149,7 @@ fn with_app_server_in<T>(
         write_json_line(&mut stdin, &json!({"method": "initialized", "params": {}}))?;
         let mut next_id = 0_u64;
         operation(&mut |mut request| {
+            check_cancelled()?;
             next_id += 1;
             request["id"] = json!(next_id);
             write_json_line(&mut stdin, &request)?;
@@ -141,9 +161,15 @@ fn with_app_server_in<T>(
     // flush and close it before handing the new thread to another process.
     // Also wait for stdout to close: the configured CLI may wrap Codex in Node.
     drop(stdin);
+    // A cancelled fork may leave an unreferenced copy, but never changes the
+    // original history. Retire this owned process instead of waiting for EOF.
+    if cancelled.is_some_and(|cancelled| cancelled()) {
+        let _ = child.kill();
+    }
     let shutdown_deadline = Instant::now() + RPC_TIMEOUT;
     let shutdown = (|| -> anyhow::Result<()> {
         loop {
+            check_cancelled()?;
             if let Some(status) = child.try_wait()? {
                 if !status.success() {
                     bail!("Codex app-server exited with {status}");
@@ -188,11 +214,12 @@ pub fn fork_session_without_recent_turns(
     cwd: &Path,
     thread_id: &str,
     turns_to_remove: usize,
+    cancelled: Option<&dyn Fn() -> bool>,
 ) -> anyhow::Result<ProviderResumeCursor> {
     let turns_to_read = turns_to_remove
         .checked_add(1)
         .ok_or_else(|| anyhow!("too many Codex turns requested"))?;
-    let response = with_app_server_in(binary, cwd, |rpc| {
+    let response = with_app_server_in(binary, cwd, cancelled, |rpc| {
         let mut remaining = turns_to_read;
         let mut cursor: Option<String> = None;
         let mut seen_cursors = std::collections::HashSet::new();
@@ -518,6 +545,58 @@ pub fn provider_session_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn stopping_a_native_fork_reaps_its_owned_peer_without_selecting_history() {
+        use std::os::unix::fs::PermissionsExt as _;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        for phase in ["read", "fork", "close"] {
+            let root = std::env::temp_dir().join(format!("codex-stop-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&root).unwrap();
+            let binary = root.join("peer");
+            std::fs::write(&binary, include_str!("fixtures/codex_fork_stop.py")).unwrap();
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::write(root.join("phase"), phase).unwrap();
+            let stopped = AtomicBool::new(false);
+            std::thread::scope(|scope| {
+                let worker = scope.spawn(|| {
+                    fork_session_without_recent_turns(
+                        &binary,
+                        &root,
+                        "original",
+                        1,
+                        Some(&|| stopped.load(Ordering::Acquire)),
+                    )
+                });
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !root.join("held").exists() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                let reached = root.join("held").exists();
+                let began = Instant::now();
+                stopped.store(true, Ordering::Release);
+                let result = worker.join().unwrap();
+                assert!(reached, "peer did not reach {phase}");
+                assert!(result.is_err(), "Stop selected a native copy in {phase}");
+                assert!(
+                    began.elapsed() < Duration::from_secs(1),
+                    "Stop waited in {phase}"
+                );
+            });
+            let pid: i32 = std::fs::read_to_string(root.join("pid"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            // SAFETY: signal zero only probes our recorded owned fixture pid.
+            assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "peer survived {phase}");
+            assert_eq!(
+                std::fs::read_to_string(root.join("original")).unwrap(),
+                "unchanged"
+            );
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
 
     #[test]
     fn unfinished_native_turn_is_not_treated_as_a_completed_history_snapshot() {

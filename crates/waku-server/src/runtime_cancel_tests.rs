@@ -8,6 +8,9 @@ struct HeldRuntime {
     stopped: Sender<Uuid>,
     signals: Sender<()>,
     prompts: Sender<String>,
+    retire_after_operation: bool,
+    settle_before_wait: bool,
+    retired: AtomicBool,
 }
 
 impl HeldRuntime {
@@ -22,6 +25,12 @@ impl HeldRuntime {
         ) {
             anyhow::ensure!(request.runtime_id == self.runtime_id, "stale runtime");
         }
+        if matches!(&request.command, Command::Cancel) && self.retired.load(Ordering::Acquire) {
+            anyhow::ensure!(
+                cancellation.signalled_operation_settled(),
+                "the runtime retired without a completion receipt for this Stop"
+            );
+        }
         if matches!(
             &request.command,
             Command::Rollback { .. } | Command::Prompt { .. }
@@ -33,8 +42,16 @@ impl HeldRuntime {
         }
         match request.command {
             Command::Rollback { .. } => {
+                if self.retire_after_operation && self.settle_before_wait {
+                    self.retired.store(true, Ordering::Release);
+                    cancellation.settle_operation();
+                }
                 self.started.send(())?;
                 self.release.recv()?;
+                if self.retire_after_operation && !self.settle_before_wait {
+                    self.retired.store(true, Ordering::Release);
+                    cancellation.settle_operation();
+                }
             }
             Command::Cancel => {
                 self.signals.send(())?;
@@ -92,6 +109,10 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_retirement(false, false)
+    }
+
+    fn with_retirement(retire_after_operation: bool, settle_before_wait: bool) -> Self {
         let (started, started_rx) = unbounded();
         let (release, release_rx) = unbounded();
         let (stopped, stopped_rx) = unbounded();
@@ -108,6 +129,9 @@ impl Fixture {
                     stopped,
                     signals,
                     prompts,
+                    retire_after_operation,
+                    settle_before_wait,
+                    retired: AtomicBool::new(false),
                 }),
                 Arc::new(Hub::default()),
             ),
@@ -155,6 +179,43 @@ impl Fixture {
                 },
             )
             .collect()
+    }
+}
+
+#[test]
+fn only_the_stop_that_signalled_an_operation_can_use_its_retirement_receipt() {
+    for settled_before_stop in [false, true] {
+        let fixture = Fixture::with_retirement(true, settled_before_stop);
+        fixture.send(Command::Rollback { turns: 1 });
+        fixture
+            .started
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        let stop = fixture.send(Command::Cancel);
+        fixture
+            .signals
+            .recv_timeout(Duration::from_millis(250))
+            .unwrap();
+        let stale = Uuid::new_v4();
+        fixture.send_as(Command::Cancel, Uuid::new_v4(), stale, None);
+        fixture.release.send(()).unwrap();
+        let replies = fixture.replies(3);
+        assert!(matches!(replies[&stop], ResponseOutcome::Ok { .. }));
+        assert!(matches!(replies[&stale], ResponseOutcome::Error { .. }));
+
+        // A new Stop after retirement did not signal that operation. Replaying
+        // the completed Stop keeps its cached reply and does not execute it again.
+        let late = fixture.send(Command::Cancel);
+        fixture.send_as(Command::Cancel, fixture.runtime, stop, None);
+        let replies = fixture.replies(2);
+        assert!(matches!(replies[&late], ResponseOutcome::Error { .. }));
+        assert!(matches!(replies[&stop], ResponseOutcome::Ok { .. }));
+        assert_eq!(fixture.stopped.try_iter().collect::<Vec<_>>(), [stop]);
+        assert_eq!(
+            fixture.signals.try_iter().count(),
+            1,
+            "a replay signalled again"
+        );
     }
 }
 

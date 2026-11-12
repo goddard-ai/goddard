@@ -69,7 +69,14 @@ fn rewind_to_beginning_keeps_the_task_and_options_after_reload() {
         state.mark_session_dirty(session_id);
         backend.task_store.save(&mut state).unwrap();
     }
-    let (rewound, _) = backend.rewind_session_to_message(session_id, 1).unwrap();
+    let (rewound, _) = backend
+        .rewind_session_to_message(
+            session_id,
+            1,
+            Uuid::nil(),
+            &crate::server::RuntimeCancellation::default(),
+        )
+        .unwrap();
     assert!(rewound.turns.is_empty() && rewound.provider_cursor.is_none());
     assert!(rewound.provider_session_id.is_none());
     let files = std::fs::read_to_string(repo.join("fixture.txt")).unwrap();

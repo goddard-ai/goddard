@@ -29,10 +29,10 @@ fn codex_message_rewind_preserves_native_source_when_its_result_is_lost() {
         .unwrap();
 
         let (cursor, _, reset) = backend
-            .rewind_provider_response(&source, &root, &binary, 0, 4, 0, None)
+            .rewind_provider_response(&source, &root, &binary, 0, 4, 0, None, None)
             .unwrap();
         assert!(cursor.is_none() && reset);
-        let result = backend.rewind_provider_response(&source, &root, &binary, 2, 2, 2, None);
+        let result = backend.rewind_provider_response(&source, &root, &binary, 2, 2, 2, None, None);
         let ledger: serde_json::Value =
             serde_json::from_slice(&std::fs::read(root.join("ledger.json")).unwrap()).unwrap();
         drop(backend);

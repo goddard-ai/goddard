@@ -2183,8 +2183,12 @@ impl Backend for WakuBackend {
                 })
             }
             Command::RewindSessionToMessage { turn_count } => {
-                let (session, cleanup_warning) =
-                    self.rewind_session_to_message(session_id, turn_count)?;
+                let (session, cleanup_warning) = self.rewind_session_to_message(
+                    session_id,
+                    turn_count,
+                    runtime_id,
+                    cancellation,
+                )?;
                 Ok(ResponsePayload::SessionRewound {
                     session,
                     cleanup_warning,
@@ -2860,6 +2864,12 @@ impl Backend for WakuBackend {
                 // automations) out until the user trusts the transfer.
                 let lifecycle = self.runtime_lifecycles.session(session_id);
                 let _cancel_owner = matches!(command, Command::Cancel).then(|| lifecycle.lock());
+                if matches!(command, Command::Cancel) && cancellation.signalled_operation_settled()
+                {
+                    // This Stop already signalled and reconciled its exact
+                    // operation. Retirement grants no authority over a replacement.
+                    return Ok(ResponsePayload::Ack);
+                }
                 let (driver, immediate_cancel) = {
                     let mut sessions = self.sessions.lock();
                     let entry = sessions
