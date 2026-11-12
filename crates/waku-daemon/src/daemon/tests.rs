@@ -3,6 +3,8 @@ mod codex_history;
 
 mod cancellation;
 #[cfg(unix)]
+mod rewind_safety;
+#[cfg(unix)]
 mod rewind_persistence;
 
 use super::*;

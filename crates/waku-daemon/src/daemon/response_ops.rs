@@ -179,7 +179,7 @@ impl WakuBackend {
                 return Err(restore_rewind_safety(
                     &cwd,
                     &safety_ref,
-                    "the provider rejected the rewind",
+                    "could not complete the provider rewind",
                     error,
                 ));
             }
@@ -484,7 +484,8 @@ impl WakuBackend {
         let reset_native_session = retained_turn_count == 0
             && matches!(
                 source.provider,
-                ProviderKind::Claude
+                ProviderKind::Codex
+                    | ProviderKind::Claude
                     | ProviderKind::Copilot
                     | ProviderKind::Cursor
                     | ProviderKind::Grok
@@ -494,6 +495,23 @@ impl WakuBackend {
         }
 
         match source.provider {
+            ProviderKind::Codex => {
+                // Keep the source conversation intact until task persistence
+                // selects the fork. A lost reply then leaves a recoverable
+                // original instead of an unknown in-place history mutation.
+                let Some(ProviderResumeCursor::Codex { thread_id }) =
+                    source.provider_cursor.as_ref()
+                else {
+                    bail!("Codex's native thread is unavailable");
+                };
+                let cursor = crate::codex_session::fork_session_without_recent_turns(
+                    binary,
+                    cwd,
+                    thread_id,
+                    rollback_turns,
+                )?;
+                Ok((Some(cursor), HashMap::new(), false))
+            }
             ProviderKind::Claude => {
                 let Some(ProviderResumeCursor::Claude { session_id, .. }) =
                     source.provider_cursor.as_ref()
@@ -615,10 +633,7 @@ impl WakuBackend {
                 };
                 Ok((Some(cursor), HashMap::new(), false))
             }
-            ProviderKind::Codex
-            | ProviderKind::DeepSeek
-            | ProviderKind::OhMyPi
-            | ProviderKind::Pi => Ok((
+            ProviderKind::DeepSeek | ProviderKind::OhMyPi | ProviderKind::Pi => Ok((
                 self.rollback_response_with_driver(source, cwd, binary, rollback_turns)?,
                 HashMap::new(),
                 false,

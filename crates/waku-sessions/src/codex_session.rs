@@ -23,6 +23,17 @@ use crate::model::{
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[derive(Debug)]
+struct SessionMethodNotFound(String);
+
+impl std::fmt::Display for SessionMethodNotFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Codex rejected the session request: {}", self.0)
+    }
+}
+
+impl std::error::Error for SessionMethodNotFound {}
+
 fn write_json_line(writer: &mut impl Write, value: &Value) -> std::io::Result<()> {
     serde_json::to_writer(&mut *writer, value)?;
     writer.write_all(b"\n")?;
@@ -35,6 +46,14 @@ fn app_server_request(binary: &Path, request: Value) -> anyhow::Result<Value> {
 }
 
 fn app_server_request_in(binary: &Path, cwd: &Path, request: Value) -> anyhow::Result<Value> {
+    with_app_server_in(binary, cwd, |rpc| rpc(request))
+}
+
+fn with_app_server_in<T>(
+    binary: &Path,
+    cwd: &Path,
+    operation: impl FnOnce(&mut dyn FnMut(Value) -> anyhow::Result<Value>) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
     let mut command = crate::command_env::command(binary);
     let command = command
         .args(["app-server", "--stdio"])
@@ -82,13 +101,16 @@ fn app_server_request_in(binary: &Path, cwd: &Path, request: Value) -> anyhow::R
             if value.get("method").is_none() && value.get("id").and_then(Value::as_u64) == Some(id)
             {
                 if let Some(error) = value.pointer("/error/message").and_then(Value::as_str) {
+                    if value.pointer("/error/code").and_then(Value::as_i64) == Some(-32601) {
+                        return Err(SessionMethodNotFound(error.to_owned()).into());
+                    }
                     bail!("Codex rejected the session request: {error}");
                 }
                 return Ok(value);
             }
         }
     };
-    let response = (|| -> anyhow::Result<Value> {
+    let response = (|| -> anyhow::Result<T> {
         write_json_line(
             &mut stdin,
             &json!({
@@ -106,8 +128,13 @@ fn app_server_request_in(binary: &Path, cwd: &Path, request: Value) -> anyhow::R
         )?;
         receive_response(0)?;
         write_json_line(&mut stdin, &json!({"method": "initialized", "params": {}}))?;
-        write_json_line(&mut stdin, &request)?;
-        receive_response(1)
+        let mut next_id = 0_u64;
+        operation(&mut |mut request| {
+            next_id += 1;
+            request["id"] = json!(next_id);
+            write_json_line(&mut stdin, &request)?;
+            receive_response(next_id)
+        })
     })();
 
     // A fork response still leaves a live writer in this app-server. Let EOF
@@ -150,21 +177,103 @@ pub fn fork_session_at_turn(
     thread_id: &str,
     last_turn_id: &str,
 ) -> anyhow::Result<ProviderResumeCursor> {
-    let response = app_server_request_in(
-        binary,
-        cwd,
-        json!({
-            "method": "thread/fork",
-            "id": 1,
-            "params": {
-                "threadId": thread_id,
-                "lastTurnId": last_turn_id,
-                "cwd": cwd,
-                "excludeTurns": true,
-                "deferGoalContinuation": true
+    let response = app_server_request_in(binary, cwd, fork_request(cwd, thread_id, last_turn_id))?;
+    fork_cursor(&response)
+}
+
+/// Fork while omitting recent turns, leaving the source history intact.
+/// Page reads and the fork share one request deadline and app-server process.
+pub fn fork_session_without_recent_turns(
+    binary: &Path,
+    cwd: &Path,
+    thread_id: &str,
+    turns_to_remove: usize,
+) -> anyhow::Result<ProviderResumeCursor> {
+    let turns_to_read = turns_to_remove
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("too many Codex turns requested"))?;
+    let response = with_app_server_in(binary, cwd, |rpc| {
+        let mut remaining = turns_to_read;
+        let mut cursor: Option<String> = None;
+        let mut seen_cursors = std::collections::HashSet::new();
+        loop {
+            let response = rpc(json!({
+                "method": "thread/turns/list",
+                "params": {
+                    "threadId": thread_id,
+                    "sortDirection": "desc",
+                    "itemsView": "notLoaded",
+                    "limit": remaining.min(100),
+                    "cursor": cursor,
+                }
+            }));
+            let response = match response {
+                Ok(response) => response,
+                Err(error) if error.is::<SessionMethodNotFound>() => {
+                    // Older app-servers expose history through thread/read.
+                    // Only an absent method permits this compatibility path.
+                    let response = rpc(json!({
+                        "method": "thread/read",
+                        "params": {"threadId": thread_id, "includeTurns": true}
+                    }))?;
+                    let turns = response
+                        .pointer("/result/thread/turns")
+                        .and_then(Value::as_array)
+                        .ok_or_else(|| anyhow!("Codex returned invalid thread history"))?;
+                    let id = turns
+                        .len()
+                        .checked_sub(turns_to_read)
+                        .and_then(|index| turns.get(index))
+                        .and_then(|turn| turn.get("id"))
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                        .ok_or_else(|| anyhow!("Codex has no completed turn at that response"))?;
+                    return rpc(fork_request(cwd, thread_id, id));
+                }
+                Err(error) => return Err(error),
+            };
+            let page = response
+                .pointer("/result/data")
+                .and_then(Value::as_array)
+                .ok_or_else(|| anyhow!("Codex returned an invalid turn page"))?;
+            if let Some(turn) = page.get(remaining - 1) {
+                let id = turn
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| anyhow!("Codex returned a turn without an ID"))?;
+                return rpc(fork_request(cwd, thread_id, id));
             }
-        }),
-    )?;
+            let next = response
+                .pointer("/result/nextCursor")
+                .and_then(Value::as_str)
+                .filter(|next| !next.is_empty() && !page.is_empty())
+                .ok_or_else(|| anyhow!("Codex has fewer turns than the requested rewind"))?;
+            anyhow::ensure!(
+                seen_cursors.insert(next.to_owned()),
+                "Codex repeated a turn-page cursor"
+            );
+            remaining -= page.len();
+            cursor = Some(next.to_owned());
+        }
+    })?;
+    fork_cursor(&response)
+}
+
+fn fork_request(cwd: &Path, thread_id: &str, last_turn_id: &str) -> Value {
+    json!({
+        "method": "thread/fork",
+        "params": {
+            "threadId": thread_id,
+            "lastTurnId": last_turn_id,
+            "cwd": cwd,
+            "excludeTurns": true,
+            "deferGoalContinuation": true
+        }
+    })
+}
+
+fn fork_cursor(response: &Value) -> anyhow::Result<ProviderResumeCursor> {
     let thread_id = response
         .pointer("/result/thread/id")
         .and_then(Value::as_str)

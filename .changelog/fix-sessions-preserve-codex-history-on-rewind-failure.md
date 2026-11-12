@@ -1,0 +1,1 @@
+- Preserve the original Codex conversation when rewinding a message, so a lost provider reply leaves the task and its files recoverable.
