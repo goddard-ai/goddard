@@ -1,0 +1,1 @@
+- Fixed the transcript jumping back to an older scroll position shortly after sending from the latest turn with “Keep scroll position when sending” enabled.

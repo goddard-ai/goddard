@@ -9504,6 +9504,92 @@ mod live_employee_approvals {
         });
     }
 
+    // Deliver the late snapshot explicitly so the ordering is deterministic.
+    #[gpui::test]
+    fn send_from_latest_turn_supersedes_saved_landing(cx: &mut gpui::TestAppContext) {
+        use super::super::TranscriptRowKind;
+
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.join("project"));
+        std::fs::create_dir_all(&project.path).unwrap();
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        for prompt in ["First", "Second", "Latest"] {
+            session.begin_turn(prompt);
+            session.finish_active_turn(TurnStatus::Completed);
+        }
+        session.detail_loaded = true;
+        let id = session.id;
+        let daemon = FakeDaemon::start(
+            dir,
+            project.clone(),
+            vec![session.clone()],
+            boss_state(None, Vec::new()),
+        );
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor.clone());
+        update_app(vcx, &view, |waku, _, cx| {
+            for compact in [false, true] {
+                waku.state.projects = vec![project.clone()];
+                waku.state.sessions = vec![session.clone()];
+                waku.state.selected_session = Some(id);
+                waku.state.transcript_keep_scroll_on_send = true;
+                waku.state.transcript_compact_on_send = compact;
+                waku.reset_visible_state();
+                waku.reset_transcript_rows(waku.transcript_row_count());
+                let parked = ListOffset {
+                    item_ix: 0,
+                    offset_in_item: px(7.0),
+                };
+                waku.transcript_landing =
+                    Some((id, super::super::TranscriptLanding::Position(parked)));
+                let latest_row = waku
+                    .transcript_row_kinds
+                    .borrow()
+                    .iter()
+                    .position(|row| *row == TranscriptRowKind::Message(2))
+                    .unwrap();
+                waku.active_transcript_rows().scroll_to(ListOffset {
+                    item_ix: latest_row,
+                    offset_in_item: px(10.0),
+                });
+                waku.transcript_is_scrolled.set(true);
+                assert!(waku.transcript_watches_latest_turn());
+                let runtime = attach_runtime(waku, &supervisor, id, Uuid::new_v4());
+                waku.runtimes.insert(id, runtime);
+                waku.submit_submission_for_session(
+                    id,
+                    ComposerSubmission::plain("Next".into()),
+                    cx,
+                );
+                assert_eq!(waku.state.sessions[0].turns.len(), 4);
+                let sent_row = waku
+                    .transcript_row_kinds
+                    .borrow()
+                    .iter()
+                    .position(|row| *row == TranscriptRowKind::Message(3))
+                    .unwrap();
+                assert!(waku.active_transcript_rows().logical_scroll_top().item_ix >= sent_row);
+                let snapshot = waku.state.sessions[0].clone();
+                let mut runtime = waku.runtimes.remove(&id).unwrap();
+                waku.handle_driver_event(
+                    id,
+                    &mut runtime,
+                    DriverEvent::TaskViewSnapshot {
+                        session: Box::new(snapshot),
+                        detail: true,
+                        settle: false,
+                    },
+                    false,
+                    cx,
+                );
+                assert!(
+                    waku.active_transcript_rows().logical_scroll_top().item_ix >= sent_row,
+                    "a late snapshot must not restore the pre-send landing (compact={compact})"
+                );
+            }
+        });
+    }
+
     // Headless state/navigation regression; no screenshots or visual assertions.
     #[gpui::test]
     fn provider_switch_takes_focus_from_the_active_window(cx: &mut gpui::TestAppContext) {

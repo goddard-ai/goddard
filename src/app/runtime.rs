@@ -8440,6 +8440,17 @@ impl Waku {
                 self.splice_transcript_rows_after_visibility_change(&previous_kinds);
             } else {
                 let compact = self.state.transcript_compact_on_send;
+                // A late snapshot or runtime attach can reset the rows and
+                // reapply the session's activation landing. The send's jump
+                // supersedes that old position, including for future resets.
+                self.transcript_landing = Some((
+                    session_id,
+                    if hidden || compact {
+                        TranscriptLanding::Tail
+                    } else {
+                        TranscriptLanding::LastTurn
+                    },
+                ));
                 let was_anchored = self.transcript_anchor.get().is_some();
                 self.transcript_anchor
                     .set(if compact { None } else { transcript_anchor });
