@@ -1391,7 +1391,8 @@ impl Waku {
         let pending_turn = self.blocked_checkpoint_turn(session.id);
         let rushed = self.big_picture.rush_session == Some(session_id);
         let fingerprint = transcript_rows_fingerprint(session, &self.expanded_turns, pending_turn)
-            ^ u64::from(rushed);
+            ^ u64::from(rushed)
+            ^ (u64::from(self.runtime_submission_checks.contains_key(&session_id)) << 1);
         let (kinds, refolded) = {
             let mut cache = self.big_picture.card_kinds.borrow_mut();
             let entry = cache
@@ -1400,6 +1401,11 @@ impl Waku {
             if entry.0 != fingerprint {
                 let mut folded =
                     folded_transcript_row_kinds(session, &self.expanded_turns, pending_turn);
+                if self.runtime_submission_checks.contains_key(&session_id)
+                    && !folded.contains(&TranscriptRowKind::WorkingIndicator)
+                {
+                    folded.push(TranscriptRowKind::WorkingIndicator);
+                }
                 // Cards have no footer or file summary, but a capture
                 // holding a queued prompt still marks the settled turn.
                 folded.retain(|kind| match kind {
@@ -1947,13 +1953,17 @@ impl Waku {
         session: &AgentSession,
         theme: &Theme,
     ) -> AnyElement {
-        let label = working_indicator_label(
-            Some(session),
-            self.submission_stages
-                .get(&session.id)
-                .map(|slot| SubmissionStage::current(slot)),
-            unix_time(),
-        );
+        let label = if self.runtime_submission_checks.contains_key(&session.id) {
+            tr!("transcript.sending_prompt")
+        } else {
+            working_indicator_label(
+                Some(session),
+                self.submission_stages
+                    .get(&session.id)
+                    .map(|slot| SubmissionStage::current(slot)),
+                unix_time(),
+            )
+        };
         div()
             .h(px(22.0))
             .flex()

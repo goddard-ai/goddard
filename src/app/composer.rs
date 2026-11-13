@@ -6224,6 +6224,12 @@ impl Waku {
         preparing: bool,
         has_draft: bool,
     ) -> ComposerSubmitAction {
+        if !has_draft
+            && session
+                .is_some_and(|session| self.runtime_submission_checks.contains_key(&session.id))
+        {
+            return ComposerSubmitAction::Stop;
+        }
         let refreshing = session.is_some_and(|session| !self.session_detail_is_ready(session));
         if preparing || refreshing {
             return composer_submit_action(session, preparing || refreshing, has_draft);

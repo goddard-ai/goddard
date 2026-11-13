@@ -291,6 +291,11 @@ impl Waku {
         {
             splice_counsel_rows(&mut rows, session, &state.counsel.recommendations);
         }
+        if self.runtime_submission_checks.contains_key(&session.id)
+            && !rows.contains(&TranscriptRowKind::WorkingIndicator)
+        {
+            rows.push(TranscriptRowKind::WorkingIndicator);
+        }
         if windowed {
             rows.insert(0, TranscriptRowKind::HistoryBoundary);
         }

@@ -1,5 +1,52 @@
 use super::*;
 
+/// Fresh submissions stay separate from a possibly retired transcript while
+/// ownership is checked. The token prevents a cancelled check settling a later one.
+pub(super) struct RuntimeSubmissionCheck {
+    token: Uuid,
+    runtime_id: Option<Uuid>,
+    options_generation: Option<Uuid>,
+    options: SessionOptions,
+    provider: ProviderKind,
+    history_generation: u64,
+    project_id: Uuid,
+    cwd: Option<PathBuf>,
+    submissions: VecDeque<ComposerSubmission>,
+}
+
+enum SubmissionRuntime {
+    Current,
+    Retired {
+        session: Option<AgentSession>,
+        has_runtime: bool,
+    },
+}
+
+fn check_submission_runtime(
+    daemon: waku_client::DaemonSupervisor,
+    session_id: Uuid,
+    expected: Option<Uuid>,
+    incognito: bool,
+) -> anyhow::Result<SubmissionRuntime> {
+    let client = daemon.client();
+    let response = client.request(session_id, Uuid::nil(), waku_client::Command::AttachSession)?;
+    let waku_client::ResponsePayload::SessionRuntime { runtime_id, .. } = response else {
+        anyhow::bail!("Goddard daemon returned an invalid runtime attachment response");
+    };
+    if expected.is_some() && runtime_id == expected {
+        return Ok(SubmissionRuntime::Current);
+    }
+    let session = waku_client::persistence::hydrate_session(&daemon, session_id)?;
+    anyhow::ensure!(
+        session.is_some() || (incognito && runtime_id.is_none()),
+        "the task is no longer available"
+    );
+    Ok(SubmissionRuntime::Retired {
+        session,
+        has_runtime: runtime_id.is_some(),
+    })
+}
+
 pub(super) enum PendingRuntimeOperation {
     Goal(crate::model::GoalOperation),
     Compact,
@@ -3124,6 +3171,7 @@ impl Waku {
             // runtime; an attach racing it would subscribe a second handle
             // to the same daemon runtime.
             || self.submission_preparations.contains(&session_id)
+            || self.runtime_submission_checks.contains_key(&session_id)
             || self.runtime_attach_pending.contains(&session_id)
         {
             return;
@@ -4510,6 +4558,7 @@ impl Waku {
             .find(|session| session.id == session_id)
             .is_some_and(session_resume_eligible);
         if !eligible
+            || self.runtime_submission_checks.contains_key(&session_id)
             || self.runtime_attach_pending.contains(&session_id)
             || self.submission_preparations.contains(&session_id)
             || self.control_runtime_starts.contains(&session_id)
@@ -7290,7 +7339,18 @@ impl Waku {
             return;
         }
         if session.is_busy() || self.provider_switch_in_flight.contains(&session.id) {
-            self.enqueue_follow_up_submission(session.id, submission, cx);
+            if !session.boss_managed
+                && !self.provider_switch_in_flight.contains(&session.id)
+                && self
+                    .runtimes
+                    .get(&session.id)
+                    .and_then(|runtime| runtime.driver.daemon_runtime_id())
+                    .is_some()
+            {
+                self.submit_submission_for_session(session.id, submission, cx);
+            } else {
+                self.enqueue_follow_up_submission(session.id, submission, cx);
+            }
             return;
         }
         self.submit_submission_for_session(session.id, submission, cx);
@@ -8045,6 +8105,259 @@ impl Waku {
     pub(super) fn submit_submission_for_session(
         &mut self,
         session_id: Uuid,
+        submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
+        let session_id = self.resolve_boss_chat_session(session_id);
+        // This intent supersedes the older one held by a sign-in terminal.
+        self.sandbox_pending_submissions.remove(&session_id);
+        if let Some(check) = self.runtime_submission_checks.get_mut(&session_id) {
+            check.submissions.push_back(submission);
+            cx.notify();
+            return;
+        }
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id);
+        let runtime = self.runtimes.get(&session_id);
+        let remote_runtime = runtime.and_then(|runtime| runtime.driver.daemon_runtime_id());
+        let eligible = session.is_some_and(|session| {
+            session.detail_loaded
+                // Private tasks have no durable detail to reload. Preserve
+                // their existing in-memory send and recovery path.
+                && !session.incognito
+                && !session.boss_managed
+                && session.provider != ProviderKind::Antigravity
+                && (remote_runtime.is_some() || (runtime.is_none() && session.has_started()))
+                && !self.submission_preparations.contains(&session_id)
+                && !self.control_runtime_starts.contains(&session_id)
+                && !self.runtime_attach_pending.contains(&session_id)
+        });
+        let offline = matches!(self.daemons.session_owner(session_id),
+            waku_client::DaemonKey::Remote(host) if !self.remote_host_connected(host));
+        let daemon = (!offline)
+            .then(|| self.daemons.daemon_for_session(session_id))
+            .flatten();
+        if !eligible || daemon.is_none() {
+            self.submit_validated_submission_for_session(session_id, submission, cx);
+            return;
+        }
+        let session = session.expect("eligible submission has a session");
+        let token = Uuid::new_v4();
+        let incognito = session.incognito;
+        let check = RuntimeSubmissionCheck {
+            token,
+            runtime_id: remote_runtime,
+            options_generation: runtime.map(|runtime| runtime.options_generation),
+            options: self.session_options(session),
+            provider: session.provider,
+            history_generation: session.history_generation,
+            project_id: session.project_id,
+            cwd: self
+                .workspace_path_for_session(session)
+                .map(Path::to_path_buf),
+            submissions: VecDeque::from([submission]),
+        };
+        self.runtime_submission_checks.insert(session_id, check);
+        self.refresh_runtime_submission_indicator(session_id, cx);
+        let daemon = daemon.expect("eligible submission has a connected daemon");
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    check_submission_runtime(daemon, session_id, remote_runtime, incognito)
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                waku.finish_runtime_submission_check(session_id, token, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn refresh_runtime_submission_indicator(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if self.state.selected_session == Some(session_id) {
+            self.transcript_row_kinds_fingerprint.set(None);
+            self.sync_transcript_rows();
+        }
+        cx.notify();
+    }
+
+    fn recover_runtime_submissions(
+        &mut self,
+        session_id: Uuid,
+        project_id: Uuid,
+        submissions: VecDeque<ComposerSubmission>,
+        cx: &mut Context<Self>,
+    ) {
+        // A delayed failure must not replace text or attachments typed since
+        // the send, nor the composer belonging to a newly selected task.
+        let restore_here = submissions.len() == 1
+            && self.state.selected_session == Some(session_id)
+            && !self.side_chat_composers.contains_key(&session_id)
+            && self.composer.read(cx).content(cx).is_empty()
+            && self.composer_attachments.is_empty()
+            && self.composer_inline_atoms.is_empty();
+        for submission in submissions.into_iter().rev() {
+            if submission.hidden {
+                continue;
+            }
+            if restore_here {
+                self.restore_composer_submission(session_id, submission, cx);
+            } else {
+                let id = submission.queued_id.unwrap_or_else(Uuid::new_v4);
+                self.state
+                    .remote_submission_drafts
+                    .retain(|draft| draft.id != id);
+                self.state.saved_drafts.insert(
+                    0,
+                    crate::persistence::SavedDraft {
+                        id,
+                        target: crate::persistence::ComposerDraftTarget::Session { session_id },
+                        project_id,
+                        draft: submission.recovery_draft(),
+                        created_at: unix_time(),
+                        hidden: false,
+                    },
+                );
+            }
+        }
+        self.save();
+    }
+
+    pub(super) fn cancel_session_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        // Invalidate the lookup before Stop so its late response cannot send.
+        // Signal the provider before restoring drafts or saving local state.
+        let check = self.runtime_submission_checks.remove(&session_id);
+        self.cancel_session_turn_inner(session_id, cx);
+        if let Some(check) = check {
+            self.recover_runtime_submissions(session_id, check.project_id, check.submissions, cx);
+            self.refresh_runtime_submission_indicator(session_id, cx);
+        }
+    }
+
+    fn finish_runtime_submission_check(
+        &mut self,
+        session_id: Uuid,
+        token: Uuid,
+        result: anyhow::Result<SubmissionRuntime>,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .runtime_submission_checks
+            .get(&session_id)
+            .map(|check| check.token)
+            != Some(token)
+        {
+            return;
+        }
+        let check = self
+            .runtime_submission_checks
+            .remove(&session_id)
+            .expect("matching check");
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id);
+        let runtime = self.runtimes.get(&session_id);
+        let unchanged = session.is_some_and(|session| {
+            session.provider == check.provider
+                && session.history_generation == check.history_generation
+                && session.project_id == check.project_id
+                && self
+                    .workspace_path_for_session(session)
+                    .map(Path::to_path_buf)
+                    == check.cwd
+                && self.session_options(session) == check.options
+        }) && runtime.and_then(|runtime| runtime.driver.daemon_runtime_id())
+            == check.runtime_id
+            && runtime.map(|runtime| runtime.options_generation) == check.options_generation;
+        let result = result.and_then(|result| {
+            anyhow::ensure!(
+                unchanged,
+                "the task settings or runtime changed before the message was sent"
+            );
+            Ok(result)
+        });
+        let mut submissions = check.submissions;
+        match result {
+            Ok(SubmissionRuntime::Current) => {}
+            Ok(SubmissionRuntime::Retired {
+                mut session,
+                has_runtime,
+            }) => {
+                if let Some(session) = session.as_mut() {
+                    self.pending_task_metadata.overlay(session);
+                    if session.provider != check.provider
+                        || self.session_options(session) != check.options
+                    {
+                        self.recover_runtime_submissions(
+                            session_id,
+                            check.project_id,
+                            submissions,
+                            cx,
+                        );
+                        self.show_toast(
+                            "The task settings changed. Your message was kept; send it again.",
+                        );
+                        self.refresh_runtime_submission_indicator(session_id, cx);
+                        return;
+                    }
+                }
+                // Dropping an attachment must not close a replacement runtime
+                // controlled by another client. Old stream buffers leave with it.
+                self.runtimes.remove(&session_id);
+                self.transcript_views.remove(&session_id);
+                self.cancel_drains.remove(&session_id);
+                self.mark_background_work_lost(session_id);
+                if let Some(session) = session {
+                    let index = self
+                        .state
+                        .sessions
+                        .iter()
+                        .position(|session| session.id == session_id)
+                        .expect("unchanged task exists");
+                    self.state.sessions[index] = session;
+                    self.stale_task_details.remove(&session_id);
+                }
+                self.invalidate_checkpoint_refs();
+                if self.state.selected_session == Some(session_id) {
+                    self.reset_visible_state();
+                    self.reset_transcript_rows(self.transcript_row_count());
+                }
+                if has_runtime {
+                    // The existing attachment path serializes subscription
+                    // creation. Preserve user order while it binds the new owner.
+                    for submission in submissions {
+                        self.enqueue_follow_up_submission(session_id, submission, cx);
+                    }
+                    self.start_runtime_attachment(session_id, cx);
+                    self.defer_queue_drain(session_id);
+                    self.refresh_runtime_submission_indicator(session_id, cx);
+                    return;
+                }
+            }
+            Err(error) => {
+                self.recover_runtime_submissions(session_id, check.project_id, submissions, cx);
+                self.show_toast(format!(
+                    "Could not send this message: {error}. Your message was kept."
+                ));
+                self.refresh_runtime_submission_indicator(session_id, cx);
+                return;
+            }
+        }
+        self.refresh_runtime_submission_indicator(session_id, cx);
+        while let Some(submission) = submissions.pop_front() {
+            self.submit_validated_submission_for_session(session_id, submission, cx);
+        }
+    }
+
+    fn submit_validated_submission_for_session(
+        &mut self,
+        session_id: Uuid,
         mut submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
@@ -8176,7 +8489,9 @@ impl Waku {
         // A thread control is already starting this session's provider.
         // Queue the message so it lands on that thread — after the control —
         // instead of racing a second provider process into existence.
-        if self.control_runtime_starts.contains(&session_id) {
+        if self.control_runtime_starts.contains(&session_id)
+            || self.runtime_attach_pending.contains(&session_id)
+        {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
             return;

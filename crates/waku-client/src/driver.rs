@@ -70,6 +70,12 @@ impl DriverHandle {
         Self { inner: control }
     }
 
+    /// The daemon runtime this attachment controls, when it has one.
+    /// Reading the identity performs no IPC.
+    pub fn daemon_runtime_id(&self) -> Option<Uuid> {
+        self.inner.daemon_runtime_id()
+    }
+
     /// Send a prompt along with the ids this client gave the turn it opened
     /// and that turn's user message, so the daemon can publish the same
     /// identity to every other client attached to the runtime. `hidden`
@@ -189,6 +195,10 @@ impl DriverHandle {
 }
 
 pub trait DriverControl: Send + Sync {
+    fn daemon_runtime_id(&self) -> Option<Uuid> {
+        None
+    }
+
     fn prompt(
         &self,
         prompt: String,

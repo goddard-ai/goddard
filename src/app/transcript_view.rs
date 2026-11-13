@@ -4175,7 +4175,11 @@ impl Waku {
         // A parked turn is waiting on detached work, not working; a
         // submission still preparing reads as its live stage — workspace,
         // checkpoint, routing, or provider start — not connecting.
-        let label = if let Some(status) = setup {
+        let label = if session
+            .is_some_and(|session| self.runtime_submission_checks.contains_key(&session.id))
+        {
+            tr!("transcript.sending_prompt")
+        } else if let Some(status) = setup {
             match status {
                 crate::model::SandboxSetupStatus::DownloadingImage => {
                     tr!("sandbox.setup_downloading")

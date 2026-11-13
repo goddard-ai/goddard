@@ -1,1 +1,1 @@
-- Web and mobile prompts recover after a rewind replaces the task's runtime, and ask you to retry if history or selected options change while preparing a prompt.
+- Prompts recover after another client rewinds the task and replaces its runtime, and ask you to retry if history or selected options change while preparing a prompt.

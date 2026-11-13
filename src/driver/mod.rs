@@ -358,6 +358,10 @@ impl RemoteDriverControl {
 }
 
 impl DriverControl for RemoteDriverControl {
+    fn daemon_runtime_id(&self) -> Option<uuid::Uuid> {
+        Some(self.runtime_id)
+    }
+
     fn prompt(
         &self,
         prompt: String,

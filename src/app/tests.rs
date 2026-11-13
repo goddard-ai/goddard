@@ -9115,6 +9115,24 @@ fn compact_task_view_snapshot_preserves_detail_and_merges_control_state() {
     );
 }
 
+#[test]
+fn compact_task_view_snapshot_cannot_restore_a_retired_history() {
+    let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Claude);
+    existing.detail_loaded = true;
+    existing.begin_turn("retained");
+    existing.finish_active_turn(TurnStatus::Completed);
+    let mut old = existing.clone();
+    old.begin_turn("removed by rewind");
+    old.finish_active_turn(TurnStatus::Completed);
+    let last = old.turns.last().unwrap().clone();
+    let mut old = old.list_projection();
+    old.turns = vec![last];
+    existing.history_generation = 1;
+    let before = serde_json::to_value(&existing).unwrap();
+    apply_compact_task_view_snapshot(&mut existing, &old);
+    assert_eq!(serde_json::to_value(&existing).unwrap(), before);
+}
+
 /// Live-daemon coverage for the inline employee approval cards: a real
 /// `Waku` window connected to a minimal in-process daemon over the client
 /// WebSocket, so the evidence covers the whole path — roster, painted
@@ -9122,13 +9140,13 @@ fn compact_task_view_snapshot_preserves_detail_and_merges_control_state() {
 mod live_employee_approvals {
     use super::super::{SessionRuntime, Waku};
     use super::*;
+    use crate::model::{PendingPermission, PermissionOption, UserInputAnswer};
+    use gpui::Focusable;
     use gpui::{Bounds, Entity, VisualTestContext, WindowBounds, WindowOptions, point, px, size};
     use parking_lot::Mutex;
     use std::net::TcpListener;
     use std::path::PathBuf;
     use std::sync::Arc;
-    use crate::model::{PendingPermission, PermissionOption, UserInputAnswer};
-    use gpui::Focusable;
     use waku_client::{
         ClientMessage, Command, DaemonSettings, DaemonSupervisor, PROTOCOL_VERSION,
         ResponseOutcome, ResponsePayload, ServerMessage,
@@ -9151,6 +9169,8 @@ mod live_employee_approvals {
     /// records every session-scoped command so tests see exactly which
     /// runtime an answer landed on, and can push sequenced runtime events
     /// for reconnect-replay checks.
+    type FakeResponseHook = dyn Fn(Uuid, &Command) -> Option<ResponseOutcome> + Send + Sync;
+
     struct FakeDaemon {
         address: String,
         commands: Arc<Mutex<Vec<RecordedCommand>>>,
@@ -9158,6 +9178,7 @@ mod live_employee_approvals {
         sessions: Arc<Mutex<Vec<AgentSession>>>,
         project: Project,
         boss: Arc<Mutex<waku_client::boss::BossState>>,
+        response_hook: Arc<Mutex<Option<Arc<FakeResponseHook>>>>,
     }
 
     impl FakeDaemon {
@@ -9186,12 +9207,14 @@ mod live_employee_approvals {
                 sessions: Arc::new(Mutex::new(sessions)),
                 project,
                 boss: Arc::new(Mutex::new(boss)),
+                response_hook: Arc::new(Mutex::new(None)),
             };
             let commands = daemon.commands.clone();
             let sockets = daemon.sockets.clone();
             let sessions = daemon.sessions.clone();
             let project = daemon.project.clone();
             let boss = daemon.boss.clone();
+            let response_hook = daemon.response_hook.clone();
             std::thread::Builder::new()
                 .name("waku-test-fake-daemon".into())
                 .spawn(move || {
@@ -9216,6 +9239,7 @@ mod live_employee_approvals {
                         let sessions = sessions.clone();
                         let project = project.clone();
                         let boss = boss.clone();
+                        let response_hook = response_hook.clone();
                         let cwd = default_cwd.clone();
                         let connection = socket.clone();
                         std::thread::Builder::new()
@@ -9264,9 +9288,12 @@ mod live_employee_approvals {
                                             if request.request_id.is_nil() {
                                                 None
                                             } else {
-                                                Some(ServerMessage::Response {
-                                                    request_id: request.request_id,
-                                                    outcome: ResponseOutcome::Ok {
+                                                let hook = response_hook.lock().clone();
+                                                let outcome = hook
+                                                    .and_then(|hook| {
+                                                        hook(request.session_id, &request.command)
+                                                    })
+                                                    .unwrap_or_else(|| ResponseOutcome::Ok {
                                                         payload: response_payload(
                                                             &request.command,
                                                             &sessions,
@@ -9274,7 +9301,10 @@ mod live_employee_approvals {
                                                             &boss,
                                                             &cwd,
                                                         ),
-                                                    },
+                                                    });
+                                                Some(ServerMessage::Response {
+                                                    request_id: request.request_id,
+                                                    outcome,
                                                 })
                                             }
                                         }
@@ -9423,25 +9453,21 @@ mod live_employee_approvals {
             crate::fonts::install(None, None, app);
             crate::platform::init_reduce_motion(app);
         });
-        let window = cx
-            .update(|app| {
-                app.open_window(
-                    WindowOptions {
-                        window_bounds: Some(WindowBounds::Windowed(Bounds {
-                            origin: point(px(0.0), px(0.0)),
-                            size: size(px(1280.0), px(800.0)),
-                        })),
-                        ..Default::default()
-                    },
-                    |window, cx| Waku::new(window, cx, supervisor),
-                )
-                .unwrap()
-            });
+        let window = cx.update(|app| {
+            app.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(Bounds {
+                        origin: point(px(0.0), px(0.0)),
+                        size: size(px(1280.0), px(800.0)),
+                    })),
+                    ..Default::default()
+                },
+                |window, cx| Waku::new(window, cx, supervisor),
+            )
+            .unwrap()
+        });
         let view = window.root(cx).unwrap();
-        (
-            view,
-            VisualTestContext::from_window(*window, cx).into_mut(),
-        )
+        (view, VisualTestContext::from_window(*window, cx).into_mut())
     }
 
     /// Scratch data dir + env, held for the length of one test.
@@ -10088,7 +10114,11 @@ mod live_employee_approvals {
         vcx.update(|window, app| view.update(app, |waku, cx| f(waku, window, cx)))
     }
 
-    fn read_app<R>(vcx: &mut VisualTestContext, view: &Entity<Waku>, f: impl FnOnce(&Waku) -> R) -> R {
+    fn read_app<R>(
+        vcx: &mut VisualTestContext,
+        view: &Entity<Waku>,
+        f: impl FnOnce(&Waku) -> R,
+    ) -> R {
         vcx.update(|_, app| f(view.read(app)))
     }
 
@@ -10116,6 +10146,337 @@ mod live_employee_approvals {
             std::thread::sleep(Duration::from_millis(10));
             vcx.run_until_parked();
         }
+    }
+
+    #[gpui::test]
+    fn retired_runtime_send_refreshes_history_before_queueing(cx: &mut gpui::TestAppContext) {
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.clone());
+        let mut cached = AgentSession::new(project.id, ProviderKind::Claude);
+        for prompt in ["retained first", "retained second", "removed third"] {
+            cached.begin_turn(prompt);
+            cached.mark_active_turn_provider_started();
+            cached.finish_active_turn(TurnStatus::Completed);
+        }
+        cached.detail_loaded = true;
+        cached.provider_cursor = Some(crate::model::ProviderResumeCursor::Claude {
+            session_id: Uuid::new_v4().to_string(),
+            resume_at: None,
+        });
+        let session_id = cached.id;
+        let removed_turn = cached.turns[2].id;
+        let mut canonical = cached.clone();
+        canonical.turns.truncate(2);
+        canonical
+            .messages
+            .retain(|message| message.turn_id != Some(removed_turn));
+        canonical.history_generation = 1;
+        canonical.provider_cursor = Some(crate::model::ProviderResumeCursor::Claude {
+            session_id: Uuid::new_v4().to_string(),
+            resume_at: None,
+        });
+        let expected_cursor = canonical.provider_cursor.clone();
+        let daemon = FakeDaemon::start(
+            dir,
+            project.clone(),
+            vec![canonical],
+            boss_state(None, Vec::new()),
+        );
+        *daemon.response_hook.lock() = Some(Arc::new(|_, command| {
+            matches!(command, Command::AttachSession).then(|| ResponseOutcome::Ok {
+                payload: ResponsePayload::SessionRuntime {
+                    runtime_id: None,
+                    supports_steer: false,
+                    supports_user_input_actions: false,
+                },
+            })
+        }));
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor.clone());
+        let obsolete_runtime = Uuid::new_v4();
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.state.sessions = vec![cached];
+            waku.state.selected_session = Some(session_id);
+            waku.state.selected_project = Some(project.id);
+            let runtime = attach_runtime(waku, &supervisor, session_id, obsolete_runtime);
+            waku.runtimes.insert(session_id, runtime);
+            // Its old response is still in flight when the user sends again.
+            waku.checkpoint_captures_in_flight.insert((session_id, 3));
+            waku.submit_submission_for_session(
+                session_id,
+                ComposerSubmission::plain("new user action".into()),
+                cx,
+            );
+        });
+        wait_for(vcx, &view, |waku| {
+            let session = waku
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .unwrap();
+            session.history_generation == 1
+                || session
+                    .queued_messages
+                    .iter()
+                    .any(|message| message.content == "new user action")
+                || session
+                    .messages
+                    .iter()
+                    .any(|message| message.content == "new user action")
+        });
+        read_app(vcx, &view, |waku| {
+            let session = waku
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .unwrap();
+            assert_eq!(
+                session.history_generation, 1,
+                "a fresh user action must refresh retired ownership before entering a checkpoint queue"
+            );
+            assert_eq!(session.provider_cursor, expected_cursor);
+            assert!(session.turns.iter().all(|turn| turn.id != removed_turn));
+        });
+    }
+
+    fn owner_check_app(
+        cx: &mut gpui::TestAppContext,
+        fail: bool,
+    ) -> (
+        parking_lot::MutexGuard<'static, ()>,
+        FakeDaemon,
+        Entity<Waku>,
+        &'static mut VisualTestContext,
+        Uuid,
+    ) {
+        let (env, dir) = isolated_env();
+        let project = Project::from_path(dir.clone());
+        let mut session = AgentSession::new(project.id, ProviderKind::Claude);
+        session.begin_turn("completed");
+        session.mark_active_turn_provider_started();
+        session.finish_active_turn(TurnStatus::Completed);
+        session.detail_loaded = true;
+        let id = session.id;
+        let runtime_id = Uuid::new_v4();
+        let daemon = FakeDaemon::start(
+            dir,
+            project.clone(),
+            vec![session.clone()],
+            boss_state(None, Vec::new()),
+        );
+        *daemon.response_hook.lock() = Some(Arc::new(move |_, command| {
+            matches!(command, Command::AttachSession).then(|| {
+                if fail {
+                    ResponseOutcome::Error {
+                        error: anyhow::anyhow!("owner lookup failed").into(),
+                    }
+                } else {
+                    ResponseOutcome::Ok {
+                        payload: ResponsePayload::SessionRuntime {
+                            runtime_id: Some(runtime_id),
+                            supports_steer: false,
+                            supports_user_input_actions: false,
+                        },
+                    }
+                }
+            })
+        }));
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor.clone());
+        update_app(vcx, &view, |waku, _, _| {
+            waku.state.sessions = vec![session];
+            waku.state.selected_session = Some(id);
+            waku.state.selected_project = Some(project.id);
+            let runtime = attach_runtime(waku, &supervisor, id, runtime_id);
+            waku.runtimes.insert(id, runtime);
+            // A valid owner's pending checkpoint should still hold sends.
+            waku.checkpoint_captures_in_flight.insert((id, 1));
+        });
+        (env, daemon, view, vcx, id)
+    }
+
+    #[gpui::test]
+    fn runtime_owner_check_failure_preserves_multiple_user_messages(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, view, vcx, id) = owner_check_app(cx, true);
+        update_app(vcx, &view, |waku, _, cx| {
+            for text in ["first unsent", "second unsent"] {
+                waku.submit_submission_for_session(id, ComposerSubmission::plain(text.into()), cx);
+            }
+        });
+        wait_for(vcx, &view, |waku| {
+            !waku.runtime_submission_checks.contains_key(&id)
+        });
+        read_app(vcx, &view, |waku| {
+            let saved: Vec<_> = waku
+                .state
+                .saved_drafts
+                .iter()
+                .filter(|draft| draft.project_id == waku.state.sessions[0].project_id)
+                .collect();
+            assert_eq!(saved.len(), 2);
+            // Full immutable composer drafts, including their prompt text, survive.
+            let saved = serde_json::to_string(&saved).unwrap();
+            assert!(saved.find("first unsent").unwrap() < saved.find("second unsent").unwrap());
+            assert!(waku.state.sessions[0].queued_messages.is_empty());
+            assert!(
+                daemon
+                    .commands_for(id)
+                    .iter()
+                    .all(|command| !matches!(command, Command::Prompt { .. }))
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn runtime_owner_check_rejects_changed_options_without_overwriting_selection(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (_env, daemon, view, vcx, id) = owner_check_app(cx, false);
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.submit_submission_for_session(
+                id,
+                ComposerSubmission::plain("keep my message".into()),
+                cx,
+            );
+            // Both actions happen before the lookup's UI completion can run.
+            waku.state.sessions[0].model = Some("new selection".into());
+            waku.apply_session_options(id, cx);
+            // Catalog synchronization must model the new selection too;
+            // this test isolates a lookup finishing after an options change.
+            daemon.sessions.lock()[0].model = Some("new selection".into());
+        });
+        wait_for(vcx, &view, |waku| {
+            !waku.runtime_submission_checks.contains_key(&id)
+        });
+        update_app(vcx, &view, |waku, _, cx| {
+            assert_eq!(
+                waku.state.sessions[0].model.as_deref(),
+                Some("new selection")
+            );
+            assert_eq!(waku.composer.read(cx).content(cx), "keep my message");
+            assert!(waku.state.sessions[0].queued_messages.is_empty());
+            assert!(
+                daemon
+                    .commands_for(id)
+                    .iter()
+                    .all(|command| !matches!(command, Command::Prompt { .. }))
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn runtime_owner_check_keeps_current_owner_and_send_order(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, view, vcx, id) = owner_check_app(cx, false);
+        update_app(vcx, &view, |waku, _, cx| {
+            for text in ["first follow up", "second follow up"] {
+                waku.submit_submission_for_session(id, ComposerSubmission::plain(text.into()), cx);
+            }
+        });
+        wait_for(vcx, &view, |waku| {
+            !waku.runtime_submission_checks.contains_key(&id)
+        });
+        read_app(vcx, &view, |waku| {
+            let session = &waku.state.sessions[0];
+            assert_eq!(session.history_generation, 0);
+            assert_eq!(session.turns.len(), 1);
+            assert_eq!(
+                session
+                    .queued_messages
+                    .iter()
+                    .map(|message| message.content.as_str())
+                    .collect::<Vec<_>>(),
+                ["first follow up", "second follow up"]
+            );
+            assert_eq!(
+                daemon
+                    .commands_for(id)
+                    .iter()
+                    .filter(|command| matches!(command, Command::AttachSession))
+                    .count(),
+                1
+            );
+            assert!(
+                daemon
+                    .commands_for(id)
+                    .iter()
+                    .all(|command| !matches!(command, Command::Prompt { .. }))
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn runtime_owner_check_stop_discards_late_reply_without_cancelling_next_send(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (_env, daemon, view, vcx, id) = owner_check_app(cx, false);
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.submit_submission_for_session(
+                id,
+                ComposerSubmission::plain("cancelled message".into()),
+                cx,
+            );
+            waku.cancel_session_turn(id, cx);
+            waku.submit_submission_for_session(
+                id,
+                ComposerSubmission::plain("later message".into()),
+                cx,
+            );
+        });
+        wait_for(vcx, &view, |waku| {
+            !waku.runtime_submission_checks.contains_key(&id)
+        });
+        update_app(vcx, &view, |waku, _, cx| {
+            assert_eq!(waku.composer.read(cx).content(cx), "cancelled message");
+            assert_eq!(
+                waku.state.sessions[0]
+                    .queued_messages
+                    .iter()
+                    .map(|message| message.content.as_str())
+                    .collect::<Vec<_>>(),
+                ["later message"]
+            );
+            assert!(
+                daemon
+                    .commands_for(id)
+                    .iter()
+                    .any(|command| matches!(command, Command::Cancel))
+            );
+            assert!(
+                daemon
+                    .commands_for(id)
+                    .iter()
+                    .all(|command| !matches!(command, Command::Prompt { .. }))
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn runtime_owner_check_does_not_create_persistent_incognito_recovery(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (_env, daemon, view, vcx, id) = owner_check_app(cx, true);
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.state.sessions[0].incognito = true;
+            waku.state.sessions[0].status = SessionStatus::Working;
+            {
+                let mut sessions = daemon.sessions.lock();
+                sessions[0].incognito = true;
+                sessions[0].status = SessionStatus::Working;
+            }
+            for text in ["private first", "private second"] {
+                waku.submit_submission_for_session(id, ComposerSubmission::plain(text.into()), cx);
+            }
+            assert!(!waku.runtime_submission_checks.contains_key(&id));
+            assert!(waku.state.saved_drafts.is_empty());
+            assert!(waku.state.remote_submission_drafts.is_empty());
+            assert_eq!(waku.state.sessions[0].queued_messages.len(), 2);
+            assert!(daemon.commands_for(id).iter().all(|command| !matches!(
+                command,
+                Command::Prompt { .. } | Command::AttachSession
+            )));
+        });
     }
 
     /// A boss chat with two live employees, served through the fake

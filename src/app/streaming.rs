@@ -35,6 +35,11 @@ pub(super) fn apply_compact_task_view_snapshot(
     existing: &mut AgentSession,
     snapshot: &AgentSession,
 ) {
+    // A compact update cannot replace a history lineage. Recovery loads the
+    // authoritative detail; an older attachment must not restore removed turns.
+    if snapshot.history_generation != existing.history_generation {
+        return;
+    }
     super::runtime::merge_session_catalog_row(existing, snapshot.clone(), true);
     super::transcript_window::merge_turns(&mut existing.turns, &snapshot.turns);
     let mut queued = snapshot.queued_messages.clone();

@@ -2979,6 +2979,7 @@ impl Waku {
         };
         let was_selected = self.state.selected_session == Some(session_id);
         self.submission_preparations.remove(&session_id);
+        self.runtime_submission_checks.remove(&session_id);
         self.submission_stages.remove(&session_id);
         self.control_runtime_starts.remove(&session_id);
         self.pending_runtime_operations.remove(&session_id);
@@ -5907,8 +5908,10 @@ impl Waku {
         let session = self.selected_session()?;
         // A session still preparing has no runtime to interrupt, but the
         // wait itself is stoppable — Escape arms the same confirmation.
-        (self.submission_preparations.contains(&session.id) || session.status.is_busy())
-            .then(|| EscapeStopTarget::for_session(session))
+        (self.submission_preparations.contains(&session.id)
+            || self.runtime_submission_checks.contains_key(&session.id)
+            || session.status.is_busy())
+        .then(|| EscapeStopTarget::for_session(session))
     }
 
     pub(super) fn reset_visible_state(&mut self) {
@@ -6086,6 +6089,7 @@ impl Waku {
         pinned.extend(self.summon_card_employees());
         pinned.extend(self.session_hydrations.iter().copied());
         pinned.extend(self.submission_preparations.iter().copied());
+        pinned.extend(self.runtime_submission_checks.keys().copied());
         pinned.extend(self.pending_queue_drains.iter().copied());
         pinned.extend(self.cancel_drains.keys().copied());
         pinned.extend(self.response_fork_preparations.keys().copied());
@@ -7657,7 +7661,7 @@ impl Waku {
         has_active_turn
     }
 
-    pub(super) fn cancel_session_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn cancel_session_turn_inner(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         self.cancel_rush_resume(session_id);
         self.escape_stop_confirmation.clear();
         if !self.runtimes.contains_key(&session_id)
