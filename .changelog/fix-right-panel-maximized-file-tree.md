@@ -1,0 +1,1 @@
+- A maximized file tab in a task's side panel keeps its file tree resizable, and picking another file in the tree no longer restores the panel.

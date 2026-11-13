@@ -6646,6 +6646,13 @@ impl Waku {
             self.open_right_panel_surface(RightPanelSurface::File(relative_path), cx);
             return;
         };
+        // The maximized tab navigates inside itself when the tree picks its
+        // file: the layer follows the file rather than ending at the next
+        // `settle_panel_slides` reconcile.
+        let maximized_tab = self
+            .fullscreen_surface
+            .as_ref()
+            .is_some_and(|(surface, _)| self.active_right_panel_surface() == Some(surface));
         match self.right_panel_surfaces.get(active).cloned() {
             Some(RightPanelSurface::Files) => {
                 let dirty_file_would_be_replaced = self
@@ -6661,6 +6668,9 @@ impl Waku {
                 }
 
                 self.right_panel_files_selected_path = Some(relative_path);
+                if maximized_tab {
+                    self.retarget_panel_fullscreen();
+                }
                 self.set_right_panel_visible(true, cx);
                 cx.notify();
             }
@@ -6688,6 +6698,9 @@ impl Waku {
                 } else {
                     self.right_panel_surfaces[active] = requested;
                     self.reveal_right_panel_tab(active);
+                }
+                if maximized_tab {
+                    self.retarget_panel_fullscreen();
                 }
                 self.set_right_panel_visible(true, cx);
                 cx.notify();
@@ -6755,6 +6768,16 @@ impl Waku {
         self.right_panel_pending_tree_reveal = Some(relative_path.clone());
         self.right_panel_files_selected_path = Some(relative_path);
         self.open_right_panel_surface(RightPanelSurface::Files, cx);
+        // A reveal that lands on the already-maximized Files tab moves its
+        // selection — an in-tab navigation the layer follows. Landing from
+        // another tab is a surface switch and still ends the mode.
+        if self
+            .fullscreen_surface
+            .as_ref()
+            .is_some_and(|(surface, _)| self.active_right_panel_surface() == Some(surface))
+        {
+            self.retarget_panel_fullscreen();
+        }
     }
 
     /// The tree's next entries resolve the pending reveal to a row index —
@@ -11472,6 +11495,19 @@ impl Waku {
         };
         self.panel_fullscreen_slide = self.begin_panel_slide(from, cx);
         cx.notify();
+    }
+
+    /// Rebind the maximized layer to its tab's current surface and file.
+    /// An in-tab file navigation keeps the mode up this way; without the
+    /// retarget the next `settle_panel_slides` reconcile reads the changed
+    /// surface or path as a takeover and ends it.
+    fn retarget_panel_fullscreen(&mut self) {
+        if self.fullscreen_surface.is_some() {
+            self.fullscreen_surface = self
+                .active_right_panel_surface()
+                .cloned()
+                .map(|surface| (surface, self.visible_right_panel_file_path()));
+        }
     }
 
     /// Escape inside the maximized layer. The binding's PanelFullscreen

@@ -1208,6 +1208,12 @@ impl Render for Waku {
                         // listener no longer counts as hovered here — the
                         // layer has to answer the swipe itself.
                         .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
+                        // The same occlusion keeps the root's resize-drag
+                        // listeners off the dispatch path, so a drag begun
+                        // on a handle inside the layer tracks and finishes
+                        // here — the file tree stays resizable maximized.
+                        .on_mouse_move(cx.listener(Self::resize_panel_mouse_move))
+                        .capture_any_mouse_up(cx.listener(Self::finish_panel_resize))
                         .child(
                             self.right_panel_pane
                                 .clone()
