@@ -1478,6 +1478,14 @@ fn queued_edit_reseats_atom_spans_as_composer_chips() {
     let (content, seated) = atom_marker_content(&display, &wire);
     assert_eq!(content, typed);
     assert_eq!(seated.len(), 3);
+    let copied = waku_ui::clipboard::ChipContent::from_clipboard(
+        &super::composer::message_clipboard_item(&display, &wire),
+    ).unwrap();
+    assert_eq!(copied.text, typed);
+    assert_eq!(copied.atoms.len(), 3);
+    assert!(matches!(&copied.atoms[0].1, waku_ui::clipboard::ClipboardAtom::PastedText { text, .. } if text == "pasted\nbody"));
+    assert!(matches!(&copied.atoms[1].1, waku_ui::clipboard::ClipboardAtom::SessionRef { session_id, .. } if *session_id == Uuid::nil()));
+    assert!(matches!(&copied.atoms[2].1, waku_ui::clipboard::ClipboardAtom::Reference { target, .. } if target == "/abs/repo"));
 
     // Chip identity and order survive: splicing the seats reproduces the
     // provider-facing text unchanged.
@@ -9365,6 +9373,135 @@ mod live_employee_approvals {
             std::env::remove_var("GODDARD_APP_EXECUTABLE");
         }
         (guard, dir)
+    }
+
+    // Exercises actual clipboard/key dispatch and task draft switching, without screenshots.
+    #[gpui::test]
+    fn composer_chips_copy_between_tasks_and_survive_undo(cx: &mut gpui::TestAppContext) {
+        use crate::input::INLINE_ATOM_MARKER as M;
+        use waku_ui::clipboard::{ChipContent, ClipboardAtom};
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.join("project"));
+        let sessions: Vec<_> = (0..2)
+            .map(|_| {
+                let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+                session.begin_turn("Initial prompt");
+                session.finish_active_turn(TurnStatus::Completed);
+                session.detail_loaded = true;
+                session
+            })
+            .collect();
+        let ids = [sessions[0].id, sessions[1].id];
+        let daemon = FakeDaemon::start(
+            dir,
+            project.clone(),
+            sessions.clone(),
+            boss_state(None, Vec::new()),
+        );
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor);
+        let payload = ChipContent {
+            text: format!("é {M} and {M} with {M}"),
+            atoms: vec![
+                (
+                    3,
+                    ClipboardAtom::PastedText {
+                        text: "  first\nsecond\n".into(),
+                        category: Some("Pasted code".into()),
+                    },
+                ),
+                (
+                    11,
+                    ClipboardAtom::SessionRef {
+                        session_id: ids[0],
+                        title: "Source task".into(),
+                    },
+                ),
+                (
+                    20,
+                    ClipboardAtom::Reference {
+                        kind: waku_protocol::model::AtomRefKind::Project,
+                        name: "Project".into(),
+                        target: "/tmp/project".into(),
+                    },
+                ),
+            ],
+        };
+        // Compute offsets from Unicode marker positions, as the clipboard writer does.
+        let payload = ChipContent {
+            atoms: payload
+                .text
+                .match_indices(M)
+                .map(|(offset, _)| offset)
+                .zip(payload.atoms.into_iter().map(|(_, atom)| atom))
+                .collect(),
+            text: payload.text,
+        };
+        let item = payload
+            .clone()
+            .clipboard_item("ordinary clipboard fallback".into());
+        update_app(vcx, &view, |waku, window, cx| {
+            crate::input::init(cx);
+            waku.state.projects = vec![project];
+            waku.state.sessions = sessions;
+            waku.request_session_activation(
+                ids[0],
+                super::super::SessionActivationTransition::Visit,
+                cx,
+            );
+            waku.refocus_composer(window, cx);
+            cx.write_to_clipboard(item);
+        });
+        vcx.simulate_keystrokes("secondary-v");
+        update_app(vcx, &view, |waku, _, cx| {
+            assert_eq!(waku.composer.read(cx).content(cx), payload.text);
+            assert_eq!(waku.composer_inline_atoms.len(), 3);
+        });
+        vcx.simulate_keystrokes("secondary-a secondary-c");
+        update_app(vcx, &view, |waku, window, cx| {
+            let copied = ChipContent::from_clipboard(&cx.read_from_clipboard().unwrap()).unwrap();
+            assert_eq!(copied.text, payload.text);
+            assert_eq!(copied.atoms, payload.atoms);
+            waku.request_session_activation(
+                ids[1],
+                super::super::SessionActivationTransition::Visit,
+                cx,
+            );
+            assert_eq!(waku.state.selected_session, Some(ids[1]));
+            assert!(waku.composer.read(cx).content(cx).is_empty());
+            waku.refocus_composer(window, cx);
+        });
+        vcx.simulate_keystrokes("secondary-v");
+        update_app(vcx, &view, |waku, _, cx| {
+            assert_eq!(waku.composer.read(cx).content(cx), payload.text);
+            assert_eq!(waku.composer_inline_atoms.len(), 3);
+        });
+        vcx.simulate_keystrokes("secondary-a secondary-x secondary-v");
+        vcx.simulate_keystrokes("secondary-z");
+        update_app(vcx, &view, |waku, _, cx| {
+            assert!(waku.composer.read(cx).content(cx).is_empty());
+            assert!(waku.composer_inline_atoms.is_empty());
+        });
+        vcx.simulate_keystrokes("secondary-shift-z");
+        vcx.simulate_keystrokes("secondary-a secondary-c");
+        update_app(vcx, &view, |waku, _, cx| {
+            assert_eq!(waku.composer_inline_atoms.len(), 3);
+            let copied = ChipContent::from_clipboard(&cx.read_from_clipboard().unwrap()).unwrap();
+            assert_eq!(copied.atoms, payload.atoms);
+            // Replacing the same markers must replace their hidden payloads too.
+            let mut replacement = copied;
+            replacement.atoms[0].1 = ClipboardAtom::PastedText {
+                text: "replacement".into(),
+                category: None,
+            };
+            cx.write_to_clipboard(replacement.clipboard_item("replacement fallback".into()));
+        });
+        vcx.simulate_keystrokes("secondary-v secondary-z secondary-c");
+        update_app(vcx, &view, |waku, _, cx| {
+            assert_eq!(waku.composer_inline_atoms.len(), 3);
+            let copied = ChipContent::from_clipboard(&cx.read_from_clipboard().unwrap()).unwrap();
+            assert_eq!(copied.atoms, payload.atoms);
+        });
     }
 
     // Headless state/navigation regression; no screenshots or visual assertions.

@@ -1615,6 +1615,7 @@ impl Waku {
                         animate_streaming,
                         cx,
                     );
+                    let ctx = self.message_atom_markdown_ctx(ctx, &message, cx);
                     let work_item_refs = (message.role == MessageRole::User)
                         .then(|| {
                             self.work_item_refs_for_content(
@@ -1632,10 +1633,11 @@ impl Waku {
                             let view = markdown
                                 .entry(message.id)
                                 .or_insert_with(MarkdownView::seeded);
-                            view.set_transcript_text(
+                            view.set_transcript_text_with_atom_links(
                                 message.visible_content(),
                                 message.streaming,
                                 message.role == MessageRole::User,
+                                !message.atoms.is_empty(),
                             );
                             &*view
                         });

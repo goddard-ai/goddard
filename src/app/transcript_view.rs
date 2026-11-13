@@ -1116,6 +1116,7 @@ impl Waku {
                     })
                     .flatten()
             })
+            .map(ClipboardItem::new_string)
             .or_else(|| {
                 // The visible lane's registry — its rows paint into a
                 // separate selection state from the session column's.
@@ -1126,7 +1127,7 @@ impl Waku {
                         }
                         _ => None,
                     })
-                    .and_then(|view| view.selection.selection.borrow().selected_text())
+                    .and_then(|view| view.selection.selection.borrow().clipboard_item())
             })
             .or_else(|| {
                 // The scratchpad owns the column while it's up — its
@@ -1134,23 +1135,66 @@ impl Waku {
                 self.voice_scratchpad_visible()
                     .then(|| {
                         self.selected_voice_scratchpad().and_then(|scratchpad| {
-                            scratchpad.selection.selection.borrow().clipboard_text()
+                            scratchpad.selection.selection.borrow().clipboard_item()
                         })
                     })
                     .flatten()
             })
-            .or_else(|| self.toast_selection.selection.borrow().selected_text())
-            .or_else(|| self.skills_selection.selection.borrow().selected_text())
+            .or_else(|| self.toast_selection.selection.borrow().clipboard_item())
+            .or_else(|| self.skills_selection.selection.borrow().clipboard_item())
             .or_else(|| {
                 self.transcript_selection
                     .selection
                     .borrow()
-                    .clipboard_text()
+                    .clipboard_item()
             });
         match selected {
-            Some(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
+            Some(item) => cx.write_to_clipboard(item),
             None => cx.propagate(),
         }
+    }
+
+    /// Shared chip links and clipboard payloads for every user-message surface.
+    pub(super) fn message_atom_markdown_ctx<'a>(
+        &self,
+        ctx: md::render::Ctx<'a>,
+        message: &Message,
+        cx: &Context<Self>,
+    ) -> md::render::Ctx<'a> {
+        if message.role != MessageRole::User || message.atoms.is_empty() {
+            return ctx;
+        }
+        let atoms = Rc::new(message.atoms.clone());
+        let tooltip_atoms = atoms.clone();
+        let message_id = message.id;
+        let waku = cx.entity().downgrade();
+        let links = self.markdown_link_handler.clone();
+        ctx.with_pasted_text_payloads(atoms.clone())
+            .with_link_handler(Rc::new(move |url, window, cx| {
+                if let Some(index) = url.strip_prefix(md::render::PASTED_TEXT_LINK_PREFIX) {
+                    if let Some((index, atom)) = index
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|index| atoms.get(index).map(|atom| (index, atom)))
+                    {
+                        let _ = waku.update(cx, |this, cx| {
+                            this.open_sent_pasted_text(message_id, index, atom.payload.clone(), cx);
+                        });
+                    }
+                } else {
+                    links(url, window, cx);
+                }
+            }))
+            .with_link_tooltip(Rc::new(move |url, window, cx| {
+                let index = url
+                    .strip_prefix(md::render::PASTED_TEXT_LINK_PREFIX)?
+                    .parse::<usize>()
+                    .ok()?;
+                let atom = tooltip_atoms.get(index)?;
+                Some(composer::pasted_text_tooltip(
+                    composer::pasted_text_preview(&atom.payload).into(),
+                )(window, cx))
+            }))
     }
 
     /// A full-size canvas that installs the frame's selection mouse listeners.
@@ -2501,46 +2545,7 @@ impl Waku {
                         .with_commit_refs(
                             message.role == MessageRole::Assistant || message.notice.is_some(),
                         );
-                    if message.role == MessageRole::User && !message.atoms.is_empty() {
-                        let atoms = Rc::new(message.atoms.clone());
-                        let tooltip_atoms = atoms.clone();
-                        let message_id = message.id;
-                        let waku = cx.entity().downgrade();
-                        let links = self.markdown_link_handler.clone();
-                        ctx = ctx
-                            .with_link_handler(Rc::new(move |url, window, cx| {
-                                if let Some(index) =
-                                    url.strip_prefix(md::render::PASTED_TEXT_LINK_PREFIX)
-                                {
-                                    if let Some((index, atom)) =
-                                        index.parse::<usize>().ok().and_then(|index| {
-                                            atoms.get(index).map(|atom| (index, atom))
-                                        })
-                                    {
-                                        let _ = waku.update(cx, |this, cx| {
-                                            this.open_sent_pasted_text(
-                                                message_id,
-                                                index,
-                                                atom.payload.clone(),
-                                                cx,
-                                            );
-                                        });
-                                    }
-                                } else {
-                                    links(url, window, cx);
-                                }
-                            }))
-                            .with_link_tooltip(Rc::new(move |url, window, cx| {
-                                let index = url
-                                    .strip_prefix(md::render::PASTED_TEXT_LINK_PREFIX)?
-                                    .parse::<usize>()
-                                    .ok()?;
-                                let atom = tooltip_atoms.get(index)?;
-                                Some(composer::pasted_text_tooltip(
-                                    composer::pasted_text_preview(&atom.payload).into(),
-                                )(window, cx))
-                            }));
-                    }
+                    ctx = self.message_atom_markdown_ctx(ctx, &message, cx);
                     if message.role == MessageRole::Assistant {
                         ctx = ctx.with_reference_context(message.turn_id.and_then(|turn| {
                             self.transcript_reference_contexts

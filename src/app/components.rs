@@ -250,6 +250,7 @@ pub(super) fn render_message_footer(
                 .flatten(),
             |element, tps| element.child(" · ").child(format!("{tps} tok/s")),
         );
+    let copy_atoms = message.atoms.clone();
     let copy_button = div()
         .id(SharedString::from(format!("copy-message-{message_id}")))
         .w(px(27.0))
@@ -275,7 +276,12 @@ pub(super) fn render_message_footer(
             tr!("common.copy_message")
         }))
         .on_click(move |_, _, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(copy_content.to_string()));
+            let item = if copy_atoms.is_empty() {
+                ClipboardItem::new_string(copy_content.to_string())
+            } else {
+                composer::message_clipboard_item(&copy_content, &copy_atoms)
+            };
+            cx.write_to_clipboard(item);
             let _ = copy_waku.update(cx, |this, cx| {
                 this.show_message_copied(message_id, cx);
             });
@@ -1820,6 +1826,8 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             };
             message_menu_items(
                 &copy_content,
+                (!menu_atoms.is_empty())
+                    .then(|| composer::message_clipboard_item(&menu_display_content, &menu_atoms)),
                 role,
                 user_message_action,
                 assistant_message_action,
@@ -2903,6 +2911,7 @@ fn transfer_notice_row(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn message_menu_items(
     content: &str,
+    chip_copy: Option<ClipboardItem>,
     role: MessageRole,
     user_message_action: Option<UserMessageAction>,
     assistant_message_action: Option<AssistantMessageAction>,
@@ -2916,10 +2925,14 @@ pub(super) fn message_menu_items(
 
     let selected_text = selection.selection.borrow().selected_text();
     if let Some(selected) = selected_text.as_ref() {
-        let copy = selected.clone();
+        let copy = selection
+            .selection
+            .borrow()
+            .clipboard_item()
+            .unwrap_or_else(|| ClipboardItem::new_string(selected.clone()));
         items.push(
             MenuItem::new(tr!("common.copy_selection"), move |_, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
+                cx.write_to_clipboard(copy.clone());
             })
             .shortcut_action(&CopySelection),
         );
@@ -2933,11 +2946,13 @@ pub(super) fn message_menu_items(
     }
 
     let copy_content: Rc<str> = Rc::from(content);
-    let copied_content = copy_content.clone();
+    let copied_content = chip_copy
+        .clone()
+        .unwrap_or_else(|| ClipboardItem::new_string(copy_content.to_string()));
     items.push(MenuItem::new(
         tr!("common.copy_message_title"),
         move |_, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(copied_content.to_string()));
+            cx.write_to_clipboard(copied_content.clone());
         },
     ));
 
@@ -2948,7 +2963,12 @@ pub(super) fn message_menu_items(
             tr!("common.copy_to_composer"),
             move |window, cx| {
                 composer.update(cx, |composer, cx| {
-                    composer.set_content(edit_content.clone(), cx);
+                    if let Some(item) = &chip_copy {
+                        composer.set_content("", cx);
+                        composer.paste_clipboard_item(item, cx);
+                    } else {
+                        composer.set_content(edit_content.clone(), cx);
+                    }
                 });
                 let focus_handle = composer.read(cx).focus();
                 window.focus(&focus_handle, cx);
@@ -3096,6 +3116,7 @@ pub(super) fn deliverable_menu_items(
 ) -> Vec<MenuItem> {
     message_menu_items(
         content,
+        None,
         MessageRole::Assistant,
         None,
         None,

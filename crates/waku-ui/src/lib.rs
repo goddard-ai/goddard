@@ -18,6 +18,7 @@ macro_rules! tr {
     };
 }
 
+pub mod clipboard;
 pub mod fonts;
 pub mod host;
 pub mod input;

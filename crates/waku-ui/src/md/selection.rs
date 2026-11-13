@@ -11,9 +11,10 @@
 //! partial in the anchor and head elements, whole for everything between. The
 //! wash paints per element from its span, and copy joins the spans in order.
 //!
-//! This half is pure and gpui-free so it can be unit-tested; the geometry and
-//! mouse listeners live in [`super::render`].
+//! Selection resolution is independent of the window system; the geometry and
+//! mouse listeners live in [`super::render`]. Clipboard export preserves chip data.
 
+use crate::clipboard::{ChipContent, ClipboardAtom};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ops::Range;
@@ -68,6 +69,8 @@ pub struct CopySpec {
     pub suffix: Rc<str>,
     /// (flat byte range, markdown) pairs in document order, non-overlapping.
     pub fragments: Vec<(Range<usize>, Rc<str>)>,
+    /// Fully covered chip ranges can be restored by a composer paste.
+    pub chips: Vec<(Range<usize>, ClipboardAtom)>,
 }
 
 impl CopySpec {
@@ -160,7 +163,7 @@ impl Span {
 }
 
 /// The selection state for one transcript.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Selection {
     /// Element that owns the drag: where the mouse went down.
     anchor: Option<TextKey>,
@@ -357,6 +360,47 @@ impl Selection {
         Some(if whole { self.markdown() } else { self.text() })
     }
 
+    /// Fully selected chips carry typed data; partial chip labels stay text.
+    pub fn clipboard_item(&self) -> Option<gpui::ClipboardItem> {
+        let fallback = self.clipboard_text()?;
+        let whole = self
+            .spans
+            .iter()
+            .any(|span| !span.range.is_empty() && span.covers_element());
+        let mut rich = self.clone();
+        let mut atoms = Vec::new();
+        for span in &mut rich.spans {
+            let mut spec = if whole {
+                (*span.copy).clone()
+            } else {
+                CopySpec::default()
+            };
+            for (range, atom) in &span.copy.chips {
+                if range.start >= span.range.start && range.end <= span.range.end {
+                    spec.fragments.retain(|(fragment, _)| fragment != range);
+                    spec.fragments.push((
+                        range.clone(),
+                        Rc::from(crate::input::INLINE_ATOM_MARKER.to_string()),
+                    ));
+                    atoms.push(atom.clone());
+                }
+            }
+            spec.fragments.sort_by_key(|(range, _)| range.start);
+            span.copy = Rc::new(spec);
+        }
+        let text = rich.markdown();
+        let offsets = text
+            .match_indices(crate::input::INLINE_ATOM_MARKER)
+            .map(|(offset, _)| offset);
+        Some(
+            ChipContent {
+                atoms: offsets.zip(atoms).collect(),
+                text,
+            }
+            .clipboard_item(fallback),
+        )
+    }
+
     /// The selection as markdown, spans joined in document order.
     pub fn markdown(&self) -> String {
         // A grab of exactly one inline code run — backticks on either side
@@ -414,7 +458,7 @@ impl Selection {
 
 /// One painted text element as seen by the current frame. `G` carries whatever
 /// geometry the renderer needs to hit-test it — a `TextLayout` in practice, and
-/// `()` in tests, which keeps this module free of any UI dependency.
+/// `()` in tests, so selection resolution needs no window.
 #[derive(Clone, Debug)]
 pub struct RegisteredText<G = ()> {
     pub key: TextKey,
@@ -1283,6 +1327,7 @@ mod tests {
             copy: Rc::new(CopySpec {
                 prefix: Rc::from("## "),
                 suffix: Rc::default(),
+                chips: Vec::new(),
                 fragments: vec![(2..6, Rc::from("**bold**"))],
             }),
             geometry: (),
@@ -1296,6 +1341,7 @@ mod tests {
             copy: Rc::new(CopySpec {
                 prefix: Rc::from("```rust\n"),
                 suffix: Rc::from("\n```"),
+                chips: Vec::new(),
                 fragments: Vec::new(),
             }),
             geometry: (),
@@ -1321,6 +1367,7 @@ mod tests {
             copy: Rc::new(CopySpec {
                 prefix: Rc::from("## "),
                 suffix: Rc::default(),
+                chips: Vec::new(),
                 fragments: vec![(2..6, Rc::from("**bold**"))],
             }),
             geometry: (),
@@ -1344,6 +1391,7 @@ mod tests {
             copy: Rc::new(CopySpec {
                 prefix: Rc::default(),
                 suffix: Rc::default(),
+                chips: Vec::new(),
                 fragments: vec![(5..12, Rc::from("`make_it`"))],
             }),
             geometry: (),
@@ -1371,6 +1419,7 @@ mod tests {
             copy: Rc::new(CopySpec {
                 prefix: Rc::default(),
                 suffix: Rc::default(),
+                chips: Vec::new(),
                 fragments: vec![(0..3, Rc::from("`` `x` ``"))],
             }),
             geometry: (),
@@ -1392,6 +1441,7 @@ mod tests {
             copy: Rc::new(CopySpec {
                 prefix: Rc::default(),
                 suffix: Rc::default(),
+                chips: Vec::new(),
                 fragments: vec![(0..3, Rc::from("`one`")), (8..11, Rc::from("`two`"))],
             }),
             geometry: (),
@@ -1405,6 +1455,7 @@ mod tests {
             copy: Rc::new(CopySpec {
                 prefix: Rc::default(),
                 suffix: Rc::default(),
+                chips: Vec::new(),
                 fragments: vec![(0..5, Rc::from("`three`"))],
             }),
             geometry: (),
@@ -1430,6 +1481,7 @@ mod tests {
             copy: Rc::new(CopySpec {
                 prefix: Rc::from("## "),
                 suffix: Rc::default(),
+                chips: Vec::new(),
                 fragments: vec![(2..6, Rc::from("**bold**"))],
             }),
             geometry: (),
@@ -1475,6 +1527,7 @@ mod tests {
                 copy: Rc::new(CopySpec {
                     prefix: Rc::from(*prefix),
                     suffix: Rc::default(),
+                    chips: Vec::new(),
                     fragments: Vec::new(),
                 }),
                 geometry: (),
@@ -1513,6 +1566,7 @@ mod tests {
                 copy: Rc::new(CopySpec {
                     prefix: Rc::from(*prefix),
                     suffix: Rc::default(),
+                    chips: Vec::new(),
                     fragments: Vec::new(),
                 }),
                 geometry: (),
@@ -1547,6 +1601,7 @@ mod tests {
                 copy: Rc::new(CopySpec {
                     prefix: Rc::from(*prefix),
                     suffix: Rc::default(),
+                    chips: Vec::new(),
                     fragments: Vec::new(),
                 }),
                 geometry: (),
@@ -1575,6 +1630,7 @@ mod tests {
                 copy: Rc::new(CopySpec {
                     prefix: Rc::from(*prefix),
                     suffix: Rc::default(),
+                    chips: Vec::new(),
                     fragments: Vec::new(),
                 }),
                 geometry: (),

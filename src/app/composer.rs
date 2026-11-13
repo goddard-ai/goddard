@@ -152,6 +152,56 @@ impl ComposerInlineAtom {
         }
     }
 
+    fn clipboard_atom(&self) -> waku_ui::clipboard::ClipboardAtom {
+        use waku_ui::clipboard::ClipboardAtom;
+        match &self.kind {
+            ComposerAtomKind::PastedText(text) => ClipboardAtom::PastedText {
+                text: text.clone(),
+                category: self.paste_category.clone(),
+            },
+            ComposerAtomKind::SessionRef { session_id, title } => ClipboardAtom::SessionRef {
+                session_id: *session_id,
+                title: title.to_string(),
+            },
+            ComposerAtomKind::Ref(reference) => ClipboardAtom::Reference {
+                kind: reference.kind,
+                name: reference.name.to_string(),
+                target: reference.target.to_string(),
+            },
+        }
+    }
+
+    fn from_clipboard(marker: usize, atom: &waku_ui::clipboard::ClipboardAtom) -> Self {
+        use waku_ui::clipboard::ClipboardAtom;
+        let (kind, paste_category) = match atom {
+            ClipboardAtom::PastedText { text, category } => {
+                (ComposerAtomKind::PastedText(text.clone()), category.clone())
+            }
+            ClipboardAtom::SessionRef { session_id, title } => (
+                ComposerAtomKind::SessionRef {
+                    session_id: *session_id,
+                    title: title.clone().into(),
+                },
+                None,
+            ),
+            ClipboardAtom::Reference { kind, name, target } => (
+                ComposerAtomKind::Ref(ComposerRef {
+                    kind: *kind,
+                    name: name.clone().into(),
+                    target: target.clone().into(),
+                    detail: SharedString::default(),
+                }),
+                None,
+            ),
+        };
+        Self {
+            marker,
+            kind,
+            paste_category,
+            revision: Uuid::new_v4(),
+        }
+    }
+
     /// The wire form the sent message carries: the chip label, the payload
     /// an edit splices back, and the task a session chip opens.
     pub(super) fn message_atom(&self) -> waku_protocol::model::MessageAtom {
@@ -3397,7 +3447,7 @@ impl Waku {
         let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
             return;
         };
-        if chat.atoms.is_empty() {
+        if chat.atoms.is_empty() && splice.0.pasted_atoms.is_none() {
             return;
         }
         let composer = chat.composer.clone();
@@ -3878,7 +3928,7 @@ impl Waku {
     /// [`remap_marker_seats`] for the seating rules — then keep the painted
     /// labels in step with the survivors.
     pub(super) fn remap_inline_atoms(&mut self, splice: &ComposerSplice, cx: &mut Context<Self>) {
-        if self.composer_inline_atoms.is_empty() {
+        if self.composer_inline_atoms.is_empty() && splice.0.pasted_atoms.is_none() {
             return;
         }
         // Capture the open paste editor's pre-filter seat — a splice that
@@ -9159,6 +9209,7 @@ fn inline_atom_paints(
             };
             crate::input::InlineAtom {
                 label: SharedString::from(atom.label()),
+                clipboard_atom: Some(atom.clipboard_atom()),
                 copy_text: match &atom.kind {
                     ComposerAtomKind::PastedText(text) => {
                         Some(waku_protocol::model::pasted_text_blockquote(text).into())
@@ -9200,7 +9251,24 @@ fn remap_atoms_for_splice(
         .map(|(index, _)| index)
         .collect();
     let markers = atoms.iter().map(|atom| atom.marker).collect::<Vec<_>>();
-    let seats = remap_marker_seats(&markers, &positions, &splice.0.removed, splice.0.inserted);
+    let seats = if splice.0.pasted_atoms.is_none() {
+        remap_marker_seats(&markers, &positions, &splice.0.removed, splice.0.inserted)
+    } else {
+        // Replacement chips own the inserted markers. Never rebind deleted
+        // atoms to them, even when the old and new offsets happen to match.
+        markers
+            .iter()
+            .map(|marker| {
+                if *marker < splice.0.removed.start {
+                    Some(*marker)
+                } else if *marker >= splice.0.removed.end {
+                    Some(*marker - splice.0.removed.len() + splice.0.inserted)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
     let mut live: Vec<ComposerInlineAtom> = std::mem::take(atoms)
         .into_iter()
         .zip(seats.iter())
@@ -9211,6 +9279,17 @@ fn remap_atoms_for_splice(
             })
         })
         .collect();
+    live.extend(
+        splice
+            .0
+            .pasted_atoms
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|(offset, atom)| {
+                ComposerInlineAtom::from_clipboard(splice.0.removed.start + offset, atom)
+            }),
+    );
     live.sort_by_key(|atom| atom.marker);
     *atoms = live;
     let painted = inline_atom_paints(atoms, planning, avatars);
@@ -9883,6 +9962,24 @@ pub(super) fn atom_marker_content(
     }
     content.push_str(rest);
     (content, seated)
+}
+
+/// Preserve sent chips when copying a whole message, with ordinary text for
+/// applications that do not understand Goddard's clipboard metadata.
+pub(super) fn message_clipboard_item(
+    display: &str,
+    atoms: &[waku_protocol::model::MessageAtom],
+) -> gpui::ClipboardItem {
+    let fallback = waku_protocol::model::message_copy_text(display, atoms);
+    let (text, atoms) = atom_marker_content(display, atoms);
+    waku_ui::clipboard::ChipContent {
+        text,
+        atoms: atoms
+            .iter()
+            .map(|atom| (atom.marker, atom.clipboard_atom()))
+            .collect(),
+    }
+    .clipboard_item(fallback)
 }
 
 /// The composer atom a queued message's span restores: the span's own

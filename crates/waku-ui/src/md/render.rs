@@ -742,6 +742,7 @@ pub fn flatten(
             prefix: Rc::default(),
             suffix: Rc::default(),
             fragments: flat.fragments,
+            chips: Vec::new(),
         }),
     }
 }
@@ -1761,6 +1762,7 @@ pub struct Ctx<'a> {
     /// chat glyph — the planning sessions' compass.
     mention_glyphs: Rc<HashMap<Uuid, &'static str>>,
     now: Instant,
+    pasted_text_payloads: Rc<Vec<waku_protocol::model::MessageAtom>>,
 }
 
 impl<'a> Ctx<'a> {
@@ -1807,6 +1809,7 @@ impl<'a> Ctx<'a> {
             mention_avatars: Rc::default(),
             mention_glyphs: Rc::default(),
             now: Instant::now(),
+            pasted_text_payloads: Rc::default(),
         }
     }
 
@@ -1820,6 +1823,14 @@ impl<'a> Ctx<'a> {
 
     pub fn with_link_handler(mut self, handler: LinkHandler) -> Self {
         self.link_handler = Some(handler);
+        self
+    }
+
+    pub fn with_pasted_text_payloads(
+        mut self,
+        atoms: Rc<Vec<waku_protocol::model::MessageAtom>>,
+    ) -> Self {
+        self.pasted_text_payloads = atoms;
         self
     }
 
@@ -2028,6 +2039,7 @@ impl<'a> Ctx<'a> {
             mention_avatars: self.mention_avatars.clone(),
             mention_glyphs: self.mention_glyphs.clone(),
             now: Instant::now(),
+            pasted_text_payloads: self.pasted_text_payloads.clone(),
         }
     }
 
@@ -2064,14 +2076,33 @@ impl<'a> Ctx<'a> {
     /// `> ## Title`.
     fn copy_spec(&self, flat: &Rc<FlatText>) -> Rc<CopySpec> {
         let container = self.copy_lead.take().or_else(|| self.copy_margin());
-        match container {
-            None => flat.copy.clone(),
-            Some(prefix) => {
-                let mut spec = (*flat.copy).clone();
-                spec.prefix = Rc::from(format!("{prefix}{}", spec.prefix));
-                Rc::new(spec)
-            }
+        let chips: Vec<_> = flat
+            .links
+            .iter()
+            .filter_map(|(range, url)| {
+                let index = url
+                    .strip_prefix(PASTED_TEXT_LINK_PREFIX)?
+                    .parse::<usize>()
+                    .ok()?;
+                let atom = self.pasted_text_payloads.get(index)?;
+                Some((
+                    range.clone(),
+                    crate::clipboard::ClipboardAtom::PastedText {
+                        text: atom.payload.clone(),
+                        category: None,
+                    },
+                ))
+            })
+            .collect();
+        if container.is_none() && chips.is_empty() {
+            return flat.copy.clone();
         }
+        let mut spec = (*flat.copy).clone();
+        if let Some(prefix) = container {
+            spec.prefix = Rc::from(format!("{prefix}{}", spec.prefix));
+        }
+        spec.chips = chips;
+        Rc::new(spec)
     }
 
     /// Flatten through the cache when one is wired: a settled block reuses its
@@ -3487,6 +3518,7 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
                     prefix: Rc::from("$$"),
                     suffix: Rc::from("$$"),
                     fragments: Vec::new(),
+                    chips: Vec::new(),
                 });
                 flat
             });
@@ -3904,6 +3936,7 @@ fn render_code_block_toned(
                 prefix: Rc::from(format!("```{}\n", language.unwrap_or(""))),
                 suffix: Rc::from("\n```"),
                 fragments: Vec::new(),
+                chips: Vec::new(),
             }),
         }
     });
@@ -4773,6 +4806,84 @@ mod tests {
                 ("gone".to_owned(), "~~gone~~".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn transcript_paste_chip_selection_keeps_its_payload() {
+        use crate::clipboard::{ChipContent, ClipboardAtom};
+        use waku_protocol::model::{MESSAGE_ATOM_END as E, MESSAGE_ATOM_OPEN as O, MessageAtom};
+        let mut view = MarkdownView::new();
+        view.set_transcript_text_with_atom_links(
+            &format!("before {O}Pasted text{E} after"),
+            false,
+            true,
+            true,
+        );
+        let colors = palette();
+        let flat = Rc::new(flatten(
+            &runs_of(view.parser.text()),
+            &colors,
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            colors.text,
+            &[],
+        ));
+        let ctx = Ctx::new(
+            "message",
+            &colors,
+            Metrics::USER_MESSAGE,
+            TranscriptSelection::default(),
+        )
+        .with_pasted_text_payloads(Rc::new(vec![MessageAtom {
+            label: "Pasted text".into(),
+            payload: "tiny".into(),
+            session_id: None,
+        }]));
+        let cached = ctx.with_cache(&view);
+        let copy = cached.copy_spec(&flat);
+        let mut selection = super::super::selection::Selection::default();
+        selection.begin_with_span(
+            TextKey::new("message", 0),
+            Rc::from(flat.text.as_ref()),
+            0..flat.text.len(),
+            copy.clone(),
+        );
+        let rich = ChipContent::from_clipboard(&selection.clipboard_item().unwrap()).unwrap();
+        assert_eq!(
+            rich.text,
+            format!("before {} after", crate::input::INLINE_ATOM_MARKER)
+        );
+        assert_eq!(
+            rich.atoms,
+            vec![(
+                7,
+                ClipboardAtom::PastedText {
+                    text: "tiny".into(),
+                    category: None
+                }
+            )]
+        );
+        let chip = &copy.chips[0].0;
+        selection.begin_with_span(
+            TextKey::new("message", 0),
+            Rc::from(flat.text.as_ref()),
+            chip.clone(),
+            copy.clone(),
+        );
+        assert_eq!(
+            ChipContent::from_clipboard(&selection.clipboard_item().unwrap())
+                .unwrap()
+                .atoms
+                .len(),
+            1
+        );
+        selection.begin_with_span(
+            TextKey::new("message", 0),
+            Rc::from(flat.text.as_ref()),
+            chip.start..chip.start + flat.text[chip.start..].chars().next().unwrap().len_utf8(),
+            copy,
+        );
+        assert!(ChipContent::from_clipboard(&selection.clipboard_item().unwrap()).is_none());
     }
 
     #[test]

@@ -1,0 +1,1 @@
+- Copy or cut reference and pasted-text chips between tasks without losing their chip form; pasted-text chips copied from transcript messages also stay collapsed when pasted into the composer.
