@@ -6,7 +6,7 @@ use std::io::{self, Read, Write};
 use std::process::{ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::command_env::{BoundedChild, Proc};
 
@@ -107,6 +107,34 @@ pub fn capture(
     options: CaptureOptions,
     input: Option<&[u8]>,
 ) -> Result<CapturedOutput, CaptureError> {
+    capture_inner(command, options, input, None)
+}
+
+/// Cancellation includes permit admission, owned descendants, and pipe cleanup.
+/// A cancelled call never returns successful output or leaves a child running.
+pub fn capture_cancellable(
+    command: &mut Proc,
+    options: CaptureOptions,
+    input: Option<&[u8]>,
+    cancellation: &AtomicBool,
+) -> Result<CapturedOutput, CaptureError> {
+    capture_inner(command, options, input, Some(cancellation))
+}
+
+fn check_cancellation(cancellation: Option<&AtomicBool>) -> Result<(), CaptureError> {
+    if cancellation.is_some_and(|cancelled| cancelled.load(Ordering::Acquire)) {
+        return Err(io::Error::new(io::ErrorKind::Interrupted, "process capture cancelled").into());
+    }
+    Ok(())
+}
+
+fn capture_inner(
+    command: &mut Proc,
+    options: CaptureOptions,
+    input: Option<&[u8]>,
+    external_cancellation: Option<&AtomicBool>,
+) -> Result<CapturedOutput, CaptureError> {
+    check_cancellation(external_cancellation)?;
     #[cfg(unix)]
     command.process_group(0);
     command
@@ -117,7 +145,12 @@ pub fn capture(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut owned_child = ReapChild(command.spawn_bounded_until(options.deadline)?);
+    let mut owned_child = ReapChild(match external_cancellation {
+        Some(cancellation) => {
+            command.spawn_bounded_cancellable_until(options.deadline, cancellation)?
+        }
+        None => command.spawn_bounded_until(options.deadline)?,
+    });
     let child = &mut owned_child.0;
     #[cfg(windows)]
     let process_tree = match windows::ProcessTree::attach(child.child_mut()) {
@@ -230,18 +263,23 @@ pub fn capture(
         let mut stderr = None;
         let mut input_done = input.is_none();
         while !exited || stdout.is_none() || stderr.is_none() || !input_done {
+            check_cancellation(external_cancellation)?;
             let remaining = options.deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return Err(CaptureError::Deadline);
             }
-            let event = receiver
-                .recv_timeout(remaining)
-                .map_err(|error| match error {
-                    mpsc::RecvTimeoutError::Timeout => CaptureError::Deadline,
-                    mpsc::RecvTimeoutError::Disconnected => {
-                        CaptureError::Io(io::Error::other("process capture worker disconnected"))
-                    }
-                })?;
+            let wait = if external_cancellation.is_some() {
+                remaining.min(Duration::from_millis(10))
+            } else {
+                remaining
+            };
+            let event = match receiver.recv_timeout(wait) {
+                Ok(event) => event,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(io::Error::other("process capture worker disconnected").into());
+                }
+            };
             match event {
                 Event::Exited(result) => {
                     result?;
@@ -255,6 +293,7 @@ pub fn capture(
                 }
             }
         }
+        check_cancellation(external_cancellation)?;
         cleanup.armed = false;
         let stdout = stdout.expect("stdout completed");
         let stderr = stderr.expect("stderr completed");
@@ -550,6 +589,71 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_reaps_descendants_and_unblocks_capture_workers() {
+        for parent_exits in [false, true] {
+            let pid_file = std::env::temp_dir().join(format!(
+                "goddard-capture-cancel-{}.pid",
+                uuid::Uuid::new_v4()
+            ));
+            let cancellation = AtomicBool::new(false);
+            let mut command = crate::command_env::plain_command("/bin/sh");
+            command
+                .args([
+                    "-c",
+                    if parent_exits {
+                        "sleep 30 & printf '%s' \"$!\" > \"$1\""
+                    } else {
+                        "sleep 30 & printf '%s' \"$!\" > \"$1\"; wait"
+                    },
+                    "capture-cancel-test",
+                ])
+                .arg(&pid_file);
+            let input = vec![b'x'; 1024 * 1024];
+            let (error, signalled) = std::thread::scope(|scope| {
+                let signal = scope.spawn(|| {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while std::fs::read_to_string(&pid_file)
+                        .ok()
+                        .and_then(|value| value.parse::<u32>().ok())
+                        .is_none()
+                        && Instant::now() < deadline
+                    {
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    let signalled = Instant::now();
+                    cancellation.store(true, Ordering::Release);
+                    signalled
+                });
+                let error = capture_cancellable(
+                    &mut command,
+                    options(OutputLimit::Exact(1024)),
+                    (!parent_exits).then_some(input.as_slice()),
+                    &cancellation,
+                )
+                .unwrap_err();
+                (error, signal.join().unwrap())
+            });
+            assert!(
+                matches!(error, CaptureError::Io(ref error) if error.kind() == io::ErrorKind::Interrupted)
+            );
+            assert!(signalled.elapsed() < Duration::from_secs(1));
+            let pid = std::fs::read_to_string(&pid_file).unwrap();
+            pid.parse::<u32>()
+                .expect("the child published its actual PID");
+            std::fs::remove_file(pid_file).unwrap();
+            let status = std::process::Command::new("/bin/ps")
+                .args(["-o", "stat=", "-p", &pid])
+                .output()
+                .unwrap();
+            let status = String::from_utf8_lossy(&status.stdout);
+            assert!(
+                status.trim().is_empty() || status.trim_start().starts_with('Z'),
+                "descendant survived: {status}"
+            );
+        }
+    }
+
+    #[test]
     fn deadline_stops_descendants_holding_pipes_after_the_parent_exits() {
         let pid_file =
             std::env::temp_dir().join(format!("goddard-capture-{}.pid", uuid::Uuid::new_v4()));
@@ -567,6 +671,8 @@ mod tests {
         assert!(matches!(error, CaptureError::Deadline));
         assert!(started.elapsed() < Duration::from_secs(3));
         let pid = std::fs::read_to_string(&pid_file).unwrap();
+        pid.parse::<u32>()
+            .expect("the child published its actual PID");
         std::fs::remove_file(pid_file).unwrap();
         let status = std::process::Command::new("/bin/ps")
             .args(["-o", "stat=", "-p", &pid])

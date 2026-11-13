@@ -503,6 +503,7 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
             cwd,
             session_id,
             turn_count,
+            history_generation: _,
         } => {
             crate::checkpoint::capture_turn_start(&cwd, session_id, turn_count)?;
             WorkspaceResult::Ack
@@ -512,6 +513,7 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
             session_id,
             turn_count,
             untouched,
+            identity: _,
         } => WorkspaceResult::Checkpoint {
             checkpoint: if untouched {
                 crate::checkpoint::capture_untouched_turn(&cwd, session_id, turn_count)?

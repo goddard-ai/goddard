@@ -181,7 +181,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const entries = useRef(new Map<string, RuntimeEntry>())
   const attachRequests = useRef(new Map<string, Promise<boolean>>())
   const persistenceTails = useRef(new Map<string, Promise<AgentSession>>())
-  const checkpointCaptures = useRef(new Map<string, Promise<AgentSession>>())
+  const checkpointCaptures = useRef(new Map<string, {
+    turnId: string | null
+    historyGeneration: number
+    operation: Promise<AgentSession>
+  }>())
   const projectionPersistTimers = useRef(new Map<string, number>())
   const saveGenerations = useRef(new Map<string, number>())
   const sendPromptRef = useRef<RuntimeContextValue['sendPrompt'] | null>(null)
@@ -365,8 +369,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
       }
 
+      const beforeSave = queryClient.getQueryData<AgentSession>(daemonKeys.session(config.address, settled.id))
       let saved = await persistOrdered(settled)
+      const current = queryClient.getQueryData<AgentSession>(daemonKeys.session(config.address, settled.id))
+      if (current && current !== beforeSave) saved = current
       cacheSession(saved)
+      if ((saved.history_generation ?? 0) !== (settled.history_generation ?? 0)) return saved
       const turn = [...saved.turns]
         .reverse()
         .find((candidate) => candidate.status !== 'running' && !candidate.checkpoint)
@@ -378,7 +386,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const project = taskState.projects.find((candidate) => candidate.id === saved.project_id)
       if (!project) return saved
 
+      const identity = { turn_id: turn.id, history_generation: saved.history_generation ?? 0 }
       let checkpoint: NonNullable<AgentSession['turns'][number]['checkpoint']>
+      let captureError: unknown
       try {
         checkpoint = await captureTurnCheckpoint(
           client,
@@ -392,11 +402,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               activity.kind === 'fileChange' || activity.kind === 'tool',
             ),
           ),
+          identity,
         )
       } catch (error) {
-        toast.error(translate(localeRef.current, 'errors.capture_turn_checkpoint', {
-          error: errorMessage(error),
-        }))
+        captureError = error
         checkpoint = {
           turn_count: turn.turn_count,
           git_ref: `refs/waku/session-${saved.id}-turn-${turn.turn_count}`,
@@ -411,12 +420,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const latest = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(config.address, saved.id),
       ) ?? saved
-      if (!latest.turns.some((candidate) => candidate.turn_count === turn.turn_count)) {
+      if ((latest.history_generation ?? 0) !== identity.history_generation
+        || !latest.turns.some((candidate) => candidate.id === identity.turn_id)) {
         return latest
+      }
+      if (captureError) {
+        toast.error(translate(localeRef.current, 'errors.capture_turn_checkpoint', {
+          error: errorMessage(captureError),
+        }))
       }
       saved = {
         ...latest,
-        turns: latest.turns.map((candidate) => candidate.turn_count === turn.turn_count
+        turns: latest.turns.map((candidate) => candidate.id === identity.turn_id
           ? { ...candidate, checkpoint }
           : candidate),
       }
@@ -428,12 +443,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   const finishSettledTurn = useCallback(
     (settled: AgentSession) => {
-      if (checkpointCaptures.current.has(settled.id)) return
+      const turnId = [...settled.turns].reverse()
+        .find((turn) => turn.status !== 'running' && !turn.checkpoint)?.id ?? null
+      const historyGeneration = settled.history_generation ?? 0
+      const pending = checkpointCaptures.current.get(settled.id)
+      if (pending?.turnId === turnId && pending?.historyGeneration === historyGeneration) return
       const operation = finalizeSettledTurn(settled)
-      checkpointCaptures.current.set(settled.id, operation)
+      checkpointCaptures.current.set(settled.id, { turnId, historyGeneration, operation })
       void operation
         .then(async (saved) => {
-          if (checkpointCaptures.current.get(saved.id) !== operation) return
+          if (checkpointCaptures.current.get(saved.id)?.operation !== operation) return
           // Release the checkpoint gate before starting the queued turn. The
           // next send must become a real turn instead of queueing itself again.
           checkpointCaptures.current.delete(saved.id)
@@ -470,7 +489,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         })
         .catch((error) => toast.error(errorMessage(error)))
         .finally(() => {
-          if (checkpointCaptures.current.get(settled.id) === operation) {
+          if (checkpointCaptures.current.get(settled.id)?.operation === operation) {
             checkpointCaptures.current.delete(settled.id)
           }
         })
@@ -787,7 +806,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         currentSession.status === 'connecting' ||
         currentSession.status === 'working' ||
         currentSession.status === 'waiting' ||
-        checkpointCaptures.current.has(currentSession.id)
+        checkpointCaptures.current.get(currentSession.id)?.historyGeneration === (currentSession.history_generation ?? 0)
       ) {
         const queued = queueSubmission(currentSession, prompt, providerPrompt, attachments, hidden)
         cacheSession(queued)
@@ -850,14 +869,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         }
 
         session = await materializeWorktree(client, session, project)
-        const turnCount = session.turns.at(-1)?.turn_count
-        if (turnCount !== undefined) {
+        const checkpointTurn = session.turns.at(-1)
+        if (checkpointTurn) {
           try {
             await captureTurnStart(
               client,
               sessionCwd(session, project),
               session.id,
-              turnCount,
+              checkpointTurn.turn_count,
+              session.history_generation ?? 0,
             )
           } catch (error) {
             toast.error(translate(localeRef.current, 'errors.capture_pre_turn_checkpoint', {
@@ -1376,7 +1396,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       if (pendingPersistence) await pendingPersistence.catch(() => undefined)
       const pendingCheckpoint = checkpointCaptures.current.get(sessionId)
       checkpointCaptures.current.delete(sessionId)
-      if (pendingCheckpoint) await pendingCheckpoint.catch(() => undefined)
+      if (pendingCheckpoint) await pendingCheckpoint.operation.catch(() => undefined)
       persistenceTails.current.delete(sessionId)
       saveGenerations.current.delete(sessionId)
       pendingSteers.current.delete(sessionId)

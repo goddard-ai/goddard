@@ -24,6 +24,7 @@ import type {
   ReviewDiffSource,
   ResponsePayload,
   RuntimeMode,
+  TurnCheckpointIdentity,
   SessionMessageMatch,
   SlashCommand,
   SkillsCatalog,
@@ -404,12 +405,14 @@ export async function captureTurnStart(
   cwd: string,
   sessionId: string,
   turnCount: number,
+  historyGeneration: number,
 ): Promise<void> {
   const result = await workspaceRequest(client, {
     type: 'captureTurnStart',
     cwd,
     session_id: sessionId,
     turn_count: turnCount,
+    history_generation: historyGeneration,
   })
   if (result.type !== 'ack') {
     throw new Error('The daemon returned an unexpected checkpoint response')
@@ -422,6 +425,7 @@ export async function captureTurnCheckpoint(
   sessionId: string,
   turnCount: number,
   untouched: boolean,
+  identity: TurnCheckpointIdentity,
 ): Promise<Checkpoint> {
   const result = await workspaceRequest(client, {
     type: 'captureTurn',
@@ -429,6 +433,7 @@ export async function captureTurnCheckpoint(
     session_id: sessionId,
     turn_count: turnCount,
     untouched,
+    identity,
   })
   if (result.type !== 'checkpoint') {
     throw new Error('The daemon returned an unexpected checkpoint response')

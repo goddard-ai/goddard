@@ -1256,17 +1256,23 @@ impl Waku {
                             }
                             if applied
                                 && let Some(turn_count) = interrupted_turn
-                                && let Some(project_path) = waku
+                                && let Some(session) = waku
                                     .state
                                     .sessions
                                     .iter()
                                     .find(|session| session.id == session_id)
-                                    .and_then(|session| waku.workspace_path_for_session(session))
+                                && let Some(identity) =
+                                    waku_protocol::TurnCheckpointIdentity::for_turn(
+                                        session, turn_count,
+                                    )
+                                && let Some(project_path) = waku
+                                    .workspace_path_for_session(session)
                                     .map(Path::to_path_buf)
                             {
                                 waku.pending_checkpoint_captures
                                     .push(PendingCheckpointCapture {
                                         session_id,
+                                        identity,
                                         turn_count,
                                         project_path,
                                         untouched: false,

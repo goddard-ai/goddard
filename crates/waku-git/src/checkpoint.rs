@@ -1,12 +1,13 @@
 //! Daemon-owned Git checkpoint capture and restoration.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -49,6 +50,30 @@ struct CheckpointIndexState {
 
 thread_local! {
     static TURN_CAPTURE_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+    static TURN_CAPTURE_CANCELLATION: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+}
+
+struct CaptureCancellationScope(Option<Arc<AtomicBool>>);
+
+impl Drop for CaptureCancellationScope {
+    fn drop(&mut self) {
+        TURN_CAPTURE_CANCELLATION.with(|current| *current.borrow_mut() = self.0.take());
+    }
+}
+
+/// Interrupt background capture before a user action mutates shared turn refs.
+pub fn with_capture_cancellation<T>(
+    cancellation: Arc<AtomicBool>,
+    capture: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let previous = TURN_CAPTURE_CANCELLATION.with(|current| current.replace(Some(cancellation)));
+    let _scope = CaptureCancellationScope(previous);
+    with_turn_capture_deadline(|| {
+        remaining_capture_time()?;
+        let result = capture();
+        remaining_capture_time()?;
+        result
+    })
 }
 
 #[derive(Debug)]
@@ -94,6 +119,14 @@ fn with_capture_deadline<T>(
 }
 
 pub fn remaining_capture_time() -> anyhow::Result<Option<Duration>> {
+    if TURN_CAPTURE_CANCELLATION.with(|current| {
+        current
+            .borrow()
+            .as_ref()
+            .is_some_and(|cancelled| cancelled.load(Ordering::Acquire))
+    }) {
+        anyhow::bail!("turn checkpoint capture superseded by a workspace change");
+    }
     TURN_CAPTURE_DEADLINE.with(|deadline| {
         let Some(deadline) = deadline.get() else {
             return Ok(None);
@@ -110,11 +143,16 @@ pub fn remaining_capture_time() -> anyhow::Result<Option<Duration>> {
 pub fn lock_capture_mutex<'a, T: ?Sized>(
     lock: &'a Mutex<T>,
 ) -> anyhow::Result<parking_lot::MutexGuard<'a, T>> {
-    match remaining_capture_time()? {
-        Some(timeout) => lock
-            .try_lock_for(timeout)
-            .ok_or_else(|| TurnCaptureDeadlineExceeded.into()),
-        None => Ok(lock.lock()),
+    loop {
+        match remaining_capture_time()? {
+            Some(timeout) => {
+                if let Some(guard) = lock.try_lock_for(timeout.min(Duration::from_millis(10))) {
+                    remaining_capture_time()?;
+                    return Ok(guard);
+                }
+            }
+            None => return Ok(lock.lock()),
+        }
     }
 }
 
@@ -1640,7 +1678,14 @@ fn timed_git_input_output(
     } else {
         crate::process::OutputLimit::Exact(crate::process::MAX_METADATA_BYTES)
     };
-    let output = match crate::process::output(command, deadline, stdout, input) {
+    let cancellation = TURN_CAPTURE_CANCELLATION.with(|current| current.borrow().clone());
+    let output = match crate::process::output_cancellable(
+        command,
+        deadline,
+        stdout,
+        input,
+        cancellation.as_deref(),
+    ) {
         Ok(output) => output,
         Err(crate::process::CaptureError::Deadline) if remaining.is_some() => {
             return Err(TurnCaptureDeadlineExceeded.into());

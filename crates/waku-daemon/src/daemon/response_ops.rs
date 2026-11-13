@@ -170,6 +170,14 @@ impl WakuBackend {
             .and_then(|index| source.turns.get(index))
             .and_then(|turn| turn.provider_resume_at.clone());
 
+        let capture_lane = self.checkpoint_capture_lane(&cwd)?;
+        let _checkpoint_mutation = capture_lane.preempt();
+        if let Some(cancellation) = cancellation.filter(|cancellation| cancellation.is_cancelled())
+        {
+            cancellation.settle_operation();
+            bail!("rewind stopped before changing worktree checkpoints");
+        }
+
         let turn_start_ref = crate::checkpoint::turn_start_ref(session_id, turn_count);
         let retained_ref = crate::checkpoint::checkpoint_ref(session_id, retained_turn_count);
         let restore_ref = if crate::checkpoint::has_ref(&cwd, &turn_start_ref) {

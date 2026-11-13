@@ -104,8 +104,8 @@ pub use workspace::{
     IssueStateReason, IssueSummary, NotificationPoll, NotificationReason, NotificationSubjectType,
     NotificationThread, PullRequestCheck, PullRequestCheckStatus, PullRequestCommit,
     PullRequestDetail, PullRequestFile, PullRequestReviewComment, PullRequestReviewDecision,
-    PullRequestState, PullRequestSummary, RepoBranch, RepoWorktree, WorkItemComment, WorkItemKind,
-    WorkItemQueryState, WorkspaceOperation, WorkspaceResult,
+    PullRequestState, PullRequestSummary, RepoBranch, RepoWorktree, TurnCheckpointIdentity,
+    WorkItemComment, WorkItemKind, WorkItemQueryState, WorkspaceOperation, WorkspaceResult,
 };
 
 pub mod sidebar_intent;

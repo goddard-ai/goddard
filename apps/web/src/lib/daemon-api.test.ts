@@ -124,7 +124,7 @@ describe('turn checkpoints', () => {
       },
     } as unknown as WakuClient
 
-    await expect(captureTurnStart(client, '/srv/waku', 'session', 2)).resolves.toBeUndefined()
+    await expect(captureTurnStart(client, '/srv/waku', 'session', 2, 3)).resolves.toBeUndefined()
     expect(command).toEqual({
       type: 'workspace',
       operation: {
@@ -132,6 +132,7 @@ describe('turn checkpoints', () => {
         cwd: '/srv/waku',
         session_id: 'session',
         turn_count: 2,
+        history_generation: 3,
       },
     })
   })
@@ -154,7 +155,7 @@ describe('turn checkpoints', () => {
       },
     } as unknown as WakuClient
 
-    await expect(captureTurnCheckpoint(client, '/srv/waku', 'session', 2, false))
+    await expect(captureTurnCheckpoint(client, '/srv/waku', 'session', 2, false, { turn_id: 'turn-uuid', history_generation: 3 }))
       .resolves.toEqual(checkpoint)
     expect(command).toEqual({
       type: 'workspace',
@@ -164,6 +165,7 @@ describe('turn checkpoints', () => {
         session_id: 'session',
         turn_count: 2,
         untouched: false,
+        identity: { turn_id: 'turn-uuid', history_generation: 3 },
       },
     })
   })

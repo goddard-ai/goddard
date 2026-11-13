@@ -1284,11 +1284,13 @@ mod tests {
                 cwd: cwd.clone(),
                 session_id,
                 turn_count: 1,
+                history_generation: None,
             },
             WorkspaceOperation::CaptureTurn {
                 cwd: cwd.clone(),
                 session_id,
                 turn_count: 1,
+                identity: None,
                 untouched: false,
             },
             WorkspaceOperation::CreateWorktree {

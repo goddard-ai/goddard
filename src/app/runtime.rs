@@ -756,6 +756,7 @@ pub(super) fn prepare_submission(
     task_registration: Option<AgentSession>,
     session_id: Uuid,
     turn_count: usize,
+    history_generation: u64,
     sync_default_branch: bool,
     sync_branches: Vec<String>,
     capture_checkpoints: bool,
@@ -913,6 +914,7 @@ pub(super) fn prepare_submission(
                 cwd: project_path.to_path_buf(),
                 session_id,
                 turn_count,
+                history_generation: Some(history_generation),
             },
         )
         .err()
@@ -4380,6 +4382,7 @@ impl Waku {
             .collect::<HashMap<_, _>>();
         let detail_current = !self.stale_task_details.contains(&session_id);
         let capture_checkpoints = self.session_captures_git_checkpoints(session_id);
+
         let mut checkpoint = None;
         if let Some(session) = self.state.session_mut(session_id) {
             if !session.status.is_busy() {
@@ -4406,11 +4409,16 @@ impl Waku {
                         .path()
                         .map(Path::to_path_buf)
                         .or_else(|| project_paths.get(&session.project_id).cloned());
-                    checkpoint = project_path.map(|project_path| PendingCheckpointCapture {
-                        session_id,
-                        turn_count,
-                        project_path,
-                        untouched: false,
+                    checkpoint = project_path.and_then(|project_path| {
+                        waku_protocol::TurnCheckpointIdentity::for_turn(session, turn_count).map(
+                            |identity| PendingCheckpointCapture {
+                                session_id,
+                                identity,
+                                turn_count,
+                                project_path,
+                                untouched: false,
+                            },
+                        )
                     });
                 }
             }
@@ -5442,12 +5450,23 @@ impl Waku {
     }
 
     fn checkpoint_capture_pending(&self, session_id: Uuid, turn_count: usize) -> bool {
+        let Some(identity) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| {
+                waku_protocol::TurnCheckpointIdentity::for_turn(session, turn_count)
+            })
+        else {
+            return false;
+        };
         self.checkpoint_captures_in_flight
-            .contains(&(session_id, turn_count))
+            .contains(&(session_id, identity))
             || self
                 .pending_checkpoint_captures
                 .iter()
-                .any(|capture| capture.session_id == session_id && capture.turn_count == turn_count)
+                .any(|capture| capture.session_id == session_id && capture.identity == identity)
     }
 
     /// The settled last turn whose checkpoint capture is still queued or in
@@ -5563,6 +5582,10 @@ impl Waku {
         self.pending_checkpoint_captures
             .push(PendingCheckpointCapture {
                 session_id,
+                identity: waku_protocol::TurnCheckpointIdentity {
+                    turn_id: turn.id,
+                    history_generation: session.history_generation,
+                },
                 turn_count,
                 project_path,
                 untouched: session.detail_loaded
@@ -5586,14 +5609,15 @@ impl Waku {
     /// Runs queued turn checkpoints on the background executor.
     ///
     /// A capture lands a frame or many later, and the turn it belongs to may be
-    /// gone by then, so the result is matched back by turn count rather than
-    /// position. Only a queued send waits on it: the transcript's rewind
+    /// gone by then, so the result is matched by turn UUID and history
+    /// generation. Only a queued send waits on it: the transcript's rewind
     /// affordance appears when `invalidate_checkpoint_refs` prompts the next
     /// prefetch to notice the new ref.
     pub(super) fn start_pending_checkpoint_captures(&mut self, cx: &mut Context<Self>) {
         for request in std::mem::take(&mut self.pending_checkpoint_captures) {
             let PendingCheckpointCapture {
                 session_id,
+                identity,
                 turn_count,
                 project_path,
                 untouched,
@@ -5606,7 +5630,7 @@ impl Waku {
             };
             if !self
                 .checkpoint_captures_in_flight
-                .insert((session_id, turn_count))
+                .insert((session_id, identity))
             {
                 continue;
             }
@@ -5622,6 +5646,7 @@ impl Waku {
                                     session_id,
                                     turn_count,
                                     untouched,
+                                    identity: Some(identity),
                                 },
                             )? {
                                 waku_client::WorkspaceResult::Checkpoint { checkpoint } => {
@@ -5636,7 +5661,22 @@ impl Waku {
                     .await;
                 waku.update(cx, |waku, cx| {
                     waku.checkpoint_captures_in_flight
-                        .remove(&(session_id, turn_count));
+                        .remove(&(session_id, identity));
+                    if waku
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .and_then(|session| {
+                            waku_protocol::TurnCheckpointIdentity::for_turn(session, turn_count)
+                        })
+                        != Some(identity)
+                    {
+                        // An old result must not attach even an Error card to a reused turn.
+                        waku.drain_pending_workspace_cleanups(cx);
+                        cx.notify();
+                        return;
+                    }
                     let selected = waku.state.selected_session == Some(session_id);
                     if selected {
                         waku.sync_transcript_rows();
@@ -5667,7 +5707,7 @@ impl Waku {
                         && let Some(turn) = session
                             .turns
                             .iter_mut()
-                            .find(|turn| turn.turn_count == turn_count)
+                            .find(|turn| turn.id == identity.turn_id)
                     {
                         turn.checkpoint = Some(checkpoint);
                         attached_turn_id = Some(turn.id);
@@ -6862,6 +6902,12 @@ impl Waku {
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
         let capture_checkpoints = self.session_captures_git_checkpoints(session_id);
+        let checkpoint_generation = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map_or(0, |session| session.history_generation);
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()
@@ -6876,6 +6922,7 @@ impl Waku {
                         None,
                         session_id,
                         next_turn_count,
+                        checkpoint_generation,
                         sync_default_branch,
                         sync_branches,
                         capture_checkpoints,
@@ -8810,6 +8857,12 @@ impl Waku {
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
         let capture_checkpoints = self.session_captures_git_checkpoints(session_id);
+        let checkpoint_generation = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map_or(0, |session| session.history_generation);
         // Incognito transcripts have no durable row after a daemon restart.
         // Existing persisted tasks already have a view baseline; only first
         // turns and incognito restarts need this startup registration.
@@ -8835,6 +8888,7 @@ impl Waku {
                         task_registration,
                         session_id,
                         next_turn_count,
+                        checkpoint_generation,
                         sync_default_branch,
                         sync_branches,
                         capture_checkpoints,
@@ -10250,6 +10304,7 @@ mod workspace_recovery_tests {
             None,
             session_id,
             2,
+            0,
             false,
             Vec::new(),
             false,

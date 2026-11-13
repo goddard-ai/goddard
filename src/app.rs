@@ -1115,6 +1115,7 @@ enum SidebarDockMotion {
 /// A turn whose checkpoint still has to be captured.
 struct PendingCheckpointCapture {
     session_id: Uuid,
+    identity: waku_protocol::TurnCheckpointIdentity,
     turn_count: usize,
     project_path: PathBuf,
     untouched: bool,
@@ -4382,8 +4383,8 @@ pub struct Waku {
     pending_checkpoint_captures: Vec<PendingCheckpointCapture>,
     /// The (session, turn) captures currently running, so a repeated request —
     /// a turn that finishes while its own capture is still going — does not
-    /// fork a second `git add -A` over the same worktree.
-    checkpoint_captures_in_flight: HashSet<(Uuid, usize)>,
+    /// fork a second `git add -A`. A reused count after rewind is a new identity.
+    checkpoint_captures_in_flight: HashSet<(Uuid, waku_protocol::TurnCheckpointIdentity)>,
     /// Clock for the idle-session sweep, so the check costs one comparison per
     /// frame instead of a scan.
     last_idle_session_sweep: Instant,
@@ -6305,6 +6306,8 @@ impl Waku {
             // `git` invocations each — paid here, before the window has drawn
             // once. Queue them and let the first frames go out first.
             if let Some(turn_count) = interrupted_turn
+                && let Some(identity) =
+                    waku_protocol::TurnCheckpointIdentity::for_turn(session, turn_count)
                 && let Some(project_path) = session
                     .workspace
                     .path()
@@ -6313,6 +6316,7 @@ impl Waku {
             {
                 interrupted_turn_checkpoints.push(PendingCheckpointCapture {
                     session_id: session.id,
+                    identity,
                     turn_count,
                     project_path,
                     untouched: false,

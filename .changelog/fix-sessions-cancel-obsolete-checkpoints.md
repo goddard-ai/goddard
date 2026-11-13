@@ -1,0 +1,1 @@
+- Rewinding a task cancels older background change checks and prevents their late results from attaching to replacement turns.

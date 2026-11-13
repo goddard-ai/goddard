@@ -402,6 +402,7 @@ export type { TransferDirection } from "./TransferDirection";
 export type { TransferInfo } from "./TransferInfo";
 export type { TransferManifestEntry } from "./TransferManifestEntry";
 export type { TransferStatus } from "./TransferStatus";
+export type { TurnCheckpointIdentity } from "./TurnCheckpointIdentity";
 export type { TurnInterruption } from "./TurnInterruption";
 export type { TurnStatus } from "./TurnStatus";
 export type { UpstreamStatus } from "./UpstreamStatus";

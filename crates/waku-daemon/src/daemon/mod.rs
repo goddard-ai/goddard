@@ -551,7 +551,7 @@ pub struct WakuBackend {
     /// account, so a second call while a redemption is in flight is a
     /// double-click, not a second spend.
     codex_reset_credit_lock: Mutex<()>,
-    checkpoint_capture_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
+    checkpoint_capture_locks: Mutex<HashMap<PathBuf, Arc<lifecycle::CheckpointCaptureLane>>>,
     checkout_history: checkout_history::CheckoutHistoryCache,
     /// Scoped agent credentials, per-session prompt queues, and the live
     /// turn bookkeeping the runtime event forwarder maintains. `pub(crate)`

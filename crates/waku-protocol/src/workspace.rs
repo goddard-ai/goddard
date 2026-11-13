@@ -659,6 +659,27 @@ impl ProjectFilesListing {
     }
 }
 
+/// A checkpoint belongs to one incarnation of a turn, never its reused number.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
+pub struct TurnCheckpointIdentity {
+    pub turn_id: Uuid,
+    #[ts(type = "number")]
+    pub history_generation: u64,
+}
+
+impl TurnCheckpointIdentity {
+    pub fn for_turn(session: &crate::model::AgentSession, turn_count: usize) -> Option<Self> {
+        session
+            .turns
+            .iter()
+            .find(|turn| turn.turn_count == turn_count)
+            .map(|turn| Self {
+                turn_id: turn.id,
+                history_generation: session.history_generation,
+            })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceOperation {
@@ -1278,6 +1299,9 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         session_id: Uuid,
         turn_count: usize,
+        #[serde(default)]
+        #[ts(type = "number | null")]
+        history_generation: Option<u64>,
     },
     CaptureTurn {
         #[ts(type = "string")]
@@ -1286,6 +1310,8 @@ pub enum WorkspaceOperation {
         turn_count: usize,
         #[serde(default)]
         untouched: bool,
+        #[serde(default)]
+        identity: Option<TurnCheckpointIdentity>,
     },
     CaptureRef {
         #[ts(type = "string")]

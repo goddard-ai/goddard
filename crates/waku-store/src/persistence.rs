@@ -35,6 +35,7 @@ use crate::model::{
     RuntimeEventCursor, RuntimeMode, SessionPlanning, SessionWorkspace, TranscriptNotice,
 };
 use crate::theme::ThemeSettings;
+use waku_protocol::TurnCheckpointIdentity;
 use waku_protocol::computer_use::ComputerAppGrant;
 use waku_protocol::custom_commands::CustomCommand;
 pub use waku_protocol::persistence::{
@@ -2179,6 +2180,7 @@ impl StateStore {
         &self,
         session_id: Uuid,
         turn_count: usize,
+        identity: &TurnCheckpointIdentity,
         checkpoint: &Checkpoint,
     ) -> io::Result<Option<Checkpoint>> {
         if checkpoint.turn_count != turn_count {
@@ -2237,12 +2239,21 @@ impl StateStore {
                 "stored checkpoint session id does not match its row",
             ));
         }
+        if session.history_generation != identity.history_generation {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "checkpoint belongs to obsolete task history",
+            ));
+        }
         let Some(turn) = session
             .turns
             .iter_mut()
-            .find(|turn| turn.turn_count == turn_count)
+            .find(|turn| turn.turn_count == turn_count && turn.id == identity.turn_id)
         else {
-            return Ok(None);
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "checkpoint turn was removed or replaced",
+            ));
         };
         if let Some(existing) = turn
             .checkpoint
@@ -4980,6 +4991,10 @@ mod tests {
         state.sessions[0].push_message(MessageRole::Assistant, "an answer");
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
         store.save(&mut state).unwrap();
+        let identity = TurnCheckpointIdentity {
+            turn_id: state.sessions[0].turns[0].id,
+            history_generation: state.sessions[0].history_generation,
+        };
 
         // This full-session batch represents a save that started before the
         // independent checkpoint write and still has no checkpoint attached.
@@ -4992,7 +5007,7 @@ mod tests {
         let checkpoint = test_checkpoint(1, "refs/waku/test-turn-1");
         assert_eq!(
             store
-                .save_turn_checkpoint(session_id, 1, &checkpoint)
+                .save_turn_checkpoint(session_id, 1, &identity, &checkpoint)
                 .unwrap(),
             Some(checkpoint.clone())
         );
@@ -5007,6 +5022,63 @@ mod tests {
     }
 
     #[test]
+    fn late_capture_must_not_attach_to_reused_turn_count_after_rewind() {
+        for next_generation in [0, 1] {
+            let directory = temporary_directory();
+            fs::create_dir_all(&directory).unwrap();
+            let store = store_in(&directory);
+            let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+            let session_id = state.sessions[0].id;
+            for prompt in ["Retain", "Remove"] {
+                state.sessions[0].begin_turn(prompt);
+                state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+            }
+            store.save(&mut state).unwrap();
+            let retired_turn_id = state.sessions[0].turns[1].id;
+            let identity = TurnCheckpointIdentity {
+                turn_id: retired_turn_id,
+                history_generation: 0,
+            };
+            // An independent capture already started for old turn two. Its Git
+            // work completes only after rewind and a new turn reuse the count.
+            state.sessions[0].turns.pop();
+            state.sessions[0].history_generation = next_generation;
+            state.mark_session_dirty(session_id);
+            store.save(&mut state).unwrap();
+            state.sessions[0].begin_turn("Replacement");
+            state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+            state.mark_session_dirty(session_id);
+            store.save(&mut state).unwrap();
+            assert_ne!(state.sessions[0].turns[1].id, retired_turn_id);
+            let late = test_checkpoint(2, "refs/waku/removed-turn-snapshot");
+            assert_eq!(
+                store
+                    .save_turn_checkpoint(session_id, 2, &identity, &late)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::Interrupted
+            );
+            let restored = load_hydrated(&store);
+            let replacement = &restored.sessions[0].turns[1];
+            assert_eq!(restored.sessions[0].history_generation, next_generation);
+            assert!(
+                replacement.checkpoint.is_none(),
+                "late capture for retired turn attached to replacement: {:?}",
+                replacement.checkpoint
+            );
+            let current = TurnCheckpointIdentity::for_turn(&state.sessions[0], 2).unwrap();
+            let fresh = test_checkpoint(2, "refs/waku/replacement-turn-snapshot");
+            assert_eq!(
+                store
+                    .save_turn_checkpoint(session_id, 2, &current, &fresh)
+                    .unwrap(),
+                Some(fresh)
+            );
+            fs::remove_dir_all(directory).ok();
+        }
+    }
+
+    #[test]
     fn a_late_checkpoint_save_does_not_recreate_a_deleted_session() {
         let directory = temporary_directory();
         fs::create_dir_all(&directory).unwrap();
@@ -5016,13 +5088,17 @@ mod tests {
         state.sessions[0].begin_turn("Ask");
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
         store.save(&mut state).unwrap();
+        let identity = TurnCheckpointIdentity {
+            turn_id: state.sessions[0].turns[0].id,
+            history_generation: state.sessions[0].history_generation,
+        };
 
         state.sessions.clear();
         store.save(&mut state).unwrap();
         let checkpoint = test_checkpoint(1, "refs/waku/deleted-session-turn-1");
         assert_eq!(
             store
-                .save_turn_checkpoint(session_id, 1, &checkpoint)
+                .save_turn_checkpoint(session_id, 1, &identity, &checkpoint)
                 .unwrap(),
             None
         );

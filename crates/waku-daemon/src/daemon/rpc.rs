@@ -2241,16 +2241,37 @@ impl Backend for WakuBackend {
             }),
             Command::Workspace {
                 operation:
+                    WorkspaceOperation::CaptureTurnStart {
+                        cwd,
+                        session_id,
+                        turn_count,
+                        history_generation,
+                    },
+            } => {
+                self.capture_turn_start_checkpoint(
+                    cwd,
+                    session_id,
+                    turn_count,
+                    history_generation,
+                )?;
+                Ok(ResponsePayload::Workspace {
+                    result: WorkspaceResult::Ack,
+                })
+            }
+            Command::Workspace {
+                operation:
                     WorkspaceOperation::CaptureTurn {
                         cwd,
                         session_id,
                         turn_count,
                         untouched,
+                        identity,
                     },
             } => Ok(ResponsePayload::Workspace {
                 result: WorkspaceResult::Checkpoint {
-                    checkpoint: self
-                        .capture_turn_checkpoint(cwd, session_id, turn_count, untouched)?,
+                    checkpoint: self.capture_turn_checkpoint(
+                        cwd, session_id, turn_count, untouched, identity,
+                    )?,
                 },
             }),
             Command::Workspace {

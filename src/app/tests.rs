@@ -10201,7 +10201,9 @@ mod live_employee_approvals {
             let runtime = attach_runtime(waku, &supervisor, session_id, obsolete_runtime);
             waku.runtimes.insert(session_id, runtime);
             // Its old response is still in flight when the user sends again.
-            waku.checkpoint_captures_in_flight.insert((session_id, 3));
+            let identity = waku_protocol::TurnCheckpointIdentity::for_turn(&waku.state.sessions[0], 3)
+                .unwrap();
+            waku.checkpoint_captures_in_flight.insert((session_id, identity));
             waku.submit_submission_for_session(
                 session_id,
                 ComposerSubmission::plain("new user action".into()),
@@ -10292,7 +10294,9 @@ mod live_employee_approvals {
             let runtime = attach_runtime(waku, &supervisor, id, runtime_id);
             waku.runtimes.insert(id, runtime);
             // A valid owner's pending checkpoint should still hold sends.
-            waku.checkpoint_captures_in_flight.insert((id, 1));
+            let identity = waku_protocol::TurnCheckpointIdentity::for_turn(&waku.state.sessions[0], 1)
+                .unwrap();
+            waku.checkpoint_captures_in_flight.insert((id, identity));
         });
         (env, daemon, view, vcx, id)
     }

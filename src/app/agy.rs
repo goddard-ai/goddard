@@ -87,6 +87,7 @@ impl Waku {
         let project_id = session.project_id;
         let workspace = session.workspace.clone();
         let next_turn_count = session.turns.len() + 1;
+        let checkpoint_generation = session.history_generation;
         let Some(project) = self
             .state
             .projects
@@ -146,6 +147,7 @@ impl Waku {
                         None,
                         session_id,
                         next_turn_count,
+                        checkpoint_generation,
                         sync_default_branch,
                         sync_branches,
                         capture_checkpoints,
