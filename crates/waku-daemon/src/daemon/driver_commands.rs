@@ -139,6 +139,7 @@ pub(super) fn handle_driver_command(
         | Command::AgentWireframe { .. }
         | Command::WireframeComments { .. }
         | Command::AgentRenameSelf { .. }
+        | Command::AgentScratch { .. }
         | Command::AgentProposeArchive { .. }
         | Command::AgentMergeSubmit
         | Command::AgentReadSession { .. }

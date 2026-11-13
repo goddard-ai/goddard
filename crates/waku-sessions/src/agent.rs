@@ -1076,6 +1076,11 @@ pub fn surface_instruction(command: &str, scope: &AgentSurfaceScope) -> String {
          Shut down owned virtual devices before ending a reservation; idle devices still consume capacity. \
          `resource status` shows owners and queues; waits need no model retries. Raw shell launches can bypass this cooperative broker."
     ));
+    instruction.push_str(&format!(
+        "\n- `scratch` — a per-task folder that survives machine restarts, for reproducible work only (downloads, fixtures, caches): \
+         `{command} scratch [NAME]` prints its path, `{command} scratch list` shows existing folders. \
+         It is deleted when this task is archived or removed, and Reclaim Disk Space may drop an idle task's pool — keep anything worth keeping in the repository."
+    ));
     instruction.push_str("\n</goddard-agent>");
     instruction
 }

@@ -330,6 +330,8 @@ export type { RouteTarget } from "./RouteTarget";
 export type { RpcError } from "./RpcError";
 export type { RuntimeEventCursor } from "./RuntimeEventCursor";
 export type { RuntimeMode } from "./RuntimeMode";
+export type { ScratchEntry } from "./ScratchEntry";
+export type { ScratchOperation } from "./ScratchOperation";
 export type { SequencedEvent } from "./SequencedEvent";
 export type { ServerMessage } from "./ServerMessage";
 export type { SessionDetailTail } from "./SessionDetailTail";

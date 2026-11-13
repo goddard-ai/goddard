@@ -736,6 +736,7 @@ mod response;
 mod response_ops;
 mod rpc;
 mod runtime;
+mod scratch;
 mod sidebar_intents;
 mod summon;
 mod task_creation;

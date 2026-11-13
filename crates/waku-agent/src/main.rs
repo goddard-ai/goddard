@@ -818,6 +818,16 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"json":{"landed":"true after the worktree is rebased, verified, and landed","sha":"landed commit SHA"}}),
             "goddard-agent merge submit".to_owned(),
         ),
+        "scratch" => (
+            json!({"NAME":{"positional":true,"optional":true,"type":"folder name, 1–64 of [A-Za-z0-9._-]; omitted selects the task's scratch root"},"--name":{"optional":true,"type":"same as positional NAME"},"description":"Returns the absolute path of a daemon-owned folder that survives machine restarts and is deleted when this task is archived or removed. Contents are reproducible by contract — the daemon drops them without the worktree's uncommitted-work check, so keep anything worth keeping in git. Reclaim Disk Space may also delete an idle task's pool."}),
+            json!({"json":{"path":"absolute scratch directory path"}}),
+            "goddard-agent scratch fixtures".to_owned(),
+        ),
+        "scratch list" => (
+            json!({}),
+            json!({"json":{"path":"this task's scratch pool root","entries":"named scratch folders that already exist"}}),
+            "goddard-agent scratch list".to_owned(),
+        ),
         "wireframe" => (
             json!({"PATH":{"positional":true,"required":true,"type":"workspace-relative .wireframe.html or .wireframe.json file"},"description":"Write the document, then validate it and request a right-panel preview. HTML previews use the active Goddard theme on macOS and Windows. Requires Settings → Experiments → Wireframes. See formatGuide for authoring and anchored comments."}),
             json!({"accepted":{"ok":true},"meaning":"document validated and preview request broadcast; does not confirm a client opened it"}),
@@ -1004,6 +1014,8 @@ fn schema() -> serde_json::Value {
         "command upsert",
         "command remove",
         "merge submit",
+        "scratch",
+        "scratch list",
     ];
     let commands = paths
         .into_iter()
@@ -1356,6 +1368,26 @@ fn run() -> anyhow::Result<()> {
         #[cfg(unix)]
         "__resource_exec" => resources::exec_child(arguments),
         "command" => command_flags(arguments.collect()),
+        "scratch" => {
+            let operation = scratch_operation(arguments.collect())?;
+            let list = matches!(operation, waku_protocol::scratch::ScratchOperation::List);
+            match connect()?.request(
+                request_session_id(),
+                Uuid::nil(),
+                Command::AgentScratch { operation },
+            )? {
+                ResponsePayload::AgentScratch { path, entries } => {
+                    let output = if list {
+                        json!({ "path": path, "entries": entries })
+                    } else {
+                        json!({ "path": path })
+                    };
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                    Ok(())
+                }
+                other => bail!("daemon returned an unexpected response: {other:?}"),
+            }
+        }
         "wireframe" | "rename" | "archive" | "ask" => {
             let args: Vec<String> = arguments.collect();
             let command = match subcommand.as_str() {
@@ -3197,6 +3229,26 @@ fn print_view_section(state: &waku_protocol::boss::BossState, section: &str) -> 
     Ok(())
 }
 
+/// `scratch [NAME | --name NAME] | scratch list` — the daemon owns the
+/// folder and its lifecycle; this only chooses which operation to ask for.
+fn scratch_operation(
+    args: Vec<String>,
+) -> anyhow::Result<waku_protocol::scratch::ScratchOperation> {
+    if args.first().is_some_and(|arg| arg == "list") {
+        if args.len() > 1 {
+            bail!("usage: goddard-agent scratch list");
+        }
+        return Ok(waku_protocol::scratch::ScratchOperation::List);
+    }
+    let (pos, opts) = flags(args, &["name"], true)?;
+    if pos.len() > 1 {
+        bail!("usage: goddard-agent scratch [NAME | --name NAME] | scratch list");
+    }
+    Ok(waku_protocol::scratch::ScratchOperation::Get {
+        name: opts.get("name").cloned().or_else(|| pos.into_iter().next()),
+    })
+}
+
 fn computer_command(arguments: &[String]) -> anyhow::Result<Command> {
     let (action, args) = arguments
         .split_first()
@@ -4389,5 +4441,34 @@ mod tests {
         assert_eq!(aggregate["contractFormat"], boss_contract::FORMAT);
         let _: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&aggregate).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn scratch_args_map_to_get_or_list() {
+        use waku_protocol::scratch::ScratchOperation;
+        assert!(matches!(
+            super::scratch_operation(vec![]).unwrap(),
+            ScratchOperation::Get { name: None }
+        ));
+        assert!(matches!(
+            super::scratch_operation(vec!["fixtures".into()]).unwrap(),
+            ScratchOperation::Get { name: Some(ref name) } if name == "fixtures"
+        ));
+        assert!(matches!(
+            super::scratch_operation(vec!["--name".into(), "cache".into()]).unwrap(),
+            ScratchOperation::Get { name: Some(ref name) } if name == "cache"
+        ));
+        assert!(matches!(
+            super::scratch_operation(vec!["list".into()]).unwrap(),
+            ScratchOperation::List
+        ));
+        // The daemon validates the name itself — the CLI only rejects
+        // malformed invocations.
+        for args in [
+            vec!["list".into(), "extra".into()],
+            vec!["a".into(), "b".into()],
+        ] {
+            assert!(super::scratch_operation(args).is_err());
+        }
     }
 }

@@ -770,6 +770,12 @@ pub enum Command {
     AgentRenameSelf {
         title: String,
     },
+    /// Ensure or list scratch directories for the calling task —
+    /// daemon-owned folders that survive restarts and are deleted when the
+    /// owning task is archived or removed.
+    AgentScratch {
+        operation: crate::scratch::ScratchOperation,
+    },
     /// Scoped agent credential only: propose archiving daemon tasks. The
     /// daemon parks a permission card on the calling session and archives
     /// only what the user approves — never on the request alone.
@@ -1825,6 +1831,13 @@ pub enum ResponsePayload {
     /// free-form clarification, or a cancellation.
     AgentAskResult {
         outcome: AgentAskOutcome,
+    },
+    /// The ensured directory for a `get`, or the task's scratch pool plus
+    /// its named entries for `list`.
+    AgentScratch {
+        #[ts(type = "string")]
+        path: PathBuf,
+        entries: Vec<crate::scratch::ScratchEntry>,
     },
     /// The preference-ordered provider/model list an `agentListModels`
     /// resolved.

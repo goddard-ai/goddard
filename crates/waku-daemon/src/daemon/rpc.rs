@@ -2179,6 +2179,16 @@ impl Backend for WakuBackend {
                 },
             }),
             Command::Workspace {
+                operation: WorkspaceOperation::InspectTaskScratch { session_id },
+            } => Ok(ResponsePayload::Workspace {
+                result: self.inspect_task_scratch(session_id),
+            }),
+            Command::Workspace {
+                operation: WorkspaceOperation::ReclaimTaskScratch { session_id },
+            } => Ok(ResponsePayload::Workspace {
+                result: self.reclaim_task_scratch(session_id),
+            }),
+            Command::Workspace {
                 operation: WorkspaceOperation::InspectCheckoutStatus { cwd, base },
             } => Ok(ResponsePayload::Workspace {
                 result: WorkspaceResult::CheckoutStatus {
@@ -2549,6 +2559,7 @@ impl Backend for WakuBackend {
                 Ok(response)
             }
             Command::AgentRenameSelf { title } => self.agent_rename_self(agent, &title, &events),
+            Command::AgentScratch { operation } => self.agent_scratch(agent, session_id, operation),
             Command::AgentProposeArchive { task_ids, reason } => {
                 self.agent_propose_archive(agent, task_ids, reason, &events)
             }

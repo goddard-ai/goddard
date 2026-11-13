@@ -803,6 +803,7 @@ impl WakuBackend {
             .collect::<Vec<_>>();
         drop_detached(removed_runtimes);
         self.cleanup_plan_delivery(&removed_ids);
+        self.drop_scratch(&removed_ids);
         Ok(())
     }
 
@@ -886,6 +887,7 @@ impl WakuBackend {
             .collect::<Vec<_>>();
         drop_detached(removed_runtimes);
         self.cleanup_plan_delivery(&removed_ids);
+        self.drop_scratch(&removed_ids);
         Ok(())
     }
 
@@ -987,6 +989,9 @@ impl WakuBackend {
         for id in removed_ids {
             drop_detached(self.remove_runtime(id, None, true));
         }
+        // Scratch is reproducible by contract — unlike the worktree it
+        // leaves with the task instead of waiting for the archive purge.
+        self.drop_scratch(&gone);
         Ok(())
     }
 
@@ -1085,6 +1090,10 @@ impl WakuBackend {
             }
             let _ = self.remove_session(session_id);
         }
+        // The same trigger reconciles scratch pools: directories whose
+        // owner archived, left, or never registered — including pools a
+        // crashed archive path could not finish dropping.
+        self.sweep_scratch();
     }
 
     /// Strips heavyweight transcript payloads from detail rows archived past

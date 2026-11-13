@@ -677,6 +677,12 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
         WorkspaceOperation::CollectReviewDiff { cwd, source } => WorkspaceResult::ReviewDiff {
             data: collect_review_diff(&cwd, source)?,
         },
+        // Resolved and deleted by the daemon, which owns the scratch pool
+        // and the session->root-task mapping this function cannot see.
+        WorkspaceOperation::InspectTaskScratch { .. }
+        | WorkspaceOperation::ReclaimTaskScratch { .. } => {
+            bail!("task scratch operations are daemon-owned")
+        }
     })
 }
 
@@ -805,7 +811,7 @@ fn reclaimable_dirs(cwd: &Path) -> Vec<PathBuf> {
 /// One directory's on-disk size. `DirEntry::metadata` doesn't follow
 /// symlinks, so a linked subtree is charged once — the link's own bytes —
 /// rather than walked at its target.
-fn directory_size(path: &Path) -> u64 {
+pub fn directory_size(path: &Path) -> u64 {
     let mut total = 0u64;
     let mut pending = vec![path.to_path_buf()];
     while let Some(directory) = pending.pop() {

@@ -3013,7 +3013,7 @@ impl Waku {
             .state
             .sessions
             .iter()
-            .any(|session| self.session_reclaim_eligible(session))
+            .any(|session| self.session_reclaimable(session))
         {
             commands.push(CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),

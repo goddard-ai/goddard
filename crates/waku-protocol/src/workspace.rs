@@ -1002,6 +1002,22 @@ pub enum WorkspaceOperation {
         #[ts(type = "string[]")]
         paths: Vec<PathBuf>,
     },
+    /// On-disk size of the session's task scratch pool — the daemon-owned
+    /// `scratch/<root-task-id>` directory `agentScratch` hands out. Its
+    /// safety hinge is ownership rather than the git-ignored allowlist:
+    /// every byte under it is reproducible by contract. Returns
+    /// `TaskScratch` with zero bytes for unknown, archived, or empty
+    /// pools.
+    InspectTaskScratch {
+        session_id: Uuid,
+    },
+    /// Delete the session's task scratch pool and return the freed bytes —
+    /// the scratch counterpart of `ReclaimPaths`, resolving the session to
+    /// its root task server-side so a stale or foreign path can never be
+    /// targeted. Returns `Reclaim`.
+    ReclaimTaskScratch {
+        session_id: Uuid,
+    },
     GenerateCommitMessage {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -1553,6 +1569,14 @@ pub enum WorkspaceResult {
     Reclaim {
         reclaimed_bytes: u64,
         failures: Vec<ReclaimFailure>,
+    },
+    /// A task scratch pool's location and on-disk size, as reported by
+    /// `InspectTaskScratch`. `bytes` is zero when the pool is absent or
+    /// its task no longer qualifies.
+    TaskScratch {
+        #[ts(type = "string")]
+        path: PathBuf,
+        bytes: u64,
     },
     CommitMessage {
         message: String,

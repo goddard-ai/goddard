@@ -2897,6 +2897,7 @@ fn is_agent_command(command: &Command) -> bool {
             | Command::AgentWireframe { .. }
             | Command::WireframeComments { .. }
             | Command::AgentRenameSelf { .. }
+            | Command::AgentScratch { .. }
             | Command::AgentProposeArchive { .. }
             | Command::AgentMergeSubmit
             | Command::AgentReadSession { .. }
@@ -3364,6 +3365,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::AgentWireframe { .. } => "agentWireframe",
         Command::WireframeComments { .. } => "wireframeComments",
         Command::AgentRenameSelf { .. } => "agentRenameSelf",
+        Command::AgentScratch { .. } => "agentScratch",
         Command::AgentProposeArchive { .. } => "agentProposeArchive",
         Command::AgentMergeSubmit => "agentMergeSubmit",
         Command::CancelQueuedPrompt { .. } => "cancelQueuedPrompt",
@@ -3471,6 +3473,8 @@ fn workspace_operation_kind(operation: &WorkspaceOperation) -> &'static str {
         WorkspaceOperation::InspectArchivePreview { .. } => "inspectArchivePreview",
         WorkspaceOperation::InspectReclaimable { .. } => "inspectReclaimable",
         WorkspaceOperation::ReclaimPaths { .. } => "reclaimPaths",
+        WorkspaceOperation::InspectTaskScratch { .. } => "inspectTaskScratch",
+        WorkspaceOperation::ReclaimTaskScratch { .. } => "reclaimTaskScratch",
         WorkspaceOperation::GenerateCommitMessage { .. } => "generateCommitMessage",
         WorkspaceOperation::GenerateSessionTitle { .. } => "generateSessionTitle",
         WorkspaceOperation::GenerateTerminalCommand { .. } => "generateTerminalCommand",

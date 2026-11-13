@@ -1,13 +1,16 @@
 //! The "Reclaim Disk Space" flow: a topbar indicator whose dropdown lists
-//! the regenerable output — dependency installs, build artifacts — each
-//! idle worktree still holds. A session qualifies when it is started,
-//! unarchived, not busy, worktree-backed, and untouched past the idle
-//! window; the daemon reports only git-ignored directories on its
-//! reproducible-name allowlist, so nothing tracked or hand-authored can
-//! be selected. Deletion is always the user's click — nothing here
-//! purges on its own. Dismissing the dropdown never cancels the flow:
-//! the indicator stays put until the discovery card's cancel aborts it
-//! or a finished batch is acknowledged.
+//! the regenerable output — dependency installs, build artifacts, the
+//! task's scratch pool — each idle task still holds. A worktree session
+//! qualifies when it is started, unarchived, not busy, and untouched past
+//! the idle window; the daemon reports only git-ignored directories on
+//! its reproducible-name allowlist, so nothing tracked or hand-authored
+//! can be selected. A scratch row qualifies on the same idle rules at
+//! any workspace kind — the daemon-owned pool is reproducible by
+//! contract — provided no side-chat descendant is busy. Deletion is
+//! always the user's click — nothing here purges on its own. Dismissing
+//! the dropdown never cancels the flow: the indicator stays put until
+//! the discovery card's cancel aborts it or a finished batch is
+//! acknowledged.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -54,10 +57,16 @@ pub(super) struct ReclaimDialogState {
 struct ReclaimDialogRow {
     session_id: Uuid,
     title: String,
-    /// The session workspace the scan ran against, in the daemon's path
-    /// spelling — also the `cwd` the reclaim request goes back to.
-    cwd: PathBuf,
+    /// The session workspace the worktree scan ran against, in the
+    /// daemon's path spelling — also the `cwd` the reclaimable-paths
+    /// request goes back to. `None` when the row only offers the task's
+    /// scratch pool.
+    cwd: Option<PathBuf>,
     paths: Vec<PathBuf>,
+    /// The task scratch pool this row also offers. It deletes through a
+    /// session-keyed request — the daemon re-resolves the owning root
+    /// task — never through the worktree path set.
+    scratch: Option<PathBuf>,
     /// Counted directory names — "node_modules ×3, target" — so the row
     /// says what would go, not just how much.
     names: String,
@@ -102,20 +111,84 @@ impl Waku {
             && unix_time().saturating_sub(session.updated_at) >= RECLAIM_IDLE_SECS
     }
 
-    /// One row per worktree path — side chats share their parent's, so
-    /// the same directories would otherwise list twice.
-    fn reclaim_candidates(&self) -> Vec<(Uuid, String, PathBuf)> {
+    /// Either reclaim surface: regenerable worktree directories or the
+    /// task's scratch pool. Gates the palette command and the sidebar
+    /// menu item — the dialog's own scan decides which entries exist.
+    pub(super) fn session_reclaimable(&self, session: &AgentSession) -> bool {
+        self.session_reclaim_eligible(session) || self.session_scratch_reclaim_eligible(session)
+    }
+
+    /// The scratch counterpart of `session_reclaim_eligible`: a
+    /// top-level, idle task — side chats share the parent's pool, so only
+    /// the root row offers it — whose whole side-chat family is quiet.
+    /// Any workspace kind qualifies: the pool lives outside the worktree.
+    pub(super) fn session_scratch_reclaim_eligible(&self, session: &AgentSession) -> bool {
+        session.has_started()
+            && session.archived_at.is_none()
+            && !session.is_busy()
+            && session.side_chat_of.is_none()
+            && Some(session.id) != self.state.selected_session
+            && unix_time().saturating_sub(session.updated_at) >= RECLAIM_IDLE_SECS
+            && !self.task_family_busy(session.id)
+    }
+
+    /// Whether the session or a task in its side-chat family is busy —
+    /// the shared scratch pool must never be reclaimed under a writer.
+    fn task_family_busy(&self, session_id: Uuid) -> bool {
+        self.state.sessions.iter().any(|candidate| {
+            candidate.is_busy() && self.task_family_contains(session_id, candidate.id)
+        })
+    }
+
+    /// Whether `descendant`'s side-chat ancestry reaches `root` — the
+    /// root itself counts, so this is a contains-not-strict-descends test.
+    fn task_family_contains(&self, root: Uuid, descendant: Uuid) -> bool {
+        let mut id = descendant;
+        for _ in 0..32 {
+            if id == root {
+                return true;
+            }
+            match self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == id)
+                .and_then(|session| session.side_chat_of)
+            {
+                Some(parent) => id = parent,
+                None => return false,
+            }
+        }
+        false
+    }
+
+    /// One scan target per eligible session — a worktree path plus
+    /// whether the task's scratch pool is also in scope. Worktree rows
+    /// dedupe by path since side chats share their parent's; scratch
+    /// rides the top-level task row only.
+    fn reclaim_candidates(&self) -> Vec<(Uuid, String, Option<PathBuf>, bool)> {
         let mut seen = HashSet::new();
         self.state
             .sessions
             .iter()
-            .filter(|session| self.session_reclaim_eligible(session))
             .filter_map(|session| {
-                let SessionWorkspace::Worktree { path, .. } = &session.workspace else {
-                    return None;
+                let worktree = match &session.workspace {
+                    SessionWorkspace::Worktree { path, .. }
+                        if self.session_reclaim_eligible(session) =>
+                    {
+                        seen.insert(path.clone()).then(|| path.clone())
+                    }
+                    _ => None,
                 };
-                seen.insert(path.clone())
-                    .then(|| (session.id, session.display_title().to_owned(), path.clone()))
+                let scratch = self.session_scratch_reclaim_eligible(session);
+                (worktree.is_some() || scratch).then(|| {
+                    (
+                        session.id,
+                        session.display_title().to_owned(),
+                        worktree,
+                        scratch,
+                    )
+                })
             })
             .collect()
     }
@@ -139,9 +212,9 @@ impl Waku {
         let pending = self
             .reclaim_candidates()
             .into_iter()
-            .filter_map(|(session_id, title, cwd)| {
+            .filter_map(|(session_id, title, cwd, scratch)| {
                 self.workspace_client_for_session(session_id)
-                    .map(|client| (session_id, title, cwd, client))
+                    .map(|client| (session_id, title, cwd, scratch, client))
             })
             .collect::<Vec<_>>();
         if let Some(dialog) = self.reclaim_dialog.as_mut() {
@@ -151,7 +224,7 @@ impl Waku {
         // Keep one in flight so large worktree sets cannot occupy the entire
         // executor or flood the daemon's shared heavy-request pool.
         cx.spawn(async move |waku, cx| {
-            for (session_id, title, cwd, client) in pending {
+            for (session_id, title, cwd, scan_scratch, client) in pending {
                 if !waku
                     .read_with(cx, |waku, _| {
                         waku.reclaim_dialog
@@ -162,15 +235,40 @@ impl Waku {
                 {
                     break;
                 }
-                let row_cwd = cwd.clone();
-                let entries = cx
+                let (paths, scratch) = cx
                     .background_executor()
-                    .spawn(async move {
-                        match client
-                            .request(waku_client::WorkspaceOperation::InspectReclaimable { cwd })
-                        {
-                            Ok(waku_client::WorkspaceResult::Reclaimable { entries }) => entries,
-                            _ => Vec::new(),
+                    .spawn({
+                        let cwd = cwd.clone();
+                        async move {
+                            let paths = match &cwd {
+                                Some(cwd) => match client.request(
+                                    waku_client::WorkspaceOperation::InspectReclaimable {
+                                        cwd: cwd.clone(),
+                                    },
+                                ) {
+                                    Ok(waku_client::WorkspaceResult::Reclaimable { entries }) => {
+                                        entries
+                                    }
+                                    _ => Vec::new(),
+                                },
+                                None => Vec::new(),
+                            };
+                            let scratch = if scan_scratch {
+                                match client.request(
+                                    waku_client::WorkspaceOperation::InspectTaskScratch {
+                                        session_id,
+                                    },
+                                ) {
+                                    Ok(waku_client::WorkspaceResult::TaskScratch {
+                                        path,
+                                        bytes,
+                                    }) if bytes > 0 => Some((path, bytes)),
+                                    _ => None,
+                                }
+                            } else {
+                                None
+                            };
+                            (paths, scratch)
                         }
                     })
                     .await;
@@ -183,19 +281,29 @@ impl Waku {
                             return false;
                         }
                         dialog.pending_scans = dialog.pending_scans.saturating_sub(1);
-                        let bytes = entries.iter().map(|entry| entry.bytes).sum::<u64>();
+                        let scratch_bytes = scratch.as_ref().map(|(_, bytes)| *bytes).unwrap_or(0);
+                        let bytes =
+                            paths.iter().map(|entry| entry.bytes).sum::<u64>() + scratch_bytes;
                         if bytes > 0 {
+                            let mut names = reclaim_names(
+                                &paths
+                                    .iter()
+                                    .map(|entry| entry.path.clone())
+                                    .collect::<Vec<_>>(),
+                            );
+                            if scratch.is_some() {
+                                if !names.is_empty() {
+                                    names.push_str(", ");
+                                }
+                                names.push_str("scratch");
+                            }
                             dialog.rows.push(ReclaimDialogRow {
                                 session_id,
                                 title,
-                                cwd: row_cwd,
-                                names: reclaim_names(
-                                    &entries
-                                        .iter()
-                                        .map(|entry| entry.path.clone())
-                                        .collect::<Vec<_>>(),
-                                ),
-                                paths: entries.into_iter().map(|entry| entry.path).collect(),
+                                cwd,
+                                names,
+                                paths: paths.into_iter().map(|entry| entry.path).collect(),
+                                scratch: scratch.map(|(path, _)| path),
                                 bytes,
                                 selected: true,
                                 focus: cx.focus_handle(),
@@ -282,10 +390,21 @@ impl Waku {
                         session.id == row.session_id
                             && !session.is_busy()
                             && Some(session.id) != waku.state.selected_session
-                            && matches!(
-                                &session.workspace,
-                                SessionWorkspace::Worktree { path, .. } if *path == row.cwd
-                            )
+                            && match (&row.cwd, &session.workspace) {
+                                // A worktree row re-verifies the same
+                                // checkout still backs the task before its
+                                // paths delete; scratch-only rows carry no
+                                // `cwd` to recheck.
+                                (Some(cwd), SessionWorkspace::Worktree { path, .. }) => {
+                                    *path == *cwd
+                                }
+                                (None, _) => true,
+                                (Some(_), _) => false,
+                            }
+                            // A scratch row also re-verifies no side-chat
+                            // descendant woke up writing to the shared
+                            // pool since the scan.
+                            && (row.scratch.is_none() || !waku.task_family_busy(session.id))
                     });
                     Some(
                         still_safe
@@ -298,22 +417,50 @@ impl Waku {
                 let (reclaimed_bytes, failures) = if let Some(client) = client {
                     cx.background_executor()
                         .spawn(async move {
-                            match client.request(waku_client::WorkspaceOperation::ReclaimPaths {
-                                cwd: row.cwd,
-                                paths: row.paths,
-                            }) {
-                                Ok(waku_client::WorkspaceResult::Reclaim {
-                                    reclaimed_bytes,
-                                    failures,
-                                }) => (reclaimed_bytes, failures.len()),
-                                // The request itself failed — one failure for
-                                // the batch, nothing freed.
-                                _ => (0, 1),
+                            let mut reclaimed_bytes = 0;
+                            let mut failures = 0;
+                            if let Some(cwd) = row.cwd
+                                && !row.paths.is_empty()
+                            {
+                                match client.request(
+                                    waku_client::WorkspaceOperation::ReclaimPaths {
+                                        cwd,
+                                        paths: row.paths,
+                                    },
+                                ) {
+                                    Ok(waku_client::WorkspaceResult::Reclaim {
+                                        reclaimed_bytes: freed,
+                                        failures: failed,
+                                    }) => {
+                                        reclaimed_bytes += freed;
+                                        failures += failed.len();
+                                    }
+                                    // The request itself failed — one
+                                    // failure for the batch, nothing freed.
+                                    _ => failures += 1,
+                                }
                             }
+                            if row.scratch.is_some() {
+                                match client.request(
+                                    waku_client::WorkspaceOperation::ReclaimTaskScratch {
+                                        session_id: row.session_id,
+                                    },
+                                ) {
+                                    Ok(waku_client::WorkspaceResult::Reclaim {
+                                        reclaimed_bytes: freed,
+                                        failures: failed,
+                                    }) => {
+                                        reclaimed_bytes += freed;
+                                        failures += failed.len();
+                                    }
+                                    _ => failures += 1,
+                                }
+                            }
+                            (reclaimed_bytes, failures)
                         })
                         .await
                 } else {
-                    // Unsafe or offline worktrees still complete their slot.
+                    // Unsafe or offline tasks still complete their slot.
                     (0, 1)
                 };
                 if !waku

@@ -24141,3 +24141,6 @@ fn task_views_ordinary_runtime_records_output_without_a_desktop_observer() {
 
 #[path = "tests/task_views.rs"]
 mod task_views;
+
+#[path = "tests/scratch.rs"]
+mod scratch;

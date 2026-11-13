@@ -1,0 +1,1 @@
+- **Task scratch:** `goddard-agent scratch NAME` gives a task's agent a daemon-owned folder for reproducible files (downloads, fixtures, caches) that survives machine restarts and lives on the host the task runs on. It is deleted when the task is archived or removed, and Reclaim Disk Space can clear an idle task's scratch.

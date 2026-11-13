@@ -28,6 +28,7 @@ import type { ResourceOperation } from "./ResourceOperation";
 import type { RouteCandidate } from "./RouteCandidate";
 import type { RouteTarget } from "./RouteTarget";
 import type { RuntimeMode } from "./RuntimeMode";
+import type { ScratchOperation } from "./ScratchOperation";
 import type { SessionDetailTail } from "./SessionDetailTail";
 import type { SessionMessageSearchScope } from "./SessionMessageSearchScope";
 import type { SidebarIntent } from "./SidebarIntent";
@@ -191,7 +192,7 @@ taskId?: string | null,
  * daemon-known tasks. `provider` disambiguates when more than one
  * task carries the id.
  */
-threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentWireframe", path: string, } | { "type": "wireframeComments", path: string, document: string | null, revision: string | null, operation: WireframeCommentOperation, } | { "type": "agentRenameSelf", title: string, } | { "type": "agentProposeArchive",
+threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentWireframe", path: string, } | { "type": "wireframeComments", path: string, document: string | null, revision: string | null, operation: WireframeCommentOperation, } | { "type": "agentRenameSelf", title: string, } | { "type": "agentScratch", operation: ScratchOperation, } | { "type": "agentProposeArchive",
 /**
  * Waku task ids to archive. Each must name a started, unarchived
  * task in the caller's own project; side chats leave with their

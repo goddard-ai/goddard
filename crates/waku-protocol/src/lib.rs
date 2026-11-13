@@ -64,6 +64,7 @@ pub mod projects;
 pub mod provider_session;
 pub mod resources;
 pub mod routing;
+pub mod scratch;
 pub mod settings;
 pub mod skills;
 pub mod streaming;

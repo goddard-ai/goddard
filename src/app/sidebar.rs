@@ -6989,7 +6989,7 @@ impl Waku {
                                 .collect::<Vec<_>>();
                             let any_reclaimable = targets.iter().any(|target| {
                                 session(target)
-                                    .is_some_and(|session| waku.session_reclaim_eligible(session))
+                                    .is_some_and(|session| waku.session_reclaimable(session))
                             });
                             (
                                 targets,
