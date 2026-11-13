@@ -2629,6 +2629,7 @@ impl Waku {
             .iter()
             .filter(|session| {
                 session.has_started()
+                    && !session.boss_managed
                     && !session.is_side_chat()
                     && self
                         .focused_project_id()
@@ -4077,6 +4078,7 @@ impl Waku {
             .iter()
             .filter(|session| {
                 session.has_started()
+                    && !session.boss_managed
                     && !session.is_side_chat()
                     // A focused project scopes the palette's task results to
                     // it — the sidebar already shows nothing else.
@@ -7378,6 +7380,12 @@ impl Waku {
                                         .min_w_0()
                                         .flex()
                                         .items_baseline()
+                                        // Flex layout does not measure text baselines. Center
+                                        // matching text metrics so the folder icon cannot shift
+                                        // the project's baseline relative to the other labels.
+                                        .when(session_project.is_some(), |row| {
+                                            row.items_center().line_height(sp(20.0))
+                                        })
                                         .gap(px(7.0))
                                         .child(
                                             div()
@@ -7427,7 +7435,11 @@ impl Waku {
                                                 div()
                                                     .min_w_0()
                                                     .truncate()
-                                                    .text_size(sp(12.5))
+                                                    .text_size(sp(if session_project.is_some() {
+                                                        14.0
+                                                    } else {
+                                                        12.5
+                                                    }))
                                                     .text_color(theme.text_tertiary)
                                                     .child(detail),
                                             )
@@ -7449,7 +7461,7 @@ impl Waku {
                                                         div()
                                                             .min_w_0()
                                                             .truncate()
-                                                            .text_size(sp(12.5))
+                                                            .text_size(sp(14.0))
                                                             .text_color(theme.text_tertiary)
                                                             .child(project),
                                                     ),

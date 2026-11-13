@@ -1,0 +1,1 @@
+- Cmd+K task search excludes Boss and employee tasks, including retired employees.

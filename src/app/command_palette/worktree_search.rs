@@ -15,6 +15,7 @@ pub(super) struct WorktreeSearch {
 
 fn task_in_worktree(session: &AgentSession, project: Uuid, checkout: &Path, path: &Path) -> bool {
     session.project_id == project
+        && !session.boss_managed
         && !session.is_side_chat()
         && match &session.workspace {
             SessionWorkspace::Local => checkout == path,
@@ -290,7 +291,10 @@ impl Waku {
             if view == CommandPaletteView::WorktreeSearch {
                 let mut activity = HashMap::<PathBuf, (usize, u64)>::new();
                 for session in &self.state.sessions {
-                    if session.project_id != project.id || session.is_side_chat() {
+                    if session.project_id != project.id
+                        || session.boss_managed
+                        || session.is_side_chat()
+                    {
                         continue;
                     }
                     let path = match &session.workspace {
@@ -518,6 +522,9 @@ mod tests {
         task.workspace = SessionWorkspace::NewWorktree { base_branch: None };
         assert!(!task_in_worktree(&task, project, checkout, checkout));
         task.workspace = SessionWorkspace::Local;
+        task.boss_managed = true;
+        assert!(!task_in_worktree(&task, project, checkout, checkout));
+        task.boss_managed = false;
         task.side_chat_of = Some(Uuid::new_v4());
         assert!(!task_in_worktree(&task, project, checkout, checkout));
     }
