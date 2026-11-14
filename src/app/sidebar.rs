@@ -1994,6 +1994,7 @@ impl Waku {
             None,
             sweep,
             self.state.starred_idle_before_unseen,
+            self.state.prefer_starred_when_nothing_unread,
         );
         if target.is_none() && sweep.is_some() {
             target = sessions::next_attention_target(
@@ -2008,6 +2009,7 @@ impl Waku {
                 None,
                 None,
                 self.state.starred_idle_before_unseen,
+                self.state.prefer_starred_when_nothing_unread,
             );
         }
         let enabled = unread_target.is_some();

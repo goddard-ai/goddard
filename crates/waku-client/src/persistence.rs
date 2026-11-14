@@ -727,6 +727,10 @@ fn default_completion_sound_volume() -> f32 {
     DEFAULT_COMPLETION_SOUND_VOLUME
 }
 
+fn default_prefer_starred_when_nothing_unread() -> bool {
+    true
+}
+
 fn default_starred_completion_sound() -> bool {
     true
 }
@@ -1547,6 +1551,9 @@ pub struct AppSettings {
     /// unread elsewhere leads. Off keeps the star leading inside each
     /// attention tier only.
     pub starred_idle_before_unseen: bool,
+    /// Prefer starred projects in the idle rotation after fresh attention is drained.
+    #[serde(default = "default_prefer_starred_when_nothing_unread")]
+    pub prefer_starred_when_nothing_unread: bool,
     /// User-owned terminal commands surfaced in the command palette.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
@@ -1791,6 +1798,7 @@ impl Default for AppSettings {
             notify_waiting_input: default_notification_enabled(),
             starred_completion_sound: true,
             starred_idle_before_unseen: false,
+            prefer_starred_when_nothing_unread: true,
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
@@ -2446,6 +2454,9 @@ pub struct PersistedState {
     /// projects' unseen completions.
     #[serde(default)]
     pub starred_idle_before_unseen: bool,
+    /// Prefer starred projects in the idle rotation after fresh attention is drained.
+    #[serde(default = "default_prefer_starred_when_nothing_unread")]
+    pub prefer_starred_when_nothing_unread: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
     /// Experimental feature opt-ins from the Experiments settings page —
@@ -3004,6 +3015,7 @@ impl PersistedState {
             notify_waiting_input: default_notification_enabled(),
             starred_completion_sound: true,
             starred_idle_before_unseen: false,
+            prefer_starred_when_nothing_unread: true,
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
@@ -3601,6 +3613,7 @@ impl PersistedState {
             notify_waiting_input: self.notify_waiting_input,
             starred_completion_sound: self.starred_completion_sound,
             starred_idle_before_unseen: self.starred_idle_before_unseen,
+            prefer_starred_when_nothing_unread: self.prefer_starred_when_nothing_unread,
             custom_commands: self.custom_commands.clone(),
             big_picture_enabled: self.big_picture_enabled,
             git_panel_enabled: self.git_panel_enabled,
@@ -3802,6 +3815,7 @@ impl PersistedState {
         self.notify_waiting_input = settings.notify_waiting_input;
         self.starred_completion_sound = settings.starred_completion_sound;
         self.starred_idle_before_unseen = settings.starred_idle_before_unseen;
+        self.prefer_starred_when_nothing_unread = settings.prefer_starred_when_nothing_unread;
         self.custom_commands = settings.custom_commands;
         self.big_picture_enabled = settings.big_picture_enabled;
         self.git_panel_enabled = settings.git_panel_enabled;
@@ -6981,6 +6995,29 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_state(serde_json::from_value(app_state).unwrap());
         assert_eq!(restored.git_panel_width, 320.0);
+    }
+
+    #[test]
+    fn starred_idle_priority_defaults_on_and_preserves_opt_out() {
+        let settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(settings.prefer_starred_when_nothing_unread);
+        let mut state = PersistedState::empty();
+        assert!(state.prefer_starred_when_nothing_unread);
+        state.prefer_starred_when_nothing_unread = false;
+        let settings =
+            serde_json::from_value(serde_json::to_value(state.app_settings()).unwrap()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(settings);
+        assert!(!restored.prefer_starred_when_nothing_unread);
+
+        // Older persisted state lacks this field and must retain today's behavior.
+        let mut legacy = serde_json::to_value(PersistedState::empty()).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("prefer_starred_when_nothing_unread");
+        let restored: PersistedState = serde_json::from_value(legacy).unwrap();
+        assert!(restored.prefer_starred_when_nothing_unread);
     }
 
     #[test]

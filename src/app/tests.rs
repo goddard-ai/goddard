@@ -2924,7 +2924,8 @@ fn next_attention_target_tiers_boss_rows_last() {
             &HashSet::new(),
             None,
             None,
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(starred_unseen))
     );
@@ -2944,7 +2945,8 @@ fn next_attention_target_tiers_boss_rows_last() {
             &HashSet::new(),
             None,
             None,
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Deliverable(key, deliverable_id))
     );
@@ -2970,7 +2972,8 @@ fn next_attention_target_tiers_boss_rows_last() {
             &HashSet::new(),
             None,
             None,
-            true
+            true,
+            true,
         ),
         Some(UnreadTarget::Session(starred_unseen))
     );
@@ -2994,7 +2997,8 @@ fn next_attention_target_tiers_boss_rows_last() {
             &HashSet::new(),
             None,
             None,
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(starred_unseen))
     );
@@ -3390,7 +3394,8 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             &HashSet::new(),
             None,
             None,
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(starred_unseen))
     );
@@ -3409,7 +3414,8 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             &HashSet::new(),
             None,
             None,
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(plain_unseen))
     );
@@ -3427,7 +3433,8 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             &HashSet::new(),
             None,
             None,
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(starred_idle))
     );
@@ -3446,7 +3453,8 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             &HashSet::new(),
             None,
             None,
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(plain_unseen))
     );
@@ -3467,9 +3475,72 @@ fn next_attention_target_ranks_unread_above_starred_idle() {
             &HashSet::new(),
             None,
             None,
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(plain_unseen))
+    );
+}
+
+#[test]
+fn next_attention_target_idle_priority_can_follow_sidebar_order() {
+    let starred_project = Uuid::new_v4();
+    let plain_project = Uuid::new_v4();
+    let projects = vec![project(starred_project, true), project(plain_project, false)];
+    let plain = Uuid::new_v4();
+    let starred = Uuid::new_v4();
+    let sessions = vec![
+        project_session(plain, plain_project),
+        project_session(starred, starred_project),
+    ];
+    let rows = vec![SidebarRow::Session(plain), SidebarRow::Session(starred)];
+    for (prefer_starred, starred_before_unread, unread, expected) in [
+        (true, false, None, starred),
+        (false, false, None, plain),
+        (true, false, Some(plain), plain),
+        (false, false, Some(plain), plain),
+        (false, false, Some(starred), starred),
+        // The separate before-unread opt-in retains its existing behavior.
+        (false, true, Some(plain), starred),
+    ] {
+        let unseen = unread.map(|id| (id, 100)).into_iter().collect();
+        assert_eq!(
+            next_attention_target(
+                &sessions,
+                &projects,
+                &unseen,
+                &HashMap::new(),
+                &rows,
+                None,
+                None,
+                &HashSet::new(),
+                None,
+                None,
+                starred_before_unread,
+                prefer_starred,
+            ),
+            Some(UnreadTarget::Session(expected)),
+            "prefer_starred={prefer_starred}, starred_before_unread={starred_before_unread}, unread={unread:?}",
+        );
+    }
+    // Disabling priority still honors the sweep's visited set, then wraps
+    // past the selected row without removing starred tasks from navigation.
+    assert_eq!(
+        next_attention_target(
+            &sessions,
+            &projects,
+            &HashMap::new(),
+            &HashMap::new(),
+            &rows,
+            Some(plain),
+            None,
+            &HashSet::new(),
+            None,
+            Some(&HashSet::from([plain])),
+            false,
+            false,
+        ),
+        Some(UnreadTarget::Session(starred)),
     );
 }
 
@@ -3511,7 +3582,8 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             &HashSet::new(),
             None,
             None,
-            true
+            true,
+            true,
         ),
         Some(UnreadTarget::Session(starred_unseen))
     );
@@ -3530,7 +3602,8 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             &HashSet::new(),
             None,
             None,
-            true
+            true,
+            true,
         ),
         Some(UnreadTarget::Session(starred_idle))
     );
@@ -3549,7 +3622,8 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             &HashSet::new(),
             None,
             None,
-            true
+            true,
+            true,
         ),
         Some(UnreadTarget::Session(starred_idle))
     );
@@ -3570,7 +3644,8 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             &HashSet::new(),
             None,
             None,
-            true
+            true,
+            true,
         ),
         Some(UnreadTarget::Session(plain_unseen))
     );
@@ -3591,7 +3666,8 @@ fn next_attention_target_starred_idle_first_drains_starred_before_unseen() {
             &HashSet::new(),
             None,
             None,
-            true
+            true,
+            true,
         ),
         Some(UnreadTarget::Session(plain_unseen))
     );
@@ -3632,7 +3708,8 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             &HashSet::new(),
             None,
             Some(&visited),
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(second))
     );
@@ -3651,7 +3728,8 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             &HashSet::new(),
             None,
             Some(&visited),
-            false
+            false,
+            true,
         ),
         None
     );
@@ -3667,7 +3745,8 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             &HashSet::new(),
             None,
             None,
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(first))
     );
@@ -3686,7 +3765,8 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             &HashSet::new(),
             None,
             Some(&visited),
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(first))
     );
@@ -3705,7 +3785,8 @@ fn next_attention_target_sweep_skips_shown_idle_but_never_unread() {
             &HashSet::new(),
             None,
             Some(&visited),
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(first))
     );
@@ -3815,7 +3896,8 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
             &dormant,
             None,
             None,
-            false
+            false,
+            true,
         ),
         Some(UnreadTarget::Session(live))
     );
@@ -3833,7 +3915,8 @@ fn dormant_sessions_are_never_keyboard_jump_targets() {
             &all_dormant,
             None,
             None,
-            false
+            false,
+            true,
         ),
         None
     );

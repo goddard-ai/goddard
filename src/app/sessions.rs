@@ -565,7 +565,9 @@ pub(super) fn next_unread_completion(
 /// seen-but-idle task on one outranks unseen completions elsewhere — so a
 /// sweep works through every reachable starred task before unread
 /// elsewhere leads. With nothing starred the tiers collapse to today's
-/// unread-then-idle order either way.
+/// unread-then-idle order either way. Disabling `prefer_starred_when_nothing_unread`
+/// uses sidebar order across all projects for the idle rotation, unless
+/// `starred_idle_first` explicitly puts starred idle tasks before unread.
 ///
 /// `excluded` filters both scans — the ⌘⇧D chain and the session-departure
 /// fallback pass the sessions the chain has already shown. `idle_excluded`
@@ -583,18 +585,30 @@ pub(super) fn next_attention_target(
     excluded: Option<&HashSet<Uuid>>,
     idle_excluded: Option<&HashSet<Uuid>>,
     starred_idle_first: bool,
+    prefer_starred_when_nothing_unread: bool,
 ) -> Option<UnreadTarget> {
     let starred = starred_project_ids(projects);
-    // (attention, starred) tier pairs. The default puts fresh attention
-    // first with the star leading inside each class; `starred_idle_first`
-    // swaps the middle tiers so a starred project's seen-but-idle tasks
-    // outrank unseen completions in unstarred projects.
-    let tiers: [(bool, bool); 4] = if starred_idle_first {
-        [(true, true), (false, true), (true, false), (false, false)]
+    // (attention, optional starred filter). With idle priority disabled,
+    // the drained queue uses one sidebar-ordered pass across all projects.
+    // The separate opt-in to put starred idle tasks before unread still wins.
+    let tiers: &[(bool, Option<bool>)] = if starred_idle_first {
+        &[
+            (true, Some(true)),
+            (false, Some(true)),
+            (true, Some(false)),
+            (false, Some(false)),
+        ]
+    } else if prefer_starred_when_nothing_unread {
+        &[
+            (true, Some(true)),
+            (true, Some(false)),
+            (false, Some(true)),
+            (false, Some(false)),
+        ]
     } else {
-        [(true, true), (true, false), (false, true), (false, false)]
+        &[(true, Some(true)), (true, Some(false)), (false, None)]
     };
-    for (attention, want) in tiers {
+    for &(attention, want) in tiers {
         let target = if attention {
             next_unread_completion(
                 sessions,
@@ -605,7 +619,7 @@ pub(super) fn next_attention_target(
                 pending_activation,
                 dormant,
                 excluded,
-                Some((&starred, want)),
+                want.map(|want| (&starred, want)),
             )
         } else {
             next_idle_session(
@@ -616,7 +630,7 @@ pub(super) fn next_attention_target(
                 dormant,
                 excluded,
                 idle_excluded,
-                Some((&starred, want)),
+                want.map(|want| (&starred, want)),
             )
             .map(UnreadTarget::Session)
         };
@@ -3129,6 +3143,7 @@ impl Waku {
             Some(&self.sweep_visited),
             None,
             self.state.starred_idle_before_unseen,
+            self.state.prefer_starred_when_nothing_unread,
         ) {
             Some(UnreadTarget::Session(session_id)) => {
                 self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
@@ -5083,6 +5098,7 @@ impl Waku {
             None,
             sweep,
             self.state.starred_idle_before_unseen,
+            self.state.prefer_starred_when_nothing_unread,
         );
         if target.is_none() && sweep.is_some() {
             // The sweep has shown everything navigable — restart it clean.
@@ -5099,6 +5115,7 @@ impl Waku {
                 None,
                 None,
                 self.state.starred_idle_before_unseen,
+                self.state.prefer_starred_when_nothing_unread,
             );
         }
         // The seen set is session ids: a deliverable records the boss chat
@@ -5245,6 +5262,7 @@ impl Waku {
             Some(&self.sweep_visited),
             None,
             self.state.starred_idle_before_unseen,
+            self.state.prefer_starred_when_nothing_unread,
         );
         match target {
             Some(target) => {

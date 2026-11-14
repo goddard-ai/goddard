@@ -3555,6 +3555,7 @@ impl Waku {
             None,
             None,
             self.state.starred_idle_before_unseen,
+            self.state.prefer_starred_when_nothing_unread,
         )
         .is_some()
         {

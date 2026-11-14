@@ -6365,6 +6365,10 @@ keyboard_options.fast:
   en: Fast
 keyboard_options.keyboard_hint:
   en: ↑ ↓ Move · Enter Select · Esc Close
+settings.prefer_starred_when_nothing_unread:
+  en: Prefer starred projects when nothing is unread
+settings.prefer_starred_when_nothing_unread_description:
+  en: "When no unread completions remain, %{action} visits idle tasks in starred projects before other idle tasks. Turn off to follow sidebar order across all projects."
 settings.starred_idle_before_unseen:
   en: Starred tasks first when jumping
 settings.starred_idle_before_unseen_description:

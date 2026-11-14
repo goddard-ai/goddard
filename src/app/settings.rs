@@ -11,6 +11,7 @@ use super::usage_page::format_tokens_compact;
 use super::*;
 use crate::theme::{ThemeName, ThemeSettings};
 use crate::ui::ActivationExt;
+use crate::ui::shortcut::ShortcutHint;
 use gpui::{ElementId, HighlightStyle, KeyBinding, StyledText, Svg, actions};
 use waku_protocol::auto_prompts::{AutoPromptQuestion, AutoPromptRule};
 use waku_protocol::boss::AvatarStyle;
@@ -351,6 +352,7 @@ pub(super) const SETTINGS_SEARCH_TITLES: &[(SettingsPage, &[&str])] = &[
             "settings.default_workspace",
             "settings.dormant_after",
             "settings.starred_idle_before_unseen",
+            "settings.prefer_starred_when_nothing_unread",
             "settings.sidebar_shortcut_tags",
             "settings.sidebar_composer_drafts",
             "settings.composer_enter_steers",
@@ -1662,7 +1664,7 @@ impl Waku {
                     }),
             )
             .child(match page {
-                SettingsPage::General => self.render_general_settings(&search, cx),
+                SettingsPage::General => self.render_general_settings(&search, window, cx),
                 SettingsPage::Boss => self.render_boss_settings(&search, cx),
                 SettingsPage::Providers => self.render_providers_settings(&search, cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
@@ -1797,7 +1799,7 @@ impl Waku {
                     .visiting(cx.entity().downgrade());
                 search.source_filter = Some(source);
                 let content = match page {
-                    SettingsPage::General => self.render_general_settings(&search, cx),
+                    SettingsPage::General => self.render_general_settings(&search, window, cx),
                     SettingsPage::Boss => self.render_boss_settings(&search, cx),
                     SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
                     SettingsPage::Providers => self.render_providers_settings(&search, cx),
@@ -1975,8 +1977,16 @@ impl Waku {
     fn render_general_settings(
         &self,
         search: &SettingSearch,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let unread_action = tr!("command_palette.go_to_next_unread_completion");
+        let unread_action = ShortcutHint::action(&GoToNextUnreadCompletion)
+            .resolve(window, cx)
+            .map_or_else(
+                || unread_action.clone(),
+                |keys| format!("{unread_action} ({keys})"),
+            );
         let page_search = search;
         let theme = Theme::current(cx);
         let updater_available = cx
@@ -2221,7 +2231,7 @@ impl Waku {
                 tr!("settings.starred_idle_before_unseen"),
                 tr!(
                     "settings.starred_idle_before_unseen_description",
-                    keys = crate::platform::primary_shortcut("⌘D", "Ctrl+D")
+                    keys = unread_action.clone()
                 ),
                 toggle_switch(
                     "starred-idle-before-unseen-toggle",
@@ -2232,6 +2242,27 @@ impl Waku {
                     {
                         let enabled = self.state.starred_idle_before_unseen;
                         move |this, _, cx| this.set_starred_idle_before_unseen(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ),
+            setting_card(
+                "icons/star.svg",
+                tr!("settings.prefer_starred_when_nothing_unread"),
+                tr!(
+                    "settings.prefer_starred_when_nothing_unread_description",
+                    action = unread_action
+                ),
+                toggle_switch(
+                    "prefer-starred-when-nothing-unread-toggle",
+                    self.state.prefer_starred_when_nothing_unread,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.prefer_starred_when_nothing_unread;
+                        move |this, _, cx| this.set_prefer_starred_when_nothing_unread(!enabled, cx)
                     },
                 ),
                 theme,
@@ -13007,6 +13038,15 @@ impl Waku {
             return;
         }
         self.state.employee_chat_search_days = days;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_prefer_starred_when_nothing_unread(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.prefer_starred_when_nothing_unread == enabled {
+            return;
+        }
+        self.state.prefer_starred_when_nothing_unread = enabled;
         self.save();
         cx.notify();
     }

@@ -1,0 +1,1 @@
+- Choose whether Go to next unread completion prefers starred projects after unread work is exhausted with “Prefer starred projects when nothing is unread” in General settings, enabled by default.
