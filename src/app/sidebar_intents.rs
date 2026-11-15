@@ -1,7 +1,6 @@
 //! Client-owned desired sidebar state. The coordinator journals before dispatch,
 //! serializes each host independently, and retains failed intent for recovery.
 use super::*;
-use gpui::{Task, relative};
 use serde::{Deserialize, Serialize};
 use std::{fs, io::Write};
 use waku_client::DaemonKey;
@@ -9,7 +8,6 @@ use waku_protocol::boss::BossState;
 use waku_protocol::sidebar_intent::{SidebarEdit, SidebarIntent, SidebarIntentResult};
 
 const MAX_ATTEMPTS: u32 = 8;
-const SLOW_SAVE_DELAY: Duration = Duration::from_secs(2);
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 enum Phase {
     Queued,
@@ -89,9 +87,6 @@ pub(super) struct SidebarIntents {
     pending_count: usize,
     blocked_count: usize,
     needs_attention: bool,
-    // UI-only clock: ordinary round trips never need a visible status.
-    pending_since: Option<Instant>,
-    status_delay: RefCell<Option<Task<()>>>,
     status_details: bool,
     reason: Option<String>,
     hosts: Vec<DaemonKey>,
@@ -212,8 +207,6 @@ impl SidebarIntents {
             pending_count: 0,
             blocked_count: 0,
             needs_attention: false,
-            pending_since: None,
-            status_delay: RefCell::new(None),
             status_details: false,
             reason: None,
             hosts: Vec::new(),
@@ -613,23 +606,14 @@ impl SidebarIntents {
                 self.archives.insert(id);
             }
         }
-        if self.pending_count == 0 {
-            self.pending_since = None;
-            *self.status_delay.get_mut() = None;
-            if self.error.is_none() {
-                self.status_details = false;
-            }
-        } else {
-            self.pending_since.get_or_insert_with(Instant::now);
+        if !self.status_visible() {
+            self.status_details = false;
         }
     }
-    fn status_visible(&self, now: Instant) -> bool {
-        self.error.is_some()
-            || self.needs_attention
-            || (self.pending_count() > 0
-                && self
-                    .pending_since
-                    .is_some_and(|since| now.duration_since(since) >= SLOW_SAVE_DELAY))
+    fn status_visible(&self) -> bool {
+        // Background retries are diagnostic noise; surface only failures that
+        // need a decision or mean the local journal cannot protect changes.
+        self.error.is_some() || self.needs_attention
     }
     pub fn pending_count(&self) -> usize {
         self.pending_count
@@ -1123,34 +1107,18 @@ impl Waku {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let now = Instant::now();
-        if !self.sidebar_intents.status_visible(now) {
-            let delay_scheduled = self.sidebar_intents.status_delay.borrow().is_some();
-            if let Some(since) = self.sidebar_intents.pending_since
-                && !delay_scheduled
-            {
-                let delay = SLOW_SAVE_DELAY.saturating_sub(now.duration_since(since));
-                *self.sidebar_intents.status_delay.borrow_mut() =
-                    Some(cx.spawn(async move |this, cx| {
-                        cx.background_executor().timer(delay).await;
-                        let _ = this.update(cx, |_, cx| cx.notify());
-                    }));
-            }
+        if !self.sidebar_intents.status_visible() {
             return None;
         }
-        let needs_attention =
-            self.sidebar_intents.error.is_some() || self.sidebar_intents.needs_attention;
         let details_open = self.sidebar_intents.status_details;
         let theme = Theme::current(cx);
         let label = if self.sidebar_intents.error.is_some() {
             tr!("sidebar.changes_not_saved")
-        } else if self.sidebar_intents.needs_attention {
+        } else {
             tr!(
                 "sidebar.changes_blocked",
                 count = self.sidebar_intents.blocked_count()
             )
-        } else {
-            tr!("sidebar.changes_still_saving")
         };
         let detail = self
             .sidebar_intents
@@ -1197,18 +1165,10 @@ impl Waku {
         Some(
             div()
                 .id("sidebar-intent-status")
-                .absolute()
-                .bottom(relative(1.0))
-                .left(px(8.0))
-                .right(px(8.0))
-                .mb(px(8.0))
-                .p(px(8.0))
-                .rounded(px(8.0))
-                .bg(theme.sidebar)
-                .border_1()
+                .mx(px(8.0))
+                .py(px(6.0))
+                .border_t_1()
                 .border_color(theme.separator)
-                .shadow_md()
-                .occlude()
                 .flex()
                 .flex_col()
                 .gap(px(3.0))
@@ -1223,7 +1183,7 @@ impl Waku {
                         .flex()
                         .flex_wrap()
                         .gap(px(6.0))
-                        .when(needs_attention, |row| {
+                        .when(details_open, |row| {
                             row.child(
                                 button("sidebar-intent-retry", tr!("common.retry"), &retry_focus)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1332,8 +1292,6 @@ mod tests {
             pending_count: 0,
             blocked_count: 0,
             needs_attention: false,
-            pending_since: None,
-            status_delay: RefCell::new(None),
             status_details: false,
             reason: None,
             hosts: Vec::new(),
@@ -1351,7 +1309,7 @@ mod tests {
         }
     }
     #[test]
-    fn sidebar_feedback_is_delayed_until_slow_and_failures_stay_visible() {
+    fn sidebar_feedback_only_surfaces_actionable_failures() {
         let mut queue = queue();
         let id = Uuid::new_v4();
         queue.record(
@@ -1362,19 +1320,22 @@ mod tests {
         );
         // This test controls completions without a synchronization worker.
         queue.error = None;
-        let started = queue.pending_since.unwrap();
-        assert!(!queue.status_visible(started));
-        assert!(!queue.status_visible(started + SLOW_SAVE_DELAY - Duration::from_millis(1)));
-        assert!(queue.status_visible(started + SLOW_SAVE_DELAY));
+        assert!(!queue.status_visible());
+        for entry in queue.entries.values_mut() {
+            entry.phase = Phase::InFlight;
+            entry.attempts = MAX_ATTEMPTS - 1;
+            entry.reason = Some("The host has not acknowledged this change.".into());
+        }
+        queue.reindex();
+        assert!(!queue.status_visible());
 
         for entry in queue.entries.values_mut() {
             entry.phase = Phase::Confirmed(1);
         }
         queue.reindex();
-        assert!(!queue.status_visible(started + SLOW_SAVE_DELAY));
-        assert!(queue.pending_since.is_none());
+        assert!(!queue.status_visible());
 
-        // A later archive gets its own quiet period, including its safety check.
+        // A pending safety check is quiet; a failed one needs attention.
         queue.record(
             DaemonKey::Local,
             SidebarEdit::Task {
@@ -1387,23 +1348,23 @@ mod tests {
             true,
         );
         queue.error = None;
-        let restarted = queue.pending_since.unwrap();
-        assert!(!queue.status_visible(restarted));
+        assert!(!queue.status_visible());
         queue.preflight_failed(id, "Offline".into());
-        assert!(queue.status_visible(restarted));
-        assert!(queue.status_visible(restarted + Duration::from_secs(60)));
+        assert!(queue.status_visible());
         for entry in queue.entries.values_mut().filter(|e| e.unresolved()) {
             entry.phase = Phase::Blocked;
         }
         queue.reindex();
-        assert!(queue.status_visible(restarted));
+        assert!(queue.status_visible());
+        queue.status_details = true;
         queue.recover(false);
-        assert!(!queue.status_visible(restarted));
+        assert!(!queue.status_visible());
+        assert!(!queue.status_details);
 
         queue.entries.clear();
         queue.reindex();
         queue.error = Some("Changes could not be written to disk".into());
-        assert!(queue.status_visible(restarted));
+        assert!(queue.status_visible());
     }
 
     #[test]
