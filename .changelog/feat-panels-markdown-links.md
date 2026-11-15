@@ -1,0 +1,1 @@
+- When reading a Markdown file in the right panel, click a link to another Markdown file to open it in a new tab there.

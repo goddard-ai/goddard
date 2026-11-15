@@ -191,6 +191,69 @@ pub(super) fn markdown_file_link_path(target: &str) -> Option<PathBuf> {
     path.is_absolute().then_some(path)
 }
 
+fn markdown_preview_file_link(
+    source_path: &str,
+    target: &str,
+    workspace: Option<&Path>,
+) -> Option<(String, Option<(usize, usize)>, Option<String>)> {
+    if file_highlighter_language(source_path) != "markdown" {
+        return None;
+    }
+
+    let raw_target = target.trim();
+    let position = file_link_location(raw_target).map(|(line, column)| (line, column.unwrap_or(1)));
+    let fragment = raw_target.rsplit_once('#').map(|(_, fragment)| fragment);
+    let target = strip_file_location(raw_target);
+    let (path_target, _) = target.rsplit_once('#').unwrap_or((target, ""));
+    let path_target = path_target
+        .split_once('?')
+        .map_or(path_target, |(path, _)| path);
+    if path_target.is_empty() || path_target.starts_with("//") {
+        return None;
+    }
+
+    let linked_path = if path_target
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("file:"))
+    {
+        url::Url::parse(path_target).ok()?.to_file_path().ok()?
+    } else {
+        let path = Path::new(path_target);
+        if !path.is_absolute() && url::Url::parse(path_target).is_ok() {
+            return None;
+        }
+        PathBuf::from(percent_decode_file_path(path_target))
+    };
+    if file_highlighter_language(&linked_path.to_string_lossy()) != "markdown" {
+        return None;
+    }
+
+    let source_path = Path::new(source_path);
+    let source_path = if source_path.is_absolute() {
+        source_path.to_path_buf()
+    } else {
+        workspace?.join(source_path)
+    };
+    let linked_path = if linked_path.is_absolute() {
+        linked_path
+    } else {
+        source_path.parent()?.join(linked_path)
+    };
+    let source_path = normalized_path(&source_path);
+    let linked_path = normalized_path(&linked_path);
+    if source_path == linked_path {
+        return None;
+    }
+
+    let linked_path = workspace
+        .and_then(|workspace| workspace_relative_file_path(workspace, &linked_path))
+        .unwrap_or_else(|| linked_path.to_string_lossy().into_owned());
+    let heading = fragment
+        .filter(|fragment| !fragment.is_empty() && !line_fragment(fragment))
+        .map(percent_decode_file_path);
+    Some((linked_path, position, heading))
+}
+
 /// Provider references may name a file relative to their captured workspace.
 /// Keep this permissive parser scoped to those references; ordinary Markdown
 /// links still require an absolute file path before they enter the file route.
@@ -6625,6 +6688,56 @@ impl Waku {
         self.select_right_panel_file(relative_path, true, cx);
     }
 
+    fn open_markdown_preview_file_link(
+        &mut self,
+        source_path: &str,
+        target: &str,
+        workspace: Option<&Path>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((path, position, heading)) =
+            markdown_preview_file_link(source_path, target, workspace)
+        else {
+            return false;
+        };
+        let surface = RightPanelSurface::File(path.clone());
+        if !self.right_panel_owner_allows(&surface) {
+            return false;
+        }
+
+        self.open_right_panel_surface(surface, cx);
+        if position.is_some() || heading.is_some() {
+            self.right_panel_pending_file_focus = Some(PendingFileFocus {
+                path,
+                position,
+                heading,
+            });
+        }
+        true
+    }
+
+    fn markdown_preview_link_handler(
+        &self,
+        source_path: Option<String>,
+        workspace: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> md::render::LinkHandler {
+        let waku = cx.entity().downgrade();
+        let link_handler = self.markdown_link_handler.clone();
+        Rc::new(move |url, window, cx| {
+            let opened = source_path.as_deref().is_some_and(|source_path| {
+                waku.update(cx, |this, cx| {
+                    this.open_markdown_preview_file_link(source_path, url, workspace.as_deref(), cx)
+                })
+                .unwrap_or(false)
+            });
+            if !opened {
+                link_handler(url, window, cx);
+            }
+            cx.stop_propagation();
+        })
+    }
+
     fn select_right_panel_file(
         &mut self,
         relative_path: String,
@@ -11877,6 +11990,13 @@ impl Waku {
         let reader_title = tr!("speed_reader.preview_title", path = "plan");
         let reader_waku = cx.entity().downgrade();
         let speed_reader_enabled = self.state.speed_reader_enabled;
+        let link_handler = self.markdown_preview_link_handler(
+            self.plan_docs
+                .get(&session_id)
+                .map(|document| document.path.clone()),
+            self.right_panel_files_root.clone(),
+            cx,
+        );
         let (block, count) = {
             let cache = self.plan_markdown.borrow();
             let Some((_, view)) = cache.as_ref().filter(|(id, _)| *id == session_id) else {
@@ -11914,7 +12034,7 @@ impl Waku {
                 )]
             }))
             .with_link_items(self.markdown_link_menu_items.clone())
-            .with_link_handler(self.markdown_link_handler.clone());
+            .with_link_handler(link_handler.clone());
             match md::render::markdown_block(view, &ctx, index) {
                 Some(block) => (block, view.block_count()),
                 None => return div().into_any_element(),
@@ -12285,6 +12405,11 @@ impl Waku {
         let reader_title = tr!("speed_reader.preview_title", path = relative_path);
         let reader_waku = cx.entity().downgrade();
         let speed_reader_enabled = self.state.speed_reader_enabled;
+        let link_handler = self.markdown_preview_link_handler(
+            Some(relative_path.to_owned()),
+            self.right_panel_files_root.clone(),
+            cx,
+        );
         let mut ctx = MarkdownCtx::new(
             format!("file-preview-{relative_path}"),
             &palette,
@@ -12316,7 +12441,7 @@ impl Waku {
             )]
         }))
         .with_link_items(self.markdown_link_menu_items.clone())
-        .with_link_handler(self.markdown_link_handler.clone());
+        .with_link_handler(link_handler);
         if let Some(highlights) = self.file_preview_search_highlights(relative_path) {
             ctx = ctx.with_search_highlights(highlights);
         }
