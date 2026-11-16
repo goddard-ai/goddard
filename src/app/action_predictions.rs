@@ -1993,11 +1993,11 @@ mod tests {
             Some("run-tests")
         );
         assert_eq!(
-            canned_prompt_id("  keep going  ", &defaults),
+            canned_prompt_id("  continue  ", &defaults),
             Some("keep-going")
         );
         assert_eq!(
-            canned_prompt_id("KEEP GOING", &defaults),
+            canned_prompt_id("CONTINUE", &defaults),
             Some("keep-going")
         );
         assert_eq!(canned_prompt_id("run the tests please", &defaults), None);

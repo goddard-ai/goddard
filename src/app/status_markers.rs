@@ -310,6 +310,7 @@ fn suggested_actions(evaluation: &Evaluation) -> Vec<StatusSuggestedAction> {
                 | "decision"
                 | "action-needed"
                 | "awaiting-input"
+                | "partial"
                 | "needs-continuation"
                 | "errors-remain"
                 | "not-tested"
@@ -323,7 +324,7 @@ fn suggested_actions(evaluation: &Evaluation) -> Vec<StatusSuggestedAction> {
         Some("decision") | Some("awaiting-input") => vec![StatusSuggestedAction::YouDecide],
         // A typed prompt can't perform the step — it reports it done.
         Some("action-needed") => vec![StatusSuggestedAction::Done],
-        Some("needs-continuation") => vec![StatusSuggestedAction::KeepGoing],
+        Some("partial") | Some("needs-continuation") => vec![StatusSuggestedAction::KeepGoing],
         // `errors-remain` is the failed flag's subtype — it only leads
         // `cleared` when repairable errors outscored the bare failure.
         Some("errors-remain") => vec![StatusSuggestedAction::FixErrors],
@@ -2031,6 +2032,10 @@ mod tests {
             ending_choice("partial", &[("partial", 0.8)]),
         )]));
         assert!(session_awaits_continue(&session, Some(&verdict)));
+        assert_eq!(
+            suggested_actions(&verdict),
+            [StatusSuggestedAction::KeepGoing]
+        );
 
         verdict.answers.insert(
             PARTIAL_QUESTION.to_owned(),
@@ -2049,6 +2054,7 @@ mod tests {
                 ending_choice(ending, &[(ending, score)]),
             );
             assert!(!session_awaits_continue(&session, Some(&verdict)));
+            assert!(suggested_actions(&verdict).is_empty());
         }
         verdict.answers.insert(
             ENDING_QUESTION.to_owned(),
@@ -2363,7 +2369,10 @@ mod tests {
             [StatusSuggestedAction::KeepGoing]
         );
         assert_eq!(cleared_markers(&verdict(0.40))[0].0.id, "partial");
-        assert!(suggested_actions(&verdict(0.40)).is_empty());
+        assert_eq!(
+            suggested_actions(&verdict(0.40)),
+            [StatusSuggestedAction::KeepGoing]
+        );
 
         // `errors-remain` refines the `failed` flag the same way — the
         // failure is a Noul now, but its subtype still drives the chip.
