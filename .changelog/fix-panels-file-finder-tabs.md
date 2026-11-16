@@ -1,0 +1,1 @@
+- Opening a file with Cmd+P keeps existing right-panel files open and puts the new tab first.

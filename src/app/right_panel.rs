@@ -6688,6 +6688,28 @@ impl Waku {
         self.select_right_panel_file(relative_path, true, cx);
     }
 
+    pub(super) fn open_file_finder_tab(&mut self, relative_path: String, cx: &mut Context<Self>) {
+        let surface = RightPanelSurface::File(relative_path.clone());
+        if !self.right_panel_owner_allows(&surface) {
+            return;
+        }
+        self.right_panel_file_tree_visible = false;
+        if self.right_panel_files_selected_path.as_deref() == Some(&relative_path)
+            && self.right_panel_surfaces.contains(&RightPanelSurface::Files)
+        {
+            self.open_right_panel_surface(RightPanelSurface::Files, cx);
+            return;
+        }
+        let is_new = reusable_surface_index(&self.right_panel_surfaces, &surface).is_none();
+        self.open_right_panel_surface(surface, cx);
+        if is_new && let Some(index) = self.right_panel_active_surface {
+            let surface = self.right_panel_surfaces.remove(index);
+            self.right_panel_surfaces.insert(0, surface);
+            self.right_panel_active_surface = Some(0);
+            self.reveal_right_panel_tab(0);
+        }
+    }
+
     fn open_markdown_preview_file_link(
         &mut self,
         source_path: &str,
